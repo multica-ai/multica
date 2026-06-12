@@ -312,6 +312,7 @@ describe("ChannelDetail thread header", () => {
     const hiddenSpy = vi
       .spyOn(document, "visibilityState", "get")
       .mockReturnValue("hidden");
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
     const unread: Channel = { ...baseChannel, unread_count: 3 };
     render(<ChannelDetail channelId="c1" initialChannel={unread} />);
     expect(mockMarkChannelRead).toHaveBeenCalledWith("c1");

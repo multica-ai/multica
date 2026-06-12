@@ -58,6 +58,7 @@ import {
   INBOX_SORT_DIRECTION_OPTIONS,
   // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
   useFocusListVisibility,
+  CerebroInboxModeButton, // CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — toolbar entry to switch to the dynamic inbox
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -726,6 +727,8 @@ export function InboxPage() {
         >
           <Plus className="h-4 w-4" />
         </Button>
+        {/* CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — switch to dynamic inbox */}
+        <CerebroInboxModeButton />
         <Button
           variant="ghost"
           size="icon-sm"
@@ -1650,6 +1653,10 @@ function matchesView(
   // each render via Date.now()).
   if (view !== "muted" && entry.kind === "notif" && isMuted(entry.item.muted_until))
     return false;
+  // CEREBRO-PATCH(channel-muted-filter): TECH-3352 — snoozed channels/DMs hide
+  // from every view except "Muted", same as muted notifications.
+  if (view !== "muted" && entry.kind === "channel" && isMuted(entry.channel.muted_until))
+    return false;
   switch (view) {
     case "all":
       return true;
@@ -1670,7 +1677,11 @@ function matchesView(
       return entry.kind === "channel" && entry.channel.kind === "dm";
     case "muted":
       // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — only notifs have muted_until.
-      return entry.kind === "notif" && isMuted(entry.item.muted_until);
+      // CEREBRO-PATCH(channel-muted-filter): TECH-3352 — snoozed channels too.
+      return (
+        (entry.kind === "notif" && isMuted(entry.item.muted_until)) ||
+        (entry.kind === "channel" && isMuted(entry.channel.muted_until))
+      );
     // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — handled in filteredEntries via the pin matcher.
     case "pinned":
       return false;

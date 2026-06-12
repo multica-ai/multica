@@ -21,7 +21,7 @@ func TestBuildGatewayMessagesCapsHistoryAndExcludesPostStartMessages(t *testing.
 	messages := buildGatewayMessages(db.Agent{
 		Name:         "Charlotte",
 		Instructions: "Svar kort.",
-	}, "", history, ts(started), 2)
+	}, "", history, ts(started), 2, nil)
 
 	if len(messages) != 3 {
 		t.Fatalf("len(messages) = %d, want system + 2 history messages: %+v", len(messages), messages)
@@ -36,6 +36,67 @@ func TestBuildGatewayMessagesCapsHistoryAndExcludesPostStartMessages(t *testing.
 		if msg.Content == "sent after start" {
 			t.Fatal("post-start user message was included")
 		}
+	}
+}
+
+func TestBuildGatewayMessagesAddsAttachmentBlocks(t *testing.T) {
+	started := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	msgID := uuid(9)
+	history := []db.ChatMessage{
+		{ID: msgID, Role: "user", Content: "what is in this?", CreatedAt: ts(started.Add(-time.Minute))},
+	}
+	attachments := map[pgtype.UUID][]AnthropicContentBlock{
+		msgID: {{Type: "image", Source: &AnthropicContentSource{Type: "base64", MediaType: "image/png", Data: "aW1n"}}},
+	}
+
+	messages := buildGatewayMessages(db.Agent{}, "", history, ts(started), 10, attachments)
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2: %+v", len(messages), messages)
+	}
+	if messages[1].Content != "what is in this?" {
+		t.Fatalf("content = %q", messages[1].Content)
+	}
+	if len(messages[1].ContentBlocks) != 2 || messages[1].ContentBlocks[1].Type != "image" {
+		t.Fatalf("content blocks = %+v", messages[1].ContentBlocks)
+	}
+}
+
+func TestFoldGatewayCompatAttachmentBlocksSurfacesDroppedAttachments(t *testing.T) {
+	e := &FirtalGatewayExecutor{}
+	messages := []GatewayMessage{
+		{Role: "user", Content: "what is in this?", ContentBlocks: []AnthropicContentBlock{
+			{Type: "text", Text: "what is in this?"},
+			{Type: "image", Source: &AnthropicContentSource{Type: "base64", MediaType: "image/png", Data: "aW1n"}},
+		}},
+		{Role: "assistant", Content: "plain answer"},
+	}
+
+	out := e.foldGatewayCompatAttachmentBlocks(messages, GatewayRequestMeta{TaskID: "task-1"})
+
+	if len(out) != 2 {
+		t.Fatalf("len(out) = %d, want 2", len(out))
+	}
+	if out[0].ContentBlocks != nil {
+		t.Fatalf("expected blocks cleared on compat path, got %+v", out[0].ContentBlocks)
+	}
+	if !strings.Contains(out[0].Content, "image/png") || !strings.Contains(out[0].Content, "omitted") {
+		t.Fatalf("expected a visible drop note, got %q", out[0].Content)
+	}
+	if out[1].Content != "plain answer" {
+		t.Fatalf("text-only message changed: %q", out[1].Content)
+	}
+	// Original slice must not be mutated.
+	if len(messages[0].ContentBlocks) != 2 {
+		t.Fatalf("original message mutated: %+v", messages[0].ContentBlocks)
+	}
+}
+
+func TestFoldGatewayCompatAttachmentBlocksNoopWithoutAttachments(t *testing.T) {
+	e := &FirtalGatewayExecutor{}
+	messages := []GatewayMessage{{Role: "user", Content: "hello"}}
+	out := e.foldGatewayCompatAttachmentBlocks(messages, GatewayRequestMeta{})
+	if &out[0] != &messages[0] {
+		t.Fatalf("expected original slice returned unchanged when nothing to fold")
 	}
 }
 
@@ -61,7 +122,7 @@ func TestBuildGatewayIssueMessagesIncludesIssueOpeningAndDistinguishesAuthors(t 
 		ID:           agentID,
 		Name:         "Sara",
 		Instructions: "Be concise.",
-	}, "", issue, comments, trigger, ts(started), 50)
+	}, "", issue, comments, trigger, ts(started), 50, nil)
 
 	if messages[0].Role != "system" {
 		t.Fatalf("expected system first, got %+v", messages[0])
@@ -106,7 +167,7 @@ func TestBuildGatewayIssueMessagesAppliesLimitButKeepsTriggerComment(t *testing.
 	}
 	trigger := &db.Comment{ID: uuid(13), AuthorType: "member", AuthorID: memberID, Content: "trigger"}
 
-	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, "", issue, comments, trigger, ts(started), 2)
+	messages := buildGatewayIssueMessages(db.Agent{ID: agentID, Name: "Sara"}, "", issue, comments, trigger, ts(started), 2, nil)
 
 	// Expect: system + issue opening + last 2 transcript entries + trigger.
 	if len(messages) != 5 {

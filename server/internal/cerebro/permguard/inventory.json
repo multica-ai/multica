@@ -81,6 +81,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/channels/{id}/mute",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/chat/sessions/{sessionId}/",
       "gate": "workspace_member"
     },
@@ -226,6 +230,10 @@
     },
     {
       "id": "DELETE /api/workspaces/{id}/accounts/{id}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/workspaces/{id}/agentvault/access",
       "gate": "workspace_admin"
     },
     {
@@ -549,7 +557,15 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/channels/{id}/mute",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/channels/{id}/read",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/channels/{id}/unread",
       "gate": "workspace_member"
     },
     {
@@ -1085,6 +1101,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/workspaces/{id}/mcp",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/workspaces/{id}/credentials",
       "gate": "workspace_member"
     },
@@ -1314,6 +1334,10 @@
     },
     {
       "id": "PUT /api/workspaces/{id}/",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/agentvault/access",
       "gate": "workspace_admin"
     },
     {

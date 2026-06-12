@@ -99,6 +99,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 Agent Vault broker module import
+	cerebroagentvault "github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -536,6 +538,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
+	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
+	if avMod, avOK := cerebroagentvault.NewModule(pool); avOK {
+		h.AgentVaultBroker = avMod.Service
+	}
+	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler.
+	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
@@ -1017,6 +1025,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection reads (any member).
 					r.Get("/connections", cerebroConnectionsHandler.List)
 					r.Get("/connections/{connId}", cerebroConnectionsHandler.Get)
+					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access read (any member).
+					r.Get("/agentvault/access", cerebroAgentVaultHandler.List)
+					// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 workspace-scoped MCP endpoint for Connections.
+					r.Post("/mcp", h.WorkspaceMCP)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1062,6 +1074,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/connections/test", cerebroConnectionsHandler.Test) // CEREBRO-PATCH(cerebro-connections-test): TECH-3108 connection reachability + MCP tool discovery.
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
 					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
+					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access writes (admin/owner only).
+					r.Put("/agentvault/access", cerebroAgentVaultHandler.Set)
+					r.Delete("/agentvault/access", cerebroAgentVaultHandler.Delete)
 					// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 saving-mode writes (admin/owner only).
 					r.Put("/cost-optimization/{key}", costOptimizationHandler.Upsert)
 					r.Delete("/cost-optimization/{key}", costOptimizationHandler.Delete)
@@ -1621,6 +1636,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// archive flag (JEH-855/912).
 				r.Post("/{id}/archive", channelListenSvc.ArchiveChannelHandler)
 				r.Delete("/{id}/archive", channelListenSvc.UnarchiveChannelHandler)
+				// CEREBRO-PATCH(channel-state-routes): TECH-3352 — per-(channel,
+				// user) snooze ("remind me") + mark-unread inbox controls.
+				r.Post("/{id}/mute", channelListenSvc.MuteChannelHandler)
+				r.Delete("/{id}/mute", channelListenSvc.UnmuteChannelHandler)
+				r.Post("/{id}/unread", channelListenSvc.MarkChannelUnreadHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

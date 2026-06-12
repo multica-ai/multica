@@ -14,6 +14,7 @@
     "@multica/core": "workspace:*",
     "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-inbox": "workspace:*",
     "@multica/ui": "workspace:*"
   },
   "peerDependencies": {

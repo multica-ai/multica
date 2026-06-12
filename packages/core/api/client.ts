@@ -2592,6 +2592,23 @@ export class ApiClient {
     await this.fetch(`/api/channels/${id}/archive`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(channel-state-client): TECH-3352 — per-user snooze ("remind
+  // me") + mark-unread endpoints, mirroring the inbox mute/unread client.
+  async muteChannel(id: string, mutedUntil: Date): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/channels/${id}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ muted_until: mutedUntil.toISOString() }),
+    });
+  }
+
+  async unmuteChannel(id: string): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/channels/${id}/mute`, { method: "DELETE" });
+  }
+
+  async markChannelUnread(id: string): Promise<{ unread: boolean }> {
+    return this.fetch(`/api/channels/${id}/unread`, { method: "POST" });
+  }
+
   // CEREBRO-PATCH(channel-listen-client): JEH-699 — per (channel × agent)
   // listen-mode endpoints. Default 'always' applies when no explicit row
   // exists for an agent; the response only contains overrides, so the
@@ -3918,6 +3935,25 @@ export class ApiClient {
   async testCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/connections/test`, {
       method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-agentvault-client): TECH-3196 per-agent Agent Vault access-table methods.
+  async listCerebroAgentVaultAccess<T = unknown>(wsId: string, agentId: string): Promise<T> {
+    return this.fetch<T>(
+      `/api/workspaces/${wsId}/agentvault/access?agent_id=${encodeURIComponent(agentId)}`,
+    );
+  }
+  async setCerebroAgentVaultAccess<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/agentvault/access`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+  async deleteCerebroAgentVaultAccess(wsId: string, body: unknown): Promise<void> {
+    await this.fetch<void>(`/api/workspaces/${wsId}/agentvault/access`, {
+      method: "DELETE",
       body: JSON.stringify(body),
     });
   }

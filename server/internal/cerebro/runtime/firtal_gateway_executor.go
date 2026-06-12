@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/pricing"
@@ -68,6 +69,8 @@ type FirtalGatewayExecutor struct {
 	// and never see the daemon's --disallowedTools. Pool-backed so it can read
 	// workspace_connection. Nil only in tests that don't wire it.
 	connDeny *toolpolicy.Store
+
+	attachmentStorage storage.Storage
 }
 
 // SetConnectionDenyStore wires the always-on connection per-tool deny resolver
@@ -75,6 +78,12 @@ type FirtalGatewayExecutor struct {
 func (e *FirtalGatewayExecutor) SetConnectionDenyStore(s *toolpolicy.Store) {
 	if e != nil {
 		e.connDeny = s
+	}
+}
+
+func (e *FirtalGatewayExecutor) SetAttachmentStorage(s storage.Storage) {
+	if e != nil {
+		e.attachmentStorage = s
 	}
 }
 
@@ -479,11 +488,12 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			return taskPlan{}, fmt.Errorf("failed to load chat history: %w", err)
 		}
 		wsCtx := gatewayLoadWorkspaceContext(ctx, e.queries, chatSession.WorkspaceID)
+		attachments := e.loadChatAttachments(ctx, chatSession.WorkspaceID, history)
 		return taskPlan{
 			workspaceID:      chatSession.WorkspaceID,
 			workspaceContext: wsCtx,
 			messagesWithLimit: func(limit int) []GatewayMessage {
-				return buildGatewayMessages(agent, wsCtx, history, task.StartedAt, limit)
+				return buildGatewayMessages(agent, wsCtx, history, task.StartedAt, limit, attachments)
 			},
 			emptyMessageError: "chat task has no user message to answer",
 			// Chat history is inlined; a daemon agent would list it itself.
@@ -504,6 +514,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 		if err != nil {
 			return taskPlan{}, fmt.Errorf("failed to load issue comments: %w", err)
 		}
+		attachments := e.loadCommentAttachments(ctx, issue.WorkspaceID, comments)
 		var triggerComment *db.Comment
 		if task.TriggerCommentID.Valid {
 			c, err := e.queries.GetComment(ctx, task.TriggerCommentID)
@@ -539,7 +550,7 @@ func (e *FirtalGatewayExecutor) buildTaskPlan(ctx context.Context, task db.Agent
 			workspaceID:      issue.WorkspaceID,
 			workspaceContext: wsCtx,
 			messagesWithLimit: func(limit int) []GatewayMessage {
-				return buildGatewayIssueMessages(agent, wsCtx, issue, comments, triggerComment, task.StartedAt, limit)
+				return buildGatewayIssueMessages(agent, wsCtx, issue, comments, triggerComment, task.StartedAt, limit, attachments)
 			},
 			emptyMessageError:   "issue task has no user message to answer",
 			inlinedContextReads: inlinedReads,
@@ -600,9 +611,28 @@ func messagesChars(messages []GatewayMessage) int64 {
 	var n int64
 	for _, m := range messages {
 		n += int64(len(m.Content))
+		for _, b := range m.ContentBlocks {
+			n += anthropicBlockChars(b)
+		}
 		for _, tc := range m.ToolCalls {
 			n += int64(len(tc.Function.Name) + len(tc.Function.Arguments))
 		}
+	}
+	return n
+}
+
+func anthropicBlockChars(b AnthropicContentBlock) int64 {
+	n := int64(len(b.Text) + len(b.Name))
+	if b.Source != nil {
+		n += int64(len(b.Source.Data))
+	}
+	if len(b.Input) > 0 {
+		if raw, err := json.Marshal(b.Input); err == nil {
+			n += int64(len(raw))
+		}
+	}
+	for _, child := range b.Content {
+		n += anthropicBlockChars(child)
 	}
 	return n
 }
@@ -636,13 +666,7 @@ func anthropicContentChars(content any) int64 {
 	case []AnthropicContentBlock:
 		var n int64
 		for _, b := range v {
-			n += int64(len(b.Text) + len(b.Name))
-			if len(b.Input) > 0 {
-				if raw, err := json.Marshal(b.Input); err == nil {
-					n += int64(len(raw))
-				}
-			}
-			n += anthropicContentChars(b.Content)
+			n += anthropicBlockChars(b)
 		}
 		return n
 	default:
@@ -791,13 +815,20 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		}
 	}
 
+	// The compat tool-loop transports serialize GatewayMessage over the OpenAI
+	// wire, where ContentBlocks (image/document) are dropped (`json:"-"`). Fold
+	// any such attachments into a visible text note so they are never silently
+	// swallowed — honoring TECH-3416's "never fail silently". The Anthropic-native
+	// loop carries the blocks directly, so it keeps the originals.
+	compatMessages := e.foldGatewayCompatAttachmentBlocks(initialMessages, meta)
+
 	if useRegistry && activeRegistry != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): use the provider-compatible tool loop as the primary path for enabled registry tools; prod Anthropic-native failures did not reliably lift Kristian into fallback.
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
 		// CEREBRO-PATCH(firtal-gateway-tool-loop-fallback): keep the legacy three-tool path on the same compat transport so tool-enabled tasks avoid Anthropic-native malformed requests entirely.
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
+		return e.runToolLoopWithServer(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 
 	completion, err := e.runAnthropicToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, anthropicTools, tctx, toolSrv, activeRegistry, useRegistry, pruneOn)
@@ -813,12 +844,58 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		"error", err,
 	)
 	if useRegistry && activeRegistry != nil {
-		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
+		return e.runGatewayCompatRegistryToolLoop(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, activeRegistry, enabledTools, pruneOn)
 	}
 	if toolSrv != nil {
-		return e.runToolLoopWithServer(ctx, cfg, agent, initialMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
+		return e.runToolLoopWithServer(ctx, cfg, agent, compatMessages, meta, agentID, workspaceID, toolSrv, anthropicToolsToGatewayToolDefs(anthropicTools), pruneOn)
 	}
 	return completion, err
+}
+
+// foldGatewayCompatAttachmentBlocks rewrites messages for the OpenAI-compat
+// transports, which cannot carry Anthropic image/document blocks. For every
+// message that holds such a block it appends a short text note naming the
+// dropped attachment (so the model and the transcript still show it was sent)
+// and logs a warning. Messages without non-text blocks are returned unchanged;
+// when nothing needs folding the original slice is returned as-is.
+func (e *FirtalGatewayExecutor) foldGatewayCompatAttachmentBlocks(messages []GatewayMessage, meta GatewayRequestMeta) []GatewayMessage {
+	folded := false
+	out := make([]GatewayMessage, len(messages))
+	copy(out, messages)
+	for i := range out {
+		var dropped []string
+		for _, b := range out[i].ContentBlocks {
+			switch b.Type {
+			case "image", "document":
+				label := b.Type
+				if b.Source != nil && b.Source.MediaType != "" {
+					label = b.Source.MediaType
+				}
+				dropped = append(dropped, label)
+			}
+		}
+		if len(dropped) == 0 {
+			continue
+		}
+		folded = true
+		note := fmt.Sprintf("[Attachment (%s) was provided but cannot be read by this tool-enabled agent path and was omitted.]", strings.Join(dropped, ", "))
+		if strings.TrimSpace(out[i].Content) == "" {
+			out[i].Content = note
+		} else {
+			out[i].Content = out[i].Content + "\n\n" + note
+		}
+		out[i].ContentBlocks = nil
+		e.attachmentLogger().Warn("firtal gateway dropped attachment on compat tool path",
+			"task_id", meta.TaskID,
+			"agent_id", meta.AgentID,
+			"workspace_id", meta.WorkspaceID,
+			"dropped", strings.Join(dropped, ","),
+		)
+	}
+	if !folded {
+		return messages
+	}
+	return out
 }
 
 func isAnthropicMalformedToolRequest(err error) bool {
@@ -1392,7 +1469,7 @@ func toolResultText(r mcp.CallToolResult) string {
 	return b.String()
 }
 
-func buildGatewayMessages(agent db.Agent, workspaceContext string, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
+func buildGatewayMessages(agent db.Agent, workspaceContext string, history []db.ChatMessage, startedAt pgtype.Timestamptz, limit int, attachments map[pgtype.UUID][]AnthropicContentBlock) []GatewayMessage {
 	if limit <= 0 {
 		limit = defaultFirtalGatewayHistoryLimit
 	}
@@ -1407,10 +1484,11 @@ func buildGatewayMessages(agent db.Agent, workspaceContext string, history []db.
 			continue
 		}
 		content := strings.TrimSpace(m.Content)
-		if content == "" {
+		blocks := contentBlocksForMessage(content, attachments[m.ID])
+		if content == "" && len(blocks) == 0 {
 			continue
 		}
-		chatMessages = append(chatMessages, GatewayMessage{Role: role, Content: content})
+		chatMessages = append(chatMessages, GatewayMessage{Role: role, Content: content, ContentBlocks: blocks})
 	}
 	if len(chatMessages) > limit {
 		chatMessages = chatMessages[len(chatMessages)-limit:]
@@ -1473,7 +1551,7 @@ func buildGatewayIssueSystemPrompt(agent db.Agent, workspaceContext string) stri
 // so the model treats it as the message to answer rather than reacting to
 // older history. limit caps the transcript at the most recent N entries
 // (preserving the opening issue message + the trigger comment when set).
-func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int) []GatewayMessage {
+func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db.Issue, comments []db.Comment, triggerComment *db.Comment, startedAt pgtype.Timestamptz, limit int, attachments map[pgtype.UUID][]AnthropicContentBlock) []GatewayMessage {
 	if limit <= 0 {
 		limit = defaultFirtalGatewayHistoryLimit
 	}
@@ -1494,14 +1572,15 @@ func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db
 			continue
 		}
 		content := strings.TrimSpace(c.Content)
-		if content == "" {
+		blocks := contentBlocksForMessage(content, attachments[c.ID])
+		if content == "" && len(blocks) == 0 {
 			continue
 		}
 		role := "user"
 		if c.AuthorType == "agent" && c.AuthorID == agent.ID {
 			role = "assistant"
 		}
-		transcript = append(transcript, GatewayMessage{Role: role, Content: content})
+		transcript = append(transcript, GatewayMessage{Role: role, Content: content, ContentBlocks: blocks})
 	}
 	if len(transcript) > limit {
 		transcript = transcript[len(transcript)-limit:]
@@ -1509,11 +1588,25 @@ func buildGatewayIssueMessages(agent db.Agent, workspaceContext string, issue db
 	out = append(out, transcript...)
 
 	if triggerComment != nil {
-		if content := strings.TrimSpace(triggerComment.Content); content != "" {
-			out = append(out, GatewayMessage{Role: "user", Content: content})
+		content := strings.TrimSpace(triggerComment.Content)
+		blocks := contentBlocksForMessage(content, attachments[triggerComment.ID])
+		if content != "" || len(blocks) > 0 {
+			out = append(out, GatewayMessage{Role: "user", Content: content, ContentBlocks: blocks})
 		}
 	}
 	return out
+}
+
+func contentBlocksForMessage(text string, attachments []AnthropicContentBlock) []AnthropicContentBlock {
+	if len(attachments) == 0 {
+		return nil
+	}
+	blocks := make([]AnthropicContentBlock, 0, 1+len(attachments))
+	if strings.TrimSpace(text) != "" {
+		blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: text})
+	}
+	blocks = append(blocks, attachments...)
+	return blocks
 }
 
 // gatewayInlinedContextChars sums non-system message content the gateway

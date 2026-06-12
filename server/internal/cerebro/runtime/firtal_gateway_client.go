@@ -14,10 +14,11 @@ import (
 )
 
 type GatewayMessage struct {
-	Role       string            `json:"role"`
-	Content    string            `json:"content,omitempty"`
-	ToolCalls  []GatewayToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string            `json:"tool_call_id,omitempty"`
+	Role          string                  `json:"role"`
+	Content       string                  `json:"content,omitempty"`
+	ContentBlocks []AnthropicContentBlock `json:"-"`
+	ToolCalls     []GatewayToolCall       `json:"tool_calls,omitempty"`
+	ToolCallID    string                  `json:"tool_call_id,omitempty"`
 }
 
 // GatewayToolDef is the OpenAI-compatible tool definition the gateway accepts
@@ -161,7 +162,20 @@ func NewGatewayClient(cfg FirtalGatewayRuntimeConfig, httpClient *http.Client) *
 }
 
 func (c *GatewayClient) Complete(ctx context.Context, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	if c.cfg.EntryMode == FirtalGatewayEntryModeNative {
+		return c.completeNativeMessages(ctx, model, messages, meta)
+	}
 	return c.CompleteWithTools(ctx, model, messages, nil, meta)
+}
+
+func (c *GatewayClient) completeNativeMessages(ctx context.Context, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
+	systemText := ""
+	msgStart := 0
+	if len(messages) > 0 && messages[0].Role == "system" {
+		systemText = messages[0].Content
+		msgStart = 1
+	}
+	return c.completeAnthropic(ctx, model, systemText, ConvertGatewayMessagesToAnthropic(messages[msgStart:]), nil, nil, meta)
 }
 
 // CompleteWithTools is Complete with optional OpenAI-compatible tool

@@ -175,6 +175,8 @@ type Daemon struct {
 	cerebroTermSinks  map[string]func(text string)
 	// CEREBRO-PATCH(daemon-cerebro-term-reattach): per-task in-flight attach frames re-emitted on WS reconnect.
 	cerebroActiveAttaches map[string][]byte
+	// CEREBRO-PATCH(daemon-cerebro-term-buffer): per-task ordered term_stdout backlog retained while the WS is down, flushed on reconnect (TECH-3388).
+	cerebroTermBuffers map[string][][]byte
 }
 
 // New creates a new Daemon instance.
@@ -205,6 +207,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		// CEREBRO-PATCH(daemon-cerebro-term-tee): per-task terminal sink + attach-frame registries (TECH-3388).
 		cerebroTermSinks:      make(map[string]func(string)),
 		cerebroActiveAttaches: make(map[string][]byte),
+		cerebroTermBuffers:    make(map[string][][]byte), // CEREBRO-PATCH(daemon-cerebro-term-buffer): retain output across WS flaps (TECH-3388).
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate

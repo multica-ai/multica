@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -1041,7 +1042,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
 		if delegationErr != nil {
 			slog.Warn("enqueue agent task on comment blocked by delegation policy", "issue_id", issueID, "error", delegationErr)
-		// CEREBRO-PATCH(new-thread-fresh-session): new top-level threads start a fresh agent session; replies resume.
+			// CEREBRO-PATCH(new-thread-fresh-session): new top-level threads start a fresh agent session; replies resume.
 		} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
@@ -1257,6 +1258,7 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
 		mentions = util.ParseMentions(parentComment.Content)
 	}
+	delegationBlockCommented := false
 	for _, m := range mentions {
 		if m.Type == "squad" {
 			if privateAutopilotComment {
@@ -1313,6 +1315,10 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			}
 			if delegationErr != nil {
 				slog.Warn("enqueue squad leader mention task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", delegationErr)
+				if !delegationBlockCommented {
+					h.postMentionDelegationBlockedSystemComment(ctx, issue, comment, agent.Name)
+					delegationBlockCommented = true
+				}
 				continue
 			}
 			// CEREBRO-PATCH(mention-delegation-legacy-test): direct helper tests pass no delegation context; production missing provenance is still blocked by delegationErr above.
@@ -1377,6 +1383,10 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 		// actual reply that mentioned it, not the thread root.
 		if delegationErr != nil {
 			slog.Warn("enqueue mention agent task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", delegationErr)
+			if !delegationBlockCommented {
+				h.postMentionDelegationBlockedSystemComment(ctx, issue, comment, agent.Name)
+				delegationBlockCommented = true
+			}
 			continue
 		}
 		// CEREBRO-PATCH(mention-delegation-legacy-test): direct helper tests pass no delegation context; production missing provenance is still blocked by delegationErr above.
@@ -1389,6 +1399,39 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 			slog.Warn("enqueue mention agent task failed", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", err)
 		}
 	}
+}
+
+func (h *Handler) postMentionDelegationBlockedSystemComment(ctx context.Context, issue db.Issue, triggerComment db.Comment, targetName string) {
+	if h == nil || h.Queries == nil {
+		return
+	}
+	if targetName == "" {
+		targetName = "agenten"
+	}
+	content := fmt.Sprintf("Kunne ikke starte %q fra denne kommentar: den aktuelle agent-kørsel mangler en menneskelig afsender. Start agenten ved at tildele issuet eller få et menneske til at nævne agenten.", targetName)
+	systemComment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    triggerComment.ID,
+	})
+	if err != nil {
+		slog.Warn("mention delegation block: create system comment failed",
+			"issue_id", uuidToString(issue.ID),
+			"trigger_comment_id", uuidToString(triggerComment.ID),
+			"error", err)
+		return
+	}
+	h.publishToAudience(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(systemComment, nil, nil),
+		"issue_title":         issue.Title,
+		"issue_assignee_type": textToPtr(issue.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_status":        issue.Status,
+	}, h.audienceForIssue(ctx, issue))
 }
 
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
@@ -1533,7 +1576,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
 				if delegationErr != nil {
 					slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
-				// CEREBRO-PATCH(new-thread-fresh-session): edited top-level comments also start fresh sessions.
+					// CEREBRO-PATCH(new-thread-fresh-session): edited top-level comments also start fresh sessions.
 				} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
 					slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
 				}

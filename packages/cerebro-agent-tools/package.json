@@ -12,6 +12,7 @@
     "./views": "./views/index.ts"
   },
   "dependencies": {
+    "@multica/cerebro-agentvault": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-types": "workspace:*",

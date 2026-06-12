@@ -67,6 +67,8 @@ type ChannelResponse struct {
 	LastMessage  *ChannelLastMessage `json:"last_message"`
 	CreatedAt    string              `json:"created_at"`
 	UpdatedAt    string              `json:"updated_at"`
+	// CEREBRO-PATCH(channel-state-response): TECH-3352 — per-user snooze target.
+	MutedUntil *string `json:"muted_until"`
 }
 
 // CreateChannelRequest is the body for POST /api/channels. For kind='dm'
@@ -295,6 +297,8 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 		channelIDs = append(channelIDs, row.ID)
 	}
 	lastMessages := h.lastMessagesForChannels(r.Context(), channelIDs)
+	// CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze/unread overlay.
+	mutedStates, unreadStates := h.channelStates(r.Context(), userID)
 
 	prefix := h.getIssuePrefix(r.Context(), parseUUID(workspaceID))
 	resp := make([]ChannelResponse, 0, len(rows))
@@ -319,6 +323,7 @@ func (h *Handler) ListChannels(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:    timestampToString(row.CreatedAt),
 			UpdatedAt:    timestampToString(row.UpdatedAt),
 		}
+		applyChannelState(&channel, mutedStates, unreadStates) // CEREBRO-PATCH(channel-state-apply): TECH-3352
 		resp = append(resp, channel)
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -432,6 +437,12 @@ func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(channel-state-clear-on-read): TECH-3352 — reading clears the
+	// user's snooze + manual-unread overlay so the row doesn't reappear unread.
+	if h.ChannelListen != nil {
+		_ = h.ChannelListen.ClearChannelState(r.Context(), issue.ID, parseUUID(userID))
+	}
+
 	slog.Info("channel: mark read", append(logger.RequestAttrs(r), "user_id", userID, "channel_id", id, "count", count)...)
 	h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
 		"recipient_id": userID,
@@ -447,7 +458,7 @@ func (h *Handler) MarkChannelRead(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserID string) ChannelResponse {
 	prefix := h.getIssuePrefix(ctx, i.WorkspaceID)
 	lastMessages := h.lastMessagesForChannels(ctx, []pgtype.UUID{i.ID})
-	return ChannelResponse{
+	resp := ChannelResponse{
 		ID:           uuidToString(i.ID),
 		WorkspaceID:  uuidToString(i.WorkspaceID),
 		Number:       i.Number,
@@ -467,6 +478,10 @@ func (h *Handler) channelToResponse(ctx context.Context, i db.Issue, viewerUserI
 		CreatedAt:    timestampToString(i.CreatedAt),
 		UpdatedAt:    timestampToString(i.UpdatedAt),
 	}
+	// CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze/unread overlay.
+	muted, unreadAt := h.channelStates(ctx, viewerUserID)
+	applyChannelState(&resp, muted, unreadAt)
+	return resp
 }
 
 func (h *Handler) loadParticipants(ctx context.Context, issueID pgtype.UUID) []ChannelMember {
@@ -493,6 +508,28 @@ func (h *Handler) unreadInboxCount(ctx context.Context, userID string, issueID p
 		return 0
 	}
 	return count
+}
+
+// CEREBRO-PATCH(channel-state-apply): TECH-3352 — per-user snooze + manual-
+// unread overlay read through the ChannelListen seam (nil = upstream-only).
+func (h *Handler) channelStates(ctx context.Context, userID string) (muted, unreadAt map[string]pgtype.Timestamptz) {
+	if h.ChannelListen == nil {
+		return nil, nil
+	}
+	return h.ChannelListen.ChannelStatesForUser(ctx, parseUUID(userID))
+}
+
+// applyChannelState overlays the user's snooze target and manual-unread marker
+// onto a channel response. Indexing nil maps is safe, so it no-ops when the
+// cerebro seam is absent.
+func applyChannelState(c *ChannelResponse, muted, unreadAt map[string]pgtype.Timestamptz) {
+	if ts, ok := muted[c.ID]; ok && ts.Valid {
+		s := timestampToString(ts)
+		c.MutedUntil = &s
+	}
+	if ts, ok := unreadAt[c.ID]; ok && ts.Valid && c.UnreadCount == 0 {
+		c.UnreadCount = 1
+	}
 }
 
 // audienceForChannel returns the WS audience for events on a channel —

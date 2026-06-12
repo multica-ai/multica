@@ -552,6 +552,16 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "manage_agent_vault_access",
+		Title:       "Manage Agent Vault access",
+		Category:    CategoryPermissions,
+		Description: "Grant or revoke a private agent's access to an Agent Vault secret box (TECH-3196).",
+		Ops: []string{
+			"PUT /api/workspaces/{id}/agentvault/access",
+			"DELETE /api/workspaces/{id}/agentvault/access",
+		},
+	},
+	{
 		Key:         "decide_approval",
 		Title:       "Decide approval request",
 		Category:    CategoryPermissions,
@@ -732,6 +742,7 @@ var catalog = []Capability{
 		Category:    CategoryConnections,
 		Description: "Create, edit, or delete workspace API/MCP connections (external URLs and internal Sliplane paths).",
 		Ops: []string{
+			"POST /api/workspaces/{id}/mcp",
 			"POST /api/workspaces/{id}/connections",
 			"PUT /api/workspaces/{id}/connections/{connId}",
 			"DELETE /api/workspaces/{id}/connections/{connId}",
@@ -885,6 +896,9 @@ var excluded = map[string]string{
 	"POST /api/persona/approvals/{id}/approve": "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/persona/approvals/{id}/deny":    "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
 	"POST /api/channels/{id}/read":             "self_only — caller marking a channel read",
+	"POST /api/channels/{id}/unread":           "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
+	"POST /api/channels/{id}/mute":             "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
+	"DELETE /api/channels/{id}/mute":           "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
 	"POST /api/lark/binding/redeem":            "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.

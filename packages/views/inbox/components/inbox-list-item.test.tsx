@@ -79,6 +79,25 @@ vi.mock("@multica/cerebro-inbox", () => {
   };
 });
 
+// CEREBRO-PATCH(channel-row-actions-test-mock): TECH-3352 — stub the channel
+// row-actions surface (it uses react-query); the test renders ChannelListItem
+// without a QueryClient and only asserts on the row content, not the menu.
+vi.mock("@multica/cerebro-channels", () => ({
+  CerebroChannelRowActions: ({ onArchive }: { onArchive: () => void }) => (
+    <span
+      role="button"
+      tabIndex={-1}
+      title="Archive"
+      onClick={(e) => {
+        e.stopPropagation();
+        onArchive();
+      }}
+    >
+      archive
+    </span>
+  ),
+}));
+
 // Translate the few strings this test asserts on (titles / labels). The
 // component uses the selector form t(($) => $.list.archive_tooltip), so we
 // resolve against the same shape the en/inbox.json bundle exposes.

@@ -1549,6 +1549,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
 			}
 		}
+		// CEREBRO-PATCH(daemon-agentvault-claim-env): TECH-3196 merge per-agent Agent Vault proxy env (flag-gated, fail-open).
+		customEnv = h.mergeAgentVaultEnvForClaim(r, agent.ID, agent.WorkspaceID, agent.Name, customEnv)
 		var customArgs []string
 		if agent.CustomArgs != nil {
 			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {

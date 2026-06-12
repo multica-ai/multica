@@ -41,6 +41,7 @@ func TestGatewayClientCompleteSendsStructuredMessagesAndUsage(t *testing.T) {
 		APIKey:    "rk_test",
 		Model:     "claude-sonnet-4-6",
 		MaxTokens: 4096,
+		EntryMode: FirtalGatewayEntryModeCompat,
 	}, srv.Client())
 
 	completion, err := client.Complete(context.Background(), "", []GatewayMessage{
@@ -61,6 +62,60 @@ func TestGatewayClientCompleteSendsStructuredMessagesAndUsage(t *testing.T) {
 	}
 	if len(got.Messages) != 2 || got.Messages[0].Role != "system" || got.Messages[1].Role != "user" {
 		t.Fatalf("request messages = %+v", got.Messages)
+	}
+}
+
+func TestGatewayClientCompleteUsesNativeAnthropicByDefault(t *testing.T) {
+	var got struct {
+		Model    string                 `json:"model"`
+		System   []AnthropicSystemBlock `json:"system"`
+		Messages []AnthropicMessage     `json:"messages"`
+	}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/ai/proxy/v1/messages" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"content": [{"type": "text", "text": "native ok"}],
+			"usage": {"input_tokens": 11, "output_tokens": 2}
+		}`))
+	}))
+	defer srv.Close()
+
+	client := NewGatewayClient(FirtalGatewayRuntimeConfig{
+		BaseURL:   srv.URL,
+		APIKey:    "rk_test",
+		Model:     "claude-sonnet-4-6",
+		MaxTokens: 4096,
+	}, srv.Client())
+
+	completion, err := client.Complete(context.Background(), "", []GatewayMessage{
+		{Role: "system", Content: "instructions"},
+		{Role: "user", Content: "hello", ContentBlocks: []AnthropicContentBlock{
+			{Type: "text", Text: "hello"},
+			{Type: "image", Source: &AnthropicContentSource{Type: "base64", MediaType: "image/png", Data: "aW1n"}},
+		}},
+	}, GatewayRequestMeta{TaskID: "task-1"})
+	if err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if completion.Output != "native ok" {
+		t.Fatalf("Output = %q", completion.Output)
+	}
+	if len(got.System) != 1 || got.System[0].Text != "instructions" {
+		t.Fatalf("system = %+v", got.System)
+	}
+	if len(got.Messages) != 1 {
+		t.Fatalf("messages = %+v", got.Messages)
+	}
+	blocks, ok := got.Messages[0].Content.([]any)
+	if !ok || len(blocks) != 2 {
+		t.Fatalf("message content = %#v", got.Messages[0].Content)
 	}
 }
 

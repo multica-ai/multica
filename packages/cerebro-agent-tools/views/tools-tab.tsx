@@ -11,6 +11,7 @@ import {
   SimpleToolPolicyTable,
   ToolPolicyTabs,
 } from "@multica/cerebro-tool-policy/views";
+import { AgentVaultAccessPanel } from "@multica/cerebro-agentvault/views";
 import { AgentToolsCard } from "./components/agent-tools-card";
 
 export interface AgentDetailTabExtension {
@@ -60,6 +61,9 @@ export function CerebroToolsTab({
   // stays the explicit power-view: when its flag is on it wins, so turning
   // cerebro_tool_policy back on restores the full Effective chain.
   const simpleToolPolicy = useFeatureFlag("cerebro_simple_tool_policy");
+  // TECH-3196: when on, append the per-agent Agent Vault access table below the
+  // tools content so admins control which secret boxes this agent may use.
+  const agentVault = useFeatureFlag("cerebro_agent_vault");
 
   const { data: runtimes = [] } = useQuery({
     queryKey: runtimeListKey(wsId),
@@ -69,6 +73,7 @@ export function CerebroToolsTab({
 
   const runtime = runtimes.find((r) => r.id === agent.runtime_id);
 
+  let content: ReactNode;
   if (unifiedToolPolicy) {
     // The agent page edits the "This agent" layer; the runtime column is shown
     // read-only as the inherited layer below. The user ceiling is bound to the
@@ -77,7 +82,7 @@ export function CerebroToolsTab({
     // including any "Capped by user"/"Capped by group". The owner's real group
     // memberships are expanded server-side from the user id (the table never
     // trusts a client-supplied group list).
-    return (
+    content = (
       <ToolPolicyTabs
         wsId={wsId}
         view="agent"
@@ -86,13 +91,11 @@ export function CerebroToolsTab({
         userId={agent.owner_id}
       />
     );
-  }
-
-  if (simpleToolPolicy) {
+  } else if (simpleToolPolicy) {
     // The simple table edits the "This agent" layer and inherits everything
     // below; the owner is bound as the user ceiling so inherited rows resolve
     // their Effective verdict server-side, same as the rich agent view.
-    return (
+    content = (
       <SimpleToolPolicyTable
         wsId={wsId}
         agentId={agent.id}
@@ -100,13 +103,22 @@ export function CerebroToolsTab({
         userId={agent.owner_id}
       />
     );
+  } else {
+    content = (
+      <AgentToolsCard agent={agent} canEdit={canEdit} runtimeName={runtime?.name} />
+    );
   }
 
+  if (!agentVault) {
+    return content;
+  }
   return (
-    <AgentToolsCard
-      agent={agent}
-      canEdit={canEdit}
-      runtimeName={runtime?.name}
-    />
+    <div className="flex flex-col gap-6">
+      {content}
+      <section className="flex flex-col gap-3">
+        <h3 className="text-sm font-medium">Agent Vault</h3>
+        <AgentVaultAccessPanel agentId={agent.id} agentName={agent.name} />
+      </section>
+    </div>
   );
 }
