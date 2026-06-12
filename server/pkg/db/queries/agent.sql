@@ -676,14 +676,16 @@ WHERE a.workspace_id = $1
 
 UNION ALL
 
-SELECT t.* FROM (
-  SELECT DISTINCT ON (atq.agent_id) atq.*
+SELECT latest.* FROM agent a
+JOIN LATERAL (
+  SELECT atq.*
   FROM agent_task_queue atq
-  JOIN agent a ON a.id = atq.agent_id
-  WHERE a.workspace_id = $1
+  WHERE atq.agent_id = a.id
     AND atq.status IN ('completed', 'failed')
-  ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
-) t;
+  ORDER BY atq.completed_at DESC NULLS LAST
+  LIMIT 1
+) latest ON true
+WHERE a.workspace_id = $1;
 
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue
