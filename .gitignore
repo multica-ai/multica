@@ -68,3 +68,5 @@ server/server
 data/
 .kilo
 .idea
+
+.hermes/

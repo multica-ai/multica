@@ -17,8 +17,9 @@ binary and spawned per task over MCP stdio. Design rationale and phase status:
 - `server.go` boots the MCP stdio server (`multica mcp-tools serve`).
 - `options.go` builds `ToolEnv` (WorkDir, AllowNetwork, Timeout, ArtifactDir,
   Logger).
-- `exec_util.go` / `git.go` hold the shell-out and git helpers
-  (`gitAvailable`, `isGitRepo`, `currentBranch`, `changedFiles`).
+- `exec_util.go` / `git.go` hold the command and git helpers
+  (`runShell`, `runCommand`, `gitAvailable`, `isGitRepo`, `currentBranch`,
+  `changedFiles`).
 - `artifacts.go` resolves artifact paths and rejects names that escape the
   artifact dir (absolute paths, `..` traversal).
 - `strictUnmarshal` (in `tool_repo_facts.go`) decodes tool input with
@@ -33,10 +34,13 @@ binary and spawned per task over MCP stdio. Design rationale and phase status:
   tool.
 - `tool_build_probe.go` — detect toolchains, run a non-destructive build/restore.
 - `tool_test_gate.go` — run configured smoke suites, normalize outcomes.
+- `tool_dotnet_test_gate.go` — run `dotnet test` with structured arguments,
+  returning `MISSING_DEPENDENCY` when `dotnet` is unavailable and
+  `POLICY_FAILURE` when tests/coverage fail.
 - `tool_diff_summarize.go` — stable machine-readable changed-file summary.
 - `tool_artifact_emit.go` — write JSON/Markdown under the task artifact dir.
 
-All six are read-only / non-destructive. Tests: `dettools_test.go`,
+All seven are read-only / non-destructive. Tests: `dettools_test.go`,
 `tools_phase2_test.go`.
 
 ## CLI entry point

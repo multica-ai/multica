@@ -241,6 +241,12 @@ func updateRepoSlug() string {
 	return defaultUpdateRepo
 }
 
+// UpdateRepoSlug returns the "owner/name" GitHub repo the self-updater fetches
+// releases from. It is exposed for CLI messages and diagnostics.
+func UpdateRepoSlug() string {
+	return updateRepoSlug()
+}
+
 // brewFormula returns the Homebrew "owner/tap/formula" the self-updater upgrades
 // for Homebrew installs.
 func brewFormula() string {
@@ -248,6 +254,12 @@ func brewFormula() string {
 		return v
 	}
 	return defaultBrewFormula
+}
+
+// BrewFormula returns the Homebrew "owner/tap/formula" the self-updater upgrades.
+// It is exposed for CLI messages and diagnostics.
+func BrewFormula() string {
+	return brewFormula()
 }
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {

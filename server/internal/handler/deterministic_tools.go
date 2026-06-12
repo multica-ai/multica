@@ -23,7 +23,7 @@ var toolNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 // at author time gives a clear error).
 var reservedToolNames = map[string]bool{
 	"repo_facts": true, "policy_check": true, "build_probe": true,
-	"test_gate": true, "diff_summarize": true, "artifact_emit": true,
+	"test_gate": true, "dotnet_test_gate": true, "diff_summarize": true, "artifact_emit": true,
 }
 
 // DeterministicToolResponse is the API shape for a workspace-authored tool.

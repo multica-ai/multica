@@ -70,8 +70,8 @@ Apply it field by field. Ask three questions:
   forbidden paths, required files. A skill *asks* the model to check; a tool
   *returns* `POLICY_FAILURE` with the violation list (`policy_check`).
 - It **runs real commands and normalizes the outcome** — build/restore probes,
-  smoke suites (`build_probe`, `test_gate`). "Did it pass?" must be measured,
-  never asserted by the model.
+  smoke suites (`build_probe`, `test_gate`, `dotnet_test_gate`). "Did it pass?"
+  must be measured, never asserted by the model.
 - It is a **deterministic transform** the model would otherwise approximate — a
   stable machine-readable diff summary (`diff_summarize`).
 - It **emits a structured artifact** other steps or the UI consume
@@ -86,7 +86,9 @@ correctness-critical core into a tool and keep a thin skill that orchestrates
 it**:
 
 > The deterministic part: "is the branch valid, are forbidden paths touched, did
-> the smoke suite pass" → `policy_check` + `test_gate` tools.
+> the smoke suite pass" → `policy_check` + `test_gate` tools. For C# test
+> gates, prefer `dotnet_test_gate` so missing SDK/PATH and test failures are
+> structured outcomes.
 > The advisory part that stays a skill: "before opening a PR, run the policy
 > check; if it returns `POLICY_FAILURE`, fix the violation before pushing."
 

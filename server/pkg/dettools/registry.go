@@ -49,6 +49,7 @@ func allTools() []Tool {
 		policyCheckTool(),
 		buildProbeTool(),
 		testGateTool(),
+		dotnetTestGateTool(),
 		diffSummarizeTool(),
 		artifactEmitTool(),
 	}

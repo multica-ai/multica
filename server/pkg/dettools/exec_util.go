@@ -17,6 +17,15 @@ func runShell(ctx context.Context, workDir, commandline string) (string, int, er
 	return string(out), exitCode(err), err
 }
 
+// runCommand runs command with args directly (no shell) in workDir and returns
+// the combined stdout+stderr and process exit code.
+func runCommand(ctx context.Context, workDir, command string, args ...string) (string, int, error) {
+	cmd := exec.CommandContext(ctx, command, args...)
+	cmd.Dir = workDir
+	out, err := cmd.CombinedOutput()
+	return string(out), exitCode(err), err
+}
+
 // exitCode extracts a process exit code from an exec error: 0 on success, the
 // real code on a non-zero exit, and -1 when the process could not run at all.
 func exitCode(err error) int {

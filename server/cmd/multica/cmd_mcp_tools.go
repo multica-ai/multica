@@ -22,7 +22,7 @@ var mcpToolsServeCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Run the deterministic tools MCP server over stdio",
 	Long: "Speak MCP (Model Context Protocol) over stdio, exposing Multica's " +
-		"read-only deterministic tools (repo_facts, policy_check). Configuration is " +
+		"read-only deterministic tool catalog. Configuration is " +
 		"read from MULTICA_DETTOOLS_* environment variables set by the daemon.",
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {

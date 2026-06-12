@@ -39,8 +39,9 @@ Rationale:
   watchdogs (`MULTICA_AGENT_IDLE_WATCHDOG`, `MULTICA_AGENT_TOOL_WATCHDOG`),
   per-task isolated workdirs, and the local trust boundary already exist in the
   daemon. The tools (`repo_facts`, `policy_check`, `build_probe`, `test_gate`,
-  `diff_summarize`, `artifact_emit`) are systems-level operations — shelling out
-  to git/build tools and inspecting the filesystem — which is idiomatic Go.
+  `dotnet_test_gate`, `diff_summarize`, `artifact_emit`) are systems-level
+  operations — shelling out to git/build tools and inspecting the filesystem —
+  which is idiomatic Go.
 - **No real loss.** The "schema reuse with `packages/core`" argument for TS is
   illusory: `packages/core` zod schemas describe API responses consumed by the
   frontend. Deterministic tool I/O contracts are a new thing consumed by the
@@ -101,6 +102,7 @@ server/pkg/dettools/
     policy_check.go
     build_probe.go
     test_gate.go
+    dotnet_test_gate.go
     diff_summarize.go
     artifact_emit.go
   *_test.go
@@ -189,6 +191,8 @@ envelope.
 - `build_probe` — detect toolchains (Go, Node, .NET, Rust, Java) and run a
   non-destructive build/restore probe.
 - `test_gate` — run configured smoke suites, normalize outcomes.
+- `dotnet_test_gate` — run `dotnet test` with structured arguments and normalize
+  missing SDK, test failures, and coverage failures.
 - `diff_summarize` — stable machine-readable summary of changed files.
 - `artifact_emit` — write JSON/Markdown artifacts under the task artifact dir.
 
@@ -202,7 +206,7 @@ Consistent with `daemon/config.go`. No new config file.
 | Env var | Default | Meaning |
 |---|---|---|
 | `MULTICA_DETTOOLS_ENABLED` | `false` | Master switch for the tool plane |
-| `MULTICA_DETTOOLS_ALLOWED` | `repo_facts,policy_check,build_probe,test_gate` | Allowlisted tool names |
+| `MULTICA_DETTOOLS_ALLOWED` | `repo_facts,policy_check,build_probe,test_gate,dotnet_test_gate` | Allowlisted tool names |
 | `MULTICA_DETTOOLS_TIMEOUT` | `90s` | Default per-tool timeout |
 | `MULTICA_DETTOOLS_ALLOW_NETWORK` | `false` | Whether tools may touch the network |
 | `MULTICA_DETTOOLS_ARTIFACT_DIR` | `.multica/artifacts` | Artifact output dir (relative to task workdir) |
@@ -292,7 +296,7 @@ runtimes. Frontend signal builds on `providerSupportsMcpConfig()` in
 | Phase | Scope | Outcome |
 |---|---|---|
 | 1 ✅ | Go MCP server subcommand + 2 read-only tools (`repo_facts`, `policy_check`); merge helper; inject for **claude** only | End-to-end tool plane on Claude Code — **implemented** (`server/pkg/dettools/`, `multica mcp-tools serve`, `daemon/dettools_inject.go`) |
-| 2 ✅ | Add codex injection; full tool catalog (`build_probe`, `test_gate`, `diff_summarize`, `artifact_emit`); artifact writing + audit logging | **Implemented** — codex added to `dettoolsExecOptionsProviders` (same Claude-style shape renders into its `config.toml`); six-tool catalog; `artifact_emit` writes path-scoped artifacts; per-invocation audit log records tool, outcome, duration, input size, and artifact paths |
+| 2 ✅ | Add codex injection; full tool catalog (`build_probe`, `test_gate`, `dotnet_test_gate`, `diff_summarize`, `artifact_emit`); artifact writing + audit logging | **Implemented** — codex added to `dettoolsExecOptionsProviders` (same Claude-style shape renders into its `config.toml`); seven-tool catalog; `artifact_emit` writes path-scoped artifacts; per-invocation audit log records tool, outcome, duration, input size, and artifact paths |
 | 3 ✅ | Extend to opencode/hermes/kimi/kiro (ExecOptions) + openclaw (execenv); capability reporting; Pi via `pi-mcp-adapter` | **Implemented & validated** — all six native-MCP providers receive the tool server; `mcpSupportKind`/`toolPlaneSupported` classify native/adapter/none (pi → adapter). **Pi adapter validated against the real `pi-mcp-adapter`** (github.com/nicobailon/pi-mcp-adapter): config schema is `{settings, mcpServers}` (Claude-style, matches our output), discovered via the project-local `.pi/mcp.json` (highest-precedence, read relative to the agent cwd). `daemon/dettools_pi.go` writes/merges `.pi/mcp.json` into the task work dir — per-task by construction, no global-file race — preserving any existing user servers/`settings`, and restores the original on `local_directory` tasks. Opt-in (`MULTICA_DETTOOLS_PI_ADAPTER`), fail-open; knobs `MULTICA_DETTOOLS_PI_CONFIG_PATH` and `MULTICA_DETTOOLS_PI_INSTALL_CMD`. |
 | 4 ✅ | Policy controls + per-agent tool profiles + capability reporting | **Implemented** — per-agent `deterministic_tools.{allowed_tools,denied_tools}` read from `runtime_config` (plumbed daemon-side, no migration); daemon-wide `MULTICA_DETTOOLS_DENIED` denylist; agents can only narrow the daemon allowlist. Richer invocation-log UI deferred (needs an invocation data model — daemon currently audit-logs only). |
 

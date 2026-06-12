@@ -8,11 +8,10 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
+import { fetchLatestCliVersion } from "@multica/core/runtimes";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 let cachedLatestVersion: string | null = null;
@@ -23,12 +22,7 @@ async function fetchLatestVersion(): Promise<string | null> {
     return cachedLatestVersion;
   }
   try {
-    const resp = await fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    cachedLatestVersion = data.tag_name ?? null;
+    cachedLatestVersion = await fetchLatestCliVersion();
     cachedAt = Date.now();
     return cachedLatestVersion;
   } catch {

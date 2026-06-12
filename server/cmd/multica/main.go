@@ -52,6 +52,7 @@ func init() {
 	workspaceCmd.GroupID = groupCore
 	repoCmd.GroupID = groupCore
 	skillCmd.GroupID = groupCore
+	dettoolCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 
 	// Runtime commands
@@ -77,6 +78,7 @@ func init() {
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(skillCmd)
+	rootCmd.AddCommand(dettoolCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)

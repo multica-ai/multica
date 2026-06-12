@@ -137,7 +137,7 @@ Create an issue from the board (or via `multica issue create`), then assign it t
 
 Skills are *advisory* — Markdown the agent reads and may follow, paraphrase, or ignore. That's the right shape for judgment ("how to frame a PR", naming conventions). It's the wrong shape for anything correctness-sensitive: a skill that says *"make sure the tests pass"* is a suggestion the model can hallucinate its way around.
 
-**Deterministic tools** close that gap. A tool is typed Go that *runs* — it inspects the repo, enforces a policy, or runs a gate — and returns a verifiable result the agent can branch on. The agent reaches tools over [MCP](https://modelcontextprotocol.io); a built-in catalog (`repo_facts`, `policy_check`, `build_probe`, `test_gate`, `diff_summarize`, `artifact_emit`) ships compiled into the daemon binary, and you can author your own from the workspace.
+**Deterministic tools** close that gap. A tool is typed Go that *runs* — it inspects the repo, enforces a policy, or runs a gate — and returns a verifiable result the agent can branch on. The agent reaches tools over [MCP](https://modelcontextprotocol.io); a built-in catalog (`repo_facts`, `policy_check`, `build_probe`, `test_gate`, `dotnet_test_gate`, `diff_summarize`, `artifact_emit`) ships compiled into the daemon binary, and you can author your own from the workspace.
 
 | | Skill (advisory) | Deterministic tool |
 |---|---|---|
@@ -148,6 +148,16 @@ Skills are *advisory* — Markdown the agent reads and may follow, paraphrase, o
 ### Authoring a tool
 
 Open your workspace and go to **Tools** in the sidebar. Write a deterministic Go *step*, give it sample input, and click **Test** to run it instantly in the sandbox — no deploy, no rebuild.
+
+You can also create and refresh workspace tools from source files with the CLI:
+
+```bash
+multica dettool import-file dettools/my_tool.go
+multica dettool test my_tool --input '{"name":"world"}'
+```
+
+`import-file` uses the file stem as the default tool name, creates the tool on
+the first run, and updates an existing tool with the same name on later runs.
 
 A step is a Go package named `step` exposing one function:
 
@@ -226,7 +236,7 @@ The deterministic tool plane is off by default. Enable it on the daemon so agent
 
 ```bash
 export MULTICA_DETTOOLS_ENABLED=true                                   # master switch
-export MULTICA_DETTOOLS_ALLOWED=repo_facts,policy_check,build_probe,test_gate  # allow-list (defaults to the full read-only catalog)
+export MULTICA_DETTOOLS_ALLOWED=repo_facts,policy_check,build_probe,test_gate,dotnet_test_gate  # allow-list (defaults to the full read-only catalog)
 export MULTICA_DETTOOLS_TIMEOUT=90s                                    # per-tool timeout
 ```
 
@@ -249,6 +259,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
+| `multica skill` | Create, update, import, and manage workspace skills |
+| `multica dettool` | Create, update, test, and import workspace deterministic tools |
 | `multica update` | Update to the latest version |
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference.
