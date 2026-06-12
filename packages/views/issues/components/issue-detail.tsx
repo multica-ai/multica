@@ -13,6 +13,7 @@ import { useNavigation } from "../../navigation";
 import {
   Archive,
   ArrowUp,
+  BellRing, // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -119,7 +120,7 @@ import { RestrictedRef } from "@multica/cerebro-access/views";
 // can mark members lacking access synchronously.
 import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
-import { CommentCard } from "./comment-card";
+import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
 import { CommentInput } from "./comment-input";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
 import { PullRequestList } from "./pull-request-list";
@@ -401,6 +402,32 @@ function ActivityBlock({
         </button>
       )}
       {visibleEntries.map((entry) => {
+        // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1 — wakeup comment as compact activity row
+        if (isWakeupComment(entry)) {
+          return (
+            <div key={entry.id} className="flex items-center text-xs text-muted-foreground">
+              <div className="mr-2 flex w-4 shrink-0 justify-center">
+                <BellRing className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </div>
+              <div className="flex min-w-0 flex-1 items-center gap-1">
+                <span className="shrink-0 font-medium">System Activity</span>
+                <span className="truncate">{entry.content ?? ""}</span>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span className="ml-auto shrink-0 cursor-default">
+                        {timeAgo(entry.created_at)}
+                      </span>
+                    }
+                  />
+                  <TooltipContent side="top">
+                    {new Date(entry.created_at).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+          );
+        }
         const details = (entry.details ?? {}) as Record<string, string>;
         const isStatusChange = entry.action === "status_changed";
         const isPriorityChange = entry.action === "priority_changed";
@@ -962,7 +989,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     // Group consecutive activities together so the connector line works
     const groups: { type: "activities" | "comment"; entries: TimelineEntry[] }[] = [];
     for (const entry of coalesced) {
-      if (entry.type === "activity") {
+      // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1 — wakeup comments render as activity lines
+      if (entry.type === "activity" || isWakeupComment(entry)) {
         const last = groups[groups.length - 1];
         if (last?.type === "activities") {
           last.entries.push(entry);

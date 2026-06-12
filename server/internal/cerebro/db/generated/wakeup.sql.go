@@ -21,7 +21,8 @@ WHERE id = $1
   AND state = 'pending'
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones
 `
 
 type CancelCerebroAgentWakeupParams struct {
@@ -50,6 +51,7 @@ func (q *Queries) CancelCerebroAgentWakeup(ctx context.Context, arg CancelCerebr
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsecutivePostpones,
 	)
 	return i, err
 }
@@ -85,7 +87,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones
 `
 
 func (q *Queries) ClaimDueTimeWakeups(ctx context.Context, rowLimit int32) ([]CerebroAgentWakeup, error) {
@@ -115,6 +118,7 @@ func (q *Queries) ClaimDueTimeWakeups(ctx context.Context, rowLimit int32) ([]Ce
 			&i.CreatedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConsecutivePostpones,
 		); err != nil {
 			return nil, err
 		}
@@ -135,7 +139,6 @@ WHERE id IN (
     SELECT id
     FROM cerebro_agent_wakeup
     WHERE cerebro_agent_wakeup.trigger_type = 'github_ci'
-      AND cerebro_agent_wakeup.state = 'pending'
       AND cerebro_agent_wakeup.watch_issue_id = ANY($1::uuid[])
     ORDER BY created_at ASC
     LIMIT $2
@@ -143,7 +146,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones
 `
 
 type ClaimPendingGithubCIWakeupsParams struct {
@@ -178,6 +182,7 @@ func (q *Queries) ClaimPendingGithubCIWakeups(ctx context.Context, arg ClaimPend
 			&i.CreatedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConsecutivePostpones,
 		); err != nil {
 			return nil, err
 		}
@@ -207,7 +212,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones
 `
 
 type ClaimPendingIssueStatusWakeupsParams struct {
@@ -243,6 +249,7 @@ func (q *Queries) ClaimPendingIssueStatusWakeups(ctx context.Context, arg ClaimP
 			&i.CreatedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConsecutivePostpones,
 		); err != nil {
 			return nil, err
 		}
@@ -289,7 +296,8 @@ INSERT INTO cerebro_agent_wakeup (
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones
 `
 
 type CreateCerebroAgentWakeupParams struct {
@@ -335,6 +343,7 @@ func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebr
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsecutivePostpones,
 	)
 	return i, err
 }
@@ -342,7 +351,8 @@ func (q *Queries) CreateCerebroAgentWakeup(ctx context.Context, arg CreateCerebr
 const getCerebroAgentWakeup = `-- name: GetCerebroAgentWakeup :one
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
-       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+       consecutive_postpones
 FROM cerebro_agent_wakeup
 WHERE id = $1
 `
@@ -368,6 +378,7 @@ func (q *Queries) GetCerebroAgentWakeup(ctx context.Context, id pgtype.UUID) (Ce
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ConsecutivePostpones,
 	)
 	return i, err
 }
@@ -375,7 +386,8 @@ func (q *Queries) GetCerebroAgentWakeup(ctx context.Context, id pgtype.UUID) (Ce
 const listCerebroAgentWakeups = `-- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
-       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+       consecutive_postpones
 FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND ($3::uuid IS NULL OR agent_id = $3::uuid)
@@ -426,6 +438,7 @@ func (q *Queries) ListCerebroAgentWakeups(ctx context.Context, arg ListCerebroAg
 			&i.CreatedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConsecutivePostpones,
 		); err != nil {
 			return nil, err
 		}
@@ -530,4 +543,47 @@ WHERE id = $1
 func (q *Queries) ReleaseWakeupToPending(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, releaseWakeupToPending, id)
 	return err
+}
+
+const incrementWakeupPostpones = `-- name: IncrementWakeupPostpones :one
+UPDATE cerebro_agent_wakeup
+SET consecutive_postpones = consecutive_postpones + 1,
+    updated_at = now()
+WHERE id = $1
+RETURNING consecutive_postpones
+`
+
+func (q *Queries) IncrementWakeupPostpones(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementWakeupPostpones, id)
+	var consecutivePostpones int32
+	err := row.Scan(&consecutivePostpones)
+	return consecutivePostpones, err
+}
+
+const resetWakeupPostpones = `-- name: ResetWakeupPostpones :exec
+UPDATE cerebro_agent_wakeup
+SET consecutive_postpones = 0,
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ResetWakeupPostpones(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, resetWakeupPostpones, id)
+	return err
+}
+
+const hasRecentPendingWakeupForAgentIssue = `-- name: HasRecentPendingWakeupForAgentIssue :one
+SELECT count(*) > 0 AS has_recent
+FROM cerebro_agent_wakeup
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND state = 'pending'
+  AND created_at > now() - make_interval(mins => $3::int)
+`
+
+func (q *Queries) HasRecentPendingWakeupForAgentIssue(ctx context.Context, agentID pgtype.UUID, issueID pgtype.UUID, minIntervalMinutes int32) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRecentPendingWakeupForAgentIssue, agentID, issueID, minIntervalMinutes)
+	var hasRecent bool
+	err := row.Scan(&hasRecent)
+	return hasRecent, err
 }

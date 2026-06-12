@@ -325,23 +325,24 @@ type CerebroAgentRuntimeToolOverride struct {
 }
 
 type CerebroAgentWakeup struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	AgentID      pgtype.UUID        `json:"agent_id"`
-	IssueID      pgtype.UUID        `json:"issue_id"`
-	Prompt       string             `json:"prompt"`
-	TriggerType  string             `json:"trigger_type"`
-	FireAt       pgtype.Timestamptz `json:"fire_at"`
-	WatchIssueID pgtype.UUID        `json:"watch_issue_id"`
-	WatchStatus  pgtype.Text        `json:"watch_status"`
-	State        string             `json:"state"`
-	ClaimedAt    pgtype.Timestamptz `json:"claimed_at"`
-	DispatchedAt pgtype.Timestamptz `json:"dispatched_at"`
-	CancelledAt  pgtype.Timestamptz `json:"cancelled_at"`
-	Failure      pgtype.Text        `json:"failure"`
-	CreatedByID  pgtype.UUID        `json:"created_by_id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	AgentID              pgtype.UUID        `json:"agent_id"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	Prompt               string             `json:"prompt"`
+	TriggerType          string             `json:"trigger_type"`
+	FireAt               pgtype.Timestamptz `json:"fire_at"`
+	WatchIssueID         pgtype.UUID        `json:"watch_issue_id"`
+	WatchStatus          pgtype.Text        `json:"watch_status"`
+	State                string             `json:"state"`
+	ClaimedAt            pgtype.Timestamptz `json:"claimed_at"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	CancelledAt          pgtype.Timestamptz `json:"cancelled_at"`
+	Failure              pgtype.Text        `json:"failure"`
+	CreatedByID          pgtype.UUID        `json:"created_by_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	ConsecutivePostpones int32              `json:"consecutive_postpones"`
 }
 
 type CerebroApprovalAudit struct {

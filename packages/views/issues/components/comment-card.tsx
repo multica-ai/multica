@@ -85,6 +85,10 @@ export function flattenReplies(
 export function isUserQuestionComment(entry: Pick<TimelineEntry, "type" | "comment_type">): boolean {
   return entry.type === "comment" && entry.comment_type === "question";
 }
+// CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1 — wakeup dispatch comments render as compact activity lines.
+export function isWakeupComment(entry: Pick<TimelineEntry, "type" | "comment_type">): boolean { // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
+  return entry.type === "comment" && entry.comment_type === "wakeup";
+}
 
 // ---------------------------------------------------------------------------
 // Types

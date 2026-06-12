@@ -17,3 +17,9 @@ matches what you are about to touch before you start.
   group/autopilot scope, the tool-policy chain). It separates what is enforced
   **live today** from what is **off by default**, because confusing the two has
   already caused a wrong conclusion once.
+
+- [`system-activity/`](./system-activity/README.md) — **System Activity — the
+  platform wakeup mechanism.** How `schedule_wakeup` / `list_wakeups` /
+  `cancel_wakeup` work, what constraints apply (15-min min interval,
+  consecutive-postpone limit), and how the sweeper dispatches due wakeups. Read
+  before touching `server/internal/cerebro/wakeup/` or any MCP wakeup tools.

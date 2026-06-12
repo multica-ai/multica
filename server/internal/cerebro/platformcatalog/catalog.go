@@ -899,6 +899,8 @@ var excluded = map[string]string{
 	"POST /api/channels/{id}/unread":           "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
 	"POST /api/channels/{id}/mute":             "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
 	"DELETE /api/channels/{id}/mute":           "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
+	"POST /api/cerebro/channels/{id}/typing":   "self_only — caller broadcasting their own typing indicator to a channel (TECH-3422); no capability gate needed",
+	"POST /api/cerebro/presence/ping":          "self_only — caller pinging their own presence heartbeat (TECH-3422); no capability gate needed",
 	"POST /api/lark/binding/redeem":            "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.

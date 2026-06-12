@@ -544,6 +544,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(cerebroWakeupMandatoryRule()) // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3121 — set a wakeup and state the time whenever you comment about waiting or returning
 	}
 
+	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3038 Phase 1 — wakeup guidance (no recurring)
+		b.WriteString(cerebroWakeupMandatoryRule())
+	}
+
 	b.WriteString("### Workflow\n\n")
 
 	if ctx.ChatSessionID != "" {
