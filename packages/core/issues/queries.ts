@@ -73,6 +73,13 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     [...issueKeys.timelineAll(), issueId] as const,
+  /** Prefix across all issues — WS task lifecycle events invalidate here so
+   *  an open composer's trigger preview refreshes when an agent's queue
+   *  state changes (the dedup guard makes the answer queue-dependent). */
+  commentTriggerPreviewAll: () => ["issues", "comment-trigger-preview"] as const,
+  /** PREFIX for invalidation — the composer hook appends parent + content signature. */
+  commentTriggerPreview: (issueId: string) =>
+    [...issueKeys.commentTriggerPreviewAll(), issueId] as const,
   reactionsAll: () => ["issues", "reactions"] as const,
   reactions: (issueId: string) =>
     [...issueKeys.reactionsAll(), issueId] as const,

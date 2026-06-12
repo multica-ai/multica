@@ -127,6 +127,15 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("previewCommentTriggers", () => {
+    it("returns an empty agent list when the response is malformed", async () => {
+      stubFetchJson({ agents: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const preview = await client.previewCommentTriggers("issue-1", "hello");
+      expect(preview).toEqual({ agents: [] });
+    });
+  });
+
   describe("listIssueSubscribers", () => {
     it("returns [] when the response is null", async () => {
       stubFetchJson(null);

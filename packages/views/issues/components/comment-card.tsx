@@ -102,7 +102,7 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -922,12 +922,13 @@ function CommentCardImpl({
               <div className="border-t border-border/50 px-4 py-2.5">
                 <ReplyInput
                   issueId={issueId}
+                  parentId={entry.id}
                   placeholder={t(($) => $.reply.placeholder)}
                   size="sm"
                   avatarType="member"
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
-                  onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
                 />
               </div>
             </>

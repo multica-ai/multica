@@ -78,6 +78,16 @@ INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reaso
 VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms))
 RETURNING *;
 
+-- name: LinkChatMessageToTask :exec
+UPDATE chat_message
+SET task_id = $2
+WHERE id = $1 AND role = 'user';
+
+-- name: DeleteUserChatMessageByTask :one
+DELETE FROM chat_message
+WHERE task_id = $1 AND role = 'user'
+RETURNING *;
+
 -- name: ListChatMessages :many
 SELECT * FROM chat_message
 WHERE chat_session_id = $1

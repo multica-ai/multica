@@ -11,10 +11,12 @@ import { contentReferencesAttachment } from "@multica/core/types";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
+import { CommentTriggerChips } from "./comment-trigger-chips";
+import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 
 interface CommentInputProps {
   issueId: string;
-  onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
 }
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
@@ -26,8 +28,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // button would be disabled even though the editor visibly contains text.
   const draftKey = `new:${issueId}` as const;
   const initialDraft = useCommentDraftStore.getState().getDraft(draftKey);
+  const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
   const [submitting, setSubmitting] = useState(false);
+  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
+  const triggerPreview = useCommentTriggerPreview({ issueId, content });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
   //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
@@ -66,6 +71,23 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     return result;
   }, [uploadWithToast, issueId]);
 
+  useEffect(() => {
+    const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
+    setSuppressedAgentIds((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [triggerPreview.agents]);
+
+  const toggleSuppressedAgent = useCallback((agentId: string) => {
+    setSuppressedAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
+
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
@@ -76,11 +98,20 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     const activeIds = pendingAttachments
       .filter((a) => contentReferencesAttachment(content, a))
       .map((a) => a.id);
+    const suppressAgentIds = triggerPreview.agents
+      .filter((agent) => suppressedAgentIds.has(agent.id))
+      .map((agent) => agent.id);
     setSubmitting(true);
     try {
-      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
+      await onSubmit(
+        content,
+        activeIds.length > 0 ? activeIds : undefined,
+        suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+      );
       editorRef.current?.clearContent();
+      setContent("");
       setIsEmpty(true);
+      setSuppressedAgentIds(new Set());
       setPendingAttachments([]);
       clearDraft(draftKey);
     } finally {
@@ -99,6 +130,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           defaultValue={initialDraft}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => {
+            setContent(md);
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
             // reload or scroll-out-of-viewport restores work to the keystroke.
@@ -112,6 +144,13 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"
+        />
+      </div>
+      <div className="absolute bottom-1 left-2 right-28 min-w-0">
+        <CommentTriggerChips
+          agents={triggerPreview.agents}
+          suppressedAgentIds={suppressedAgentIds}
+          onToggle={toggleSuppressedAgent}
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">

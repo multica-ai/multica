@@ -11,7 +11,8 @@
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
     "send_tooltip": "보내기",
-    "stop_tooltip": "중지"
+    "stop_tooltip": "중지",
+    "send_failed_toast": "메시지를 보내지 못했습니다"
   },
   "message_list": {
     "show_details": "세부 정보 보기",

@@ -352,11 +352,12 @@ func TestIsNoteComment(t *testing.T) {
 }
 
 // TestTriggerTasksForComment_NoteShortCircuits proves a /note comment returns
-// before any of the three enqueue paths run. shouldEnqueueOnComment,
-// shouldEnqueueSquadLeaderOnComment, and enqueueMentionedAgentTasks all
-// dereference h.Queries, so a nil-Queries Handler would panic if the /note
-// guard were missing or moved below them. The comment also @mentions an agent
-// to exercise the mention path specifically.
+// before any of the three trigger paths run. shouldEnqueueOnComment,
+// computeAssignedSquadLeaderCommentTrigger, and
+// computeMentionedAgentCommentTriggers all dereference h.Queries, so a
+// nil-Queries Handler would panic if the /note guard were missing or moved
+// below them. The comment also @mentions an agent to exercise the mention
+// path specifically.
 func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
 	h := &Handler{} // nil Queries / TaskService on purpose
 	issue := issueWithAgentAssignee()
@@ -365,5 +366,5 @@ func TestTriggerTasksForComment_NoteShortCircuits(t *testing.T) {
 	}
 
 	// Must not panic — the guard short-circuits before any DB access.
-	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID)
+	h.triggerTasksForComment(context.Background(), issue, comment, nil, "member", memberID, nil)
 }

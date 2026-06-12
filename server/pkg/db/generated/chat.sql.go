@@ -164,6 +164,28 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 	return err
 }
 
+const deleteUserChatMessageByTask = `-- name: DeleteUserChatMessageByTask :one
+DELETE FROM chat_message
+WHERE task_id = $1 AND role = 'user'
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms
+`
+
+func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, deleteUserChatMessageByTask, taskID)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Role,
+		&i.Content,
+		&i.TaskID,
+		&i.CreatedAt,
+		&i.FailureReason,
+		&i.ElapsedMs,
+	)
+	return i, err
+}
+
 const getChatMessage = `-- name: GetChatMessage :one
 SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms FROM chat_message
 WHERE id = $1
@@ -327,6 +349,22 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 	var i GetPendingChatTaskRow
 	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
 	return i, err
+}
+
+const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
+UPDATE chat_message
+SET task_id = $2
+WHERE id = $1 AND role = 'user'
+`
+
+type LinkChatMessageToTaskParams struct {
+	ID     pgtype.UUID `json:"id"`
+	TaskID pgtype.UUID `json:"task_id"`
+}
+
+func (q *Queries) LinkChatMessageToTask(ctx context.Context, arg LinkChatMessageToTaskParams) error {
+	_, err := q.db.Exec(ctx, linkChatMessageToTask, arg.ID, arg.TaskID)
+	return err
 }
 
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many

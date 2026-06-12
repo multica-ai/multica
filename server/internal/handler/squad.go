@@ -905,58 +905,6 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 
 // ── Squad Trigger Logic ─────────────────────────────────────────────────────
 
-// shouldEnqueueSquadLeaderOnComment returns true if the issue is assigned to a
-// squad and the comment author is NOT a member of that squad (anti-loop).
-// commentContent is the new comment's markdown body; when a member explicitly
-// @mentions anyone (agent, member, squad, or @all) in that body, the leader
-// is skipped — the @ marks deliberate routing and the leader would otherwise
-// just observe and record no_action. Issue cross-reference mentions
-// (mention://issue/...) are NOT a routing signal and do not suppress the
-// leader. Agent-authored comments always go through the leader (subject to
-// the leader self-trigger guard) so agent updates still drive coordination.
-func (h *Handler) shouldEnqueueSquadLeaderOnComment(ctx context.Context, issue db.Issue, commentContent, authorType, authorID string) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		return false
-	}
-
-	// Load the squad.
-	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return false
-	}
-
-	// Skip if the comment author is the squad leader itself AND the agent's
-	// last activity on this issue was in the leader role (prevent self-trigger
-	// loop). An agent that is simultaneously the squad's leader and one of its
-	// workers must still wake the leader role after posting a comment from
-	// its worker task — role is inferred from the agent's most recent task
-	// on the issue, not from author ID alone.
-	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
-		h.lastTaskWasLeader(ctx, issue.ID, squad.LeaderID) {
-		return false
-	}
-
-	// Member explicitly @mentioned someone → that someone owns the next step,
-	// skip the leader. Covers @agent / @member / @squad / @all; issue
-	// cross-references do NOT count as routing. Agent-authored comments are
-	// intentionally exempt: when an agent posts a result that @mentions
-	// another agent, the leader still needs to coordinate the thread.
-	if authorType == "member" && commentMentionsAnyone(commentContent) {
-		return false
-	}
-
-	// Verify leader agent is ready (has runtime, not archived).
-	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return false
-	}
-
-	return true
-}
-
 // lastTaskWasLeader returns true when the agent's most recent task on the
 // issue was enqueued in the squad-leader role. Used by the self-trigger
 // guards to tell apart a comment posted while the agent was acting as
@@ -1031,7 +979,10 @@ func (h *Handler) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
 	return ready
 }
 
-// enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned to a squad.
+// enqueueSquadLeaderTask triggers the squad leader agent for an issue assigned
+// to a squad. Assign and backlog-promotion paths use this directly; comment
+// paths go through computeCommentAgentTriggers so preview and create share the
+// same trigger set.
 func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
@@ -1041,12 +992,10 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, tr
 		return
 	}
 
-	// Private-leader gate: deny if the actor cannot access the leader.
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 		return
 	}
 
-	// Dedup: skip if leader already has a pending task for this issue.
 	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
 		AgentID: squad.LeaderID,

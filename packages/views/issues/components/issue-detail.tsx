@@ -43,6 +43,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -1847,8 +1848,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // Bind any pending uploads still referenced in the markdown
                 // so they appear in `issueAttachments` after refresh and the
                 // editor's text/code preview keeps working past reload.
+                //
+                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                // the editor persists the durable `markdownLink`
+                // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                // therefore never matches, so the upload is never linked via
+                // `attachment_ids`. After reload it's absent from
+                // `issueAttachments`, the renderer can't resolve it to a
+                // freshly-signed `download_url`, and the persisted auth-gated
+                // download endpoint fails to load as a native <img> on clients
+                // whose origin isn't the API host (Desktop/Electron, mobile
+                // webview) — while still working on web via the cookie/proxy.
+                // This mirrors the comment/reply/chat composers, which already
+                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
                 const ids = descPendingAttachments
-                  .filter((a) => md.includes(a.url))
+                  .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);
                 handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
               }}

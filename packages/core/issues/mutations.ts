@@ -598,12 +598,14 @@ export function useCreateComment(issueId: string) {
       type,
       parentId,
       attachmentIds,
+      suppressAgentIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds),
+      suppressAgentIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",
@@ -626,6 +628,10 @@ export function useCreateComment(issueId: string) {
         if (old.some((e) => e.id === entry.id)) return old;
         return sortTimelineEntriesAsc([...old, entry]);
       });
+      // Posting a comment changes the trigger answer itself (the enqueued
+      // task now dedupes follow-up triggers), so cached previews for this
+      // issue are stale the moment the create lands.
+      qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect

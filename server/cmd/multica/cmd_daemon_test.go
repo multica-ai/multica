@@ -2,8 +2,12 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
@@ -127,6 +131,86 @@ func TestPrintDaemonStatusAlignsValuesWithProfileLabel(t *testing.T) {
 	}
 }
 
+func TestPrintDiskUsageEmptyHintSuggestsProfilesWithTasks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+
+	mkdirProfile(t, home, "empty")
+	mkdirProfile(t, home, "one-task")
+	mkdirProfile(t, home, "space profile")
+	mkdirProfile(t, home, "two-tasks")
+
+	writeDiskUsageTaskFile(t, home, "one-task", "ws1", "task1", "workdir/main.go")
+	writeDiskUsageTaskFile(t, home, "space profile", "ws3", "task1", "workdir/main.go")
+	writeDiskUsageTaskFile(t, home, "two-tasks", "ws2", "task1", "workdir/main.go")
+	writeDiskUsageTaskFile(t, home, "two-tasks", "ws2", "task2", "workdir/main.go")
+
+	var out bytes.Buffer
+	printDiskUsageEmptyHint(&out, daemon.DiskUsageReport{
+		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
+	}, "", "")
+
+	got := out.String()
+	if !strings.Contains(got, "Other workspace roots contain task directories:") {
+		t.Fatalf("hint output = %q, want profile suggestion header", got)
+	}
+	if !strings.Contains(got, "multica --profile two-tasks daemon disk-usage") {
+		t.Fatalf("hint output = %q, want two-tasks profile command", got)
+	}
+	if !strings.Contains(got, "multica --profile one-task daemon disk-usage") {
+		t.Fatalf("hint output = %q, want one-task profile command", got)
+	}
+	if !strings.Contains(got, "multica --profile 'space profile' daemon disk-usage") {
+		t.Fatalf("hint output = %q, want shell-quoted profile command", got)
+	}
+	if strings.Contains(got, "empty") {
+		t.Fatalf("hint output = %q, want empty profile omitted", got)
+	}
+	if strings.Index(got, "two-tasks") > strings.Index(got, "one-task") {
+		t.Fatalf("hint output = %q, want larger profile first", got)
+	}
+}
+
+func TestPrintDiskUsageEmptyHintSuggestsDefaultFromNamedProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+
+	writeDefaultDiskUsageTaskFile(t, home, "ws0", "task0", "workdir/main.go")
+
+	var out bytes.Buffer
+	printDiskUsageEmptyHint(&out, daemon.DiskUsageReport{
+		WorkspacesRoot: filepath.Join(home, "multica_workspaces_named"),
+	}, "named", "")
+
+	got := out.String()
+	if !strings.Contains(got, "multica daemon disk-usage") {
+		t.Fatalf("hint output = %q, want default profile command", got)
+	}
+	if strings.Contains(got, "--profile") {
+		t.Fatalf("hint output = %q, want default profile command without --profile", got)
+	}
+}
+
+func TestPrintDiskUsageEmptyHintSkipsExplicitRootOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+
+	mkdirProfile(t, home, "has-task")
+	writeDiskUsageTaskFile(t, home, "has-task", "ws1", "task1", "workdir/main.go")
+
+	var out bytes.Buffer
+	printDiskUsageEmptyHint(&out, daemon.DiskUsageReport{
+		WorkspacesRoot: filepath.Join(home, "custom-root"),
+	}, "", filepath.Join(home, "custom-root"))
+
+	if got := out.String(); got != "" {
+		t.Fatalf("hint output = %q, want no hint for explicit root override", got)
+	}
+}
+
 func valueColumn(t *testing.T, line string) int {
 	t.Helper()
 	colon := strings.Index(line, ":")
@@ -140,4 +224,33 @@ func valueColumn(t *testing.T, line string) int {
 	}
 	t.Fatalf("line missing value: %q", line)
 	return 0
+}
+
+func mkdirProfile(t *testing.T, home, profile string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(home, ".multica", "profiles", profile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeDiskUsageTaskFile(t *testing.T, home, profile, workspaceID, taskID, rel string) {
+	t.Helper()
+	path := filepath.Join(home, "multica_workspaces_"+profile, workspaceID, taskID, rel)
+	writeDiskUsageFile(t, path)
+}
+
+func writeDefaultDiskUsageTaskFile(t *testing.T, home, workspaceID, taskID, rel string) {
+	t.Helper()
+	path := filepath.Join(home, "multica_workspaces", workspaceID, taskID, rel)
+	writeDiskUsageFile(t, path)
+}
+
+func writeDiskUsageFile(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

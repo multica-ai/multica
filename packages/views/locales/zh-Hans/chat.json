@@ -10,7 +10,8 @@
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
-    "stop_tooltip": "停止"
+    "stop_tooltip": "停止",
+    "send_failed_toast": "发送消息失败"
   },
   "message_list": {
     "show_details": "查看详情",

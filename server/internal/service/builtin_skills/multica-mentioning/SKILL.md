@@ -57,18 +57,31 @@ match, or the link resolves to the wrong entity (or to nothing).
 | link a person        | `member` | member.user_id  | renders a link; enqueues NOTHING — no agent run          |
 | reference an issue   | `issue`  | issue.id        | renders a link; enqueues NOTHING — always safe           |
 
-The enqueue logic lives in `enqueueMentionedAgentTasks`
-(`server/internal/handler/comment.go`). It iterates the parsed mentions and
-acts on two types only: the `squad` branch resolves the squad and enqueues its
-leader; everything that is not `agent` after that is skipped
-(`if m.Type != "agent" { continue }`), then the `agent` branch enqueues the
-run. A `member` or `issue` mention reaches neither branch, so it enqueues no
-task.
+The mention trigger set is computed by `computeMentionedAgentCommentTriggers`
+(`server/internal/handler/comment.go`); the comment path folds that result into
+`computeCommentAgentTriggers` and enqueues it via `enqueueCommentAgentTriggers`.
+It acts on two types only: the `squad` branch resolves the squad and adds its
+leader to the trigger set; everything that is not `agent` after that is skipped
+(`if m.Type != "agent" { continue }`), then the `agent` branch adds that agent.
+A `member` or `issue` mention reaches neither branch, so it enqueues no task.
 
 A `member` mention therefore does NOT make a person "run", and this skill does
 NOT claim it delivers a notification through the Go comment handler — there is
 no such code path in that handler (see the source map). What is verified is the
 contract above: only `agent` and `squad` mentions enqueue work.
+
+## Preview and per-comment suppression
+
+Newer clients can call `POST /api/issues/{id}/comments/trigger-preview` before
+submitting a comment. The preview endpoint uses the same
+`computeCommentAgentTriggers` function as `CreateComment`, so the displayed
+agent chips come from backend rules, not from a client-side reimplementation.
+
+When creating a comment, clients may send an optional `suppress_agent_ids`
+array. The server still computes the full trigger set first, then removes those
+agent IDs as a post-filter. A missing or empty field preserves the old behavior.
+A valid UUID that is not in the computed trigger set is a no-op; a malformed
+UUID is rejected at the request boundary.
 
 ## @all is the broadcast type
 
