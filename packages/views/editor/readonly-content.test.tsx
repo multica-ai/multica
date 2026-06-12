@@ -124,6 +124,37 @@ describe("ReadonlyContent line breaks", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
   });
+
+  it("keeps agent result sections and verification bullets visually separated", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          "## Result",
+          "`needs-review`",
+          "",
+          "## Verification",
+          "- `go test ./cmd/multica`",
+          "- `pnpm test --filter @multica/views`",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector("h2")?.textContent).toBe("Result");
+    const paragraphs = Array.from(container.querySelectorAll("p")).map((p) =>
+      p.textContent,
+    );
+    expect(paragraphs).toContain("needs-review");
+    const items = Array.from(container.querySelectorAll("li")).map((li) =>
+      li.textContent,
+    );
+    expect(items).toEqual([
+      "go test ./cmd/multica",
+      "pnpm test --filter @multica/views",
+    ]);
+    expect(container.textContent).not.toContain(
+      "needs-reviewVerificationgo test",
+    );
+  });
 });
 
 describe("ReadonlyContent task lists", () => {
@@ -239,6 +270,19 @@ describe("ReadonlyContent issue mention Markdown", () => {
       "무엇을 먼저 정해두고 시작할지",
     );
     expect(safe.container.textContent).toContain('"무엇을 먼저 정해두고 시작할지"가');
+  });
+
+  it("renders safe bold spans when punctuation stays outside the emphasis boundary", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={'"**나머지를 못 넘기는 80% 벽**"에 걸렸다.'}
+      />,
+    );
+
+    expect(container.querySelector("strong")?.textContent).toBe(
+      "나머지를 못 넘기는 80% 벽",
+    );
+    expect(container.textContent).toBe('"나머지를 못 넘기는 80% 벽"에 걸렸다.');
   });
 });
 

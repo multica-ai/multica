@@ -245,6 +245,17 @@ func newIssueCreateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -280,6 +291,74 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	}
 	if got := body["allow_duplicate"]; got != true {
 		t.Fatalf("allow_duplicate = %#v, want true in request body", got)
+	}
+}
+
+func TestRunIssueCommentAddStdinPreservesMultilinePayload(t *testing.T) {
+	var gotBody map[string]any
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-447":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-447",
+				"title":      "Comment rendering regression",
+			})
+		case "/api/issues/issue-uuid/comments":
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s, want POST", r.Method)
+			}
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "comment-uuid",
+				"issue_id":   "issue-uuid",
+				"content":    gotBody["content"],
+				"parent_id":  gotBody["parent_id"],
+				"type":       "comment",
+				"created_at": "2026-06-08T15:00:00Z",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content-stdin", "true")
+	_ = cmd.Flags().Set("parent", "parent-comment")
+	body := strings.Join([]string{
+		"## Result",
+		"`needs-review`",
+		"",
+		"진행 로그 조각이 한 문장으로 붙으면 안 됩니다.",
+		"- `go test ./cmd/multica`",
+		"- literal backslash stays visible: \\n",
+		`- shell-looking text stays data: $(echo unsafe) and $TOKEN`,
+	}, "\n") + "\n"
+
+	pipeStdin(t, body, func() {
+		if err := runIssueCommentAdd(cmd, []string{"MUL-447"}); err != nil {
+			t.Fatalf("runIssueCommentAdd: %v", err)
+		}
+	})
+
+	if want := []string{"/api/issues/MUL-447", "/api/issues/issue-uuid/comments"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	wantContent := strings.TrimSuffix(body, "\n")
+	if gotBody["content"] != wantContent {
+		t.Fatalf("content = %#v, want %#v", gotBody["content"], wantContent)
+	}
+	if gotBody["parent_id"] != "parent-comment" {
+		t.Fatalf("parent_id = %#v, want parent-comment", gotBody["parent_id"])
 	}
 }
 
