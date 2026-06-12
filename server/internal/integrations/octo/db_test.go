@@ -603,6 +603,55 @@ func TestOctoWSLease_CAS(t *testing.T) {
 	}
 }
 
+// TestOctoWSLease_DoesNotBumpUpdatedAt is a regression guard: lease
+// acquire/renew and release must NOT advance updated_at. The hub treats an
+// advancing updated_at as a reconfigure signal and restarts the supervisor —
+// if a lease renewal bumped updated_at, every renewal would look like a
+// reconfigure and the connection would churn in a perpetual restart loop,
+// never holding the lease (caught in E2E acceptance after the reconfigure fix).
+func TestOctoWSLease_DoesNotBumpUpdatedAt(t *testing.T) {
+	requireDB(t)
+	q := db.New(testPool)
+	wsID, userID, agentID := fixture(t)
+	inst := newInstallation(t, q, wsID, userID, agentID)
+	ctx := context.Background()
+	token := pgtype.Text{String: "node-1:" + randToken(), Valid: true}
+	future := pgtype.Timestamptz{Time: time.Now().Add(90 * time.Second), Valid: true}
+
+	baseline := inst.UpdatedAt.Time
+
+	// Acquire then renew (same token re-acquires) — updated_at must stay put.
+	for i := 0; i < 2; i++ {
+		if _, err := q.AcquireOctoWSLease(ctx, db.AcquireOctoWSLeaseParams{
+			NewToken: token, NewExpiresAt: future, ID: inst.ID,
+		}); err != nil {
+			t.Fatalf("acquire/renew %d: %v", i, err)
+		}
+		got, err := q.GetOctoInstallation(ctx, inst.ID)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+		if !got.UpdatedAt.Time.Equal(baseline) {
+			t.Fatalf("acquire/renew advanced updated_at (%v -> %v); the hub would see a phantom reconfigure and restart-loop",
+				baseline, got.UpdatedAt.Time)
+		}
+	}
+
+	// Release must also leave updated_at untouched.
+	if err := q.ReleaseOctoWSLease(ctx, db.ReleaseOctoWSLeaseParams{
+		ID: inst.ID, CurrentToken: token,
+	}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	got, err := q.GetOctoInstallation(ctx, inst.ID)
+	if err != nil {
+		t.Fatalf("reload after release: %v", err)
+	}
+	if !got.UpdatedAt.Time.Equal(baseline) {
+		t.Errorf("release advanced updated_at (%v -> %v)", baseline, got.UpdatedAt.Time)
+	}
+}
+
 // TestOctoUserBinding_NoSteal verifies the identity-binding boundary in
 // CreateOctoUserBinding: the same user re-binds idempotently (bound_at bumps),
 // a different user CANNOT steal an already-bound uid (zero rows), and a

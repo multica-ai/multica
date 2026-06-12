@@ -88,10 +88,13 @@ DELETE FROM octo_installation WHERE id = $1 AND workspace_id = $2;
 -- accepts the lease when (a) no current holder exists, (b) the holder's lease
 -- has expired, or (c) the holder is us (renewal). Returns the row when claimed;
 -- returns no rows when another live holder still owns it.
+-- Deliberately does NOT touch updated_at: lease acquire/renew is high-frequency
+-- operational churn, not a config change. The hub treats an advancing
+-- updated_at as a reconfigure signal (and restarts the supervisor), so bumping
+-- it here would make every renewal look like a reconfigure and loop forever.
 UPDATE octo_installation
 SET ws_lease_token      = sqlc.arg('new_token'),
-    ws_lease_expires_at = sqlc.arg('new_expires_at'),
-    updated_at          = now()
+    ws_lease_expires_at = sqlc.arg('new_expires_at')
 WHERE id = sqlc.arg('id')
   AND status = 'active'
   AND (
@@ -103,11 +106,11 @@ RETURNING *;
 
 -- name: ReleaseOctoWSLease :exec
 -- Drops the lease iff we're still the holder. A racing acquirer that already
--- took over will not have its lease cleared.
+-- took over will not have its lease cleared. Like AcquireOctoWSLease, this does
+-- NOT bump updated_at (lease churn is not a config change).
 UPDATE octo_installation
 SET ws_lease_token      = NULL,
-    ws_lease_expires_at = NULL,
-    updated_at          = now()
+    ws_lease_expires_at = NULL
 WHERE id = $1
   AND ws_lease_token = sqlc.arg('current_token');
 

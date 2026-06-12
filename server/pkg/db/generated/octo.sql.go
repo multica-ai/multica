@@ -14,8 +14,7 @@ import (
 const acquireOctoWSLease = `-- name: AcquireOctoWSLease :one
 UPDATE octo_installation
 SET ws_lease_token      = $1,
-    ws_lease_expires_at = $2,
-    updated_at          = now()
+    ws_lease_expires_at = $2
 WHERE id = $3
   AND status = 'active'
   AND (
@@ -916,8 +915,7 @@ func (q *Queries) ReleaseOctoInboundDedup(ctx context.Context, arg ReleaseOctoIn
 const releaseOctoWSLease = `-- name: ReleaseOctoWSLease :exec
 UPDATE octo_installation
 SET ws_lease_token      = NULL,
-    ws_lease_expires_at = NULL,
-    updated_at          = now()
+    ws_lease_expires_at = NULL
 WHERE id = $1
   AND ws_lease_token = $2
 `
