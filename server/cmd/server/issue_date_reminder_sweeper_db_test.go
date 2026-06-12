@@ -74,7 +74,13 @@ func TestClaimArrivingDateReminders_BadTimezoneDoesNotAbortSweep(t *testing.T) {
 		cleanupTestUser(t, badEmail)
 	})
 
-	rows, err := queries.ClaimArrivingDateReminders(ctx, 200)
+	// CEREBRO-PATCH(issue-date-reminders): the cmd/server tests share one CI
+	// Postgres DB with every other package running concurrently;
+	// ClaimArrivingDateReminders claims with a global LIMIT and no ORDER BY, so a
+	// 200 cap let concurrent due-today issues evict these two rows (flaky CI red,
+	// reproduced). A high cap keeps the timezone-fallback regression deterministic
+	// without changing production sweep behavior (prod still uses 200).
+	rows, err := queries.ClaimArrivingDateReminders(ctx, 1_000_000)
 	if err != nil {
 		t.Fatalf("ClaimArrivingDateReminders returned error (bad timezone aborted the sweep): %v", err)
 	}
