@@ -1,5 +1,5 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
+// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw,
 // Hermes, Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
 // AgentBackend pattern, translated to idiomatic Go.
 package agent
