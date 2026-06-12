@@ -15,6 +15,7 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   ListIssuesResponse,
+  ListQuickActionsResponse,
   ListWebhookDeliveriesResponse,
   Squad,
   TimelineEntry,
@@ -243,6 +244,25 @@ export const GroupedIssuesResponseSchema = z.object({
 
 export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
+};
+
+export const QuickActionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  label: z.string(),
+  body: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ListQuickActionsResponseSchema = z.object({
+  quick_actions: z.array(QuickActionSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_QUICK_ACTIONS_RESPONSE: ListQuickActionsResponse = {
+  quick_actions: [],
+  total: 0,
 };
 
 const SubscriberSchema = z.object({

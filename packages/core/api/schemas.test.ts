@@ -5,7 +5,9 @@ import {
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_USER,
+  EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
   ListIssuesResponseSchema,
+  ListQuickActionsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -268,5 +270,42 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("ListQuickActionsResponseSchema", () => {
+  const action = {
+    id: "11111111-1111-1111-1111-111111111111",
+    workspace_id: "ws-1",
+    label: "Review this PR",
+    body: "Review this PR using the requesting-code-review skill.",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a well-formed response", () => {
+    const parsed = ListQuickActionsResponseSchema.parse({
+      quick_actions: [action],
+      total: 1,
+    });
+    expect(parsed.quick_actions).toHaveLength(1);
+    expect(parsed.quick_actions[0]?.label).toBe("Review this PR");
+  });
+
+  it("defaults a missing list to empty rather than throwing", () => {
+    const parsed = ListQuickActionsResponseSchema.parse({});
+    expect(parsed.quick_actions).toEqual([]);
+    expect(parsed.total).toBe(0);
+  });
+
+  it("degrades to the fallback on a malformed body (null array, wrong types)", () => {
+    const malformed = { quick_actions: [{ id: 5, label: null }], total: "lots" };
+    const parsed = parseWithFallback(
+      malformed,
+      ListQuickActionsResponseSchema,
+      EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
+      { endpoint: "GET /api/quick-actions" },
+    );
+    expect(parsed).toBe(EMPTY_LIST_QUICK_ACTIONS_RESPONSE);
   });
 });

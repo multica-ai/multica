@@ -77,6 +77,10 @@ import type {
   UpdateLabelRequest,
   ListLabelsResponse,
   IssueLabelsResponse,
+  QuickAction,
+  CreateQuickActionRequest,
+  UpdateQuickActionRequest,
+  ListQuickActionsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -155,6 +159,8 @@ import {
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
+  ListQuickActionsResponseSchema,
+  EMPTY_LIST_QUICK_ACTIONS_RESPONSE,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -1779,6 +1785,32 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
       method: "DELETE",
     });
+  }
+
+  // Quick actions (workspace-shared comment macros)
+  async listQuickActions(): Promise<ListQuickActionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/quick-actions`);
+    return parseWithFallback(raw, ListQuickActionsResponseSchema, EMPTY_LIST_QUICK_ACTIONS_RESPONSE, {
+      endpoint: "GET /api/quick-actions",
+    });
+  }
+
+  async createQuickAction(data: CreateQuickActionRequest): Promise<QuickAction> {
+    return this.fetch(`/api/quick-actions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateQuickAction(id: string, data: UpdateQuickActionRequest): Promise<QuickAction> {
+    return this.fetch(`/api/quick-actions/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteQuickAction(id: string): Promise<void> {
+    await this.fetch(`/api/quick-actions/${id}`, { method: "DELETE" });
   }
 
   // Pins

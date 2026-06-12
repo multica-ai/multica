@@ -56,6 +56,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { QuickActionsSection } from "./quick-actions-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -1475,6 +1476,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           owns its own collapse state and WS subscriptions. Hides itself
           when there are no runs to show. */}
       <ExecutionLogSection issueId={id} />
+
+      {/* Quick actions — author-defined macro buttons that post a canned
+          comment (which can kick off agent work). Self-contained; owns its
+          own collapse state and localStorage-backed macro list. */}
+      <QuickActionsSection onRun={submitComment} />
 
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
