@@ -12,6 +12,16 @@ const presenceState = vi.hoisted(() => ({
   online: new Set<string>(),
 }));
 
+// Mutable favorites set + spy for the starring tests.
+const favState = vi.hoisted(() => ({
+  keys: [] as string[],
+  toggle: vi.fn((k: string) => {
+    favState.keys = favState.keys.includes(k)
+      ? favState.keys.filter((x) => x !== k)
+      : [...favState.keys, k];
+  }),
+}));
+
 // Captures the live `cerebro:typing` WS handler so a test can fire a typing
 // event and assert "skriver…" appears. `useWSEvent(event, handler)` registers
 // each call here keyed by event string.
@@ -134,6 +144,37 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: () => true,
 }));
 
+// Favorites store: selector over the mutable favState. Starred tests seed
+// favState.keys before render; the toggle spy records star clicks.
+vi.mock("@multica/cerebro-channels", () => ({
+  useChannelFavoritesStore: (
+    selector: (s: { favorites: string[]; toggle: (k: string) => void }) => unknown,
+  ) => selector({ favorites: favState.keys, toggle: favState.toggle }),
+  actorKey: (type: string, id: string) => `${type}:${id}`,
+  channelKey: (id: string) => `channel:${id}`,
+}));
+
+// Dropdown renders its content inline so the "Vis personer" options are in the
+// DOM without opening a portal-backed menu in jsdom.
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ render }: { render: React.ReactElement }) => render,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+  }) => (
+    <button type="button" onClick={onClick}>
+      {children}
+    </button>
+  ),
+  DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 // useWSEvent records each handler so tests can fire WS payloads at will.
 vi.mock("@multica/core/realtime", () => ({
   useWSEvent: (event: string, handler: (payload: unknown) => void) => {
@@ -163,23 +204,41 @@ import { SlackBlock } from "./components/slack-block";
 const onlineDot = (userId: string) =>
   screen.getByTestId(`presence-dot-${userId}`);
 
+// Fills the required section-chrome props so each test only overrides what it
+// cares about.
+function renderBlock(
+  overrides: Partial<React.ComponentProps<typeof SlackBlock>> = {},
+) {
+  const props: React.ComponentProps<typeof SlackBlock> = {
+    wsId: "ws",
+    selectedChannelId: null,
+    onOpenChannel: () => {},
+    onSetMaxPeople: () => {},
+    onRemove: () => {},
+    onMove: () => {},
+    isFirst: true,
+    isLast: true,
+    ...overrides,
+  };
+  return render(<SlackBlock {...props} />);
+}
+
 describe("SlackBlock", () => {
   beforeEach(() => {
     mockCreateChannel.mockReset();
     mockCreateChannel.mockResolvedValue(aliceDm);
     presenceState.online = new Set();
+    favState.keys = [];
+    favState.toggle.mockClear();
     wsHandlers.clear();
   });
 
   it("renders a green online dot for a member in the online set, gray otherwise", async () => {
     presenceState.online = new Set(["alice"]);
     await act(async () => {
-      render(
-        <SlackBlock wsId="ws" selectedChannelId={null} onOpenChannel={() => {}} />,
-      );
+      renderBlock();
     });
 
-    // Alice online -> bg-success; Bob offline -> bg-muted-foreground.
     expect(onlineDot("alice").className).toContain("bg-success");
     expect(onlineDot("alice")).toHaveAttribute("data-online", "true");
     expect(onlineDot("bob").className).toContain("bg-muted-foreground");
@@ -188,13 +247,10 @@ describe("SlackBlock", () => {
 
   it("renders channels with a # glyph", async () => {
     await act(async () => {
-      render(
-        <SlackBlock wsId="ws" selectedChannelId={null} onOpenChannel={() => {}} />,
-      );
+      renderBlock();
     });
     const row = screen.getByText("general").closest("button");
     expect(row).not.toBeNull();
-    // lucide Hash renders an <svg> inside the channel row.
     expect(row?.querySelector("svg")).not.toBeNull();
   });
 
@@ -202,13 +258,7 @@ describe("SlackBlock", () => {
     const onOpenChannel = vi.fn();
     const user = userEvent.setup();
     await act(async () => {
-      render(
-        <SlackBlock
-          wsId="ws"
-          selectedChannelId={null}
-          onOpenChannel={onOpenChannel}
-        />,
-      );
+      renderBlock({ onOpenChannel });
     });
 
     await user.click(screen.getByText("general"));
@@ -220,18 +270,11 @@ describe("SlackBlock", () => {
 
   it("shows 'skriver…' when a typing event arrives for a member's selected DM", async () => {
     await act(async () => {
-      render(
-        <SlackBlock
-          wsId="ws"
-          selectedChannelId="dm-alice"
-          onOpenChannel={() => {}}
-        />,
-      );
+      renderBlock({ selectedChannelId: "dm-alice" });
     });
 
     expect(screen.queryByText("skriver…")).not.toBeInTheDocument();
 
-    // Fire a typing event for Alice in her selected DM.
     await act(async () => {
       wsHandlers.get("cerebro:typing")?.({
         channel_id: "dm-alice",
@@ -240,5 +283,57 @@ describe("SlackBlock", () => {
     });
 
     expect(screen.getByText("skriver…")).toBeInTheDocument();
+  });
+
+  // #2 — the control box header with reorder + remove controls.
+  it("renders the control box (move up/down + remove)", async () => {
+    const onRemove = vi.fn();
+    const onMove = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onRemove, onMove, isFirst: false, isLast: false });
+    });
+
+    await user.click(screen.getByTitle("Flyt op"));
+    expect(onMove).toHaveBeenCalledWith(-1);
+    await user.click(screen.getByTitle("Fjern blok"));
+    expect(onRemove).toHaveBeenCalled();
+  });
+
+  // #3 — max-people setting caps the list and surfaces the hidden count.
+  it("caps the people list at maxPeople and shows the hidden count", async () => {
+    await act(async () => {
+      renderBlock({ maxPeople: 1 });
+    });
+    // Two non-self people (Alice, Bob); cap to 1 → one hidden.
+    expect(screen.getByText(/1 flere skjult/)).toBeInTheDocument();
+  });
+
+  it("picking a people limit from settings calls onSetMaxPeople", async () => {
+    const onSetMaxPeople = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onSetMaxPeople });
+    });
+    await user.click(screen.getByText("10"));
+    expect(onSetMaxPeople).toHaveBeenCalledWith(10);
+  });
+
+  // #4 — starred people float to the top and the star toggles the favorite.
+  it("sorts a starred member above non-starred and toggles the star", async () => {
+    favState.keys = ["member:bob"]; // Bob starred → above Alice
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock();
+    });
+
+    const names = screen
+      .getAllByTestId(/^presence-dot-/)
+      .map((d) => d.getAttribute("data-testid"));
+    expect(names).toEqual(["presence-dot-bob", "presence-dot-alice"]);
+
+    // Star Alice → toggle called with her actor key.
+    await user.click(screen.getAllByLabelText("Stjernemarkér")[0]!);
+    expect(favState.toggle).toHaveBeenCalledWith("member:alice");
   });
 });

@@ -2167,6 +2167,9 @@ importers:
 
   packages/cerebro-inbox-slack-block:
     dependencies:
+      '@multica/cerebro-channels':
+        specifier: workspace:*
+        version: link:../cerebro-channels
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

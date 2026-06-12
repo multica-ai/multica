@@ -43,6 +43,9 @@ export interface InboxSectionConfig {
   compact?: boolean;
   /** Max rows before a "show more" affordance; 0 / undefined = no cap. */
   maxRows?: number;
+  /** TECH-3422 — for the "team" (Slack) section: how many people to show.
+   *  0 / undefined = show all. Starred people always count first. */
+  maxPeople?: number;
 }
 
 export interface InboxTabConfig {

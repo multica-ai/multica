@@ -250,16 +250,18 @@ export function DynamicInbox() {
           )}
           {activeTab.sections.map((section, i) =>
             section.kind === "team" ? (
-              <section
+              <SlackBlock
                 key={section.id}
-                className="overflow-hidden rounded-xl border border-border bg-card"
-              >
-                <SlackBlock
-                  wsId={wsId}
-                  selectedChannelId={selectedChannelId}
-                  onOpenChannel={onOpenChannel}
-                />
-              </section>
+                wsId={wsId}
+                selectedChannelId={selectedChannelId}
+                onOpenChannel={onOpenChannel}
+                maxPeople={section.maxPeople}
+                onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                onRemove={() => removeSection(section.id)}
+                onMove={(dir) => moveSection(section.id, dir)}
+                isFirst={i === 0}
+                isLast={i === activeTab.sections.length - 1}
+              />
             ) : (
             <DynamicInboxSection
               key={section.id}
