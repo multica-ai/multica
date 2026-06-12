@@ -132,13 +132,14 @@ type DaemonHeartbeatRequestPayload struct {
 // and re-registers; without it the dead UUID would keep heartbeating until the
 // daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
-	RuntimeID               string                                  `json:"runtime_id"`
-	Status                  string                                  `json:"status"`
-	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
-	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
-	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
-	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
+	RuntimeID                string                                   `json:"runtime_id"`
+	Status                   string                                   `json:"status"`
+	RuntimeGone              bool                                     `json:"runtime_gone,omitempty"`
+	PendingUpdate            *DaemonHeartbeatPendingUpdate            `json:"pending_update,omitempty"`
+	PendingProviderCLIUpdate *DaemonHeartbeatPendingProviderCLIUpdate `json:"pending_provider_cli_update,omitempty"`
+	PendingModelList         *DaemonHeartbeatPendingModelList         `json:"pending_model_list,omitempty"`
+	PendingLocalSkills       *DaemonHeartbeatPendingLocalSkills       `json:"pending_local_skills,omitempty"`
+	PendingLocalSkillImport  *DaemonHeartbeatPendingLocalSkillImport  `json:"pending_local_skill_import,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
 	// heartbeat so the daemon can process them concurrently. Old daemons
 	// that don't know this field silently ignore it (standard JSON behavior)
@@ -155,6 +156,16 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+}
+
+// DaemonHeartbeatPendingProviderCLIUpdate describes a provider CLI update
+// action the daemon should plan or apply for one configured provider.
+type DaemonHeartbeatPendingProviderCLIUpdate struct {
+	ID              string `json:"id"`
+	Provider        string `json:"provider"`
+	Mode            string `json:"mode"`
+	TargetVersion   string `json:"target_version,omitempty"`
+	RollbackVersion string `json:"rollback_version,omitempty"`
 }
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to

@@ -843,7 +843,9 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
 	UpdateMs, ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
+	ProbeProviderCLIUpdateMs, PopProviderCLIUpdateMs                                           int64
 	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                               bool
+	ProbeProviderCLIUpdateTimedOut                                                             bool
 }
 
 // processHeartbeat does the work shared by HTTP POST /api/daemon/heartbeat and
@@ -887,6 +889,36 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 			slog.Warn("update HasPending timed out", "runtime_id", runtimeID)
 		} else {
 			slog.Warn("update HasPending failed", "error", probeUpdateErr, "runtime_id", runtimeID)
+		}
+	}
+
+	probeProviderStart := time.Now()
+	probeProviderCtx, cancelProbeProvider := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+	hasProviderUpdate, probeProviderErr := h.ProviderCLIUpdateStore.HasPending(probeProviderCtx, runtimeID)
+	cancelProbeProvider()
+	m.ProbeProviderCLIUpdateMs = time.Since(probeProviderStart).Milliseconds()
+	switch {
+	case probeProviderErr == nil && hasProviderUpdate:
+		popStart := time.Now()
+		pending, popErr := h.ProviderCLIUpdateStore.PopPending(ctx, runtimeID)
+		m.PopProviderCLIUpdateMs = time.Since(popStart).Milliseconds()
+		if popErr != nil {
+			slog.Warn("provider CLI update PopPending failed", "error", popErr, "runtime_id", runtimeID)
+		} else if pending != nil {
+			ack.PendingProviderCLIUpdate = &protocol.DaemonHeartbeatPendingProviderCLIUpdate{
+				ID:              pending.ID,
+				Provider:        pending.Provider,
+				Mode:            pending.Mode,
+				TargetVersion:   pending.TargetVersion,
+				RollbackVersion: pending.RollbackVersion,
+			}
+		}
+	case probeProviderErr != nil:
+		if errors.Is(probeProviderErr, context.DeadlineExceeded) || errors.Is(probeProviderErr, context.Canceled) {
+			m.ProbeProviderCLIUpdateTimedOut = true
+			slog.Warn("provider CLI update HasPending timed out", "runtime_id", runtimeID)
+		} else {
+			slog.Warn("provider CLI update HasPending failed", "error", probeProviderErr, "runtime_id", runtimeID)
 		}
 	}
 

@@ -382,10 +382,14 @@ func (d *Daemon) buildProviderCLIAutoUpdatePlan(ctx context.Context, provider st
 }
 
 func (d *Daemon) applyProviderCLIUpdate(ctx context.Context, plan ProviderCLIUpdatePlan) error {
-	if d.providerCLIUpdateMode() != ProviderCLIUpdateApply {
+	return d.applyProviderCLIUpdateWithMode(ctx, plan, d.providerCLIUpdateMode(), true)
+}
+
+func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan ProviderCLIUpdatePlan, mode ProviderCLIUpdateMode, enforceWindow bool) error {
+	if mode != ProviderCLIUpdateApply {
 		return fmt.Errorf("provider CLI update mode is not apply")
 	}
-	if !d.inProviderCLIUpdateWindow(time.Now()) {
+	if enforceWindow && !d.inProviderCLIUpdateWindow(time.Now()) {
 		return fmt.Errorf("outside provider CLI update window")
 	}
 	if !plan.Valid {

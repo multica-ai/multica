@@ -43,11 +43,19 @@ var runtimeUpdateCmd = &cobra.Command{
 	RunE:  runRuntimeUpdate,
 }
 
+var runtimeProviderCLIUpdateCmd = &cobra.Command{
+	Use:   "provider-cli-update <runtime-id>",
+	Short: "Plan or apply a provider CLI update on a runtime",
+	Args:  exactArgs(1),
+	RunE:  runRuntimeProviderCLIUpdate,
+}
+
 func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
+	runtimeCmd.AddCommand(runtimeProviderCLIUpdateCmd)
 
 	// runtime list
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -63,6 +71,14 @@ func init() {
 	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
+
+	// runtime provider-cli-update
+	runtimeProviderCLIUpdateCmd.Flags().String("provider", "", "Provider CLI to update (required, e.g. codex, kimi, opencode, gemini, claude)")
+	runtimeProviderCLIUpdateCmd.Flags().String("mode", "dry-run", "Provider CLI update mode: dry-run or apply")
+	runtimeProviderCLIUpdateCmd.Flags().String("target-version", "", "Optional provider CLI target version; empty resolves latest/pinned on the daemon")
+	runtimeProviderCLIUpdateCmd.Flags().String("rollback-version", "", "Optional provider CLI rollback version")
+	runtimeProviderCLIUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+	runtimeProviderCLIUpdateCmd.Flags().Bool("wait", false, "Wait for provider CLI update request to complete (poll until done)")
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +249,73 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Update completed: %s\n", strVal(update, "output"))
 			} else {
 				fmt.Printf("Update %s: %s\n", status, strVal(update, "error"))
+			}
+			return nil
+		}
+	}
+}
+
+func runRuntimeProviderCLIUpdate(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	provider, _ := cmd.Flags().GetString("provider")
+	if provider == "" {
+		return fmt.Errorf("--provider is required")
+	}
+	mode, _ := cmd.Flags().GetString("mode")
+	if mode != "dry-run" && mode != "apply" {
+		return fmt.Errorf("--mode must be dry-run or apply")
+	}
+	targetVersion, _ := cmd.Flags().GetString("target-version")
+	rollbackVersion, _ := cmd.Flags().GetString("rollback-version")
+
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(180*time.Second))
+	defer cancel()
+
+	body := map[string]any{
+		"provider":         provider,
+		"mode":             mode,
+		"target_version":   targetVersion,
+		"rollback_version": rollbackVersion,
+	}
+	var update map[string]any
+	path := "/api/runtimes/" + args[0] + "/provider-cli-update"
+	if err := client.PostJSON(ctx, path, body, &update); err != nil {
+		return fmt.Errorf("initiate provider CLI update: %w", err)
+	}
+
+	wait, _ := cmd.Flags().GetBool("wait")
+	if !wait {
+		output, _ := cmd.Flags().GetString("output")
+		if output == "json" {
+			return cli.PrintJSON(os.Stdout, update)
+		}
+		fmt.Printf("Provider CLI update initiated: %s (status: %s, mode: %s, provider: %s)\n", strVal(update, "id"), strVal(update, "status"), strVal(update, "mode"), strVal(update, "provider"))
+		return nil
+	}
+
+	updateID := strVal(update, "id")
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for provider CLI update (last status: %s)", strVal(update, "status"))
+		case <-time.After(2 * time.Second):
+		}
+		if err := client.GetJSON(ctx, path+"/"+updateID, &update); err != nil {
+			return fmt.Errorf("get provider CLI update status: %w", err)
+		}
+		status := strVal(update, "status")
+		if status == "completed" || status == "failed" || status == "timeout" {
+			output, _ := cmd.Flags().GetString("output")
+			if output == "json" {
+				return cli.PrintJSON(os.Stdout, update)
+			}
+			if status == "completed" {
+				fmt.Printf("Provider CLI update completed: %s\n", strVal(update, "output"))
+			} else {
+				fmt.Printf("Provider CLI update %s: %s\n", status, strVal(update, "error"))
 			}
 			return nil
 		}
