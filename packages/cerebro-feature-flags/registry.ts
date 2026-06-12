@@ -159,7 +159,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
-  cerebro_inbox_dynamic: true,
+  cerebro_inbox_dynamic: false,
   cerebro_inbox_slack_block: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
