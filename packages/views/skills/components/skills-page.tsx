@@ -776,7 +776,9 @@ export default function SkillsPage() {
   };
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
+    // relative: positioning anchor for the batch toolbar (page-centered,
+    // not viewport-centered).
+    <div className="relative flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}

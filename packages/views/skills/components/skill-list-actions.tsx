@@ -581,7 +581,11 @@ export function SkillBatchToolbar({
 
   return (
     <>
-      <div className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      {/* Anchored to the page root (relative), NOT the viewport: with a
+          sidebar/split pane open, viewport-centering sits visibly off the
+          list's own center. Same rule for every future list page's batch
+          toolbar. */}
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
           <span className="text-sm font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
