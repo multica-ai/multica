@@ -60,6 +60,12 @@ func TestGitEnv(t *testing.T) {
 	if !envHas(env, "GIT_CONFIG_VALUE_0=*") {
 		t.Error("gitEnv() must include GIT_CONFIG_VALUE_0=*")
 	}
+	if !envHas(env, "GIT_CONFIG_KEY_1=protocol.file.allow") {
+		t.Error("gitEnv() must include GIT_CONFIG_KEY_1=protocol.file.allow")
+	}
+	if !envHas(env, "GIT_CONFIG_VALUE_1=always") {
+		t.Error("gitEnv() must include GIT_CONFIG_VALUE_1=always")
+	}
 }
 
 func TestGitEnvPreservesExistingConfig(t *testing.T) {
@@ -83,14 +89,20 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 	}
 
 	// safe.directory must be appended at index 2 (next available).
-	if !envHas("GIT_CONFIG_COUNT=3") {
-		t.Error("expected GIT_CONFIG_COUNT=3")
+	if !envHas("GIT_CONFIG_COUNT=4") {
+		t.Error("expected GIT_CONFIG_COUNT=4")
 	}
 	if !envHas("GIT_CONFIG_KEY_2=safe.directory") {
 		t.Error("expected GIT_CONFIG_KEY_2=safe.directory")
 	}
 	if !envHas("GIT_CONFIG_VALUE_2=*") {
 		t.Error("expected GIT_CONFIG_VALUE_2=*")
+	}
+	if !envHas("GIT_CONFIG_KEY_3=protocol.file.allow") {
+		t.Error("expected GIT_CONFIG_KEY_3=protocol.file.allow")
+	}
+	if !envHas("GIT_CONFIG_VALUE_3=always") {
+		t.Error("expected GIT_CONFIG_VALUE_3=always")
 	}
 
 	// Original entries must still be present.
@@ -233,6 +245,33 @@ func createTestRepoAt(t *testing.T, dir string) string {
 		}
 	}
 	return dir
+}
+
+// createTestRepoWithSubmodule creates a repo that has a .gitmodules pointing
+// to a local submodule repo. Returns the parent repo path.
+func createTestRepoWithSubmodule(t *testing.T) string {
+	t.Helper()
+
+	subRepo := createTestRepo(t)
+	parentRepo := createTestRepo(t)
+
+	// Use gitEnv() so that protocol.file.allow=always is set, which is
+	// required for newer git versions to clone from local file paths.
+	for _, args := range [][]string{
+		{"-C", parentRepo, "submodule", "add", subRepo, "mysubmodule"},
+		{"-C", parentRepo, "commit", "-am", "add submodule"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(gitEnv(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %s: %v", strings.Join(args, " "), out, err)
+		}
+	}
+
+	return parentRepo
 }
 
 func TestSyncAndLookup(t *testing.T) {
@@ -1453,5 +1492,125 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 	got := getRemoteDefaultBranch(barePath)
 	if got != "" {
 		t.Fatalf("getRemoteDefaultBranch = %q, want \"\" (ambiguous origin/* must not guess)", got)
+	}
+}
+
+func TestCreateWorktreeWithSubmodules(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepoWithSubmodule(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "test-agent",
+		TaskID:      "submodule-test",
+		Submodules:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if len(result.SubmoduleErrors) > 0 {
+		t.Fatalf("expected no submodule errors, got: %v", result.SubmoduleErrors)
+	}
+
+	submoduleGit := filepath.Join(result.Path, "mysubmodule", ".git")
+	if _, err := os.Stat(submoduleGit); os.IsNotExist(err) {
+		t.Fatalf("submodule .git not found at %s", submoduleGit)
+	}
+}
+
+func TestCreateWorktreeSubmodulesDisabledByDefault(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepoWithSubmodule(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "test-agent",
+		TaskID:      "no-submodule-test",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	submoduleDir := filepath.Join(result.Path, "mysubmodule")
+	entries, err := os.ReadDir(submoduleDir)
+	if err != nil {
+		t.Fatalf("read submodule dir failed: %v", err)
+	}
+	if len(entries) > 0 {
+		t.Errorf("expected empty submodule dir when Submodules=false, got %d entries", len(entries))
+	}
+}
+
+func TestInitSubmodulesFailure(t *testing.T) {
+	t.Parallel()
+
+	// Create a proper submodule setup, then delete the submodule source
+	// so that git submodule update fails when trying to fetch.
+	subRepo := createTestRepo(t)
+	parentRepo := createTestRepo(t)
+
+	// Properly register the submodule (creates gitlink entry in the index).
+	for _, args := range [][]string{
+		{"-C", parentRepo, "submodule", "add", subRepo, "badsub"},
+		{"-C", parentRepo, "commit", "-am", "add submodule"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Env = append(gitEnv(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@test.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@test.com",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s failed: %s: %v", strings.Join(args, " "), out, err)
+		}
+	}
+
+	// Delete the submodule source so the URL in .gitmodules becomes unreachable.
+	if err := os.RemoveAll(subRepo); err != nil {
+		t.Fatalf("remove submodule source: %v", err)
+	}
+
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: parentRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     parentRepo,
+		WorkDir:     workDir,
+		AgentName:   "test-agent",
+		TaskID:      "submodule-fail-test",
+		Submodules:  true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree should succeed even if submodules fail: %v", err)
+	}
+
+	if len(result.SubmoduleErrors) == 0 {
+		t.Fatal("expected submodule errors for unreachable URL")
+	}
+	if !strings.Contains(result.SubmoduleErrors[0], "git submodule update") {
+		t.Errorf("expected error to mention 'git submodule update', got: %s", result.SubmoduleErrors[0])
 	}
 }

@@ -3,6 +3,7 @@
 package repocache
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -14,7 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -45,9 +45,11 @@ func gitEnv() []string {
 	idx := strconv.Itoa(existing)
 	return append(base,
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
+		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+2),
 		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
 		"GIT_CONFIG_VALUE_"+idx+"=*",
+		"GIT_CONFIG_KEY_"+strconv.Itoa(existing+1)+"=protocol.file.allow",
+		"GIT_CONFIG_VALUE_"+strconv.Itoa(existing+1)+"=always",
 	)
 }
 
@@ -302,6 +304,26 @@ func gitFetch(barePath string) error {
 	return nil
 }
 
+// initSubmodules runs `git submodule update --init --recursive` in the
+// given worktree directory. The worktree must already be checked out.
+// Returns an error if the git command fails; callers decide whether
+// to treat this as fatal.
+func initSubmodules(worktreePath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", worktreePath, "submodule", "update", "--init", "--recursive")
+	cmd.Env = gitEnv()
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("git submodule update timed out after 5m: %w", err)
+		}
+		return fmt.Errorf("git submodule update: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
 // runGitFetch is the raw `git fetch origin` wrapper. Callers should go through
 // gitFetch, which migrates legacy caches first.
 func runGitFetch(barePath string) error {
@@ -382,12 +404,14 @@ type WorktreeParams struct {
 	AgentName           string // for branch naming
 	TaskID              string // for branch naming uniqueness
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
+	Submodules          bool   // run git submodule update --init --recursive after checkout
 }
 
 // WorktreeResult describes a successfully created worktree.
 type WorktreeResult struct {
-	Path       string `json:"path"`        // absolute path to the worktree
-	BranchName string `json:"branch_name"` // git branch created for this worktree
+	Path            string   `json:"path"`                        // absolute path to the worktree
+	BranchName      string   `json:"branch_name"`                 // git branch created for this worktree
+	SubmoduleErrors []string `json:"submodule_errors,omitempty"`  // errors from submodule init (non-fatal)
 }
 
 // CreateWorktree looks up the bare cache for a repo, fetches latest, and creates
@@ -477,6 +501,18 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			}
 		}
 
+		result := &WorktreeResult{
+			Path:       worktreePath,
+			BranchName: actualBranch,
+		}
+
+		if params.Submodules {
+			if err := initSubmodules(worktreePath); err != nil {
+				c.logger.Warn("repo checkout: submodule init failed (non-fatal)", "url", params.RepoURL, "error", err)
+				result.SubmoduleErrors = append(result.SubmoduleErrors, err.Error())
+			}
+		}
+
 		c.logger.Info("repo checkout: existing worktree updated",
 			"url", params.RepoURL,
 			"path", worktreePath,
@@ -484,10 +520,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			"base", baseRef,
 		)
 
-		return &WorktreeResult{
-			Path:       worktreePath,
-			BranchName: actualBranch,
-		}, nil
+		return result, nil
 	}
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
@@ -515,6 +548,18 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		}
 	}
 
+	result := &WorktreeResult{
+		Path:       worktreePath,
+		BranchName: actualBranch,
+	}
+
+	if params.Submodules {
+		if err := initSubmodules(worktreePath); err != nil {
+			c.logger.Warn("repo checkout: submodule init failed (non-fatal)", "url", params.RepoURL, "error", err)
+			result.SubmoduleErrors = append(result.SubmoduleErrors, err.Error())
+		}
+	}
+
 	c.logger.Info("repo checkout: worktree created",
 		"url", params.RepoURL,
 		"path", worktreePath,
@@ -522,10 +567,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		"base", baseRef,
 	)
 
-	return &WorktreeResult{
-		Path:       worktreePath,
-		BranchName: actualBranch,
-	}, nil
+	return result, nil
 }
 
 func resolveBaseRef(barePath, requestedRef string) (string, error) {

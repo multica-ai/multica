@@ -26,9 +26,11 @@ var repoCheckoutCmd = &cobra.Command{
 }
 
 var repoCheckoutRef string
+var repoCheckoutSubmodules bool
 
 func init() {
 	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoCheckoutCmd.Flags().BoolVar(&repoCheckoutSubmodules, "recurse-submodules", false, "initialize and update submodules after checkout")
 	repoCmd.AddCommand(repoCheckoutCmd)
 }
 
@@ -50,13 +52,14 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get working directory: %w", err)
 	}
 
-	reqBody := map[string]string{
-		"url":          repoURL,
-		"workspace_id": workspaceID,
-		"workdir":      workDir,
-		"ref":          repoCheckoutRef,
-		"agent_name":   agentName,
-		"task_id":      taskID,
+	reqBody := map[string]any{
+		"url":               repoURL,
+		"workspace_id":      workspaceID,
+		"workdir":           workDir,
+		"ref":               repoCheckoutRef,
+		"agent_name":        agentName,
+		"task_id":           taskID,
+		"recurse_submodules": repoCheckoutSubmodules,
 	}
 
 	data, err := json.Marshal(reqBody)
@@ -82,8 +85,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	var result struct {
-		Path       string `json:"path"`
-		BranchName string `json:"branch_name"`
+		Path            string   `json:"path"`
+		BranchName      string   `json:"branch_name"`
+		SubmoduleErrors []string `json:"submodule_errors"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("parse response: %w", err)
@@ -91,6 +95,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
 	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
+	for _, e := range result.SubmoduleErrors {
+		fmt.Fprintf(os.Stderr, "Warning: submodule init failed: %s\n", e)
+	}
 
 	return nil
 }
