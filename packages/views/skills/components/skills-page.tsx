@@ -847,7 +847,7 @@ export default function SkillsPage() {
             allRows={allRows}
             visibleCount={rows.length}
           />
-          <div className="min-h-0 flex-1 overflow-x-auto @container">
+          <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden @container">
           <ListGrid
             className={`${GRID_COLS} h-full grid-rows-[auto_minmax(0,1fr)] @2xl:min-w-[var(--lgc-minw)]`}
             style={columnTrackVars(isColVisible)}

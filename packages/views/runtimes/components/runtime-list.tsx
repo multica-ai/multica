@@ -509,7 +509,7 @@ export function RuntimeList({
   );
 
   return (
-    <div className="overflow-x-auto @container">
+    <div className="overflow-x-auto overflow-y-hidden @container">
       <ListGrid
         className={`${GRID_COLS} @2xl:min-w-[var(--rtc-minw)]`}
         style={columnTrackVars(showOwner, showActions)}
