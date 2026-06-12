@@ -154,6 +154,18 @@
   white-space: nowrap;
 }
 
+/* CEREBRO-PATCH(editor-mobile-table-wrap): email/message bodies pack prose into
+   fixed-width layout tables (often with inline width="600"/style="width:680px").
+   On a phone there is no room to scroll one sideways, so the row reads as "text
+   cut off the right edge" (JEH inbox threads). Below the mobile breakpoint, force
+   tables to fit the column and wrap their cells. `!important` is required to beat
+   the email's inline widths; desktop keeps the scroll behaviour above. */
+@media (max-width: 640px) {
+  .rich-text-editor table { table-layout: fixed !important; width: 100% !important; min-width: 0 !important; max-width: 100% !important; }
+  .rich-text-editor th,
+  .rich-text-editor td { white-space: normal !important; overflow-wrap: anywhere; width: auto !important; }
+}
+
 /* CEREBRO-PATCH(editor-longword-wrap): a long unbreakable string (URL, token,
    hash) in a paragraph, list item, heading, blockquote or link has no natural
    break opportunity, so without this it pushes the editor — and the whole
