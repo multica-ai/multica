@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -451,6 +452,28 @@ func parseOpenCodeModelIDLine(line string) string {
 	id := fields[0]
 	if strings.HasPrefix(id, `"`) || strings.HasPrefix(id, "{") || strings.HasPrefix(id, "[") {
 		return ""
+	}
+	// Normalize the first colon to slash so that model IDs emitted by
+	// opencode in provider:model format (e.g. "custom:lfm2.5:8b") are
+	// treated the same as provider/model. Subsequent colons (as in the
+	// model segment "lfm2.5:8b") are preserved.  This mirrors the
+	// normalisation applied by parsePiModels for the pi backend.
+	// Guard: only normalise colon to slash when the line looks like a
+	// table-format model row (fields[0] is the model ID, the rest are
+	// context/max_out numbers) or a bare model ID. Skip multi-word noise
+	// like "panic: catalog sync failed" where subsequent tokens contain
+	// letters.
+	if strings.Contains(id, ":") && !strings.Contains(id, "/") {
+		isTableRow := true
+		for _, f := range fields[1:] {
+			if _, err := strconv.Atoi(strings.TrimSpace(f)); err != nil {
+				isTableRow = false
+				break
+			}
+		}
+		if isTableRow {
+			id = strings.Replace(id, ":", "/", 1)
+		}
 	}
 	if !strings.Contains(id, "/") {
 		return ""
