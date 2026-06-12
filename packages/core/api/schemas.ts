@@ -349,6 +349,28 @@ const DashboardRunTimeDailySchema = z.object({
 export const DashboardRunTimeDailyListSchema = z.array(DashboardRunTimeDailySchema);
 
 // ---------------------------------------------------------------------------
+// Agent plan-limits schema — the operator's Claude subscription usage windows
+// proxied from the OAuth broker (`GET /api/agent-usage/plan-limits`). Each
+// window is nullable (a plan may not expose a per-model weekly limit), and a
+// malformed window degrades that one field to null rather than dropping the
+// whole response — `available` still drives whether the widget renders.
+// ---------------------------------------------------------------------------
+
+const AgentPlanUsageWindowSchema = z.object({
+  utilization: z.number().default(0),
+  resets_at: z.string().default(""),
+}).loose();
+
+export const AgentPlanLimitsSchema = z.object({
+  available: z.boolean().default(false),
+  five_hour: AgentPlanUsageWindowSchema.nullish().catch(null),
+  seven_day: AgentPlanUsageWindowSchema.nullish().catch(null),
+  seven_day_opus: AgentPlanUsageWindowSchema.nullish().catch(null),
+  seven_day_sonnet: AgentPlanUsageWindowSchema.nullish().catch(null),
+  fetched_at: z.string().nullish().catch(null),
+}).loose();
+
+// ---------------------------------------------------------------------------
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes

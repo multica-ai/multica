@@ -36,6 +36,10 @@
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",
     "configure_group": "설정",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "plan_usage_title": "플랜 한도",
+    "plan_usage_session": "세션",
+    "plan_usage_weekly": "주간",
+    "plan_usage_resets": "재설정"
   }
 }

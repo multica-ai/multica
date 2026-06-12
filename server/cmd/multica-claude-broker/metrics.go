@@ -12,10 +12,11 @@ import (
 // label cardinality stays bounded and typos don't accidentally create new
 // label values.
 const (
-	outcomeOk      = "ok"
-	outcomeError   = "error"
-	outcomeSkipped = "skipped"
-	outcomeStale   = "stale"
+	outcomeOk          = "ok"
+	outcomeError       = "error"
+	outcomeSkipped     = "skipped"
+	outcomeStale       = "stale"
+	outcomeRateLimited = "rate_limited"
 )
 
 var (
@@ -66,7 +67,46 @@ var (
 		},
 		[]string{"claude_version", "extracted_at", "version_header"},
 	)
+	usagePollTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "multica_claude_broker_usage_poll_total",
+			Help: "Plan-usage poll attempts by outcome (ok|error|rate_limited).",
+		},
+		[]string{"outcome"},
+	)
+	usageRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "multica_claude_broker_usage_requests_total",
+			Help: "GET /usage requests by outcome (ok|stale).",
+		},
+		[]string{"outcome"},
+	)
+	usageUtilization = promauto.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "multica_claude_broker_usage_utilization_percent",
+			Help: "Most recent plan-usage utilization (0-100) by window (five_hour|seven_day|seven_day_sonnet|seven_day_opus).",
+		},
+		[]string{"window"},
+	)
 )
+
+// observeUsage mirrors a freshly fetched snapshot into the utilization gauges.
+// Nil windows are left untouched so a transient absence doesn't zero a gauge.
+func observeUsage(snap *UsageSnapshot) {
+	if snap == nil {
+		return
+	}
+	for window, w := range map[string]*UsageWindow{
+		"five_hour":        snap.FiveHour,
+		"seven_day":        snap.SevenDay,
+		"seven_day_sonnet": snap.SevenDaySonnet,
+		"seven_day_opus":   snap.SevenDayOpus,
+	} {
+		if w != nil {
+			usageUtilization.WithLabelValues(window).Set(w.Utilization)
+		}
+	}
+}
 
 func init() {
 	// One-shot info metric — populated at startup, never updated.

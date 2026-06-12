@@ -46,6 +46,7 @@ import type {
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
+  AgentPlanLimits,
   DashboardUsageDaily,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
@@ -135,6 +136,7 @@ import {
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  AgentPlanLimitsSchema,
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_APP_CONFIG,
@@ -1146,6 +1148,20 @@ export class ApiClient {
       DashboardUsageDailyListSchema,
       [],
       { endpoint: "GET /api/dashboard/usage/daily" },
+    );
+  }
+
+  // Operator's Claude subscription plan-usage (session + weekly windows),
+  // proxied from the OAuth broker. Always resolves: an unconfigured or
+  // unreachable broker comes back as { available: false } so the caller can
+  // hide the widget rather than error.
+  async getAgentPlanLimits(): Promise<AgentPlanLimits> {
+    const raw = await this.fetch<unknown>("/api/agent-usage/plan-limits");
+    return parseWithFallback<AgentPlanLimits>(
+      raw,
+      AgentPlanLimitsSchema,
+      { available: false },
+      { endpoint: "GET /api/agent-usage/plan-limits" },
     );
   }
 

@@ -23,6 +23,9 @@ type Broker struct {
 	mu     sync.RWMutex
 	cached *TokenState
 
+	usageMu sync.RWMutex
+	usage   *UsageSnapshot
+
 	ready atomic.Bool
 }
 
@@ -133,6 +136,7 @@ func NewAdminMux(broker *Broker) *http.ServeMux {
 	mux.HandleFunc("/healthz", broker.healthHandler)
 	mux.HandleFunc("/readyz", broker.readyHandler)
 	mux.HandleFunc("/access_token", broker.accessTokenHandler)
+	mux.HandleFunc("/usage", broker.usageHandler)
 	return mux
 }
 

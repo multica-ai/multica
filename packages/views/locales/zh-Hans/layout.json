@@ -36,6 +36,10 @@
     "pinned_label": "固定",
     "workspace_group": "工作区",
     "configure_group": "配置",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "plan_usage_title": "套餐用量",
+    "plan_usage_session": "会话",
+    "plan_usage_weekly": "每周",
+    "plan_usage_resets": "重置"
   }
 }

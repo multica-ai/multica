@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentPlanLimitsSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
@@ -268,5 +269,38 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+// The plan-limits widget hides itself unless `available` is true, so the
+// schema must hold that flag and degrade individual windows rather than
+// dropping the whole response. A malformed window must not crash the toolbar.
+describe("agent plan-limits schema drift", () => {
+  it("parses a full broker snapshot with both windows", () => {
+    const parsed = AgentPlanLimitsSchema.parse({
+      available: true,
+      five_hour: { utilization: 33, resets_at: "2026-06-12T20:00:00Z" },
+      seven_day: { utilization: 13, resets_at: "2026-06-18T00:00:00Z" },
+      seven_day_opus: null,
+      seven_day_sonnet: { utilization: 1, resets_at: "2026-06-17T00:00:00Z" },
+      fetched_at: "2026-06-12T16:50:00Z",
+    });
+    expect(parsed.available).toBe(true);
+    expect(parsed.five_hour?.utilization).toBe(33);
+    expect(parsed.seven_day_opus).toBeNull();
+  });
+
+  it("defaults available to false when the field is missing", () => {
+    expect(AgentPlanLimitsSchema.parse({}).available).toBe(false);
+  });
+
+  it("degrades a malformed window to null instead of failing the parse", () => {
+    const parsed = AgentPlanLimitsSchema.parse({
+      available: true,
+      five_hour: { utilization: "lots" },
+      seven_day: { utilization: 20, resets_at: "2026-06-18T00:00:00Z" },
+    });
+    expect(parsed.five_hour).toBeNull();
+    expect(parsed.seven_day?.utilization).toBe(20);
   });
 });

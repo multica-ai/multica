@@ -534,6 +534,28 @@ export interface DashboardRunTimeDaily {
   failed_count: number;
 }
 
+// One rate-limit window of the operator's Claude subscription: how much of
+// the allowance is consumed (0-100) and when it resets. Surfaced in the left
+// toolbar so the operator can see their Max/Pro plan headroom at a glance.
+export interface AgentPlanUsageWindow {
+  utilization: number;
+  resets_at: string;
+}
+
+// The operator's Claude plan-usage snapshot, proxied from the OAuth broker.
+// `available` is false when no broker is configured or it can't be reached,
+// in which case the UI hides the widget. The five-hour window is the rolling
+// session limit; seven-day is the weekly limit (all models), with optional
+// per-model weekly windows.
+export interface AgentPlanLimits {
+  available: boolean;
+  five_hour?: AgentPlanUsageWindow | null;
+  seven_day?: AgentPlanUsageWindow | null;
+  seven_day_opus?: AgentPlanUsageWindow | null;
+  seven_day_sonnet?: AgentPlanUsageWindow | null;
+  fetched_at?: string | null;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"

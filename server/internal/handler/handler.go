@@ -80,6 +80,12 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	// ClaudeBrokerURL is the in-cluster base URL of the multica-claude-broker
+	// admin service (e.g. "http://multica-claude-broker:8080"). When set, the
+	// agent plan-usage endpoint proxies the broker's /usage snapshot so the UI
+	// can show the operator's Claude subscription limits. Empty on deployments
+	// without OAuth-broker agents — the endpoint then reports unavailable.
+	ClaudeBrokerURL string
 }
 
 type cloudRuntimeProxy interface {

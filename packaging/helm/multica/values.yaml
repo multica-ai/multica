@@ -44,6 +44,10 @@ platform:
     cookieDomain: ""
     publicUrl: ""
     trustedProxies: ""
+    # Override the Claude OAuth broker URL the backend proxies plan-usage from.
+    # Empty → defaults to the in-cluster admin service http://multica-claude-broker:8080
+    # when runtime.claudeBroker.enabled. Only relevant in controller mode.
+    claudeBrokerUrl: ""
     jwtSecretName: multica-jwt
     # How long a login lasts before re-authentication. Go duration string
     # (e.g. "720h" = 30 days, "87600h" ≈ 10 years) or integer seconds. Empty

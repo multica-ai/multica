@@ -36,6 +36,10 @@
     "pinned_label": "Pinned",
     "workspace_group": "Workspace",
     "configure_group": "Configure",
-    "unread_overflow": "99+"
+    "unread_overflow": "99+",
+    "plan_usage_title": "Plan limits",
+    "plan_usage_session": "Session",
+    "plan_usage_weekly": "Weekly",
+    "plan_usage_resets": "Resets"
   }
 }

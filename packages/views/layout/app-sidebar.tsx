@@ -5,6 +5,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
 import { HelpLauncher } from "./help-launcher";
+import { PlanUsageWidget } from "./plan-usage-widget";
 import {
   DndContext,
   PointerSensor,
@@ -727,6 +728,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
+          <PlanUsageWidget />
           <div className="flex justify-end">
             <HelpLauncher />
           </div>

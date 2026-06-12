@@ -16,4 +16,12 @@ data:
   MULTICA_TRUSTED_PROXIES: {{ .Values.platform.backend.trustedProxies | quote }}
   ALLOW_SIGNUP: {{ .Values.platform.backend.allowSignup | quote }}
   RESEND_FROM_EMAIL: {{ .Values.platform.backend.resend.fromEmail | quote }}
+  {{- if and .Values.runtime.enabled (eq .Values.runtime.mode "controller") .Values.runtime.claudeBroker.enabled }}
+  # In-cluster URL of the Claude OAuth broker's admin service. Lets the agent
+  # plan-usage endpoint (/api/agent-usage/plan-limits) proxy the broker's
+  # /usage snapshot so the UI can show the operator's Claude plan limits. Only
+  # emitted when the broker is deployed; unset → the endpoint reports
+  # unavailable and the UI hides the widget.
+  CLAUDE_BROKER_URL: {{ default "http://multica-claude-broker:8080" .Values.platform.backend.claudeBrokerUrl | quote }}
+  {{- end }}
 {{- end }}

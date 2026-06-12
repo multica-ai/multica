@@ -35,6 +35,8 @@ export type {
   DashboardUsageByAgent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
+  AgentPlanLimits,
+  AgentPlanUsageWindow,
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,

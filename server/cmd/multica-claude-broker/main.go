@@ -85,6 +85,11 @@ func run(logger *slog.Logger) error {
 	//      become leader, the next tick refreshes if the cached token is
 	//      within RefreshPad of expiry.
 	go broker.RunRefreshLoop(ctx, cfg.RefreshInterval)
+	//   4. Start the plan-usage poller. Leader-gated like refresh, so only
+	//      one replica polls Anthropic's rate-limited usage endpoint. It
+	//      serves the cached snapshot from the admin mux's /usage handler.
+	usagePoller := NewUsagePoller(broker, leader, DefaultUsageClient(), cfg.UsageInterval)
+	go usagePoller.Run(ctx)
 
 	adminSrv := &http.Server{
 		Addr:              cfg.AdminAddr,
