@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -140,6 +140,10 @@ vi.mock("../editor", () => {
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      valueRef.current = defaultValue || "";
+      setValue(defaultValue || "");
+    }, [defaultValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
@@ -314,8 +318,14 @@ describe("CreateIssueModal", () => {
     });
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
+    mockDraftStore.draft.title = "";
+    mockDraftStore.draft.description = "";
+    mockDraftStore.draft.status = "todo";
+    mockDraftStore.draft.priority = "none";
     mockDraftStore.draft.assigneeType = undefined;
     mockDraftStore.draft.assigneeId = undefined;
+    mockDraftStore.draft.startDate = null;
+    mockDraftStore.draft.dueDate = null;
     mockCreateIssue.mockResolvedValue({
       id: "issue-123",
       identifier: "TES-123",
@@ -627,6 +637,20 @@ describe("CreateIssueModal", () => {
     await user.click(picker);
 
     expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+  });
+
+  it("defers persisted description hydration until after the dialog can render", async () => {
+    mockDraftStore.draft.title = "Recovered title";
+    mockDraftStore.draft.description = "x".repeat(70 * 1024);
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByPlaceholderText("Issue title")).toHaveValue("Recovered title");
+    expect(screen.getByPlaceholderText("Add description...")).toHaveValue("");
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Add description...")).toHaveValue(mockDraftStore.draft.description);
+    });
   });
 
   // Title + description are packed into the agent prompt on switch; if we

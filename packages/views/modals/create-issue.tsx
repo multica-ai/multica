@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -100,8 +100,10 @@ export function ManualCreatePanel({
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
 
   const [title, setTitle] = useState(draft.title);
+  const [descriptionDefaultValue, setDescriptionDefaultValue] = useState("");
   const [formResetKey, setFormResetKey] = useState(0);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const initialDraftDescriptionRef = useRef(draft.description);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -149,6 +151,24 @@ export function ManualCreatePanel({
   // File upload — collect attachment IDs so we can link them after issue creation.
   const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
   const { uploadWithToast } = useFileUpload(api);
+
+  useEffect(() => {
+    const initialDescription = initialDraftDescriptionRef.current;
+    if (!initialDescription) return;
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const frameId = requestAnimationFrame(() => {
+      timeoutId = setTimeout(() => {
+        setDescriptionDefaultValue(initialDescription);
+      }, 0);
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, []);
+
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -190,6 +210,7 @@ export function ManualCreatePanel({
       startDate: null,
       dueDate: null,
     });
+    setDescriptionDefaultValue("");
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
   };
@@ -477,7 +498,7 @@ export function ManualCreatePanel({
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
-                defaultValue={draft.description}
+                defaultValue={descriptionDefaultValue}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
