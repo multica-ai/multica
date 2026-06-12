@@ -16,6 +16,9 @@ import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
 import { AgentRunPip, type AgentRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
+// CEREBRO-PATCH(inbox-dynamic-chat-reexport): TECH-3413 — expose the chat panel + run pip to the dynamic inbox without widening the views exports map.
+export { InboxChatPanel } from "./inbox-chat-panel";
+export { AgentRunPip, type AgentRunState } from "../../common/agent-run-pip";
 
 // Hook returning a localized relative-time formatter — the i18n equivalent
 // of the previous static `timeAgo` function. Returning a function (rather

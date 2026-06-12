@@ -22,11 +22,15 @@ import {
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxActionGroupLabels, useSetInboxMode } from "@multica/cerebro-inbox";
+import { api } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail } from "@multica/views/channels";
+import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel } from "@multica/core/types";
@@ -59,6 +63,7 @@ export function DynamicInbox() {
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
+  const qc = useQueryClient();
 
   const [activeTabId, setActiveTabId] = useState<string>(
     layout.activeTabId ?? layout.tabs[0]?.id ?? "",
@@ -81,6 +86,12 @@ export function DynamicInbox() {
   const onArchive = (entry: DynInboxEntry) => {
     if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
+    else if (entry.kind === "chat") {
+      // Mirror the classic inbox: archive the session, then refresh the list.
+      void api
+        .updateChatSession(entry.session.id, { status: "archived" })
+        .then(() => qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) }));
+    }
     if (selected && selected.id === entry.id) setSelected(null);
   };
   // TECH-3422 — the Slack-block opens a channel/DM into the same detail panel.
@@ -169,9 +180,18 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
+    // Agent chat session — open the same conversation panel the classic inbox
+    // uses, so chats read identically here.
+    if (selected.kind === "chat") {
+      return (
+        <ErrorBoundary resetKeys={[selected.session.id]}>
+          <InboxChatPanel key={selected.session.id} sessionId={selected.session.id} />
+        </ErrorBoundary>
+      );
+    }
     return (
-      <div className="p-6 text-sm text-muted-foreground">
-        Open this conversation from the chat view.
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Select a message to read it here.
       </div>
     );
   }, [selected]);

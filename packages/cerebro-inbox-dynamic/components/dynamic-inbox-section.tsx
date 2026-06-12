@@ -13,6 +13,7 @@ import {
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { InboxActionCategory } from "@multica/cerebro-inbox";
+import type { AgentRunState } from "@multica/views/inbox/components/inbox-list-item";
 import type { Project } from "@multica/core/types";
 import {
   selectSectionEntries,
@@ -41,6 +42,21 @@ export interface DynamicInboxSectionProps {
 
 function entryKey(entry: DynInboxEntry): string {
   return entry.kind === "notif" ? entry.item.issue_id ?? entry.item.id : entry.id;
+}
+
+// Resolve the running/queued pip for a row from the same task state the
+// classic inbox uses: issue rows key on issue_id, chat rows on session id.
+function runStateFor(
+  entry: DynInboxEntry,
+  ctx: SectionFilterContext,
+): AgentRunState | undefined {
+  if (entry.kind === "notif" && entry.item.issue_id) {
+    return ctx.action.issueRunStates.get(entry.item.issue_id) as AgentRunState | undefined;
+  }
+  if (entry.kind === "chat") {
+    return ctx.action.chatRunStates.get(entry.session.id) as AgentRunState | undefined;
+  }
+  return undefined;
 }
 
 export function DynamicInboxSection(props: DynamicInboxSectionProps) {
@@ -162,6 +178,7 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                   mentioned={
                     entry.kind === "channel" && filterContext.action.mentionedChannels.has(entry.channel.id)
                   }
+                  agentRunState={runStateFor(entry, filterContext)}
                   onSelect={props.onSelect}
                   onArchive={props.onArchive}
                 />
