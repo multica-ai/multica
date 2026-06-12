@@ -1,0 +1,109 @@
+---
+title: Octo IM integration
+description: Bind a Multica agent to an Octo IM bot, then talk to it from an Octo DM or group — chat naturally and the agent's reply streams back into the conversation.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bind any [agent](/agents) to an Octo IM bot and your team can work with it from inside Octo — DM the bot or @-mention it in a group, and the agent answers in the chat. Replies stream back as a normal Octo message that updates in place while the agent works.
+
+Each bot is bound **one-to-one** to a single Multica agent. Binding a second agent uses a second bot; one agent never has two bots.
+
+## What the integration does
+
+| Surface | Behavior |
+|---|---|
+| **Agent → Integrations** | The agent detail page has an **Integrations** tab (and a matching section in the left sidebar). Owners and admins see **Connect Octo bot** there; once connected it flips to a **Connected to Octo** status. |
+| **DM the bot** | A workspace member messages the bot directly in Octo. Each conversation becomes a Multica [chat](/chat) session with the agent; the agent answers in-thread. |
+| **@-mention in a group** | Add the bot to an Octo group and @-mention it. Only the mentioning message is read — the bot does not listen to the whole group. |
+| **Streaming reply** | The bot posts the agent's answer as a plain Octo message (Octo renders Markdown natively) and edits it in place as the agent runs, so you see progress and the final result without a new message per step. |
+
+<Callout type="info">
+Octo is a **chat** integration — there is no `/issue` command. People talk to the agent in natural language; to file issues, use the agent chat or the Multica app. (This is the main difference from the Lark Bot, which adds `/issue`.)
+</Callout>
+
+## Connect an agent (owner / admin)
+
+Octo bots are configured with a **bot token**, not a QR scan.
+
+1. Obtain a **User Bot token** (it starts with `bf_`) from your Octo deployment's bot platform.
+2. In Multica, open the agent in **Agents → _your agent_**.
+3. Go to the **Integrations** tab (or use the **Integrations** section in the left sidebar) and click **Connect Octo bot**. The agent's ID is pre-filled and locked, so the bot can only bind to the agent you opened.
+4. Paste the **bot token**. If your deployment has not set a default API URL, also fill in the **API URL** (the Octo bot API base, e.g. `https://im.example.com/api`).
+5. Click **Configure bot**. Multica registers the bot against Octo to validate the token and capture its identity, then shows **Connected to Octo**.
+
+<Callout type="warning">
+A given Octo bot can be bound to **only one agent across the whole deployment**. If you try to connect a bot that is already bound elsewhere, Multica refuses with a clear message — disconnect it from the other agent first.
+</Callout>
+
+You can also configure bots from **Settings → Integrations → Octo IM** using the same dialog; the per-agent button just pre-fills the agent ID for you.
+
+## Use the bot (members)
+
+### First message: bind your Octo identity
+
+The first time you message the bot, it replies with a link asking you to **bind your Octo identity**. Open the link, sign in to Multica, and your Octo account is linked to your Multica membership. This is what lets the agent act on your behalf and route your messages to the right agent.
+
+<Callout type="warning">
+Only people who are **members of the workspace** can use the bot. If you aren't a member, or you haven't redeemed the binding link yet, the bot won't process your message — it's dropped (and recorded for audit, without its contents). The binding link is single-use and valid for 15 minutes; if it lapses, send the bot another message to get a fresh one.
+</Callout>
+
+### Chat with the agent
+
+- **Ask the agent anything** — DM the bot, or @-mention it in a group. The conversation is a normal agent chat session; the agent's reply appears in the chat and updates in place as it works.
+- **Markdown is rendered** — the agent's answer is sent as Markdown, which Octo displays natively.
+
+If the agent is **offline** (its runtime isn't connected) or **archived**, the bot replies with a short status notice instead of silently dropping your message.
+
+## Manage and disconnect
+
+Workspace-wide management lives in **Settings → Integrations → Octo IM**:
+
+- **Connected bots** lists every bot in the workspace and the agent each one is bound to, with its connection status. This list is visible to all members.
+- **Disconnect** is **owner / admin only**. Disconnecting stops the bot from receiving Octo messages and tears down its WebSocket connection; the installation record is kept for audit, and you can re-configure the same agent later.
+
+Rotating a bot token (or re-registering) is just re-running **Configure bot** for the same agent — the live connection picks up the new credentials automatically.
+
+## Permissions
+
+- **Connect / disconnect** require workspace **owner** or **admin**. Members see the connected-bots list but no configure or disconnect controls.
+- **Talking to the bot** requires being a workspace member with a bound Octo identity. Everyone else is dropped.
+- The integration never stores message bodies for dropped messages — only a drop reason, for audit. Bot tokens are encrypted at rest.
+
+## Self-host setup
+
+On Multica Cloud the integration is already available — skip this section.
+
+For self-host, Octo is **off until you set an at-rest encryption key**. The key encrypts each bot's token before it touches the database.
+
+1. Generate a 32-byte key and set it on the API server:
+
+   ```dotenv
+   MULTICA_OCTO_SECRET_KEY=<base64-encoded 32-byte key>
+   ```
+
+   Generate one with `openssl rand -base64 32`.
+
+2. (Optional) Set a default Octo bot API URL so admins don't paste it on every install:
+
+   ```dotenv
+   MULTICA_OCTO_API_URL=https://im.example.com/api
+   ```
+
+3. Set the public URL of your Multica app so the identity-binding link the bot sends is clickable:
+
+   ```dotenv
+   MULTICA_PUBLIC_URL=https://multica.example.com
+   ```
+
+4. Restart the API. Until `MULTICA_OCTO_SECRET_KEY` is set, **Settings → Integrations** shows an "Octo integration not enabled" notice and the **Connect Octo bot** entry points stay hidden.
+
+<Callout type="info">
+**Binding links need `MULTICA_PUBLIC_URL`.** The bot's "bind your identity" link points at `{MULTICA_PUBLIC_URL}/octo/bind?token=…`. If that variable is unset, the integration still runs but unbound users never receive a working link, so they can't self-serve. The server logs this at startup so the gap is visible.
+</Callout>
+
+## Next
+
+- [Agents](/agents) — each bot is bound to exactly one agent
+- [Chat](/chat) — what a bot conversation maps to inside Multica
+- [Environment variables](/environment-variables) — full self-host configuration reference
