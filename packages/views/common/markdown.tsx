@@ -8,7 +8,7 @@ import {
 } from "@multica/ui/markdown";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
@@ -19,6 +19,7 @@ import {
 import { MermaidDiagram } from "../editor/mermaid-diagram";
 import { HtmlBlockPreview } from "../editor/html-block-preview";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
+import { openLink } from "../editor/utils/link-handler";
 import "../editor/styles/index.css";
 
 export type { RenderMode };
@@ -139,6 +140,7 @@ function renderHtmlBlock({ html }: { html: string }): React.ReactNode {
  */
 export function Markdown(props: MarkdownProps): React.JSX.Element {
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const slug = useWorkspaceSlug();
   const { attachments, ...rest } = props;
   const isEditorParity = props.mode === "editor-parity";
 
@@ -155,11 +157,19 @@ export function Markdown(props: MarkdownProps): React.JSX.Element {
     [],
   );
 
+  // onUrlClick — uses openLink for client-side navigation of internal links
+  // (matching original ReadonlyContent's ReadonlyLink behavior)
+  const handleUrlClick = React.useCallback(
+    (href: string) => openLink(href, slug),
+    [slug],
+  );
+
   const editorParityProps = isEditorParity
     ? {
         renderMermaid,
         renderHtmlBlock,
         onLinkHover: handleLinkHover,
+        onUrlClick: handleUrlClick,
       }
     : {};
 
