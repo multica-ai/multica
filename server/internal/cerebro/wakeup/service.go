@@ -2,6 +2,7 @@ package wakeup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -39,6 +40,15 @@ const (
 	// postponeDelay is how long to wait before retrying a wakeup that couldn't
 	// fire because the issue had an active task or the agent runtime was offline.
 	postponeDelay = 5 * time.Minute
+
+	// WakeupMinIntervalMinutes is the minimum allowed gap between wakeup
+	// creations for the same agent+issue (enforced at creation time).
+	// Also used as the delay before re-scheduling after a postpone notification.
+	WakeupMinIntervalMinutes = 15
+
+	// WakeupMaxConsecutivePostpones is the number of consecutive wakeup
+	// dispatches allowed before an inbox notification is sent to the issue owner.
+	WakeupMaxConsecutivePostpones = 3
 )
 
 var ErrNotFound = errors.New("wakeup not found")
@@ -84,6 +94,22 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	case TriggerTime:
 		if !req.FireAt.Valid {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("fire_at is required for time wakeups")
+		}
+		// Enforce minimum interval: reject if fire_at is too soon.
+		minAllowed := time.Now().Add(time.Duration(WakeupMinIntervalMinutes) * time.Minute)
+		if req.FireAt.Time.Before(minAllowed) {
+			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
+				"fire_at must be at least %d minutes from now (got %s)",
+				WakeupMinIntervalMinutes, req.FireAt.Time.Format(time.RFC3339),
+			)
+		}
+		// Enforce min interval: reject if there is already a pending wakeup
+		// for this agent+issue created within the last WakeupMinIntervalMinutes.
+		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, req.AgentID, req.IssueID, WakeupMinIntervalMinutes); err == nil && recent {
+			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
+				"a wakeup for this agent+issue was already created within the last %d minutes; wait before creating another",
+				WakeupMinIntervalMinutes,
+			)
 		}
 	case TriggerIssueStatus:
 		if !req.WatchIssueID.Valid || !req.WatchStatus.Valid || strings.TrimSpace(req.WatchStatus.String) == "" {
@@ -222,14 +248,23 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return fmt.Errorf("issue workspace mismatch")
 	}
 
-	// Postpone if another run is already active on this issue — firing now
-	// would create a duplicate concurrent task.
-	if hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, row.IssueID); checkErr == nil && hasActive {
-		slog.Info("cerebro wakeup postponed: active task on issue",
+	// Phase 1: clean up hanging running/dispatched tasks for this agent+issue
+	// so the new wakeup task can actually be claimed by the daemon.
+	if cancelled, cancelErr := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: row.AgentID,
+	}); cancelErr != nil {
+		slog.Warn("cerebro wakeup: could not cancel hanging tasks",
 			"wakeup_id", util.UUIDToString(row.ID),
-			"issue_id", util.UUIDToString(row.IssueID),
+			"agent_id", util.UUIDToString(row.AgentID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", cancelErr,
 		)
-		return s.postpone(ctx, row)
+	} else if len(cancelled) > 0 {
+		slog.Info("cerebro wakeup: cancelled hanging tasks before dispatch",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"cancelled", len(cancelled),
+		)
 	}
 
 	// Postpone if the agent has no runtime or the runtime is currently offline.
@@ -271,6 +306,11 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	if err := s.Cerebro.MarkWakeupDispatched(ctx, row.ID); err != nil {
 		return fmt.Errorf("mark dispatched: %w", err)
 	}
+
+	// Phase 1: increment postpone counter and notify the issue owner if the
+	// loop threshold is reached.
+	go s.checkPostponeLimit(context.Background(), row, issue)
+
 	if s.Bus != nil {
 		s.Bus.Publish(events.Event{
 			Type:        protocol.EventCommentCreated,
@@ -364,6 +404,78 @@ func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return fmt.Errorf("postpone wakeup: %w", err)
 	}
 	return nil
+}
+
+// checkPostponeLimit increments the postpone counter and sends an inbox
+// notification to the issue owner when the limit is reached. Called after
+// a successful dispatch so it never blocks the dispatch path.
+func (s *Service) checkPostponeLimit(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue) {
+	count, err := s.Cerebro.IncrementWakeupPostpones(ctx, row.ID)
+	if err != nil {
+		slog.Warn("cerebro wakeup: increment postpones failed",
+			"wakeup_id", util.UUIDToString(row.ID), "error", err)
+		return
+	}
+	if count < WakeupMaxConsecutivePostpones {
+		return
+	}
+	// Threshold reached — notify the issue owner and reset the counter.
+	s.sendPostponeNotification(ctx, row, issue, count)
+	if resetErr := s.Cerebro.ResetWakeupPostpones(ctx, row.ID); resetErr != nil {
+		slog.Warn("cerebro wakeup: reset postpones failed",
+			"wakeup_id", util.UUIDToString(row.ID), "error", resetErr)
+	}
+}
+
+// sendPostponeNotification sends an inbox item to the member who owns the
+// issue (assignee if member, else creator) warning that the wakeup has
+// fired consecutiveCount times without resolution.
+func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, consecutiveCount int32) {
+	// Find the human recipient: assignee if member, else creator.
+	var recipientID pgtype.UUID
+	if issue.AssigneeID.Valid && issue.AssigneeType.Valid && issue.AssigneeType.String == "member" {
+		recipientID = issue.AssigneeID
+	} else if issue.CreatorID.Valid && issue.CreatorType == "member" {
+		recipientID = issue.CreatorID
+	}
+	if !recipientID.Valid {
+		return // no human owner to notify
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"wakeup_id":         util.UUIDToString(row.ID),
+		"issue_id":          util.UUIDToString(issue.ID),
+		"consecutive_count": consecutiveCount,
+		"prompt":            row.Prompt,
+		"max_postpones":     WakeupMaxConsecutivePostpones,
+	})
+	_, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   row.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   recipientID,
+		Type:          "wakeup_loop",
+		Severity:      "action_required",
+		IssueID:       issue.ID,
+		Title:         fmt.Sprintf(`Wakeup loop på "%s"`, issue.Title),
+		Body: pgtype.Text{
+			String: fmt.Sprintf(
+				`Agenten har modtaget dette wakeup %d gange i træk uden at afslutte: "%s". Tjek hvad der blokerer.`,
+				consecutiveCount, row.Prompt,
+			),
+			Valid: true,
+		},
+		ActorType: pgtype.Text{String: "system", Valid: true},
+		ActorID:   pgtype.UUID{},
+		Details:   details,
+		Route:     "inbox",
+	})
+	if err != nil {
+		slog.Warn("cerebro wakeup: postpone inbox notification failed",
+			"wakeup_id", util.UUIDToString(row.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+	}
 }
 
 func (s *Service) validateIssueAndAgent(ctx context.Context, workspaceID, issueID, agentID pgtype.UUID) error {

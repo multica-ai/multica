@@ -170,3 +170,6 @@ jobs:
 
       - name: Validate CEREBRO-PATCH markers
         run: bash scripts/validate-cerebro-patches.sh
+
+      - name: Validate system-activity docs consistency # CEREBRO-PATCH(system-activity-ci): TECH-3038 Phase 1
+        run: bash scripts/validate-system-activity-docs.sh

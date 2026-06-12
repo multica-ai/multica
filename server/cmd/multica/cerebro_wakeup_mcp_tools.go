@@ -39,8 +39,8 @@ func registerWakeupTools(srv *mcp.Server, client *cli.APIClient) {
 				"agent_id":       map[string]any{"type": "string", "description": "Agent UUID. Defaults to this running agent when available."},
 				"issue_id":       map[string]any{"type": "string", "description": "Issue UUID the agent should run on."},
 				"prompt":         map[string]any{"type": "string", "description": "Prompt inserted into the wakeup comment."},
-				"trigger_type":   map[string]any{"type": "string", "enum": []string{"time", "issue_status", "github_ci"}},
-				"fire_at":        map[string]any{"type": "string", "description": "RFC3339 timestamp for trigger_type=time."},
+				"trigger_type":   map[string]any{"type": "string", "enum": []string{"time", "issue_status", "github_ci"}}, // CEREBRO-PATCH(wakeup-phase1-mcp-cleanup): TECH-3038 Phase 1 — removed recurring/interval_seconds
+				"fire_at":        map[string]any{"type": "string", "description": "RFC3339 timestamp (required for trigger_type=time)."},
 				"watch_issue_id": map[string]any{"type": "string", "description": "Issue UUID watched by issue_status/github_ci."},
 				"watch_status":   map[string]any{"type": "string", "description": "Status for trigger_type=issue_status."},
 			},

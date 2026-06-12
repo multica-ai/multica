@@ -4,8 +4,23 @@
 // classic inbox lives in the ⋯ menu.
 "use client";
 
-import { useMemo, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   ResizablePanelGroup,
@@ -22,11 +37,18 @@ import {
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
+import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import { useInboxActionGroupLabels, useSetInboxMode } from "@multica/cerebro-inbox";
+import { api } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail } from "@multica/views/channels";
+import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
+import type { Channel } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
@@ -45,16 +67,62 @@ function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) 
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
 }
 
+// TECH-3413 #6 — stable identity of an entry so a frozen snapshot can be
+// matched back to its live row after a refetch (ids survive read/state changes).
+function entryIdentity(entry: DynInboxEntry): string {
+  return `${entry.kind}:${entry.id}`;
+}
+
+// TECH-3413 #1 — wraps one section in a @dnd-kit sortable. The render prop
+// receives the drag handle to place inside the section header so only the
+// grip starts a drag (the rest of the box stays clickable).
+function SortableSection({
+  id,
+  children,
+}: {
+  id: string;
+  children: (handle: React.ReactNode) => React.ReactNode;
+}) {
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 20 : undefined,
+    opacity: isDragging ? 0.85 : undefined,
+  };
+  const handle = (
+    <button
+      ref={setActivatorNodeRef}
+      type="button"
+      {...attributes}
+      {...listeners}
+      className="-ml-1 cursor-grab touch-none rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground active:cursor-grabbing"
+      title="Drag to reorder"
+      aria-label="Drag to reorder section"
+    >
+      <GripVertical className="size-3.5" />
+    </button>
+  );
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children(handle)}
+    </div>
+  );
+}
+
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
   const { layout, setLayout } = useInboxLayout();
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const setMode = useSetInboxMode();
+  const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
 
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
+  const qc = useQueryClient();
 
   const [activeTabId, setActiveTabId] = useState<string>(
     layout.activeTabId ?? layout.tabs[0]?.id ?? "",
@@ -63,22 +131,84 @@ export function DynamicInbox() {
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
 
+  // TECH-3413 #9 — free-text search across all sections in the active tab.
+  const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  // TECH-3413 #6 — frozen copy of the selected entry, captured at selection
+  // time. While a row is open we render it from this snapshot so marking it
+  // read doesn't move it out of its group/section until you pick another row.
+  const [selectedSnapshot, setSelectedSnapshot] = useState<DynInboxEntry | null>(null);
   const selectedKey = selected
     ? selected.kind === "notif"
       ? selected.item.issue_id ?? selected.item.id
       : selected.id
     : null;
 
+  const clearSelection = useCallback(() => {
+    setSelected(null);
+    setSelectedSnapshot(null);
+  }, []);
+
   const onSelect = (entry: DynInboxEntry) => {
     setSelected(entry);
+    setSelectedSnapshot(entry);
+    // TECH-3413 #7 — selecting never auto-advances to the next row; we only
+    // ever set the row the user clicked.
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
   const onArchive = (entry: DynInboxEntry) => {
     if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
-    if (selected && selected.id === entry.id) setSelected(null);
+    else if (entry.kind === "chat") {
+      // Mirror the classic inbox: archive the session, then refresh the list.
+      void api
+        .updateChatSession(entry.session.id, { status: "archived" })
+        .then(() => qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) }));
+    }
+    if (selected && selected.id === entry.id) clearSelection();
   };
+
+  // TECH-3413 #6 — substitute the frozen snapshot for its live row so the
+  // section filter/sort sees the entry's selection-time state, not the
+  // just-marked-read state. Matched on stable identity; falls through cleanly
+  // if the row was archived/removed.
+  const displayEntries = useMemo(() => {
+    if (!selectedSnapshot) return entries;
+    const target = entryIdentity(selectedSnapshot);
+    let swapped = false;
+    const next = entries.map((e) => {
+      if (!swapped && entryIdentity(e) === target) {
+        swapped = true;
+        return selectedSnapshot;
+      }
+      return e;
+    });
+    return swapped ? next : entries;
+  }, [entries, selectedSnapshot]);
+
+  // TECH-3413 #1 — drag-to-reorder sections (5px threshold so clicks inside a
+  // section still register).
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const handleSectionDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    updateActiveTab((t) => {
+      const oldIndex = t.sections.findIndex((s) => s.id === active.id);
+      const newIndex = t.sections.findIndex((s) => s.id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return t;
+      return { ...t, sections: arrayMove(t.sections, oldIndex, newIndex) };
+    });
+  };
+  // TECH-3422 — the Slack-block opens a channel/DM into the same detail panel.
+  const onOpenChannel = (channel: Channel) => {
+    setSelected({
+      kind: "channel",
+      id: channel.id,
+      time: Date.parse(channel.updated_at) || 0,
+      channel,
+    });
+  };
+  const selectedChannelId = selected?.kind === "channel" ? selected.channel.id : null;
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
@@ -135,7 +265,7 @@ export function DynamicInbox() {
             key={selected.channel.id}
             channelId={selected.channel.id}
             initialChannel={selected.channel}
-            onArchive={() => setSelected(null)}
+            onArchive={clearSelection}
           />
         </ErrorBoundary>
       );
@@ -150,17 +280,27 @@ export function DynamicInbox() {
             defaultSidebarOpen={false}
             layoutId="multica_inbox_dynamic_issue_detail_layout"
             linkSelfInBreadcrumb
-            onDelete={() => setSelected(null)}
+            onDelete={clearSelection}
           />
         </ErrorBoundary>
       );
     }
+    // Agent chat session — open the same conversation panel the classic inbox
+    // uses, so chats read identically here.
+    if (selected.kind === "chat") {
+      return (
+        <ErrorBoundary resetKeys={[selected.session.id]}>
+          <InboxChatPanel key={selected.session.id} sessionId={selected.session.id} />
+        </ErrorBoundary>
+      );
+    }
     return (
-      <div className="p-6 text-sm text-muted-foreground">
-        Open this conversation from the chat view.
+      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+        <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+        <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected]);
+  }, [selected, clearSelection]);
 
   return (
     <ResizablePanelGroup orientation="horizontal">
@@ -200,7 +340,9 @@ export function DynamicInbox() {
               <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Add section</DropdownMenuLabel>
-                  {SECTION_CATALOG.map((c) => (
+                  {SECTION_CATALOG.filter(
+                    (c) => c.kind !== "team" || slackBlockEnabled,
+                  ).map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
                     </DropdownMenuItem>
@@ -224,6 +366,30 @@ export function DynamicInbox() {
           </div>
         </div>
 
+        {/* search (TECH-3413 #9) */}
+        <div className="border-b border-border px-3 py-2">
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+            <Search className="size-3.5 flex-none text-muted-foreground" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search inbox…"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
+            {query && (
+              <button
+                type="button"
+                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
+                onClick={() => setQuery("")}
+                title="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
         {/* sections */}
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
@@ -232,31 +398,65 @@ export function DynamicInbox() {
               Empty tab — add a section from the ⋯ menu.
             </p>
           )}
-          {activeTab.sections.map((section, i) => (
-            <DynamicInboxSection
-              key={section.id}
-              section={section}
-              entries={entries}
-              filterContext={filterContext}
-              actionLabels={actionLabels}
-              projects={projects}
-              selectedKey={selectedKey}
-              onSelect={onSelect}
-              onArchive={onArchive}
-              onChange={changeSection}
-              onRemove={() => removeSection(section.id)}
-              onMove={(dir) => moveSection(section.id, dir)}
-              isFirst={i === 0}
-              isLast={i === activeTab.sections.length - 1}
-            />
-          ))}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
+            <SortableContext
+              items={activeTab.sections.map((s) => s.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-3">
+                {activeTab.sections.map((section, i) => (
+                  <SortableSection key={section.id} id={section.id}>
+                    {(handle) =>
+                      section.kind === "team" ? (
+                        <div className="relative">
+                          <div className="absolute left-2 top-2.5 z-10">{handle}</div>
+                          <SlackBlock
+                            wsId={wsId}
+                            selectedChannelId={selectedChannelId}
+                            onOpenChannel={onOpenChannel}
+                            maxPeople={section.maxPeople}
+                            onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                            onRemove={() => removeSection(section.id)}
+                            onMove={(dir) => moveSection(section.id, dir)}
+                            isFirst={i === 0}
+                            isLast={i === activeTab.sections.length - 1}
+                          />
+                        </div>
+                      ) : (
+                        <DynamicInboxSection
+                          section={section}
+                          entries={displayEntries}
+                          filterContext={filterContext}
+                          actionLabels={actionLabels}
+                          projects={projects}
+                          selectedKey={selectedKey}
+                          query={query}
+                          dragHandle={handle}
+                          onSelect={onSelect}
+                          onArchive={onArchive}
+                          onChange={changeSection}
+                          onRemove={() => removeSection(section.id)}
+                          onMove={(dir) => moveSection(section.id, dir)}
+                          isFirst={i === 0}
+                          isLast={i === activeTab.sections.length - 1}
+                        />
+                      )
+                    }
+                  </SortableSection>
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         </div>
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
         {detail ?? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Select a message to read it here.
+          // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
+          // hint) so the right panel never reads as a blank/broken pane.
+          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+            <p className="text-sm">Select a message to read it here.</p>
           </div>
         )}
       </ResizablePanel>

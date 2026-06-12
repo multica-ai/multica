@@ -2,8 +2,8 @@
 // that lives outside the upstream zone so the validate-cerebro-patches gate
 // stays clean. See docs/cerebro-patches.md (`cerebro-channels-favorites`).
 export { ChannelAgentInlineRow } from "./channel-agent-inline-row";
-export { useChannelFavoritesStore, actorKey } from "./favorites-store";
-export type { ActorKey } from "./favorites-store";
+export { useChannelFavoritesStore, actorKey, channelKey } from "./favorites-store";
+export type { ActorKey, ChannelKey, FavoriteKey } from "./favorites-store";
 export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
 // TECH-3352 — open-time auto-mark-read for channels/DMs (replaces the inline
 // focus-guard effect that left the inbox row stuck as unread when focus

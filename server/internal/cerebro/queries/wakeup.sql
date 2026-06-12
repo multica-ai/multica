@@ -31,12 +31,14 @@ INSERT INTO cerebro_agent_wakeup (
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at;
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones;
 
 -- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
-       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+       consecutive_postpones
 FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id')::uuid)
@@ -48,7 +50,8 @@ LIMIT $2;
 -- name: GetCerebroAgentWakeup :one
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
-       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at
+       dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+       consecutive_postpones
 FROM cerebro_agent_wakeup
 WHERE id = $1;
 
@@ -62,7 +65,8 @@ WHERE id = $1
   AND state = 'pending'
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at;
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones;
 
 -- name: ClaimDueTimeWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -81,7 +85,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at;
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones;
 
 -- name: ClaimPendingIssueStatusWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -101,7 +106,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at;
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones;
 
 -- name: ClaimPendingGithubCIWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -120,7 +126,8 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
-          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at;
+          dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
+          consecutive_postpones;
 
 -- name: MarkWakeupDispatched :exec
 UPDATE cerebro_agent_wakeup
@@ -164,3 +171,31 @@ SET state = 'pending',
     fire_at = $2,
     updated_at = now()
 WHERE id = $1;
+
+-- name: IncrementWakeupPostpones :one
+-- Increments consecutive_postpones and returns the new count.
+-- Called after each successful wakeup dispatch so the sweeper can
+-- notify the issue owner when the loop threshold is reached.
+UPDATE cerebro_agent_wakeup
+SET consecutive_postpones = consecutive_postpones + 1,
+    updated_at = now()
+WHERE id = $1
+RETURNING consecutive_postpones;
+
+-- name: ResetWakeupPostpones :exec
+-- Resets the postpone counter (called after inbox notification is sent).
+UPDATE cerebro_agent_wakeup
+SET consecutive_postpones = 0,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: HasRecentPendingWakeupForAgentIssue :one
+-- Returns true if there is already a pending wakeup for the same
+-- agent+issue created within the last @min_interval_minutes minutes.
+-- Used to enforce wakeup_min_interval_minutes on creation.
+SELECT count(*) > 0 AS has_recent
+FROM cerebro_agent_wakeup
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND state = 'pending'
+  AND created_at > now() - make_interval(mins => @min_interval_minutes::int);

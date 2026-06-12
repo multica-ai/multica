@@ -15,10 +15,18 @@ export const actorKey = (
   id: string,
 ): ActorKey => `${type}:${id}` as ActorKey;
 
+// TECH-3422 — the Slack-block stars channels/DMs too, not just actors, so the
+// favorites set is keyed by a superset that also covers channel ids. Existing
+// actor callers (new-message picker) keep passing ActorKey, which is a subset.
+export type ChannelKey = `channel:${string}`;
+export type FavoriteKey = ActorKey | ChannelKey;
+
+export const channelKey = (id: string): ChannelKey => `channel:${id}` as ChannelKey;
+
 interface ChannelFavoritesState {
-  favorites: ActorKey[];
-  isFavorite: (key: ActorKey) => boolean;
-  toggle: (key: ActorKey) => void;
+  favorites: FavoriteKey[];
+  isFavorite: (key: FavoriteKey) => boolean;
+  toggle: (key: FavoriteKey) => void;
 }
 
 /**

@@ -4,6 +4,7 @@ import type { InboxActionContext } from "@multica/cerebro-inbox";
 import {
   entryIsUnread,
   entryProjectId,
+  entryIsMentioned,
   entryMatchesSection,
   selectSectionEntries,
   type DynInboxEntry,
@@ -90,6 +91,41 @@ describe("section-filter", () => {
     const entries = [notifEntry(1), notifEntry(3), notifEntry(2)];
     const out = selectSectionEntries(entries, { id: "s", kind: "all", sort: "oldest" }, ctx);
     expect(out.map((e) => e.time)).toEqual([1, 2, 3]);
+  });
+
+  it("detects mentions on notif (type) and channel (context set)", () => {
+    expect(entryIsMentioned(notifEntry(1, { type: "mentioned" }), ctx)).toBe(true);
+    expect(entryIsMentioned(notifEntry(1, { type: "new_comment" }), ctx)).toBe(false);
+    const mentionedCtx: SectionFilterContext = {
+      ...ctx,
+      action: { ...ctx.action, mentionedChannels: new Set(["c-men"]) },
+    };
+    expect(entryIsMentioned(channelEntry(1, { id: "c-men" }), mentionedCtx)).toBe(true);
+    expect(entryIsMentioned(channelEntry(1, { id: "c-other" }), mentionedCtx)).toBe(false);
+  });
+
+  it("'filter' kind ANDs the enabled predicates; empty filter matches all (#4)", () => {
+    const unreadPinned = notifEntry(1, { read: false, issue_id: "pinned-iss" });
+    const readPinned = notifEntry(1, { read: true, issue_id: "pinned-iss" });
+    const unreadOther = notifEntry(1, { read: false, issue_id: "other" });
+
+    // Empty filter = everything.
+    expect(entryMatchesSection(unreadOther, { id: "s", kind: "filter" }, ctx)).toBe(true);
+
+    // Unread AND pinned: only the unread+pinned row qualifies.
+    const cfg = { id: "s", kind: "filter" as const, filterUnread: true, filterPinned: true };
+    expect(entryMatchesSection(unreadPinned, cfg, ctx)).toBe(true);
+    expect(entryMatchesSection(readPinned, cfg, ctx)).toBe(false);
+    expect(entryMatchesSection(unreadOther, cfg, ctx)).toBe(false);
+
+    // Project narrow combines with the toggles.
+    const proj = notifEntry(1, { read: false, project_id: "p1" });
+    expect(
+      entryMatchesSection(proj, { id: "s", kind: "filter", filterUnread: true, projectId: "p1" }, ctx),
+    ).toBe(true);
+    expect(
+      entryMatchesSection(proj, { id: "s", kind: "filter", filterUnread: true, projectId: "pX" }, ctx),
+    ).toBe(false);
   });
 });
 
