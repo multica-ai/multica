@@ -43,6 +43,12 @@
     "section_creator": "Creator",
     "section_project": "Project",
     "section_label": "Label",
+    "section_epic": "Epic",
+    "section_sprint": "Sprint",
+    "epic": "Epic",
+    "no_epic": "No Epic",
+    "sprint": "Sprint",
+    "no_sprint": "No Sprint",
     "members_group": "Members",
     "agents_group": "Agents",
     "squads_group": "Squads",
@@ -63,6 +69,7 @@
     "group_assignee": "Assignee",
     "group_parent": "Parent issue",
     "group_project": "Project",
+    "group_epic": "Epic",
     "sort_manual": "Manual",
     "sort_priority": "Priority",
     "sort_start_date": "Start date",
@@ -481,5 +488,20 @@
     "dont_show_again": "Don't show this again",
     "keep_in_backlog": "Keep in Backlog",
     "move_to_todo": "Move to Todo"
+  },
+  "epic_picker": {
+    "none": "No epic",
+    "remove": "Remove epic",
+    "empty": "No epics in this workspace"
+  },
+  "sprint_picker": {
+    "none": "No sprint",
+    "remove": "Remove sprint",
+    "empty": "No sprints in this workspace"
+  },
+  "sections": {
+    "properties": "Properties",
+    "planning": "Planning",
+    "dates": "Dates"
   }
 }

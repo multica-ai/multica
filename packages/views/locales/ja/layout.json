@@ -4,6 +4,8 @@
     "my_issues": "マイイシュー",
     "issues": "イシュー",
     "projects": "プロジェクト",
+    "epics": "Epics",
+    "sprints": "Sprints",
     "autopilots": "オートパイロット",
     "agents": "エージェント",
     "squads": "スクワッド",

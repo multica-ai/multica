@@ -42,6 +42,10 @@ export function IssuesPage() {
   const projectFilters = useIssueViewStore((s) => s.projectFilters);
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const epicFilters = useIssueViewStore((s) => s.epicFilters);
+  const includeNoEpic = useIssueViewStore((s) => s.includeNoEpic);
+  const sprintFilters = useIssueViewStore((s) => s.sprintFilters);
+  const includeNoSprint = useIssueViewStore((s) => s.includeNoSprint);
   const sortBy = useIssueViewStore((s) => s.sortBy);
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
@@ -126,15 +130,15 @@ export function IssuesPage() {
   const headerIssues = usesAssigneeBoard ? assigneeIssues : scopedIssues;
 
   const issues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds }),
+    [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane — same narrowing as `issues`
   // minus the status filter.
   const swimlaneIssues = useMemo(
-    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
-    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(scopedIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds }),
+    [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   const activeFilters = useMemo(() => ({
@@ -145,6 +149,10 @@ export function IssuesPage() {
     projectFilters,
     includeNoProject,
     labelFilters,
+    epicFilters,
+    includeNoEpic,
+    sprintFilters,
+    includeNoSprint,
     agentRunningFilter,
   }), [
     priorityFilters,
@@ -154,6 +162,10 @@ export function IssuesPage() {
     projectFilters,
     includeNoProject,
     labelFilters,
+    epicFilters,
+    includeNoEpic,
+    sprintFilters,
+    includeNoSprint,
     agentRunningFilter,
   ]);
 

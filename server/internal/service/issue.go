@@ -61,6 +61,8 @@ type IssueCreateParams struct {
 	CreatorID      pgtype.UUID
 	ParentIssueID  pgtype.UUID
 	ProjectID      pgtype.UUID
+	EpicID         pgtype.UUID
+	SprintID       pgtype.UUID
 	StartDate      pgtype.Date
 	DueDate        pgtype.Date
 	OriginType     pgtype.Text
@@ -257,6 +259,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			DueDate:       p.DueDate,
 			Number:        issueNumber,
 			ProjectID:     projectID,
+			EpicID:        p.EpicID,
+			SprintID:      p.SprintID,
 		})
 	}
 	if err != nil {

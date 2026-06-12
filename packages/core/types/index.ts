@@ -1,4 +1,6 @@
 export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
+export type { Epic, EpicStatus } from "./epic";
+export type { Sprint, SprintStatus } from "./sprint";
 export type {
   Agent,
   AgentStatus,

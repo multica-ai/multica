@@ -43,6 +43,12 @@
     "section_creator": "创建者",
     "section_project": "项目",
     "section_label": "标签",
+    "section_epic": "Epic",
+    "section_sprint": "Sprint",
+    "epic": "Epic",
+    "no_epic": "无 Epic",
+    "sprint": "Sprint",
+    "no_sprint": "无 Sprint",
     "members_group": "成员",
     "agents_group": "智能体",
     "squads_group": "小队",
@@ -61,6 +67,7 @@
     "group_assignee": "负责人",
     "group_parent": "父级 issue",
     "group_project": "项目",
+    "group_epic": "Epic",
     "sort_manual": "手动",
     "sort_priority": "优先级",
     "sort_start_date": "开始日期",
@@ -467,5 +474,20 @@
     "dont_show_again": "不再提示",
     "keep_in_backlog": "保持在 Backlog",
     "move_to_todo": "移到 Todo"
+  },
+  "epic_picker": {
+    "none": "无 Epic",
+    "remove": "移除 Epic",
+    "empty": "该工作区暂无 Epic"
+  },
+  "sprint_picker": {
+    "none": "无 Sprint",
+    "remove": "移除 Sprint",
+    "empty": "该工作区暂无 Sprint"
+  },
+  "sections": {
+    "properties": "属性",
+    "planning": "规划",
+    "dates": "日期"
   }
 }

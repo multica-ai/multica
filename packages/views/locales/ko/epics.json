@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Epics",
+    "new_epic": "새 Epic",
+    "empty": "아직 Epic이 없습니다",
+    "create_first": "첫 Epic 만들기",
+    "search_placeholder": "Epic 검색...",
+    "no_search_results": "검색 결과가 없습니다"
+  },
+  "table": {
+    "name": "이름",
+    "status": "상태",
+    "progress": "진행률",
+    "created": "생성일",
+    "issues": "issues"
+  },
+  "picker": {
+    "no_epic": "Epic 없음",
+    "remove_epic": "Epic 제거",
+    "no_epics": "이 워크스페이스에 Epic이 없습니다"
+  },
+  "status": {
+    "open": "진행 중",
+    "closed": "완료"
+  },
+  "detail": {
+    "not_found": "Epic을 찾을 수 없습니다",
+    "breadcrumb_fallback": "Epics",
+    "title_placeholder": "Epic 제목",
+    "copy_link": "링크 복사",
+    "delete_action": "Epic 삭제",
+    "section_properties": "속성",
+    "section_description": "설명",
+    "description_placeholder": "설명 추가...",
+    "no_issues_yet": "아직 이슈가 없습니다",
+    "delete_confirm_title": "Epic 삭제",
+    "delete_confirm_description": "이 Epic을 삭제하시겠습니까? 할당된 이슈는 삭제되지 않습니다."
+  },
+  "create": {
+    "title": "Epic 만들기",
+    "label_title": "제목",
+    "title_placeholder": "Epic 제목",
+    "label_description": "설명",
+    "description_placeholder": "설명 추가...",
+    "color": "색상",
+    "submit": "Epic 만들기",
+    "cancel": "취소"
+  }
+}
