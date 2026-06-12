@@ -5,7 +5,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Inbox } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   ResizablePanelGroup,
@@ -190,8 +190,9 @@ export function DynamicInbox() {
       );
     }
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Select a message to read it here.
+      <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+        <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+        <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
   }, [selected]);
@@ -305,8 +306,11 @@ export function DynamicInbox() {
       <ResizableHandle withHandle />
       <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
         {detail ?? (
-          <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-            Select a message to read it here.
+          // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
+          // hint) so the right panel never reads as a blank/broken pane.
+          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+            <p className="text-sm">Select a message to read it here.</p>
           </div>
         )}
       </ResizablePanel>
