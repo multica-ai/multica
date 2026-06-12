@@ -290,7 +290,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 // After clearing, it broadcasts a daemon:register event so connected clients
 // refresh the runtime list and the daemon can pick up queued tasks.
 func sweepExpiredHolds(ctx context.Context, queries *db.Queries, bus *events.Bus) {
-	released, err := queries.ClearExpiredHolds(ctx)
+	released, err := queries.ClearExpiredHolds(ctx, service.HoldExpiryMargin.Seconds())
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clear expired holds", "error", err)
 		return

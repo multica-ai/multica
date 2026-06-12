@@ -92,7 +92,8 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 const clearExpiredHolds = `-- name: ClearExpiredHolds :many
 UPDATE agent_runtime
 SET hold_until = NULL, hold_reason = NULL, updated_at = now()
-WHERE hold_until IS NOT NULL AND hold_until <= now() - make_interval(secs => 300)
+WHERE hold_until IS NOT NULL
+  AND hold_until <= now() - make_interval(secs => $1::double precision)
 RETURNING id, workspace_id
 `
 
@@ -101,13 +102,15 @@ type ClearExpiredHoldsRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Releases holds only after hold_until plus a 300s margin has fully elapsed.
-// The margin absorbs clock skew between when we parsed the reset time and when
-// the provider actually lifts the limit (the quota is often not released on the
-// very first run after the stated reset), so we keep the runtime held a little
-// longer rather than dispatch into a still-throttled provider.
-func (q *Queries) ClearExpiredHolds(ctx context.Context) ([]ClearExpiredHoldsRow, error) {
-	rows, err := q.db.Query(ctx, clearExpiredHolds)
+// Releases holds only after hold_until plus the release margin has fully
+// elapsed. The margin absorbs clock skew between when we parsed the reset time
+// and when the provider actually lifts the limit (the quota is often not
+// released on the very first run after the stated reset), so we keep the
+// runtime held a little longer rather than dispatch into a still-throttled
+// provider. The margin is passed from the single holdExpiryMargin source in Go
+// so the sweeper, both claim paths, and runtimeOnHold cannot drift apart.
+func (q *Queries) ClearExpiredHolds(ctx context.Context, holdExpiryMarginSeconds float64) ([]ClearExpiredHoldsRow, error) {
+	rows, err := q.db.Query(ctx, clearExpiredHolds, holdExpiryMarginSeconds)
 	if err != nil {
 		return nil, err
 	}
