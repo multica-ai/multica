@@ -39,6 +39,16 @@ func isWorkspaceNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "workspace not found")
 }
 
+// IsNotFound reports whether err is a 404 from a daemon API call. The gc-check
+// endpoints return 404 for a row that was deleted (or that a scoped token
+// cannot see), which callers treat as a definitive "gone" signal distinct from
+// a transient 5xx/network failure. Exported for out-of-package callers such as
+// the k8s controller's PVC reaper.
+func IsNotFound(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound
+}
+
 // isTaskNotFoundError returns true if the error is a 404 with "task not found"
 // body. The daemon uses this to detect that a task was deleted server-side
 // (issue removed, agent reassigned, ...) while the local agent was still

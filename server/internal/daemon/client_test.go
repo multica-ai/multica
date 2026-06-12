@@ -240,6 +240,18 @@ func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
 	}
 }
 
+func TestIsNotFound(t *testing.T) {
+	if !IsNotFound(&requestError{StatusCode: http.StatusNotFound}) {
+		t.Error("expected 404 to be reported as not-found")
+	}
+	if IsNotFound(&requestError{StatusCode: http.StatusInternalServerError}) {
+		t.Error("expected 500 not to be reported as not-found")
+	}
+	if IsNotFound(nil) {
+		t.Error("expected nil error not to be reported as not-found")
+	}
+}
+
 func TestNormalizeGOOS(t *testing.T) {
 	cases := map[string]string{
 		"darwin":  "macos",
