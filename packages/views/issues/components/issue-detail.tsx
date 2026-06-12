@@ -367,6 +367,7 @@ function mergeAttachments(
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
+const EMPTY_STRING_ARRAY: string[] = [];
 
 // ---------------------------------------------------------------------------
 // Issue-level attachment list. These are explicit issue attachments, so keep
@@ -1599,6 +1600,7 @@ export function IssueDetail({
   const subIssuesCollapsed = useIssueDetailCollapseStore((s) =>
     s.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed)
   );
+  const collapsedCommentIds = useCommentCollapseStore((s) => s.collapsedByIssue[resolvedId] ?? EMPTY_STRING_ARRAY);
   const setSubIssuesCollapsed = useCallback((collapsed: boolean | ((prev: boolean) => boolean)) => {
     const store = useIssueDetailCollapseStore.getState();
     const current = store.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed);
@@ -1606,42 +1608,59 @@ export function IssueDetail({
     store.setSubIssuesCollapsed(resolvedId, next);
   }, [resolvedId, defaultSubIssuesCollapsed]);
 
+  const commentRootIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const group of timelineView.groups) {
+      if (group.type !== "comment") continue;
+      const entry = group.entries[0];
+      if (entry) ids.push(entry.id);
+    }
+    return ids;
+  }, [timelineView.groups]);
+
+  const resolvedCommentIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const group of timelineView.groups) {
+      if (group.type !== "comment") continue;
+      const entry = group.entries[0];
+      if (entry?.resolved_at) ids.push(entry.id);
+    }
+    return ids;
+  }, [timelineView.groups]);
+
+  const allCommentsCollapsed = useMemo(() => {
+    if (commentRootIds.length === 0) return true;
+    return commentRootIds.every((id) => {
+      const entry = timelineView.commentById.get(id);
+      if (entry?.resolved_at && !expandedResolved.has(id)) return true;
+      return collapsedCommentIds.includes(id);
+    });
+  }, [collapsedCommentIds, commentRootIds, expandedResolved, timelineView.commentById]);
+
+  const isAllSectionsCollapsed = isDescriptionCollapsedState && subIssuesCollapsed && allCommentsCollapsed;
+
   const handleToggleAllSections = useCallback(() => {
-    const isAllCollapsed = isDescriptionCollapsedState && subIssuesCollapsed;
-    const nextCollapsed = !isAllCollapsed;
+    const nextCollapsed = !isAllSectionsCollapsed;
     
     useIssueDetailCollapseStore.getState().toggleAllSections(resolvedId, nextCollapsed);
-    
-    const resolvedCommentIds: string[] = [];
-    if (timelineView?.groups) {
-      for (const group of timelineView.groups) {
-        if (group.type === "comment") {
-          const entry = group.entries[0];
-          if (entry && entry.resolved_at) {
-            resolvedCommentIds.push(entry.id);
-          }
-        }
-      }
-    }
-    
+    useCommentCollapseStore.getState().setIssueCommentsCollapsed(
+      resolvedId,
+      commentRootIds,
+      nextCollapsed,
+    );
+
     if (nextCollapsed) {
-      useCommentCollapseStore.setState((s) => ({
-        collapsedByIssue: {
-          ...s.collapsedByIssue,
-          [resolvedId]: [...new Set([...(s.collapsedByIssue[resolvedId] ?? []), ...resolvedCommentIds])]
-        }
-      }));
       setExpandedResolved(new Set());
     } else {
-      useCommentCollapseStore.setState((s) => ({
-        collapsedByIssue: {
-          ...s.collapsedByIssue,
-          [resolvedId]: (s.collapsedByIssue[resolvedId] ?? []).filter(id => !resolvedCommentIds.includes(id))
-        }
-      }));
       setExpandedResolved(new Set(resolvedCommentIds));
     }
-  }, [resolvedId, isDescriptionCollapsedState, subIssuesCollapsed, timelineView?.groups, setExpandedResolved]);
+  }, [
+    commentRootIds,
+    isAllSectionsCollapsed,
+    resolvedCommentIds,
+    resolvedId,
+    setExpandedResolved,
+  ]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
@@ -2603,7 +2622,7 @@ export function IssueDetail({
                     className="text-muted-foreground"
                     onClick={handleToggleAllSections}
                   >
-                    {isDescriptionCollapsedState && subIssuesCollapsed ? (
+                    {isAllSectionsCollapsed ? (
                       <UnfoldVertical className="h-4 w-4" />
                     ) : (
                       <FoldVertical className="h-4 w-4" />
@@ -2612,7 +2631,7 @@ export function IssueDetail({
                 }
               />
               <TooltipContent side="bottom">
-                {isDescriptionCollapsedState && subIssuesCollapsed
+                {isAllSectionsCollapsed
                   ? t(($) => $.detail.expand_all)
                   : t(($) => $.detail.collapse_all)}
               </TooltipContent>

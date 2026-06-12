@@ -11,6 +11,11 @@ interface CommentCollapseStore {
   collapsedByIssue: Record<string, string[]>;
   isCollapsed: (issueId: string, commentId: string) => boolean;
   toggle: (issueId: string, commentId: string) => void;
+  setIssueCommentsCollapsed: (
+    issueId: string,
+    commentIds: string[],
+    collapsed: boolean,
+  ) => void;
 }
 
 export const useCommentCollapseStore = create<CommentCollapseStore>()(
@@ -34,6 +39,27 @@ export const useCommentCollapseStore = create<CommentCollapseStore>()(
             return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: next } };
           }
           return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: [...current, commentId] } };
+        }),
+      setIssueCommentsCollapsed: (issueId, commentIds, collapsed) =>
+        set((s) => {
+          const ids = [...new Set(commentIds)];
+          if (ids.length === 0) return s;
+
+          const current = s.collapsedByIssue[issueId] ?? [];
+          if (collapsed) {
+            const next = [...new Set([...current, ...ids])];
+            if (next.length === current.length) return s;
+            return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: next } };
+          }
+
+          const remove = new Set(ids);
+          const next = current.filter((id) => !remove.has(id));
+          if (next.length === current.length) return s;
+          if (next.length === 0) {
+            const { [issueId]: _, ...rest } = s.collapsedByIssue;
+            return { collapsedByIssue: rest };
+          }
+          return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: next } };
         }),
     }),
     {

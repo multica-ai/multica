@@ -368,14 +368,41 @@ vi.mock("@multica/core/issues/stores", () => ({
     },
   ),
   selectRecentIssues: () => () => [],
-  useCommentCollapseStore: (selector?: any) => {
+  useCommentCollapseStore: (() => {
     const state = {
-      collapsedByIssue: {},
-      isCollapsed: () => false,
+      collapsedByIssue: {} as Record<string, string[]>,
+      isCollapsed: (issueId: string, commentId: string) =>
+        state.collapsedByIssue[issueId]?.includes(commentId) ?? false,
       toggle: () => {},
+      setIssueCommentsCollapsed: () => {},
     };
-    return selector ? selector(state) : state;
-  },
+    return Object.assign(
+      (selector?: any) => (selector ? selector(state) : state),
+      {
+        getState: () => state,
+        setState: (partial: Partial<typeof state>) => Object.assign(state, partial),
+      },
+    );
+  })(),
+  useIssueDetailCollapseStore: (() => {
+    const state = {
+      issueCollapseStates: {},
+      isDescriptionCollapsed: (_issueId: string, defaultVal: boolean) => defaultVal,
+      isSubIssuesCollapsed: (_issueId: string, defaultVal: boolean) => defaultVal,
+      isTaskCollapsed: (_issueId: string, _taskId: string, defaultVal: boolean) => defaultVal,
+      setDescriptionCollapsed: () => {},
+      setSubIssuesCollapsed: () => {},
+      setTaskCollapsed: () => {},
+      toggleAllSections: () => {},
+    };
+    return Object.assign(
+      (selector?: any) => (selector ? selector(state) : state),
+      {
+        getState: () => state,
+        setState: (partial: Partial<typeof state>) => Object.assign(state, partial),
+      },
+    );
+  })(),
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
