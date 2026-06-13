@@ -10,6 +10,8 @@
     "placeholder_archived": "보관된 세션입니다",
     "placeholder_named": "{{name}}에게 메시지 보내기…",
     "placeholder_default": "메시지 입력…",
+    "placeholder_page": "메시지를 보내거나 / 로 명령 사용...",
+    "attach_tooltip": "첨부",
     "send_tooltip": "보내기",
     "stop_tooltip": "중지",
     "send_failed_toast": "메시지를 보내지 못했습니다"
@@ -80,6 +82,23 @@
     "no_agents": "에이전트 없음",
     "history_group": "채팅 기록",
     "agent_filter_placeholder": "에이전트 검색..."
+  },
+  "page": {
+    "title": "채팅",
+    "messages_title": "메시지",
+    "search_placeholder": "에이전트 검색...",
+    "search_short_placeholder": "검색",
+    "no_results": "에이전트를 찾을 수 없음",
+    "back_to_agents": "채팅 목록으로 돌아가기",
+    "yesterday": "어제",
+    "current_thread": "Chat",
+    "new_thread": "New Thread",
+    "presence": {
+      "online": "온라인",
+      "unstable": "연결 불안정",
+      "offline": "오프라인",
+      "archived": "보관됨"
+    }
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",

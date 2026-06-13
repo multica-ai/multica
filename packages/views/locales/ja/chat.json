@@ -9,6 +9,8 @@
     "placeholder_archived": "このセッションはアーカイブされています",
     "placeholder_named": "{{name}} にメッセージ…",
     "placeholder_default": "メッセージを入力…",
+    "placeholder_page": "メッセージを送信、/ でコマンド...",
+    "attach_tooltip": "添付",
     "send_tooltip": "送信",
     "stop_tooltip": "停止",
     "send_failed_toast": "メッセージを送信できませんでした"
@@ -77,6 +79,23 @@
     "no_agents": "エージェントなし",
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索..."
+  },
+  "page": {
+    "title": "チャット",
+    "messages_title": "メッセージ",
+    "search_placeholder": "エージェントを検索...",
+    "search_short_placeholder": "検索",
+    "no_results": "エージェントが見つかりません",
+    "back_to_agents": "チャット一覧に戻る",
+    "yesterday": "昨日",
+    "current_thread": "Chat",
+    "new_thread": "New Thread",
+    "presence": {
+      "online": "オンライン",
+      "unstable": "接続が不安定",
+      "offline": "オフライン",
+      "archived": "アーカイブ済み"
+    }
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",

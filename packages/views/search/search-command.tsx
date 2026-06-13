@@ -69,6 +69,7 @@ import { useSearchStore } from "./search-store";
 // against the current workspace slug at render time (see SearchCommand body).
 // Only parameterless paths are valid nav destinations.
 type NavKey =
+  | "chat"
   | "inbox"
   | "myIssues"
   | "issues"
@@ -141,6 +142,7 @@ interface SearchResults {
 export function SearchCommand() {
   const { t } = useT("search");
   const navPages: NavPage[] = [
+    { key: "chat", label: t(($) => $.pages.chat), icon: MessageSquare, keywords: ["chat", "messages", "agents", "聊天"] },
     { key: "inbox", label: t(($) => $.pages.inbox), icon: Inbox, keywords: ["inbox", "notifications", "收件箱"] },
     { key: "myIssues", label: t(($) => $.pages.my_issues), icon: CircleUser, keywords: ["my", "issues", "assigned", "我的"] },
     { key: "issues", label: t(($) => $.pages.issues), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },

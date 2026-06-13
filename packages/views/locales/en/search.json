@@ -11,6 +11,7 @@
     "recent": "Recent"
   },
   "pages": {
+    "chat": "Chat",
     "inbox": "Inbox",
     "my_issues": "My Issues",
     "issues": "Issues",
