@@ -17,9 +17,7 @@
  */
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
-// linkifyjs is a transitive dependency via @tiptap/extension-link
-// eslint-disable-next-line import-x/no-extraneous-dependencies
-import { find } from "linkifyjs";
+import { detectLinks } from "@multica/ui/markdown/linkify";
 
 export const AutolinkEmailRepairExtension = Extension.create({
   name: "autolinkEmailRepair",
@@ -64,16 +62,16 @@ export const AutolinkEmailRepairExtension = Extension.create({
               let bestHref = "";
               for (let len = 1; len <= trailingText.length; len++) {
                 const candidate = linkText + trailingText.slice(0, len);
-                const matches = find(candidate);
+                const matches = detectLinks(candidate);
                 const match = matches[0];
                 if (
                   matches.length === 1 &&
                   match &&
                   match.type === "email" &&
-                  match.value === candidate
+                  match.text === candidate
                 ) {
                   bestLen = len;
-                  bestHref = match.href;
+                  bestHref = match.url;
                 }
               }
 
