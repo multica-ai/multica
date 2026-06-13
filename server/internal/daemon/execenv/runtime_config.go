@@ -602,12 +602,26 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Complete the autopilot instructions directly\n")
 		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
-		// Comment-triggered: focus on reading and replying
-		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
+		// Comment-triggered and wakeup-triggered tasks both carry a reply
+		// anchor, but wakeups are platform activity, not synthetic comments.
+		if ctx.WakeupPrompt != "" {
+			b.WriteString("**This task was triggered by a scheduled wakeup.** The platform started you directly; no user-visible wakeup comment was created. Your primary job is to continue from the wakeup note and post any visible result in the original thread.\n\n")
+			if ctx.WakeupTriggerType != "" {
+				fmt.Fprintf(&b, "- Wakeup type: `%s`\n", ctx.WakeupTriggerType)
+			}
+			fmt.Fprintf(&b, "- Wakeup note: %s\n", ctx.WakeupPrompt)
+			fmt.Fprintf(&b, "- Original thread reply parent: `%s`\n\n", ctx.TriggerCommentID)
+		} else {
+			b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
+		}
 		b.WriteString(commentIssueGetStep(ctx.IssueID, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the issue get step when a fewer-calls saving is on (FIR-2384)
 		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
 		b.WriteString(commentThreadStep(ctx.IssueID, ctx.TriggerCommentID, ctx.TriggerThreadID, ctx.NewCommentCount, ctx.NewCommentsSince, ctx.PriorSessionResumed, ctx.IssueSnapshotInlined, ctx.BundleContextHint)) // CEREBRO-PATCH(runtime-config-snapshot): skip/replace the comment-list step when a fewer-calls saving is on (FIR-2384). Upstream's BuildNewCommentsHint / BuildResumedCommentsHint / BuildColdCommentsHint (MUL-2785/2809/2805) are wired through commentThreadStep so the FIR-2384 bundling and the upstream since-delta hints coexist.
-		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
+		if ctx.WakeupPrompt != "" {
+			fmt.Fprintf(&b, "4. Find the original thread anchor (ID: `%s`) inside the thread you just read. Do NOT treat it as a new comment; the wakeup note above is the new instruction.\n", ctx.TriggerCommentID)
+		} else {
+			fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
+		}
 		if ctx.IsSquadLeader {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)

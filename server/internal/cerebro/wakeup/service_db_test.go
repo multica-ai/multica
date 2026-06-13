@@ -1,10 +1,9 @@
 package wakeup
 
-// Integration tests for TECH-3487: a fired wakeup must thread its note back into
-// the conversation that scheduled it, so the agent's reply lands in the original
-// thread instead of a new orphaned root note. These exercise the real DB through
-// resolveWakeupParent (the decision dispatch uses to set the note's parent) and a
-// CreateComment round-trip proving the note resolves under the origin thread.
+// Integration tests for TECH-3487: a fired wakeup must restart the agent from
+// platform activity, not by wrapping the wakeup as a user-visible comment. The
+// queued task carries wakeup context while trigger_comment_id points at the
+// original thread so the agent's visible reply lands there.
 //
 // Tests skip cleanly when no test DB is reachable, same pattern as
 // sprints/sweeper_db_test.go and feature_flags/store_test.go.
@@ -21,6 +20,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -137,6 +138,7 @@ func setupWkFixture(ctx context.Context, pool *pgxpool.Pool) error {
 func cleanupWkFixture(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
 		`DELETE FROM cerebro_agent_wakeup WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
+		`DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,
 		`DELETE FROM comment WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM agent WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
@@ -175,7 +177,14 @@ func newWakeup(t *testing.T, ctx context.Context, svc *Service, issueID, origin 
 }
 
 func wkService() *Service {
-	return &Service{Cerebro: cerebrodb.New(wkPool), Queries: db.New(wkPool)}
+	queries := db.New(wkPool)
+	bus := events.New()
+	return &Service{
+		Cerebro: cerebrodb.New(wkPool),
+		Queries: queries,
+		Tasks:   service.NewTaskService(queries, nil, nil, bus),
+		Bus:     bus,
+	}
 }
 
 func TestResolveWakeupParent_RootOrigin(t *testing.T) {
@@ -292,10 +301,10 @@ func TestResolveOriginComment_TriggerCommentWinsOverLatestMemberComment(t *testi
 	}
 }
 
-// TestWakeupNoteThreadsUnderOrigin proves the product behavior end to end: the
-// dispatched wakeup note, created with the resolved parent, lands inside the
-// original thread (parent_id == thread root), not as a new orphaned root.
-func TestWakeupNoteThreadsUnderOrigin(t *testing.T) {
+// TestDispatchCreatesWakeupTaskWithoutSyntheticComment proves the product
+// behavior end to end: dispatch creates an agent task directly, stores the
+// wakeup note in task context, and does not add a hidden wakeup comment.
+func TestDispatchCreatesWakeupTaskWithoutSyntheticComment(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")
 	}
@@ -303,20 +312,50 @@ func TestWakeupNoteThreadsUnderOrigin(t *testing.T) {
 	svc := wkService()
 	row := newWakeup(t, ctx, svc, wkIssueID, wkReplyID)
 
-	parentID := svc.resolveWakeupParent(ctx, row, wkIssueID)
-	note, err := svc.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     wkIssueID,
-		WorkspaceID: wkWorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    util.MustParseUUID("00000000-0000-0000-0000-000000000000"),
-		Content:     buildWakeupCommentContent(row.TriggerType, row.Prompt),
-		Type:        commentTypeWakeup,
-		ParentID:    parentID,
-	})
-	if err != nil {
-		t.Fatalf("create wakeup note: %v", err)
+	var before int
+	if err := wkPool.QueryRow(ctx,
+		`SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'wakeup'`,
+		wkIssueID,
+	).Scan(&before); err != nil {
+		t.Fatalf("count wakeup comments before dispatch: %v", err)
 	}
-	if !note.ParentID.Valid || util.UUIDToString(note.ParentID) != util.UUIDToString(wkRootID) {
-		t.Fatalf("note parent = %s, want thread root %s", util.UUIDToString(note.ParentID), util.UUIDToString(wkRootID))
+
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch wakeup: %v", err)
+	}
+	t.Cleanup(func() {
+		wkPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1 AND context->>'type' = 'wakeup'`, wkIssueID)
+	})
+
+	var after int
+	if err := wkPool.QueryRow(ctx,
+		`SELECT count(*) FROM comment WHERE issue_id = $1 AND type = 'wakeup'`,
+		wkIssueID,
+	).Scan(&after); err != nil {
+		t.Fatalf("count wakeup comments after dispatch: %v", err)
+	}
+	if after != before {
+		t.Fatalf("wakeup comments = %d after dispatch, want unchanged %d", after, before)
+	}
+
+	var triggerCommentID pgtype.UUID
+	var contextType, prompt string
+	if err := wkPool.QueryRow(ctx, `
+		SELECT trigger_comment_id, context->>'type', context->>'prompt'
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND context->>'type' = 'wakeup'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, wkIssueID, wkAgentID).Scan(&triggerCommentID, &contextType, &prompt); err != nil {
+		t.Fatalf("load wakeup task: %v", err)
+	}
+	if util.UUIDToString(triggerCommentID) != util.UUIDToString(wkRootID) {
+		t.Fatalf("task trigger_comment_id = %s, want thread root %s", util.UUIDToString(triggerCommentID), util.UUIDToString(wkRootID))
+	}
+	if contextType != service.WakeupTaskContextType {
+		t.Fatalf("task context type = %q, want %q", contextType, service.WakeupTaskContextType)
+	}
+	if prompt != row.Prompt {
+		t.Fatalf("task context prompt = %q, want %q", prompt, row.Prompt)
 	}
 }
