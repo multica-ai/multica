@@ -782,6 +782,13 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		return
 	}
 
+	// Drain any check_suite events that arrived before this PR row was
+	// mirrored (out-of-order webhook delivery). Each drained row is
+	// replayed through the same upsert path used by live check_suite
+	// events; the DrainPending… query removes them atomically so a
+	// concurrent PR upsert can't double-apply.
+	h.replayPendingCheckSuitesForPR(ctx, pr, inst.WorkspaceID)
+
 	workspaceID := uuidToString(inst.WorkspaceID)
 	resp := githubPullRequestToResponse(pr)
 
@@ -915,24 +922,21 @@ type ghCheckSuitePayload struct {
 }
 
 // handleCheckSuiteEvent records the CI suite state for each PR the suite
-// references. MVP only persists terminal events (`completed`); GitHub sends
-// `requested`/`rerequested` for some apps but those carry no useful
-// conclusion and the RFC restricts us to suite-level aggregation.
+// references. We persist all non-terminal actions (`requested`, `rerequested`)
+// as well as `completed`: a `requested`/`rerequested` event has status
+// `queued`/`in_progress` and an empty conclusion, which the aggregation query
+// counts as pending. Without persisting them, the per-PR `checks_pending`
+// count stays at 0 while CI is mid-run and the PR card falls through to
+// "checks not reported yet" until the first suite finishes.
 //
 // The suite payload may reference multiple PRs (e.g. the same head SHA is
 // open against several base branches), so we iterate. A reference whose PR
-// hasn't been mirrored locally is logged and skipped — auto-backfill from
-// GitHub's REST API is a v2 enhancement.
+// hasn't been mirrored locally is stashed in `github_pending_check_suite`
+// and replayed when the matching `pull_request` event upserts the PR row.
 func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 	var p ghCheckSuitePayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Warn("github: bad check_suite payload", "err", err)
-		return
-	}
-	if p.Action != "completed" {
-		// MVP scope: only completed suites carry a conclusion we can
-		// surface. queued / in_progress events would feed a future
-		// "real pending" display path.
 		return
 	}
 	if p.Installation.ID == 0 {
@@ -973,12 +977,28 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 		if err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {
 				slog.Warn("github: lookup pr for check_suite failed", "err", err)
+				continue
 			}
-			slog.Info("github: check_suite for unknown PR — skipping",
-				"repo", p.Repository.Owner.Login+"/"+p.Repository.Name,
-				"pr", prRef.Number,
-				"suite_id", p.CheckSuite.ID,
-			)
+			// Out-of-order delivery: the suite reached us before the
+			// `pull_request` webhook that mirrors the PR row. Stash the
+			// event keyed by (workspace, repo, pr_number, suite_id); the
+			// PR upsert path will drain and replay it.
+			if err := h.Queries.UpsertPendingCheckSuite(ctx, db.UpsertPendingCheckSuiteParams{
+				WorkspaceID:    inst.WorkspaceID,
+				InstallationID: p.Installation.ID,
+				RepoOwner:      p.Repository.Owner.Login,
+				RepoName:       p.Repository.Name,
+				PrNumber:       prRef.Number,
+				SuiteID:        p.CheckSuite.ID,
+				HeadSha:        p.CheckSuite.HeadSHA,
+				AppID:          p.CheckSuite.App.ID,
+				Conclusion:     strToText(p.CheckSuite.Conclusion),
+				Status:         p.CheckSuite.Status,
+				SuiteUpdatedAt: updatedAt,
+			}); err != nil {
+				slog.Warn("github: stash pending check_suite failed",
+					"err", err, "suite_id", p.CheckSuite.ID)
+			}
 			continue
 		}
 		if err := h.Queries.UpsertPullRequestCheckSuite(ctx, db.UpsertPullRequestCheckSuiteParams{
@@ -1014,6 +1034,41 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 		h.publish(protocol.EventPullRequestUpdated, ws, "system", "", map[string]any{
 			"linked_issue_ids": linked,
 		})
+	}
+}
+
+// replayPendingCheckSuitesForPR drains the stash table for one PR (any
+// rows left there by a check_suite event that arrived before the PR row
+// was mirrored) and re-applies each event through the normal upsert
+// path. Safe to call on every PR upsert: the drain is a single
+// DELETE … RETURNING, so when there is nothing to replay the helper is
+// a no-op round-trip.
+func (h *Handler) replayPendingCheckSuitesForPR(ctx context.Context, pr db.GithubPullRequest, workspaceID pgtype.UUID) {
+	pending, err := h.Queries.DrainPendingCheckSuitesForPR(ctx, db.DrainPendingCheckSuitesForPRParams{
+		WorkspaceID: workspaceID,
+		RepoOwner:   pr.RepoOwner,
+		RepoName:    pr.RepoName,
+		PrNumber:    pr.PrNumber,
+	})
+	if err != nil {
+		slog.Warn("github: drain pending check_suites failed",
+			"err", err, "pr_id", uuidToString(pr.ID))
+		return
+	}
+	for _, row := range pending {
+		if err := h.Queries.UpsertPullRequestCheckSuite(ctx, db.UpsertPullRequestCheckSuiteParams{
+			PrID:       pr.ID,
+			SuiteID:    row.SuiteID,
+			HeadSha:    row.HeadSha,
+			AppID:      row.AppID,
+			Conclusion: row.Conclusion,
+			Status:     row.Status,
+			UpdatedAt:  row.SuiteUpdatedAt,
+		}); err != nil {
+			slog.Warn("github: replay pending check_suite failed",
+				"err", err, "pr_id", uuidToString(pr.ID),
+				"suite_id", row.SuiteID)
+		}
 	}
 }
 
