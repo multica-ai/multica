@@ -1013,6 +1013,7 @@ function CommentCardImpl({
             <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
               <ReplyInput
                 issueId={issueId}
+                rootCommentId={entry.id} // CEREBRO-PATCH(comment-drafts): TECH-3491 — scope the reply draft to this thread.
                 placeholder={t(($) => $.reply.placeholder)}
                 size="sm"
                 avatarType="member"

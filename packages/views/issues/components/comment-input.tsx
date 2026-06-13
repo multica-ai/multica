@@ -27,6 +27,8 @@ import { useT } from "../../i18n";
 import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — confirm before waking a foreign private agent.
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for the new-comment / channel / DM composer.
+import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
 
 interface CommentInputProps {
   issueId: string;
@@ -62,6 +64,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const { uploadWithToast } = useFileUpload(api);
   // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
   const { confirmBeforeSend, confirmDialog } = usePrivateAgentSendConfirm({ triggerAgentId });
+  // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist this composer's unsent text (key per issue/channel/DM).
+  const draft = useCommentDraft(`new:${issueId}`);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -93,6 +97,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
+      draft.clear(); // CEREBRO-PATCH(comment-drafts): TECH-3491 — sent, drop the stored draft.
       setIsEmpty(true);
       setMarkdown("");
       uploadMapRef.current.clear();
@@ -172,9 +177,12 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
               key={issueId}
               ref={editorRef}
               placeholder={t(($) => $.comment.leave_comment_placeholder)}
+              // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
+              defaultValue={draft.defaultValue}
               onUpdate={(md) => {
                 setMarkdown(md);
                 setIsEmpty(!md.trim());
+                draft.save(md); // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist as you type.
               }}
               onSubmit={handleSubmit}
               onUploadFile={handleUpload}
@@ -197,6 +205,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
             />
           </div>
           <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
+            {/* CEREBRO-PATCH(comment-drafts): TECH-3491 — "Kladde gemt" cue. */}
+            <DraftSavedHint show={draft.saved} className="mr-1" />
             {pinEnabled && (
               <PinButton
                 isPinned={isPinned}

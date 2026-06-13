@@ -90,6 +90,7 @@
     "@multica/ui": "workspace:*",
     "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
+    "@multica/cerebro-comment-drafts": "workspace:*",
     "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-duplicate-check": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
