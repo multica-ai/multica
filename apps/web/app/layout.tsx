@@ -20,7 +20,7 @@ import "./globals.css";
 // Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
 // app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
@@ -37,7 +37,7 @@ const geistMono = Geist_Mono({
 // render the font; layout-shift-prevention handled by next/font's synthetic
 // fallback metrics, same as Inter.
 const sourceSerif = Source_Serif_4({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   style: ["normal", "italic"],
   variable: "--font-serif",
   fallback: [
@@ -60,26 +60,21 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://www.multica.ai"),
+  metadataBase: new URL("https://app.hira.vn"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: "Hira — Quản lý công việc cho đội ngũ Người + AI",
+    template: "%s | Hira",
   },
   description:
-    "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
+    "Nền tảng biến coding agent thành đồng đội thực thụ. Giao việc, theo dõi tiến độ, tích lũy kỹ năng.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
   },
   openGraph: {
     type: "website",
-    siteName: "Multica",
-    locale: "en_US",
-  },
-  twitter: {
-    card: "summary_large_image",
-    site: "@multica_hq",
-    creator: "@multica_hq",
+    siteName: "Hira",
+    locale: "vi_VN",
   },
   alternates: {
     canonical: "/",
@@ -99,6 +94,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   "zh-Hans": "zh-CN",
   ko: "ko-KR",
   ja: "ja-JP",
+  vi: "vi-VN",
 };
 
 export default async function RootLayout({

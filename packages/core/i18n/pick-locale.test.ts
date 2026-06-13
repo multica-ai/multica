@@ -46,6 +46,12 @@ describe("matchLocale", () => {
     expect(matchLocale(["fr", "ja-JP", "en"])).toBe("ja");
   });
 
+  it("matches Vietnamese region tags to vi", () => {
+    expect(matchLocale(["vi"])).toBe("vi");
+    expect(matchLocale(["vi-VN"])).toBe("vi");
+    expect(matchLocale(["fr", "vi-VN", "en"])).toBe("vi");
+  });
+
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {
     expect(matchLocale(["----"])).toBe("en");
     expect(matchLocale(["x-private-only"])).toBe("en");

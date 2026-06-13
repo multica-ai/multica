@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "Hộp thư",
+    "back": "Hộp thư"
+  },
+  "menu": {
+    "mark_all_read": "Đánh dấu tất cả đã đọc",
+    "archive_all": "Lưu trữ tất cả",
+    "archive_all_read": "Lưu trữ tất cả đã đọc",
+    "archive_completed": "Lưu trữ đã hoàn tất"
+  },
+  "list": {
+    "empty": "Không có thông báo",
+    "mark_done_tooltip": "Đánh dấu hoàn tất",
+    "archive_tooltip": "Lưu trữ",
+    "time": {
+      "just_now": "vừa xong",
+      "minutes": "{{count}}ph",
+      "hours": "{{count}}g",
+      "days": "{{count}}n"
+    }
+  },
+  "detail": {
+    "select_prompt": "Chọn một thông báo để xem chi tiết",
+    "empty": "Hộp thư của bạn trống",
+    "original_input": "Đầu vào gốc",
+    "edit_advanced": "Sửa dạng nâng cao",
+    "archive": "Lưu trữ"
+  },
+  "types": {
+    "issue_assigned": "Được giao",
+    "unassigned": "Đã gỡ giao",
+    "assignee_changed": "Người phụ trách thay đổi",
+    "status_changed": "Trạng thái thay đổi",
+    "priority_changed": "Mức ưu tiên thay đổi",
+    "start_date_changed": "Ngày bắt đầu thay đổi",
+    "due_date_changed": "Hạn chót thay đổi",
+    "new_comment": "Bình luận mới",
+    "mentioned": "Được đề cập",
+    "review_requested": "Yêu cầu duyệt",
+    "task_completed": "Tác vụ hoàn tất",
+    "task_failed": "Tác vụ thất bại",
+    "agent_blocked": "Agent bị chặn",
+    "agent_completed": "Agent hoàn tất",
+    "reaction_added": "Đã thả cảm xúc",
+    "quick_create_done": "Đã tạo bằng Agent",
+    "quick_create_failed": "Tạo bằng Agent thất bại"
+  },
+  "labels": {
+    "set_status_to": "Đặt trạng thái thành",
+    "set_priority_to": "Đặt mức ưu tiên thành",
+    "assigned_to": "Giao cho {{name}}",
+    "removed_assignee": "Đã gỡ người phụ trách",
+    "set_start_date_to": "Đặt ngày bắt đầu là {{date}}",
+    "removed_start_date": "Đã gỡ ngày bắt đầu",
+    "set_due_date_to": "Đặt hạn chót là {{date}}",
+    "removed_due_date": "Đã gỡ hạn chót",
+    "reacted_to_comment": "Đã thả {{emoji}} cho bình luận của bạn",
+    "created_with_agent": "Đã tạo bằng Agent: {{identifier}}",
+    "failed_with_detail": "Thất bại: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Không thể đánh dấu đã đọc",
+    "archive_failed": "Không thể lưu trữ",
+    "mark_done_failed": "Không thể đánh dấu hoàn tất",
+    "mark_all_read_failed": "Không thể đánh dấu tất cả đã đọc",
+    "archive_all_failed": "Không thể lưu trữ tất cả",
+    "archive_all_read_failed": "Không thể lưu trữ các mục đã đọc",
+    "archive_completed_failed": "Không thể lưu trữ đã hoàn tất"
+  }
+}

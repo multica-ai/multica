@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Công việc của tôi",
+    "workspace_fallback": "Workspace",
+    "empty_title": "Không có công việc nào được giao cho bạn",
+    "empty_description": "Công việc bạn tạo hoặc được giao sẽ xuất hiện ở đây."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Tất cả",
+      "all_description": "Giao cho tôi, do tôi tạo, hoặc liên quan đến Agent và Squad của tôi",
+      "assigned_label": "Được giao",
+      "assigned_description": "Công việc được giao cho tôi",
+      "created_label": "Đã tạo",
+      "created_description": "Công việc tôi đã tạo",
+      "agents_label": "Agent và Squad của tôi",
+      "agents_description": "Công việc được giao cho Agent của tôi"
+    },
+    "filter_button": "Lọc",
+    "filter_status": "Trạng thái",
+    "filter_priority": "Mức ưu tiên",
+    "issue_count_one": "{{count}} công việc",
+    "issue_count_other": "{{count}} công việc",
+    "reset_filters": "Đặt lại bộ lọc",
+    "display_settings": "Cài đặt hiển thị",
+    "grouping": "Nhóm theo",
+    "group_status": "Trạng thái",
+    "group_assignee": "Người phụ trách",
+    "ordering": "Sắp xếp",
+    "ascending": "Tăng dần",
+    "descending": "Giảm dần",
+    "card_properties": "Thuộc tính thẻ",
+    "view_board": "Dạng bảng",
+    "view_list": "Dạng danh sách",
+    "view_swimlane": "Dạng bơi lộng",
+    "view_label": "Chế độ xem",
+    "view_board_short": "Bảng",
+    "view_list_short": "Danh sách",
+    "view_swimlane_short": "Bơi lộng",
+    "sort_manual": "Thủ công"
+  },
+  "errors": {
+    "move_failed": "Không thể di chuyển công việc"
+  }
+}

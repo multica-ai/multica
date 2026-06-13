@@ -1,0 +1,75 @@
+{
+  "title": "Thanh toán (trang kiểm thử)",
+  "subtitle": "Chuyển tiếp trực tiếp đến /api/v1/billing/* của hira-cloud. Không phải giao diện hoàn thiện — chỉ là mọi endpoint đặt trên một trang để kiểm tra proxy + luồng Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Số dư",
+    "credits_suffix": "tín dụng",
+    "meta": "micro thô: {{micro}} · chủ sở hữu: {{owner}}… · cập nhật {{updated}}"
+  },
+  "buy": {
+    "title": "Mua tín dụng / Quản lý thanh toán",
+    "no_tiers": "Không có gói giá nào được cài đặt. Cloud có thể chưa có Stripe key — checkout sẽ trả về 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} tín dụng",
+    "tier_bonus": " + {{credits}} thưởng",
+    "tier_bonus_with_expiry": " + {{credits}} thưởng ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Mở Stripe Billing Portal",
+    "portal_hint": "Lỗi 400 là bình thường với người dùng chưa thanh toán (chưa có hồ sơ Stripe).",
+    "toast_no_url": "Cloud không trả về URL checkout",
+    "toast_checkout_failed": "Checkout thất bại",
+    "toast_no_portal_url": "Không có URL portal nào được trả về",
+    "toast_portal_failed": "Portal thất bại"
+  },
+  "checkout": {
+    "session_label": "Phiên checkout {{prefix}}…",
+    "loading": "Đang tải trạng thái đơn hàng…",
+    "fetch_failed": "Lấy trạng thái thất bại: {{error}}",
+    "fetch_failed_unknown": "lỗi không xác định",
+    "final_status": "Trạng thái cuối: {{status}}",
+    "polling_status": "Đang kiểm tra trạng thái… hiện tại: {{status}}",
+    "status_unknown": "không xác định",
+    "label_order": "Đơn hàng",
+    "label_tier": "Gói",
+    "label_charged": "Đã thanh toán",
+    "charged_value": "{{money}} · {{credits}} tín dụng",
+    "charged_with_bonus": "{{money}} · {{credits}} tín dụng + {{bonus}} thưởng",
+    "clear_url": "Xóa khỏi URL"
+  },
+  "transactions": {
+    "title": "Giao dịch",
+    "empty": "Chưa có giao dịch nào.",
+    "credits_value": "{{value}} tín dụng",
+    "row_meta": "{{date}} · số dư sau: {{balance}} tín dụng · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Lô tín dụng",
+    "empty": "Chưa có lô nào.",
+    "remaining_over_total": "{{remaining}} / {{total}} tín dụng",
+    "id_suffix": "{{id}}…",
+    "consumed": "Đã dùng: {{value}} tín dụng",
+    "expires_suffix": " · hết hạn {{value}}",
+    "never_expires_suffix": " · không hết hạn"
+  },
+  "topups": {
+    "title": "Đơn nạp tiền",
+    "empty": "Chưa có đơn nạp tiền nào.",
+    "amount_to_credits": "{{money}} → {{credits}} tín dụng",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} tín dụng + {{bonus}} thưởng",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "Yêu cầu thất bại",
+    "refresh": "Làm mới",
+    "paging": "trang {{page}} / {{totalPages}} · {{total}} tổng cộng",
+    "date_dash": "—"
+  }
+}

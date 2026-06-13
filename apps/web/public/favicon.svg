@@ -1,7 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Multica">
-  <rect width="100" height="100" rx="20" fill="#ffffff"/>
-  <polygon
-    fill="#111827"
-    points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" width="240" height="240">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4F46E5"></stop>
+      <stop offset="1" stop-color="#3730A3"></stop>
+    </linearGradient>
+  </defs>
+
+  
+
+  
+  <rect x="40" y="40" width="144" height="144" rx="36" ry="36" fill="url(#bgGrad)"></rect>
+
+  
+  <text x="112" y="112" font-family="&#39;Space Grotesk&#39;,&#39;Inter&#39;,system-ui,-apple-system,sans-serif" font-weight="700" font-size="108" fill="#FFFFFF" text-anchor="middle" dominant-baseline="central" letter-spacing="-3">h</text>
+
+  
+  <circle cx="184" cy="184" r="36" fill="#F59E0B" stroke="#FFFFFF" stroke-width="6"></circle>
 </svg>

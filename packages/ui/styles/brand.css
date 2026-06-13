@@ -1,0 +1,55 @@
+/* Hira brand overlay — fork-owned. Loaded AFTER tokens.css in both apps so it
+   wins the cascade. NEVER edit packages/ui/styles/tokens.css (upstream-owned);
+   override semantic tokens here instead. When upstream changes a token we don't
+   override, the fork inherits it automatically.
+
+   Palette source: docs/brand/BRAND-GUIDELINE.md
+   - Electric Indigo #4F46E5 (primary 60%) · Deep Indigo #3730A3 (hover)
+   - Mist Indigo #EEF2FF (tint) · Signal Amber #F59E0B (accent 10%)
+   - Mint Success #10B981 · Obsidian/Slate/Paper neutrals (left to upstream). */
+
+:root {
+    --primary: #4F46E5;
+    --primary-foreground: #FFFFFF;
+    --brand: #4F46E5;
+    --brand-foreground: #FFFFFF;
+    --ring: #A5B4FC;
+    --warning: #F59E0B;
+    --success: #10B981;
+
+    --sidebar-primary: #4F46E5;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #EEF2FF;
+    --sidebar-accent-foreground: #3730A3;
+    --sidebar-ring: #A5B4FC;
+
+    /* Chart ramp: Electric Indigo → lighter tints (keeps upstream's
+       primary→tertiary reading order). */
+    --chart-1: #4F46E5;
+    --chart-2: #6366F1;
+    --chart-3: #818CF8;
+    --chart-4: #A5B4FC;
+    --chart-5: #C7D2FE;
+}
+
+.dark {
+    --primary: #6366F1;
+    --primary-foreground: #FFFFFF;
+    --brand: #6366F1;
+    --brand-foreground: #FFFFFF;
+    --ring: #4338CA;
+    --warning: #FBBF24;
+    --success: #34D399;
+
+    --sidebar-primary: #6366F1;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #312E81;
+    --sidebar-accent-foreground: #E0E7FF;
+    --sidebar-ring: #4338CA;
+
+    --chart-1: #818CF8;
+    --chart-2: #6366F1;
+    --chart-3: #4F46E5;
+    --chart-4: #4338CA;
+    --chart-5: #3730A3;
+}

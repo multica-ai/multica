@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "Hộp thư",
+    "my_issues": "Công việc của tôi",
+    "issues": "Công việc",
+    "projects": "Dự án",
+    "autopilots": "Autopilot",
+    "agents": "Agent",
+    "squads": "Squad",
+    "usage": "Mức sử dụng",
+    "runtimes": "Runtime",
+    "skills": "Skill",
+    "settings": "Cài đặt"
+  },
+  "help": {
+    "trigger": "Trợ giúp",
+    "docs": "Tài liệu",
+    "changelog": "Nhật ký thay đổi",
+    "feedback": "Phản hồi"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Đang tải workspace…",
+    "loading_named_prefix": "Đang tải"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Bỏ ghim",
+    "workspaces_label": "Workspace",
+    "create_workspace": "Tạo workspace",
+    "pending_invitations_label": "Lời mời đang chờ",
+    "invitation_workspace_fallback": "Workspace",
+    "invitation_join": "Tham gia",
+    "invitation_decline": "Từ chối",
+    "log_out": "Đăng xuất",
+    "new_issue": "Công việc mới",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Đã ghim",
+    "workspace_group": "Workspace",
+    "configure_group": "Cấu hình",
+    "unread_overflow": "99+"
+  }
+}

@@ -35,6 +35,7 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hans": "zh",
   ko: "ko",
   ja: "ja",
+  vi: "en", // no Vietnamese onboarding content yet — fall back to English
 };
 
 /**

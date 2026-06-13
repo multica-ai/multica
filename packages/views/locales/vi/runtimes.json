@@ -1,0 +1,328 @@
+{
+  "page": {
+    "title": "Runtimes",
+    "tagline": "Máy và worker đám mây chạy phiên CLI cho agent của bạn.",
+    "learn_more": "Tìm hiểu thêm →",
+    "connect_remote": "Thêm máy tính",
+    "search_placeholder": "Tìm runtime…",
+    "scope_mine": "Của tôi",
+    "scope_all": "Tất cả",
+    "live": "Trực tiếp",
+    "live_tooltip": "Cập nhật theo thời gian thực · phát hiện ngoại tuyến tới 75 giây",
+    "filter_all": "Tất cả",
+    "filter_all_description": "Tất cả runtime trong chế độ xem này",
+    "empty": {
+      "title": "Chưa có runtime nào",
+      "hint": "Desktop tự quét máy tính này. Để dùng máy khác — máy chủ, máy dev, hoặc bất kỳ máy tính nào có terminal — thêm nó vào đây."
+    },
+    "no_matches": {
+      "title": "Không tìm thấy kết quả",
+      "with_query": "Không có runtime nào khớp với \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " trong bộ lọc này",
+      "no_query": "Không có runtime nào khớp với bộ lọc này.",
+      "try_widening": " Thử mở rộng phạm vi hoặc xóa bộ lọc."
+    },
+    "bootstrapping": {
+      "title": "Đang khởi động runtime cục bộ…",
+      "hint": "Thường mất vài giây. daemon của bạn đang đăng ký với workspace."
+    }
+  },
+  "machine": {
+    "search_placeholder": "Tìm máy…",
+    "filters": {
+      "all": "Tất cả",
+      "online": "Trực tuyến",
+      "issues": "Sự cố"
+    },
+    "section_local": "Cục bộ",
+    "section_remote": "Từ xa",
+    "section_cloud": "Đám mây",
+    "this_machine": "Thiết bị này",
+    "local_badge": "Cục bộ · máy này",
+    "runtime_count_one": "{{count}} runtime",
+    "runtime_count_other": "{{count}} runtime",
+    "busy_count_one": "{{count}} đang bận",
+    "busy_count_other": "{{count}} đang bận",
+    "no_matches_title": "Không có máy nào",
+    "no_matches_hint": "Không có máy nào khớp với tìm kiếm hoặc bộ lọc hiện tại.",
+    "select_machine": "Chọn máy để kiểm tra các runtime của nó.",
+    "metrics": {
+      "runtimes": "Runtimes",
+      "runtimes_hint_one": "{{count}} trực tuyến",
+      "runtimes_hint_other": "{{count}} trực tuyến",
+      "health": "Sức khỏe",
+      "health_clear": "Không có sự cố",
+      "health_issues_one": "{{count}} sự cố",
+      "health_issues_other": "{{count}} sự cố",
+      "workload": "Khối lượng",
+      "workload_value_idle": "Rảnh",
+      "workload_idle": "Tất cả đều rảnh",
+      "workload_hint": "{{running}} đang chạy · {{queued}} đang chờ",
+      "cli": "CLI",
+      "cloud_worker": "Worker đám mây",
+      "local_daemon": "daemon cục bộ"
+    }
+  },
+  "health": {
+    "online": {
+      "label": "Trực tuyến",
+      "description": "Nhận heartbeat trong 45 giây qua. Sẵn sàng giao tác vụ."
+    },
+    "recently_lost": {
+      "label": "Mất kết nối gần đây",
+      "description": "Mất liên lạc dưới 5 phút trước — thường là gián đoạn mạng ngắn."
+    },
+    "offline": {
+      "label": "Ngoại tuyến",
+      "description": "Không có heartbeat trong hơn 5 phút. Khởi động lại daemon hoặc kiểm tra máy chủ."
+    },
+    "about_to_gc": {
+      "label": "Sắp bị dọn dẹp",
+      "description": "Ngoại tuyến hơn 6 ngày. Sẽ bị xóa tự động sau 7 ngày nếu không kết nối lại."
+    }
+  },
+  "detail": {
+    "all_runtimes": "Tất cả runtime",
+    "read_only": "Chỉ đọc",
+    "delete_button": "Xóa runtime",
+    "delete_disabled_tooltip": "Runtime này được quản lý bởi daemon cục bộ đang chạy và sẽ tự đăng ký lại trong vài giây. Dừng tiến trình daemon để xóa vĩnh viễn.",
+    "last_seen": "hoạt động cuối {{when}}",
+    "fact_owner": "Chủ sở hữu",
+    "fact_device": "Thiết bị",
+    "fact_runtime": "Runtime",
+    "technical_details": "Chi tiết kỹ thuật",
+    "fact_daemon_cli": "daemon CLI",
+    "fact_daemon_id": "daemon ID",
+    "serving_title": "Đang phục vụ",
+    "serving_count_one": "{{count}} agent",
+    "serving_count_other": "{{count}} agent",
+    "no_agents": "Chưa có agent nào được gắn với runtime này.",
+    "diagnostics_title": "Chẩn đoán",
+    "diagnostics_cli": "CLI",
+    "diagnostics_visibility": "Phạm vi",
+    "visibility_label": {
+      "private": "Riêng tư",
+      "public": "Công khai"
+    },
+    "visibility_hint": {
+      "private": "Chỉ bạn và quản trị viên workspace mới có thể tạo agent trên runtime này.",
+      "public": "Bất kỳ thành viên workspace nào cũng có thể tạo agent trên runtime này."
+    },
+    "visibility_toast_updated": "Đã đặt phạm vi thành {{visibility}}",
+    "visibility_toast_failed": "Không thể cập nhật phạm vi",
+    "delete_dialog": {
+      "light": {
+        "title": "Xóa Runtime?",
+        "description": "Bạn có chắc muốn xóa \"{{name}}\"? Không thể hoàn tác.",
+        "cancel": "Hủy",
+        "confirm": "Xóa runtime",
+        "submitting": "Đang xóa..."
+      },
+      "cascade": {
+        "title_one": "Lưu trữ {{count}} agent và xóa Runtime này?",
+        "title_other": "Lưu trữ {{count}} agent và xóa Runtime này?",
+        "description": "Xóa \"{{name}}\". Các agent bên dưới sẽ được lưu trữ và xóa khỏi quy trình đang hoạt động; các tác vụ đang chờ hoặc đang chạy sẽ bị hủy, sau đó Runtime sẽ bị xóa.",
+        "warning": "Đây là thao tác phá hủy. Agent đã lưu trữ sẽ bị xóa khỏi quy trình đang hoạt động và các tác vụ đang chờ hoặc đang chạy sẽ bị hủy.",
+        "notice_runtime_has_active_agents": "Đã thêm agent đang hoạt động kể từ khi bạn mở hộp thoại này. Xem lại kế hoạch mới và xác nhận.",
+        "notice_runtime_delete_plan_changed": "Danh sách agent đang hoạt động đã thay đổi khi hộp thoại này đang mở. Xem lại kế hoạch mới và xác nhận.",
+        "checkbox_one": "Tôi hiểu rằng {{count}} agent này sẽ được lưu trữ và các tác vụ đang chờ hoặc đang chạy sẽ bị hủy.",
+        "checkbox_other": "Tôi hiểu rằng {{count}} agent này sẽ được lưu trữ và các tác vụ đang chờ hoặc đang chạy sẽ bị hủy.",
+        "cancel": "Hủy",
+        "confirm_one": "Lưu trữ {{count}} agent và xóa runtime",
+        "confirm_other": "Lưu trữ {{count}} agent và xóa runtime",
+        "submitting": "Đang lưu trữ và xóa...",
+        "self_healing_blocked_toast": "Runtime này được quản lý bởi daemon cục bộ đang chạy và sẽ tự đăng ký lại.",
+        "delete_failed_toast": "Không thể xóa runtime",
+        "table": {
+          "header_agent": "Agent",
+          "header_owner": "Chủ sở hữu",
+          "header_status": "Trạng thái",
+          "header_visibility": "Phạm vi",
+          "header_model": "Mô hình",
+          "owner_self": "Bạn",
+          "owner_unassigned": "—",
+          "model_unset": "—",
+          "presence_unknown": "—",
+          "workload_idle": "Rảnh",
+          "workload_working": "Đang làm",
+          "workload_queued": "Đang chờ",
+          "visibility_workspace": "Workspace",
+          "visibility_private": "Riêng tư"
+        }
+      }
+    },
+    "toast_deleted": "Đã xóa runtime",
+    "toast_delete_failed": "Không thể xóa runtime",
+    "running_chip_one": "· {{count}} đang chạy",
+    "running_chip_other": "· {{count}} đang chạy",
+    "queued_chip_one": "· {{count}} đang chờ",
+    "queued_chip_other": "· {{count}} đang chờ"
+  },
+  "detail_page": {
+    "not_found_title": "Không tìm thấy runtime",
+    "not_found_hint": "Nó có thể đã bị xóa hoặc bạn không có quyền truy cập."
+  },
+  "running_one": "{{count}} đang chạy",
+  "running_other": "{{count}} đang chạy",
+  "queued_one": "{{count}} đang chờ",
+  "queued_other": "{{count}} đang chờ",
+  "connect": {
+    "title": "Thêm máy tính",
+    "description": "Chạy hai lệnh này trên máy tính bạn muốn thêm. Chúng tôi sẽ phát hiện nó ngay khi daemon trực tuyến.",
+    "step1_label": "Cài đặt Hira CLI",
+    "step2_label": "Khởi động daemon",
+    "step2_hint": "Mở trình duyệt để đăng nhập, sau đó giữ daemon chạy nền.",
+    "live_listening": "Đang chờ máy tính của bạn",
+    "live_listening_hint": "Chúng tôi sẽ phát hiện nó ngay khi daemon khởi động — thường dưới một phút.",
+    "troubleshooting": "Không thể mở trình duyệt trên máy đó?",
+    "trouble_intro": "Dùng token thay cho đăng nhập qua trình duyệt. Thao tác này thay thế bước 2 và hoạt động ở bất kỳ đâu có terminal.",
+    "trouble_token_hint_prefix": "Tạo token trong ",
+    "trouble_token_hint_destination": "Cài đặt → Token",
+    "trouble_token_hint_suffix": ". daemon chỉ tạo kết nối ra ngoài — không cần cổng vào.",
+    "trouble_check_status": "Kiểm tra trạng thái",
+    "trouble_view_logs": "Xem nhật ký",
+    "copy_aria": "Sao chép",
+    "cancel": "Hủy",
+    "success_title": "Máy tính đã kết nối",
+    "success_description": "Máy tính của bạn trực tuyến và sẵn sàng. Tạo agent và nó có thể bắt đầu nhận tác vụ ở đây.",
+    "view_runtime": "Xem runtime",
+    "create_agent": "Tạo agent"
+  },
+  "cloud_runtime": {
+    "action": "Cloud Runtime",
+    "title": "Cloud Runtime",
+    "description": "Khởi chạy node đám mây được quản lý và theo dõi trạng thái Fleet.",
+    "create_title": "Node mới",
+    "create_hint": "Chọn tên, loại instance và kích thước đĩa. Fleet sẽ xử lý phần còn lại.",
+    "nodes_title": "Các node Fleet",
+    "refresh": "Làm mới",
+    "nodes_empty": "Không có node đám mây nào",
+    "nodes_failed": "Cloud Runtime không khả dụng",
+    "nodes_failed_hint": "Fleet không trả về danh sách node.",
+    "node_fallback_name": "Node đám mây",
+    "create": "Tạo node",
+    "creating": "Đang tạo...",
+    "cancel": "Hủy",
+    "toast_created": "Đã tạo node Cloud Runtime",
+    "toast_create_failed": "Không thể tạo node Cloud Runtime",
+    "delete": "Xóa node",
+    "delete_confirm": "Bạn có chắc muốn xóa node đám mây này? Không thể hoàn tác.",
+    "toast_deleted": "Đã xóa node đám mây",
+    "toast_delete_failed": "Không thể xóa node đám mây",
+    "fields": {
+      "name": "Tên",
+      "instance_type": "Loại instance",
+      "region": "Vùng",
+      "disk_size": "Dung lượng đĩa GiB",
+      "image_id": "AMI ID",
+      "subnet_id": "Subnet ID",
+      "key_name": "Cặp khóa",
+      "bootstrap_pat": "Bootstrap PAT"
+    },
+    "placeholders": {
+      "name": "cloud-dev-01",
+      "key_name": "dev-key"
+    },
+    "validation": {
+      "instance_type_required": "Loại instance là bắt buộc",
+      "disk_size_invalid": "Dung lượng đĩa phải là số nguyên dương"
+    }
+  },
+  "update": {
+    "cli_version_label": "Phiên bản CLI:",
+    "version_unknown": "không rõ",
+    "managed_by_desktop": "Do Desktop quản lý",
+    "managed_by_desktop_title": "File nhị phân CLI được quản lý bởi Hira Desktop — cập nhật Desktop để nâng cấp CLI.",
+    "latest": "Mới nhất",
+    "available": "có sẵn",
+    "action": "Cập nhật",
+    "retry": "Thử lại",
+    "unknown_error": "Lỗi không xác định",
+    "initiate_failed": "Không thể bắt đầu cập nhật",
+    "status": {
+      "pending": "Đang chờ daemon...",
+      "running": "Đang cập nhật...",
+      "completed": "Cập nhật hoàn tất. daemon đang khởi động lại...",
+      "failed": "Cập nhật thất bại",
+      "timeout": "Hết thời gian"
+    }
+  },
+  "charts": {
+    "heatmap_less": "Ít hơn",
+    "heatmap_more": "Nhiều hơn",
+    "tooltip_total": "Tổng"
+  },
+  "list": {
+    "col_runtime": "Runtime",
+    "col_health": "Sức khỏe",
+    "col_owner": "Chủ sở hữu",
+    "col_agents": "Agents",
+    "col_workload": "Khối lượng",
+    "col_cost": "Chi phí · 7 ngày",
+    "col_cli": "CLI",
+    "cost_delta_flat": "phẳng",
+    "cli_managed_badge": "Desktop",
+    "row_actions_aria": "Thao tác hàng",
+    "delete_action": "Xóa",
+    "delete_permission_hint": "Chỉ chủ sở hữu runtime và quản trị viên workspace mới có thể xóa runtime này",
+    "delete_admin_hint": "Chỉ chủ sở hữu runtime và quản trị viên workspace mới có thể xóa runtime."
+  },
+  "usage": {
+    "period_label": "Kỳ",
+    "dimension_label": "Chiều",
+    "kpi_cost_label": "Chi phí · {{days}} ngày",
+    "kpi_cost_delta": "{{sign}}{{pct}}% so với kỳ trước",
+    "kpi_cache_label": "Tiết kiệm cache · {{days}} ngày",
+    "kpi_cache_hint": "{{pct}}% hit · {{reads}} lần đọc",
+    "kpi_tokens_label": "Token · {{days}} ngày",
+    "kpi_tokens_hint": "vào {{input}} · ra {{output}}",
+    "when_title": "Khi runtime này chi tiêu",
+    "when_tab_daily": "Hàng ngày",
+    "when_tab_weekly": "Hàng tuần",
+    "when_tab_heatmap": "Heatmap",
+    "daily_metric_cost": "Chi phí",
+    "daily_metric_tokens": "Token",
+    "weekly_partial_label": "{{range}} (một phần · {{covered}} / 7 ngày)",
+    "heatmap_caption": "26 tuần qua · cường độ $ hàng ngày (bộ chọn kỳ bị bỏ qua ở đây)",
+    "legend_input": "Đầu vào",
+    "legend_output": "Đầu ra",
+    "legend_cache_read": "Đọc cache",
+    "legend_cache_write": "Ghi cache",
+    "empty_no_usage": "Không có dữ liệu sử dụng trong kỳ này.",
+    "empty_pricing_missing": "Token đã ghi nhưng thiếu giá cho:",
+    "empty_pricing_hint": "Đặt mức giá tùy chỉnh để đưa chúng vào tổng chi phí.",
+    "empty_zero_cost": "Token đã ghi nhưng tính toán chi phí trả về $0.",
+    "unmapped_notice_one": "{{count}} mô hình không có giá duy trì — token của nó bị loại khỏi tổng chi phí.",
+    "unmapped_notice_other": "{{count}} mô hình không có giá duy trì — token của chúng bị loại khỏi tổng chi phí.",
+    "custom_pricing": {
+      "open_button": "Đặt giá tùy chỉnh",
+      "title": "Giá mô hình tùy chỉnh",
+      "description": "Nhập mức giá theo triệu token để chúng tôi có thể tính giá các mô hình không có mức giá duy trì. Được lưu cục bộ trên máy này.",
+      "empty": "Không có mô hình nào cần giá tùy chỉnh ngay bây giờ.",
+      "field_input": "Đầu vào",
+      "field_output": "Đầu ra",
+      "field_cache_read": "Đọc cache",
+      "field_cache_write": "Ghi cache",
+      "unit_hint": "Tất cả mức giá tính bằng USD trên 1 triệu token. Để trống toàn bộ các trường để xóa ghi đè.",
+      "remove_aria": "Xóa giá tùy chỉnh",
+      "cancel": "Hủy",
+      "save": "Lưu"
+    },
+    "cost_by_title_agent": "Chi phí theo agent",
+    "cost_by_title_model": "Chi phí theo mô hình",
+    "cost_by_tab_agent": "Theo agent",
+    "cost_by_tab_model": "Theo mô hình",
+    "cost_by_caption_agent_one": "{{count}} agent trên runtime này",
+    "cost_by_caption_agent_other": "{{count}} agent trên runtime này",
+    "cost_by_caption_model_one": "{{count}} mô hình được dùng",
+    "cost_by_caption_model_other": "{{count}} mô hình được dùng",
+    "daily_breakdown_toggle": "Bảng phân tích hàng ngày",
+    "table_date": "Ngày",
+    "table_model": "Mô hình",
+    "table_input": "Đầu vào",
+    "table_output": "Đầu ra",
+    "table_cache_r": "Cache Đọc",
+    "table_cache_w": "Cache Ghi",
+    "no_data": "Chưa có dữ liệu sử dụng"
+  }
+}

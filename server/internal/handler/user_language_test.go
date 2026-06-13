@@ -125,6 +125,23 @@ func TestUpdateMeRejectsUnsupportedLanguage(t *testing.T) {
 	}
 }
 
+func TestUpdateMeAcceptsVietnameseLanguage(t *testing.T) {
+	userID := newLanguageTestUser(t, "lang-vi@multica.ai")
+	w := httptest.NewRecorder()
+	req := newPatchMeRequest(userID, `{"language":"vi"}`)
+	testHandler.UpdateMe(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, _ := resp["language"].(string); got != "vi" {
+		t.Fatalf("expected response language=vi, got %v", resp["language"])
+	}
+}
+
 // COALESCE semantics: omitting language must NOT clear an existing value.
 func TestUpdateMePreservesLanguageWhenNotProvided(t *testing.T) {
 	userID := newLanguageTestUser(t, "lang-preserve@multica.ai")

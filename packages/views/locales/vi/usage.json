@@ -1,0 +1,58 @@
+{
+  "title": "Mức sử dụng",
+  "subtitle": "Lượng token tiêu thụ và hoạt động của Agent trong workspace này.",
+  "filter": {
+    "project_label": "Dự án",
+    "all_projects": "Tất cả dự án",
+    "period_label": "Khoảng thời gian"
+  },
+  "kpi": {
+    "cost_label": "Chi phí · {{days}}N",
+    "tokens_label": "Token · {{days}}N",
+    "tokens_hint": "Đầu vào {{input}} · Đầu ra {{output}}",
+    "run_time_label": "Thời gian chạy · {{days}}N",
+    "run_time_hint": "Trên {{tasks}} tác vụ",
+    "tasks_label": "Tác vụ · {{days}}N",
+    "tasks_hint": "{{failed}} thất bại"
+  },
+  "dim": {
+    "label": "Chiều",
+    "daily": "Hàng ngày",
+    "weekly": "Hàng tuần"
+  },
+  "daily": {
+    "title_cost": "Chi phí hàng ngày",
+    "title_tokens": "Token hàng ngày",
+    "title_time": "Thời gian chạy hàng ngày",
+    "title_tasks": "Tác vụ hàng ngày",
+    "metric_cost": "Chi phí",
+    "metric_tokens": "Token",
+    "metric_time": "Thời gian",
+    "metric_tasks": "Tác vụ",
+    "no_data": "Không có dữ liệu trong khoảng này."
+  },
+  "weekly": {
+    "title_cost": "Chi phí hàng tuần",
+    "title_tokens": "Token hàng tuần",
+    "title_time": "Thời gian chạy hàng tuần",
+    "title_tasks": "Tác vụ hàng tuần",
+    "partial_label": "{{range}} (một phần · {{covered}} / 7 ngày)"
+  },
+  "leaderboard": {
+    "title": "Bảng xếp hạng",
+    "caption": "{{count}} Agent",
+    "header_agent": "Agent",
+    "header_tokens": "Token",
+    "header_cost": "Chi phí",
+    "header_time": "Thời gian",
+    "header_tasks": "Tác vụ",
+    "no_data": "Không có hoạt động Agent trong khoảng này."
+  },
+  "empty": {
+    "title": "Chưa có dữ liệu",
+    "body": "Khi Agent bắt đầu chạy tác vụ, lượng token tiêu thụ và thời gian chạy sẽ xuất hiện ở đây."
+  },
+  "duration": {
+    "less_than_minute": "<1p"
+  }
+}

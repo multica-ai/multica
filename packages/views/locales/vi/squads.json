@@ -1,0 +1,76 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Squad mới",
+    "empty_no_squads": "Chưa có Squad nào. Tạo một cái để bắt đầu.",
+    "empty_no_match": "Không có Squad nào khớp với bộ lọc."
+  },
+  "inspector": {
+    "details_section": "Chi tiết",
+    "archive_button": "Lưu trữ"
+  },
+  "archive_dialog": {
+    "title": "Lưu trữ Squad này?",
+    "description": "\"{{name}}\" sẽ được lưu trữ. Các công việc hiện đang được giao cho Squad này sẽ được chuyển cho người dẫn đầu. Không thể hoàn tác — hãy tạo Squad mới nếu bạn cần định tuyến lại.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ",
+    "archiving": "Đang lưu trữ…"
+  },
+  "name_editor": {
+    "cancel": "Hủy"
+  },
+  "add_member_dialog": {
+    "title": "Thêm thành viên",
+    "description": "Thêm thành viên workspace hoặc Agent vào Squad này.",
+    "label_member": "Thành viên",
+    "label_role": "Vai trò",
+    "label_optional": "(tùy chọn)",
+    "placeholder_role_inline": "Thêm vai trò…",
+    "cancel": "Hủy"
+  },
+  "description_dialog": {
+    "title": "Sửa mô tả",
+    "placeholder_empty": "Thêm mô tả",
+    "cancel": "Hủy"
+  },
+  "discard_changes_dialog": {
+    "title": "Bỏ qua thay đổi chưa lưu?",
+    "description": "Bạn có thay đổi chưa lưu trên tab này. Chuyển tab sẽ bỏ qua các thay đổi đó.",
+    "keep_editing": "Tiếp tục chỉnh sửa",
+    "discard_button": "Bỏ qua"
+  },
+  "members_tab": {
+    "section_title": "Thành viên",
+    "section_count_one": "{{count}} thành viên trong Squad này",
+    "section_count_other": "{{count}} thành viên trong Squad này",
+    "add_member_button": "Thêm thành viên",
+    "create_agent_button": "Tạo Agent",
+    "leader_chip": "Dẫn đầu",
+    "view_agent_tooltip": "Mở chi tiết Agent",
+    "make_leader_tooltip": "Đặt làm người dẫn đầu Squad",
+    "remove_member_tooltip": "Xóa khỏi Squad",
+    "status_working": "Đang làm",
+    "status_idle": "Rảnh",
+    "status_offline": "Ngoại tuyến",
+    "status_unstable": "Không ổn định",
+    "status_archived": "Đã lưu trữ",
+    "issue_status_blocked": "bị chặn",
+    "active_issue_more": "và {{count}} công việc khác",
+    "last_active_label": "hoạt động lần cuối {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Squad không khả dụng",
+    "detail_link": "Chi tiết →",
+    "archived": "Đã lưu trữ",
+    "member_count_one": "{{count}} thành viên",
+    "member_count_other": "{{count}} thành viên",
+    "members_section": "Thành viên",
+    "more_members_one": "+{{count}} nữa",
+    "more_members_other": "+{{count}} nữa"
+  },
+  "instructions_tab": {
+    "description": "Hướng dẫn Squad được đưa vào prompt của Agent dẫn đầu mỗi khi làm việc trên công việc được giao cho Squad này. Dùng để cung cấp cho người dẫn đầu các hướng dẫn chung của Squad, quy ước làm việc, hoặc ngữ cảnh cần tuân theo mọi tác vụ.",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "save_button": "Lưu"
+  }
+}

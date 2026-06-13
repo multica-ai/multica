@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Dự án",
+    "new_project": "Dự án mới",
+    "empty": "Chưa có dự án nào",
+    "create_first": "Tạo dự án đầu tiên của bạn",
+    "view_compact": "Thu gọn",
+    "view_comfortable": "Thoải mái",
+    "search_placeholder": "Tìm kiếm dự án...",
+    "no_search_results": "Không có kết quả phù hợp"
+  },
+  "table": {
+    "name": "Tên",
+    "priority": "Mức ưu tiên",
+    "status": "Trạng thái",
+    "progress": "Tiến độ",
+    "lead": "Người phụ trách",
+    "created": "Ngày tạo"
+  },
+  "status": {
+    "planned": "Đã lên kế hoạch",
+    "in_progress": "Đang làm",
+    "paused": "Tạm dừng",
+    "completed": "Hoàn tất",
+    "cancelled": "Đã hủy"
+  },
+  "priority": {
+    "urgent": "Khẩn cấp",
+    "high": "Cao",
+    "medium": "Trung bình",
+    "low": "Thấp",
+    "none": "Không ưu tiên"
+  },
+  "lead": {
+    "no_lead": "Chưa có người phụ trách",
+    "assign_placeholder": "Giao người phụ trách...",
+    "members_group": "Thành viên",
+    "agents_group": "Agent",
+    "no_results": "Không có kết quả"
+  },
+  "relative_date": {
+    "today": "Hôm nay",
+    "one_day_ago": "1 ngày trước",
+    "days_ago": "{{count}} ngày trước",
+    "months_ago": "{{count}} tháng trước"
+  },
+  "detail": {
+    "not_found": "Không tìm thấy dự án",
+    "breadcrumb_fallback": "Dự án",
+    "title_placeholder": "Tiêu đề dự án",
+    "icon_tooltip": "Đổi biểu tượng",
+    "pin_tooltip": "Ghim vào sidebar",
+    "unpin_tooltip": "Bỏ ghim khỏi sidebar",
+    "sidebar_tooltip": "Ẩn/hiện sidebar",
+    "copy_link": "Sao chép liên kết",
+    "delete_action": "Xóa dự án",
+    "section_properties": "Thuộc tính",
+    "section_progress": "Tiến độ",
+    "section_description": "Mô tả",
+    "description_placeholder": "Thêm mô tả...",
+    "empty_issues_title": "Chưa có công việc nào được liên kết",
+    "empty_issues_hint": "Tạo công việc mới hoặc gán công việc hiện có vào dự án này.",
+    "empty_issues_new_button": "Công việc mới",
+    "no_issues_yet": "Chưa có công việc nào",
+    "toast_link_copied": "Đã sao chép liên kết",
+    "toast_project_deleted": "Đã xóa dự án",
+    "toast_move_issue_failed": "Không thể di chuyển công việc"
+  },
+  "resources": {
+    "section_header": "Tài nguyên",
+    "empty": "Chưa có tài nguyên nào.",
+    "add_button": "Thêm tài nguyên",
+    "popover_title": "Gắn kho GitHub",
+    "repos_search_placeholder": "Tìm kiếm kho lưu trữ...",
+    "repos_search_empty": "Không có kho lưu trữ nào phù hợp.",
+    "attached_badge": "đã gắn",
+    "remove_tooltip": "Gỡ",
+    "url_placeholder": "https://github.com/owner/repo hoặc git@github.com:owner/repo.git",
+    "url_submit": "Thêm",
+    "toast_attached": "Đã gắn kho lưu trữ",
+    "toast_attach_failed": "Không thể gắn",
+    "toast_removed": "Đã gỡ tài nguyên",
+    "toast_remove_failed": "Không thể gỡ tài nguyên",
+    "add_local_directory_button": "Thêm thư mục cục bộ",
+    "local_daemon_offline_hint": "Khởi động daemon cục bộ để gắn thư mục trên máy này.",
+    "local_daemon_already_attached_hint": "Máy này đã có thư mục cục bộ được gắn. Gỡ trước khi thêm thư mục khác.",
+    "local_rename_tooltip": "Đổi tên",
+    "local_rename_label": "Nhãn thư mục cục bộ",
+    "local_no_daemon_tooltip": "Daemon cục bộ chưa báo cáo ID — Agent không thể mở thư mục này.",
+    "local_other_machine_tooltip": "Chỉ khả dụng trên máy đã đăng ký thư mục này.",
+    "chat_hint_prefix": "Agent sẽ làm việc trực tiếp tại",
+    "toast_local_attached": "Đã gắn thư mục cục bộ",
+    "toast_local_renamed": "Đã đổi tên",
+    "toast_local_rename_failed": "Không thể đổi tên",
+    "toast_local_pick_failed": "Không thể chọn thư mục",
+    "toast_local_already_attached": "Thư mục này đã được gắn vào dự án trên máy này.",
+    "toast_local_daemon_already_attached": "Máy này đã có thư mục cục bộ được gắn vào dự án này. Gỡ trước khi thêm thư mục khác.",
+    "toast_local_daemon_not_running": "Daemon cục bộ chưa chạy.",
+    "local_validate_not_absolute": "Chọn đường dẫn tuyệt đối.",
+    "local_validate_not_found": "Đường dẫn không tồn tại.",
+    "local_validate_not_a_directory": "Đường dẫn không phải thư mục.",
+    "local_validate_not_readable": "Thư mục không thể đọc.",
+    "local_validate_not_writable": "Thư mục không thể ghi.",
+    "local_validate_unsupported": "Thư mục cục bộ chỉ có thể chọn trên ứng dụng desktop."
+  },
+  "delete_dialog": {
+    "title": "Xóa dự án",
+    "description": "Dự án sẽ bị xóa. Các công việc sẽ không bị xóa nhưng sẽ được hủy liên kết.",
+    "confirm": "Xóa",
+    "cancel": "Hủy"
+  },
+  "picker": {
+    "no_project": "Không có dự án",
+    "remove": "Gỡ khỏi dự án",
+    "empty": "Chưa có dự án nào"
+  },
+  "chip": {
+    "fallback_label": "Dự án"
+  }
+}

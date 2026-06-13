@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "@multica/ui/styles/tokens.css";
 @import "@multica/ui/styles/base.css";
+@import "@multica/ui/styles/brand.css";
 
 @custom-variant dark (&:is(.dark *));
 

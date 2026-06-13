@@ -1,0 +1,88 @@
+{
+  "bubble_menu": {
+    "bold": "Đậm",
+    "italic": "Nghiêng",
+    "strikethrough": "Gạch ngang",
+    "code": "Code",
+    "highlight": "Tô sáng",
+    "link": "Liên kết",
+    "list": "Danh sách",
+    "quote": "Trích dẫn",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Văn bản",
+      "normal_text": "Văn bản thường",
+      "heading_1": "Tiêu đề 1",
+      "heading_2": "Tiêu đề 2",
+      "heading_3": "Tiêu đề 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Danh sách dấu đầu dòng",
+      "ordered_list": "Danh sách có số",
+      "task_list": "Danh sách tác vụ"
+    },
+    "sub_issue": {
+      "tooltip": "Tạo công việc con từ vùng chọn",
+      "created": "Đã tạo {{identifier}}",
+      "create_failed": "Tạo công việc con thất bại"
+    }
+  },
+  "image": {
+    "view": "Xem ảnh",
+    "download": "Tải về",
+    "copy_link": "Sao chép liên kết",
+    "delete": "Xóa",
+    "link_copied": "Đã sao chép liên kết",
+    "copy_link_failed": "Sao chép liên kết thất bại"
+  },
+  "attachment": {
+    "download_failed": "Không thể lấy liên kết tải về. Thử lại sau.",
+    "preview": "Xem trước",
+    "preview_loading": "Đang tải xem trước…",
+    "preview_failed": "Không thể tải xem trước",
+    "preview_too_large": "Tệp quá lớn để xem trước. Vui lòng tải về.",
+    "preview_unsupported": "Loại tệp này không hỗ trợ xem trước.",
+    "close": "Đóng",
+    "open_in_new_tab": "Mở trong tab mới",
+    "remove": "Xóa tệp đính kèm"
+  },
+  "link_hover": {
+    "copy_link": "Sao chép liên kết",
+    "open_link": "Mở liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "copy_failed": "Sao chép thất bại"
+  },
+  "mention": {
+    "group_users": "Người dùng",
+    "group_issues": "Công việc",
+    "all_members": "Tất cả thành viên",
+    "searching": "Đang tìm...",
+    "no_results": "Không có kết quả",
+    "group_current": "Trang hiện tại",
+    "group_recent": "Đã xem gần đây",
+    "group_search": "Kết quả tìm kiếm"
+  },
+  "slash_command": {
+    "no_skills_configured": "Chưa có Skill nào được cài đặt",
+    "no_results": "Không có Skill phù hợp",
+    "commands": {
+      "note": "Thêm ghi chú — sẽ không kích hoạt Agent nào"
+    }
+  },
+  "code_block": {
+    "copy_code": "Sao chép code",
+    "show_preview": "Xem trước",
+    "show_source": "Xem nguồn",
+    "fullscreen": "Toàn màn hình"
+  },
+  "file_card": {
+    "uploading": "Đang tải lên {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Tiêu đề"
+  },
+  "mermaid": {
+    "render_error": "Không thể hiển thị sơ đồ Mermaid.",
+    "rendering": "Đang hiển thị sơ đồ…"
+  }
+}

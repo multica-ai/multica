@@ -38,7 +38,7 @@ func NewEmailService() *EmailService {
 	apiKey := os.Getenv("RESEND_API_KEY")
 	from := strings.TrimSpace(os.Getenv("RESEND_FROM_EMAIL"))
 	if from == "" {
-		from = "noreply@multica.ai"
+		from = "noreply@hira.vn"
 	}
 
 	smtpHost := strings.TrimSpace(os.Getenv("SMTP_HOST"))
@@ -232,14 +232,14 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 func (s *EmailService) SendVerificationCode(to, code string) error {
 	body := fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-			<h2>Your verification code</h2>
+			<h2>Mã xác thực của bạn</h2>
 			<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
-			<p>This code expires in 10 minutes.</p>
-			<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
+			<p>Mã này sẽ hết hạn sau 10 phút.</p>
+			<p style="color: #666; font-size: 14px;">Nếu bạn không yêu cầu mã này, bạn có thể bỏ qua email này một cách an toàn.</p>
 		</div>`, code)
 
 	if s.smtpHost != "" {
-		return s.sendSMTP(to, "Your Multica verification code", body)
+		return s.sendSMTP(to, "Mã xác thực Hira của bạn", body)
 	}
 	if s.client == nil {
 		fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
@@ -248,7 +248,7 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 	params := &resend.SendEmailRequest{
 		From:    s.fromEmail,
 		To:      []string{to},
-		Subject: "Your Multica verification code",
+		Subject: "Mã xác thực Hira của bạn",
 		Html:    body,
 	}
 	_, err := s.client.Emails.Send(params)
@@ -260,7 +260,7 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
 	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	if appURL == "" {
-		appURL = "https://app.multica.ai"
+		appURL = "https://app.hira.vn"
 	}
 	inviteURL := fmt.Sprintf("%s/invite/%s", appURL, invitationID)
 
@@ -289,15 +289,15 @@ func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL strin
 	return &resend.SendEmailRequest{
 		From:    from,
 		To:      []string{to},
-		Subject: fmt.Sprintf("%s invited you to %s on Multica", subjectInviter, subjectWorkspace),
+		Subject: fmt.Sprintf("%s đã mời bạn vào %s trên Hira", subjectInviter, subjectWorkspace),
 		Html: fmt.Sprintf(
 			`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-				<h2>You're invited to join %s</h2>
-				<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
+				<h2>Bạn được mời tham gia %s</h2>
+				<p><strong>%s</strong> đã mời bạn cộng tác trong workspace <strong>%s</strong> trên Hira.</p>
 				<p style="margin: 24px 0;">
-					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
+					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #4F46E5; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Chấp nhận lời mời</a>
 				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+				<p style="color: #666; font-size: 14px;">Bạn cần đăng nhập để chấp nhận hoặc từ chối lời mời.</p>
 			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL),
 	}
 }

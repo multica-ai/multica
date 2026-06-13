@@ -1,0 +1,21 @@
+{
+  "role": {
+    "owner": "Chủ sở hữu",
+    "admin": "Quản trị viên",
+    "member": "Thành viên"
+  },
+  "card": {
+    "unavailable": "Thành viên không khả dụng",
+    "agents_section": "Agent ({{count}})",
+    "detail_link": "Chi tiết →",
+    "more_agents_one": "và {{count}} Agent khác",
+    "more_agents_other": "và {{count}} Agent khác"
+  },
+  "detail": {
+    "workspace_fallback": "Workspace",
+    "members_breadcrumb": "Thành viên",
+    "breadcrumb_fallback": "Thành viên",
+    "not_found_title": "Không tìm thấy thành viên",
+    "not_found_description": "Thành viên này có thể đã rời workspace."
+  }
+}

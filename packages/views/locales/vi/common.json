@@ -1,0 +1,28 @@
+{
+  "save": "Lưu",
+  "cancel": "Hủy",
+  "delete": "Xóa",
+  "confirm": "Xác nhận",
+  "loading": "Đang tải...",
+  "time": {
+    "just_now": "vừa xong",
+    "minutes_ago": "{{count}} phút trước",
+    "hours_ago": "{{count}} giờ trước",
+    "days_ago": "{{count}} ngày trước"
+  },
+  "lark_bind": {
+    "page_title": "Liên kết tài khoản Lark",
+    "redeeming": "Đang xác thực token liên kết…",
+    "needs_auth_description": "Đăng nhập vào Hira để hoàn tất liên kết. Token trong đường dẫn sẽ gắn tài khoản Lark của bạn với người dùng Hira này, vì vậy bạn cần đăng nhập trước.",
+    "sign_in": "Đăng nhập",
+    "done_title": "Đã liên kết thành công.",
+    "done_description": "Tin nhắn tiếp theo bạn gửi đến Bot trong Lark sẽ đi thẳng đến Agent. Bạn có thể đóng tab này.",
+    "error_title": "Không thể hoàn tất liên kết",
+    "error_admin_hint": "Nếu lỗi này vẫn xảy ra, hãy yêu cầu quản trị viên workspace gửi lại đường dẫn liên kết từ Lark.",
+    "error_missing_token": "Đường dẫn thiếu token liên kết. Hãy yêu cầu Bot gửi đường dẫn mới trong Lark.",
+    "error_expired": "Đường dẫn liên kết này không hợp lệ hoặc đã hết hạn (đường dẫn có hiệu lực trong 15 phút). Hãy yêu cầu Bot gửi đường dẫn mới.",
+    "error_already_bound": "Tài khoản Lark này đã được liên kết với một người dùng Hira khác. Việc chuyển tài khoản phải thực hiện qua bước hủy liên kết trước.",
+    "error_not_member": "Bạn đang đăng nhập vào tài khoản Hira không phải thành viên của workspace này.",
+    "error_unknown": "Đã xảy ra lỗi. Hãy thử lại, và nếu sự cố vẫn tiếp diễn, hãy liên hệ quản trị viên workspace."
+  }
+}

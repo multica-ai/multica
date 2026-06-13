@@ -1,0 +1,124 @@
+{
+  "fab": {
+    "running": "Hira đang xử lý...",
+    "unread_one": "{{count}} chat chưa đọc",
+    "unread_other": "{{count}} chat chưa đọc",
+    "default": "Hỏi Hira"
+  },
+  "input": {
+    "placeholder_no_agent": "Tạo agent để bắt đầu chat",
+    "placeholder_archived": "Phiên này đã được lưu trữ",
+    "placeholder_named": "Nhắn tin cho {{name}}…",
+    "placeholder_default": "Bắt đầu nhắn tin…",
+    "send_tooltip": "Gửi",
+    "stop_tooltip": "Dừng",
+    "send_failed_toast": "Không thể gửi tin nhắn"
+  },
+  "message_list": {
+    "show_details": "Hiện chi tiết",
+    "replied_in": "Phản hồi trong {{elapsed}}",
+    "failed_after": "Thất bại sau {{elapsed}}",
+    "task_failed_fallback": "Tác vụ thất bại",
+    "tools_one": "{{count}} công cụ",
+    "tools_other": "{{count}} công cụ",
+    "tool_result_named": "Kết quả {{tool}}: ",
+    "tool_result_unnamed": "kết quả: ",
+    "process_steps_one": "{{count}} bước",
+    "process_steps_other": "{{count}} bước",
+    "copy_action": "Sao chép",
+    "copied_toast": "Đã sao chép",
+    "copy_failed_toast": "Sao chép thất bại",
+    "loading_older": "Đang tải tin nhắn cũ hơn…"
+  },
+  "session_history": {
+    "untitled": "Chưa đặt tên",
+    "time": {
+      "just_now": "vừa xong",
+      "minutes": "{{count}} phút trước",
+      "hours": "{{count}} giờ trước",
+      "days": "{{count}} ngày trước"
+    },
+    "row_delete_aria": "Xóa phiên chat",
+    "row_rename_aria": "Đổi tên phiên chat",
+    "row_stop_aria": "Dừng lần chạy hiện tại",
+    "stop_action": "Dừng",
+    "row_subtitle": {
+      "working": "Đang làm",
+      "completed": "Hoàn tất",
+      "new_reply": "Có phản hồi mới"
+    },
+    "stop_dialog": {
+      "title": "Dừng lần chạy này?",
+      "description_with_title": "Thao tác này sẽ hủy tác vụ agent hiện tại trong \"{{title}}\". Đầu ra một phần sẽ được giữ lại trong chat.",
+      "description_default": "Thao tác này sẽ hủy tác vụ agent hiện tại. Đầu ra một phần sẽ được giữ lại trong chat.",
+      "cancel": "Tiếp tục chạy",
+      "confirm": "Dừng lần chạy",
+      "confirming": "Đang dừng..."
+    },
+    "delete_dialog": {
+      "title": "Xóa phiên chat",
+      "description_with_title": "\"{{title}}\" và các tin nhắn của nó sẽ bị xóa vĩnh viễn. Không thể hoàn tác.",
+      "description_default": "Phiên chat này và các tin nhắn sẽ bị xóa vĩnh viễn. Không thể hoàn tác.",
+      "cancel": "Hủy",
+      "confirm": "Xóa",
+      "confirming": "Đang xóa..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Chat mới",
+    "restore_tooltip": "Khôi phục",
+    "expand_tooltip": "Mở rộng",
+    "minimize_tooltip": "Thu nhỏ",
+    "another_running": "Có chat khác đang chạy",
+    "another_unread": "Có chat khác có phản hồi chưa đọc",
+    "running": "Đang chạy",
+    "unread": "Chưa đọc",
+    "no_previous": "Không có chat trước đó",
+    "untitled": "Chat mới",
+    "my_agents": "Agent của tôi",
+    "others": "Khác",
+    "no_agents": "Không có agent",
+    "history_group": "Lịch sử chat",
+    "agent_filter_placeholder": "Tìm agent..."
+  },
+  "empty_state": {
+    "first_time_title": "Chat với agent của bạn",
+    "first_time_intro": "✨ Họ biết workspace của bạn —",
+    "first_time_pillars": "công việc, dự án, skill",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Hỏi tóm tắt, lên kế hoạch ngày mới, hoặc giao nhanh một tác vụ.",
+    "returning_title_named": "Xin chào, tôi là {{name}}",
+    "returning_title_default": "Chào mừng đến Hira",
+    "returning_subtitle": "Thử hỏi"
+  },
+  "starter_prompts": {
+    "list_open": "Liệt kê các công việc đang mở theo mức ưu tiên",
+    "summarize_today": "Tóm tắt những gì tôi đã làm hôm nay",
+    "plan_next": "Lên kế hoạch cho việc cần làm tiếp theo"
+  },
+  "no_agent_banner": "Bạn cần một agent để bắt đầu chat.",
+  "offline_banner": {
+    "fallback_name": "agent",
+    "unstable": "Kết nối của {{name}} không ổn định — phản hồi có thể bị chậm.",
+    "offline": "{{name}} đang ngoại tuyến — tin nhắn của bạn sẽ được gửi khi họ trở lại."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Ngoại tuyến",
+      "reconnecting": "Đang kết nối lại",
+      "queued": "Đang chờ",
+      "waiting_local_directory": "Đang chờ thư mục cục bộ",
+      "starting_up": "Đang khởi động",
+      "thinking": "Đang suy nghĩ",
+      "typing": "Đang gõ"
+    },
+    "tools": {
+      "running_command": "Đang chạy lệnh",
+      "reading_files": "Đang đọc file",
+      "searching_code": "Đang tìm kiếm code",
+      "making_edits": "Đang chỉnh sửa",
+      "searching_web": "Đang tìm kiếm web",
+      "fallback": "Đang làm việc"
+    }
+  }
+}

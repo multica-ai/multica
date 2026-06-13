@@ -1,0 +1,266 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "Hướng dẫn mà mọi agent trong workspace này có thể sử dụng.",
+    "learn_more": "Tìm hiểu thêm →",
+    "new_skill": "Skill mới",
+    "search_placeholder": "Tìm skill…",
+    "scopes": {
+      "all": { "label": "Tất cả", "description": "Tất cả skill trong workspace này" },
+      "used": { "label": "Đang dùng", "description": "Skill được gán cho ít nhất một agent" },
+      "unused": { "label": "Chưa dùng", "description": "Skill chưa được gán cho agent nào" },
+      "mine": { "label": "Do tôi tạo", "description": "Skill bạn đã tạo" }
+    },
+    "empty": {
+      "title": "Chưa có skill nào",
+      "description": "Tạo skill đầu tiên, import từ URL, hoặc sao chép từ runtime đã kết nối — và mọi agent trong workspace đều có thể dùng nó."
+    },
+    "no_matches": {
+      "title": "Không tìm thấy kết quả",
+      "with_query": "Không có skill nào khớp với \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " trong bộ lọc này",
+      "filter_only": "Không có skill nào khớp với bộ lọc này.",
+      "try_different": " Thử truy vấn khác."
+    },
+    "intro_banner": {
+      "title": "Được chia sẻ với workspace của bạn.",
+      "body": "Bất kỳ ai cũng có thể tạo skill, import từ URL, hoặc sao chép từ runtime cục bộ — và mọi agent đều có thể dùng nó.",
+      "highlight": "Skill runtime cục bộ vẫn riêng tư cho đến khi bạn sao chép vào đây."
+    },
+    "list_error": {
+      "title": "Không thể tải skill",
+      "fallback": "Đã xảy ra lỗi khi tải danh sách skill.",
+      "retry": "Thử lại"
+    },
+    "supporting_data_warning": "Một số dữ liệu workspace không tải được. Thông tin tác giả, tên runtime hoặc quyền chỉnh sửa có thể hiển thị không đầy đủ."
+  },
+  "table": {
+    "name": "Tên",
+    "used_by": "Được dùng bởi",
+    "source": "Nguồn · Thêm bởi",
+    "updated": "Cập nhật",
+    "no_description": "Không có mô tả",
+    "lock_tooltip": "Chỉ đọc — chỉ người tạo hoặc quản trị viên mới có thể chỉnh sửa",
+    "unused": "— chưa dùng",
+    "by_creator": "bởi {{name}}",
+    "source_manual": "Tạo thủ công",
+    "source_runtime_named": "Từ {{name}}",
+    "source_runtime_provider": "Từ runtime {{provider}}",
+    "source_runtime_unknown": "Từ runtime",
+    "source_clawhub": "Từ ClawHub",
+    "source_skills_sh": "Từ Skills.sh",
+    "source_github": "Từ GitHub"
+  },
+  "detail": {
+    "all_skills": "Tất cả skill",
+    "read_only": "Chỉ đọc",
+    "delete_aria": "Xóa skill",
+    "delete_tooltip": "Xóa skill",
+    "supporting_data_warning": "Một số dữ liệu workspace không tải được. Thông tin tác giả, tên runtime hoặc quyền chỉnh sửa có thể hiển thị không đầy đủ cho đến lần làm mới tiếp theo.",
+    "files_label": "File · {{count}}",
+    "add_file_aria": "Thêm file",
+    "add_file_tooltip": "Thêm file",
+    "delete_file": "Xóa file",
+    "name_aria": "Tên skill",
+    "name_placeholder": "tên-skill",
+    "description_label": "Mô tả",
+    "description_placeholder": "Một câu mô tả khi nào agent nên dùng skill này…",
+    "subline": {
+      "origin_runtime_named": "Runtime cục bộ · {{name}}",
+      "origin_runtime_provider": "Runtime cục bộ · {{provider}}",
+      "origin_runtime_unknown": "Runtime cục bộ",
+      "origin_clawhub": "Đã import · ClawHub",
+      "origin_skills_sh": "Đã import · Skills.sh",
+      "origin_github": "Đã import · GitHub",
+      "origin_workspace": "Workspace",
+      "updated_label": "Cập nhật {{when}}",
+      "by_creator": "bởi {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Người khác đã cập nhật skill này",
+      "body": "Chỉnh sửa của bạn được giữ lại. Bỏ để lấy thay đổi của họ, hoặc Lưu để ghi đè."
+    },
+    "save_bar": {
+      "unsaved": "Có thay đổi chưa lưu — sẽ ghi đè skill đang chạy khi lưu",
+      "discard": "Bỏ thay đổi",
+      "save": "Lưu thay đổi",
+      "saving": "Đang lưu…"
+    },
+    "sidebar": {
+      "metadata": "Siêu dữ liệu",
+      "created": "Ngày tạo",
+      "updated": "Ngày cập nhật",
+      "created_by": "Người tạo",
+      "files": "File",
+      "id": "ID",
+      "origin": "Nguồn gốc",
+      "used_by_one": "Được dùng bởi {{count}} agent",
+      "used_by_other": "Được dùng bởi {{count}} agent",
+      "permissions": "Quyền",
+      "permissions_owner": "Bạn có thể chỉnh sửa và xóa skill này. Thay đổi có hiệu lực ở lần chạy agent tiếp theo.",
+      "permissions_locked_creator": "Chỉ người tạo ({{name}}) hoặc quản trị viên workspace mới có thể chỉnh sửa skill này.",
+      "permissions_locked": "Chỉ người tạo hoặc quản trị viên workspace mới có thể chỉnh sửa skill này.",
+      "used_by_empty": "Chưa được gán cho agent nào. Mở tab Skills của agent để gán."
+    },
+    "origin_card": {
+      "imported_runtime": "Import từ runtime cục bộ",
+      "imported_clawhub": "Import từ ClawHub",
+      "imported_skills_sh": "Import từ Skills.sh",
+      "imported_github": "Import từ GitHub",
+      "provider": "provider · {{provider}}"
+    },
+    "not_found": {
+      "title": "Không tìm thấy skill",
+      "fallback": "Skill này có thể đã bị xóa hoặc bạn đã mất quyền truy cập.",
+      "back": "Quay lại Skills"
+    },
+    "toast_saved": "Đã lưu skill",
+    "toast_save_failed": "Không thể lưu skill",
+    "toast_deleted": "Đã xóa skill",
+    "toast_delete_failed": "Không thể xóa skill",
+    "delete_dialog": {
+      "title": "Xóa skill?",
+      "description_with_agents_one": "Thao tác này sẽ xóa vĩnh viễn \"{{name}}\" và gỡ bỏ khỏi {{count}} agent đang dùng nó.",
+      "description_with_agents_other": "Thao tác này sẽ xóa vĩnh viễn \"{{name}}\" và gỡ bỏ khỏi {{count}} agent đang dùng nó.",
+      "description_no_agents": "Thao tác này sẽ xóa vĩnh viễn \"{{name}}\" và gỡ bỏ khỏi tất cả agent.",
+      "warning": "Không thể hoàn tác.",
+      "cancel": "Hủy",
+      "confirm": "Xóa vĩnh viễn",
+      "deleting": "Đang xóa…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Thêm",
+      "cancel": "Hủy",
+      "errors": {
+        "empty": "Đường dẫn không được để trống.",
+        "absolute": "Không được dùng đường dẫn tuyệt đối.",
+        "double_dot": "Đường dẫn không được chứa \"..\".",
+        "reserved": "SKILL.md được dành riêng cho file chính.",
+        "exists": "Đã có file tại đường dẫn này."
+      }
+    }
+  },
+  "create": {
+    "back": "Quay lại",
+    "back_aria": "Quay lại chọn phương thức",
+    "close": "Đóng",
+    "close_aria": "Đóng",
+    "method": {
+      "chooser": {
+        "title": "Skill mới",
+        "desc": "Chọn cách bạn muốn thêm skill vào workspace này."
+      },
+      "manual": {
+        "title": "Tạo thủ công",
+        "desc": "Viết SKILL.md mới từ đầu."
+      },
+      "url": {
+        "title": "Import từ URL",
+        "desc": "Tải skill đã xuất bản bằng URL. File được kéo từ phía máy chủ."
+      },
+      "runtime": {
+        "title": "Sao chép từ runtime",
+        "desc": "Quét runtime cục bộ và đưa một trong các skill trên ổ đĩa vào workspace này."
+      }
+    },
+    "method_card": {
+      "manual_title": "Tạo thủ công",
+      "manual_desc": "Bắt đầu từ SKILL.md trống và viết hướng dẫn của riêng bạn.",
+      "url_title": "Import từ URL",
+      "url_desc": "Kéo skill đã xuất bản từ ClawHub hoặc Skills.sh.",
+      "runtime_title": "Sao chép từ runtime",
+      "runtime_desc": "Đưa skill đã cài trên runtime cục bộ của bạn vào workspace."
+    },
+    "manual": {
+      "name_label": "Tên",
+      "name_placeholder": "VD: review-helper",
+      "name_hint": "Phải là duy nhất trong workspace.",
+      "description_label": "Mô tả",
+      "description_placeholder": "Một câu về thời điểm gán skill này cho agent.",
+      "name_conflict_hint": " Thử tên khác và gửi lại.",
+      "fallback_error": "Không thể tạo skill",
+      "cancel": "Hủy",
+      "submit": "Tạo skill",
+      "submitting": "Đang tạo…",
+      "toast_created": "Đã tạo skill"
+    },
+    "url": {
+      "url_label": "Skill URL",
+      "supported_sources": "Nguồn được hỗ trợ",
+      "import": "Import",
+      "importing": "Đang import…",
+      "importing_clawhub": "Đang import từ ClawHub…",
+      "importing_skills_sh": "Đang import từ Skills.sh…",
+      "importing_github": "Đang import từ GitHub…",
+      "name_conflict_hint": " Tên skill đã import bị trùng — xóa skill hiện có trước khi thử lại.",
+      "fallback_error": "Import thất bại",
+      "cancel": "Hủy",
+      "toast_imported": "Đã import skill"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Runtime",
+    "runtime_placeholder": "Chọn runtime cục bộ",
+    "no_local_runtimes_title": "Không có runtime cục bộ nào",
+    "no_local_runtimes_hint": "Kết nối runtime cục bộ để duyệt và import các skill cục bộ của nó.",
+    "choose_runtime": "Chọn runtime để tiếp tục",
+    "must_be_online": "Runtime phải trực tuyến để duyệt skill cục bộ.",
+    "load_failed": "Không thể tải skill cục bộ của runtime",
+    "not_supported": "Provider runtime này chưa hiển thị danh mục skill cục bộ.",
+    "no_skills_title": "Không tìm thấy skill cục bộ nào",
+    "no_skills_hint": "Runtime này chưa có skill cục bộ nào có thể khám phá.",
+    "ignored_files_hint": "Symlink, file không đọc được, file quá lớn và bundle rất lớn bị bỏ qua khi import.",
+    "ready": "Sẵn sàng import",
+    "into_workspace": "vào workspace này.",
+    "select_skill": "Chọn skill để tiếp tục.",
+    "import_button": "Import vào Workspace",
+    "importing": "Đang import…",
+    "skill_files_one": "{{count}} file",
+    "skill_files_other": "{{count}} file",
+    "skill_name_label": "Tên skill workspace",
+    "skill_description_label": "Mô tả",
+    "skill_description_placeholder": "Tùy chọn — mô tả khi nào agent nên dùng skill này.",
+    "toast_imported": "Đã import skill",
+    "toast_import_failed": "Không thể import skill",
+    "select_all": "Chọn tất cả ({{count}})",
+    "bulk_ready": "Đã chọn {{count}} skill",
+    "bulk_import_button": "Import {{count}} Skill",
+    "bulk_progress": "Đang import {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Hủy",
+    "bulk_complete_hint": "Import hoàn tất.",
+    "bulk_cancelled_hint": "Import đã bị hủy.",
+    "bulk_done_button": "Xong",
+    "bulk_summary_created": "Đã tạo",
+    "bulk_summary_updated": "Đã cập nhật",
+    "bulk_summary_conflicts": "Xung đột",
+    "bulk_summary_skipped": "Đã bỏ qua",
+    "bulk_summary_failed": "Thất bại",
+    "conflict_single_title": "Đã có skill cùng tên này",
+    "conflict_bulk_title": "{{count}} skill cần quyết định",
+    "conflict_hint": "Chọn ghi đè skill workspace hiện có, import với tên mới, hoặc bỏ qua.",
+    "conflict_locked_creator": "Skill này được tạo bởi {{creator}}. Chỉ người tạo mới có thể ghi đè từ import cục bộ; chỉnh sửa từ trang chi tiết Skill nếu cần thay đổi.",
+    "conflict_locked": "Chỉ người tạo mới có thể ghi đè skill này từ import cục bộ; chỉnh sửa từ trang chi tiết Skill nếu cần thay đổi.",
+    "conflict_overwrite": "Ghi đè",
+    "conflict_rename": "Đổi tên",
+    "conflict_skip": "Bỏ qua",
+    "conflict_cancel": "Hủy",
+    "conflict_overwrite_all": "Ghi đè tất cả",
+    "conflict_skip_all": "Bỏ qua tất cả",
+    "conflict_rename_label": "Tên skill mới",
+    "conflict_footer": "{{count}} quyết định xung đột đang chờ.",
+    "conflict_apply_button": "Áp dụng quyết định",
+    "conflict_missing_resolution": "Chọn cách giải quyết xung đột này.",
+    "conflict_name_still_exists": "Tên đó đã tồn tại. Chọn tên khác hoặc bỏ qua."
+  },
+  "file_tree": {
+    "no_files": "Không có file"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Sửa",
+    "preview_tooltip": "Xem trước",
+    "no_content": "*Chưa có nội dung*",
+    "markdown_placeholder": "Viết nội dung markdown...",
+    "raw_placeholder": "Nội dung file..."
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "Tên workspace",
+    "name_placeholder": "Workspace của tôi",
+    "url_label": "URL workspace",
+    "url_placeholder": "workspace-cua-toi",
+    "submit": "Tạo workspace",
+    "submitting": "Đang tạo...",
+    "errors": {
+      "slug_format": "Chỉ dùng chữ thường, số và dấu gạch ngang",
+      "slug_taken": "URL workspace này đã được dùng.",
+      "slug_reserved": "URL workspace này đã được đặt trước và không thể sử dụng.",
+      "slug_conflict_toast": "Chọn một URL workspace khác",
+      "create_failed": "Không thể tạo workspace"
+    }
+  },
+  "new_page": {
+    "back": "Quay lại",
+    "log_out": "Đăng xuất",
+    "title": "Chào mừng đến Hira",
+    "description": "Một workspace nơi bạn và các đồng nghiệp AI làm việc sát cánh — nhận công việc, để lại bình luận, chia sẻ cùng một ngữ cảnh.",
+    "invite_hint": "Bạn có thể mời đồng nghiệp sau khi workspace sẵn sàng."
+  },
+  "creation_disabled": {
+    "title": "Tạo workspace bị vô hiệu hóa",
+    "description": "Phiên bản Hira này không cho phép tạo workspace mới. Hãy liên hệ quản trị viên để nhận lời mời vào workspace hiện có."
+  },
+  "no_access": {
+    "title": "Workspace không khả dụng",
+    "description": "Workspace này không tồn tại hoặc bạn không có quyền truy cập.",
+    "go_to_workspaces": "Đến workspace của tôi",
+    "sign_in_different": "Đăng nhập bằng tài khoản khác"
+  }
+}

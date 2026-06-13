@@ -53,4 +53,14 @@ export const useCaseText: Record<SupportedLocale, UseCaseText> = {
     cardReadMore: "続きを読む →",
     tableOfContents: "このページの内容",
   },
+  vi: {
+    indexTitle: "Tình huống sử dụng",
+    indexSubtitle:
+      "Xem cách các đội nhóm tổ chức con người và agent làm việc cùng nhau với Hira.",
+    indexMetadataTitle: "Tình huống sử dụng",
+    indexMetadataDescription:
+      "Xem cách các đội nhóm đưa con người và agent vào làm việc cùng nhau với Hira.",
+    cardReadMore: "Đọc tiếp →",
+    tableOfContents: "Trong trang này",
+  },
 };

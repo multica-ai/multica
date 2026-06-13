@@ -3,6 +3,7 @@
 @import "shadcn/tailwind.css";
 @import "../../../packages/ui/styles/tokens.css";
 @import "../../../packages/ui/styles/base.css";
+@import "../../../packages/ui/styles/brand.css";
 @import "./custom.css";
 
 @custom-variant dark (&:is(.dark *));
