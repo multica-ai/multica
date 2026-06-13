@@ -42,16 +42,17 @@ function toDraft(p: CustomModelPricing | undefined): DraftRow {
 }
 
 function parseRow(draft: DraftRow): CustomModelPricing | null {
-  const values = [draft.input, draft.output, draft.cacheRead, draft.cacheWrite].map(
-    (s) => Number(s.trim()),
-  );
-  if (values.some((n) => !Number.isFinite(n) || n < 0)) return null;
-  const [input, output, cacheRead, cacheWrite] = values as [
-    number,
-    number,
-    number,
-    number,
-  ];
+  if ([draft.input, draft.output, draft.cacheRead].some((s) => s.trim() === "")) {
+    return null;
+  }
+  const input = Number(draft.input.trim());
+  const output = Number(draft.output.trim());
+  const cacheRead = Number(draft.cacheRead.trim());
+  const cacheWrite =
+    draft.cacheWrite.trim() === "" ? output : Number(draft.cacheWrite.trim());
+  if ([input, output, cacheRead, cacheWrite].some((n) => !Number.isFinite(n) || n < 0)) {
+    return null;
+  }
   return { input, output, cacheRead, cacheWrite };
 }
 

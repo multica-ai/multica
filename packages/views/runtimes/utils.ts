@@ -147,7 +147,7 @@ export function formatTokens(n: number): string {
 // inheriting the price of a near-named relative; they surface in the
 // unmapped diagnostic instead. Mirror new entries in
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
-const MODEL_PRICING: Record<
+export const MODEL_PRICING: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
 > = {
@@ -251,18 +251,20 @@ const MODEL_PRICING: Record<
 //     bracketed variant at the standard tier. Slight under-estimate
 //     beats the previous behaviour of dropping the row entirely.
 //
-// Anything still unmapped falls back to the user-supplied custom pricing
-// store. No startsWith fallback: variants like `gpt-5.5-mini` must have
-// their own row to be priced (otherwise they'd inherit `gpt-5.5`).
+// User-supplied custom pricing is checked first so a local team can override
+// the maintained defaults with provider-specific or negotiated rates. If no
+// override matches, we fall back to the built-in catalog. No startsWith
+// fallback: variants like `gpt-5.5-mini` must have their own row to be priced
+// (otherwise they'd inherit `gpt-5.5`).
 function resolvePricing(model: string) {
   if (!model) return undefined;
 
   for (const candidate of canonicalCandidates(model)) {
-    const hit = MODEL_PRICING[candidate];
+    const hit = getCustomPricing(candidate);
     if (hit) return hit;
   }
   for (const candidate of canonicalCandidates(model)) {
-    const hit = getCustomPricing(candidate);
+    const hit = MODEL_PRICING[candidate];
     if (hit) return hit;
   }
   return undefined;

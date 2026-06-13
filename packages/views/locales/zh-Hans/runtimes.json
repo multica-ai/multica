@@ -290,7 +290,7 @@
       "field_output": "输出",
       "field_cache_read": "缓存读取",
       "field_cache_write": "缓存写入",
-      "unit_hint": "所有费率单位为美元 / 百万 token。清空所有字段即可移除该自定义价格。",
+      "unit_hint": "所有费率单位为美元 / 百万 token。缓存写入留空时会复用输出价格；清空所有字段即可移除该自定义价格。",
       "remove_aria": "移除自定义价格",
       "cancel": "取消",
       "save": "保存"
