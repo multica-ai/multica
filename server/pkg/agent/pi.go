@@ -184,9 +184,6 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
 
 	// Pi's --session flag expects a file path where events are appended.
 	// The path doubles as our opaque session identifier: we return it as
@@ -203,7 +200,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		return nil, fmt.Errorf("pi session file: %w", err)
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildPiArgs(prompt, sessionPath, opts, b.cfg.Logger)
 	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)

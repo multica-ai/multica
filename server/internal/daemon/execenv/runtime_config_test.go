@@ -156,9 +156,9 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
-// The CLAUDE.md workflow surface must carry the same since-delta new-comment
-// hint as the per-turn prompt. PR #2816 requires the two surfaces stay in sync,
-// so this pins the count-driven `--since` hint into the comment-triggered brief.
+// The CLAUDE.md workflow surface must carry the same issue-wide since-delta
+// new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
+// stay in sync.
 func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	t.Parallel()
 	const (
@@ -173,16 +173,23 @@ func TestCommentTriggeredBriefCarriesNewCommentsHint(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
-	if !strings.Contains(out, "4 new comment(s) since your last run") {
-		t.Errorf("comment brief must report the new-comment count, got:\n%s", out)
+	// Issue-wide count.
+	if !strings.Contains(out, "4 new comment(s) on this issue since your last run") {
+		t.Errorf("comment brief must report the issue-wide new-comment count, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--since "+since+" --output json") {
-		t.Errorf("comment brief must point at the --since catch-up read, got:\n%s", out)
+	if !strings.Contains(out, "blindly") {
+		t.Errorf("comment brief must discourage blindly reading every new comment, got:\n%s", out)
 	}
-	// Warm path also keeps a --thread pointer for the triggering thread's
-	// pre-anchor history that --since cannot cover.
-	if !strings.Contains(out, "--thread reply-abc --tail 30 --output json") {
-		t.Errorf("warm brief must also point at the triggering thread, got:\n%s", out)
+	// Parent thread first.
+	if !strings.Contains(out, "--thread reply-abc --since "+since+" --output json") {
+		t.Errorf("comment brief must point at the triggering (parent) thread --since read first, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--tail 30") {
+		t.Errorf("comment brief must offer the full-thread (--tail 30) option, got:\n%s", out)
+	}
+	// Issue-wide catch-up demoted to an only-if-needed fallback.
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --output json") {
+		t.Errorf("comment brief must keep the issue-wide --since catch-up fallback, got:\n%s", out)
 	}
 	// The removed resolve step must not reappear.
 	if strings.Contains(out, "multica comment resolve") {
@@ -199,6 +206,7 @@ func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
 	ctx := TaskContextForEnv{
 		IssueID:          issueID,
 		TriggerCommentID: "trigger-1",
+		TriggerThreadID:  "thread-root-1",
 		NewCommentCount:  0,
 		NewCommentsSince: "",
 	}
@@ -206,24 +214,126 @@ func TestCommentTriggeredBriefColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
 
-// Assignment-triggered briefs are the inverse boundary: when the agent
-// owns the issue lifecycle, the brief AS A WHOLE must still tell it to
-// flip to in_review on completion. The flip lives in the
-// assignment-triggered workflow above (with the real id substituted).
-func TestAssignmentTriggeredProtocolStillFlipsInReview(t *testing.T) {
+// A resumed comment session with no since-delta should not fall back to the
+// cold-start "read the triggering conversation first" instruction. The trigger
+// body is already embedded in the per-turn prompt and the resumed session should
+// carry prior thread context, so the thread read is only a fallback.
+func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T) {
+	t.Parallel()
+	const issueID = "55555555-6666-7777-8888-999999999999"
+	ctx := TaskContextForEnv{
+		IssueID:             issueID,
+		TriggerCommentID:    "trigger-1",
+		TriggerThreadID:     "thread-root-1",
+		PriorSessionResumed: true,
+		NewCommentCount:     0,
+		NewCommentsSince:    "",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"triggering comment is already included above",
+		"No other new comments on this issue since your last run",
+		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
+		"If your reply depends on thread context",
+		"do not rely only on resumed session memory",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resumed/no-delta brief missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "scoped to the triggering thread") {
+		t.Errorf("resumed/no-delta brief must not claim the delta is thread-scoped, got:\n%s", out)
+	}
+	if strings.Contains(out, "Read the triggering conversation first") {
+		t.Errorf("resumed/no-delta brief must not use the cold-start forced-read wording, got:\n%s", out)
+	}
+}
+
+// Assignment-triggered briefs are the high-risk path for role conflicts:
+// non-executor agents still need issue context, but the runtime workflow must
+// not turn status changes, investigation, implementation, or delegation into
+// permissions that override Agent Identity.
+func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	t.Parallel()
 	const issueID = "77777777-8888-9999-aaaa-bbbbbbbbbbbb"
 	ctx := TaskContextForEnv{IssueID: issueID}
 	out := buildMetaSkillContent("claude", ctx)
 
-	want := "`multica issue status " + issueID + " in_review`"
-	if !strings.Contains(out, want) {
-		t.Errorf("assignment-triggered brief must still flip to in_review on completion (expected %q in the workflow above)", want)
+	for _, want := range []string{
+		"## Instruction Precedence",
+		"Agent Identity instructions have priority over the assignment workflow below.",
+		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
+		"Never treat this runtime workflow as permission to change issue status, investigate, implement",
+		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
+		"Complete the task within your Agent Identity boundaries.",
+		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
+		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
+		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("assignment-triggered brief missing identity-bound workflow text %q\n---\n%s", want, out)
+		}
+	}
+
+	for _, banned := range []string{
+		"4. Run `multica issue status " + issueID + " in_progress`\n",
+		"5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)",
+		"8. When done, run `multica issue status " + issueID + " in_review`\n",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("assignment-triggered brief still contains unconditional legacy workflow text %q\n---\n%s", banned, out)
+		}
+	}
+}
+
+func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{
+			name: "comment-triggered",
+			ctx: TaskContextForEnv{
+				IssueID:          "11111111-2222-3333-4444-555555555555",
+				TriggerCommentID: "22222222-3333-4444-5555-666666666666",
+			},
+		},
+		{
+			name: "chat",
+			ctx:  TaskContextForEnv{ChatSessionID: "chat-1"},
+		},
+		{
+			name: "quick-create",
+			ctx:  TaskContextForEnv{QuickCreatePrompt: "create me an issue"},
+		},
+		{
+			name: "autopilot run-only",
+			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			for _, banned := range []string{
+				"## Instruction Precedence",
+				"assignment workflow below",
+				"Never treat this runtime workflow as permission to change issue status",
+			} {
+				if strings.Contains(out, banned) {
+					t.Errorf("%s brief must not inherit assignment-only precedence text %q\n---\n%s", tc.name, banned, out)
+				}
+			}
+		})
 	}
 }
 

@@ -242,6 +242,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringSlice("attachment-id", nil, "")
 	return cmd
 }
 
@@ -283,6 +284,54 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	}
 }
 
+func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "With attachments",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS", `["att-env","att-shared"]`)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("attachment-id", "att-flag")
+	_ = cmd.Flags().Set("attachment-id", "att-shared")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	got, ok := body["attachment_ids"].([]any)
+	if !ok {
+		t.Fatalf("attachment_ids = %#v, want JSON array", body["attachment_ids"])
+	}
+	want := []string{"att-flag", "att-shared", "att-env"}
+	if len(got) != len(want) {
+		t.Fatalf("attachment_ids length = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("attachment_ids[%d] = %#v, want %q (all=%#v)", i, got[i], w, got)
+		}
+	}
+}
+
 func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	want := "Active duplicate issue exists: YUA-36 SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs (status: in_progress). Set allow_duplicate=true or use --allow-duplicate to create another."
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -315,6 +364,97 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func newIssuePullRequestsTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "pull-requests"}
+	cmd.Flags().String("output", "table", "")
+	return cmd
+}
+
+func TestRunIssuePullRequestsListsLinkedPRsAsJSON(t *testing.T) {
+	var gotPaths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPaths = append(gotPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/api/issues/MUL-2818":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-uuid",
+				"identifier": "MUL-2818",
+				"title":      "CLI PR lookup",
+			})
+		case "/api/issues/issue-uuid/pull-requests":
+			json.NewEncoder(w).Encode(map[string]any{
+				"pull_requests": []map[string]any{
+					{
+						"url":    "https://github.com/multica-ai/multica/pull/42",
+						"number": float64(42),
+						"state":  "open",
+						"title":  "MUL-2818 add issue PR CLI",
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssuePullRequestsTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := runIssuePullRequests(cmd, []string{"MUL-2818"})
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("runIssuePullRequests: %v", err)
+	}
+
+	if want := []string{"/api/issues/MUL-2818", "/api/issues/issue-uuid/pull-requests"}; fmt.Sprint(gotPaths) != fmt.Sprint(want) {
+		t.Fatalf("paths = %v, want %v", gotPaths, want)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out, &payload); err != nil {
+		t.Fatalf("decode JSON output: %v\n%s", err, string(out))
+	}
+	prs, _ := payload["pull_requests"].([]any)
+	if len(prs) != 1 {
+		t.Fatalf("pull_requests length = %d, want 1", len(prs))
+	}
+	pr, _ := prs[0].(map[string]any)
+	if pr["url"] != "https://github.com/multica-ai/multica/pull/42" || pr["number"] != float64(42) || pr["state"] != "open" || pr["title"] != "MUL-2818 add issue PR CLI" {
+		t.Fatalf("unexpected PR payload: %#v", pr)
+	}
+}
+
+func TestRunIssuePullRequestsTableIncludesCoreFields(t *testing.T) {
+	prs := []map[string]any{{
+		"url":    "https://github.com/multica-ai/multica/pull/42",
+		"number": float64(42),
+		"state":  "open",
+		"title":  "MUL-2818 add issue PR CLI",
+	}}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	printIssuePullRequestsTable(prs)
+	_ = w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	text := string(out)
+	for _, want := range []string{"NUMBER", "STATE", "TITLE", "URL", "42", "open", "MUL-2818 add issue PR CLI", "https://github.com/multica-ai/multica/pull/42"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("table output missing %q:\n%s", want, text)
+		}
 	}
 }
 

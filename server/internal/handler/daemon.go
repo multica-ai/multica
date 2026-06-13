@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -19,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -343,7 +345,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			OwnerID:     ownerID,
 		})
 		if err != nil {
-			h.Analytics.Capture(analytics.RuntimeFailed(
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
 				uuidToString(ownerID),
 				req.WorkspaceID,
 				req.DaemonID,
@@ -376,7 +378,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if row.Inserted {
-			h.Analytics.Capture(analytics.RuntimeRegistered(
+			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
 				uuidToString(registered.ID),
@@ -386,7 +388,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				req.CLIVersion,
 			))
 			if registered.Status == "online" {
-				h.Analytics.Capture(analytics.RuntimeReady(
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeReady(
 					uuidToString(ownerID),
 					req.WorkspaceID,
 					uuidToString(registered.ID),
@@ -560,7 +562,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
-		h.Analytics.Capture(analytics.RuntimeOffline(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeOffline(
 			uuidToString(rt.OwnerID),
 			wsID,
 			uuidToString(rt.ID),
@@ -1109,7 +1111,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
+		// Workspace-bound skills first, then platform built-in skills. Built-in
+		// names carry a "multica-" prefix so their on-disk slugs never collide
+		// with a user-authored workspace skill (see writeSkillFiles).
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		skills = append(skills, h.TaskService.BuiltinSkills()...)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -1126,6 +1132,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		// runtime_config is stored as JSONB and may legitimately be the
+		// empty object `{}` for agents that haven't opted into any
+		// provider-specific tuning. Forward only non-empty payloads so the
+		// daemon's per-provider decoders treat absent-or-empty identically.
+		var runtimeConfig json.RawMessage
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1136,6 +1150,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			RuntimeConfig: runtimeConfig,
 		}
 	}
 
@@ -1157,6 +1172,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Stored task initiator: chat tasks persist the real message sender at
+	// enqueue time (web: request user; Lark: inbound sender — NOT the chat
+	// session creator, which for Lark groups is the installer). When set, it is
+	// the authoritative initiator for this run; resolve the live name/email so
+	// the daemon can render `## Task Initiator`. Comment-triggered tasks instead
+	// resolve their initiator from the triggering comment's author below; the
+	// two paths are mutually exclusive (a task is either chat or issue-bound).
+	// See MUL-2645.
+	if task.InitiatorUserID.Valid {
+		resp.InitiatorType = "member"
+		resp.InitiatorID = uuidToString(task.InitiatorUserID)
+		if u, err := h.Queries.GetUser(r.Context(), task.InitiatorUserID); err == nil {
+			resp.InitiatorName = u.Name
+			resp.InitiatorEmail = u.Email
+		}
+	}
+
 	// Include workspace ID and repos so the daemon can set up worktrees.
 	//
 	// Repo precedence: project-bound github_repo resources override workspace
@@ -1167,6 +1199,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			resp.ThreadName = issue.Title
 
 			// Squad-leader briefing injection: when the issue is assigned
 			// to a squad and the claiming agent is that squad's current
@@ -1252,12 +1285,27 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if task.TriggerCommentID.Valid {
 			if comment, err := h.Queries.GetComment(r.Context(), task.TriggerCommentID); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				resp.TriggerThreadID = uuidToString(comment.ID)
+				if comment.ParentID.Valid {
+					resp.TriggerThreadID = uuidToString(comment.ParentID)
+				}
 				resp.TriggerAuthorType = comment.AuthorType
+				// The triggering comment's author is the task initiator — the
+				// real requester behind this run. Surface it (type + id + name,
+				// plus email for members) so a workspace-visible agent can
+				// attribute the request to the right person instead of to the
+				// runtime owner. Same lookups as the display name above; we just
+				// also capture the id and email. See MUL-2645.
+				resp.InitiatorType = comment.AuthorType
+				if comment.AuthorID.Valid {
+					resp.InitiatorID = uuidToString(comment.AuthorID)
+				}
 				switch comment.AuthorType {
 				case "agent":
 					if comment.AuthorID.Valid {
 						if a, err := h.Queries.GetAgent(r.Context(), comment.AuthorID); err == nil {
 							resp.TriggerAuthorName = a.Name
+							resp.InitiatorName = a.Name
 						}
 					}
 				case "member":
@@ -1266,21 +1314,26 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					if comment.AuthorID.Valid {
 						if u, err := h.Queries.GetUser(r.Context(), comment.AuthorID); err == nil {
 							resp.TriggerAuthorName = u.Name
+							resp.InitiatorName = u.Name
+							resp.InitiatorEmail = u.Email
 						}
 					}
 				}
-				// Count comments that arrived since this agent's last run on the
-				// issue, so the daemon can tell it up front instead of relying on
-				// it to self-fetch. Anchor = the prior task's started_at (never
-				// completed_at: a long run would miss comments posted while it
-				// ran). Cold start (no prior task) → no anchor → no hint.
-				// Excludes the agent's own comments. Best-effort: any DB error or
-				// zero count leaves the hint suppressed.
+				// Count comments that arrived issue-wide since this agent's last
+				// run, so the daemon can tell it the full catch-up volume up front
+				// (the prompt then steers it to read the triggering thread first).
+				// Anchor = the prior task's started_at (never completed_at: a long
+				// run would miss comments posted while it ran). Cold start (no prior
+				// task) → no anchor → no hint. Excludes the agent's own comments and
+				// the triggering comment itself because that body is already
+				// injected into the prompt. Best-effort: any DB error or zero count
+				// leaves the hint suppressed.
 				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
 					AgentID: task.AgentID,
 					IssueID: comment.IssueID,
 				}); err == nil && startedAt.Valid {
 					if cnt, err := h.Queries.CountNewCommentsSince(r.Context(), db.CountNewCommentsSinceParams{
+						AnchorID:    task.TriggerCommentID,
 						IssueID:     comment.IssueID,
 						WorkspaceID: comment.WorkspaceID,
 						Since:       startedAt,
@@ -1326,6 +1379,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
+			resp.ThreadName = cs.Title
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
@@ -1356,31 +1410,42 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			// Load the latest user message for the chat prompt, plus any
-			// attachments linked to that exact message. Without the structured
-			// attachment list the agent only sees the markdown URL in
-			// `ChatMessage` — fine for vision models inline but unusable when
-			// the agent wants to `multica attachment download <id>` (URL is
-			// signed and 30-min expiring on private CDN).
+			// Build the chat prompt from EVERY user message that has arrived
+			// since the agent's last reply — not just the most recent one. A
+			// short-window debounce (MUL-2968) can land several user messages
+			// before a single run fires; the agent resumes its prior session
+			// and only learns of new input through resp.ChatMessage, so
+			// delivering just the latest message would silently drop the
+			// earlier ones (e.g. "看上海天气" then "还有青岛" → only Qingdao
+			// answered). The unanswered set is the trailing run of user
+			// messages after the last assistant message (every completed or
+			// failed run writes an assistant row, so that anchor advances each
+			// turn). Attachments are collected from each included message so
+			// the agent can `multica attachment download <id>` — the markdown
+			// URL alone is signed and 30-min expiring on the private CDN.
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				for i := len(msgs) - 1; i >= 0; i-- {
-					if msgs[i].Role == "user" {
-						resp.ChatMessage = msgs[i].Content
-						if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-							ChatMessageID: msgs[i].ID,
-							WorkspaceID:   parseUUID(resp.WorkspaceID),
-						}); attErr == nil && len(atts) > 0 {
-							resp.ChatMessageAttachments = make([]ChatAttachmentMeta, len(atts))
-							for j, a := range atts {
-								resp.ChatMessageAttachments[j] = ChatAttachmentMeta{
-									ID:          uuidToString(a.ID),
-									Filename:    a.Filename,
-									ContentType: a.ContentType,
-								}
-							}
-						}
-						break
+				unanswered := trailingUserMessages(msgs)
+				parts := make([]string, 0, len(unanswered))
+				for _, m := range unanswered {
+					if strings.TrimSpace(m.Content) != "" {
+						parts = append(parts, m.Content)
 					}
+					if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+						ChatMessageID: m.ID,
+						WorkspaceID:   parseUUID(resp.WorkspaceID),
+					}); attErr == nil && len(atts) > 0 {
+						for _, a := range atts {
+							resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+								ID:          uuidToString(a.ID),
+								Filename:    a.Filename,
+								ContentType: a.ContentType,
+							})
+						}
+					}
+				}
+				resp.ChatMessage = strings.Join(parts, "\n\n")
+				if strings.TrimSpace(resp.ThreadName) == "" {
+					resp.ThreadName = resp.ChatMessage
 				}
 			}
 		}
@@ -1398,6 +1463,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
+				resp.ThreadName = ap.Title
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -1425,6 +1491,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
+			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 
 			// When the user picked a project in the modal, surface its title
@@ -1630,6 +1698,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 
+// trailingUserMessages returns the run of user messages after the last
+// assistant message in a chronologically-ordered chat history — the set the
+// agent has NOT yet replied to. The agent resumes its prior session and only
+// learns of new input through the claim response's chat_message, so a single
+// run that covers a debounced burst (MUL-2968) must deliver every one of
+// these, not just the latest. Every completed or failed run writes an
+// assistant row, so the anchor advances one turn at a time; the result is the
+// whole slice on the first turn and exactly the new message(s) thereafter.
+func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
+	start := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role != "user" {
+			start = i + 1
+			break
+		}
+	}
+	return msgs[start:]
+}
+
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
 func (h *Handler) ListPendingTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -1829,7 +1916,7 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	if marked.CreatorType == "agent" {
 		distinct = "agent:" + distinct
 	}
-	h.Analytics.Capture(analytics.IssueExecuted(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueExecuted(
 		distinct,
 		uuidToString(marked.WorkspaceID),
 		uuidToString(marked.ID),
@@ -1857,7 +1944,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
 	// Verify the caller owns this task's workspace.
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
 		return
 	}
 
@@ -1880,14 +1968,17 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			CacheWriteTokens: u.CacheWriteTokens,
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
+			continue
 		}
+		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // GetTaskStatus returns the current status of a task.
-// Used by the daemon to check whether a task was cancelled mid-execution.
+// Used by the daemon to detect terminal/interruption signals (cancelled,
+// failed, completed) while a task is executing mid-flight.
 func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 
@@ -2000,7 +2091,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
-		h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -2009,22 +2100,41 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			Input:   inputJSON,
 			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
 		})
+		if createErr != nil {
+			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
+			writeError(w, http.StatusInternalServerError, "failed to persist task message")
+			return
+		}
 
 		if workspaceID != "" {
-			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID, protocol.TaskMessagePayload{
-				TaskID:  taskID,
-				IssueID: uuidToString(task.IssueID),
-				Seq:     msg.Seq,
-				Type:    msg.Type,
-				Tool:    msg.Tool,
-				Content: msg.Content,
-				Input:   msg.Input,
-				Output:  msg.Output,
-			})
+			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
+				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
 		}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.TaskMessagePayload {
+	var input map[string]any
+	if m.Input != nil {
+		json.Unmarshal(m.Input, &input)
+	}
+	createdAt := ""
+	if m.CreatedAt.Valid {
+		createdAt = m.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return protocol.TaskMessagePayload{
+		TaskID:    taskID,
+		IssueID:   issueID,
+		Seq:       int(m.Seq),
+		Type:      m.Type,
+		Tool:      m.Tool.String,
+		Content:   m.Content.String,
+		Input:     input,
+		Output:    m.Output.String,
+		CreatedAt: createdAt,
+	}
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).
@@ -2063,20 +2173,7 @@ func (h *Handler) ListTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2206,20 +2303,7 @@ func (h *Handler) ListTaskMessagesByUser(w http.ResponseWriter, r *http.Request)
 
 	resp := make([]protocol.TaskMessagePayload, len(messages))
 	for i, m := range messages {
-		var input map[string]any
-		if m.Input != nil {
-			json.Unmarshal(m.Input, &input)
-		}
-		resp[i] = protocol.TaskMessagePayload{
-			TaskID:  taskID,
-			IssueID: issueID,
-			Seq:     int(m.Seq),
-			Type:    m.Type,
-			Tool:    m.Tool.String,
-			Content: m.Content.String,
-			Input:   input,
-			Output:  m.Output.String,
-		}
+		resp[i] = taskMessageToPayload(m, taskID, issueID)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

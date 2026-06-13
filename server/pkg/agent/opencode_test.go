@@ -954,6 +954,74 @@ func TestOpencodeBackendAnchorsDirAndPWD(t *testing.T) {
 	}
 }
 
+func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	argsFile := filepath.Join(tempDir, "argv.txt")
+	fakePath := filepath.Join(tempDir, "opencode")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScript()))
+
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_ARGS_FILE": argsFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new opencode backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Model:         "opencode/deepseek-v4",
+		ThinkingLevel: "max",
+		CustomArgs:    []string{"--variant", "low", "--keep-me"},
+		Timeout:       5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := splitNonEmptyLines(string(raw))
+	if !containsAdjacent(args, "--model", "opencode/deepseek-v4") {
+		t.Fatalf("expected --model opencode/deepseek-v4 in args: %v", args)
+	}
+	if !containsAdjacent(args, "--variant", "max") {
+		t.Fatalf("expected daemon-injected --variant max in args: %v", args)
+	}
+	if argIndexOf(args, "--model") > argIndexOf(args, "--variant") {
+		t.Errorf("expected --variant after --model for readability: %v", args)
+	}
+	count := 0
+	for _, arg := range args {
+		if arg == "--variant" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one --variant, got %d: %v", count, args)
+	}
+	if argIndexOf(args, "low") >= 0 {
+		t.Errorf("filtered user --variant value still appears: %v", args)
+	}
+	if argIndexOf(args, "--keep-me") < 0 {
+		t.Errorf("non-blocked custom arg was dropped: %v", args)
+	}
+}
+
 func TestOpencodeBackendDoesNotUsePermissionEnvOverride(t *testing.T) {
 	t.Parallel()
 

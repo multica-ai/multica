@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -77,6 +78,36 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 	if got := d.RestartBinary(); got == deletedCellarPath {
 		t.Fatalf("restart binary used deleted Cellar path %q", got)
+	}
+}
+
+func TestIsBlockedEnvKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{key: "MULTICA_TOKEN", want: true},
+		{key: "multica_runtime_id", want: true},
+		{key: "HOME", want: true},
+		{key: "PATH", want: true},
+		{key: "CODEX_HOME", want: true},
+		{key: "CURSOR_DATA_DIR", want: true},
+		{key: "cursor_data_dir", want: true},
+		{key: "OPENCLAW_CONFIG_PATH", want: true},
+		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		{key: "ANTHROPIC_API_KEY", want: false},
+		{key: "CURSOR_AGENT", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			t.Parallel()
+			if got := isBlockedEnvKey(tt.key); got != tt.want {
+				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -703,8 +734,12 @@ func TestShouldInterruptAgent(t *testing.T) {
 		want   bool
 	}{
 		{name: "status cancelled", status: "cancelled", err: nil, want: true},
+		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
+		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
+		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
+		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
 		{name: "transient 5xx is not a cancel signal", status: "", err: transient, want: false},
 		{name: "no information yet", status: "", err: nil, want: false},
 	}
@@ -890,6 +925,71 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	// "directory not empty" cleanup error.
 	t.Cleanup(d.waitBackgroundSyncs)
 	return d
+}
+
+func TestGateResumeToReusedWorkdir(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
+	}{
+		{
+			name:        "same workdir keeps session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-a/workdir",
+			wantSession: "sess-1",
+			wantReused:  true,
+		},
+		{
+			name:        "fresh workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "session without recorded workdir drops session",
+			sessionID:   "sess-1",
+			priorDir:    "",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:        "no prior session is a no-op",
+			sessionID:   "",
+			priorDir:    "/ws/task-a/workdir",
+			envDir:      "/ws/task-b/workdir",
+			wantSession: "",
+			wantReused:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+
+			if reused != tt.wantReused {
+				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
+			}
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+		})
+	}
 }
 
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
@@ -1096,8 +1196,9 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 
 // idleWatchdogBackend simulates the MUL-2225 hang: emit one message to mark
 // activity, then go silent forever. With a short AgentIdleWatchdog, the
-// watchdog should fire and short-circuit executeAndDrain instead of waiting
-// for the full drainTimeout (which is ~21 minutes by default).
+// watchdog should fire and short-circuit executeAndDrain. With no wall-clock
+// cap (opts.Timeout = 0) the drain loop imposes no deadline of its own, so the
+// idle watchdog is the only thing that ends this otherwise-forever-silent run.
 type idleWatchdogBackend struct {
 	emitOne bool // when true, emit one message before going silent; when false, never emit anything
 }
@@ -1282,6 +1383,45 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 	}
 	if result.Status != "completed" {
 		t.Fatalf("expected status=completed, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// stuckInFlightToolBackend models a hung tool: it emits a tool_use and then
+// goes silent forever — the matching tool_result never arrives, so inFlightTools
+// stays at 1 (e.g. a child process that never returns). With no wall-clock cap
+// (the MUL-3064 default), AgentToolWatchdog is the only thing that ends it.
+type stuckInFlightToolBackend struct{}
+
+func (stuckInFlightToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
+	// Deliberately leave msgCh open, never emit tool_result, never write resCh.
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	// The normal idle window would be skipped while a tool is in flight; the
+	// AgentToolWatchdog budget is what must fire here.
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+	d.cfg.AgentToolWatchdog = 50 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected status=idle_watchdog for a hung in-flight tool, got %q (err=%q)", result.Status, result.Error)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("tool watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentToolWatchdog)
 	}
 }
 
@@ -1719,32 +1859,49 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	cases := []struct {
 		name              string
 		status            string
+		comment           string
 		failureReasonIn   string
 		wantFailureReason string
 	}{
 		{
 			name:              "blocked with explicit reason preserves it",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "iteration_limit",
 			wantFailureReason: "iteration_limit",
 		},
 		{
-			name:              "blocked without reason defaults to agent_error",
+			// MUL-2946: when the daemon doesn't supply a refined
+			// reason, the comment text is run through
+			// taskfailure.Classify so the failure_reason column
+			// lands in the canonical refined taxonomy instead of
+			// the legacy "agent_error" coarse bucket.
+			name:              "blocked without reason classifies comment as rate-limit",
 			status:            "blocked",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 		{
-			name:              "cancelled defaults to cancelled reason",
+			name:              "blocked without reason and unrecognized comment lands in agent_error.unknown",
+			status:            "blocked",
+			comment:           "the agent gave up for reasons we don't recognize",
+			failureReasonIn:   "",
+			wantFailureReason: "agent_error.unknown",
+		},
+		{
+			name:              "cancelled defaults to cancelled reason regardless of comment",
 			status:            "cancelled",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
 			wantFailureReason: "cancelled",
 		},
 		{
-			name:              "unknown status fails closed",
+			name:              "unknown status routes through classifier",
 			status:            "weird_new_status",
+			comment:           "rate limit reached",
 			failureReasonIn:   "",
-			wantFailureReason: "agent_error",
+			wantFailureReason: "agent_error.provider_capacity_or_rate_limit",
 		},
 	}
 
@@ -1757,7 +1914,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 			d.reportTaskResult(context.Background(), "task-x", TaskResult{
 				Status:        tc.status,
-				Comment:       "rate limit reached",
+				Comment:       tc.comment,
 				SessionID:     "ses-x",
 				WorkDir:       "/tmp/x",
 				FailureReason: tc.failureReasonIn,
@@ -1768,7 +1925,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 			if rec.path != "/api/daemon/tasks/task-x/fail" {
 				t.Fatalf("expected /fail endpoint for status=%q, got %s", tc.status, rec.path)
 			}
-			if rec.payload["error"] != "rate limit reached" {
+			if rec.payload["error"] != tc.comment {
 				t.Errorf("error body: got %v", rec.payload["error"])
 			}
 			if got := rec.payload["failure_reason"]; got != tc.wantFailureReason {

@@ -1,0 +1,88 @@
+{
+  "bubble_menu": {
+    "bold": "굵게",
+    "italic": "기울임",
+    "strikethrough": "취소선",
+    "code": "코드",
+    "highlight": "강조",
+    "link": "링크",
+    "list": "목록",
+    "quote": "인용",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "텍스트",
+      "normal_text": "일반 텍스트",
+      "heading_1": "제목 1",
+      "heading_2": "제목 2",
+      "heading_3": "제목 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "글머리 기호 목록",
+      "ordered_list": "번호 목록",
+      "task_list": "체크리스트"
+    },
+    "sub_issue": {
+      "tooltip": "선택 영역으로 하위 이슈 만들기",
+      "created": "{{identifier}} 생성됨",
+      "create_failed": "하위 이슈를 만들지 못했습니다"
+    }
+  },
+  "image": {
+    "view": "이미지 보기",
+    "download": "다운로드",
+    "copy_link": "링크 복사",
+    "delete": "삭제",
+    "link_copied": "링크를 복사했습니다",
+    "copy_link_failed": "링크를 복사하지 못했습니다"
+  },
+  "attachment": {
+    "download_failed": "다운로드 링크를 가져오지 못했습니다. 잠시 후 다시 시도하세요.",
+    "preview": "미리보기",
+    "preview_loading": "미리보기 불러오는 중...",
+    "preview_failed": "미리보기를 불러오지 못했습니다",
+    "preview_too_large": "파일이 너무 커서 미리볼 수 없습니다. 다운로드하세요.",
+    "preview_unsupported": "이 파일 형식은 미리보기를 지원하지 않습니다.",
+    "close": "닫기",
+    "open_in_new_tab": "새 탭에서 열기",
+    "remove": "첨부 파일 제거"
+  },
+  "link_hover": {
+    "copy_link": "링크 복사",
+    "open_link": "링크 열기",
+    "link_copied": "링크를 복사했습니다",
+    "copy_failed": "복사하지 못했습니다"
+  },
+  "mention": {
+    "group_users": "사용자",
+    "group_issues": "이슈",
+    "all_members": "모든 멤버",
+    "searching": "검색 중...",
+    "no_results": "결과 없음",
+    "group_current": "현재 페이지",
+    "group_recent": "최근 본 항목",
+    "group_search": "검색 결과"
+  },
+  "code_block": {
+    "copy_code": "코드 복사",
+    "show_preview": "미리보기 표시",
+    "show_source": "소스 표시",
+    "fullscreen": "전체 화면"
+  },
+  "file_card": {
+    "uploading": "{{filename}} 업로드 중"
+  },
+  "title_editor": {
+    "title_aria_label": "제목"
+  },
+  "mermaid": {
+    "render_error": "Mermaid 다이어그램을 렌더링할 수 없습니다.",
+    "rendering": "다이어그램 렌더링 중..."
+  },
+  "slash_command": {
+    "no_skills_configured": "구성된 스킬 없음",
+    "no_results": "일치하는 스킬 없음",
+    "commands": {
+      "note": "메모 추가 — 에이전트를 트리거하지 않음"
+    }
+  }
+}

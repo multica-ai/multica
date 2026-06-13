@@ -30,6 +30,7 @@
     "inbox",
     "---集成---",
     "github-integration",
+    "lark-bot-integration",
     "---自部署运维---",
     "environment-variables",
     "auth-setup",

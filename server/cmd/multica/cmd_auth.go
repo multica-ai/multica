@@ -17,8 +17,28 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// loginTokenPrefixes are the token prefixes `multica login --token` accepts.
+// The CLI used to hardcode `mul_` only, which made it impossible to log in
+// with a Multica Cloud Node PAT (`mcn_`) even though the server happily
+// authenticates both kinds. Keep this list in sync with the prefix branches
+// in server/internal/middleware/auth.go.
+var loginTokenPrefixes = []string{"mul_", auth.CloudPATPrefix}
+
+// validateLoginTokenPrefix returns nil if token starts with one of the
+// CLI-recognised PAT prefixes, or an error describing the accepted set.
+// Extracted so the prefix list has one obvious test surface.
+func validateLoginTokenPrefix(token string) error {
+	for _, p := range loginTokenPrefixes {
+		if strings.HasPrefix(token, p) {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid token format: must start with %s", strings.Join(loginTokenPrefixes, " or "))
+}
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
@@ -215,7 +235,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// so an IPv4 listener is what the browser actually needs.
 	listener, err := net.Listen("tcp4", bindAddr+":0")
 	if err != nil {
-		return fmt.Errorf("failed to start local server: %w", err)
+		return fmt.Errorf("could not start the local login callback server (used to receive the browser sign-in); a firewall or another process may be blocking local ports: %w", err)
 	}
 	defer listener.Close()
 
@@ -280,7 +300,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// Use the JWT to create a PAT via the existing API.
 	client := cli.NewAPIClient(serverURL, "", jwtToken)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	hostname, _ := os.Hostname()
@@ -298,7 +318,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		"expires_in_days": expiresInDays,
 	}, &patResp)
 	if err != nil {
-		return fmt.Errorf("failed to create access token: %w", err)
+		return cli.WithUserMessage("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
 	}
 
 	// Verify the PAT works.
@@ -308,7 +328,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		Email string `json:"email"`
 	}
 	if err := patClient.GetJSON(ctx, "/api/me", &me); err != nil {
-		return fmt.Errorf("token verification failed: %w", err)
+		return cli.WithUserMessage("Sign-in did not complete: the server did not accept the new credential. Run `multica login` again.", err)
 	}
 
 	// Save to config. Reset workspace data on every login — the user or
@@ -346,14 +366,14 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	if token == "" {
 		return fmt.Errorf("token is required")
 	}
-	if !strings.HasPrefix(token, "mul_") {
-		return fmt.Errorf("invalid token format: must start with mul_")
+	if err := validateLoginTokenPrefix(token); err != nil {
+		return err
 	}
 
 	serverURL := resolveServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {
@@ -361,7 +381,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		Email string `json:"email"`
 	}
 	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
-		return fmt.Errorf("invalid token: %w", err)
+		return cli.WithUserMessage("Could not sign in with that token — make sure it is valid and not expired, then run `multica login --token <token>` again.", err)
 	}
 
 	profile := resolveProfile(cmd)
@@ -388,7 +408,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 
 	client := cli.NewAPIClient(serverURL, "", token)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	var me struct {

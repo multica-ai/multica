@@ -3,8 +3,8 @@
  *
  * Written to a new issue (assigned to the user themselves) by the welcome
  * hook when the user took the Skip exit on Step 3. Content is the
- * install-runtime tutorial; the Chinese version uses Kimi CLI as the
- * recommended quickest path, the English version uses Codex.
+ * install-runtime tutorial; each supported locale can recommend the
+ * quickest runtime path that best fits that audience.
  *
  * Title is stable — kept identical to the v2 server-side
  * `NoRuntimeIssueTitle` so any existing dedupe code elsewhere keeps
@@ -12,8 +12,8 @@
  */
 
 /**
- * Step 1 of the skip-path bundle. Bilingual so a Chinese user sees a
- * Chinese title on the board.
+ * Step 1 of the skip-path bundle. Localized so users see the title in
+ * their current supported locale on the board.
  *
  * Note: server's deprecation shim (`onboarding_shim.go:noRuntimeIssueTitle`)
  * still uses the bare English string for its title-based dedupe — that
@@ -23,6 +23,8 @@
 export const INSTALL_RUNTIME_ISSUE_TITLE = {
   en: "Step 1 — Connect a runtime to start using agents",
   zh: "第 1 步 —— 连接运行时,开始使用 agent",
+  ko: "1단계 — agent를 사용하려면 runtime 연결하기",
+  ja: "ステップ1 — agent を使うために runtime を接続する",
 } as const;
 
 const en = `Welcome to Multica.
@@ -104,7 +106,85 @@ Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-st
 
 运行时连上后,你就可以创建 Multica Helper,开始一次有智能体参与的上手引导。`;
 
-export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh } as const;
+const ko = `Multica에 오신 것을 환영합니다.
+
+agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을 설치하는 동안에도 Multica를 가벼운 프로젝트 관리 워크스페이스로 먼저 사용할 수 있습니다.
+
+## 먼저 Multica를 사용해 보기
+
+runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
+
+1. 현재 작업을 위한 project를 만듭니다.
+2. issue 몇 개를 만들고 backlog, todo, in_progress, done 사이에서 이동해 봅니다.
+3. priority, label, comment, subscription을 추가합니다.
+4. Inbox에서 나에게 배정된 작업과 mention을 확인합니다.
+
+이렇게 프로젝트 관리 계층을 먼저 익힐 수 있습니다. runtime이 연결되면 agent가 같은 issue에서 바로 작업을 시작합니다.
+
+## 첫 agent runtime 설치하기
+
+전체 가이드: https://multica.ai/docs/install-agent-runtime
+
+한국어 사용자는 Codex로 시작하는 것이 가장 빠릅니다:
+
+1. Node.js가 설치되어 있는지 확인합니다.
+2. Codex를 설치합니다:
+   npm i -g @openai/codex
+3. 로그인합니다:
+   codex
+4. 터미널에서 찾을 수 있는지 확인합니다:
+   which codex
+   codex --version
+5. Multica daemon을 재시작합니다:
+   multica daemon restart
+   데스크톱 앱을 사용한다면 앱을 재시작해도 됩니다.
+6. Runtimes로 돌아가 새로고침합니다. Codex runtime이 online으로 보여야 합니다.
+7. 해당 runtime으로 첫 agent를 만든 뒤 issue를 agent에게 배정하고 status를 todo로 바꿉니다.
+
+Codex 참고 문서: https://developers.openai.com/codex/cli
+
+runtime이 연결되면 Multica Helper를 만들어 안내를 받으며 첫 실행을 시작할 수 있습니다.`;
+
+const ja = `Multica へようこそ。
+
+agent が作業を実行するには、まず runtime が必要です。runtime をインストールしている間も、Multica を軽量なプロジェクト管理ワークスペースとして先に使うことができます。
+
+## まず Multica を使ってみる
+
+runtime が準備できる前に、次のことを試せます:
+
+1. いまの仕事のための project を作る。
+2. issue をいくつか作り、backlog、todo、in_progress、done の間で動かしてみる。
+3. priority、label、comment、subscription を追加する。
+4. Inbox で自分への割り当てや mention を確認する。
+
+これでまずプロジェクト管理のレイヤーに慣れることができます。runtime を接続すると、agent が同じ issue から作業を始められます。
+
+## 最初の agent runtime をインストールする
+
+詳しいガイド: https://multica.ai/docs/install-agent-runtime
+
+日本語ユーザーには、Codex で始めるのが最も速い経路です:
+
+1. Node.js がインストールされていることを確認します。
+2. Codex をインストールします:
+   npm i -g @openai/codex
+3. サインインします:
+   codex
+4. ターミナルから見つけられるか確認します:
+   which codex
+   codex --version
+5. Multica daemon を再起動します:
+   multica daemon restart
+   デスクトップアプリを使っている場合は、アプリを再起動するだけで十分です。
+6. Runtimes に戻って再読み込みします。Codex runtime が online と表示されるはずです。
+7. その runtime から最初の agent を作り、issue を agent に割り当てて status を todo にします。
+
+Codex のリファレンス: https://developers.openai.com/codex/cli
+
+runtime が接続されたら、Multica Helper を作成して、案内付きの最初の実行を始められます。`;
+
+export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;
 
 /**
  * Prefix sentence for the follow-up comment posted on this issue (the one
@@ -118,4 +198,6 @@ export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh } as const;
 export const FOLLOWUP_COMMENT_PREFIX = {
   en: "Your next step:",
   zh: "完成后的下一步：",
+  ko: "다음 단계:",
+  ja: "次のステップ:",
 } as const;

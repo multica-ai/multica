@@ -97,6 +97,7 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	WaitReason        pgtype.Text        `json:"wait_reason"`
+	InitiatorUserID   pgtype.UUID        `json:"initiator_user_id"`
 }
 
 type Attachment struct {
@@ -347,7 +348,7 @@ type Issue struct {
 	AcceptanceCriteria []byte             `json:"acceptance_criteria"`
 	ContextRefs        []byte             `json:"context_refs"`
 	Position           float64            `json:"position"`
-	DueDate            pgtype.Timestamptz `json:"due_date"`
+	DueDate            pgtype.Date        `json:"due_date"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
@@ -355,7 +356,7 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
-	StartDate          pgtype.Timestamptz `json:"start_date"`
+	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 }
 
@@ -405,6 +406,84 @@ type IssueSubscriber struct {
 type IssueToLabel struct {
 	IssueID pgtype.UUID `json:"issue_id"`
 	LabelID pgtype.UUID `json:"label_id"`
+}
+
+type LarkBindingToken struct {
+	TokenHash      string             `json:"token_hash"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkOpenID     string             `json:"lark_open_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkChatSessionBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkChatID     string             `json:"lark_chat_id"`
+	LarkChatType   string             `json:"lark_chat_type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkInboundAudit struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkChatID     pgtype.Text        `json:"lark_chat_id"`
+	EventType      string             `json:"event_type"`
+	LarkEventID    pgtype.Text        `json:"lark_event_id"`
+	LarkMessageID  pgtype.Text        `json:"lark_message_id"`
+	DropReason     string             `json:"drop_reason"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+}
+
+type LarkInboundMessageDedup struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type LarkInstallation struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	AgentID            pgtype.UUID        `json:"agent_id"`
+	AppID              string             `json:"app_id"`
+	AppSecretEncrypted []byte             `json:"app_secret_encrypted"`
+	TenantKey          pgtype.Text        `json:"tenant_key"`
+	BotOpenID          string             `json:"bot_open_id"`
+	InstallerUserID    pgtype.UUID        `json:"installer_user_id"`
+	Status             string             `json:"status"`
+	WsLeaseToken       pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt   pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstalledAt        pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	BotUnionID         pgtype.Text        `json:"bot_union_id"`
+	Region             string             `json:"region"`
+}
+
+type LarkOutboundCardMessage struct {
+	ID                pgtype.UUID        `json:"id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	TaskID            pgtype.UUID        `json:"task_id"`
+	LarkChatID        string             `json:"lark_chat_id"`
+	LarkCardMessageID string             `json:"lark_card_message_id"`
+	Status            string             `json:"status"`
+	LastPatchedAt     pgtype.Timestamptz `json:"last_patched_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type LarkUserBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkOpenID     string             `json:"lark_open_id"`
+	UnionID        pgtype.Text        `json:"union_id"`
+	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
 type Member struct {
@@ -514,6 +593,31 @@ type SquadMember struct {
 	MemberID   pgtype.UUID        `json:"member_id"`
 	Role       string             `json:"role"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type SysCronExecution struct {
+	ID           pgtype.UUID        `json:"id"`
+	JobName      string             `json:"job_name"`
+	ScopeKind    string             `json:"scope_kind"`
+	ScopeID      string             `json:"scope_id"`
+	PlanTime     pgtype.Timestamptz `json:"plan_time"`
+	Status       string             `json:"status"`
+	Attempt      int32              `json:"attempt"`
+	MaxAttempts  int32              `json:"max_attempts"`
+	NextRetryAt  pgtype.Timestamptz `json:"next_retry_at"`
+	RunnerID     pgtype.Text        `json:"runner_id"`
+	LeaseToken   pgtype.UUID        `json:"lease_token"`
+	HeartbeatAt  pgtype.Timestamptz `json:"heartbeat_at"`
+	StaleAfter   pgtype.Timestamptz `json:"stale_after"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	DurationMs   pgtype.Int4        `json:"duration_ms"`
+	RowsAffected pgtype.Int8        `json:"rows_affected"`
+	Result       []byte             `json:"result"`
+	ErrorCode    pgtype.Text        `json:"error_code"`
+	ErrorMsg     pgtype.Text        `json:"error_msg"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type TaskMessage struct {
@@ -654,6 +758,7 @@ type Workspace struct {
 	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 }
 
 type WorkspaceInvitation struct {

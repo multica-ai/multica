@@ -1,0 +1,88 @@
+{
+  "bubble_menu": {
+    "bold": "太字",
+    "italic": "斜体",
+    "strikethrough": "取り消し線",
+    "code": "コード",
+    "highlight": "ハイライト",
+    "link": "リンク",
+    "list": "リスト",
+    "quote": "引用",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "テキスト",
+      "normal_text": "標準テキスト",
+      "heading_1": "見出し 1",
+      "heading_2": "見出し 2",
+      "heading_3": "見出し 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "箇条書きリスト",
+      "ordered_list": "番号付きリスト",
+      "task_list": "タスクリスト"
+    },
+    "sub_issue": {
+      "tooltip": "選択範囲からサブイシューを作成",
+      "created": "{{identifier}} を作成しました",
+      "create_failed": "サブイシューを作成できませんでした"
+    }
+  },
+  "image": {
+    "view": "画像を表示",
+    "download": "ダウンロード",
+    "copy_link": "リンクをコピー",
+    "delete": "削除",
+    "link_copied": "リンクをコピーしました",
+    "copy_link_failed": "リンクをコピーできませんでした"
+  },
+  "attachment": {
+    "download_failed": "ダウンロードリンクを取得できませんでした。しばらくしてからもう一度お試しください。",
+    "preview": "プレビュー",
+    "preview_loading": "プレビューを読み込み中…",
+    "preview_failed": "プレビューを読み込めませんでした",
+    "preview_too_large": "ファイルが大きすぎてプレビューできません。ダウンロードしてください。",
+    "preview_unsupported": "このファイル形式はプレビューできません。",
+    "close": "閉じる",
+    "open_in_new_tab": "新しいタブで開く",
+    "remove": "添付ファイルを削除"
+  },
+  "link_hover": {
+    "copy_link": "リンクをコピー",
+    "open_link": "リンクを開く",
+    "link_copied": "リンクをコピーしました",
+    "copy_failed": "コピーできませんでした"
+  },
+  "mention": {
+    "group_users": "ユーザー",
+    "group_issues": "イシュー",
+    "all_members": "すべてのメンバー",
+    "searching": "検索中...",
+    "no_results": "結果なし",
+    "group_current": "現在のページ",
+    "group_recent": "最近見た項目",
+    "group_search": "検索結果"
+  },
+  "code_block": {
+    "copy_code": "コードをコピー",
+    "show_preview": "プレビューを表示",
+    "show_source": "ソースを表示",
+    "fullscreen": "全画面"
+  },
+  "file_card": {
+    "uploading": "{{filename}} をアップロード中"
+  },
+  "title_editor": {
+    "title_aria_label": "タイトル"
+  },
+  "mermaid": {
+    "render_error": "Mermaid ダイアグラムを描画できません。",
+    "rendering": "ダイアグラムを描画中…"
+  },
+  "slash_command": {
+    "no_skills_configured": "設定済みスキルなし",
+    "no_results": "一致するスキルなし",
+    "commands": {
+      "note": "メモを追加 — エージェントをトリガーしません"
+    }
+  }
+}

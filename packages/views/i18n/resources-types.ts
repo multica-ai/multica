@@ -33,7 +33,7 @@ import type billing from "../locales/en/billing.json";
 // Apps don't need to redeclare this — the augmentation is global, pulled
 // into the compilation graph by `use-t.ts`'s side-effect import.
 //
-// Adding a namespace: drop a JSON file under en/ and zh-Hans/, then add
+// Adding a namespace: drop a JSON file under every locale directory, then add
 // the matching `import type` + entry below. Type inference on `t($ => $)`
 // follows automatically.
 //

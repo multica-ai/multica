@@ -151,7 +151,9 @@ const MODEL_PRICING: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
 > = {
-  // -- Anthropic: current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
+  // -- Anthropic: current generation. Fable 5 is a Mythos-class SKU at 10/50;
+  //    Opus 4.5+ stays on the lower 5/25 Opus tier. --
+  "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },

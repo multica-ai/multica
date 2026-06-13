@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "ワークスペース名",
+    "name_placeholder": "マイワークスペース",
+    "url_label": "ワークスペースURL",
+    "url_placeholder": "my-workspace",
+    "submit": "ワークスペースを作成",
+    "submitting": "作成中...",
+    "errors": {
+      "slug_format": "小文字、数字、ハイフンのみ使用できます",
+      "slug_taken": "このワークスペースURLはすでに使用されています。",
+      "slug_reserved": "このワークスペースURLは予約されているため使用できません。",
+      "slug_conflict_toast": "別のワークスペースURLを選択してください",
+      "create_failed": "ワークスペースを作成できませんでした"
+    }
+  },
+  "new_page": {
+    "back": "戻る",
+    "log_out": "ログアウト",
+    "title": "Multicaへようこそ",
+    "description": "あなたとAIの仲間が同じコンテキストを共有しながら、イシューを引き受け、コメントを残し、隣り合って作業する1つのワークスペースです。",
+    "invite_hint": "ワークスペースの準備ができたら、仲間を招待できます。"
+  },
+  "creation_disabled": {
+    "title": "ワークスペースの作成が無効になっています",
+    "description": "このMultica instanceでは新しいワークスペースを作成できません。既存のワークスペースへの招待を管理者に依頼してください。"
+  },
+  "no_access": {
+    "title": "ワークスペースを利用できません",
+    "description": "このワークスペースは存在しないか、アクセス権がありません。",
+    "go_to_workspaces": "マイワークスペースへ移動",
+    "sign_in_different": "別のユーザーでログイン"
+  }
+}

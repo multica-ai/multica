@@ -1,0 +1,160 @@
+---
+title: CLI コマンドリファレンス
+description: すべてのトップレベル Multica CLI コマンドを 1 ページにまとめた概要です。完全な使い方は `multica <command> --help` を実行してください。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica CLI は、Web UI でできるほぼすべての操作をそのまま提供します（[イシュー](/issues)の作成、[エージェント](/agents)の割り当て、[デーモン](/daemon-runtimes)の起動など）。このページでは、すべてのトップレベルコマンドを 1 行の説明とともに一覧します。フラグや例の完全な一覧は `multica <command> --help` を実行してください。
+
+## 認証する
+
+CLI を初めて使うときにこのコマンドを実行して、**パーソナルアクセストークン（PAT）**を取得します。
+
+```bash
+multica login
+```
+
+ブラウザが自動的に開きます。Web アプリで承認すると、CLI が PAT（`mul_` プレフィックス付き）を `~/.multica/config.json` に保存します。これ以降のすべてのコマンドはこの PAT で認証されます。
+
+<Callout type="tip">
+CI やヘッドレス環境では、ブラウザフローをスキップできます。Web アプリの **Settings → Personal Access Tokens** で PAT を作成し、`multica login --token <mul_...>` で直接渡してください。
+</Callout>
+
+トークンの種類による違いについては、[認証とトークン](/auth-tokens)を参照してください。
+
+## 認証とセットアップ
+
+| コマンド | 用途 |
+|---|---|
+| `multica login` | ログインして PAT を保存 |
+| `multica auth status` | 現在のログイン状態、ユーザー、ワークスペースを表示 |
+| `multica auth logout` | ローカルの PAT を削除 |
+| `multica setup cloud` | Multica Cloud のワンショットセットアップ（ログイン + デーモンのインストール） |
+| `multica setup self-host` | セルフホストバックエンドのワンショットセットアップ |
+
+## ワークスペースとメンバー
+
+| コマンド | 用途 |
+|---|---|
+| `multica workspace list` | アクセスできるすべてのワークスペースを一覧 |
+| `multica workspace get <slug>` | 1 つのワークスペースの詳細を表示 |
+| `multica workspace member list` | 現在のワークスペースのメンバーを一覧 |
+| `multica workspace update <id> --name "..." [--description "..."] [--context "..."] [--issue-prefix "..."]` | ワークスペースのメタデータを更新（admin/owner）。長いフィールドは `--description-stdin` / `--context-stdin` を使用できます。 |
+
+## イシューとプロジェクト
+
+<Callout type="info">
+`list` 系のコマンド（`multica issue list`、`autopilot list`、`project list` など）は、デフォルトで短く**そのままコピー＆ペーストできる** ID を出力します。イシューは `MUL-123` のようなイシューキー、それ以外のリソースは短い UUID プレフィックスです。以下の後続コマンドの `<id>` 引数は短い ID と完全な UUID のどちらも受け取るため、一般的な流れは `multica issue list` → キーをコピー → `multica issue get MUL-123` となります。正式な UUID が必要なときは `list` コマンドに `--full-id` を渡してください。
+</Callout>
+
+| コマンド | 用途 |
+|---|---|
+| `multica issue list` | イシューを一覧（コピー＆ペーストできるイシューキーを出力） |
+| `multica issue get <id>` | 単一のイシューを表示（イシューキーまたは UUID を受け取る） |
+| `multica issue create --title "..."` | 新しいイシューを作成 |
+| `multica issue update <id> ...` | イシューを更新（ステータス、優先度、担当者など） |
+| `multica issue assign <id> --agent <slug>` | エージェントに割り当て（即座にタスクをトリガー） |
+| `multica issue status <id> --set <status>` | ステータス変更のショートカット |
+| `multica issue search <query>` | キーワード検索 |
+| `multica issue runs <id>` | イシュー上のエージェント実行を表示 |
+| `multica issue rerun <id>` | イシューの現在のエージェント担当者向けに新しいタスクを再キューイング |
+| `multica issue comment <id> ...` | ネスト: コメントの表示 / 投稿 |
+| `multica issue subscriber <id> ...` | ネスト: 購読 / 購読解除 |
+| `multica project list/get/create/update/delete/status` | プロジェクトの CRUD |
+
+## エージェントとスキル
+
+| コマンド | 用途 |
+|---|---|
+| `multica agent list` | ワークスペースのエージェントを一覧 |
+| `multica agent get <slug>` | エージェントの構成を表示 |
+| `multica agent create ...` | エージェントを作成 |
+| `multica agent update <slug> ...` | エージェントを更新 |
+| `multica agent archive <slug>` | アーカイブ |
+| `multica agent restore <slug>` | アーカイブ済みのエージェントを復元 |
+| `multica agent tasks <slug>` | エージェントのタスク履歴を表示 |
+| `multica agent skills ...` | ネスト: スキルのアタッチ / デタッチ |
+| `multica skill list/get/create/update/delete` | スキルの CRUD |
+| `multica skill import ...` | GitHub、ClawHub、またはローカルマシンからスキルをインポート |
+| `multica skill files ...` | ネスト: スキルのファイルを管理 |
+
+### スキルインポートの競合
+
+`multica skill import --url <url>` の既定値は `--on-conflict fail` です。同じ名前のスキルがすでに存在する場合、コマンドは構造化された `conflict` 結果で終了し、ワークスペースは変更されません。
+
+既存スキルの作成者で、スキル ID とエージェントの紐付けを維持したまま内容を置き換える場合は `--on-conflict overwrite` を使います。既存スキルを残してコピーを取り込む場合は `--on-conflict rename` を使うと、`-2` のような接尾辞が自動で付きます。同名の項目を単に飛ばす場合は `--on-conflict skip` を使います。
+
+```bash
+multica skill import --url https://skills.sh/acme/repo/review-helper
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+```
+
+## スクワッド
+
+| コマンド | 用途 |
+|---|---|
+| `multica squad list` | ワークスペースのスクワッドを一覧 |
+| `multica squad get <id>` | 単一のスクワッドを表示 |
+| `multica squad create --name "..." --leader <agent>` | スクワッドを作成（owner / admin） |
+| `multica squad update <id> ...` | 名前、説明、指示、リーダー、またはアバターを更新 |
+| `multica squad delete <id>` | アーカイブ（ソフト削除） — 割り当て済みのイシューをリーダーに移管 |
+| `multica squad member list/add/remove <squad-id>` | スクワッドメンバーを管理 |
+| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | スクワッドリーダーエージェントがターンごとに評価を記録するために使用 |
+
+完全なモデルについては[スクワッド](/squads)を参照してください。
+
+## オートパイロット
+
+| コマンド | 用途 |
+|---|---|
+| `multica autopilot list` | ワークスペースのすべてのオートパイロットを一覧 |
+| `multica autopilot get <id>` | 単一のオートパイロットを表示 |
+| `multica autopilot create ...` | オートパイロットを作成 |
+| `multica autopilot update <id> ...` | 更新 |
+| `multica autopilot delete <id>` | 削除 |
+| `multica autopilot runs <id>` | 実行履歴を表示 |
+| `multica autopilot trigger <id>` | 手動で実行をトリガー |
+
+## デーモンとランタイム
+
+| コマンド | 用途 |
+|---|---|
+| `multica daemon start` | デーモンを起動（デフォルトはバックグラウンド。`--foreground` を追加するとフォアグラウンドで実行） |
+| `multica daemon stop` | デーモンを停止 |
+| `multica daemon restart` | デーモンを再起動 |
+| `multica daemon status` | デーモンがオンラインかどうかと同時実行数を確認 |
+| `multica daemon logs` | デーモンのログを表示 |
+| `multica runtime list` | 現在のワークスペースのランタイムを一覧 |
+| `multica runtime usage` | リソース使用量を表示 |
+| `multica runtime activity` | 最近のアクティビティログ |
+| `multica runtime update <id> ...` | ランタイムの構成を更新 |
+
+## その他
+
+| コマンド | 用途 |
+|---|---|
+| `multica repo checkout <url>` | エージェントが使用できるようにリポジトリをローカルにクローン |
+| `multica config` | ローカルの CLI 構成を表示または編集 |
+| `multica version` | CLI のバージョンを出力 |
+| `multica update` | CLI を最新のリリースにアップグレード |
+| `multica attachment download <id>` | イシューまたはコメントから添付ファイルをダウンロード |
+
+## 完全なフラグを確認する
+
+すべてのコマンドが `--help` をサポートしています。
+
+```bash
+multica issue create --help
+multica agent update --help
+```
+
+v2 では、各コマンドごとに専用の詳細なリファレンスページを提供する予定です。
+
+## 次のステップ
+
+- [認証とトークン](/auth-tokens) — PAT vs. JWT vs. デーモントークン
+- [デーモンとランタイム](/daemon-runtimes) — `daemon` コマンドが内部でどう動作するか
+- [エージェントの作成と構成](/agents-create) — `multica agent create` のすべてのオプション

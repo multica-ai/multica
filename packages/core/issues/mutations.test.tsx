@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "./mutations";
+import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus, useResolveComment } from "./mutations";
 import {
   issueKeys,
   type IssueSortParam,
@@ -20,6 +20,7 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   ListIssuesResponse,
+  TimelineEntry,
 } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -310,5 +311,116 @@ describe("useLoadMoreByAssigneeGroup", () => {
       "issue-1",
       "issue-2",
     ]);
+  });
+});
+
+describe("useResolveComment", () => {
+  const ISSUE_ID = "issue-1";
+
+  function makeComment(
+    id: string,
+    parentId: string | null,
+    resolvedAt: string | null,
+  ): TimelineEntry {
+    return {
+      type: "comment",
+      id,
+      actor_type: "member",
+      actor_id: "user-1",
+      content: id,
+      parent_id: parentId,
+      comment_type: "comment",
+      reactions: [],
+      attachments: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      resolved_at: resolvedAt,
+      resolved_by_type: resolvedAt ? "member" : null,
+      resolved_by_id: resolvedAt ? "user-1" : null,
+    };
+  }
+
+  // Two independent threads on one issue:
+  //   root1 ─ a1 (resolved), b1
+  //   root2 ─ a2 (resolved)
+  function seedTimeline(qc: QueryClient) {
+    const entries: TimelineEntry[] = [
+      makeComment("root1", null, null),
+      makeComment("a1", "root1", "2026-01-01T00:01:00Z"),
+      makeComment("b1", "root1", null),
+      makeComment("root2", null, null),
+      makeComment("a2", "root2", "2026-01-01T00:05:00Z"),
+    ];
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID), entries);
+  }
+
+  function resolvedIds(qc: QueryClient): string[] {
+    const cache = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID)) ?? [];
+    return cache.filter((e) => e.resolved_at).map((e) => e.id).sort();
+  }
+
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    setApiInstance({
+      resolveComment: vi.fn().mockResolvedValue({ id: "b1" }),
+      unresolveComment: vi.fn().mockResolvedValue({ id: "b1" }),
+    } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("clears the prior resolution in the same thread when resolving another comment", async () => {
+    seedTimeline(qc);
+
+    const { result } = renderHook(() => useResolveComment(ISSUE_ID), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ commentId: "b1", resolved: true });
+    });
+
+    // b1 replaces a1 inside thread 1; a2 (thread 2) is untouched.
+    expect(resolvedIds(qc)).toEqual(["a2", "b1"]);
+  });
+
+  it("does not clear resolutions in other threads", async () => {
+    seedTimeline(qc);
+
+    const { result } = renderHook(() => useResolveComment(ISSUE_ID), {
+      wrapper: createWrapper(qc),
+    });
+
+    // Resolving root1 (thread 1) must leave a2 (thread 2) resolved.
+    await act(async () => {
+      await result.current.mutateAsync({ commentId: "root1", resolved: true });
+    });
+
+    expect(resolvedIds(qc)).toEqual(["a2", "root1"]);
+  });
+
+  it("unresolve only clears its own row, never siblings", async () => {
+    // Legacy state: two resolved comments coexist in one thread.
+    qc.setQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID), [
+      makeComment("root1", null, null),
+      makeComment("a1", "root1", "2026-01-01T00:01:00Z"),
+      makeComment("b1", "root1", "2026-01-01T00:02:00Z"),
+    ]);
+
+    const { result } = renderHook(() => useResolveComment(ISSUE_ID), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ commentId: "b1", resolved: false });
+    });
+
+    // Only b1 is cleared; a1 stays resolved (unresolve never mirrors the clear).
+    expect(resolvedIds(qc)).toEqual(["a1"]);
   });
 });

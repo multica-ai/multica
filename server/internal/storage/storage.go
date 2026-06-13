@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"io"
+	"time"
 )
 
 type Storage interface {
@@ -16,4 +17,12 @@ type Storage interface {
 	// CORS and the inline/attachment Content-Disposition decision. Caller
 	// must Close the returned reader.
 	GetReader(ctx context.Context, key string) (io.ReadCloser, error)
+}
+
+type Presigner interface {
+	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
+}
+
+type DownloadPresigner interface {
+	PresignGetWithContentDisposition(ctx context.Context, key string, ttl time.Duration, contentDisposition string) (string, error)
 }

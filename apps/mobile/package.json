@@ -16,7 +16,8 @@
     "ios:device:prod": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:ios --device",
     "ios:device:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:ios --device --configuration Release",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -86,6 +87,7 @@
     "cross-env": "^7.0.3",
     "dotenv-cli": "^7.4.4",
     "eslint-config-expo": "~55.0.0",
-    "typescript": "~5.9.0"
+    "typescript": "~5.9.0",
+    "vitest": "catalog:"
   }
 }

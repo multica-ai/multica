@@ -312,7 +312,7 @@ export function ProjectsPage() {
           ) : isCompact ? (
             <div className="mt-4 mx-5 rounded-md border mb-5 overflow-auto flex-1">
               <div className="min-w-[740px]">
-                <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 sticky top-0 z-10")}>
+                <div className={cn(COMPACT_GRID, "h-8 shrink-0 items-center gap-2 px-4 text-xs font-medium text-muted-foreground border-b bg-muted/30 backdrop-blur sticky top-0 z-10")}>
                   <span />
                   <span className="text-left">{t(($) => $.table.name)}</span>
                   <span className="text-left">{t(($) => $.table.priority)}</span>

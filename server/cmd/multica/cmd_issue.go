@@ -101,6 +101,14 @@ var issueGetCmd = &cobra.Command{
 	RunE:  runIssueGet,
 }
 
+var issuePullRequestsCmd = &cobra.Command{
+	Use:     "pull-requests <id>",
+	Aliases: []string{"prs"},
+	Short:   "List pull requests linked to an issue",
+	Args:    exactArgs(1),
+	RunE:    runIssuePullRequests,
+}
+
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
@@ -233,6 +241,7 @@ var validIssueStatuses = []string{
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
+	issueCmd.AddCommand(issuePullRequestsCmd)
 	issueCmd.AddCommand(issueCreateCmd)
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
@@ -268,6 +277,9 @@ func init() {
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
 
+	// issue pull-requests
+	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
+
 	// issue create
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -279,11 +291,12 @@ func init() {
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
-	issueCreateCmd.Flags().String("start-date", "", "Start date (RFC3339 format)")
-	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
+	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
+	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -295,8 +308,8 @@ func init() {
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
-	issueUpdateCmd.Flags().String("start-date", "", "New start date (RFC3339 format; pass empty string to clear)")
-	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
+	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -371,7 +384,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if client.WorkspaceID == "" {
@@ -492,13 +505,75 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+func runIssuePullRequests(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/pull-requests", &result); err != nil {
+		return fmt.Errorf("list issue pull requests: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	prs, _ := result["pull_requests"].([]any)
+	printIssuePullRequestsTable(normalizePullRequestList(prs))
+	return nil
+}
+
+func normalizePullRequestList(raw []any) []map[string]any {
+	prs := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		pr, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prs = append(prs, pr)
+	}
+	return prs
+}
+
+func printIssuePullRequestsTable(prs []map[string]any) {
+	headers := []string{"NUMBER", "STATE", "TITLE", "URL"}
+	rows := make([][]string, 0, len(prs))
+	for _, pr := range prs {
+		rows = append(rows, []string{
+			strVal(pr, "number"),
+			strVal(pr, "state"),
+			strVal(pr, "title"),
+			pullRequestURL(pr),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+}
+
+func pullRequestURL(pr map[string]any) string {
+	if url := strVal(pr, "url"); url != "" {
+		return url
+	}
+	return strVal(pr, "html_url")
+}
+
 func runIssueGet(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -550,6 +625,35 @@ func isHTTPURL(path string) bool {
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
 }
 
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	out := make([]string, 0, len(dst)+len(values))
+	for _, v := range append(dst, values...) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func quickCreateAttachmentIDsFromEnv() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS"))
+	if raw == "" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, fmt.Errorf("parse MULTICA_QUICK_CREATE_ATTACHMENT_IDS: %w", err)
+	}
+	return appendUniqueStrings(nil, ids...), nil
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -562,10 +666,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
-	timeout := 15 * time.Second
+	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = 60 * time.Second
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -626,6 +730,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
 		body["origin_type"] = "quick_create"
 		body["origin_id"] = taskID
+	}
+	attachmentIDs, _ := cmd.Flags().GetStringSlice("attachment-id")
+	envAttachmentIDs, err := quickCreateAttachmentIDsFromEnv()
+	if err != nil {
+		return err
+	}
+	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
 	}
 
 	// Pre-validate attachments BEFORE creating the issue so a bad path
@@ -720,7 +833,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -834,7 +947,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -897,7 +1010,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, id)
@@ -930,7 +1043,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1090,10 +1203,10 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
-	timeout := 15 * time.Second
+	timeout := cli.APITimeout()
 	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
-		timeout = 60 * time.Second
+		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -1155,7 +1268,7 @@ func runIssueCommentDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	if err := client.DeleteJSON(ctx, "/api/comments/"+args[0]); err != nil {
@@ -1176,7 +1289,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1231,7 +1344,7 @@ func runIssueRunMessages(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueID := ""
@@ -1298,7 +1411,7 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1331,7 +1444,7 @@ func runIssueCancelTask(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueScope := ""
@@ -1371,7 +1484,7 @@ func runIssueSearch(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	params := url.Values{}
@@ -1433,7 +1546,7 @@ func runIssueSubscriberList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, args[0])
@@ -1485,7 +1598,7 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	issueRef, err := resolveIssueRef(ctx, client, issueID)

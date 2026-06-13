@@ -487,7 +487,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 		t.Fatalf("count tasks before: %v", err)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID)
+	enqueueMentionedAgentTasksForTest(t, ctx, issue, comment, nil, "member", testUserID)
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,

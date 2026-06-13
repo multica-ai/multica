@@ -58,6 +58,7 @@ export const AttachmentSchema: z.ZodType<Attachment> = z.object({
   filename: z.string(),
   url: z.string(),
   download_url: z.string().default(""),
+  markdown_url: z.string().default(""),
   content_type: z.string().default(""),
   size_bytes: z.number().default(0),
   created_at: z.string().default(""),
@@ -306,6 +307,7 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
+  created_at: z.string().optional(),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
@@ -467,6 +469,7 @@ export const WorkspaceSchema: z.ZodType<Workspace> = z.object({
   settings: z.record(z.string(), z.unknown()).default({}),
   repos: z.array(z.object({ url: z.string() }).loose()).default([]),
   issue_prefix: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();

@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -185,8 +186,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		CreatorID:     leader.ID,
 		ParentIssueID: pgtype.UUID{},
 		Position:      newPosition,
-		StartDate:     pgtype.Timestamptz{},
-		DueDate:       pgtype.Timestamptz{},
+		StartDate:     pgtype.Date{},
+		DueDate:       pgtype.Date{},
 		Number:        issueNumber,
 		ProjectID:     ap.ProjectID,
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
@@ -231,6 +232,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// MUL-2429); agent-assigned autopilots go through the standard issue
 	// path. Both code paths land in agent_task_queue with agent_id = leader.
 	if ap.AssigneeType == "squad" {
+		// Fail-closed private-leader gate: if the leader is private, verify
+		// the autopilot creator still has access. This catches illegitimate
+		// configs that were saved before the save-time gate was added.
+		if leader.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, leader) {
+			return fmt.Errorf("autopilot creator cannot access private squad leader")
+		}
 		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, pgtype.UUID{}); err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
@@ -291,6 +298,11 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	}
 	if !ready {
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
+	}
+
+	// Fail-closed private-leader gate for squad autopilots.
+	if ap.AssigneeType == "squad" && agent.Visibility == "private" && !s.canCreatorAccessPrivateLeader(ctx, ap, agent) {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
 	}
 
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
@@ -424,6 +436,79 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+// SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
+// linked issue task fails terminally before the issue itself reaches a
+// terminal status. create_issue tasks are linked through issue_id rather than
+// autopilot_run_id, so SyncRunFromTask cannot see them directly. Without this
+// the run would hang in `issue_created` forever — and because the failure-rate
+// auto-pause monitor excludes issue_created/running runs, a consistently
+// failing autopilot would never trip the auto-pause either.
+//
+// "Terminal" means no task is still active for the issue. FailTask enqueues an
+// auto-retry for infra-shaped failures (timeout, runtime offline/recovery,
+// codex no-progress) BEFORE it broadcasts the failure event, so an active task
+// here means another attempt is already in flight — we wait for it instead of
+// failing the run prematurely. Once retries are exhausted (or the failure was
+// never retryable in the first place), the run fails carrying the task's reason.
+func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task db.AgentTaskQueue) {
+	if task.AutopilotRunID.Valid || !task.IssueID.Valid || task.Status != "failed" {
+		return
+	}
+	// Only create_issue runs link through issue_id (and their linked issue is
+	// always origin_type=autopilot by construction), so a hit here both
+	// identifies an in-flight create_issue run and bails the common case of
+	// ordinary issue/chat task failures after a single query.
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
+	if err != nil {
+		return // no active run linked to this issue
+	}
+	// A still-active task — typically the auto-retry FailTask just enqueued —
+	// means the dispatch isn't terminal yet; wait for the final attempt.
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("failed to check active tasks for autopilot issue failure",
+			"issue_id", util.UUIDToString(task.IssueID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	if hasActive {
+		return
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return
+	}
+
+	reason := taskFailureReasonForAutopilotRun(task)
+	updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID:            run.ID,
+		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		slog.Warn("failed to fail autopilot run from linked issue task",
+			"run_id", util.UUIDToString(run.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"task_id", util.UUIDToString(task.ID),
+			"error", err,
+		)
+		return
+	}
+	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
+}
+
+func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
+	if task.Error.Valid && strings.TrimSpace(task.Error.String) != "" {
+		return task.Error.String
+	}
+	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
+		return task.FailureReason.String
+	}
+	return "task failed"
 }
 
 // handleDispatchSkip recognises an errDispatchSkipped returned from a
@@ -724,7 +809,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 	// For PostHog the agent_id should be the agent that will actually run
 	// the work (the resolved leader for squad autopilots) so per-agent task
 	// counts line up with what daemons report.
-	s.TaskSvc.Analytics.Capture(analytics.IssueCreated(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.IssueCreated(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(issue.ID),
@@ -732,6 +817,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 		"",
 		util.UUIDToString(run.ID),
 		analytics.SourceAutopilot,
+		analytics.PlatformServer,
 	))
 }
 
@@ -739,11 +825,12 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunStarted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunStarted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource, // cadence proxy: see autopilot cadence note in metrics/labels_pr3.go
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 	))
@@ -753,11 +840,12 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunCompleted(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunCompleted(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		run.Source,
 		s.autopilotAssigneeAnalytics(ap),
 		run.Source,
 		autopilotRunDurationMS(run),
@@ -771,11 +859,12 @@ func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.Aut
 	if reason == "" {
 		reason = "unknown"
 	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunFailed(
+	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunFailed(
 		autopilotActorID(ap),
 		util.UUIDToString(ap.WorkspaceID),
 		util.UUIDToString(ap.ID),
 		util.UUIDToString(run.ID),
+		triggerSource,
 		s.autopilotAssigneeAnalytics(ap),
 		triggerSource,
 		reason,
@@ -1039,4 +1128,26 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// canCreatorAccessPrivateLeader checks whether the autopilot's creator still
+// has access to a private leader agent. Mirrors handler.canAccessPrivateAgent
+// logic: agent creators always pass; member creators must be the agent owner
+// or a workspace owner/admin. Returns false (fail-closed) on any lookup error.
+func (s *AutopilotService) canCreatorAccessPrivateLeader(ctx context.Context, ap db.Autopilot, leader db.Agent) bool {
+	if ap.CreatedByType == "agent" {
+		return true
+	}
+	creatorID := util.UUIDToString(ap.CreatedByID)
+	if util.UUIDToString(leader.OwnerID) == creatorID {
+		return true
+	}
+	member, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      ap.CreatedByID,
+		WorkspaceID: ap.WorkspaceID,
+	})
+	if err != nil {
+		return false
+	}
+	return member.Role == "owner" || member.Role == "admin"
 }

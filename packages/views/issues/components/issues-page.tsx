@@ -137,6 +137,26 @@ export function IssuesPage() {
     [scopedIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
+  const activeFilters = useMemo(() => ({
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    labelFilters,
+    agentRunningFilter,
+  }), [
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters,
+    includeNoProject,
+    labelFilters,
+    agentRunningFilter,
+  ]);
+
   // Fetch sub-issue progress from the backend so counts are accurate
   // regardless of client-side pagination or filtering of done issues.
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(childIssueProgressOptions(wsId));
@@ -222,6 +242,7 @@ export function IssuesPage() {
               <SwimLaneView
                 issues={issues}
                 unfilteredIssues={swimlaneIssues}
+                activeFilters={activeFilters}
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}

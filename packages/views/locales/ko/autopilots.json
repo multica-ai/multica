@@ -1,0 +1,351 @@
+{
+  "page": {
+    "title": "오토파일럿",
+    "new_autopilot": "새 오토파일럿",
+    "start_blank": "처음부터 시작",
+    "table": {
+      "name": "이름",
+      "agent": "에이전트",
+      "created_by": "생성자",
+      "mode": "모드",
+      "status": "상태",
+      "last_run": "마지막 실행"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "아직 오토파일럿이 없습니다",
+      "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
+    }
+  },
+  "status": {
+    "active": "활성",
+    "paused": "일시 중지",
+    "archived": "보관됨"
+  },
+  "execution_mode": {
+    "create_issue": "이슈 생성",
+    "run_only": "실행만"
+  },
+  "relative_date": {
+    "today": "오늘",
+    "one_day_ago": "1일 전",
+    "days_ago": "{{count}}일 전",
+    "months_ago": "{{count}}개월 전"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "일일 뉴스 요약",
+      "summary": "오늘의 뉴스를 찾아 팀이 볼 수 있게 요약합니다"
+    },
+    "pr_review": {
+      "title": "PR 리뷰 리마인더",
+      "summary": "리뷰가 필요한 오래된 Pull request를 표시합니다"
+    },
+    "bug_triage": {
+      "title": "버그 분류",
+      "summary": "새 버그 리포트를 평가하고 우선순위를 정합니다"
+    },
+    "weekly_progress": {
+      "title": "주간 진행 보고서",
+      "summary": "팀 진행 상황을 주간 요약으로 정리합니다"
+    },
+    "dependency_audit": {
+      "title": "의존성 감사",
+      "summary": "보안 취약점과 오래된 패키지를 점검합니다"
+    },
+    "documentation_check": {
+      "title": "문서 점검",
+      "summary": "최근 변경사항에서 문서가 빠진 부분을 검토합니다"
+    }
+  },
+  "detail": {
+    "not_found": "오토파일럿을 찾을 수 없습니다",
+    "pause_aria": "오토파일럿 일시 중지",
+    "activate_aria": "오토파일럿 활성화",
+    "edit": "수정",
+    "run_now": "지금 실행",
+    "running": "실행 중...",
+    "toast_triggered": "오토파일럿을 실행했습니다",
+    "toast_trigger_failed": "오토파일럿을 실행하지 못했습니다",
+    "section_properties": "속성",
+    "section_triggers": "트리거",
+    "section_run_history": "실행 기록",
+    "section_danger": "위험 영역",
+    "field_agent": "에이전트",
+    "field_created_by": "생성자",
+    "field_output_mode": "출력 모드",
+    "field_project": "프로젝트",
+    "no_project": "프로젝트 없음",
+    "project_unavailable": "프로젝트를 사용할 수 없습니다",
+    "field_prompt": "프롬프트",
+    "add_trigger": "트리거 추가",
+    "no_triggers": "설정된 트리거가 없습니다. 자동으로 실행할 일정을 추가하세요.",
+    "no_runs": "아직 실행 기록이 없습니다. 수동으로 실행하려면 \"지금 실행\"을 클릭하세요.",
+    "delete_button": "오토파일럿 삭제",
+    "toast_deleted": "오토파일럿을 삭제했습니다",
+    "toast_delete_failed": "오토파일럿을 삭제하지 못했습니다",
+    "delete_dialog": {
+      "title": "오토파일럿 삭제",
+      "description": "\"{{title}}\" 오토파일럿과 트리거, 실행 기록이 영구 삭제됩니다. 이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "삭제",
+      "deleting": "삭제하는 중..."
+    }
+  },
+  "run_status": {
+    "issue_created": "이슈 생성됨",
+    "running": "실행 중",
+    "skipped": "건너뜀",
+    "completed": "완료됨",
+    "failed": "실패함"
+  },
+  "run_source": {
+    "schedule": "일정",
+    "manual": "수동",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "이슈 연결됨",
+    "view_log": "실행 로그 보기",
+    "skipped_group": {
+      "label": "건너뜀",
+      "summary": "건너뛴 실행 {{count}}개"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook 이벤트:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "복사",
+    "copied": "Webhook payload를 복사했습니다",
+    "copied_short": "복사했습니다",
+    "copy_failed": "복사하지 못했습니다",
+    "truncated_marker": "[잘림 - 전체 payload를 받으려면 복사를 클릭하세요]"
+  },
+  "trigger_kind": {
+    "schedule": "일정",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "비활성",
+    "deprecated_badge": "지원 중단",
+    "next_label": "다음: {{date}}",
+    "webhook_url_label": "Webhook URL",
+    "copy_url": "URL 복사",
+    "url_copied": "Webhook URL을 복사했습니다",
+    "url_copy_failed": "URL을 복사하지 못했습니다",
+    "rotate_url": "URL 재발급",
+    "rotate_confirm_title": "Webhook URL 재발급",
+    "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
+    "rotate_confirm_cancel": "취소",
+    "rotate_confirm_action": "URL 재발급",
+    "rotate_in_progress": "재발급 중...",
+    "toast_rotated": "Webhook URL을 재발급했습니다",
+    "toast_rotate_failed": "URL을 재발급하지 못했습니다",
+    "toast_deleted": "트리거를 삭제했습니다",
+    "toast_delete_failed": "트리거를 삭제하지 못했습니다",
+    "delete_dialog": {
+      "title": "트리거 삭제",
+      "description": "이 트리거가 제거되고 오토파일럿은 이 일정으로 더 이상 실행되지 않습니다. 이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "삭제",
+      "deleting": "삭제하는 중..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Webhook 전달",
+    "empty": "아직 Webhook 전달 기록이 없습니다. Webhook URL로 POST를 보내면 여기에 표시됩니다.",
+    "row": {
+      "attempts": "{{count}}회 시도",
+      "replay_badge": "재실행"
+    },
+    "status": {
+      "queued": "대기 중",
+      "dispatched": "디스패치됨",
+      "rejected": "거부됨",
+      "ignored": "무시됨",
+      "failed": "실패함"
+    },
+    "signature": {
+      "not_required": "서명 없음",
+      "valid": "유효한 서명",
+      "invalid": "유효하지 않은 서명",
+      "missing": "서명 없음"
+    },
+    "detail": {
+      "title": "전달",
+      "received_at": "수신",
+      "last_attempt_at": "마지막 시도",
+      "attempt_count": "시도 횟수",
+      "response_status": "응답",
+      "dedupe_key": "중복 제거 키",
+      "dedupe_source": "중복 제거 소스",
+      "content_type": "Content-Type",
+      "replayed_from": "재실행 원본",
+      "error_label": "오류",
+      "raw_body": "원본 본문",
+      "selected_headers": "헤더",
+      "response_body": "응답 본문"
+    },
+    "replay": {
+      "action": "재실행",
+      "in_progress": "재실행 중...",
+      "toast_success": "전달을 재실행했습니다",
+      "toast_failed": "재실행에 실패했습니다",
+      "disabled_invalid_signature": "서명이 유효하지 않아 재실행할 수 없습니다",
+      "disabled_rejected": "거부된 전달은 재실행할 수 없습니다",
+      "disabled_queued": "아직 대기 중입니다. 처리된 후 재실행하세요"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "트리거 추가",
+    "type_label": "유형",
+    "type_schedule": "일정",
+    "type_webhook": "Webhook",
+    "label_field": "라벨(선택 사항)",
+    "label_placeholder": "예: 평일 오전",
+    "webhook_help": "저장하면 Multica가 Webhook URL을 생성합니다. 해당 URL로 JSON을 POST하면 이 오토파일럿이 실행됩니다.",
+    "submit": "트리거 추가",
+    "submitting": "추가하는 중...",
+    "toast_added_schedule": "일정 트리거를 추가했습니다",
+    "toast_added_webhook": "Webhook 트리거를 추가했습니다",
+    "toast_add_failed": "트리거를 추가하지 못했습니다"
+  },
+  "dialog": {
+    "sr_create": "새 오토파일럿",
+    "sr_edit": "오토파일럿 수정",
+    "header_create": "새 오토파일럿",
+    "header_edit": "오토파일럿 수정",
+    "subtitle": "반복되는 AI 작업",
+    "expand": "펼치기",
+    "collapse": "접기",
+    "close": "닫기",
+    "title_placeholder": "오토파일럿 이름",
+    "runbook_label": "런북",
+    "runbook_hint": "매 실행마다 에이전트가 읽습니다",
+    "description_placeholder": "# 목표\n에이전트가 무엇을 달성해야 하나요?\n\n# 맥락\n누구를 위한 작업인가요? 제약이 있나요?\n\n# 단계\n1. ...\n2. ...",
+    "auto_run_hint": "저장하면 일시 중지할 때까지 자동으로 실행됩니다.",
+    "cancel": "취소",
+    "create": "오토파일럿 만들기",
+    "save": "저장",
+    "creating": "만드는 중...",
+    "saving": "저장하는 중...",
+    "toast_created": "오토파일럿을 만들었습니다",
+    "toast_create_partial": "오토파일럿은 만들었지만 일정을 저장하지 못했습니다",
+    "toast_create_partial_with_reason": "오토파일럿은 만들었지만 일정을 저장하지 못했습니다: {{reason}}",
+    "toast_create_failed": "오토파일럿을 만들지 못했습니다",
+    "toast_updated": "오토파일럿을 업데이트했습니다",
+    "toast_update_partial": "오토파일럿은 업데이트했지만 일정을 저장하지 못했습니다",
+    "toast_update_partial_with_reason": "오토파일럿은 업데이트했지만 일정을 저장하지 못했습니다: {{reason}}",
+    "toast_update_failed": "오토파일럿을 업데이트하지 못했습니다",
+    "section_agent": "에이전트",
+    "section_assignee": "담당자",
+    "select_agent": "에이전트 선택",
+    "select_assignee": "에이전트 또는 스쿼드 선택",
+    "section_project": "프로젝트",
+    "no_project": "프로젝트 없음",
+    "section_output_mode": "출력 모드",
+    "section_schedule": "일정",
+    "section_trigger_kind": "트리거",
+    "trigger_kind_schedule": "일정",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "이 오토파일럿을 만들면 Multica가 Webhook URL을 생성합니다. 해당 URL로 JSON을 POST하면 실행됩니다.",
+    "webhook_help_edit": "이 오토파일럿은 Webhook으로 실행됩니다. URL 복사와 재발급은 오토파일럿 상세 페이지에서 관리하세요.",
+    "webhook_created_title": "Webhook 오토파일럿 준비 완료",
+    "webhook_created_description": "아래 URL로 JSON을 POST하면 오토파일럿이 실행됩니다. 지금 복사해 두세요. 나중에 오토파일럿 상세 페이지에서도 확인하고 재발급할 수 있습니다.",
+    "webhook_created_warning": "이 URL은 비밀번호처럼 다루세요. URL을 가진 사람은 누구나 오토파일럿을 실행할 수 있습니다.",
+    "webhook_created_done": "완료",
+    "event_filter_label": "이벤트 필터",
+    "event_filter_docs_link_label": "이벤트 필터 작동 방식 알아보기",
+    "event_filter_event_placeholder": "예: workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
+    "schedule_disabled_reason": "이 오토파일럿에는 여러 일정이 있습니다. 상세 페이지에서 수정하세요.",
+    "next_run_label": "다음 실행:",
+    "output_modes": {
+      "create_issue": {
+        "label": "이슈 생성",
+        "description": "실행할 때마다 추적 가능한 이슈를 만듭니다"
+      },
+      "run_only": {
+        "label": "실행만",
+        "description": "이슈를 만들지 않고 조용히 실행합니다"
+      }
+    },
+    "frequency_long": {
+      "hourly": "매시간",
+      "daily": "매일",
+      "weekdays": "평일마다",
+      "weekly": "매주",
+      "custom": "사용자 지정 cron"
+    },
+    "days": {
+      "sunday": "일요일",
+      "monday": "월요일",
+      "tuesday": "화요일",
+      "wednesday": "수요일",
+      "thursday": "목요일",
+      "friday": "금요일",
+      "saturday": "토요일"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "매시간",
+      "daily": "매일",
+      "weekdays": "평일",
+      "weekly": "요일",
+      "custom": "사용자 지정"
+    },
+    "days_short": {
+      "sun": "일",
+      "mon": "월",
+      "tue": "화",
+      "wed": "수",
+      "thu": "목",
+      "fri": "금",
+      "sat": "토"
+    },
+    "cron_label": "Cron 표현식",
+    "cron_hint": "표준 5필드 cron(분 시 일 월 요일)",
+    "minute_label": "분",
+    "time_label": "시간",
+    "timezone_label": "시간대",
+    "days_label": "요일",
+    "summary": {
+      "hourly": "매시간 · :{{min}}",
+      "daily": "매일 {{time}}",
+      "weekdays": "평일 {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "사용자 지정 cron",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "매시간 :{{min}}에 실행",
+      "daily": "매일 {{time}} {{offset}}에 실행",
+      "weekdays": "평일 {{time}} {{offset}}에 실행",
+      "weekly": "매주 {{days}} {{time}} {{offset}}에 실행",
+      "custom": "사용자 지정 일정: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}일 {{hours}}시간",
+      "hours_minutes": "{{hours}}시간 {{minutes}}분",
+      "minutes": "{{minutes}}분",
+      "less_than_minute": "1분 미만"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "에이전트 또는 스쿼드 필터...",
+    "select_agent": "에이전트 선택",
+    "select_assignee": "에이전트 또는 스쿼드 선택",
+    "agents_group": "에이전트",
+    "squads_group": "스쿼드"
+  },
+  "timezone_picker": {
+    "search_placeholder": "시간대 검색..."
+  }
+}
