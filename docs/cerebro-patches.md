@@ -35,6 +35,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | Patch name | File(s) | `+` lines | Rationale |
 |---|---|---|---|
+| `force-attachment-download` | server/internal/handler/file.go<br>packages/views/editor/use-download-attachment.ts<br>server/internal/handler/file_test.go | ~35 | TECH-3512 — explicit Download actions append `download=1`; the attachment download endpoint treats that as a hard `Content-Disposition: attachment` override so media files (PDF/images/video/audio) save as files instead of opening inline in the installed PWA window. Preview paths keep the old inline behavior. |
 | `handler-tool-invoke` | server/internal/handler/agent_tool_invoke_cerebro.go | ~80 | TECH-3226 — new file: defines `ToolExecutorInvoker` interface + `InvokeAgentTool` handler for `POST /api/agents/{id}/tools/{name}/invoke`. Permissions use cascade (same as gateway), not raw `agent_tool_grant`. 403 on permission denial, 422 on tool error. |
 | `handler-tool-executor` | server/internal/handler/handler.go | 2 | TECH-3226 — adds `ToolExecutor ToolExecutorInvoker` field to Handler struct. nil = invoke endpoint returns 501. |
 | `handler-tool-schema` | server/internal/handler/agent_tools.go | 8 | TECH-3226 — adds `InputSchema map[string]any` to `CerebroToolItem` and `InputSchema json.RawMessage` to `AgentToolResponse`; `ListAgentTools` includes it so external runtimes can build their tool list from the server. |

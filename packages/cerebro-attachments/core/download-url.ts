@@ -31,3 +31,12 @@ export function attachmentDownloadHref(
   const sep = downloadUrl.includes("?") ? "&" : "?";
   return `${downloadUrl}${sep}workspace_id=${encodeURIComponent(workspaceId)}`;
 }
+
+export function attachmentForceDownloadPath(
+  attachmentId: string,
+  workspaceId: string,
+): string {
+  const params = new URLSearchParams({ download: "1" });
+  if (workspaceId) params.set("workspace_id", workspaceId);
+  return `/api/attachments/${encodeURIComponent(attachmentId)}/download?${params.toString()}`;
+}
