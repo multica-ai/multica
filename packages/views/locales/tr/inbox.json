@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "Gelen Kutusu",
+    "back": "Gelen Kutusu"
+  },
+  "menu": {
+    "mark_all_read": "Tümünü okundu işaretle",
+    "archive_all": "Tümünü arşivle",
+    "archive_all_read": "Okunanların tümünü arşivle",
+    "archive_completed": "Tamamlananları arşivle"
+  },
+  "list": {
+    "empty": "Bildirim yok",
+    "mark_done_tooltip": "Tamamlandı olarak işaretle",
+    "archive_tooltip": "Arşivle",
+    "time": {
+      "just_now": "az önce",
+      "minutes": "{{count}} dk",
+      "hours": "{{count}} sa",
+      "days": "{{count}} g"
+    }
+  },
+  "detail": {
+    "select_prompt": "Detayları görüntülemek için bir bildirim seçin",
+    "empty": "Gelen Kutusu boş",
+    "original_input": "Orijinal girdi",
+    "edit_advanced": "Gelişmiş formda düzenle",
+    "archive": "Arşivle"
+  },
+  "types": {
+    "issue_assigned": "Atandı",
+    "unassigned": "Atama kaldırıldı",
+    "assignee_changed": "Atanan kişi değişti",
+    "status_changed": "Durum değişti",
+    "priority_changed": "Öncelik değişti",
+    "start_date_changed": "Başlangıç tarihi değişti",
+    "due_date_changed": "Bitiş tarihi değişti",
+    "new_comment": "Yeni yorum",
+    "mentioned": "Bahsedildi",
+    "review_requested": "İnceleme istendi",
+    "task_completed": "Task tamamlandı",
+    "task_failed": "Task başarısız oldu",
+    "agent_blocked": "Ajan engellendi",
+    "agent_completed": "Ajan tamamladı",
+    "reaction_added": "Tepki verildi",
+    "quick_create_done": "Ajan ile oluşturuldu",
+    "quick_create_failed": "Ajan ile oluşturma başarısız"
+  },
+  "labels": {
+    "set_status_to": "Durumu şuna ayarla",
+    "set_priority_to": "Önceliği şuna ayarla",
+    "assigned_to": "{{name}} kişisine atandı",
+    "removed_assignee": "Atama kaldırıldı",
+    "set_start_date_to": "Başlangıç tarihi {{date}} olarak ayarlandı",
+    "removed_start_date": "Başlangıç tarihi kaldırıldı",
+    "set_due_date_to": "Bitiş tarihi {{date}} olarak ayarlandı",
+    "removed_due_date": "Bitiş tarihi kaldırıldı",
+    "reacted_to_comment": "Yorumunuza {{emoji}} tepkisi verdi",
+    "created_with_agent": "Ajan ile oluşturuldu: {{identifier}}",
+    "failed_with_detail": "Başarısız: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Okundu olarak işaretlenemedi",
+    "archive_failed": "Arşivlenemedi",
+    "mark_done_failed": "Tamamlandı olarak işaretlenemedi",
+    "mark_all_read_failed": "Tümü okundu olarak işaretlenemedi",
+    "archive_all_failed": "Tümü arşivlenemedi",
+    "archive_all_read_failed": "Okunan öğeler arşivlenemedi",
+    "archive_completed_failed": "Tamamlananlar arşivlenemedi"
+  }
+}

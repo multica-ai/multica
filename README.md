@@ -22,7 +22,7 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 
 [Website](https://multica.ai) · [Cloud](https://multica.ai) · [X](https://x.com/MulticaAI) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
 
-**English | [简体中文](README.zh-CN.md)**
+**English | [简体中文](README.zh-CN.md) | [Türkçe](README.tr.md)**
 
 </div>
 

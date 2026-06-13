@@ -1,0 +1,76 @@
+{
+  "page": {
+    "title": "Ekipler",
+    "new_button": "Yeni Ekip",
+    "empty_no_squads": "Henüz ekip yok. Başlamak için bir tane oluşturun.",
+    "empty_no_match": "Filtrelerinizle eşleşen ekip yok."
+  },
+  "inspector": {
+    "details_section": "Detaylar",
+    "archive_button": "Arşivle"
+  },
+  "archive_dialog": {
+    "title": "Bu ekip arşivlensin mi?",
+    "description": "\"{{name}}\" arşivlenecek. Şu anda bu ekip'a atanmış issue'lar liderine aktarılacak. Bu işlem geri alınamaz - yönlendirmeyi geri istiyorsanız yeni bir ekip oluşturun.",
+    "cancel": "İptal",
+    "confirm": "Arşivle",
+    "archiving": "Arşivleniyor..."
+  },
+  "name_editor": {
+    "cancel": "İptal"
+  },
+  "add_member_dialog": {
+    "title": "Üye ekle",
+    "description": "Bu ekip'a bir çalışma alanı üyesi veya ajan ekleyin.",
+    "label_member": "Üye",
+    "label_role": "Rol",
+    "label_optional": "(isteğe bağlı)",
+    "placeholder_role_inline": "Rol ekle...",
+    "cancel": "İptal"
+  },
+  "description_dialog": {
+    "title": "Açıklamayı düzenle",
+    "placeholder_empty": "Açıklama ekle",
+    "cancel": "İptal"
+  },
+  "discard_changes_dialog": {
+    "title": "Kaydedilmemiş değişiklikler atılsın mı?",
+    "description": "Bu sekmede kaydedilmemiş değişiklikleriniz var. Sekme değiştirmek bunları atar.",
+    "keep_editing": "Düzenlemeye devam et",
+    "discard_button": "At"
+  },
+  "members_tab": {
+    "section_title": "Üyeler",
+    "section_count_one": "Bu ekip'da {{count}} üye",
+    "section_count_other": "Bu ekip'da {{count}} üye",
+    "add_member_button": "Üye ekle",
+    "create_agent_button": "Ajan oluştur",
+    "leader_chip": "Lider",
+    "view_agent_tooltip": "Ajan detayını aç",
+    "make_leader_tooltip": "Ekip lideri yap",
+    "remove_member_tooltip": "Ekipten kaldır",
+    "status_working": "Çalışıyor",
+    "status_idle": "Boşta",
+    "status_offline": "Offline",
+    "status_unstable": "Kararsız",
+    "status_archived": "Arşivlendi",
+    "issue_status_blocked": "blocked",
+    "active_issue_more": "ve {{count}} tane daha",
+    "last_active_label": "son aktif {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Ekip kullanılamıyor",
+    "detail_link": "Detay →",
+    "archived": "Arşivlendi",
+    "member_count_one": "{{count}} üye",
+    "member_count_other": "{{count}} üye",
+    "members_section": "Üyeler",
+    "more_members_one": "+{{count}} daha",
+    "more_members_other": "+{{count}} daha"
+  },
+  "instructions_tab": {
+    "description": "Ekip talimatları, lider ajan bu ekip'a atanmış bir issue üzerinde çalıştığında prompt'una eklenir. Liderin her task'te izlemesi gereken ekip genelindeki yönlendirmeleri, çalışma anlaşmalarını veya bağlamı vermek için kullanın.",
+    "unsaved_changes": "Kaydedilmemiş değişiklikler",
+    "save_button": "Kaydet"
+  }
+}

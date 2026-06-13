@@ -2,15 +2,16 @@ import type { SupportedLocale } from "@multica/core/i18n";
 export { docsHrefForLocale } from "@/lib/docs-href";
 
 export type Locale = SupportedLocale;
-export type LandingDictionaryLocale = "en" | "zh" | "ko" | "ja";
+export type LandingDictionaryLocale = "en" | "zh" | "ko" | "ja" | "tr";
 
-export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja"];
+export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja", "tr"];
 
 export const localeLabels: Record<Locale, string> = {
   en: "EN",
   "zh-Hans": "\u4e2d\u6587",
   ko: "\ud55c\uad6d\uc5b4",
   ja: "\u65e5\u672c\u8a9e",
+  tr: "T\u00fcrk\u00e7e",
 };
 
 export function toLandingDictionaryLocale(
@@ -18,6 +19,7 @@ export function toLandingDictionaryLocale(
 ): LandingDictionaryLocale {
   if (locale === "ko") return "ko";
   if (locale === "ja") return "ja";
+  if (locale === "tr") return "tr";
   return locale === "zh-Hans" ? "zh" : "en";
 }
 

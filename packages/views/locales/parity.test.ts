@@ -9,10 +9,9 @@ import { RESOURCES } from "./index";
 // new EN key lands without a translated key, which would silently fall back
 // to the English string in production.
 //
-// i18next plural rule: EN uses `_one` + `_other`; zh only uses `_other`
-// because Chinese has no grammatical number. Normalize both forms to
-// `_other` before comparing so a `{ key_one, key_other }` pair in EN
-// matches a single `{ key_other }` in zh.
+// i18next plural rule: EN uses `_one` + `_other`; some locales can use only
+// one form for a given count. Normalize both forms before comparing so a
+// `{ key_one, key_other }` pair in EN matches a single translated key.
 
 // Derive the canonical namespace list from disk so the test fails if a JSON
 // file ships without a matching RESOURCES entry. Without this guard the test

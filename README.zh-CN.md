@@ -22,7 +22,7 @@
 
 [官网](https://multica.ai) · [云服务](https://multica.ai) · [X](https://x.com/MulticaAI) · [自部署指南](SELF_HOSTING.md) · [参与贡献](CONTRIBUTING.md)
 
-**[English](README.md) | 简体中文**
+**[English](README.md) | 简体中文 | [Türkçe](README.tr.md)**
 
 </div>
 

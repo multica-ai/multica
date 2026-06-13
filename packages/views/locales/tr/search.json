@@ -1,0 +1,44 @@
+{
+  "title": "Ara",
+  "description": "Sayfalarda, issue'larda, projelerde ve üyelerde ara",
+  "placeholder": "Komut yazın veya arayın...",
+  "groups": {
+    "pages": "Sayfalar",
+    "commands": "Komutlar",
+    "members": "Üyeler",
+    "projects": "Projeler",
+    "issues": "Issue'lar",
+    "recent": "Son kullanılanlar"
+  },
+  "pages": {
+    "inbox": "Gelen Kutusu",
+    "my_issues": "Issue'larım",
+    "issues": "Issue'lar",
+    "projects": "Projeler",
+    "agents": "Ajanlar",
+    "runtimes": "Çalışma ortamları",
+    "skills": "Skill'ler",
+    "settings": "Ayarlar"
+  },
+  "commands": {
+    "current_theme_aria": "Geçerli tema",
+    "new_issue": "Yeni issue",
+    "new_project": "Yeni proje",
+    "copy_issue_link": "Issue bağlantısını kopyala",
+    "copy_identifier": "Tanımlayıcıyı kopyala ({{identifier}})",
+    "switch_to_light": "Açık temaya geç",
+    "switch_to_dark": "Koyu temaya geç",
+    "use_system_theme": "Sistem temasını kullan"
+  },
+  "toast": {
+    "link_copied": "Bağlantı kopyalandı",
+    "copied_identifier": "{{identifier}} kopyalandı"
+  },
+  "empty": {
+    "no_results": "Sonuç bulunamadı.",
+    "type_to_search": "Issue ve proje aramak için yazın"
+  },
+  "trigger": {
+    "label": "Ara..."
+  }
+}
