@@ -127,6 +127,25 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 	return err
 }
 
+const getLatestMemberCommentAuthor = `-- name: GetLatestMemberCommentAuthor :one
+SELECT author_id FROM comment
+WHERE issue_id = $1 AND author_type = 'member' AND author_id IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+// CEREBRO-PATCH(delegation-latest-human-fallback): returns the user id of the
+// most recent human (member) comment on an issue. Used as a delegation-origin
+// fallback when an agent task carries no recorded original user and the issue
+// creator is not a member (e.g. an agent-created issue, or a run started by a
+// wakeup). Only member authors qualify, so a real human always roots the chain.
+func (q *Queries) GetLatestMemberCommentAuthor(ctx context.Context, issueID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestMemberCommentAuthor, issueID)
+	var author_id pgtype.UUID
+	err := row.Scan(&author_id)
+	return author_id, err
+}
+
 const getComment = `-- name: GetComment :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification FROM comment
 WHERE id = $1

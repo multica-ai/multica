@@ -316,7 +316,18 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	if err != nil {
 		return fmt.Errorf("create wakeup comment: %w", err)
 	}
-	if _, err := s.Tasks.EnqueueTaskForMention(ctx, issue, row.AgentID, comment.ID); err != nil {
+	// Seed the human principal onto the woken run so the agent it starts can
+	// fan out to other agents. A wakeup is a deferred continuation of whatever
+	// a human set in motion; without an explicit origin the dispatched run
+	// would carry no human provenance and the delegation gate would block it
+	// from mentioning another agent. Resolve the human (wakeup creator → issue
+	// creator → latest human comment); fall back to the origin-less enqueue
+	// only when no human can be found, leaving the comment-time fallback to try.
+	if delegation := s.resolveWakeupOrigin(ctx, row, issue); delegation.OriginalUserID.Valid {
+		if _, err := s.Tasks.EnqueueTaskForMentionFromComment(ctx, issue, row.AgentID, comment.ID, delegation); err != nil {
+			return fmt.Errorf("enqueue agent task: %w", err)
+		}
+	} else if _, err := s.Tasks.EnqueueTaskForMention(ctx, issue, row.AgentID, comment.ID); err != nil {
 		return fmt.Errorf("enqueue agent task: %w", err)
 	}
 	if err := s.Cerebro.MarkWakeupDispatched(ctx, row.ID); err != nil {
@@ -558,4 +569,29 @@ func truncateFailure(s string) string {
 		return s
 	}
 	return s[:1000]
+}
+
+// resolveWakeupOrigin determines the human principal a dispatched wakeup run
+// acts on behalf of, so the woken agent inherits provenance and may fan out to
+// other agents. Resolution order, most-specific first:
+//  1. the wakeup creator, when it is a real human user (X-User-ID at create time);
+//  2. the issue creator, when the issue was created by a member;
+//  3. the most recent human (member) comment on the issue.
+//
+// Returns an empty context when no human can be attributed; the caller then
+// enqueues without provenance and the comment-time delegation fallback applies.
+func (s *Service) resolveWakeupOrigin(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue) service.TaskDelegationContext {
+	src := pgtype.Text{String: "wakeup", Valid: true}
+	if row.CreatedByID.Valid {
+		if _, err := s.Queries.GetUser(ctx, row.CreatedByID); err == nil {
+			return service.TaskDelegationContext{OriginalUserID: row.CreatedByID, Source: src}
+		}
+	}
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		return service.TaskDelegationContext{OriginalUserID: issue.CreatorID, Source: src}
+	}
+	if human, err := s.Queries.GetLatestMemberCommentAuthor(ctx, issue.ID); err == nil && human.Valid {
+		return service.TaskDelegationContext{OriginalUserID: human, Source: src}
+	}
+	return service.TaskDelegationContext{}
 }
