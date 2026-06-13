@@ -31,7 +31,7 @@ the SAME commit.
 
 | packages/views/locales/{en,zh-Hans,ko,ja}/settings.json | +"vietnamese" language label key | Re-apply 1 key per file |
 | packages/views/settings/components/preferences-tab.tsx | +1 vi option in languageOptions | Re-apply 1 line |
-| apps/web/app/layout.tsx | +vi in HTML_LANG | Re-apply 1 line (see also Task 6/12) |
+| apps/web/app/layout.tsx | +vi in HTML_LANG; +vietnamese font subsets; Hira metadata (Task 12) | Take upstream then re-apply 3 regions |
 | apps/desktop/src/renderer/src/App.tsx | +vi in HTML_LANG | Re-apply 1 line |
 | packages/views/onboarding/templates/index.ts | +vi→en content fallback | Re-apply 1 line |
 | apps/web/lib/use-cases-i18n.ts | +vi UseCaseText block | Re-apply block |

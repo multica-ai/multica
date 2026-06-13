@@ -20,7 +20,7 @@ import "./globals.css";
 // Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
 // app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
 const inter = Inter({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
@@ -37,7 +37,7 @@ const geistMono = Geist_Mono({
 // render the font; layout-shift-prevention handled by next/font's synthetic
 // fallback metrics, same as Inter.
 const sourceSerif = Source_Serif_4({
-  subsets: ["latin"],
+  subsets: ["latin", "vietnamese"],
   style: ["normal", "italic"],
   variable: "--font-serif",
   fallback: [
