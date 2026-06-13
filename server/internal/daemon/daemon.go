@@ -70,6 +70,7 @@ var (
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
+	daemonToken     string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
 	taskRepoURLs    map[string]struct{}
@@ -471,6 +472,9 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	// for a surviving provider (e.g. schema change); the daemon converges on
 	// what the server says without leaving stale heartbeat goroutines.
 	ws.runtimeIDs = newIDs
+	if resp.DaemonToken != "" {
+		ws.daemonToken = strings.TrimSpace(resp.DaemonToken)
+	}
 	if resp.ReposVersion != "" {
 		ws.reposVersion = resp.ReposVersion
 		ws.allowedRepoURLs = repoAllowlist(resp.Repos)
@@ -791,12 +795,33 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
+	return newWorkspaceStateWithDaemonToken(workspaceID, runtimeIDs, "", reposVersion, repos, settings)
+}
+
+func newWorkspaceStateWithDaemonToken(workspaceID string, runtimeIDs []string, daemonToken string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
 	return &workspaceState{
 		workspaceID:     workspaceID,
 		runtimeIDs:      runtimeIDs,
+		daemonToken:     strings.TrimSpace(daemonToken),
 		reposVersion:    reposVersion,
 		allowedRepoURLs: repoAllowlist(repos),
 		settings:        settings,
+	}
+}
+
+func (d *Daemon) workspaceDaemonToken(workspaceID string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return ""
+	}
+	return ws.daemonToken
+}
+
+func (d *Daemon) injectDaemonTokenEnv(agentEnv map[string]string, workspaceID string) {
+	if token := d.workspaceDaemonToken(workspaceID); token != "" {
+		agentEnv["MULTICA_DAEMON_TOKEN"] = token
 	}
 }
 
@@ -1219,7 +1244,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
 		d.mu.Lock()
-		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+		d.workspaces[id] = newWorkspaceStateWithDaemonToken(id, runtimeIDs, resp.DaemonToken, resp.ReposVersion, resp.Repos, resp.Settings)
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}
@@ -2849,6 +2874,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
 	}
+	d.injectDaemonTokenEnv(agentEnv, task.WorkspaceID)
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
 	}

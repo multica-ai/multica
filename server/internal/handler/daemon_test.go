@@ -147,6 +147,86 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 	return agentID, issueID
 }
 
+func createDaemonCommentIssue(t *testing.T, title string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var number int32
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = issue_counter + 1
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("setup: increment issue counter: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
+		VALUES ($1, 'member', $2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, title, number).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
+}
+
+func TestCreateDaemonSystemCommentRequiresDaemonToken(t *testing.T) {
+	issueID := createDaemonCommentIssue(t, "daemon system comment rejects PAT")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/issues/"+issueID+"/comments", map[string]any{
+		"content": "background result",
+	})
+	req = withURLParam(req, "issueId", issueID)
+
+	testHandler.CreateDaemonSystemComment(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateDaemonSystemComment: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "daemon token required") {
+		t.Fatalf("CreateDaemonSystemComment error should explain daemon token requirement, got %s", w.Body.String())
+	}
+}
+
+func TestCreateDaemonSystemCommentCreatesSystemAuthor(t *testing.T) {
+	issueID := createDaemonCommentIssue(t, "daemon system comment happy path")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/issues/"+issueID+"/comments", map[string]any{
+		"content": "background result from daemon",
+	}, testWorkspaceID, "daemon-system-comment-test")
+	req = withURLParam(req, "issueId", issueID)
+
+	testHandler.CreateDaemonSystemComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateDaemonSystemComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp CommentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode comment response: %v", err)
+	}
+	if resp.AuthorType != "system" {
+		t.Fatalf("author_type = %q, want system", resp.AuthorType)
+	}
+	if resp.AuthorID != "00000000-0000-0000-0000-000000000000" {
+		t.Fatalf("author_id = %q, want zero UUID sentinel", resp.AuthorID)
+	}
+	if resp.Type != "system" {
+		t.Fatalf("type = %q, want system", resp.Type)
+	}
+	if resp.Content != "background result from daemon" {
+		t.Fatalf("content = %q", resp.Content)
+	}
+}
+
 func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID, dispatchedAge string, started bool) string {
 	t.Helper()
 
@@ -457,6 +537,70 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	rt := runtimes[0].(map[string]any)
 	runtimeID := rt["id"].(string)
 	testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+}
+
+func TestDaemonRegister_IssuesDaemonToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const daemonID = "test-daemon-token-issue"
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    daemonID,
+		"device_name":  "test-device",
+		"runtimes": []map[string]any{
+			{"name": "test-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		DaemonToken string `json:"daemon_token"`
+		Runtimes    []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.HasPrefix(resp.DaemonToken, "mdt_") {
+		t.Fatalf("daemon_token = %q, want mdt_ token", resp.DaemonToken)
+	}
+	if len(resp.Runtimes) == 0 {
+		t.Fatal("expected registered runtime")
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM daemon_token WHERE token_hash = $1`, auth.HashToken(resp.DaemonToken))
+		for _, rt := range resp.Runtimes {
+			testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, rt.ID)
+		}
+	})
+
+	var workspaceID, gotDaemonID string
+	var expiresInFuture bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT workspace_id::text, daemon_id, expires_at > now()
+		FROM daemon_token
+		WHERE token_hash = $1
+	`, auth.HashToken(resp.DaemonToken)).Scan(&workspaceID, &gotDaemonID, &expiresInFuture); err != nil {
+		t.Fatalf("query daemon token: %v", err)
+	}
+	if workspaceID != testWorkspaceID {
+		t.Fatalf("workspace_id = %q, want %q", workspaceID, testWorkspaceID)
+	}
+	if gotDaemonID != daemonID {
+		t.Fatalf("daemon_id = %q, want %q", gotDaemonID, daemonID)
+	}
+	if !expiresInFuture {
+		t.Fatal("daemon token should expire in the future")
+	}
 }
 
 func TestDaemonRegister_WithDaemonToken_WorkspaceMismatch(t *testing.T) {

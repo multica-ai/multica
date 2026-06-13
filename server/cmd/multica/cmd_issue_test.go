@@ -1702,6 +1702,198 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().Bool("require-task-token", false, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueCommentAddRequireTaskTokenGuard(t *testing.T) {
+	cases := []struct {
+		name    string
+		token   string
+		agentID string
+		taskID  string
+		wantMsg string
+	}{
+		{
+			name:    "missing token",
+			wantMsg: "MULTICA_TOKEN",
+		},
+		{
+			name:    "user PAT token rejected",
+			token:   "mul_user_pat",
+			agentID: "agent-123",
+			taskID:  "task-456",
+			wantMsg: "mat_ task token",
+		},
+		{
+			name:    "missing agent context",
+			token:   "mat_task_token",
+			taskID:  "task-456",
+			wantMsg: "MULTICA_AGENT_ID",
+		},
+		{
+			name:    "missing task context",
+			token:   "mat_task_token",
+			agentID: "agent-123",
+			wantMsg: "MULTICA_TASK_ID",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_TOKEN", tc.token)
+			t.Setenv("MULTICA_AGENT_ID", tc.agentID)
+			t.Setenv("MULTICA_TASK_ID", tc.taskID)
+
+			cmd := newIssueCommentAddTestCmd()
+			_ = cmd.Flags().Set("content", "hello")
+			_ = cmd.Flags().Set("require-task-token", "true")
+			err := runIssueCommentAdd(cmd, []string{"MUL-1"})
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.wantMsg)
+			}
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantMsg)
+			}
+		})
+	}
+}
+
+func TestRunIssueCommentAddRequireTaskTokenPassesMatContext(t *testing.T) {
+	var posted bool
+	var gotAuth, gotAgentID, gotTaskID string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "MUL-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/comments":
+			posted = true
+			gotAuth = r.Header.Get("Authorization")
+			gotAgentID = r.Header.Get("X-Agent-ID")
+			gotTaskID = r.Header.Get("X-Task-ID")
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_task_token")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "hello")
+	_ = cmd.Flags().Set("require-task-token", "true")
+	_ = cmd.Flags().Set("output", "table")
+	if err := runIssueCommentAdd(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentAdd: %v", err)
+	}
+
+	if !posted {
+		t.Fatal("expected comment POST")
+	}
+	if gotAuth != "Bearer mat_task_token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotAgentID != "agent-123" {
+		t.Fatalf("X-Agent-ID = %q", gotAgentID)
+	}
+	if gotTaskID != "task-456" {
+		t.Fatalf("X-Task-ID = %q", gotTaskID)
+	}
+	if gotBody["content"] != "hello" {
+		t.Fatalf("body content = %v", gotBody["content"])
+	}
+}
+
+func newDaemonCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunDaemonCommentAddRequiresDaemonToken(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_TOKEN", "")
+	t.Setenv("MULTICA_TOKEN", "mul_user_pat")
+
+	cmd := newDaemonCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "background result")
+	err := runDaemonCommentAdd(cmd, []string{"issue-1"})
+	if err == nil {
+		t.Fatal("expected daemon token error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mdt_ daemon token") {
+		t.Fatalf("error = %q, want daemon-token requirement", err.Error())
+	}
+}
+
+func TestRunDaemonCommentAddPostsDaemonSystemEndpoint(t *testing.T) {
+	var gotAuth, gotPath string
+	var gotBody map[string]any
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if r.Method != http.MethodPost {
+			t.Errorf("expected POST, got %s", r.Method)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "comment-1", "author_type": "system"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_DAEMON_TOKEN", "mdt_daemon_token")
+	t.Setenv("MULTICA_TOKEN", "mul_user_pat")
+
+	cmd := newDaemonCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "background result")
+	_ = cmd.Flags().Set("parent", "parent-1")
+	_ = cmd.Flags().Set("output", "table")
+	if err := runDaemonCommentAdd(cmd, []string{"issue-1"}); err != nil {
+		t.Fatalf("runDaemonCommentAdd: %v", err)
+	}
+
+	if gotPath != "/api/daemon/issues/issue-1/comments" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotAuth != "Bearer mdt_daemon_token" {
+		t.Fatalf("Authorization = %q", gotAuth)
+	}
+	if gotBody["content"] != "background result" {
+		t.Fatalf("body content = %v", gotBody["content"])
+	}
+	if gotBody["parent_id"] != "parent-1" {
+		t.Fatalf("body parent_id = %v", gotBody["parent_id"])
+	}
+}
+
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination
 // matrix. Three behaviours matter here:
 //

@@ -493,7 +493,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
 	//     Windows uses `--content-file`, not stdin.
 	// Because the corruption is shell-driven, the guardrail is provider-agnostic.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
+
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>] [--require-task-token]` — Post a comment. Agent-authored result comments should include `--require-task-token` so detached scripts fail instead of falling back to a user PAT. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
@@ -511,11 +512,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// over stdin (the quoted delimiter blocks backtick / `$()` / `$VAR`).
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
-		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path> --require-task-token`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
 		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	} else {
 		b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
+		b.WriteString("Always include `--require-task-token` on agent-authored result comments; shorthand: always use `--content-stdin --require-task-token` with a HEREDOC. ")
 		b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}

@@ -353,6 +353,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCommentAddCmd.Flags().Bool("require-task-token", false, "Require a daemon-injected mat_ task token and agent/task context; prevents fallback to a user PAT")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue search
@@ -1196,6 +1197,11 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if !hasContent {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
 	}
+	if requireTaskToken, _ := cmd.Flags().GetBool("require-task-token"); requireTaskToken {
+		if err := requireAgentTaskTokenContext(); err != nil {
+			return err
+		}
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1260,6 +1266,20 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func requireAgentTaskTokenContext() error {
+	token := strings.TrimSpace(os.Getenv("MULTICA_TOKEN"))
+	if !strings.HasPrefix(token, "mat_") {
+		return fmt.Errorf("--require-task-token requires MULTICA_TOKEN to be a daemon-injected mat_ task token")
+	}
+	if strings.TrimSpace(os.Getenv("MULTICA_AGENT_ID")) == "" {
+		return fmt.Errorf("--require-task-token requires MULTICA_AGENT_ID")
+	}
+	if strings.TrimSpace(os.Getenv("MULTICA_TASK_ID")) == "" {
+		return fmt.Errorf("--require-task-token requires MULTICA_TASK_ID")
+	}
+	return nil
 }
 
 func runIssueCommentDelete(cmd *cobra.Command, args []string) error {

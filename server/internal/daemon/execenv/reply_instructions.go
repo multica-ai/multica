@@ -155,8 +155,24 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
 				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
 				"    # 2. Then run:\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n\n"+
+				"    multica issue comment add %s --parent %s --content-file ./reply.md --require-task-token\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
+			issueID, triggerCommentID,
+		)
+	}
+	if provider == "codex" {
+		return fmt.Sprintf(
+			"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
+				"do NOT reuse --parent values from previous turns in this session.\n\n"+
+				"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
+				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
+				"Use this form, preserving the same issue ID and --parent value:\n\n"+
+				"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin --require-task-token\n"+
+				"    First paragraph.\n"+
+				"\n"+
+				"    Second paragraph.\n"+
+				"    COMMENT\n\n"+
+				"Do NOT write literal `\\n` escapes to simulate line breaks; the HEREDOC preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)
 	}
@@ -172,7 +188,7 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
 			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them, and it is easy to lose formatting or compress a structured reply into one line.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
+			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin --require-task-token\n"+
 			"    First paragraph.\n"+
 			"\n"+
 			"    Second paragraph.\n"+
