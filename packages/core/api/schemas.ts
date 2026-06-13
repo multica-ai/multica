@@ -728,6 +728,47 @@ export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesRespon
   total: 0,
 };
 
+// ---------------------------------------------------------------------------
+// Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,
+// `last_run_status`) stay `z.string()` so future server-side values degrade
+// to a generic UI fallback. The three derived fields (trigger_kinds /
+// next_run_at / last_run_status) are list-endpoint-only and absent on older
+// servers — optional by contract, the list renders "—" without them.
+// ---------------------------------------------------------------------------
+
+const AutopilotListItemSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  project_id: z.string().nullable().optional(),
+  // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
+  // documented default.
+  assignee_type: z.string().default("agent"),
+  assignee_id: z.string(),
+  status: z.string(),
+  execution_mode: z.string(),
+  issue_title_template: z.string().nullable().optional(),
+  created_by_type: z.string(),
+  created_by_id: z.string(),
+  last_run_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  trigger_kinds: z.array(z.string()).optional(),
+  next_run_at: z.string().nullable().optional(),
+  last_run_status: z.string().nullable().optional(),
+}).loose();
+
+export const ListAutopilotsResponseSchema = z.object({
+  autopilots: z.array(AutopilotListItemSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
+  autopilots: [],
+  total: 0,
+};
+
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   id: "",
   workspace_id: "",
