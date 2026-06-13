@@ -43,7 +43,7 @@ function daemonCommands(serverUrl: string | undefined, appUrl: string | undefine
       tokenCmd: `multica config set server_url ${normalizedServerUrl}
 multica config set app_url ${normalizedAppUrl}
 multica login --token <YOUR_TOKEN>
-multica daemon start`,
+multica daemon restart`,
     };
   }
 
@@ -52,7 +52,7 @@ multica daemon start`,
     tokenCmd: `multica config set server_url ${CLOUD_SERVER_URL}
 multica config set app_url ${CLOUD_APP_URL}
 multica login --token <YOUR_TOKEN>
-multica daemon start`,
+multica daemon restart`,
   };
 }
 

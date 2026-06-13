@@ -10,6 +10,8 @@
     "placeholder_archived": "This session is archived",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
+    "placeholder_page": "Send a message, type / to use commands...",
+    "attach_tooltip": "Attach",
     "send_tooltip": "Send",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message"
@@ -80,6 +82,23 @@
     "no_agents": "No agents",
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents..."
+  },
+  "page": {
+    "title": "Chat",
+    "messages_title": "Messages",
+    "search_placeholder": "Search agents...",
+    "search_short_placeholder": "Search",
+    "no_results": "No agents found",
+    "back_to_agents": "Back to chats",
+    "yesterday": "Yesterday",
+    "current_thread": "Chat",
+    "new_thread": "New Thread",
+    "presence": {
+      "online": "Online",
+      "unstable": "Unstable",
+      "offline": "Offline",
+      "archived": "Archived"
+    }
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

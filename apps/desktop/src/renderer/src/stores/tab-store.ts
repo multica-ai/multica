@@ -130,6 +130,7 @@ interface TabStore {
 // ---------------------------------------------------------------------------
 
 const ROUTE_ICONS: Record<string, string> = {
+  chat: "MessageCircle",
   inbox: "Inbox",
   "my-issues": "CircleUser",
   issues: "ListTodo",
@@ -231,14 +232,14 @@ function pinnedBoundary(tabs: Tab[]): number {
   return i;
 }
 
-/** Default entry point for a workspace — its issues list. */
+/** Default entry point for a workspace — its chat page. */
 function defaultPathFor(slug: string): string {
-  return `/${slug}/issues`;
+  return `/${slug}/chat`;
 }
 
 function defaultTabFor(slug: string): Tab {
   const path = defaultPathFor(slug);
-  return makeTab(path, "Issues", resolveRouteIcon(path));
+  return makeTab(path, "Chat", resolveRouteIcon(path));
 }
 
 // ---------------------------------------------------------------------------
@@ -284,7 +285,7 @@ export const useTabStore = create<TabStore>()(
             desiredPath && sanitizeTabPath(desiredPath) === desiredPath
               ? desiredPath
               : defaultPathFor(slug);
-          const tab = makeTab(seedPath, "Issues", resolveRouteIcon(seedPath));
+          const tab = makeTab(seedPath, "Chat", resolveRouteIcon(seedPath));
           set({
             activeWorkspaceSlug: slug,
             byWorkspace: {
@@ -311,7 +312,7 @@ export const useTabStore = create<TabStore>()(
               });
               return;
             }
-            const tab = makeTab(clean, "Issues", resolveRouteIcon(clean));
+            const tab = makeTab(clean, "Chat", resolveRouteIcon(clean));
             set({
               activeWorkspaceSlug: slug,
               byWorkspace: {

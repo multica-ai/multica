@@ -15,6 +15,7 @@ vi.mock("../routes", () => ({
 }));
 
 import {
+  resolveRouteIcon,
   sanitizeTabPath,
   migrateV1ToV2,
   migrateV2ToV3,
@@ -24,6 +25,12 @@ import {
 beforeEach(() => {
   createTabRouterMock.mockClear();
   useTabStore.getState().reset();
+});
+
+describe("resolveRouteIcon", () => {
+  it("uses the chat icon for chat routes", () => {
+    expect(resolveRouteIcon("/acme/chat")).toBe("MessageCircle");
+  });
 });
 
 describe("sanitizeTabPath", () => {
@@ -115,7 +122,8 @@ describe("useTabStore actions", () => {
     const s = useTabStore.getState();
     expect(s.activeWorkspaceSlug).toBe("acme");
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
-    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
+    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/chat");
+    expect(s.byWorkspace.acme.tabs[0].icon).toBe("MessageCircle");
   });
 
   it("switchWorkspace without openPath restores the group's last active tab", () => {
@@ -137,12 +145,13 @@ describe("useTabStore actions", () => {
 
   it("switchWorkspace with openPath dedupes into an existing tab with same path", () => {
     const store = useTabStore.getState();
-    store.switchWorkspace("acme"); // creates default /acme/issues
+    store.switchWorkspace("acme"); // creates default /acme/chat
+    store.addTab("/acme/issues", "Issues", "ListTodo");
     store.addTab("/acme/projects", "Projects", "FolderKanban");
 
     store.switchWorkspace("acme", "/acme/issues");
     const s = useTabStore.getState();
-    expect(s.byWorkspace.acme.tabs).toHaveLength(2); // no duplicate created
+    expect(s.byWorkspace.acme.tabs).toHaveLength(3); // no duplicate created
     const activeTab = s.byWorkspace.acme.tabs.find(
       (t) => t.id === s.byWorkspace.acme.activeTabId,
     );
@@ -177,7 +186,7 @@ describe("useTabStore actions", () => {
     store.closeTab(onlyTabId);
     const s = useTabStore.getState();
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
-    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
+    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/chat");
     expect(s.byWorkspace.acme.tabs[0].id).not.toBe(onlyTabId); // fresh tab
   });
 
@@ -265,7 +274,7 @@ describe("useTabStore actions", () => {
     const s = useTabStore.getState();
     expect(s.activeWorkspaceSlug).toBe("acme");
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
-    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
+    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/chat");
   });
 
   it("validateWorkspaceSlugs reactivates an existing valid group before seeding", () => {
@@ -295,7 +304,7 @@ describe("useTabStore actions", () => {
     expect(Object.keys(s.byWorkspace)).toEqual(["acme"]);
     expect(s.activeWorkspaceSlug).toBe("acme");
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
-    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
+    expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/chat");
     // The dropped stale group's router must be disposed, not leaked.
     expect(staleRouter.dispose).toHaveBeenCalled();
   });
@@ -437,7 +446,7 @@ describe("moveTab boundary clamp", () => {
     const tabs = useTabStore.getState().byWorkspace.acme.tabs;
     expect(tabs.map((t) => t.path)).toEqual([
       "/acme/agents",
-      "/acme/issues",
+      "/acme/chat",
       "/acme/projects",
     ]);
   });

@@ -17,6 +17,7 @@ describe("paths.workspace() shape", () => {
     expect(new Set(parameterlessRoutes)).toEqual(
       new Set([
         "root",
+        "chat",
         "usage",
         "issues",
         "projects",
@@ -38,6 +39,7 @@ describe("paths.workspace() shape", () => {
     // Check that none of the parameterless paths embed a leaked literal
     // and that their second URL segment matches the method name's kebab-case.
     const expectedSegments: Array<[string, string]> = [
+      ["chat", "chat"],
       ["usage", "usage"],
       ["issues", "issues"],
       ["projects", "projects"],

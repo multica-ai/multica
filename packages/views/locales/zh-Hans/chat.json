@@ -9,6 +9,8 @@
     "placeholder_archived": "此会话已归档",
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
+    "placeholder_page": "发送消息，输入 / 使用命令...",
+    "attach_tooltip": "添加附件",
     "send_tooltip": "发送",
     "stop_tooltip": "停止",
     "send_failed_toast": "发送消息失败"
@@ -77,6 +79,23 @@
     "no_agents": "暂无智能体",
     "history_group": "历史对话",
     "agent_filter_placeholder": "搜索智能体..."
+  },
+  "page": {
+    "title": "聊天",
+    "messages_title": "消息",
+    "search_placeholder": "搜索智能体...",
+    "search_short_placeholder": "搜索",
+    "no_results": "未找到智能体",
+    "back_to_agents": "返回聊天列表",
+    "yesterday": "昨天",
+    "current_thread": "Chat",
+    "new_thread": "New Thread",
+    "presence": {
+      "online": "在线",
+      "unstable": "连接不稳定",
+      "offline": "离线",
+      "archived": "已归档"
+    }
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",
