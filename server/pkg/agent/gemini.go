@@ -236,21 +236,24 @@ type geminiModelStats struct {
 //
 //	-p / --prompt         non-interactive prompt (the user's task)
 //	--yolo                auto-approve all tool executions
+//	--skip-trust          bypass trusted-directory check (required for headless/daemon use, v0.41+)
 //	-o stream-json        streaming NDJSON output for live events
 //	-m <model>            optional model override
 //	-r <session>          resume a previous session (if provided)
 // geminiBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var geminiBlockedArgs = map[string]blockedArgMode{
-	"-p":     blockedWithValue,  // non-interactive prompt
-	"--yolo": blockedStandalone, // auto-approve tool use
-	"-o":     blockedWithValue,  // stream-json output format
+	"-p":           blockedWithValue,  // non-interactive prompt
+	"--yolo":       blockedStandalone, // auto-approve tool use
+	"--skip-trust": blockedStandalone, // trust bypass (always set by daemon)
+	"-o":           blockedWithValue,  // stream-json output format
 }
 
 func buildGeminiArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
 		"--yolo",
+		"--skip-trust",
 		"-o", "stream-json",
 	}
 	if opts.Model != "" {
