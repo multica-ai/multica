@@ -4,6 +4,12 @@ This fork Vietnamizes + rebrands Multica as "Hira" using a 3-layer principle so 
 `git merge upstream/main` stays low-conflict. Full plan:
 docs/superpowers/plans/2026-06-13-viet-hoa-multica.md
 
+> **AI agents / new contributors start here.** This is the authoritative fork doc.
+> [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) carry a short banner pointing
+> back to this file. To pull upstream features, run `scripts/sync-upstream.sh`
+> (see *Upstream sync playbook* below) — don't merge upstream by hand unless you
+> have to.
+
 ## 3-layer principle
 
 - **Layer A — fork-owned new files** (zero conflict): `packages/views/locales/vi/**`,
@@ -44,7 +50,9 @@ Every upstream-owned file this fork edits. New fork-owned files (`locales/vi/**`
 | apps/web/public/favicon.svg | Hira "h." mark | merge=ours (auto) |
 | server/internal/service/email.go | sender noreply@hira.vn; VI verification + invitation subjects/bodies; appURL app.hira.vn; CTA indigo | Take upstream, re-apply 6 strings |
 | server/internal/service/email_test.go | invitation subject expectation → VI/Hira | Re-apply 1 assertion |
-| README.md | +Tiếng Việt link in language nav | Re-apply 1 line |
+| README.md | +Tiếng Việt link in language nav; +Vietnamese "Bản fork cá nhân — Hira" notice block after the header | Take upstream, re-apply the 2 fork additions (top of file) |
+| AGENTS.md | Fork-notice banner prepended above upstream content (golden rules + pointers) | Keep our banner, take upstream body below it |
+| CLAUDE.md | Fork-notice blockquote inserted after the intro line (golden rules + pointers) | Keep our blockquote, take upstream body |
 
 > **In-app brand glyph (MulticaIcon) intentionally NOT swapped.** It is a monochrome
 > `currentColor` clip-path used as a loading spinner (animate-spin/pulse) and themed glyph
@@ -67,18 +75,32 @@ Every upstream-owned file this fork edits. New fork-owned files (`locales/vi/**`
 
 ## Upstream sync playbook
 
-Run every time you pull upstream for new features:
+**Preferred: the helper script.** It does everything below safely — adds the
+`upstream` remote if missing, self-configures the `merge=ours` driver, merges into
+an *isolated* `sync/upstream-<timestamp>` branch (never touching `main`), and runs
+the three safety nets. It never pushes.
+
+```bash
+scripts/sync-upstream.sh            # fetch + merge into a sync branch + run safety nets
+scripts/sync-upstream.sh --full     # also run the full `make check` (Go + E2E)
+# On conflicts it stops on the sync branch with the file list; resolve each per the
+# "Conflict policy" column above, then: git add -A && git merge --continue
+# When green: git switch main && git merge --no-ff sync/upstream-<ts> && git push
+```
+
+**Manual fallback** (if you must merge by hand):
 
 ```bash
 git fetch upstream
-git checkout main && git merge upstream/main      # keep fork's own integration branch updated
-git checkout hira && git merge main               # or merge upstream/main directly into your work branch
+git switch -c sync/upstream-manual main
+git merge upstream/main                            # merge=ours protects brand assets (configure once: git config merge.ours.driver true)
 # Conflicts? open the Touch-point Registry above and resolve each file per its "Conflict policy" column.
 pnpm install                                       # lockfile / catalog may have changed
 pnpm typecheck                                     # SAFETY NET 1 — see below
 pnpm test                                          # SAFETY NET 2 — see below
 cd server && go build ./... && go test ./...       # server still compiles / passes
 make check                                         # full pipeline (typecheck + unit + Go + E2E) before push
+# then: git switch main && git merge --no-ff sync/upstream-manual && git push
 ```
 
 ### Three automated safety nets after a merge

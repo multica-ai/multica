@@ -2,6 +2,31 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> ## ⚠️ Fork notice — this is the Hira fork, not upstream Multica
+>
+> `saucevn/multica` is a personal fork that **Vietnamizes + rebrands** Multica as
+> **"Hira"** (app.hira.vn). Upstream = `multica-ai/multica`. The fork is built to
+> keep `git merge upstream/main` low-conflict. **Protect that.** Authoritative fork
+> docs: **[`BRANDING.md`](BRANDING.md)** (3-layer strategy + Touch-point Registry +
+> conflict policy per file). Quick AI entry: [`AGENTS.md`](AGENTS.md).
+>
+> **Golden rules** (breaking these breaks upstream sync):
+> 1. Never rename technical identifiers — `@multica/*`, the `multica` CLI, the Go
+>    module, `MULTICA_*` env vars, DB names, the `multica-locale` cookie all stay.
+>    Surface rebrand only (UI text, colors, logo, emails).
+> 2. Never edit `packages/ui/styles/tokens.css` or `base.css` — brand overrides go
+>    in fork-owned `packages/ui/styles/brand.css`.
+> 3. Never edit `en`/`zh-Hans`/`ko`/`ja` strings — the fork only *adds* `vi`
+>    (`packages/views/locales/vi/`), kept at parity with `en` (`parity.test.ts`).
+> 4. Keep `DEFAULT_LOCALE = "en"`.
+> 5. Don't rewrite upstream pages/components to restyle — override via tokens/CSS.
+> 6. Editing any upstream-owned file → add a row to the Touch-point Registry in
+>    `BRANDING.md` in the same commit.
+>
+> Pull upstream features with `scripts/sync-upstream.sh` (safe, isolated, runs the
+> safety nets). Everything below is upstream's guidance and still applies; the rules
+> above win where they overlap.
+
 ## Conventions reference
 
 The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
