@@ -26,6 +26,18 @@ Turn coding agents into real teammates — assign tasks, track progress, compoun
 
 </div>
 
+> ### 🇻🇳 Bản fork cá nhân — Hira
+>
+> Đây là bản **fork cá nhân** của Multica, được **Việt hóa và đổi thương hiệu thành
+> "Hira"** (chạy tại app.hira.vn). Upstream gốc: [`multica-ai/multica`](https://github.com/multica-ai/multica).
+> Fork giữ nguyên toàn bộ định danh kỹ thuật (`@multica/*`, CLI `multica`, Go module…)
+> để vẫn `git merge upstream/main` lấy tính năng mới được — chỉ Việt hóa + đổi giao diện.
+>
+> - 📖 Đọc tiếng Việt: **[README.vi.md](README.vi.md)**
+> - 🛠️ Quy tắc duy trì + cách sync upstream an toàn: **[BRANDING.md](BRANDING.md)**
+> - 🔄 Cập nhật từ upstream: `scripts/sync-upstream.sh`
+> - 🤖 AI agents: đọc [AGENTS.md](AGENTS.md) / [CLAUDE.md](CLAUDE.md) trước khi sửa.
+
 ## What is Multica?
 
 Multica turns coding agents into real teammates. Assign issues to an agent like you'd assign to a colleague — they'll pick up the work, write code, report blockers, and update statuses autonomously.
