@@ -48,6 +48,8 @@ the SAME commit.
 > `text-white`/`text-foreground` contexts. A dedicated monochrome Hira glyph is a separate
 > design task. The colored "h." mark lives in `favicon.svg` (tab/PWA/OS icon).
 
+| README.md | +Tiếng Việt link in language nav | Re-apply 1 line |
+
 ## Upstream sync playbook
 <!-- filled in by the final task -->
 
