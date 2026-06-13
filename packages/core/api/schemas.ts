@@ -34,6 +34,7 @@ export interface AppConfigResponse {
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+  email_configured?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,7 @@ export const AppConfigSchema = z.object({
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  email_configured: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {

@@ -92,6 +92,12 @@
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
       "enabled_badge": "Enabled"
+    },
+    "email": {
+      "label": "Email notifications",
+      "hint_enabled": "You'll get an email when there's new inbox activity.",
+      "hint_unavailable": "Email isn't configured on this server. Set SMTP_HOST or RESEND_API_KEY to enable.",
+      "unavailable_badge": "Unavailable"
     }
   },
   "tokens": {

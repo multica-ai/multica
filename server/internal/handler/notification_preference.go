@@ -24,6 +24,7 @@ var validNotifGroups = map[string]bool{
 	"updates":              true,
 	"agent_activity":       true,
 	"system_notifications": true,
+	"email_notifications":  true, // delivery-channel toggle: missing/all → send, muted → suppress
 }
 
 // validNotifValues is the set of allowed preference values per group.

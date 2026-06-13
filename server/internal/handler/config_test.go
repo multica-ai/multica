@@ -215,6 +215,39 @@ func TestURLHostEqualsCanonicalizesCommonHostForms(t *testing.T) {
 	}
 }
 
+func TestGetConfig_EmailConfigured(t *testing.T) {
+	tests := []struct {
+		name           string
+		smtpHost       string
+		resendAPIKey   string
+		wantConfigured bool
+	}{
+		{"neither set", "", "", false},
+		{"smtp only", "smtp.example.com", "", true},
+		{"resend only", "", "re_xxx", true},
+		{"both set", "smtp.example.com", "re_xxx", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("SMTP_HOST", tt.smtpHost)
+			t.Setenv("RESEND_API_KEY", tt.resendAPIKey)
+
+			req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+			w := httptest.NewRecorder()
+			testHandler.GetConfig(w, req)
+
+			var resp AppConfig
+			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if resp.EmailConfigured != tt.wantConfigured {
+				t.Errorf("email_configured = %v, want %v",
+					resp.EmailConfigured, tt.wantConfigured)
+			}
+		})
+	}
+}
+
 // TestGetConfigExposesWorkspaceCreationDisabled verifies that the self-host
 // gate added by #3433 surfaces to the frontend through /api/config so the UI
 // can hide every "Create workspace" affordance.
