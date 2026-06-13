@@ -1114,4 +1114,35 @@ describe("IssueDetail (shared)", () => {
       );
     });
   });
+
+  it("clears parent with parent_issue_id: null when the remove-parent X is clicked", async () => {
+    const parentIssue: Issue = {
+      ...mockIssue,
+      id: "parent-1",
+      identifier: "TES-99",
+      title: "Parent task",
+    };
+    const childWithParent: Issue = {
+      ...mockIssue,
+      parent_issue_id: "parent-1",
+    };
+    mockApiObj.getIssue.mockImplementation((id: string) =>
+      Promise.resolve(id === "parent-1" ? parentIssue : childWithParent),
+    );
+    mockApiObj.listIssues.mockResolvedValue({
+      issues: [childWithParent, parentIssue],
+      total: 2,
+    });
+
+    renderIssueDetail();
+
+    const removeButton = await screen.findByRole("button", { name: "Remove parent" });
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(mockApiObj.updateIssue).toHaveBeenCalledWith("issue-1", {
+        parent_issue_id: null,
+      });
+    });
+  });
 });
