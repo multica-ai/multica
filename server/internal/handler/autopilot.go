@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1318,7 +1319,8 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
+		slog.Warn("failed to trigger autopilot", "autopilot_id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot")
 		return
 	}
 
