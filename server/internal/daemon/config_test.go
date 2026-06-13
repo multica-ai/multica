@@ -240,6 +240,7 @@ func stageFakeAgent(t *testing.T) string {
 	// Clear any inherited env-var override so the test sees the URL-based
 	// default, not whatever the developer happens to have exported.
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "")
 	return binDir
 }
 
@@ -330,6 +331,52 @@ func TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault(t *testing.T) {
 	}
 	if cfg.AutoUpdateEnabled {
 		t.Fatalf("AutoUpdateEnabled = true with --no-auto-update set; flag must win")
+	}
+}
+
+func TestLoadConfig_AutoReloadDefaultOn(t *testing.T) {
+	stageFakeAgent(t)
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.AutoReloadOnVersionChange {
+		t.Fatalf("AutoReloadOnVersionChange = false by default, want true")
+	}
+}
+
+func TestLoadConfig_AutoReloadEnvDisables(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "0")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.AutoReloadOnVersionChange {
+		t.Fatalf("AutoReloadOnVersionChange = true with MULTICA_DAEMON_AUTO_RELOAD=0, want false")
+	}
+}
+
+func TestLoadConfig_AutoReloadFlagOverrideWins(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "0")
+	enabled := true
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:                 "http://localhost:8080",
+		WorkspacesRoot:            t.TempDir(),
+		AutoReloadOnVersionChange: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.AutoReloadOnVersionChange {
+		t.Fatalf("AutoReloadOnVersionChange = false despite explicit override, want true")
 	}
 }
 

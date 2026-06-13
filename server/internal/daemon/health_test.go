@@ -28,6 +28,8 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		logger:     slog.Default(),
 	}
 	d.activeTasks.Store(3)
+	d.reloadPending = true
+	d.reloadPendingReason = "codex version changed: 0.1.0 -> 0.1.1"
 	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -52,6 +54,12 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["active_task_count"], float64(3); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
 	}
+	if got, want := raw["reload_pending"], true; got != want {
+		t.Errorf("reload_pending key: got %v, want %v", got, want)
+	}
+	if got, want := raw["reload_pending_reason"], "codex version changed: 0.1.0 -> 0.1.1"; got != want {
+		t.Errorf("reload_pending_reason key: got %v, want %q", got, want)
+	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
@@ -73,6 +81,12 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	}
 	if resp.ActiveTaskCount != 3 {
 		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	}
+	if !resp.ReloadPending {
+		t.Errorf("ReloadPending: got false, want true")
+	}
+	if resp.ReloadReason != "codex version changed: 0.1.0 -> 0.1.1" {
+		t.Errorf("ReloadReason: got %q", resp.ReloadReason)
 	}
 }
 
