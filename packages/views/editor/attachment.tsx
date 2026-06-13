@@ -312,7 +312,13 @@ export function Attachment({
 
   const openPreview = () => {
     if (state.record) {
-      preview.tryOpen({ kind: "full", attachment: state.record });
+      preview.tryOpen({
+        kind: "full",
+        attachment: {
+          ...state.record,
+          download_url: state.url || state.record.download_url,
+        },
+      });
       return;
     }
     if (state.url) {

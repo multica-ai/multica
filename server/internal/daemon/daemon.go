@@ -2871,6 +2871,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// Point Cursor at per-task project state when managed MCP is present.
+	// The workdir .cursor/mcp.json carries the managed server list, while
+	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
+	// persistent ~/.cursor/projects state.
+	if env.CursorDataDir != "" {
+		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
+	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
 	// task workdir, so the CLI's native skill scanner picks up the per-task
@@ -3761,7 +3768,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

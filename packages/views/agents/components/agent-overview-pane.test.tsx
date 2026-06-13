@@ -125,6 +125,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
   it.each([
     ["Claude", "claude"],
     ["Codex", "codex"],
+    ["Cursor", "cursor"],
     ["Hermes", "hermes"],
     ["Kimi", "kimi"],
     ["Kiro", "kiro"],
