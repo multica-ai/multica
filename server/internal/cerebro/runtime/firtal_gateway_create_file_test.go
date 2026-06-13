@@ -48,3 +48,21 @@ func TestCoerceRows_Rejects(t *testing.T) {
 		t.Error("expected error for non-array row")
 	}
 }
+
+// TestCreateFileSchema_NoModelControlledTarget guards the TECH-3416 surface-only
+// rule: the attachment target must come from the server-set ToolContext surface,
+// never from a model-chosen tool argument. If anyone re-adds issue_id (or any
+// other target selector) to the input schema, this fails — the model must not be
+// able to attach a file to an arbitrary issue.
+func TestCreateFileSchema_NoModelControlledTarget(t *testing.T) {
+	schema := (&FirtalCreateFileTool{}).InputSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("InputSchema has no properties map: %#v", schema)
+	}
+	for _, banned := range []string{"issue_id", "issue", "chat_message_id", "comment_id", "target", "attach_to"} {
+		if _, present := props[banned]; present {
+			t.Fatalf("create_file InputSchema exposes model-controlled target %q — target must come from the server-set ToolContext surface only (TECH-3416 guardrail)", banned)
+		}
+	}
+}
