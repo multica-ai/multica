@@ -257,6 +257,7 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerPipelineOrchestratorBridge(bus, queries, pipelineBridgeConfigFromEnv())
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

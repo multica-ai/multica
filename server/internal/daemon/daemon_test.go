@@ -1128,7 +1128,11 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	}
 	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
-		Timeout:                   5 * time.Second,
+		// Keep the outer execution budget comfortably above full-suite
+		// process startup jitter. This test is about the post-tool-result
+		// semantic inactivity watchdog, which is governed by the 100 ms
+		// timeout below.
+		Timeout:                   30 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, slog.Default(), "task-stale")
 	if err != nil {

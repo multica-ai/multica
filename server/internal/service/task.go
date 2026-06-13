@@ -33,6 +33,10 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// AutopilotSvc is wired by NewAutopilotService so task terminal paths can
+	// update run_only autopilot runs synchronously. The event listener remains
+	// as a UI/backfill safety net, but the lifecycle no longer depends on it.
+	AutopilotSvc *AutopilotService
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -1434,6 +1438,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.syncAutopilotRunFromTask(ctx, task)
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
@@ -1716,6 +1721,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retried := 0
 
 	for _, t := range tasks {
+		autopilotRetried := s.syncAutopilotRunFromTask(ctx, t)
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
 		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
@@ -1723,6 +1729,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
 			}
+		} else if autopilotRetried {
+			retried++
 		}
 
 		failureReason := "agent_error"
@@ -1787,6 +1795,13 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
 	return retried
+}
+
+func (s *TaskService) syncAutopilotRunFromTask(ctx context.Context, task db.AgentTaskQueue) bool {
+	if !task.AutopilotRunID.Valid || s.AutopilotSvc == nil {
+		return false
+	}
+	return s.AutopilotSvc.SyncRunFromTask(ctx, task)
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
