@@ -21,6 +21,16 @@ vi.mock("@multica/cerebro-preferences/views", () => ({
   useSubmitOnEnter: () => false,
 }));
 
+vi.mock("@multica/cerebro-comment-drafts", () => ({
+  DraftSavedHint: () => null,
+  useCommentDraft: () => ({
+    defaultValue: "",
+    save: vi.fn(),
+    clear: vi.fn(),
+    saved: false,
+  }),
+}));
+
 // JEH-1065: pin-input is a cerebro affordance gated by `pinnable`. Stub the
 // package so this test stays focused on autoFocus wiring without spinning
 // up the feature-flags store or anchor measurement.

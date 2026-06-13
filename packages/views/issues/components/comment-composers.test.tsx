@@ -34,6 +34,16 @@ vi.mock("@multica/cerebro-preferences/views", () => ({
   useTheme: () => "system",
 }));
 
+vi.mock("@multica/cerebro-comment-drafts", () => ({
+  DraftSavedHint: () => null,
+  useCommentDraft: () => ({
+    defaultValue: "",
+    save: vi.fn(),
+    clear: vi.fn(),
+    saved: false,
+  }),
+}));
+
 // CEREBRO-PATCH: mock cerebro-access send-confirm hook (FIR-32) — it reads
 // feature flags + workspace context the composer unit tests don't wire up.
 vi.mock("@multica/cerebro-access/views", () => ({
