@@ -370,6 +370,82 @@ func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.U
 	return err
 }
 
+const failStaleIssueCreatedAutopilotRunsForAutopilot = `-- name: FailStaleIssueCreatedAutopilotRunsForAutopilot :many
+WITH stale_runs AS (
+    SELECT ar.id
+    FROM autopilot_run ar
+    JOIN issue i ON i.id = ar.issue_id
+    WHERE ar.autopilot_id = $1
+      AND ar.status = 'issue_created'
+      AND ar.created_at < $2
+      AND i.status NOT IN ('in_review', 'done', 'blocked', 'cancelled')
+      AND EXISTS (
+          SELECT 1
+          FROM agent_task_queue failed
+          WHERE failed.issue_id = ar.issue_id
+            AND failed.status = 'failed'
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue active
+          WHERE active.issue_id = ar.issue_id
+            AND active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      )
+)
+UPDATE autopilot_run ar
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = $3
+FROM stale_runs
+WHERE ar.id = stale_runs.id
+RETURNING ar.id, ar.autopilot_id, ar.trigger_id, ar.source, ar.status, ar.issue_id, ar.task_id, ar.triggered_at, ar.completed_at, ar.failure_reason, ar.trigger_payload, ar.result, ar.created_at, ar.squad_id
+`
+
+type FailStaleIssueCreatedAutopilotRunsForAutopilotParams struct {
+	AutopilotID   pgtype.UUID        `json:"autopilot_id"`
+	CreatedBefore pgtype.Timestamptz `json:"created_before"`
+	FailureReason pgtype.Text        `json:"failure_reason"`
+}
+
+// Fails old create_issue runs whose linked issue has no active task but does
+// have at least one failed task. This is the recovery guard for scheduled
+// autopilots whose issue task exhausts retries and leaves the run stuck in
+// issue_created until the next scheduled tick.
+func (q *Queries) FailStaleIssueCreatedAutopilotRunsForAutopilot(ctx context.Context, arg FailStaleIssueCreatedAutopilotRunsForAutopilotParams) ([]AutopilotRun, error) {
+	rows, err := q.db.Query(ctx, failStaleIssueCreatedAutopilotRunsForAutopilot, arg.AutopilotID, arg.CreatedBefore, arg.FailureReason)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotRun{}
+	for rows.Next() {
+		var i AutopilotRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.TriggerID,
+			&i.Source,
+			&i.Status,
+			&i.IssueID,
+			&i.TaskID,
+			&i.TriggeredAt,
+			&i.CompletedAt,
+			&i.FailureReason,
+			&i.TriggerPayload,
+			&i.Result,
+			&i.CreatedAt,
+			&i.SquadID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAutopilot = `-- name: GetAutopilot :one
 SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
 WHERE id = $1

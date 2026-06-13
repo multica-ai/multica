@@ -39,6 +39,10 @@ type AutopilotService struct {
 // when computing next run times.
 const DefaultAutopilotTriggerTimezone = "UTC"
 
+const staleCreateIssueRunAge = 30 * time.Minute
+
+const staleCreateIssueRunFailureReason = "stale issue_created run: linked issue has failed tasks and no active task"
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -63,6 +67,8 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
+	s.failStaleIssueCreatedRuns(ctx, autopilot)
+
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
@@ -558,6 +564,32 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 		FailureReason: pgtype.Text{String: reason, Valid: true},
 	}); err != nil {
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
+	}
+}
+
+func (s *AutopilotService) failStaleIssueCreatedRuns(ctx context.Context, ap db.Autopilot) {
+	staleBefore := time.Now().Add(-staleCreateIssueRunAge)
+	runs, err := s.Queries.FailStaleIssueCreatedAutopilotRunsForAutopilot(ctx, db.FailStaleIssueCreatedAutopilotRunsForAutopilotParams{
+		AutopilotID:   ap.ID,
+		CreatedBefore: pgtype.Timestamptz{Time: staleBefore, Valid: true},
+		FailureReason: pgtype.Text{String: staleCreateIssueRunFailureReason, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("autopilot stale run recovery failed",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"error", err,
+		)
+		return
+	}
+	for _, run := range runs {
+		slog.Warn("autopilot stale issue_created run failed",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"issue_id", util.UUIDToString(run.IssueID),
+			"reason", staleCreateIssueRunFailureReason,
+		)
+		s.captureAutopilotRunFailed(ap, run, run.Source, staleCreateIssueRunFailureReason)
+		s.publishRunDone(util.UUIDToString(ap.WorkspaceID), run, "failed")
 	}
 }
 

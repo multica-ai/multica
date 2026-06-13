@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -157,6 +159,98 @@ func TestAutopilotFailureMonitor_PausesOffenderAndNotifiesCreator(t *testing.T) 
 	}
 	if !found {
 		t.Fatalf("expected an autopilot_paused inbox_item in DB for user %s", testUserID)
+	}
+}
+
+func TestDispatchAutopilotFailsStaleIssueCreatedRunsBeforeNewRun(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	agentID := pickFixtureAgent(t)
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Dispatch stale issue run",
+		AssigneeType:       "agent",
+		AssigneeID:         agentID,
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "Dispatch stale issue run follow-up", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_id = $1`, ap.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, description, status, priority,
+			assignee_type, assignee_id, creator_type, creator_id,
+			number, position, origin_type, origin_id
+		)
+		VALUES ($1, 'Stale autopilot issue', '', 'todo', 'none',
+			'agent', $2, 'agent', $2,
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0, 'autopilot', $3)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), agentID, ap.ID).Scan(&issueID); err != nil {
+		t.Fatalf("seed issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status, issue_id, created_at, triggered_at)
+		VALUES ($1, 'schedule', 'issue_created', $2, now() - interval '2 hours', now() - interval '2 hours')
+		RETURNING id::text
+	`, ap.ID, issueID).Scan(&runID); err != nil {
+		t.Fatalf("seed autopilot_run: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			completed_at, failure_reason, error, attempt, max_attempts
+		)
+		SELECT $1, runtime_id, $2, 'failed', 0,
+		       now() - interval '90 minutes', 'codex_semantic_inactivity',
+		       'codex app-server no progress timeout after 30s', 2, 2
+		FROM agent
+		WHERE id = $1
+	`, agentID, issueID); err != nil {
+		t.Fatalf("seed failed task: %v", err)
+	}
+
+	newRun, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if newRun == nil || newRun.Status != "issue_created" {
+		t.Fatalf("new run = %+v, want issue_created", newRun)
+	}
+
+	run, err := queries.GetAutopilotRun(ctx, parseUUID(runID))
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if run.Status != "failed" {
+		t.Fatalf("stale run status = %q, want failed", run.Status)
+	}
+	if !run.CompletedAt.Valid {
+		t.Fatal("stale run completed_at is invalid, want set")
+	}
+	if !run.FailureReason.Valid || !strings.Contains(run.FailureReason.String, "stale issue_created run") {
+		t.Fatalf("stale run failure_reason = %q, want stale issue_created run", run.FailureReason.String)
 	}
 }
 
