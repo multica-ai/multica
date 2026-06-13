@@ -5,7 +5,50 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/auth"
 )
+
+func TestGetConfigReportsCdnSignedMode(t *testing.T) {
+	origStorage := testHandler.Storage
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = &mockStorage{}
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.CFSigner = origSigner
+	}()
+
+	fetch := func() AppConfig {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var cfg AppConfig
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.CFSigner = nil
+	if cfg := fetch(); cfg.CdnSigned {
+		t.Fatalf("cdn_signed: want false without a CloudFront signer, got true")
+	}
+
+	// With signing enabled the same cdn_domain serves private content via
+	// signed URLs only — clients must be told raw storage URLs won't load.
+	testHandler.CFSigner = &auth.CloudFrontSigner{}
+	cfg := fetch()
+	if !cfg.CdnSigned {
+		t.Fatalf("cdn_signed: want true with a CloudFront signer, got false")
+	}
+	if cfg.CdnDomain != "cdn.example.com" {
+		t.Fatalf("cdn_domain: want cdn.example.com alongside cdn_signed, got %q", cfg.CdnDomain)
+	}
+}
 
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
