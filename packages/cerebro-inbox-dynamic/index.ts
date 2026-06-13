@@ -14,9 +14,7 @@ export {
 export { useDynamicInboxData } from "./use-dynamic-inbox-data";
 export {
   SECTION_CATALOG,
-  INBOX_PRESETS,
   operatorPreset,
-  managerPreset,
   DEFAULT_INBOX_LAYOUT,
   deleteUserInboxPreset,
   makeUserInboxPresetsBlob,
