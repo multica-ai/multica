@@ -59,6 +59,7 @@ import {
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel } from "@multica/core/types";
@@ -382,6 +383,10 @@ export function DynamicInbox() {
     <div className="relative flex h-full min-h-0 flex-col">
       {/* tabs */}
       <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
+          {/* TECH-3502 — on mobile the dynamic inbox is full-screen with no app
+              chrome, so it needs its own hamburger to open the navigation menu
+              (the classic inbox gets this from PageHeader). md:hidden on desktop. */}
+          <MobileSidebarTrigger className="-mb-1 mr-1" />
           {layout.tabs.map((tab) =>
             editingTabId === tab.id ? (
               // TECH-3502 #2/#4 — inline rename of a tab.
@@ -628,6 +633,7 @@ export function DynamicInbox() {
       return (
         <div className="flex h-full flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+            <MobileSidebarTrigger className="mr-0" />
             <button
               type="button"
               onClick={clearSelection}
