@@ -27,6 +27,7 @@ the SAME commit.
 | packages/core/i18n/pick-locale.test.ts | +1 it() block for vi | Keep both sides (additive) |
 | server/internal/handler/auth.go | +"vi" in supportedLanguages | Re-apply 1 line |
 | server/internal/handler/user_language_test.go | +1 test for vi | Keep both sides |
+| packages/views/locales/index.ts | +25 vi imports + vi block in RESOURCES | Re-apply block on conflict |
 
 ## Upstream sync playbook
 <!-- filled in by the final task -->

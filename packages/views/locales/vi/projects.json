@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Projects",
+    "new_project": "New project",
+    "empty": "No projects yet",
+    "create_first": "Create your first project",
+    "view_compact": "Compact",
+    "view_comfortable": "Comfortable",
+    "search_placeholder": "Search projects...",
+    "no_search_results": "No results match your search"
+  },
+  "table": {
+    "name": "Name",
+    "priority": "Priority",
+    "status": "Status",
+    "progress": "Progress",
+    "lead": "Lead",
+    "created": "Created"
+  },
+  "status": {
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "paused": "Paused",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "priority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "lead": {
+    "no_lead": "No lead",
+    "assign_placeholder": "Assign lead...",
+    "members_group": "Members",
+    "agents_group": "Agents",
+    "no_results": "No results"
+  },
+  "relative_date": {
+    "today": "Today",
+    "one_day_ago": "1d ago",
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago"
+  },
+  "detail": {
+    "not_found": "Project not found",
+    "breadcrumb_fallback": "Projects",
+    "title_placeholder": "Project title",
+    "icon_tooltip": "Change icon",
+    "pin_tooltip": "Pin to sidebar",
+    "unpin_tooltip": "Unpin from sidebar",
+    "sidebar_tooltip": "Toggle sidebar",
+    "copy_link": "Copy link",
+    "delete_action": "Delete project",
+    "section_properties": "Properties",
+    "section_progress": "Progress",
+    "section_description": "Description",
+    "description_placeholder": "Add description...",
+    "empty_issues_title": "No issues linked",
+    "empty_issues_hint": "Create a new issue or assign existing ones to this project.",
+    "empty_issues_new_button": "New Issue",
+    "no_issues_yet": "No issues yet",
+    "toast_link_copied": "Link copied",
+    "toast_project_deleted": "Project deleted",
+    "toast_move_issue_failed": "Failed to move issue"
+  },
+  "resources": {
+    "section_header": "Resources",
+    "empty": "No resources attached.",
+    "add_button": "Add resource",
+    "popover_title": "Attach a GitHub repo",
+    "repos_search_placeholder": "Search repositories...",
+    "repos_search_empty": "No repositories match your search.",
+    "attached_badge": "attached",
+    "remove_tooltip": "Remove",
+    "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
+    "url_submit": "Add",
+    "toast_attached": "Repository attached",
+    "toast_attach_failed": "Failed to attach",
+    "toast_removed": "Resource removed",
+    "toast_remove_failed": "Failed to remove resource",
+    "add_local_directory_button": "Add local directory",
+    "local_daemon_offline_hint": "Start the local daemon to attach a directory on this machine.",
+    "local_daemon_already_attached_hint": "This machine already has a local directory attached. Remove it before adding another.",
+    "local_rename_tooltip": "Rename",
+    "local_rename_label": "Local directory label",
+    "local_no_daemon_tooltip": "Local daemon isn't reporting an ID yet — the agent can't open this directory.",
+    "local_other_machine_tooltip": "Only available on the machine that registered this directory.",
+    "chat_hint_prefix": "Agent will work in-place at",
+    "toast_local_attached": "Local directory attached",
+    "toast_local_renamed": "Renamed",
+    "toast_local_rename_failed": "Failed to rename",
+    "toast_local_pick_failed": "Failed to pick directory",
+    "toast_local_already_attached": "This directory is already attached to the project on this machine.",
+    "toast_local_daemon_already_attached": "This machine already has a local directory attached to this project. Remove it before adding another.",
+    "toast_local_daemon_not_running": "Local daemon isn't running.",
+    "local_validate_not_absolute": "Pick an absolute path.",
+    "local_validate_not_found": "Path doesn't exist.",
+    "local_validate_not_a_directory": "Path is not a directory.",
+    "local_validate_not_readable": "Directory is not readable.",
+    "local_validate_not_writable": "Directory is not writable.",
+    "local_validate_unsupported": "Local directories can only be picked on the desktop app."
+  },
+  "delete_dialog": {
+    "title": "Delete project",
+    "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
+  "picker": {
+    "no_project": "No project",
+    "remove": "Remove from project",
+    "empty": "No projects yet"
+  },
+  "chip": {
+    "fallback_label": "Project"
+  }
+}
