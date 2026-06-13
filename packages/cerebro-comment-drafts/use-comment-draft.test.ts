@@ -18,7 +18,7 @@ vi.mock("@multica/core/issues/stores", () => {
 
 const flag = { enabled: true };
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => flag.enabled,
+  useFlagValue: () => flag.enabled,
 }));
 
 import { useCommentDraft } from "./use-comment-draft";

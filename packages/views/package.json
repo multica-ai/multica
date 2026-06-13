@@ -11,6 +11,7 @@
   "_comment_cerebro_workspace_branding": "CEREBRO-PATCH(workspace-accent-color): TECH-3002 — adds @multica/cerebro-workspace-branding dep for extractHueFromUrl + color utilities used in workspace-tab accent color section.",
   "_comment_cerebro_skill_metadata": "CEREBRO-PATCH(skill-category-filter): TECH-3077 — adds @multica/cerebro-skill-metadata dep for the SkillCategoryFilter chip row on the skills list page.",
   "_comment_cerebro_wakeup": "CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3176 — adds @multica/cerebro-wakeup dep for the pending-wakeups sidebar section in issue-detail.",
+  "_comment_cerebro_comment_drafts": "CEREBRO-PATCH(views-package-comment-drafts): TECH-3491 — adds @multica/cerebro-comment-drafts dep for the useCommentDraft hook + DraftSavedHint wired into the comment / channel / DM / thread-reply composers.",
   "_comment_cerebro_access_undeclared": "CEREBRO-PATCH(reply-target-mention-suppression): TECH-3194 — reply-targets.ts and trigger-target-bar.tsx import @multica/cerebro-access/views as an undeclared workspace import ON PURPOSE. Declaring it here makes turbo see a build/typecheck cycle (cerebro-access already imports @multica/views), so it must stay out of dependencies; pnpm hoist resolves the import.",
   "name": "@multica/views",
   "version": "0.0.0",
