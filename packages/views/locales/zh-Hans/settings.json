@@ -92,6 +92,12 @@
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
       "enabled_badge": "已启用"
+    },
+    "email": {
+      "label": "邮件通知",
+      "hint_enabled": "收件箱有新消息时，会同时给你的邮箱发一封提醒。",
+      "hint_unavailable": "服务端尚未配置邮件发送。请联系管理员设置 SMTP_HOST 或 RESEND_API_KEY。",
+      "unavailable_badge": "不可用"
     }
   },
   "tokens": {

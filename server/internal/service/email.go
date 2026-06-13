@@ -2,6 +2,7 @@ package service
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"html"
 	"mime"
@@ -112,6 +113,16 @@ func NewEmailService() *EmailService {
 		smtpTLSImplicit: smtpTLSImplicit,
 		smtpEHLOName:    smtpEHLOName,
 	}
+}
+
+// Configured reports whether a real outbound transport (SMTP relay or Resend
+// API) is wired. When false, SendNotification falls through to the DEV stdout
+// path — that's fine for OTP / invitation flows (intentional debug output)
+// but the inbox notification fan-out must NOT register against the bus,
+// otherwise every inbox row leaks the recipient + rendered body into server
+// logs on an unconfigured production self-host.
+func (s *EmailService) Configured() bool {
+	return s.smtpHost != "" || s.client != nil
 }
 
 // sendSMTP delivers an HTML email via an SMTP server.
@@ -275,6 +286,36 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 	params := buildInvitationParams(s.fromEmail, to, inviterName, workspaceName, inviteURL)
 	_, err := s.client.Emails.Send(params)
 	return err
+}
+
+// SendNotification sends a single-recipient transactional notification email.
+// Delivery priority mirrors the constructor: SMTP relay → Resend API → DEV
+// stdout. Returns the first non-recoverable error or nil on success.
+func (s *EmailService) SendNotification(to, subject, textBody, htmlBody string) error {
+	to = strings.TrimSpace(to)
+	if to == "" {
+		return errors.New("email: SendNotification requires non-empty to")
+	}
+	subject = sanitizeSubjectField(subject)
+
+	if s.smtpHost != "" {
+		return s.sendSMTP(to, subject, htmlBody)
+	}
+	if s.client != nil {
+		_, err := s.client.Emails.Send(&resend.SendEmailRequest{
+			From:    s.fromEmail,
+			To:      []string{to},
+			Subject: subject,
+			Html:    htmlBody,
+			Text:    textBody,
+		})
+		return err
+	}
+
+	// DEV mode
+	fmt.Printf("EmailService DEV: to=%s subject=%q\n--- text ---\n%s\n--- html ---\n%s\n",
+		to, subject, textBody, htmlBody)
+	return nil
 }
 
 // buildInvitationParams assembles the email request for an invitation.

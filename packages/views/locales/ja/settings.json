@@ -92,6 +92,12 @@
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
       "enabled_badge": "有効"
+    },
+    "email": {
+      "label": "メール通知",
+      "hint_enabled": "新しい受信箱の通知をメールで受け取ります。",
+      "hint_unavailable": "このサーバーではメール送信が未設定です。SMTP_HOST または RESEND_API_KEY を設定してください。",
+      "unavailable_badge": "利用不可"
     }
   },
   "tokens": {

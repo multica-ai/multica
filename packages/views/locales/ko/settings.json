@@ -92,6 +92,12 @@
       "granted": "이 브라우저에서 알림 배너를 표시할 수 있습니다.",
       "denied": "브라우저에서 차단되었습니다. 브라우저 설정에서 이 사이트의 알림을 허용하세요.",
       "enabled_badge": "사용 중"
+    },
+    "email": {
+      "label": "이메일 알림",
+      "hint_enabled": "받은편지함에 새 알림이 도착하면 이메일로도 받습니다.",
+      "hint_unavailable": "이 서버에는 이메일 전송이 구성되지 않았습니다. SMTP_HOST 또는 RESEND_API_KEY를 설정하세요.",
+      "unavailable_badge": "사용 불가"
     }
   },
   "tokens": {
