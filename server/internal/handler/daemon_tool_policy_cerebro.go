@@ -173,6 +173,33 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	// CEREBRO-PATCH(daemon-connection-tool-ask): TECH-3498 — workspace-connection
+	// MCP tools resolve through a separate connection:<name> chain (per-tool rows
+	// keyed on the bare tool name), which the generic tools:<name> resolve above
+	// never matches (PolicyToolKey keeps the mcp__ name as-is). Fold the connection
+	// verdict in by TIGHTENING, so an Ask/Deny authored on a connection tool is
+	// enforced on the local runtime exactly as on the gateway. Built-in tools (no
+	// mcp__ prefix) skip this entirely.
+	if connTool := connectionToolFromName(req.ToolName); connTool != "" {
+		connEff, cErr := store.ConnectionToolEffective(r.Context(), wsUUID, runtimeID, agentID, ownerID, connTool)
+		if cErr != nil {
+			if mode == localtoolpolicy.ModeEnforce {
+				slog.Warn("local tool-policy: connection resolve failed — failing closed",
+					"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", cErr)
+				writeJSON(w, http.StatusOK, map[string]any{
+					"allowed": false, "decision": string(localtoolpolicy.KindDeny),
+					"mode": string(mode), "enforced": true, "would_block": true,
+					"reason": "connection permission check failed",
+				})
+				return
+			}
+			slog.Warn("local tool-policy observe: connection resolve failed — keeping base verdict",
+				"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", cErr)
+		} else if toolpolicy.MoreRestrictive(connEff, eff.Setting) == connEff && connEff != eff.Setting {
+			eff = toolpolicy.Effective{Setting: connEff, Reason: "workspace connection permission"}
+		}
+	}
+
 	decision := localtoolpolicy.Decide(mode, eff)
 
 	// Enforce-stage Ask: raise (or rejoin) one shared-inbox approval and return
@@ -226,6 +253,23 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		"observed":    string(eff.Setting),
 		"reason":      eff.Reason,
 	})
+}
+
+// connectionToolFromName extracts the bare MCP tool name from a Claude tool name
+// of shape "mcp__<connection>__<tool>". Returns "" for any non-MCP (built-in)
+// tool name, so built-in tools skip the connection chain entirely. It mirrors the
+// token parsing in toolpolicy.ConnectionToolDenied so the daemon and the claim-
+// time --disallowedTools path agree on which segment is the tool.
+func connectionToolFromName(toolName string) string {
+	rest, ok := strings.CutPrefix(toolName, "mcp__")
+	if !ok {
+		return ""
+	}
+	_, tool, ok := strings.Cut(rest, "__")
+	if !ok {
+		return ""
+	}
+	return tool
 }
 
 // localToolPolicyMode resolves the staged-rollout Mode for a workspace from the

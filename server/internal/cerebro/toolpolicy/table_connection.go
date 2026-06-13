@@ -284,6 +284,49 @@ func (s *Store) ConnectionToolDenied(ctx context.Context, workspaceID, runtimeID
 	return false, nil
 }
 
+// ConnectionToolEffective resolves the effective Allow/Ask/Deny verdict for a
+// single workspace-connection MCP tool through the full Workspace › Runtime ›
+// Agent › Group › User chain. It is the Ask-capable generalisation of
+// ConnectionToolDenied (TECH-3498): the Deny-only resolver could never surface
+// an "Ask" row, so connection-tool Ask was stored and shown but never enforced.
+//
+// Both engines route their connection-tool decision through this one resolver so
+// the gateway gate and the daemon resolve endpoint can never drift from the
+// admin screen: a tool the screen shows as Ask is exactly a tool this returns
+// SettingAsk for.
+//
+// Matching mirrors ConnectionToolDenied: the dispatched/queried tool carries a
+// bare tool name (no connection prefix), so we match per-tool rows by their
+// resource_pattern (the tool name). If more than one connection exposes a tool
+// of the same name, the MOST restrictive verdict wins (Deny > Ask > Allow) so a
+// name collision can never loosen a tighter rule. A tool with no matching
+// connection row resolves to SettingAllow (ungated): connection permissions only
+// ever tighten from an allow baseline.
+func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (Setting, error) {
+	if toolName == "" {
+		return SettingAllow, nil
+	}
+	rows, err := s.Table(ctx, TableQuery{
+		WorkspaceID: workspaceID,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      userID,
+	})
+	if err != nil {
+		return SettingAllow, err
+	}
+	result := SettingAllow
+	for _, r := range rows {
+		if r.Source != connectionToolSource || r.ResourcePattern != toolName {
+			continue
+		}
+		// Fold colliding rows to the tighter verdict (Deny > Ask > Allow) so a
+		// same-named tool on a looser connection can never override a tighter rule.
+		result = MoreRestrictive(result, r.Effective.Setting)
+	}
+	return result, nil
+}
+
 // DeniedConnectionTools resolves, for the given chain context, every MCP
 // connection tool whose effective verdict is Deny, and returns them as Claude
 // Code --disallowedTools tokens ("mcp__<connection>__<tool>"). The daemon passes
