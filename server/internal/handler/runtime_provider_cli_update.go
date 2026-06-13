@@ -193,6 +193,10 @@ func (h *Handler) InitiateProviderCLIUpdate(w http.ResponseWriter, r *http.Reque
 	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
+	if !h.cfg.ProviderCLIUpdateControlEnabled {
+		writeError(w, http.StatusForbidden, "provider CLI update control requires MULTICA_PROVIDER_CLI_UPDATE_CONTROL_SINGLE_NODE=true until a Redis-backed store is implemented")
+		return
+	}
 	var req struct {
 		Provider        string `json:"provider"`
 		Mode            string `json:"mode"`

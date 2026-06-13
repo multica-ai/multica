@@ -57,8 +57,11 @@ func (d *Daemon) handleProviderCLIUpdate(ctx context.Context, runtimeID string, 
 	}
 	out, _ := json.Marshal(map[string]any{"provider": plan.Provider, "target_version": plan.TargetVersion, "status": string(providerCLIUpdatePendingVerify)})
 	reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	d.reportProviderCLIUpdateResult(reportCtx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
-	cancel()
+	defer cancel()
+	if err := d.reportProviderCLIUpdateResult(reportCtx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)}); err != nil {
+		d.logger.Error("provider CLI update completion report failed before restart", "runtime_id", runtimeID, "update_id", update.ID, "error", err)
+		return
+	}
 	d.triggerRestart()
 }
 
@@ -101,8 +104,8 @@ func (d *Daemon) buildProviderCLIUpdateControlPlan(ctx context.Context, provider
 	return d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{Provider: provider, CurrentVersion: current, LatestVersion: latest, TargetVersion: target, PinnedVersion: pinned, RollbackVersion: rollback, InstallPath: installPath, InstallPrefix: installPrefix, Mode: string(mode)}), nil
 }
 
-func (d *Daemon) reportProviderCLIUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
-	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+func (d *Daemon) reportProviderCLIUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) error {
+	return d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
 		return d.client.ReportProviderCLIUpdateResult(ctx, runtimeID, updateID, payload)
 	})
 }

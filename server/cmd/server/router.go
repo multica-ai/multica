@@ -143,16 +143,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
-		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
-		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AllowSignup:                     os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:                   splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:             splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation:        os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		PublicURL:                       strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:                  parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:            cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout:        envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		ProviderCLIUpdateControlEnabled: os.Getenv("MULTICA_PROVIDER_CLI_UPDATE_CONTROL_SINGLE_NODE") == "true",
+		AttachmentDownloadMode:          os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL:        envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics

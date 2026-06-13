@@ -1733,13 +1733,13 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 // Overridable for tests to avoid real sleeps.
 var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
-	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) error {
+	return d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
 		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
 	})
 }
 
-func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) error {
 	var lastErr error
 	for attempt, wait := range updateReportBackoffs {
 		if wait > 0 {
@@ -1748,7 +1748,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 				d.logger.Error("CLI update report cancelled",
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt, "error", ctx.Err())
-				return
+				return ctx.Err()
 			case <-time.After(wait):
 			}
 		}
@@ -1760,7 +1760,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt+1)
 			}
-			return
+			return nil
 		}
 		lastErr = err
 
@@ -1769,7 +1769,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 			d.logger.Error("CLI update report rejected — not retrying",
 				"runtime_id", runtimeID, "update_id", updateID,
 				"status", reqErr.StatusCode, "error", err)
-			return
+			return err
 		}
 
 		d.logger.Warn("CLI update report failed — will retry",
@@ -1778,6 +1778,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+	return lastErr
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the

@@ -82,8 +82,12 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
-	AttachmentDownloadMode   string
-	AttachmentDownloadURLTTL time.Duration
+	// ProviderCLIUpdateControlEnabled is a hard single-node/affinity guard for
+	// the minimal provider CLI update control path while its store is in-memory.
+	// Enable only for a confirmed single API process or sticky same-process smoke.
+	ProviderCLIUpdateControlEnabled bool
+	AttachmentDownloadMode          string
+	AttachmentDownloadURLTTL        time.Duration
 }
 
 type cloudRuntimeProxy interface {
