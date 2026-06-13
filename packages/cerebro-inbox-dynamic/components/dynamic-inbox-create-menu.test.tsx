@@ -16,15 +16,27 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     children: React.ReactNode;
     render: React.ReactElement;
   }) => <>{render ? cloneElement(render, undefined, children) : children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuContent: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <div data-testid="create-menu-content" className={className}>
+      {children}
+    </div>
+  ),
   DropdownMenuItem: ({
     children,
+    className,
     onClick,
   }: {
     children: React.ReactNode;
+    className?: string;
     onClick?: () => void;
   }) => (
-    <button type="button" onClick={onClick}>
+    <button type="button" className={className} onClick={onClick}>
       {children}
     </button>
   ),
@@ -52,5 +64,38 @@ describe("DynamicInboxCreateMenu", () => {
     expect(onNewMessage).toHaveBeenCalledTimes(1);
     expect(onNewIssue).toHaveBeenCalledTimes(1);
     expect(onNewReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a mobile-friendly menu size and touch targets", () => {
+    render(
+      <DynamicInboxCreateMenu
+        onNewMessage={vi.fn()}
+        onNewIssue={vi.fn()}
+        onNewReminder={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Create" }).className).toContain("h-10");
+    expect(screen.getByRole("button", { name: "Create" }).className).toContain("min-w-10");
+    expect(screen.getByTestId("create-menu-content").className).toContain(
+      "w-[min(calc(100vw-2rem),20rem)]",
+    );
+    expect(screen.getByRole("button", { name: "New message" }).className).toContain("min-h-12");
+  });
+
+  it("can render as a floating inbox opener", () => {
+    render(
+      <DynamicInboxCreateMenu
+        variant="floating"
+        onNewMessage={vi.fn()}
+        onNewIssue={vi.fn()}
+        onNewReminder={vi.fn()}
+      />,
+    );
+
+    const triggerClassName = screen.getByRole("button", { name: "Create" }).className;
+    expect(triggerClassName).toContain("h-14");
+    expect(triggerClassName).toContain("w-14");
+    expect(triggerClassName).toContain("rounded-full");
   });
 });

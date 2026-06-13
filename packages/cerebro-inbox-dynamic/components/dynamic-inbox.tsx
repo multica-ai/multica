@@ -378,8 +378,14 @@ export function DynamicInbox() {
     );
   }, [selected, clearSelection]);
 
+  const createMenuProps = {
+    onNewMessage: () => setShowNewMessage(true),
+    onNewIssue: () => openCreateIssueWithPreference(),
+    onNewReminder: () => setShowReminder(true),
+  };
+
   const listColumn = (
-    <>
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* tabs */}
       <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
           {layout.tabs.map((tab) =>
@@ -424,11 +430,7 @@ export function DynamicInbox() {
           {/* create-menu (main) + ⋯ settings menu — tab add/rename/remove now
               lives in ⋯ (TECH-3502 #2) */}
           <div className="ml-auto flex items-center gap-1 pb-1">
-            <DynamicInboxCreateMenu
-              onNewMessage={() => setShowNewMessage(true)}
-              onNewIssue={() => openCreateIssueWithPreference()}
-              onNewReminder={() => setShowReminder(true)}
-            />
+            <DynamicInboxCreateMenu {...createMenuProps} />
             <Dialog open={savePresetOpen} onOpenChange={setSavePresetOpen}>
               <DialogContent>
                 <form onSubmit={onSavePreset} className="space-y-4">
@@ -615,7 +617,12 @@ export function DynamicInbox() {
             </SortableContext>
           </DndContext>
         </div>
-    </>
+        <div className="pointer-events-none absolute bottom-4 right-4 z-30 md:hidden">
+          <div className="pointer-events-auto">
+            <DynamicInboxCreateMenu {...createMenuProps} variant="floating" />
+          </div>
+        </div>
+    </div>
   );
 
   // TECH-3413 (Jesper feedback): mobile/PWA has no room for the side-by-side
