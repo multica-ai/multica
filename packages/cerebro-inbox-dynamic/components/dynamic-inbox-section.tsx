@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, ChevronRight, Settings2, X, Pencil } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronRight, Settings2, X, Pencil, Filter } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -132,6 +132,12 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
 
   // TECH-3502 #4 — inline rename of the box header.
   const [editing, setEditing] = useState(false);
+  // TECH-3502 #6 — the filter builder is configuration UI, so it only shows
+  // while you're building/changing the box: open by default for a just-added
+  // (empty) filter box, otherwise revealed from the ⋯ menu's "Edit filter".
+  const [editFilter, setEditFilter] = useState(
+    section.kind === "filter" && sectionFilters(section).length === 0,
+  );
 
   const projectName =
     section.kind === "project"
@@ -237,6 +243,11 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                     Reset name
                   </DropdownMenuItem>
                 )}
+                {section.kind === "filter" && (
+                  <DropdownMenuItem onClick={() => setEditFilter(true)}>
+                    <Filter className="mr-2 size-3.5" /> Edit filter
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
@@ -332,13 +343,22 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
         </div>
       </header>
 
-      {!isCollapsed && section.kind === "filter" && (
+      {!isCollapsed && section.kind === "filter" && editFilter && (
         <div className="border-b border-border/60">
           <FilterBuilder
             filters={sectionFilters(section)}
             projects={projects}
             onChange={(filters) => props.onChange({ ...section, filters })}
           />
+          <div className="flex justify-end px-3 pb-2">
+            <button
+              type="button"
+              onClick={() => setEditFilter(false)}
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-brand hover:bg-accent"
+            >
+              Done
+            </button>
+          </div>
         </div>
       )}
 
