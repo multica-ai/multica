@@ -49,6 +49,8 @@ multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output 
 
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 
+Schedule triggers enforce a minimum interval between consecutive fires (default 5 minutes; operators tune it via the server-side `AUTOPILOT_MIN_TRIGGER_INTERVAL` env var, `0` disables). Creating or updating a trigger whose cron expression fires more often than the floor returns a 400 — pick a sparser cadence instead of retrying.
+
 Webhook trigger output can include a URL/token. Do not paste webhook tokens or signing material into comments, logs, docs, or PRs. Redact secrets.
 
 ## Debugging
