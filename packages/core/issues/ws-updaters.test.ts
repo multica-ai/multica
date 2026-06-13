@@ -13,6 +13,7 @@ import {
   onIssueMetadataChanged,
   onIssueUpdated,
 } from "./ws-updaters";
+import { useRecentIssuesStore } from "./stores";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
@@ -126,6 +127,7 @@ describe("onIssueLabelsChanged", () => {
 
   beforeEach(() => {
     qc = new QueryClient();
+    useRecentIssuesStore.setState({ items: [] });
   });
 
   it("patches the per-issue label cache when present (LabelPicker source)", () => {
@@ -535,5 +537,26 @@ describe("project gantt cache invalidation", () => {
   it("invalidates the project Gantt cache on issue:deleted", () => {
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
     expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("onIssueDeleted", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    useRecentIssuesStore.setState({ items: [] });
+  });
+
+  it("prunes deleted issues from recent history", () => {
+    const { recordVisit } = useRecentIssuesStore.getState();
+    recordVisit(ISSUE_ID);
+    recordVisit("other-issue");
+
+    onIssueDeleted(qc, WS_ID, ISSUE_ID);
+
+    expect(useRecentIssuesStore.getState().items.map((i) => i.id)).toEqual([
+      "other-issue",
+    ]);
   });
 });

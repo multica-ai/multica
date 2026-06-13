@@ -88,6 +88,10 @@ export const useRecentIssuesStore = create<RecentIssuesState>()(
           }
           return changed ? { byWorkspace: next } : state;
         }),
+      removeItem: (id) =>
+        set((state) => ({
+          items: state.items.filter((i) => i.id !== id),
+        })),
     }),
     {
       name: "multica_recent_issues",
