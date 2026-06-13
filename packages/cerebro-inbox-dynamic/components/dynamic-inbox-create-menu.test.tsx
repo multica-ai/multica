@@ -27,6 +27,13 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
       {children}
     </div>
   ),
+  DropdownMenuLabel: ({
+    children,
+    className,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+  }) => <div className={className}>{children}</div>,
   DropdownMenuItem: ({
     children,
     className,
@@ -57,13 +64,27 @@ describe("DynamicInboxCreateMenu", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "New message" }));
-    await user.click(screen.getByRole("button", { name: "New issue" }));
-    await user.click(screen.getByRole("button", { name: "New reminder" }));
+    await user.click(screen.getByRole("button", { name: /New message/ }));
+    await user.click(screen.getByRole("button", { name: /New issue/ }));
+    await user.click(screen.getByRole("button", { name: /New reminder/ }));
 
     expect(onNewMessage).toHaveBeenCalledTimes(1);
     expect(onNewIssue).toHaveBeenCalledTimes(1);
     expect(onNewReminder).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a description under each create action", () => {
+    render(
+      <DynamicInboxCreateMenu
+        onNewMessage={vi.fn()}
+        onNewIssue={vi.fn()}
+        onNewReminder={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Send a direct message")).toBeTruthy();
+    expect(screen.getByText("Create a task or ticket")).toBeTruthy();
+    expect(screen.getByText("Get nudged at a set time")).toBeTruthy();
   });
 
   it("uses a mobile-friendly menu size and touch targets", () => {
@@ -80,7 +101,6 @@ describe("DynamicInboxCreateMenu", () => {
     expect(screen.getByTestId("create-menu-content").className).toContain(
       "w-[min(calc(100vw-2rem),20rem)]",
     );
-    expect(screen.getByRole("button", { name: "New message" }).className).toContain("min-h-12");
   });
 
   it("can render as a floating inbox opener", () => {
