@@ -43,6 +43,12 @@
     "section_creator": "作成者",
     "section_project": "プロジェクト",
     "section_label": "ラベル",
+    "section_epic": "エピック",
+    "section_sprint": "スプリント",
+    "epic": "エピック",
+    "no_epic": "エピックなし",
+    "sprint": "スプリント",
+    "no_sprint": "スプリントなし",
     "members_group": "メンバー",
     "agents_group": "エージェント",
     "squads_group": "スクワッド",
@@ -61,6 +67,7 @@
     "group_assignee": "担当者",
     "group_parent": "親イシュー",
     "group_project": "プロジェクト",
+    "group_epic": "エピック",
     "sort_manual": "手動",
     "sort_priority": "優先度",
     "sort_start_date": "開始日",
@@ -462,5 +469,20 @@
     "dont_show_again": "今後表示しない",
     "keep_in_backlog": "バックログのままにする",
     "move_to_todo": "未着手に移動"
+  },
+  "epic_picker": {
+    "none": "エピックなし",
+    "remove": "エピックを削除",
+    "empty": "このワークスペースにはエピックがありません"
+  },
+  "sprint_picker": {
+    "none": "スプリントなし",
+    "remove": "スプリントを削除",
+    "empty": "このワークスペースにはスプリントがありません"
+  },
+  "sections": {
+    "properties": "プロパティ",
+    "planning": "計画",
+    "dates": "日付"
   }
 }

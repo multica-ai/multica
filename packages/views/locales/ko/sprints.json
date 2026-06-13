@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "Sprints",
+    "new_sprint": "새 Sprint",
+    "empty": "아직 Sprint가 없습니다",
+    "create_first": "첫 Sprint 만들기",
+    "search_placeholder": "Sprint 검색...",
+    "no_search_results": "검색 결과가 없습니다"
+  },
+  "table": {
+    "name": "이름",
+    "status": "상태",
+    "dates": "날짜",
+    "progress": "진행률",
+    "created": "생성일",
+    "issues": "issues"
+  },
+  "status": {
+    "planned": "계획됨",
+    "active": "진행 중",
+    "completed": "완료",
+    "cancelled": "취소됨"
+  },
+  "detail": {
+    "not_found": "Sprint을 찾을 수 없습니다",
+    "breadcrumb_fallback": "Sprints",
+    "title_placeholder": "Sprint 이름",
+    "copy_link": "링크 복사",
+    "delete_action": "Sprint 삭제",
+    "section_properties": "속성",
+    "section_description": "설명",
+    "description_placeholder": "Sprint 목표 추가...",
+    "no_issues_yet": "아직 이슈가 없습니다",
+    "delete_confirm_title": "Sprint 삭제",
+    "delete_confirm_description": "이 Sprint를 삭제하시겠습니까? 할당된 이슈는 삭제되지 않습니다.",
+    "date_range": "{{start}} — {{end}}"
+  },
+  "picker": {
+    "no_sprint": "Sprint 없음",
+    "remove_sprint": "Sprint 제거",
+    "no_sprints": "이 워크스페이스에 Sprint가 없습니다"
+  },
+  "create": {
+    "title": "Sprint 만들기",
+    "label_name": "이름",
+    "name_placeholder": "Sprint 이름",
+    "label_goal": "목표",
+    "goal_placeholder": "Sprint 목표 추가...",
+    "start_date": "시작일",
+    "end_date": "종료일",
+    "submit": "Sprint 만들기",
+    "cancel": "취소"
+  }
+}

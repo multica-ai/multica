@@ -10,6 +10,10 @@ export interface IssueFilters {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  epicFilters: string[];
+  includeNoEpic: boolean;
+  sprintFilters: string[];
+  includeNoSprint: boolean;
   // When `agentRunningFilter` is true, only keep issues whose id is in
   // `runningIssueIds`. The set is derived by the caller from
   // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
@@ -28,9 +32,11 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const hasEpicFilter = epicFilters.length > 0 || includeNoEpic;
+  const hasSprintFilter = sprintFilters.length > 0 || includeNoSprint;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
@@ -77,6 +83,26 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
         if (!projectFilters.includes(issue.project_id)) return false;
       } else {
         // Only "No project" is checked → hide issues that have a project
+        return false;
+      }
+    }
+
+    if (hasEpicFilter) {
+      if (!issue.epic_id) {
+        if (!includeNoEpic) return false;
+      } else if (epicFilters.length > 0) {
+        if (!epicFilters.includes(issue.epic_id)) return false;
+      } else {
+        return false;
+      }
+    }
+
+    if (hasSprintFilter) {
+      if (!issue.sprint_id) {
+        if (!includeNoSprint) return false;
+      } else if (sprintFilters.length > 0) {
+        if (!sprintFilters.includes(issue.sprint_id)) return false;
+      } else {
         return false;
       }
     }

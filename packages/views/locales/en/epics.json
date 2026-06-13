@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Epics",
+    "new_epic": "New epic",
+    "empty": "No epics yet",
+    "create_first": "Create your first epic",
+    "search_placeholder": "Search epics...",
+    "no_search_results": "No results match your search"
+  },
+  "table": {
+    "name": "Name",
+    "status": "Status",
+    "progress": "Progress",
+    "created": "Created",
+    "issues": "issues"
+  },
+  "picker": {
+    "no_epic": "No epic",
+    "remove_epic": "Remove epic",
+    "no_epics": "No epics in this workspace"
+  },
+  "status": {
+    "open": "Open",
+    "closed": "Closed"
+  },
+  "detail": {
+    "not_found": "Epic not found",
+    "breadcrumb_fallback": "Epics",
+    "title_placeholder": "Epic title",
+    "copy_link": "Copy link",
+    "delete_action": "Delete epic",
+    "section_properties": "Properties",
+    "section_description": "Description",
+    "description_placeholder": "Add description...",
+    "no_issues_yet": "No issues yet",
+    "delete_confirm_title": "Delete epic",
+    "delete_confirm_description": "Are you sure you want to delete this epic? Issues assigned to it will not be deleted."
+  },
+  "create": {
+    "title": "Create epic",
+    "label_title": "Title",
+    "title_placeholder": "Epic title",
+    "label_description": "Description",
+    "description_placeholder": "Add description...",
+    "color": "Color",
+    "submit": "Create epic",
+    "cancel": "Cancel"
+  }
+}

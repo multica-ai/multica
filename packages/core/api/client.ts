@@ -118,6 +118,8 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  Epic,
+  Sprint,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -481,6 +483,8 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.epic_id) search.set("epic_id", params.epic_id);
+    if (params?.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
@@ -1809,6 +1813,64 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  // Epics
+  async listEpics(params?: { status?: string }): Promise<{ epics: Epic[]; total: number }> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    return this.fetch(`/api/epics?${search}`);
+  }
+
+  async getEpic(id: string): Promise<Epic> {
+    return this.fetch(`/api/epics/${id}`);
+  }
+
+  async createEpic(data: { title: string; description?: string; color?: string }): Promise<Epic> {
+    return this.fetch("/api/epics", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateEpic(id: string, data: Record<string, unknown>): Promise<Epic> {
+    return this.fetch(`/api/epics/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteEpic(id: string): Promise<void> {
+    await this.fetch(`/api/epics/${id}`, { method: "DELETE" });
+  }
+
+  // Sprints
+  async listSprints(params?: { status?: string }): Promise<{ sprints: Sprint[]; total: number }> {
+    const search = new URLSearchParams();
+    if (params?.status) search.set("status", params.status);
+    return this.fetch(`/api/sprints?${search}`);
+  }
+
+  async getSprint(id: string): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${id}`);
+  }
+
+  async createSprint(data: { name: string; goal?: string; start_date: string; end_date: string }): Promise<Sprint> {
+    return this.fetch("/api/sprints", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateSprint(id: string, data: Record<string, unknown>): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSprint(id: string): Promise<void> {
+    await this.fetch(`/api/sprints/${id}`, { method: "DELETE" });
   }
 
   // Labels

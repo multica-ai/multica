@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Epics",
+    "new_epic": "新しいEpic",
+    "empty": "まだEpicがありません",
+    "create_first": "最初のEpicを作成",
+    "search_placeholder": "Epicを検索...",
+    "no_search_results": "検索結果がありません"
+  },
+  "table": {
+    "name": "名前",
+    "status": "ステータス",
+    "progress": "進捗",
+    "created": "作成日",
+    "issues": "issues"
+  },
+  "picker": {
+    "no_epic": "Epicなし",
+    "remove_epic": "Epicを削除",
+    "no_epics": "このワークスペースにEpicがありません"
+  },
+  "status": {
+    "open": "進行中",
+    "closed": "完了"
+  },
+  "detail": {
+    "not_found": "Epicが見つかりません",
+    "breadcrumb_fallback": "Epics",
+    "title_placeholder": "Epicのタイトル",
+    "copy_link": "リンクをコピー",
+    "delete_action": "Epicを削除",
+    "section_properties": "プロパティ",
+    "section_description": "説明",
+    "description_placeholder": "説明を追加...",
+    "no_issues_yet": "まだイシューがありません",
+    "delete_confirm_title": "Epicを削除",
+    "delete_confirm_description": "このEpicを削除してもよろしいですか？割り当てられたイシューは削除されません。"
+  },
+  "create": {
+    "title": "Epicを作成",
+    "label_title": "タイトル",
+    "title_placeholder": "Epicのタイトル",
+    "label_description": "説明",
+    "description_placeholder": "説明を追加...",
+    "color": "色",
+    "submit": "Epicを作成",
+    "cancel": "キャンセル"
+  }
+}

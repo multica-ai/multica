@@ -11,6 +11,10 @@ const NO_FILTER: IssueFilters = {
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+    epicFilters: [],
+    includeNoEpic: false,
+    sprintFilters: [],
+    includeNoSprint: false,
 };
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
@@ -29,6 +33,8 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     creator_id: "u-1",
     parent_issue_id: null,
     project_id: null,
+    epic_id: null,
+    sprint_id: null,
     position: 0,
     start_date: null,
     due_date: null,

@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "Sprints",
+    "new_sprint": "新建 Sprint",
+    "empty": "还没有 Sprint",
+    "create_first": "创建第一个 Sprint",
+    "search_placeholder": "搜索 Sprint...",
+    "no_search_results": "未找到匹配的 Sprint"
+  },
+  "table": {
+    "name": "名称",
+    "status": "状态",
+    "dates": "日期",
+    "progress": "进度",
+    "created": "创建时间",
+    "issues": "issues"
+  },
+  "status": {
+    "planned": "计划中",
+    "active": "进行中",
+    "completed": "已完成",
+    "cancelled": "已取消"
+  },
+  "detail": {
+    "not_found": "Sprint 未找到",
+    "breadcrumb_fallback": "Sprints",
+    "title_placeholder": "Sprint 名称",
+    "copy_link": "复制链接",
+    "delete_action": "删除 Sprint",
+    "section_properties": "属性",
+    "section_description": "描述",
+    "description_placeholder": "添加 Sprint 目标...",
+    "no_issues_yet": "暂无 Issue",
+    "delete_confirm_title": "删除 Sprint",
+    "delete_confirm_description": "确定要删除此 Sprint 吗？分配给它的 Issue 不会被删除。",
+    "date_range": "{{start}} — {{end}}"
+  },
+  "picker": {
+    "no_sprint": "无 Sprint",
+    "remove_sprint": "移除 Sprint",
+    "no_sprints": "此工作区没有 Sprint"
+  },
+  "create": {
+    "title": "创建 Sprint",
+    "label_name": "名称",
+    "name_placeholder": "Sprint 名称",
+    "label_goal": "目标",
+    "goal_placeholder": "添加 Sprint 目标...",
+    "start_date": "开始日期",
+    "end_date": "结束日期",
+    "submit": "创建 Sprint",
+    "cancel": "取消"
+  }
+}

@@ -143,6 +143,10 @@ function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const epicFilters = useViewStore((s) => s.epicFilters);
+  const includeNoEpic = useViewStore((s) => s.includeNoEpic);
+  const sprintFilters = useViewStore((s) => s.sprintFilters);
+  const includeNoSprint = useViewStore((s) => s.includeNoSprint);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
@@ -155,14 +159,14 @@ function ProjectIssuesContent({
   }, [snapshot]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   const activeFilters = useMemo(() => ({
@@ -173,6 +177,10 @@ function ProjectIssuesContent({
     projectFilters: [],
     includeNoProject: false,
     labelFilters,
+    epicFilters,
+    includeNoEpic,
+    sprintFilters,
+    includeNoSprint,
     agentRunningFilter,
   }), [
     priorityFilters,
@@ -180,6 +188,10 @@ function ProjectIssuesContent({
     includeNoAssignee,
     creatorFilters,
     labelFilters,
+    epicFilters,
+    includeNoEpic,
+    sprintFilters,
+    includeNoSprint,
     agentRunningFilter,
   ]);
 
@@ -187,8 +199,8 @@ function ProjectIssuesContent({
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   const filteredAssigneeGroups = useMemo(

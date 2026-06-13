@@ -34,6 +34,8 @@ import {
   X,
   Zap,
   Users,
+  Diamond,
+  Timer,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -109,6 +111,8 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
+  | "epics"
+  | "sprints"
   | "autopilots"
   | "agents"
   | "squads"
@@ -123,6 +127,8 @@ type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
+  | "epics"
+  | "sprints"
   | "autopilots"
   | "agents"
   | "squads"
@@ -139,6 +145,8 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
+  { key: "epics", labelKey: "epics", icon: Diamond },
+  { key: "sprints", labelKey: "sprints", icon: Timer },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
