@@ -136,6 +136,17 @@ export type {
   WebhookSignatureStatus,
   ListWebhookDeliveriesResponse,
 } from "./autopilot";
+// Outbound webhook endpoint types (PR #1108). Note: WebhookDelivery is
+// intentionally excluded here — the canonical WebhookDelivery (inbound
+// autopilot delivery) is already exported above from "./autopilot".
+export type {
+  WebhookEndpoint,
+  CreateWebhookEndpointRequest,
+  UpdateWebhookEndpointRequest,
+  CreateWebhookEndpointResponse,
+  WebhookEventType,
+} from "./webhook";
+export { WEBHOOK_EVENT_TYPES } from "./webhook";
 export type {
   Squad,
   SquadMember,

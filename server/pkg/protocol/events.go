@@ -118,6 +118,11 @@ const (
 	EventDaemonRegister      = "daemon:register"
 	EventDaemonTaskAvailable = "daemon:task_available"
 
+	// Webhook events
+	EventWebhookCreated = "webhook:created"
+	EventWebhookUpdated = "webhook:updated"
+	EventWebhookDeleted = "webhook:deleted"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"
