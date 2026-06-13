@@ -11,6 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAutopilotSubscriber = `-- name: AddAutopilotSubscriber :exec
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING
+`
+
+type AddAutopilotSubscriberParams struct {
+	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	UserType    string      `json:"user_type"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) AddAutopilotSubscriber(ctx context.Context, arg AddAutopilotSubscriberParams) error {
+	_, err := q.db.Exec(ctx, addAutopilotSubscriber, arg.AutopilotID, arg.UserType, arg.UserID)
+	return err
+}
+
 const advanceTriggerNextRun = `-- name: AdvanceTriggerNextRun :exec
 UPDATE autopilot_trigger
 SET next_run_at = $2,
@@ -347,6 +364,17 @@ func (q *Queries) DeleteAutopilot(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const deleteAutopilotSubscribersForAutopilot = `-- name: DeleteAutopilotSubscribersForAutopilot :exec
+DELETE FROM autopilot_subscriber
+WHERE autopilot_id = $1
+`
+
+// Paired with a re-insert loop to implement full-replace PATCH semantics.
+func (q *Queries) DeleteAutopilotSubscribersForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotSubscribersForAutopilot, autopilotID)
+	return err
+}
+
 const deleteAutopilotTrigger = `-- name: DeleteAutopilotTrigger :exec
 DELETE FROM autopilot_trigger WHERE id = $1
 `
@@ -611,6 +639,42 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 			&i.Result,
 			&i.CreatedAt,
 			&i.SquadID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAutopilotSubscribers = `-- name: ListAutopilotSubscribers :many
+
+SELECT autopilot_id, user_type, user_id, created_at FROM autopilot_subscriber
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC
+`
+
+// =====================
+// Autopilot Subscribers
+// =====================
+// ORDER BY created_at keeps chip rendering stable across refreshes.
+func (q *Queries) ListAutopilotSubscribers(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotSubscriber, error) {
+	rows, err := q.db.Query(ctx, listAutopilotSubscribers, autopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotSubscriber{}
+	for rows.Next() {
+		var i AutopilotSubscriber
+		if err := rows.Scan(
+			&i.AutopilotID,
+			&i.UserType,
+			&i.UserID,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

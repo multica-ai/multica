@@ -39,6 +39,15 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  // List endpoint returns []; only the detail endpoint populates this.
+  // Treat undefined as empty on older servers.
+  subscribers?: AutopilotSubscriber[];
+}
+
+export interface AutopilotSubscriber {
+  user_type: "member";
+  user_id: string;
+  created_at: string;
 }
 
 export interface WebhookEventFilter {
@@ -88,6 +97,11 @@ export interface AutopilotRun {
   created_at: string;
 }
 
+export interface AutopilotSubscriberInput {
+  user_type: "member";
+  user_id: string;
+}
+
 export interface CreateAutopilotRequest {
   title: string;
   description?: string;
@@ -98,6 +112,7 @@ export interface CreateAutopilotRequest {
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
+  subscribers?: AutopilotSubscriberInput[];
 }
 
 export interface UpdateAutopilotRequest {
@@ -111,6 +126,9 @@ export interface UpdateAutopilotRequest {
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
   issue_title_template?: string | null;
+  // When present, fully replaces the autopilot's subscriber template;
+  // omit to leave it untouched.
+  subscribers?: AutopilotSubscriberInput[];
 }
 
 export interface CreateAutopilotTriggerRequest {
