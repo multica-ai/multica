@@ -178,6 +178,19 @@ function priorityLabel(priority: string, t: ActivityT): string {
   return priority;
 }
 
+function formatWakeupFireAt(value: string | undefined): string {
+  if (!value) return "?";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZoneName: "short",
+  }).format(date);
+  return `${formatted} (${timeZone})`; // CEREBRO-PATCH(wakeup-scheduled-activity): show the user's actual timezone.
+}
+
 function formatActivity(
   entry: TimelineEntry,
   t: ActivityT,
@@ -228,6 +241,10 @@ function formatActivity(
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
+    case "wakeup_scheduled":
+      return details.fire_at
+        ? t(($) => $.activity.wakeup_scheduled_for, { date: formatWakeupFireAt(details.fire_at) })
+        : t(($) => $.activity.wakeup_scheduled);
     default:
       return entry.action ?? "";
   }
@@ -443,6 +460,8 @@ function ActivityBlock({
           leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else if (entry.action === "wakeup_scheduled") {
+          leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
         }
@@ -967,11 +986,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     // - all other actions: within a 2-minute window
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
+    const NEVER_COALESCE_ACTIONS = new Set(["wakeup_scheduled"]); // CEREBRO-PATCH(wakeup-scheduled-activity): each scheduled time must stay visible.
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
+          !NEVER_COALESCE_ACTIONS.has(entry.action ?? "") &&
           prev?.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&

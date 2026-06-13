@@ -10,6 +10,7 @@ package wakeup
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -139,6 +140,7 @@ func cleanupWkFixture(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
 		`DELETE FROM cerebro_agent_wakeup WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,
+		`DELETE FROM activity_log WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,
 		`DELETE FROM comment WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM agent WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
@@ -224,16 +226,17 @@ func TestResolveWakeupParent_CrossIssueRejected(t *testing.T) {
 	ctx := context.Background()
 	svc := wkService()
 	// Wakeup fires on a different issue than the origin comment lives on — never
-	// cross threads; fall back to a root note.
+	// cross threads. wkOtherIssue has no human comment, so there is no visible
+	// fallback thread.
 	row := newWakeup(t, ctx, svc, wkOtherIssue, wkRootID)
 
 	got := svc.resolveWakeupParent(ctx, row, wkOtherIssue)
 	if got.Valid {
-		t.Fatalf("parent = %s, want zero (cross-issue rejected)", util.UUIDToString(got))
+		t.Fatalf("parent = %s, want zero (cross-issue rejected, no fallback)", util.UUIDToString(got))
 	}
 }
 
-func TestResolveWakeupParent_NoOrigin(t *testing.T) {
+func TestResolveWakeupParent_NoOriginFallsBackToLatestMemberThread(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")
 	}
@@ -242,8 +245,60 @@ func TestResolveWakeupParent_NoOrigin(t *testing.T) {
 	row := newWakeup(t, ctx, svc, wkIssueID, pgtype.UUID{})
 
 	got := svc.resolveWakeupParent(ctx, row, wkIssueID)
-	if got.Valid {
-		t.Fatalf("parent = %s, want zero (no origin)", util.UUIDToString(got))
+	if util.UUIDToString(got) != util.UUIDToString(wkRootID) {
+		t.Fatalf("parent = %s, want latest member thread root %s", util.UUIDToString(got), util.UUIDToString(wkRootID))
+	}
+}
+
+func TestCreateRecordsWakeupScheduledActivity(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	fireAt := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE issue_id = $1 AND agent_id = $2`, wkIssueID, wkAgentID); err != nil {
+		t.Fatalf("clear wakeups before activity create test: %v", err)
+	}
+
+	row, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:         wkAgentID,
+		IssueID:         wkIssueID,
+		Prompt:          "visible activity test",
+		TriggerType:     TriggerTime,
+		FireAt:          pgtype.Timestamptz{Time: fireAt, Valid: true},
+		OriginCommentID: wkReplyID,
+	})
+	if err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+
+	var action string
+	var rawDetails []byte
+	if err := wkPool.QueryRow(ctx, `
+		SELECT action, details
+		FROM activity_log
+		WHERE issue_id = $1 AND actor_id = $2 AND action = 'wakeup_scheduled'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, wkIssueID, wkAgentID).Scan(&action, &rawDetails); err != nil {
+		t.Fatalf("load wakeup activity: %v", err)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(rawDetails, &details); err != nil {
+		t.Fatalf("decode activity details: %v", err)
+	}
+	if action != "wakeup_scheduled" {
+		t.Fatalf("activity action = %q, want wakeup_scheduled", action)
+	}
+	if details["wakeup_id"] != util.UUIDToString(row.ID) {
+		t.Fatalf("activity wakeup_id = %q, want %s", details["wakeup_id"], util.UUIDToString(row.ID))
+	}
+	if details["fire_at"] != fireAt.Format(time.RFC3339) {
+		t.Fatalf("activity fire_at = %q, want %s", details["fire_at"], fireAt.Format(time.RFC3339))
+	}
+	if details["origin_comment_id"] != util.UUIDToString(wkReplyID) {
+		t.Fatalf("activity origin_comment_id = %q, want %s", details["origin_comment_id"], util.UUIDToString(wkReplyID))
 	}
 }
 

@@ -228,8 +228,9 @@ type AgentTaskResponse struct {
 	TriggerSummary        *string `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType     string  `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName     string  `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
-	WakeupPrompt          string  `json:"wakeup_prompt,omitempty"`           // prompt stored on a platform wakeup task
-	WakeupTriggerType     string  `json:"wakeup_trigger_type,omitempty"`     // time, issue_status, or github_ci for wakeup tasks
+	// CEREBRO-PATCH(wakeup-system-activity): expose wakeup context to daemon clients without creating comments.
+	WakeupPrompt      string `json:"wakeup_prompt,omitempty"`       // prompt stored on a platform wakeup task
+	WakeupTriggerType string `json:"wakeup_trigger_type,omitempty"` // time, issue_status, or github_ci for wakeup tasks
 
 	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
 	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
@@ -343,7 +344,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
-	wakeupCtx := wakeupContextFromTask(t)
+	wakeupCtx := wakeupContextFromTask(t) // CEREBRO-PATCH(wakeup-system-activity): parse task context into daemon response fields.
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -391,6 +392,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	}
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): wakeup task context is intentionally separate from comments.
 func wakeupContextFromTask(t db.AgentTaskQueue) service.WakeupTaskContext {
 	if len(t.Context) == 0 {
 		return service.WakeupTaskContext{}

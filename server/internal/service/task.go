@@ -130,6 +130,7 @@ type TaskDelegationContext struct {
 	Source            pgtype.Text
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks store platform activity context instead of synthetic comments.
 const WakeupTaskContextType = "wakeup"
 
 type WakeupTaskContext struct {
@@ -686,6 +687,7 @@ func (s *TaskService) EnqueueTaskForMentionFromComment(ctx context.Context, issu
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, delegation)
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): enqueue wakeups directly as tasks.
 // EnqueueWakeupTask creates a queued issue task from a platform wakeup without
 // first creating a synthetic comment. triggerCommentID is the original thread
 // anchor the agent should reply under when it produces visible output.
@@ -806,6 +808,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	return task, nil
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): stable wakeup summary for task lists.
 func buildWakeupTaskSummary(payload WakeupTaskContext) string {
 	triggerType := strings.TrimSpace(payload.TriggerType)
 	if triggerType == "" {
