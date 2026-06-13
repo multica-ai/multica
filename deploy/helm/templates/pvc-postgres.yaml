@@ -1,0 +1,17 @@
+{{- if .Values.postgresql.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "multica.postgres.fullname" . }}-data
+  labels:
+    {{- include "multica.postgres.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.postgresql.storage.accessMode | default "ReadWriteOnce" }}
+  resources:
+    requests:
+      storage: {{ .Values.postgresql.storage.size }}
+  {{- if .Values.postgresql.storage.storageClass }}
+  storageClassName: {{ .Values.postgresql.storage.storageClass | quote }}
+  {{- end }}
+{{- end }}

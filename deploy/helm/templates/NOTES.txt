@@ -1,0 +1,39 @@
+Multica has been installed in namespace {{ .Release.Namespace }} as release {{ .Release.Name }}.
+
+1. Check pods are running:
+
+   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+{{- if .Values.ingress.enabled }}
+
+2. Multica is exposed via Ingress at:
+
+   {{ if .Values.ingress.tls.enabled }}https{{ else }}http{{ end }}://{{ .Values.ingress.host }}
+{{- else }}
+
+2. Ingress is disabled. Port-forward to access the frontend locally:
+
+   kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "multica.frontend.fullname" . }} 3000:{{ .Values.frontend.service.port }}
+
+   Then open http://localhost:3000
+{{- end }}
+
+3. Tail backend logs:
+
+   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/component=backend,app.kubernetes.io/instance={{ .Release.Name }} -f
+
+{{- if eq .Values.config.jwtSecret "" }}
+
+WARNING: config.jwtSecret was empty. Set a strong value with --set config.jwtSecret=$(openssl rand -hex 32).
+{{- end }}
+
+{{- if and .Values.postgresql.enabled (eq .Values.postgresql.auth.password "changeme") }}
+
+WARNING: postgresql.auth.password is still the default "changeme". Override it for production.
+{{- end }}
+
+{{- if not .Values.ingress.enabled }}
+
+NOTE: WebSockets require the Ingress (or another L7 proxy) to route /ws to the backend service.
+Port-forwarding to the frontend will NOT give you WebSocket support — enable ingress.enabled to test realtime features.
+{{- end }}
