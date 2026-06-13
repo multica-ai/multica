@@ -15,8 +15,22 @@
 // same rows.
 
 import { useMemo, useState } from "react";
-import { Loader2, Lock, Search } from "lucide-react";
+import {
+  ChevronDown,
+  Loader2,
+  Lock,
+  Search,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldQuestion,
+} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -49,6 +63,22 @@ const CHOICE_LABEL: Record<ToolSetting, string> = {
 // so the sheet disables it (TECH-3287 hul 7). `inherit` is never futile: it
 // clears the per-tool row so the tool simply follows the connection floor.
 const SETTING_RANK: Record<ToolEffectiveSetting, number> = { allow: 0, ask: 1, deny: 2 };
+
+// Decision palette + icons — identical to the main tool-policy table's pill so a
+// REST endpoint row reads exactly like every other permission row in the app
+// (TECH-3287 hul: Jesper's "use the same toggle as everywhere else"). The pill
+// renders the EFFECTIVE verdict; the dropdown writes this surface's own layer.
+const VERDICT_PILL: Record<ToolEffectiveSetting, string> = {
+  allow:
+    "border-emerald-600/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+  ask: "border-amber-600/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  deny: "border-destructive/30 bg-destructive/10 text-destructive",
+};
+const VERDICT_ICON: Record<ToolEffectiveSetting, typeof ShieldCheck> = {
+  allow: ShieldCheck,
+  ask: ShieldQuestion,
+  deny: ShieldAlert,
+};
 
 const LAYER_LABEL: Record<string, string> = {
   workspace: "Workspace",
@@ -123,9 +153,6 @@ export function ConnectionConfigSheet({
   // "Tillad alle" can never beat a connection-wide Ask/Deny → disable it when the
   // floor is not Allow (TECH-3287 hul 6).
   const allowAllFutile = floorRank > 0;
-  // A concrete per-tool choice looser than the floor is futile (TECH-3287 hul 7).
-  const choiceFutile = (choice: ToolSetting) =>
-    choice !== "inherit" && SETTING_RANK[choice] < floorRank;
 
   const blocker = connectionRow.effective.capped_by || connectionRow.effective.decided_by;
   const blockerGroups = connectionRow.capped_by_groups
@@ -259,54 +286,32 @@ export function ConnectionConfigSheet({
               No {unitLabel}s match the search.
             </p>
           ) : (
-            filtered.map((r) => {
-              const layerSetting = r.layers[editLayer] ?? "inherit";
-              return (
-                <div
-                  key={r.resource_pattern}
-                  data-testid={`connection-tool-${r.resource_pattern}`}
-                  className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-mono text-sm">
-                      {r.title || r.resource_pattern}
-                    </div>
+            filtered.map((r) => (
+              <div
+                key={r.resource_pattern}
+                data-testid={`connection-tool-${r.resource_pattern}`}
+                className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-mono text-sm">
+                    {r.title || r.resource_pattern}
+                  </div>
+                  {r.effective.capped_by ? (
                     <div className="text-xs text-muted-foreground">
-                      Effective: {CHOICE_LABEL[r.effective.setting]}
-                      {r.effective.capped_by
-                        ? ` (capped by ${r.effective.capped_by})`
-                        : ""}
+                      Capped by {r.effective.capped_by}
                     </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {CHOICES.map((choice) => {
-                      const futile = choiceFutile(choice);
-                      return (
-                        <button
-                          key={choice}
-                          type="button"
-                          disabled={busy || futile}
-                          onClick={() => write(r.resource_pattern, choice)}
-                          title={
-                            futile
-                              ? `Forbindelsen er sat til “${CHOICE_LABEL[floor]}” — “${CHOICE_LABEL[choice]}” her er mere åbent og får ingen effekt.`
-                              : undefined
-                          }
-                          className={cn(
-                            "rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
-                            layerSetting === choice
-                              ? "border-primary bg-primary/10 text-primary"
-                              : "text-muted-foreground hover:text-foreground",
-                          )}
-                        >
-                          {CHOICE_LABEL[choice]}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  ) : null}
                 </div>
-              );
-            })
+                <EndpointDecisionControl
+                  row={r}
+                  editLayer={editLayer}
+                  disabled={busy}
+                  floorRank={floorRank}
+                  floorLabel={CHOICE_LABEL[floor]}
+                  onChange={(setting) => write(r.resource_pattern, setting)}
+                />
+              </div>
+            ))
           )}
         </div>
 
@@ -323,5 +328,82 @@ export function ConnectionConfigSheet({
         </SheetFooter>
       </SheetContent>
     </Sheet>
+  );
+}
+
+// EndpointDecisionControl is the single editable pill — one compact control per
+// endpoint row instead of the old four-button row that overflowed on mobile and
+// read differently from the rest of the app. It mirrors the main tool-policy
+// table's DecisionControl: the pill shows the EFFECTIVE verdict (coloured), and
+// opening it writes this surface's own layer. A per-endpoint choice can only
+// TIGHTEN the connection-wide floor, so looser choices are disabled in the menu
+// (TECH-3287 hul 7). Choosing Inherit clears this surface's row.
+function EndpointDecisionControl({
+  row,
+  editLayer,
+  disabled,
+  floorRank,
+  floorLabel,
+  onChange,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  disabled?: boolean;
+  /** Restrictiveness rank of the connection-wide floor; looser choices are futile. */
+  floorRank: number;
+  /** Display label of the connection-wide floor, for the futile-choice tooltip. */
+  floorLabel: string;
+  onChange: (setting: ToolSetting) => void;
+}) {
+  const verdict = row.effective.setting;
+  const layerSetting = row.layers[editLayer] ?? "inherit";
+  const overridden = !!row.layers[editLayer];
+  const Icon = VERDICT_ICON[verdict];
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        aria-label={`Decision: ${CHOICE_LABEL[verdict]}`}
+        className={cn(
+          "inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          VERDICT_PILL[verdict],
+          overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {CHOICE_LABEL[verdict]}
+        <ChevronDown className="size-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-36">
+        {CHOICES.map((choice) => {
+          const futile =
+            choice !== "inherit" && SETTING_RANK[choice] < floorRank;
+          return (
+            <DropdownMenuItem
+              key={choice}
+              disabled={futile}
+              onClick={() => onChange(choice)}
+              title={
+                futile
+                  ? `Forbindelsen er sat til “${floorLabel}” — “${CHOICE_LABEL[choice]}” her er mere åbent og får ingen effekt.`
+                  : undefined
+              }
+              className={cn(
+                "text-sm",
+                choice === "inherit" && "text-muted-foreground",
+                layerSetting === choice && "font-semibold",
+              )}
+            >
+              {CHOICE_LABEL[choice]}
+              {choice === "inherit" && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  clears {LAYER_LABEL[editLayer] ?? editLayer}
+                </span>
+              )}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
