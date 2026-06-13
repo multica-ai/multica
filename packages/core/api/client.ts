@@ -1534,6 +1534,10 @@ export class ApiClient {
     });
   }
 
+  async syncSkill(id: string): Promise<Skill> {
+    return this.fetch(`/api/skills/${id}/sync`, { method: "POST" });
+  }
+
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
     return this.fetch(`/api/agents/${agentId}/skills`);
   }
