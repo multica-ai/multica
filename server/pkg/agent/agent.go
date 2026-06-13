@@ -20,6 +20,15 @@ type Backend interface {
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
+// SessionExporter is an optional interface that backends may implement to
+// support recovering output from a completed session when the primary
+// streaming path produced no text (e.g. opencode run --format json emitting
+// only step_start events). The daemon checks for this interface when
+// result.Output is empty but a session ID is available.
+type SessionExporter interface {
+	ExportSession(ctx context.Context, sessionID string) (string, error)
+}
+
 // ExecOptions configures a single execution.
 type ExecOptions struct {
 	Cwd   string
