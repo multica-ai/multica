@@ -75,6 +75,8 @@ type codexTimeoutDiagnostic struct {
 	CodexVersion string
 }
 
+var codexLookPath = exec.LookPath
+
 // codexBackend implements Backend by spawning `codex app-server --listen stdio://`
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
@@ -497,12 +499,9 @@ func isCodexBareTomlKey(s string) bool {
 }
 
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "codex"
-	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
+	execPath, err := resolveCodexExecPath(b.cfg.ExecutablePath)
+	if err != nil {
+		return nil, err
 	}
 
 	timeout := opts.Timeout
@@ -883,6 +882,23 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func resolveCodexExecPath(configured string) (string, error) {
+	execPath := strings.TrimSpace(configured)
+	if execPath == "" {
+		execPath = "codex"
+	}
+	resolved, err := codexLookPath(execPath)
+	if err == nil {
+		return resolved, nil
+	}
+	if configured != "" && filepath.Base(execPath) == "codex" {
+		if fallback, fallbackErr := codexLookPath("codex"); fallbackErr == nil {
+			return fallback, nil
+		}
+	}
+	return "", fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 }
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start

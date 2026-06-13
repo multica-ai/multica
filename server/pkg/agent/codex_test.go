@@ -1259,6 +1259,31 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestResolveCodexExecPathFallsBackToPathWhenConfiguredCodexPathIsStale(t *testing.T) {
+	stalePath := filepath.Join(t.TempDir(), "codex")
+	fallbackPath := filepath.Join(t.TempDir(), "bin", "codex")
+	oldLookPath := codexLookPath
+	codexLookPath = func(file string) (string, error) {
+		switch file {
+		case stalePath:
+			return "", os.ErrNotExist
+		case "codex":
+			return fallbackPath, nil
+		default:
+			return "", os.ErrNotExist
+		}
+	}
+	defer func() { codexLookPath = oldLookPath }()
+
+	got, err := resolveCodexExecPath(stalePath)
+	if err != nil {
+		t.Fatalf("resolveCodexExecPath: %v", err)
+	}
+	if got != fallbackPath {
+		t.Fatalf("expected fallback path %q, got %q", fallbackPath, got)
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
