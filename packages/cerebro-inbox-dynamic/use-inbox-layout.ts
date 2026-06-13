@@ -9,6 +9,7 @@ import { api } from "@multica/core/api";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   DEFAULT_INBOX_LAYOUT,
+  dedupeLayoutIds,
   isValidLayout,
   type InboxLayout,
 } from "./layout";
@@ -49,7 +50,9 @@ export function useInboxLayout(): UseInboxLayoutResult {
   // Local optimistic mirror so reorders/edits feel instant; seeded from prefs.
   const fallback = useMemo(() => saved ?? DEFAULT_INBOX_LAYOUT(), [saved]);
   const [optimistic, setOptimistic] = useState<InboxLayout | null>(null);
-  const layout = optimistic ?? fallback;
+  // TECH-3502 #1 — heal any colliding ids from older persisted blobs before any
+  // consumer reads the layout, so tab switching and id-based edits are reliable.
+  const layout = useMemo(() => dedupeLayoutIds(optimistic ?? fallback), [optimistic, fallback]);
 
   const setLayout = useCallback(
     (next: InboxLayout) => {

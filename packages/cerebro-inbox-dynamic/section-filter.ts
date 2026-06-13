@@ -18,6 +18,13 @@ export interface SectionFilterContext {
   action: InboxActionContext;
   /** Pinned-view predicate (from useInboxPinnedMatcher). */
   matchesPins: (entry: DynInboxEntry) => boolean;
+  /**
+   * TECH-3502 #3 — descendant project ids per project (NOT including the
+   * project itself), used by a "project" filter condition with
+   * includeSubprojects. Optional: absent in unit tests and when the project
+   * tree is unavailable, in which case sub-projects simply don't match.
+   */
+  subProjectIds?: Map<string, Set<string>>;
 }
 
 const ACTION_KIND: Partial<Record<InboxSectionConfig["kind"], InboxActionCategory>> = {
@@ -51,6 +58,18 @@ export function entryIsMentioned(entry: DynInboxEntry, ctx: SectionFilterContext
     default:
       return false;
   }
+}
+
+/** TECH-3502 #3: does an agent currently have a run going on this row? */
+export function entryIsRunning(entry: DynInboxEntry, ctx: SectionFilterContext): boolean {
+  if (entry.kind === "notif" && entry.item.issue_id) {
+    return (
+      ctx.action.issueRunStates.has(entry.item.issue_id) ||
+      ctx.action.subIssueRunStates.has(entry.item.issue_id)
+    );
+  }
+  if (entry.kind === "chat") return ctx.action.chatRunStates.has(entry.session.id);
+  return false;
 }
 
 export function entryProjectId(entry: DynInboxEntry): string | null {
@@ -119,12 +138,31 @@ function conditionMatches(
   switch (cond.field) {
     case "unread":
       return entryIsUnread(entry);
+    case "read":
+      return !entryIsUnread(entry);
     case "mentioned":
       return entryIsMentioned(entry, ctx);
     case "pinned":
       return ctx.matchesPins(entry);
-    case "project":
-      return !!cond.projectId && entryProjectId(entry) === cond.projectId;
+    case "muted":
+      return entryIsMuted(entry);
+    case "running":
+      return entryIsRunning(entry, ctx);
+    case "kind": {
+      if (!cond.entryKind) return true;
+      // "issue" rows are stored as notif entries; chat/channel match directly.
+      const want = cond.entryKind === "issue" ? "notif" : cond.entryKind;
+      return entry.kind === want;
+    }
+    case "project": {
+      if (!cond.projectId) return false;
+      const pid = entryProjectId(entry);
+      if (pid === cond.projectId) return true;
+      if (cond.includeSubprojects && pid && ctx.subProjectIds) {
+        return ctx.subProjectIds.get(cond.projectId)?.has(pid) ?? false;
+      }
+      return false;
+    }
     default:
       return true;
   }

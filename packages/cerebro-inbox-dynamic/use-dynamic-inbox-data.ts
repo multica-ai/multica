@@ -14,12 +14,12 @@ import {
 } from "@multica/core/inbox/queries";
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import { channelListOptions } from "@multica/core/channels";
-import { projectListOptions } from "@multica/core/projects";
+import { projectListOptions, projectTreeOptions } from "@multica/core/projects";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxWakeupStates, useInboxPinnedMatcher } from "@multica/cerebro-inbox";
 import type { InboxActionContext } from "@multica/cerebro-inbox";
-import type { Channel, Project } from "@multica/core/types";
+import type { Channel, Project, ProjectTreeItem } from "@multica/core/types";
 import type { DynInboxEntry, SectionFilterContext } from "./section-filter";
 
 // Trivial mirror of views/common/agent-run-pip's taskStatusToRunState (not
@@ -96,6 +96,25 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
 
+  // TECH-3502 #3 — descendant ids per project (for the "include sub-projects"
+  // filter option). Falls back to empty when the nested-projects tree is
+  // unavailable, so the filter degrades to an exact-project match.
+  const { data: projectTree = [] } = useQuery(projectTreeOptions(wsId));
+  const subProjectIds = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    const collect = (node: ProjectTreeItem): Set<string> => {
+      const all = new Set<string>();
+      for (const child of node.children ?? []) {
+        all.add(child.id);
+        for (const id of collect(child)) all.add(id);
+      }
+      map.set(node.id, all);
+      return all;
+    };
+    for (const root of projectTree) collect(root);
+    return map;
+  }, [projectTree]);
+
   const mentionedChannels = useMemo(() => {
     const set = new Set<string>();
     for (const item of items) {
@@ -135,8 +154,8 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
       mentionedChannels,
       wakeupIssueIds,
     };
-    return { action, matchesPins: (entry) => matchesPins(entry) };
-  }, [userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds, matchesPins]);
+    return { action, matchesPins: (entry) => matchesPins(entry), subProjectIds };
+  }, [userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds, matchesPins, subProjectIds]);
 
   return {
     entries,
