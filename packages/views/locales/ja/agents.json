@@ -228,6 +228,8 @@
     "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
     "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
+    "thinking_label": "思考",
+    "thinking_help": "このエージェントの推論レベルをオーバーライドします",
     "instructions": {
       "label": "指示",
       "placeholder_blank": "クリックして指示を作成...",

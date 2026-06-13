@@ -241,6 +241,8 @@
     "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
+    "thinking_label": "Thinking",
+    "thinking_help": "Override reasoning effort for this agent",
     "instructions": {
       "label": "Instructions",
       "placeholder_blank": "Click to write instructions…",

@@ -236,6 +236,8 @@
     "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
     "squad_join_failed_toast": "智能体「{{name}}」已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
+    "thinking_label": "思考",
+    "thinking_help": "为此智能体覆盖推理级别",
     "instructions": {
       "label": "指令",
       "placeholder_blank": "点击撰写指令…",
