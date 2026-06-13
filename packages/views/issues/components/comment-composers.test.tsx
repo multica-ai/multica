@@ -34,6 +34,8 @@ vi.mock("@multica/cerebro-preferences/views", () => ({
   useTheme: () => "system",
 }));
 
+// CEREBRO-PATCH(comment-drafts): composer unit tests don't mount the workspace
+// route/query providers that the real draft hook uses for its feature flag.
 vi.mock("@multica/cerebro-comment-drafts", () => ({
   DraftSavedHint: () => null,
   useCommentDraft: () => ({

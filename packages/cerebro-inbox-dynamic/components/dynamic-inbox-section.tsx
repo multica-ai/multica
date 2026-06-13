@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, ChevronRight, Settings2, X } from "lucide-react";
+import { ChevronUp, ChevronDown, ChevronRight, Settings2, X, Pencil } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -130,12 +130,26 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
   const [collapsed, setCollapsed] = useState<boolean>(section.defaultCollapsed === true);
   const isCollapsed = collapsible && collapsed;
 
+  // TECH-3502 #4 — inline rename of the box header.
+  const [editing, setEditing] = useState(false);
+
   const projectName =
     section.kind === "project"
       ? projects.find((p) => p.id === section.projectId)?.title
       : undefined;
-  const headerLabel =
-    section.kind === "project" ? `Project · ${projectName ?? "select…"}` : sectionLabel(section);
+  // A user-set title wins for every kind (TECH-3502 #4); otherwise project
+  // boxes show their project, and the rest fall back to the catalog label.
+  const headerLabel = section.title?.trim()
+    ? section.title.trim()
+    : section.kind === "project"
+      ? `Project · ${projectName ?? "select…"}`
+      : sectionLabel(section);
+
+  const commitRename = (value: string) => {
+    const trimmed = value.trim();
+    props.onChange({ ...section, title: trimmed || undefined });
+    setEditing(false);
+  };
 
   // #3: count as a plain number or a coloured circle badge.
   const countCircle = section.countStyle === "circle";
@@ -156,9 +170,29 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
             {isCollapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           </button>
         )}
-        <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-          {headerLabel}
-        </span>
+        {editing ? (
+          <input
+            autoFocus
+            defaultValue={section.title ?? ""}
+            placeholder={headerLabel}
+            onBlur={(e) => commitRename(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commitRename(e.currentTarget.value);
+              else if (e.key === "Escape") setEditing(false);
+            }}
+            className="w-40 rounded border border-primary bg-transparent px-1 py-0.5 text-xs font-bold uppercase tracking-wide text-foreground outline-none"
+            aria-label="Box name"
+          />
+        ) : (
+          <button
+            type="button"
+            onDoubleClick={() => setEditing(true)}
+            title="Double-click to rename"
+            className="text-xs font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          >
+            {headerLabel}
+          </button>
+        )}
         {countCircle ? (
           <span
             className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${badgeClassName}`}
@@ -194,6 +228,17 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
               <Settings2 className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => setEditing(true)}>
+                  <Pencil className="mr-2 size-3.5" /> Rename box
+                </DropdownMenuItem>
+                {section.title && (
+                  <DropdownMenuItem onClick={() => props.onChange({ ...section, title: undefined })}>
+                    Reset name
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Group by</DropdownMenuLabel>
                 <DropdownMenuItem onClick={() => props.onChange({ ...section, groupBy: "none" })}>

@@ -741,7 +741,7 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	if e.registry == nil {
 		return false
 	}
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage}
 	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 	taskRegistry.db = e.registry.db
 	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)) > 0
@@ -755,7 +755,23 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 // The first round without tool calls becomes the final output. Budget is
 // checked before each tool dispatch. Usage is summed across all rounds.
 func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatewayRuntimeConfig, agent db.Agent, initialMessages []GatewayMessage, meta GatewayRequestMeta, agentID, workspaceID, originalUserID pgtype.UUID, pruneApply bool) (GatewayCompletion, error) {
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage}
+	// Pin the default file-attachment target (create_file) to the surface this
+	// task runs on, so an agent never has to know the chat-message UUID.
+	if meta.IssueID != "" {
+		if iid, err := util.ParseUUID(meta.IssueID); err == nil {
+			tctx.IssueID = iid
+		}
+	}
+	// Chat surface: the assistant chat_message row is pre-created at claim time
+	// (ensureAssistantChatMessageForTask), so create_file attaches to it.
+	if meta.Surface == "chat" && meta.TaskID != "" && e.queries != nil {
+		if tid, err := util.ParseUUID(meta.TaskID); err == nil {
+			if msg, err := e.queries.GetAssistantChatMessageByTaskID(ctx, tid); err == nil {
+				tctx.ChatMessageID = msg.ID
+			}
+		}
+	}
 	// FIR-2325: prune_tool_results actually drops superseded tool output from the
 	// transcript mid-run when "on" for this workspace. Off/shadow keep the full
 	// transcript (no behavior change), so the default fleet is unaffected.

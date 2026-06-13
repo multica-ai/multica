@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/mcp"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -29,6 +30,18 @@ type ToolContext struct {
 	// paths. When set, authorship tools (add_comment, create_issue, create_project)
 	// use "member" identity. Zero value = agent-only context (task token path).
 	UserID pgtype.UUID
+
+	// Storage is the attachment backend used by file-producing tools
+	// (create_file, TECH-3416 Fase 2a). Nil when the executor has no storage
+	// wired — file creation then returns a clear "not configured" error rather
+	// than panicking. Set from the executor's attachmentStorage.
+	Storage storage.Storage
+	// IssueID / ChatMessageID pin the default attachment target for create_file
+	// to the surface the task is running on, so an agent never has to guess (or
+	// be told) the chat-message UUID. Either may be zero; explicit tool args
+	// override them.
+	IssueID       pgtype.UUID
+	ChatMessageID pgtype.UUID
 }
 
 // NewFirtalGatewayToolServer builds the in-process MCP server with the POC

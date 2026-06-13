@@ -6,14 +6,30 @@
 // server-synced user.preferences blob (see use-inbox-layout.ts), with an
 // optional separate layout for the mobile/PWA view.
 
-// TECH-3413 #5 — one condition in the filter builder. `project` needs a
-// projectId; the boolean predicates ignore it.
-export type FilterField = "unread" | "mentioned" | "pinned" | "project";
+// TECH-3413 #5 / TECH-3502 #3 — one condition in the filter builder. Most
+// predicates are pure booleans; `project` needs a projectId (and may include
+// its sub-projects); `kind` needs an entryKind.
+export type FilterField =
+  | "unread"
+  | "read"
+  | "mentioned"
+  | "pinned"
+  | "muted"
+  | "running"
+  | "kind"
+  | "project";
+
+/** TECH-3502 #3 — narrow a "kind" condition to one row type. */
+export type EntryKindFilter = "issue" | "chat" | "channel";
 
 export interface FilterCondition {
   field: FilterField;
   /** Required when field === "project". */
   projectId?: string;
+  /** field === "project": also match rows in this project's sub-projects. */
+  includeSubprojects?: boolean;
+  /** Required when field === "kind". */
+  entryKind?: EntryKindFilter;
 }
 
 /** What a section pulls from the merged inbox feed. */
@@ -137,10 +153,65 @@ export function sectionLabel(section: InboxSectionConfig): string {
 }
 
 let counter = 0;
-/** Deterministic-enough id without Date.now()/Math.random() (banned in some envs). */
+/**
+ * Globally-unique id. TECH-3502 #1: the old counter-only scheme restarted at
+ * `_1` on every page load, so a tab/section minted in a new session collided
+ * with a tab/section of the same id already persisted from an earlier session.
+ * Two tabs with the same id made `tabs.find(id)` always resolve to the first —
+ * tab switching silently broke. The random component (crypto.randomUUID, which
+ * is available in the browser and Node ≥18, and unlike Date.now/Math.random is
+ * not banned in our test/SSR envs) makes collisions across sessions impossible.
+ */
 export function makeId(prefix: string): string {
   counter += 1;
-  return `${prefix}_${counter}`;
+  const uuid =
+    typeof globalThis !== "undefined" && typeof globalThis.crypto?.randomUUID === "function"
+      ? globalThis.crypto.randomUUID().slice(0, 8)
+      : "";
+  return uuid ? `${prefix}_${uuid}` : `${prefix}_${counter}`;
+}
+
+/**
+ * TECH-3502 #1 — defensively de-duplicate tab/section ids in a persisted
+ * layout. Blobs written before the unique-id fix can carry colliding ids that
+ * break tab switching and React keys. Collisions are renamed deterministically
+ * (`<id>__2`, `__3`, …) so the same input always yields the same output (no
+ * remount churn across renders). Returns the same reference when already clean.
+ */
+export function dedupeLayoutIds(layout: InboxLayout): InboxLayout {
+  const seen = new Set<string>();
+  let changed = false;
+  const unique = (id: string): string => {
+    if (!seen.has(id)) {
+      seen.add(id);
+      return id;
+    }
+    changed = true;
+    let n = 2;
+    let next = `${id}__${n}`;
+    while (seen.has(next)) {
+      n += 1;
+      next = `${id}__${n}`;
+    }
+    seen.add(next);
+    return next;
+  };
+
+  const tabs = layout.tabs.map((tab) => {
+    const id = unique(tab.id);
+    const sections = tab.sections.map((s) => {
+      const sid = unique(s.id);
+      return sid === s.id ? s : { ...s, id: sid };
+    });
+    const tabChanged = id !== tab.id || sections.some((s, i) => s !== tab.sections[i]);
+    return tabChanged ? { ...tab, id, sections } : tab;
+  });
+
+  if (!changed) return layout;
+  const activeTabId = tabs.some((t) => t.id === layout.activeTabId)
+    ? layout.activeTabId
+    : tabs[0]?.id;
+  return { ...layout, tabs, activeTabId };
 }
 
 function section(kind: SectionKind, extra: Partial<InboxSectionConfig> = {}): InboxSectionConfig {
@@ -195,6 +266,19 @@ export const INBOX_PRESETS: InboxPreset[] = [
   { key: "manager", label: "Manager", build: managerPreset },
 ];
 
+export interface UserInboxPreset {
+  id: string;
+  label: string;
+  layout: InboxLayout;
+}
+
+export const USER_INBOX_PRESETS_VERSION = 1 as const;
+
+export interface UserInboxPresetsBlob {
+  version: typeof USER_INBOX_PRESETS_VERSION;
+  presets: UserInboxPreset[];
+}
+
 /** Defensive: validate an untrusted layout blob from preferences. */
 export function isValidLayout(value: unknown): value is InboxLayout {
   if (!value || typeof value !== "object") return false;
@@ -209,4 +293,61 @@ export function isValidLayout(value: unknown): value is InboxLayout {
       Array.isArray(t.sections) &&
       t.sections.every((s) => typeof s?.id === "string" && typeof s?.kind === "string"),
   );
+}
+
+export function cloneInboxLayout(layout: InboxLayout): InboxLayout {
+  return {
+    ...layout,
+    tabs: layout.tabs.map((tab) => ({
+      ...tab,
+      sections: tab.sections.map((section) => ({ ...section })),
+    })),
+  };
+}
+
+function isValidUserPreset(value: unknown): value is UserInboxPreset {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<UserInboxPreset>;
+  return typeof v.id === "string" && typeof v.label === "string" && isValidLayout(v.layout);
+}
+
+export function readUserInboxPresets(value: unknown): UserInboxPreset[] {
+  if (!value || typeof value !== "object") return [];
+  const v = value as Partial<UserInboxPresetsBlob>;
+  if (v.version !== USER_INBOX_PRESETS_VERSION || !Array.isArray(v.presets)) return [];
+  return v.presets.filter(isValidUserPreset).map((preset) => ({
+    id: preset.id,
+    label: preset.label.trim(),
+    layout: cloneInboxLayout(preset.layout),
+  }));
+}
+
+export function makeUserInboxPresetsBlob(presets: UserInboxPreset[]): UserInboxPresetsBlob {
+  return {
+    version: USER_INBOX_PRESETS_VERSION,
+    presets: presets
+      .filter((preset) => preset.label.trim() && isValidLayout(preset.layout))
+      .map((preset) => ({
+        id: preset.id,
+        label: preset.label.trim(),
+        layout: cloneInboxLayout(preset.layout),
+      })),
+  };
+}
+
+export function upsertUserInboxPreset(
+  existing: UserInboxPreset[],
+  preset: UserInboxPreset,
+): UserInboxPreset[] {
+  const clean: UserInboxPreset = {
+    id: preset.id,
+    label: preset.label.trim(),
+    layout: cloneInboxLayout(preset.layout),
+  };
+  const next = existing.filter((p) => p.id !== clean.id && p.label.trim() !== clean.label);
+  return [...next, clean];
+}
+
+export function deleteUserInboxPreset(existing: UserInboxPreset[], presetId: string): UserInboxPreset[] {
+  return existing.filter((preset) => preset.id !== presetId);
 }

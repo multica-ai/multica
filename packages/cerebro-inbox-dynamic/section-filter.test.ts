@@ -5,13 +5,25 @@ import {
   entryIsUnread,
   entryProjectId,
   entryIsMentioned,
+  entryIsRunning,
   entryMatchesSection,
   selectSectionEntries,
   sectionFilters,
   type DynInboxEntry,
   type SectionFilterContext,
 } from "./section-filter";
-import { isValidLayout, operatorPreset, sectionLabel, makeId } from "./layout";
+import {
+  deleteUserInboxPreset,
+  dedupeLayoutIds,
+  isValidLayout,
+  makeId,
+  makeUserInboxPresetsBlob,
+  operatorPreset,
+  readUserInboxPresets,
+  sectionLabel,
+  upsertUserInboxPreset,
+  type InboxLayout,
+} from "./layout";
 
 function notif(over: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -152,6 +164,58 @@ describe("section-filter", () => {
       sectionFilters({ id: "s", kind: "filter", filterUnread: true, projectId: "p1" }),
     ).toEqual([{ field: "unread" }, { field: "project", projectId: "p1" }]);
   });
+
+  it("TECH-3502 #3 — new filter fields: read / muted / running / kind", () => {
+    const read = notifEntry(1, { read: true });
+    const unread = notifEntry(1, { read: false });
+    const future = "2999-01-01T00:00:00Z";
+    const muted = notifEntry(1, { muted_until: future });
+
+    const matchesField = (e: DynInboxEntry, field: "read" | "muted", c = ctx) =>
+      entryMatchesSection(e, { id: "s", kind: "filter", filters: [{ field }] }, c);
+
+    expect(matchesField(read, "read")).toBe(true);
+    expect(matchesField(unread, "read")).toBe(false);
+    expect(matchesField(muted, "muted")).toBe(true);
+    expect(matchesField(read, "muted")).toBe(false);
+
+    // running: keyed off the action run-state maps.
+    const runningCtx: SectionFilterContext = {
+      ...ctx,
+      action: { ...ctx.action, issueRunStates: new Map([["iss1", "active"]]) },
+    };
+    const runningEntry = notifEntry(1, { issue_id: "iss1" });
+    expect(entryIsRunning(runningEntry, runningCtx)).toBe(true);
+    expect(
+      entryMatchesSection(runningEntry, { id: "s", kind: "filter", filters: [{ field: "running" }] }, runningCtx),
+    ).toBe(true);
+    expect(
+      entryMatchesSection(runningEntry, { id: "s", kind: "filter", filters: [{ field: "running" }] }, ctx),
+    ).toBe(false);
+
+    // kind: "issue" maps to notif entries; channels don't match it.
+    const issueFilter = { id: "s", kind: "filter" as const, filters: [{ field: "kind" as const, entryKind: "issue" as const }] };
+    expect(entryMatchesSection(notifEntry(1), issueFilter, ctx)).toBe(true);
+    expect(entryMatchesSection(channelEntry(1), issueFilter, ctx)).toBe(false);
+  });
+
+  it("TECH-3502 #3 — project condition matches sub-projects only with includeSubprojects", () => {
+    const child = notifEntry(1, { project_id: "child" });
+    const ctxWithTree: SectionFilterContext = {
+      ...ctx,
+      subProjectIds: new Map([["parent", new Set(["child", "grandchild"])]]),
+    };
+    const onlyParent = { id: "s", kind: "filter" as const, filters: [{ field: "project" as const, projectId: "parent" }] };
+    const withSubs = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "project" as const, projectId: "parent", includeSubprojects: true }],
+    };
+    expect(entryMatchesSection(child, onlyParent, ctxWithTree)).toBe(false);
+    expect(entryMatchesSection(child, withSubs, ctxWithTree)).toBe(true);
+    // Falls back to no-match when the tree is unavailable.
+    expect(entryMatchesSection(child, withSubs, ctx)).toBe(false);
+  });
 });
 
 describe("layout", () => {
@@ -168,5 +232,76 @@ describe("layout", () => {
   it("sectionLabel falls back to the catalog label", () => {
     expect(sectionLabel({ id: "s", kind: "running" })).toBe("Agents working");
     expect(sectionLabel({ id: "s", kind: "running", title: "  Mine  " })).toBe("Mine");
+  });
+
+  it("makeId returns unique ids across calls (TECH-3502 #1)", () => {
+    const ids = new Set([makeId("tab"), makeId("tab"), makeId("tab"), makeId("tab")]);
+    expect(ids.size).toBe(4);
+  });
+
+  it("dedupeLayoutIds heals colliding tab/section ids; leaves clean layouts untouched (TECH-3502 #1)", () => {
+    const clean = operatorPreset();
+    expect(dedupeLayoutIds(clean)).toBe(clean);
+
+    // Two tabs sharing an id — the second must be renamed so switching works.
+    const collided: InboxLayout = {
+      version: 1,
+      activeTabId: "tab_1",
+      tabs: [
+        { id: "tab_1", title: "A", sections: [{ id: "all_1", kind: "all" }] },
+        { id: "tab_1", title: "B", sections: [{ id: "all_1", kind: "all" }] },
+      ],
+    };
+    const fixed = dedupeLayoutIds(collided);
+    const tabIds = fixed.tabs.map((t) => t.id);
+    expect(new Set(tabIds).size).toBe(2);
+    // Deterministic: same input → same output (no remount churn).
+    expect(dedupeLayoutIds(collided)).toEqual(fixed);
+    // activeTabId still points at a real tab.
+    expect(tabIds).toContain(fixed.activeTabId);
+  });
+
+  it("saves a named user preset in the preferences blob shape", () => {
+    const layout = operatorPreset();
+    const presets = upsertUserInboxPreset([], {
+      id: "preset_1",
+      label: "  Morning queue  ",
+      layout,
+    });
+    const blob = makeUserInboxPresetsBlob(presets);
+
+    expect(blob).toEqual({
+      version: 1,
+      presets: [{ id: "preset_1", label: "Morning queue", layout }],
+    });
+  });
+
+  it("loads only valid user presets from preferences", () => {
+    const layout = operatorPreset();
+    const presets = readUserInboxPresets({
+      version: 1,
+      presets: [
+        { id: "preset_1", label: "Mine", layout },
+        { id: "broken", label: "Broken", layout: { version: 99, tabs: [] } },
+      ],
+    });
+
+    expect(presets).toHaveLength(1);
+    expect(presets[0]?.label).toBe("Mine");
+    expect(presets[0]?.layout).toEqual(layout);
+  });
+
+  it("replaces a user preset by name and deletes it by id", () => {
+    const first = operatorPreset();
+    const second = { ...operatorPreset(), activeTabId: "replacement" };
+    const saved = upsertUserInboxPreset(
+      [{ id: "old", label: "Mine", layout: first }],
+      { id: "new", label: "Mine", layout: second },
+    );
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.id).toBe("new");
+    expect(saved[0]?.layout.activeTabId).toBe("replacement");
+    expect(deleteUserInboxPreset(saved, "new")).toEqual([]);
   });
 });

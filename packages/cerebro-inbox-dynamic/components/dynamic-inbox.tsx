@@ -4,8 +4,8 @@
 // classic inbox lives in the ⋯ menu.
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2 } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -37,6 +37,16 @@ import {
   DropdownMenuLabel,
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import { Input } from "@multica/ui/components/ui/input";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useQueryClient } from "@tanstack/react-query";
@@ -85,9 +95,12 @@ function entryIdentity(entry: DynInboxEntry): string {
 // grip starts a drag (the rest of the box stays clickable).
 function SortableSection({
   id,
+  highlight,
   children,
 }: {
   id: string;
+  /** TECH-3502 #5 — flash a ring around a just-added box. */
+  highlight?: boolean;
   children: (handle: React.ReactNode) => React.ReactNode;
 }) {
   const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } =
@@ -112,7 +125,15 @@ function SortableSection({
     </button>
   );
   return (
-    <div ref={setNodeRef} style={style}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={
+        highlight
+          ? "rounded-xl ring-2 ring-primary ring-offset-2 ring-offset-background transition-shadow"
+          : "transition-shadow"
+      }
+    >
       {children(handle)}
     </div>
   );
@@ -120,7 +141,7 @@ function SortableSection({
 
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
-  const { layout, setLayout } = useInboxLayout();
+  const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const setMode = useSetInboxMode();
@@ -139,11 +160,25 @@ export function DynamicInbox() {
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
 
+  // TECH-3502 #2 — inline rename of the active tab (also reachable from ⋯).
+  const [editingTabId, setEditingTabId] = useState<string | null>(null);
+  // TECH-3502 #5 — id of the box just added, so we can flash it; cleared on a
+  // timer. The list scrolls to the top (where new boxes land) on insert.
+  const [justAddedId, setJustAddedId] = useState<string | null>(null);
+  const sectionsScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!justAddedId) return;
+    const t = setTimeout(() => setJustAddedId(null), 1800);
+    return () => clearTimeout(t);
+  }, [justAddedId]);
+
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [presetName, setPresetName] = useState("");
   // TECH-3413 #6 — frozen copy of the selected entry, captured at selection
   // time. While a row is open we render it from this snapshot so marking it
   // read doesn't move it out of its group/section until you pick another row.
@@ -225,14 +260,22 @@ export function DynamicInbox() {
     setLayout(replaceTab(layout, activeTab.id, fn));
 
   const addSection = (kind: SectionKind) => {
+    const id = makeId(kind);
     const section: InboxSectionConfig = {
-      id: makeId(kind),
+      id,
       kind,
       groupBy: kind === "act_now" ? "action" : "none",
       sort: "newest",
       ...(kind === "project" ? { projectId: projects[0]?.id } : {}),
     };
-    updateActiveTab((t) => ({ ...t, sections: [...t.sections, section] }));
+    // TECH-3502 #5 — new boxes are inserted at the TOP so they're immediately
+    // visible; flash a ring around the new box and scroll the list up so the
+    // insert reads clearly.
+    updateActiveTab((t) => ({ ...t, sections: [section, ...t.sections] }));
+    setJustAddedId(id);
+    requestAnimationFrame(() =>
+      sectionsScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" }),
+    );
   };
   const removeSection = (id: string) =>
     updateActiveTab((t) => ({ ...t, sections: t.sections.filter((s) => s.id !== id) }));
@@ -259,11 +302,40 @@ export function DynamicInbox() {
       tabs: [...layout.tabs, { id, title: "New tab", sections: [{ id: makeId("all"), kind: "all" }] }],
     });
     setActiveTabId(id);
+    // TECH-3502 #2 — a fresh tab opens straight into rename so it gets a name.
+    setEditingTabId(id);
+  };
+  // TECH-3502 #2/#4 — rename a tab; empty input keeps the previous title.
+  const renameTab = (id: string, title: string) => {
+    const trimmed = title.trim();
+    setLayout({
+      ...layout,
+      tabs: layout.tabs.map((t) => (t.id === id ? { ...t, title: trimmed || t.title } : t)),
+    });
+  };
+  const removeTab = (id: string) => {
+    if (layout.tabs.length <= 1) return;
+    const remaining = layout.tabs.filter((t) => t.id !== id);
+    const nextActive = remaining[0]?.id ?? "";
+    setLayout({ ...layout, tabs: remaining, activeTabId: nextActive });
+    if (activeTabId === id) setActiveTabId(nextActive);
   };
   const applyPreset = (build: () => InboxLayout) => {
     const next = build();
     setLayout(next);
     setActiveTabId(next.activeTabId ?? next.tabs[0]?.id ?? "");
+  };
+  const applyUserPreset = (presetLayout: InboxLayout) => {
+    setLayout(presetLayout);
+    setActiveTabId(presetLayout.activeTabId ?? presetLayout.tabs[0]?.id ?? "");
+  };
+  const onSavePreset = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const cleanName = presetName.trim();
+    if (!cleanName) return;
+    saveUserPreset(cleanName);
+    setPresetName("");
+    setSavePresetOpen(false);
   };
 
   const detail = useMemo(() => {
@@ -316,35 +388,79 @@ export function DynamicInbox() {
     <>
       {/* tabs */}
       <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
-          {layout.tabs.map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTabId(tab.id)}
-              className={`-mb-px border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
-                tab.id === activeTab.id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tab.title}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={addTab}
-            className="px-2 pb-2 pt-2 text-muted-foreground hover:text-foreground"
-            title="Add tab"
-          >
-            <Plus className="size-4" />
-          </button>
-          {/* ⋯ menu */}
+          {layout.tabs.map((tab) =>
+            editingTabId === tab.id ? (
+              // TECH-3502 #2/#4 — inline rename of a tab.
+              <input
+                key={tab.id}
+                autoFocus
+                defaultValue={tab.title}
+                onBlur={(e) => {
+                  renameTab(tab.id, e.target.value);
+                  setEditingTabId(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    renameTab(tab.id, e.currentTarget.value);
+                    setEditingTabId(null);
+                  } else if (e.key === "Escape") {
+                    setEditingTabId(null);
+                  }
+                }}
+                className="-mb-px w-28 border-b-2 border-primary bg-transparent px-2 pb-2 pt-2 text-sm font-semibold text-foreground outline-none"
+                aria-label="Tab name"
+              />
+            ) : (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTabId(tab.id)}
+                onDoubleClick={() => setEditingTabId(tab.id)}
+                title="Double-click to rename"
+                className={`-mb-px border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
+                  tab.id === activeTab.id
+                    ? "border-primary text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {tab.title}
+              </button>
+            ),
+          )}
+          {/* create-menu (main) + ⋯ settings menu — tab add/rename/remove now
+              lives in ⋯ (TECH-3502 #2) */}
           <div className="ml-auto flex items-center gap-1 pb-1">
             <DynamicInboxCreateMenu
               onNewMessage={() => setShowNewMessage(true)}
               onNewIssue={() => openCreateIssueWithPreference()}
               onNewReminder={() => setShowReminder(true)}
             />
+            <Dialog open={savePresetOpen} onOpenChange={setSavePresetOpen}>
+              <DialogContent>
+                <form onSubmit={onSavePreset} className="space-y-4">
+                  <DialogHeader>
+                    <DialogTitle>Save inbox preset</DialogTitle>
+                    <DialogDescription>
+                      Save the current tabs and sections as a shortcut in this menu.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Input
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="Preset name"
+                    autoFocus
+                  />
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setSavePresetOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={!presetName.trim()}>
+                      <Save className="size-4" /> Save preset
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<button type="button" className="rounded p-1.5 text-muted-foreground hover:bg-muted" title="Inbox menu" />}
@@ -352,6 +468,21 @@ export function DynamicInbox() {
                 <MoreHorizontal className="size-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Tabs</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={addTab}>
+                    <Plus className="mr-2 size-4" /> Add tab
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setEditingTabId(activeTab.id)}>
+                    <Pencil className="mr-2 size-4" /> Rename current tab
+                  </DropdownMenuItem>
+                  {layout.tabs.length > 1 && (
+                    <DropdownMenuItem onClick={() => removeTab(activeTab.id)}>
+                      <Trash2 className="mr-2 size-4" /> Remove current tab
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Add section</DropdownMenuLabel>
                   {SECTION_CATALOG.filter(
@@ -365,11 +496,43 @@ export function DynamicInbox() {
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Start from preset</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setSavePresetOpen(true)}>
+                    <Save className="mr-2 size-4" /> Save current as preset...
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {INBOX_PRESETS.map((p) => (
                     <DropdownMenuItem key={p.key} onClick={() => applyPreset(p.build)}>
                       {p.label}
                     </DropdownMenuItem>
                   ))}
+                  {userPresets.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>My presets</DropdownMenuLabel>
+                      {userPresets.map((preset) => (
+                        <DropdownMenuItem
+                          key={preset.id}
+                          className="pr-1"
+                          onClick={() => applyUserPreset(preset.layout)}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                          <button
+                            type="button"
+                            className="ml-2 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            title={`Delete ${preset.label}`}
+                            aria-label={`Delete ${preset.label}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              deleteUserPreset(preset.id);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => void setMode("classic")}>
@@ -405,7 +568,7 @@ export function DynamicInbox() {
         </div>
 
         {/* sections */}
-        <div className="flex-1 space-y-3 overflow-y-auto p-3">
+        <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
           {activeTab.sections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
@@ -419,7 +582,7 @@ export function DynamicInbox() {
             >
               <div className="space-y-3">
                 {activeTab.sections.map((section, i) => (
-                  <SortableSection key={section.id} id={section.id}>
+                  <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
                       section.kind === "team" ? (
                         <div className="relative">
