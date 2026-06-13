@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
 import { useActiveTitleSync } from "@/hooks/use-tab-sync";
+import { useWindowFocus } from "@/hooks/use-window-focus";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
 import {
   SidebarProvider,
@@ -24,6 +25,9 @@ import { WindowOverlay } from "./window-overlay";
 
 function SidebarTopBar() {
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
+  const isWindowFocused = useWindowFocus();
+  const canTriggerBack = canGoBack && isWindowFocused;
+  const canTriggerForward = canGoForward && isWindowFocused;
 
   return (
     <div
@@ -37,18 +41,28 @@ function SidebarTopBar() {
         <button
           type="button"
           onClick={goBack}
-          disabled={!canGoBack}
+          disabled={!canTriggerBack}
           aria-label="Go back"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+          className={cn(
+            "flex size-7 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
+            canTriggerBack
+              ? "text-foreground hover:bg-accent"
+              : "text-muted-foreground/40",
+          )}
         >
           <ChevronLeft className="size-4" />
         </button>
         <button
           type="button"
           onClick={goForward}
-          disabled={!canGoForward}
+          disabled={!canTriggerForward}
           aria-label="Go forward"
-          className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30 disabled:pointer-events-none"
+          className={cn(
+            "flex size-7 items-center justify-center rounded-md transition-colors disabled:pointer-events-none",
+            canTriggerForward
+              ? "text-foreground hover:bg-accent"
+              : "text-muted-foreground/40",
+          )}
         >
           <ChevronRight className="size-4" />
         </button>
