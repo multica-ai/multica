@@ -60,6 +60,9 @@ export type WSEventType =
   | "chat:session_deleted"
   // CEREBRO-PATCH(chat-session-updated-event): JEH-799 chat-session header.
   | "chat:session_updated"
+  // CEREBRO-PATCH(chat-state-events): TECH-3352 — chat snooze / mark-unread.
+  | "chat:session_muted"
+  | "chat:session_unread"
   | "project:created"
   | "project:updated"
   | "project:deleted"

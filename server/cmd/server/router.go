@@ -522,6 +522,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
 	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes feature.
+	// CEREBRO-PATCH(handler-chat-mute-wire): TECH-3352 — chat-snooze seam.
+	h.ChatMute = cerebroInboxHandler
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
@@ -1685,6 +1687,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
+					// CEREBRO-PATCH(chat-state-routes): TECH-3352 — chat row inbox
+					// controls (snooze + mark-unread) aligned with issues/channels.
+					r.Post("/mute", cerebroInboxHandler.MuteChatSession)
+					r.Delete("/mute", cerebroInboxHandler.UnmuteChatSession)
+					r.Post("/unread", cerebroInboxHandler.MarkChatSessionUnread)
 					r.Get("/usage", h.GetChatSessionUsage)
 					// CEREBRO-PATCH(chat-message-cost-route): FIR-31 per-reply cost badge.
 					r.Get("/message-costs", h.GetChatSessionMessageCosts)

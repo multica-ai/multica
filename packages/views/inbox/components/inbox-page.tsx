@@ -1547,7 +1547,8 @@ export function InboxPage() {
  */
 function matchesView(
   entry:
-    | { kind: "chat"; session: { has_unread?: boolean } }
+    // CEREBRO-PATCH(chat-muted-filter): TECH-3352 — chat sessions carry muted_until too.
+    | { kind: "chat"; session: { has_unread?: boolean; muted_until?: string | null } }
     | { kind: "notif"; item: InboxItem }
     | { kind: "channel"; channel: Channel },
   view: InboxView,
@@ -1561,6 +1562,9 @@ function matchesView(
   // CEREBRO-PATCH(channel-muted-filter): TECH-3352 — snoozed channels/DMs hide
   // from every view except "Muted", same as muted notifications.
   if (view !== "muted" && entry.kind === "channel" && isMuted(entry.channel.muted_until))
+    return false;
+  // CEREBRO-PATCH(chat-muted-filter): TECH-3352 — snoozed chat sessions hide too.
+  if (view !== "muted" && entry.kind === "chat" && isMuted(entry.session.muted_until))
     return false;
   switch (view) {
     case "all":
@@ -1585,7 +1589,9 @@ function matchesView(
       // CEREBRO-PATCH(channel-muted-filter): TECH-3352 — snoozed channels too.
       return (
         (entry.kind === "notif" && isMuted(entry.item.muted_until)) ||
-        (entry.kind === "channel" && isMuted(entry.channel.muted_until))
+        (entry.kind === "channel" && isMuted(entry.channel.muted_until)) ||
+        // CEREBRO-PATCH(chat-muted-filter): TECH-3352 — snoozed chats show in "Muted".
+        (entry.kind === "chat" && isMuted(entry.session.muted_until))
       );
     // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — handled in filteredEntries via the pin matcher.
     case "pinned":

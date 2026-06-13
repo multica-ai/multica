@@ -597,6 +597,18 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/chat/sessions/{sessionId}/mute",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/chat/sessions/{sessionId}/mute",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/chat/sessions/{sessionId}/unread",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cli-token",
       "gate": "self_only"
     },

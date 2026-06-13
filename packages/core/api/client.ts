@@ -3262,6 +3262,22 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
   }
 
+  // CEREBRO-PATCH(chat-state-client): TECH-3352 — chat row snooze + mark-unread.
+  async muteChatSession(sessionId: string, mutedUntil: Date): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/mute`, {
+      method: "POST",
+      body: JSON.stringify({ muted_until: mutedUntil.toISOString() }),
+    });
+  }
+
+  async unmuteChatSession(sessionId: string): Promise<{ muted_until: string | null }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/mute`, { method: "DELETE" });
+  }
+
+  async markChatSessionUnread(sessionId: string): Promise<{ unread: boolean }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/unread`, { method: "POST" });
+  }
+
   async cancelTaskById(taskId: string): Promise<void> {
     await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }

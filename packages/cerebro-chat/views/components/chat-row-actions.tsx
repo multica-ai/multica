@@ -18,7 +18,10 @@ import { useState } from "react";
 import {
   Archive,
   ArchiveRestore,
+  BellOff,
+  BellPlus,
   FileText,
+  Mail,
   MailOpen,
   MoreHorizontal,
   Pencil,
@@ -30,7 +33,16 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useMarkChatSessionRead, useDeleteChatSession } from "@multica/core/chat/mutations";
 import { useNavigation } from "@multica/views/navigation";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { CerebroSwipeArchive, CerebroUnarchiveAction } from "@multica/cerebro-inbox";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import {
+  CerebroSwipeArchive,
+  CerebroUnarchiveAction,
+  ReminderSheet,
+  useCerebroInboxStrings,
+  isMuted,
+  toDateTimeLocalValue,
+  nextBusinessDayNineAm,
+} from "@multica/cerebro-inbox";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -57,7 +69,13 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { useUpdateChatSession, useConvertChatSessionToIssue } from "../../mutations";
+import {
+  useUpdateChatSession,
+  useConvertChatSessionToIssue,
+  useMuteChat,
+  useUnmuteChat,
+  useMarkChatUnread,
+} from "../../mutations";
 import { useCerebroChatHeaderStrings } from "../../strings";
 
 export function CerebroChatSessionRowActions({
@@ -74,16 +92,43 @@ export function CerebroChatSessionRowActions({
 }) {
   const enabled = useFeatureFlag("cerebro_chat_row_actions");
   const s = useCerebroChatHeaderStrings();
+  const inboxStrings = useCerebroInboxStrings();
+  const isMobile = useIsMobile();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const update = useUpdateChatSession();
   const convert = useConvertChatSessionToIssue();
   const markRead = useMarkChatSessionRead();
+  const markUnread = useMarkChatUnread();
+  const mute = useMuteChat();
+  const unmute = useUnmuteChat();
   const remove = useDeleteChatSession();
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirm, setConfirm] = useState<"convert" | "delete" | null>(null);
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [customReminder, setCustomReminder] = useState(() =>
+    toDateTimeLocalValue(nextBusinessDayNineAm()),
+  );
+
+  const muted = isMuted(session.muted_until);
+
+  // "Remind me" opens the shared reminder sheet (presets + custom). Removing a
+  // reminder on a snoozed chat is the inverse and happens directly.
+  const toggleMute = () => {
+    if (muted) unmute.mutate(session.id);
+    else setReminderOpen(true);
+  };
+
+  const scheduleReminder = (mutedUntil: Date) => {
+    mute.mutate(
+      { id: session.id, mutedUntil },
+      { onError: () => toast.error("Kunne ikke sætte påmindelse") },
+    );
+    setReminderOpen(false);
+    setCustomReminder(toDateTimeLocalValue(mutedUntil));
+  };
 
   function archive() {
     update.mutate(
@@ -167,9 +212,21 @@ export function CerebroChatSessionRowActions({
           <MoreHorizontal className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          {session.has_unread && (
+          {session.has_unread ? (
             <DropdownMenuItem onClick={() => markRead.mutate(session.id)}>
               <MailOpen className="size-4" /> {s.mark_read}
+            </DropdownMenuItem>
+          ) : (
+            !isArchivedView && (
+              <DropdownMenuItem onClick={() => markUnread.mutate(session.id)}>
+                <Mail className="size-4" /> {s.mark_unread}
+              </DropdownMenuItem>
+            )
+          )}
+          {!isArchivedView && (
+            <DropdownMenuItem onClick={toggleMute}>
+              {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
+              {muted ? s.remind_remove : s.remind}
             </DropdownMenuItem>
           )}
           <DropdownMenuItem onClick={startRename}>
@@ -201,6 +258,17 @@ export function CerebroChatSessionRowActions({
       ) : (
         <CerebroSwipeArchive hideOnDesktop onArchive={archive} />
       )}
+
+      {/* "Remind me" time picker (presets + custom), shared with channel/DM rows. */}
+      <ReminderSheet
+        isMobile={isMobile}
+        customReminder={customReminder}
+        open={reminderOpen}
+        strings={inboxStrings}
+        onCustomReminderChange={setCustomReminder}
+        onOpenChange={setReminderOpen}
+        onSchedule={scheduleReminder}
+      />
 
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent className="sm:max-w-sm" onClick={(e) => e.stopPropagation()}>

@@ -142,6 +142,9 @@ type Handler struct {
 	// listen-mode) service. Set by the router after construction so the upstream
 	// handler.New signature stays unchanged.
 	ChannelListen ChannelListenInvoker
+	// CEREBRO-PATCH(handler-chat-mute): TECH-3352 — cerebro chat-session snooze
+	// seam (read muted_until onto the chat list, clear it on read).
+	ChatMute ChatMuteInvoker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
 	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
@@ -376,6 +379,14 @@ type ChannelListenInvoker interface {
 	// snooze + mark-unread overlay read on the channel list, cleared on read.
 	ChannelStatesForUser(ctx context.Context, userID pgtype.UUID) (muted, unreadAt map[string]pgtype.Timestamptz)
 	ClearChannelState(ctx context.Context, channelID, userID pgtype.UUID) error
+}
+
+// ChatMuteInvoker is the seam the upstream chat handler uses to overlay the
+// per-chat-session snooze onto the chat list and clear it on read, without
+// importing the cerebro inbox package. CEREBRO-PATCH(handler-chat-mute-iface): TECH-3352.
+type ChatMuteInvoker interface {
+	ChatMutedForUser(ctx context.Context, userID, workspaceID string) map[string]string
+	ClearChatSessionMute(ctx context.Context, sessionID, userID string)
 }
 
 // New constructs a Handler. The pushService argument is cerebro-specific

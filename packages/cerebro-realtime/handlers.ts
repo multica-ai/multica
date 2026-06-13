@@ -100,6 +100,16 @@ export function registerCerebroHandlers(
     qc.invalidateQueries({ queryKey: chatKeys.allSessions(wsId) });
   });
 
+  // TECH-3352 — chat snooze / mark-unread changes the row's muted/unread state;
+  // keep the user's other tabs/devices in sync.
+  const invalidateChatSessions = () => {
+    const wsId = getCurrentWsId();
+    if (!wsId) return;
+    qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+  };
+  const unsubChatMuted = ws.on("chat:session_muted", invalidateChatSessions);
+  const unsubChatUnread = ws.on("chat:session_unread", invalidateChatSessions);
+
   // JEH-851 — channel archive flips the row in/out of the user's channel
   // list. The originating tab already optimistically updated its caches; this
   // handler keeps the user's other tabs/devices in sync, and re-surface
@@ -180,6 +190,8 @@ export function registerCerebroHandlers(
     unsubArtifactUpdated();
     unsubArtifactDeleted();
     unsubChatSessionUpdated();
+    unsubChatMuted();
+    unsubChatUnread();
     unsubChannelArchived();
     unsubChannelUnarchived();
     unsubChannelStateChanged();

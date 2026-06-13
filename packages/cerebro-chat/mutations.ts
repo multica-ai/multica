@@ -128,3 +128,84 @@ export function useArchiveActiveChatSession() {
     },
   };
 }
+
+// TECH-3352 — per-user "remind me" (snooze) + "mark as unread" for chat-session
+// inbox rows, bringing them to full parity with issue/channel/DM rows (which
+// already have these via @multica/cerebro-channels + @multica/cerebro-inbox).
+// Cerebro-only: chat sessions store the snooze directly on the row
+// (chat_session.muted_until, per creator) and reuse the existing unread marker.
+function patchSessionList(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  sessionId: string,
+  patch: (s: ChatSession) => ChatSession,
+) {
+  qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+    old?.map((s) => (s.id === sessionId ? patch(s) : s)),
+  );
+}
+
+// Snooze ("remind me later"): hides the chat from the normal inbox views until
+// `mutedUntil`, then it resurfaces on its own.
+export function useMuteChat() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, mutedUntil }: { id: string; mutedUntil: Date }) =>
+      api.muteChatSession(id, mutedUntil),
+    onMutate: async ({ id, mutedUntil }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const prev = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+      patchSessionList(qc, wsId, id, (s) => ({ ...s, muted_until: mutedUntil.toISOString() }));
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(chatKeys.sessions(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+export function useUnmuteChat() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.unmuteChatSession(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const prev = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+      patchSessionList(qc, wsId, id, (s) => ({ ...s, muted_until: null }));
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(chatKeys.sessions(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+// Re-flag a read chat as unread (bold row + stripe). The server sets
+// unread_since; the chat list reports has_unread=true for it.
+export function useMarkChatUnread() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.markChatSessionUnread(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const prev = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+      patchSessionList(qc, wsId, id, (s) => ({ ...s, has_unread: true }));
+      return { prev };
+    },
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(chatKeys.sessions(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}

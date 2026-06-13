@@ -32,6 +32,10 @@ type StringTable = {
   toast_convert_failed: string;
   // TECH-3489 — chat row-actions menu (inbox).
   mark_read: string;
+  // TECH-3352 — snooze ("remind me") + mark-unread, parity with channel/DM rows.
+  mark_unread: string;
+  remind: string;
+  remind_remove: string;
   rename: string;
   rename_dialog_title: string;
   rename_placeholder: string;
@@ -82,6 +86,9 @@ const en: StringTable = {
   toast_converted: "Issue created",
   toast_convert_failed: "Failed to create issue",
   mark_read: "Mark as read",
+  mark_unread: "Mark as unread",
+  remind: "Remind me",
+  remind_remove: "Remove reminder",
   rename: "Rename",
   rename_dialog_title: "Rename chat",
   rename_placeholder: "Chat title",
@@ -132,6 +139,9 @@ const da: StringTable = {
   toast_converted: "Issue oprettet",
   toast_convert_failed: "Kunne ikke oprette issue",
   mark_read: "Markér som læst",
+  mark_unread: "Markér som ulæst",
+  remind: "Påmind mig",
+  remind_remove: "Fjern påmindelse",
   rename: "Omdøb",
   rename_dialog_title: "Omdøb chat",
   rename_placeholder: "Chat-titel",
