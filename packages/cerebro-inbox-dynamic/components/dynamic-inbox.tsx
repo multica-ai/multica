@@ -171,6 +171,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  // JEH-901 — "new message" → picking an AGENT must open an agent chat, not a
+  // one-agent DM. Held in local state because no ChatSession exists yet (the
+  // session is created on first send); mirrors the classic inbox new-chat flow.
+  const [newChat, setNewChat] = useState<{ agentId: string; sessionId: string | null } | null>(null);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
@@ -188,9 +192,11 @@ export function DynamicInbox() {
   const clearSelection = useCallback(() => {
     setSelected(null);
     setSelectedSnapshot(null);
+    setNewChat(null);
   }, []);
 
   const onSelect = (entry: DynInboxEntry) => {
+    setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
     // TECH-3413 #7 — selecting never auto-advances to the next row; we only
@@ -248,6 +254,14 @@ export function DynamicInbox() {
     });
   };
   const selectedChannelId = selected?.kind === "channel" ? selected.channel.id : null;
+  // JEH-901 — picking an AGENT in "new message" starts an agent chat (the same
+  // conversation panel the classic inbox uses), not a DM channel. A MEMBER
+  // still flows through onCreated → onOpenChannel (a real DM channel).
+  const handleAgentChatStarted = (agentId: string) => {
+    setSelected(null);
+    setSelectedSnapshot(null);
+    setNewChat({ agentId, sessionId: null });
+  };
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
@@ -328,6 +342,23 @@ export function DynamicInbox() {
   };
 
   const detail = useMemo(() => {
+    // JEH-901 — a freshly started agent chat (from "new message"). No session
+    // exists until the first message is sent; InboxChatPanel owns that, then
+    // reports the id back so we keep showing the live session.
+    if (newChat) {
+      return (
+        <ErrorBoundary resetKeys={[newChat.sessionId ?? newChat.agentId]}>
+          <InboxChatPanel
+            key={newChat.sessionId ?? "new-chat"}
+            sessionId={newChat.sessionId}
+            initialAgentId={newChat.agentId}
+            onSessionCreated={(id) =>
+              setNewChat((c) => (c ? { ...c, sessionId: id } : c))
+            }
+          />
+        </ErrorBoundary>
+      );
+    }
     if (!selected) return null;
     if (selected.kind === "channel") {
       return (
@@ -371,7 +402,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection]);
+  }, [selected, clearSelection, newChat]);
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
@@ -629,7 +660,7 @@ export function DynamicInbox() {
   // open) that message full-screen with a Back button — mirroring how the
   // classic inbox behaves on a phone.
   if (isMobile) {
-    if (selected) {
+    if (selected || newChat) {
       return (
         <div className="flex h-full flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -653,6 +684,7 @@ export function DynamicInbox() {
           open={showNewMessage}
           onClose={() => setShowNewMessage(false)}
           onCreated={onOpenChannel}
+          onAgentChatStarted={handleAgentChatStarted}
         />
         <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
       </div>
@@ -681,6 +713,7 @@ export function DynamicInbox() {
         open={showNewMessage}
         onClose={() => setShowNewMessage(false)}
         onCreated={onOpenChannel}
+        onAgentChatStarted={handleAgentChatStarted}
       />
       <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
     </>
