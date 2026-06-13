@@ -22,6 +22,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -41,11 +42,15 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
-import { useInboxActionGroupLabels, useSetInboxMode } from "@multica/cerebro-inbox";
+import {
+  GlobalInboxReminderDialog,
+  useInboxActionGroupLabels,
+  useSetInboxMode,
+} from "@multica/cerebro-inbox";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { IssueDetail } from "@multica/views/issues/components";
-import { ChannelDetail } from "@multica/views/channels";
+import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
@@ -62,6 +67,7 @@ import {
   type SectionKind,
 } from "../layout";
 import type { DynInboxEntry } from "../section-filter";
+import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
@@ -136,6 +142,8 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  const [showNewMessage, setShowNewMessage] = useState(false);
+  const [showReminder, setShowReminder] = useState(false);
   // TECH-3413 #6 — frozen copy of the selected entry, captured at selection
   // time. While a row is open we render it from this snapshot so marking it
   // read doesn't move it out of its group/section until you pick another row.
@@ -331,7 +339,12 @@ export function DynamicInbox() {
             <Plus className="size-4" />
           </button>
           {/* ⋯ menu */}
-          <div className="ml-auto pb-1">
+          <div className="ml-auto flex items-center gap-1 pb-1">
+            <DynamicInboxCreateMenu
+              onNewMessage={() => setShowNewMessage(true)}
+              onNewIssue={() => openCreateIssueWithPreference()}
+              onNewReminder={() => setShowReminder(true)}
+            />
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<button type="button" className="rounded p-1.5 text-muted-foreground hover:bg-muted" title="Inbox menu" />}
@@ -475,25 +488,43 @@ export function DynamicInbox() {
         </div>
       );
     }
-    return <div className="flex h-full flex-col min-h-0">{listColumn}</div>;
+    return (
+      <div className="flex h-full flex-col min-h-0">
+        {listColumn}
+        <NewMessageModal
+          open={showNewMessage}
+          onClose={() => setShowNewMessage(false)}
+          onCreated={onOpenChannel}
+        />
+        <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
+      </div>
+    );
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal">
-      <ResizablePanel id="list" defaultSize={420} minSize={300} className="flex flex-col">
-        {listColumn}
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
-        {detail ?? (
-          // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
-          // hint) so the right panel never reads as a blank/broken pane.
-          <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
-            <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
-            <p className="text-sm">Select a message to read it here.</p>
-          </div>
-        )}
-      </ResizablePanel>
-    </ResizablePanelGroup>
+    <>
+      <ResizablePanelGroup orientation="horizontal">
+        <ResizablePanel id="list" defaultSize={420} minSize={300} className="flex flex-col">
+          {listColumn}
+        </ResizablePanel>
+        <ResizableHandle withHandle />
+        <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
+          {detail ?? (
+            // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
+            // hint) so the right panel never reads as a blank/broken pane.
+            <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
+              <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
+              <p className="text-sm">Select a message to read it here.</p>
+            </div>
+          )}
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      <NewMessageModal
+        open={showNewMessage}
+        onClose={() => setShowNewMessage(false)}
+        onCreated={onOpenChannel}
+      />
+      <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
+    </>
   );
 }
