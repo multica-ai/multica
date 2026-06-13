@@ -53,8 +53,9 @@ import { useT } from "../../i18n";
 const LARK_INTL_CONNECT_ENABLED: boolean = false;
 
 // LarkTab is the workspace settings panel for Lark Bot installations.
-// Listing is member-visible; the disconnect action is admin-only (the
-// backend enforces it; the UI hides the button for non-admins to match).
+// Listing is member-visible; the workspace-level disconnect action stays
+// owner/admin-only. Agent owners can manage their own bot from that agent's
+// detail Integrations tab, where the page has the agent ownership context.
 //
 // Adding a new installation flows through the Agent detail page: the
 // install path is per-agent (each Multica Agent gets exactly one Bot —
@@ -275,13 +276,9 @@ function InstallationRow({
 // button is the entry point.
 //
 // Visibility rules, in order:
-//   1. Non-owner/admin viewers see nothing — the backend gates
-//      `POST /lark/install/begin`, the status poll, AND disconnect on
-//      those roles (see server/cmd/server/router.go), and `canEditAgent`
-//      lets agent owners through even when they're not workspace admins,
-//      so the parent's `canEdit` gate alone would expose controls that
-//      are guaranteed to 403.
-//   2. If this agent ALREADY has an active installation, owner/admins see
+//   1. Users who cannot manage this agent see nothing. The backend uses
+//      the same rule: workspace owner/admin OR this agent's owner.
+//   2. If this agent ALREADY has an active installation, managers see
 //      the "Connected + Manage in Lark" badge — regardless of
 //      install_supported. install_supported governs only whether NEW
 //      scan-installs can complete; already-installed bots stay manageable
@@ -295,11 +292,13 @@ function InstallationRow({
 export function LarkAgentBindButton({
   agentId,
   agentName,
+  agentOwnerId,
   className,
   onShowConnectedDetails,
 }: {
   agentId: string;
   agentName?: string;
+  agentOwnerId?: string | null;
   className?: string;
   /**
    * When set, the connected state renders as a compact read-only status
@@ -336,7 +335,9 @@ export function LarkAgentBindButton({
   });
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
+    currentMember?.role === "owner" ||
+    currentMember?.role === "admin" ||
+    (!!agentOwnerId && agentOwnerId === user?.id);
 
   if (!canManage) return null;
 
@@ -480,9 +481,9 @@ function LarkAgentBotStatusRow({
 // (new tab). Disconnect removes the installation after a confirm dialog.
 //
 // Visibility rules carry over from the parent `LarkAgentBindButton`:
-// only owners and admins ever reach this component, so the unbind
-// affordance is unconditionally shown — the backend gates DELETE on
-// the same role and would 403 anyone else, which makes a redundant
+// only users who can manage this agent ever reach this component, so the
+// unbind affordance is unconditionally shown — the backend gates DELETE on
+// the same rule and would 403 anyone else, which makes a redundant
 // `canManage` check here dead code.
 //
 // The dev-console host depends on which Lark cloud the bot lives on:

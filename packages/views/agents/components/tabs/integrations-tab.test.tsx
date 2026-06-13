@@ -147,11 +147,21 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
   });
 
-  it("points members at Settings instead of a dead button when they can't manage", () => {
+  it("renders the bind entry for a member who owns the agent", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
+    expect(screen.getByTestId("lark-bind-button")).toBeTruthy();
+  });
+
+  it("points members at Settings instead of a dead button when they don't own the agent", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    renderTab(
+      <IntegrationsTab agent={{ ...agent, owner_id: "someone-else" }} />,
+    );
     expect(
-      screen.getByText(/Only workspace owners and admins can bind a Lark Bot/i),
+      screen.getByText(
+        /Only the agent owner or workspace owners and admins can bind a Lark Bot/i,
+      ),
     ).toBeTruthy();
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
   });

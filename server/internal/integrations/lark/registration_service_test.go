@@ -98,6 +98,8 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 	s := newRegistrationServiceForTest(t)
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 	otherWs := uuidFromStringSvc(t, "22222222-2222-2222-2222-222222222222")
+	agentID := uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333")
+	initiatorID := uuidFromStringSvc(t, "44444444-4444-4444-4444-444444444444")
 
 	if _, err := s.GetSession(ws, "nope"); !errors.Is(err, ErrRegistrationSessionNotFound) {
 		t.Errorf("unknown session: want ErrRegistrationSessionNotFound, got %v", err)
@@ -109,6 +111,8 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 	s.sessions["plant-1"] = &registrationSession{
 		id:          "plant-1",
 		workspaceID: ws,
+		agentID:     agentID,
+		initiatorID: initiatorID,
 		status:      RegistrationStatusPending,
 	}
 	s.mu.Unlock()
@@ -123,6 +127,12 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 	}
 	if state.Status != RegistrationStatusPending {
 		t.Errorf("Status: got %q want pending", state.Status)
+	}
+	if !uuidEqual(state.AgentID, agentID) {
+		t.Errorf("AgentID: got %q want %q", uuidString(state.AgentID), uuidString(agentID))
+	}
+	if !uuidEqual(state.InitiatorID, initiatorID) {
+		t.Errorf("InitiatorID: got %q want %q", uuidString(state.InitiatorID), uuidString(initiatorID))
 	}
 }
 
