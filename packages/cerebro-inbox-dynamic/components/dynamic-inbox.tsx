@@ -417,6 +417,8 @@ export function DynamicInbox() {
                             onOpenChannel={onOpenChannel}
                             maxPeople={section.maxPeople}
                             onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                            sort={section.teamSort}
+                            onSetSort={(s) => changeSection({ ...section, teamSort: s })}
                             onRemove={() => removeSection(section.id)}
                             onMove={(dir) => moveSection(section.id, dir)}
                             isFirst={i === 0}

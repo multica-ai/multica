@@ -173,6 +173,7 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   ),
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
 }));
 
 // useWSEvent records each handler so tests can fire WS payloads at will.
@@ -214,6 +215,7 @@ function renderBlock(
     selectedChannelId: null,
     onOpenChannel: () => {},
     onSetMaxPeople: () => {},
+    onSetSort: () => {},
     onRemove: () => {},
     onMove: () => {},
     isFirst: true,
@@ -335,5 +337,24 @@ describe("SlackBlock", () => {
     // Star Alice → toggle called with her actor key.
     await user.click(screen.getAllByLabelText("Stjernemarkér")[0]!);
     expect(favState.toggle).toHaveBeenCalledWith("member:alice");
+  });
+
+  // TECH-3422 feedback #1 — the block heading reads "Chat".
+  it("renders the 'Chat' heading", async () => {
+    await act(async () => {
+      renderBlock();
+    });
+    expect(screen.getByText("Chat")).toBeInTheDocument();
+  });
+
+  // TECH-3422 feedback #2 — a sort setting that drives onSetSort.
+  it("picking a sort option from settings calls onSetSort", async () => {
+    const onSetSort = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onSetSort });
+    });
+    await user.click(screen.getByText("Seneste aktivitet"));
+    expect(onSetSort).toHaveBeenCalledWith("recent");
   });
 });

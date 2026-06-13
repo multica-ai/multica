@@ -33,6 +33,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuGroup,
+  DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import type { Channel } from "@multica/core/types";
@@ -46,11 +47,16 @@ export interface SlackBlockProps {
   /** How many people to show (0 / undefined = all). Starred people count first. */
   maxPeople?: number;
   onSetMaxPeople: (n: number | undefined) => void;
+  /** Sort order for people + channels. Starred always float to the top. */
+  sort?: TeamSort;
+  onSetSort: (s: TeamSort) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
   isFirst: boolean;
   isLast: boolean;
 }
+
+export type TeamSort = "name" | "recent" | "unread";
 
 /** Options offered in the "Show people" setting. `undefined` = all. */
 const PEOPLE_LIMITS: Array<{ label: string; value: number | undefined }> = [
@@ -59,6 +65,20 @@ const PEOPLE_LIMITS: Array<{ label: string; value: number | undefined }> = [
   { label: "25", value: 25 },
   { label: "Alle", value: undefined },
 ];
+
+/** Options offered in the "Sort by" setting. */
+const SORT_OPTIONS: Array<{ label: string; value: TeamSort }> = [
+  { label: "Navn (A–Å)", value: "name" },
+  { label: "Seneste aktivitet", value: "recent" },
+  { label: "Ulæste øverst", value: "unread" },
+];
+
+/** Most-recent activity timestamp for a conversation (ms), 0 when none. */
+function channelRecency(c: Channel | undefined): number {
+  if (!c) return 0;
+  const ts = c.last_message?.created_at ?? c.updated_at;
+  return ts ? Date.parse(ts) || 0 : 0;
+}
 
 /** A DM channel is "with" a member when its participants are exactly
  *  {self, member} (two members, the current user plus that one). */
@@ -85,6 +105,8 @@ export function SlackBlock({
   onOpenChannel,
   maxPeople,
   onSetMaxPeople,
+  sort = "name",
+  onSetSort,
   onRemove,
   onMove,
   isFirst,
@@ -109,10 +131,13 @@ export function SlackBlock({
   const favorites = useChannelFavoritesStore((s) => s.favorites);
   const toggleFavorite = useChannelFavoritesStore((s) => s.toggle);
 
-  // People = workspace members excluding self, starred first then by name.
+  // People = workspace members excluding self. Starred always float to the top;
+  // within that, the chosen sort decides order (name / recent DM / unread first).
   const people = useMemo(() => {
     const isStarred = (userId: string) =>
       favorites.includes(actorKey("member", userId));
+    const dmOf = (userId: string) =>
+      dmWithMember(channels, selfUserId, userId);
     return members
       .filter((m) => m.user_id !== selfUserId)
       .slice()
@@ -120,9 +145,17 @@ export function SlackBlock({
         const sa = isStarred(a.user_id);
         const sb = isStarred(b.user_id);
         if (sa !== sb) return sa ? -1 : 1;
+        if (sort === "recent") {
+          const d = channelRecency(dmOf(b.user_id)) - channelRecency(dmOf(a.user_id));
+          if (d !== 0) return d;
+        } else if (sort === "unread") {
+          const ua = (dmOf(a.user_id)?.unread_count ?? 0) > 0 ? 1 : 0;
+          const ub = (dmOf(b.user_id)?.unread_count ?? 0) > 0 ? 1 : 0;
+          if (ua !== ub) return ub - ua;
+        }
         return a.name.localeCompare(b.name);
       });
-  }, [members, selfUserId, favorites]);
+  }, [members, selfUserId, favorites, sort, channels]);
 
   const visiblePeople =
     maxPeople && maxPeople > 0 ? people.slice(0, maxPeople) : people;
@@ -137,9 +170,17 @@ export function SlackBlock({
         const sa = isStarred(a.id);
         const sb = isStarred(b.id);
         if (sa !== sb) return sa ? -1 : 1;
+        if (sort === "recent") {
+          const d = channelRecency(b) - channelRecency(a);
+          if (d !== 0) return d;
+        } else if (sort === "unread") {
+          const ua = (a.unread_count ?? 0) > 0 ? 1 : 0;
+          const ub = (b.unread_count ?? 0) > 0 ? 1 : 0;
+          if (ua !== ub) return ub - ua;
+        }
         return a.title.localeCompare(b.title);
       });
-  }, [channels, favorites]);
+  }, [channels, favorites, sort]);
 
   const onlineCount = useMemo(
     () => people.filter((m) => onlineUserIds.has(m.user_id)).length,
@@ -168,7 +209,7 @@ export function SlackBlock({
       {/* Control box — matches the other dynamic-inbox sections. */}
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
-          Team &amp; kanaler
+          Chat
         </span>
         <span className="text-xs text-muted-foreground">{onlineCount} online</span>
         <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
@@ -203,6 +244,18 @@ export function SlackBlock({
               <Settings2 className="size-3.5" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Sortér efter</DropdownMenuLabel>
+                {SORT_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => onSetSort(opt.value)}
+                  >
+                    {opt.label} {sort === opt.value ? "✓" : ""}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Vis personer</DropdownMenuLabel>
                 {PEOPLE_LIMITS.map((opt) => (
