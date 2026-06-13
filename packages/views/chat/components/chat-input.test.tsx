@@ -33,8 +33,10 @@ function makeUpload(overrides: Partial<UploadResult> & { id: string; link: strin
 const TEST_RESOURCES = { en: { common: enCommon, chat: enChat } };
 
 // Track drop-zone callbacks so the test can simulate a real drop.
-const dropHandlers = vi.hoisted(() => ({
+const editorCalls = vi.hoisted(() => ({
   onDrop: null as null | ((files: File[]) => void),
+  focus: vi.fn(),
+  blur: vi.fn(),
 }));
 const editorProps = vi.hoisted(() => ({
   last: null as null | Record<string, unknown>,
@@ -42,7 +44,7 @@ const editorProps = vi.hoisted(() => ({
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
-    dropHandlers.onDrop = onDrop;
+    editorCalls.onDrop = onDrop;
     return { isDragOver: false, dropZoneProps: { "data-testid": "drop-zone" } };
   },
   FileDropOverlay: () => null,
@@ -71,8 +73,8 @@ vi.mock("../../editor", () => ({
       clearContent: () => {
         valueRef.current = "";
       },
-      blur: () => {},
-      focus: () => {},
+      blur: editorCalls.blur,
+      focus: editorCalls.focus,
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
         try {
@@ -180,7 +182,7 @@ describe("ChatInput @ context wiring", () => {
 describe("ChatInput attachment wiring", () => {
   it("routes dropped files through the editor's upload handler", async () => {
     const { onUploadFile } = renderInput();
-    expect(dropHandlers.onDrop).not.toBeNull();
+    expect(editorCalls.onDrop).not.toBeNull();
     const file = new File(["x"], "drop.png", { type: "image/png" });
     await act(async () => {
       dropHandlers.onDrop?.([file]);
@@ -317,6 +319,22 @@ describe("ChatInput attachment wiring", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     const [, ids] = onSend.mock.calls[0]!;
     expect(ids).toEqual(["att-slow"]);
+  });
+
+  it("keeps the editor focused after sending", async () => {
+    editorCalls.focus.mockClear();
+    editorCalls.blur.mockClear();
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "next step" } });
+
+    const buttons = screen.getAllByRole("button");
+    fireEvent.click(buttons[buttons.length - 1]!);
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(editorCalls.focus).toHaveBeenCalledTimes(1);
+    expect(editorCalls.blur).not.toHaveBeenCalled();
   });
 
   it("does not render the file upload button when onUploadFile is omitted", () => {

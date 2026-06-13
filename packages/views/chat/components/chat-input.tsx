@@ -217,14 +217,11 @@ export function ChatInput({
     setIsSubmitting(false);
     if (accepted === false) return;
     editorRef.current?.clearContent();
-    // Drop focus so the caret doesn't keep blinking under the StatusPill /
-    // streaming reply that's about to take over the user's attention. The
-    // input is also `disabled` once isRunning flips, and a focused-but-
-    // disabled editor reads as a stale cursor. We deliberately don't auto-
-    // refocus on completion — that would interrupt the user if they're
-    // selecting text from the assistant reply; one click to refocus is
-    // a fair price for not stealing focus mid-action.
-    editorRef.current?.blur();
+    // Keep the composer focused after send so follow-up prompts can be typed
+    // immediately. ChatInput remains disabled while a task is running, so this
+    // is a best-effort focus restore for the common fast-send / next-thought
+    // workflow without stealing focus after the assistant reply completes.
+    editorRef.current?.focus();
     clearInputDraft(keyAtSend);
     uploadMapRef.current.clear();
     setIsEmpty(true);
