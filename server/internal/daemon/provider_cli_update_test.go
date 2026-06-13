@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -306,6 +308,71 @@ func TestApplyProviderCLIUpdateInstallFailureRecordsRollbackRequired(t *testing.
 		}
 		if record.TargetVersion != "0.139.0" || record.RollbackVersion != "0.125.0" || record.UpdateID == "" {
 			t.Fatalf("record did not persist target/rollback/update id: %+v", record)
+		}
+	}
+}
+
+func TestApplyProviderCLIUpdateReportFailureReleasesBarrier(t *testing.T) {
+	prev := providerCLICommandRunner
+	providerCLICommandRunner = func(_ context.Context, command []string) (string, error) {
+		if len(command) >= 2 && command[0] == "/usr/local/bin/codex" && command[1] == "--version" {
+			return "codex 0.139.0", nil
+		}
+		return "install output", nil
+	}
+	t.Cleanup(func() { providerCLICommandRunner = prev })
+
+	d := &Daemon{
+		cfg:    Config{WorkspacesRoot: t.TempDir()},
+		logger: slog.Default(),
+	}
+	plan := d.PlanProviderCLIUpdate(ProviderCLIUpdateRequest{
+		Provider:      "codex",
+		TargetVersion: "0.139.0",
+		InstallPath:   "/usr/local/bin/codex",
+		InstallPrefix: "/usr/local",
+		Mode:          string(ProviderCLIUpdateApply),
+	})
+	reportErr := errors.New("server unavailable")
+	err := d.applyProviderCLIUpdateWithPreRestartReport(context.Background(), plan, ProviderCLIUpdateApply, false, false, func(record providerCLIUpdateRecord) error {
+		if !d.updating.Load() {
+			t.Fatal("updating must still be held while reporting completion")
+		}
+		if !d.pauseClaims {
+			t.Fatal("claim barrier must still be held while reporting completion")
+		}
+		if record.Status != providerCLIUpdatePendingVerify {
+			t.Fatalf("report record status = %q, want pending_verify", record.Status)
+		}
+		return reportErr
+	})
+	if !errors.Is(err, reportErr) {
+		t.Fatalf("error = %v, want %v", err, reportErr)
+	}
+	if d.updating.Load() {
+		t.Fatal("updating must be released after report failure prevents restart")
+	}
+	if d.pauseClaims {
+		t.Fatal("claim barrier must be released after report failure prevents restart")
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("daemon must be able to claim tasks after report failure prevents restart")
+	}
+	d.exitClaim()
+
+	records, err := d.loadProviderCLIUpdateRecords()
+	if err != nil {
+		t.Fatalf("load records: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records len = %d, want 1", len(records))
+	}
+	for _, record := range records {
+		if record.Status != providerCLIUpdateManualRequired {
+			t.Fatalf("status = %q, want manual_required", record.Status)
+		}
+		if !strings.Contains(record.Error, "completion report failed before restart") {
+			t.Fatalf("record error = %q", record.Error)
 		}
 	}
 }

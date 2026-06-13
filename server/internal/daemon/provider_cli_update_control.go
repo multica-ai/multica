@@ -51,15 +51,14 @@ func (d *Daemon) handleProviderCLIUpdate(ctx context.Context, runtimeID string, 
 		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
 		return
 	}
-	if err := d.applyProviderCLIUpdateWithMode(ctx, plan, ProviderCLIUpdateApply, false, false); err != nil {
+	if err := d.applyProviderCLIUpdateWithPreRestartReport(ctx, plan, ProviderCLIUpdateApply, false, false, func(providerCLIUpdateRecord) error {
+		out, _ := json.Marshal(map[string]any{"provider": plan.Provider, "target_version": plan.TargetVersion, "status": string(providerCLIUpdatePendingVerify)})
+		reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		return d.reportProviderCLIUpdateResult(reportCtx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)})
+	}); err != nil {
+		d.logger.Error("provider CLI update apply failed before restart", "runtime_id", runtimeID, "update_id", update.ID, "error", err)
 		d.reportProviderCLIUpdateResult(ctx, runtimeID, update.ID, map[string]any{"status": "failed", "error": err.Error()})
-		return
-	}
-	out, _ := json.Marshal(map[string]any{"provider": plan.Provider, "target_version": plan.TargetVersion, "status": string(providerCLIUpdatePendingVerify)})
-	reportCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := d.reportProviderCLIUpdateResult(reportCtx, runtimeID, update.ID, map[string]any{"status": "completed", "output": string(out)}); err != nil {
-		d.logger.Error("provider CLI update completion report failed before restart", "runtime_id", runtimeID, "update_id", update.ID, "error", err)
 		return
 	}
 	d.triggerRestart()

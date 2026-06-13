@@ -386,6 +386,10 @@ func (d *Daemon) applyProviderCLIUpdate(ctx context.Context, plan ProviderCLIUpd
 }
 
 func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan ProviderCLIUpdatePlan, mode ProviderCLIUpdateMode, enforceWindow bool, restartOnSuccess bool) error {
+	return d.applyProviderCLIUpdateWithPreRestartReport(ctx, plan, mode, enforceWindow, restartOnSuccess, nil)
+}
+
+func (d *Daemon) applyProviderCLIUpdateWithPreRestartReport(ctx context.Context, plan ProviderCLIUpdatePlan, mode ProviderCLIUpdateMode, enforceWindow bool, restartOnSuccess bool, preRestartReport func(providerCLIUpdateRecord) error) error {
 	if mode != ProviderCLIUpdateApply {
 		return fmt.Errorf("provider CLI update mode is not apply")
 	}
@@ -464,6 +468,15 @@ func (d *Daemon) applyProviderCLIUpdateWithMode(ctx context.Context, plan Provid
 		return err
 	}
 	d.logger.Info("provider CLI auto-update: install completed, restart pending", "provider", plan.Provider, "target", plan.TargetVersion, "update_id", record.UpdateID, "output", output)
+	if preRestartReport != nil {
+		if err := preRestartReport(record); err != nil {
+			record.Status = providerCLIUpdateManualRequired
+			record.Error = fmt.Sprintf("install completed but completion report failed before restart: %v", err)
+			record.UpdatedAt = time.Now()
+			_ = d.saveProviderCLIUpdateRecord(record)
+			return err
+		}
+	}
 	released = true
 	barrierReleased = true
 	if restartOnSuccess {
