@@ -69,6 +69,12 @@ type CreateRequest struct {
 	WatchIssueID pgtype.UUID
 	WatchStatus  pgtype.Text
 	CreatedByID  pgtype.UUID
+	// OriginCommentID is the thread anchor (root comment) of the conversation
+	// the scheduling agent was in when it created this wakeup. When set, the
+	// dispatched wakeup note is posted as a reply under this thread so the
+	// agent's eventual reply lands back in the original conversation instead of
+	// a new orphaned root note (TECH-3487). Zero value = no thread context.
+	OriginCommentID pgtype.UUID
 }
 
 func New(cerebro *cerebrodb.Queries, queries *db.Queries, tasks *service.TaskService, bus *events.Bus) *Service {
@@ -144,15 +150,16 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	}
 
 	return s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
-		WorkspaceID:  workspaceID,
-		AgentID:      req.AgentID,
-		IssueID:      req.IssueID,
-		Prompt:       req.Prompt,
-		TriggerType:  req.TriggerType,
-		FireAt:       req.FireAt,
-		WatchIssueID: req.WatchIssueID,
-		WatchStatus:  req.WatchStatus,
-		CreatedByID:  req.CreatedByID,
+		WorkspaceID:     workspaceID,
+		AgentID:         req.AgentID,
+		IssueID:         req.IssueID,
+		Prompt:          req.Prompt,
+		TriggerType:     req.TriggerType,
+		FireAt:          req.FireAt,
+		WatchIssueID:    req.WatchIssueID,
+		WatchStatus:     req.WatchStatus,
+		CreatedByID:     req.CreatedByID,
+		OriginCommentID: req.OriginCommentID,
 	})
 }
 
@@ -289,6 +296,14 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return s.postpone(ctx, row)
 	}
 
+	// TECH-3487: anchor the wakeup note inside the conversation that scheduled
+	// it. Posting the note as a reply under the original thread root makes the
+	// agent's forced reply (the comment guard requires parent == trigger comment)
+	// resolve into that same thread, so the answer lands where the request was
+	// made instead of in a new orphaned root note. parentID stays zero (root
+	// note, pre-TECH-3487 behavior) when there is no still-valid origin thread.
+	parentID := s.resolveWakeupParent(ctx, row, issue.ID)
+
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -296,6 +311,7 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		AuthorID:    util.MustParseUUID("00000000-0000-0000-0000-000000000000"),
 		Content:     buildWakeupCommentContent(row.TriggerType, row.Prompt),
 		Type:        commentTypeWakeup,
+		ParentID:    parentID,
 	})
 	if err != nil {
 		return fmt.Errorf("create wakeup comment: %w", err)
@@ -329,6 +345,30 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		})
 	}
 	return nil
+}
+
+// resolveWakeupParent returns the comment the wakeup note should be posted under
+// so it threads into the conversation that scheduled the wakeup (TECH-3487).
+// It returns the zero UUID — meaning "post as a root note" — when the wakeup has
+// no recorded origin, or the origin comment has since been deleted or moved to a
+// different issue. The returned anchor is normalized to the thread root, matching
+// how the daemon derives the triggering thread (handler/daemon.go), so the note
+// sits one level under the root and the agent's reply lands in the same thread.
+func (s *Service) resolveWakeupParent(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issueID pgtype.UUID) pgtype.UUID {
+	if !row.OriginCommentID.Valid {
+		return pgtype.UUID{}
+	}
+	origin, err := s.Queries.GetComment(ctx, row.OriginCommentID)
+	if err != nil {
+		return pgtype.UUID{} // origin deleted — fall back to a root note
+	}
+	if util.UUIDToString(origin.IssueID) != util.UUIDToString(issueID) {
+		return pgtype.UUID{} // origin belongs to another issue — do not cross threads
+	}
+	if origin.ParentID.Valid {
+		return origin.ParentID // normalize to the thread root
+	}
+	return origin.ID
 }
 
 // buildWakeupCommentContent encodes the trigger sub-type as a leading inline

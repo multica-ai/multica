@@ -343,6 +343,7 @@ type CerebroAgentWakeup struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	ConsecutivePostpones int32              `json:"consecutive_postpones"`
+	OriginCommentID      pgtype.UUID        `json:"origin_comment_id"`
 }
 
 type CerebroApprovalAudit struct {

@@ -26,19 +26,19 @@ WHERE workspace_id = $1
 -- name: CreateCerebroAgentWakeup :one
 INSERT INTO cerebro_agent_wakeup (
     workspace_id, agent_id, issue_id, prompt, trigger_type,
-    fire_at, watch_issue_id, watch_status, created_by_id
+    fire_at, watch_issue_id, watch_status, created_by_id, origin_comment_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones;
+          consecutive_postpones, origin_comment_id;
 
 -- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
        dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-       consecutive_postpones
+       consecutive_postpones, origin_comment_id
 FROM cerebro_agent_wakeup
 WHERE workspace_id = $1
   AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id')::uuid)
@@ -51,7 +51,7 @@ LIMIT $2;
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
        dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-       consecutive_postpones
+       consecutive_postpones, origin_comment_id
 FROM cerebro_agent_wakeup
 WHERE id = $1;
 
@@ -66,7 +66,7 @@ WHERE id = $1
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones;
+          consecutive_postpones, origin_comment_id;
 
 -- name: ClaimDueTimeWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -86,7 +86,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones;
+          consecutive_postpones, origin_comment_id;
 
 -- name: ClaimPendingIssueStatusWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -107,7 +107,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones;
+          consecutive_postpones, origin_comment_id;
 
 -- name: ClaimPendingGithubCIWakeups :many
 UPDATE cerebro_agent_wakeup
@@ -127,7 +127,7 @@ WHERE id IN (
 RETURNING id, workspace_id, agent_id, issue_id, prompt, trigger_type,
           fire_at, watch_issue_id, watch_status, state, claimed_at,
           dispatched_at, cancelled_at, failure, created_by_id, created_at, updated_at,
-          consecutive_postpones;
+          consecutive_postpones, origin_comment_id;
 
 -- name: MarkWakeupDispatched :exec
 UPDATE cerebro_agent_wakeup
