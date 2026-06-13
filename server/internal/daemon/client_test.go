@@ -66,6 +66,35 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	}
 }
 
+func TestClient_SendHeartbeatAdvertisesProviderCLIUpdateCapability(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/heartbeat" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["runtime_id"] != "rt-1" {
+			t.Fatalf("runtime_id = %v", body["runtime_id"])
+		}
+		if body["supports_batch_import"] != true {
+			t.Fatalf("supports_batch_import = %v", body["supports_batch_import"])
+		}
+		if body["supports_provider_cli_update"] != true {
+			t.Fatalf("supports_provider_cli_update = %v", body["supports_provider_cli_update"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if _, err := c.SendHeartbeat(context.Background(), "rt-1"); err != nil {
+		t.Fatalf("SendHeartbeat: %v", err)
+	}
+}
+
 func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("X-Client-Platform"); got != "daemon" {
