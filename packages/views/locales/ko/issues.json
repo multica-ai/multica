@@ -219,7 +219,14 @@
     "link_copy_failed": "링크를 복사하지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
-    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다"
+    "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 이슈를 실행하지 않았습니다",
+    "section_ado_pull_requests": "Azure DevOps PR",
+    "ado_pull_requests_loading": "로딩 중…",
+    "ado_pull_requests_empty": "연결된 Azure DevOps 풀 리퀘스트가 아직 없습니다.",
+    "ado_pr_state_abandoned": "중단됨",
+    "ado_policy_approved": "정책 승인됨",
+    "ado_policy_blocked": "정책 차단됨",
+    "ado_policy_pending": "정책 대기 중"
   },
   "timeline": {
     "loading": "불러오는 중..."

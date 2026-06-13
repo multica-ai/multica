@@ -591,6 +591,17 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 				ref["label"] = strings.TrimSpace(refLabel)
 			}
 			body["resource_ref"] = ref
+		case "azure_devops_repo":
+			urlVal, _ := cmd.Flags().GetString("url")
+			urlVal = strings.TrimSpace(urlVal)
+			if urlVal == "" {
+				return fmt.Errorf("azure_devops_repo requires --url (or pass a JSON payload via --ref)")
+			}
+			ref := map[string]any{"url": urlVal}
+			if hint, _ := cmd.Flags().GetString("default-branch-hint"); hint != "" {
+				ref["default_branch_hint"] = strings.TrimSpace(hint)
+			}
+			body["resource_ref"] = ref
 		default:
 			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
 		}

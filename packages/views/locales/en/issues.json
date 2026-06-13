@@ -219,7 +219,14 @@
     "link_copy_failed": "Failed to copy link",
     "workdir_path_copied": "Workdir path copied",
     "workdir_path_copy_failed": "Failed to copy workdir path",
-    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
+    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
+    "section_ado_pull_requests": "Azure DevOps PRs",
+    "ado_pull_requests_loading": "Loading…",
+    "ado_pull_requests_empty": "No linked Azure DevOps pull requests yet. Reference this issue's identifier in a PR's title or body to auto-link it.",
+    "ado_pr_state_abandoned": "Abandoned",
+    "ado_policy_approved": "Policy approved",
+    "ado_policy_blocked": "Policy blocked",
+    "ado_policy_pending": "Policy pending"
   },
   "timeline": {
     "loading": "Loading..."

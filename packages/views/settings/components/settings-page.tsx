@@ -13,6 +13,7 @@ import {
   Plug,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
+import { AzureDevOpsMark } from "./azuredevops-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
@@ -23,6 +24,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
+import { AzureDevOpsTab } from "./azuredevops-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -40,6 +42,7 @@ const WORKSPACE_TAB_KEYS = [
   "general",
   "repositories",
   "github",
+  "azuredevops",
   "integrations",
   "labs",
   "members",
@@ -48,6 +51,7 @@ const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
   github: "github",
+  azuredevops: "azuredevops",
   integrations: "integrations",
   labs: "labs",
   members: "members",
@@ -56,6 +60,7 @@ const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
   github: GitHubMark,
+  azuredevops: AzureDevOpsMark,
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
@@ -174,6 +179,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="github"><GitHubTab /></TabsContent>
+          <TabsContent value="azuredevops"><AzureDevOpsTab /></TabsContent>
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
