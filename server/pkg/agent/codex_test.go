@@ -1548,8 +1548,24 @@ func TestWithAgentStderrAppendsHint(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsUsesUmbrellaCodexSubcommand(t *testing.T) {
+	args := buildCodexArgs("/usr/local/bin/codex", ExecOptions{}, slog.Default())
+	want := []string{"app-server", "--listen", "stdio://"}
+	if !stringSlicesEqual(args, want) {
+		t.Fatalf("got %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsUsesStandaloneAppServerSessionSource(t *testing.T) {
+	args := buildCodexArgs("/usr/local/bin/codex-app-server", ExecOptions{}, slog.Default())
+	want := []string{"--listen", "stdio://", "--session-source", "multica-agent-sdk"}
+	if !stringSlicesEqual(args, want) {
+		t.Fatalf("got %v, want %v", args, want)
+	}
+}
+
 func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
-	args := buildCodexArgs(ExecOptions{
+	args := buildCodexArgs("/usr/local/bin/codex", ExecOptions{
 		ExtraArgs:  []string{"--listen", "tcp://evil", "--sandbox", "read-only"},
 		CustomArgs: []string{"--sandbox", "workspace-write", "--listen=bad"},
 	}, slog.Default())
@@ -1580,7 +1596,7 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	// test pins the contract: even with a non-empty mcp_config, no -c /
 	// --config / mcp_servers.* entry shows up in buildCodexArgs output.
 	raw := json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","env":{"SECRET":"hunter2"}}}}`)
-	args := buildCodexArgs(ExecOptions{
+	args := buildCodexArgs("/usr/local/bin/codex", ExecOptions{
 		McpConfig:  raw,
 		CustomArgs: []string{"-c", `model="o3"`},
 	}, slog.Default())
@@ -1689,7 +1705,7 @@ func TestBuildCodexArgsPreservesCustomMcpOverridesWhenUnmanaged(t *testing.T) {
 	// alone — silently dropping them would break the only way those
 	// users had to configure MCP. We only claim the `mcp_servers`
 	// namespace once an admin opts in via the MCP Tab.
-	args := buildCodexArgs(ExecOptions{
+	args := buildCodexArgs("/usr/local/bin/codex", ExecOptions{
 		CustomArgs: []string{"-c", `mcp_servers.fetch={ command = "uvx" }`, "-c", `model="o3"`},
 	}, slog.Default())
 	foundMcp := false
@@ -1711,7 +1727,7 @@ func TestBuildCodexArgsDropsCustomMcpOverridesWhenManaged(t *testing.T) {
 	// `-c` is last-wins, so any `-c mcp_servers.…` left in custom_args
 	// would silently shadow the saved managed entries.
 	raw := json.RawMessage(`{"mcpServers":{"managed":{"command":"managed-cmd"}}}`)
-	args := buildCodexArgs(ExecOptions{
+	args := buildCodexArgs("/usr/local/bin/codex", ExecOptions{
 		McpConfig:  raw,
 		CustomArgs: []string{"-c", `mcp_servers.fetch={ command = "evil" }`, "-c", `model="o3"`},
 	}, slog.Default())
@@ -2099,4 +2115,31 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBuildCodexArgsStandaloneFiltersSessionSourceOverrides(t *testing.T) {
+	args := buildCodexArgs("/usr/local/bin/codex-app-server", ExecOptions{
+		ExtraArgs:  []string{"--session-source", "vscode", "--sandbox", "read-only"},
+		CustomArgs: []string{"--session-source=cli", "--sandbox", "workspace-write"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "vscode") || strings.Contains(joined, "--session-source=cli") {
+		t.Fatalf("session source overrides should be filtered: %v", args)
+	}
+	wantPrefix := []string{"--listen", "stdio://", "--session-source", "multica-agent-sdk"}
+	if len(args) < len(wantPrefix) || !stringSlicesEqual(args[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("got %v, want prefix %v", args, wantPrefix)
+	}
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
