@@ -292,11 +292,37 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// shape can drive the turn.
 		// TODO: drop one field once Kiro lands on a single canonical payload.
 		streamingCurrentTurn.Store(true)
-		_, err = c.request(runCtx, "session/prompt", map[string]any{
-			"sessionId": sessionID,
-			"content":   promptBlocks,
-			"prompt":    promptBlocks,
-		})
+
+		// Retry transient upstream errors (ConnectionReset, DispatchFailure,
+		// timeout, throttling) with exponential backoff. Throttled requests
+		// use longer delays (10s base) to respect rate limits.
+		const maxPromptRetries = 3
+		for attempt := 0; attempt <= maxPromptRetries; attempt++ {
+			if attempt > 0 {
+				streamingCurrentTurn.Store(false)
+				var backoff time.Duration
+				if isThrottledError(err) {
+					backoff = time.Duration(10<<(attempt-1)) * time.Second // 10s, 20s, 40s
+				} else {
+					backoff = time.Duration(3<<(attempt-1)) * time.Second // 3s, 6s, 12s
+				}
+				b.cfg.Logger.Warn("kiro session/prompt transient failure, retrying", "attempt", attempt, "backoff", backoff, "error", err)
+				select {
+				case <-time.After(backoff):
+				case <-runCtx.Done():
+				}
+				streamingCurrentTurn.Store(true)
+			}
+			_, err = c.request(runCtx, "session/prompt", map[string]any{
+				"sessionId": sessionID,
+				"content":   promptBlocks,
+				"prompt":    promptBlocks,
+			})
+			if err == nil || runCtx.Err() != nil || !isTransientKiroError(err) {
+				break
+			}
+		}
+
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
@@ -420,4 +446,30 @@ func kiroToolNameFromTitle(title string) string {
 	}
 
 	return strings.ReplaceAll(lower, " ", "_")
+}
+
+// isTransientKiroError returns true for errors that are likely transient
+// upstream failures (network resets, dispatch failures, timeouts, throttling)
+// and worth retrying.
+func isTransientKiroError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "dispatch failure") ||
+		strings.Contains(msg, "DispatchFailure") ||
+		strings.Contains(msg, "ConnectionReset") ||
+		strings.Contains(msg, "Connection reset by peer") ||
+		strings.Contains(msg, "request has timed out") ||
+		strings.Contains(msg, "throttled") ||
+		strings.Contains(msg, "response error")
+}
+
+// isThrottledError returns true if the error indicates rate limiting,
+// which warrants a longer backoff.
+func isThrottledError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "throttled")
 }
