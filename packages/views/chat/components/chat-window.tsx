@@ -247,6 +247,50 @@ export function ChatWindow() {
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
 
+  useEffect(() => {
+    if (!activeSessionId || !isTaskMessageTaskId(pendingTaskId)) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const refreshAfterIdle = () => {
+      qc.setQueryData(chatKeys.pendingTask(activeSessionId), {});
+      qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(activeSessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    };
+
+    const poll = async () => {
+      try {
+        const latest = await api.getPendingChatTask(activeSessionId);
+        if (cancelled) return;
+        if (!latest?.task_id) {
+          apiLogger.info("pendingTask.poll.idle", {
+            sessionId: activeSessionId,
+            previousTaskId: pendingTaskId,
+          });
+          refreshAfterIdle();
+          return;
+        }
+        qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(activeSessionId), latest);
+      } catch (err) {
+        apiLogger.warn("pendingTask.poll.error", {
+          sessionId: activeSessionId,
+          taskId: pendingTaskId,
+          err,
+        });
+      }
+      if (!cancelled) timer = setTimeout(poll, 3000);
+    };
+
+    timer = setTimeout(poll, 3000);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [activeSessionId, pendingTaskId, qc, wsId]);
+
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
   const availableAgents = agents.filter(
@@ -647,6 +691,7 @@ export function ChatWindow() {
   return (
     <motion.div
       ref={windowRef}
+      data-acceptance="chat-response-in-progress"
       className={containerClass}
       style={containerStyle}
       initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
