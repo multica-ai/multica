@@ -353,3 +353,64 @@ func TestSplitWebhookEvent(t *testing.T) {
 		}
 	}
 }
+
+// TestEncodeWebhookEventFilters_TrimsWhitespace is follow-up 2 from the PR
+// #3231 review: validation only trims for the emptiness check but used to
+// persist the raw string, so a `" workflow_run "` entry passed validation
+// and then never matched at read time (the matcher compares exact strings).
+// Normalizing at marshal time fixes this end to end — the stored bytes match
+// a real envelope.
+func TestEncodeWebhookEventFilters_TrimsWhitespace(t *testing.T) {
+	filters := []WebhookEventFilter{
+		{Event: "  workflow_run  ", Actions: []string{" completed ", "requested"}},
+	}
+	encoded, err := encodeWebhookEventFilters(filters)
+	if err != nil {
+		t.Fatalf("encode failed: %v", err)
+	}
+
+	var got []WebhookEventFilter
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if len(got) != 1 || got[0].Event != "workflow_run" {
+		t.Fatalf("event not trimmed: %+v", got)
+	}
+	if len(got[0].Actions) != 2 || got[0].Actions[0] != "completed" || got[0].Actions[1] != "requested" {
+		t.Fatalf("actions not trimmed: %+v", got[0].Actions)
+	}
+
+	// The normalized bytes must actually match a real envelope at read time.
+	env := WebhookEnvelope{
+		Event:        "github.workflow_run.completed",
+		EventPayload: json.RawMessage(`{"action":"completed"}`),
+	}
+	if !webhookEventAllowedByTriggerScope(encoded, env) {
+		t.Fatal("normalized filter should match workflow_run.completed; raw-stored whitespace would have dropped it")
+	}
+}
+
+// TestNormalizeWebhookEventFilters_DropsEmptyActions guards the action list:
+// blank-after-trim actions are dropped so a stray comma in the UI input
+// (e.g. "completed,,failed") can't persist an unmatchable empty entry.
+func TestNormalizeWebhookEventFilters_DropsEmptyActions(t *testing.T) {
+	out := normalizeWebhookEventFilters([]WebhookEventFilter{
+		{Event: "push", Actions: []string{"completed", "   ", ""}},
+	})
+	if len(out) != 1 || len(out[0].Actions) != 1 || out[0].Actions[0] != "completed" {
+		t.Fatalf("blank actions not dropped: %+v", out)
+	}
+}
+
+// TestEncodeWebhookEventFiltersAlways_EmptyStaysExplicitArray pins the
+// tri-state contract: an explicit empty slice must still marshal to `[]`
+// (the UPDATE path relies on this to clear filters), not `null`.
+func TestEncodeWebhookEventFiltersAlways_EmptyStaysExplicitArray(t *testing.T) {
+	encoded, err := encodeWebhookEventFiltersAlways([]WebhookEventFilter{})
+	if err != nil {
+		t.Fatalf("encode failed: %v", err)
+	}
+	if string(encoded) != "[]" {
+		t.Fatalf("empty filters should encode to [], got %q", string(encoded))
+	}
+}
