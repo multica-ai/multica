@@ -28,6 +28,7 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockUploadWithToast = vi.hoisted(() => vi.fn());
 
 const mockDraftStore = {
   draft: {
@@ -39,6 +40,23 @@ const mockDraftStore = {
     assigneeId: undefined as string | undefined,
     startDate: null,
     dueDate: null,
+    attachments: [] as Array<{
+      id: string;
+      workspace_id: string;
+      issue_id: string | null;
+      comment_id: string | null;
+      chat_session_id: string | null;
+      chat_message_id: string | null;
+      uploader_type: string;
+      uploader_id: string;
+      filename: string;
+      url: string;
+      download_url: string;
+      markdown_url: string;
+      content_type: string;
+      size_bytes: number;
+      created_at: string;
+    }>,
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
@@ -93,7 +111,7 @@ vi.mock("@multica/core/issues/mutations", () => ({
 }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn() }),
+  useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
 }));
 
 // Hoisted ApiError class so both the vi.mock factory and the tests below
@@ -137,7 +155,7 @@ vi.mock("@multica/core/api", async () => {
 });
 
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useImperativeHandle(ref, () => ({
@@ -146,18 +164,21 @@ vi.mock("../editor", () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: vi.fn(),
+      uploadFile: (file: File) => onUploadFile?.(file),
     }));
     return (
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => {
-          valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
-        }}
-      />
+      <>
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          data-attachments-count={attachments?.length ?? 0}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+        />
+      </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
@@ -312,10 +333,52 @@ describe("CreateIssueModal", () => {
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
+    mockDraftStore.draft.title = "";
+    mockDraftStore.draft.description = "";
+    mockDraftStore.draft.status = "todo";
+    mockDraftStore.draft.priority = "none";
     // Reset the shared draft mock so per-test assignee seeding (squad / agent)
     // doesn't leak into the next test in the suite.
     mockDraftStore.draft.assigneeType = undefined;
     mockDraftStore.draft.assigneeId = undefined;
+    mockDraftStore.draft.startDate = null;
+    mockDraftStore.draft.dueDate = null;
+    mockDraftStore.draft.attachments = [];
+    mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
+      mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
+    });
+    mockClearDraft.mockImplementation(() => {
+      mockDraftStore.draft = {
+        title: "",
+        description: "",
+        status: "todo",
+        priority: "none",
+        assigneeType: mockDraftStore.lastAssigneeType,
+        assigneeId: mockDraftStore.lastAssigneeId,
+        startDate: null,
+        dueDate: null,
+        attachments: [],
+      };
+    });
+    mockUploadWithToast.mockResolvedValue({
+      id: "11111111-2222-3333-4444-555555555555",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "shot.png",
+      url: "https://cdn.example.test/shot.png",
+      download_url: "https://cdn.example.test/shot.png?Signature=fresh",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      content_type: "image/png",
+      size_bytes: 123,
+      created_at: "2026-06-12T00:00:00Z",
+      link: "https://cdn.example.test/shot.png",
+      markdownLink: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
+    });
     mockCreateIssue.mockResolvedValue({
       id: "issue-123",
       identifier: "TES-123",
@@ -410,6 +473,111 @@ describe("CreateIssueModal", () => {
       assigneeId: undefined,
       startDate: null,
       dueDate: null,
+      attachments: [],
+    });
+  });
+
+  it("persists manual-mode uploads in the issue draft", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
+
+    await waitFor(() => {
+      expect(mockSetDraft).toHaveBeenCalledWith({
+        attachments: [
+          expect.objectContaining({
+            id: "11111111-2222-3333-4444-555555555555",
+            filename: "shot.png",
+            download_url: "",
+          }),
+        ],
+      });
+    });
+    const draftAttachmentsCall = mockSetDraft.mock.calls.find(
+      ([patch]) => Array.isArray(patch.attachments),
+    )?.[0] as { attachments?: Array<{ download_url: string }> } | undefined;
+    expect(draftAttachmentsCall?.attachments?.[0]?.download_url).not.toContain(
+      "Signature=",
+    );
+  });
+
+  it("reuses draft attachments after reopening manual create so pasted images can render and bind", async () => {
+    const user = userEvent.setup();
+    const attachment = {
+      id: "11111111-2222-3333-4444-555555555555",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "shot.png",
+      url: "https://cdn.example.test/shot.png",
+      download_url: "",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      content_type: "image/png",
+      size_bytes: 123,
+      created_at: "2026-06-12T00:00:00Z",
+    };
+    mockDraftStore.draft.title = "Image draft";
+    mockDraftStore.draft.description = `![shot.png](${attachment.markdown_url})`;
+    mockDraftStore.draft.attachments = [attachment];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByPlaceholderText("Add description...")).toHaveAttribute(
+      "data-attachments-count",
+      "1",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: `![shot.png](${attachment.markdown_url})`,
+          attachment_ids: ["11111111-2222-3333-4444-555555555555"],
+        }),
+      );
+    });
+  });
+
+  it("prunes draft attachments the reopened description no longer references", async () => {
+    const referenced = {
+      id: "11111111-2222-3333-4444-555555555555",
+      workspace_id: "ws-test",
+      issue_id: null,
+      comment_id: null,
+      chat_session_id: null,
+      chat_message_id: null,
+      uploader_type: "member",
+      uploader_id: "user-1",
+      filename: "kept.png",
+      url: "https://cdn.example.test/kept.png",
+      download_url: "",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      content_type: "image/png",
+      size_bytes: 123,
+      created_at: "2026-06-12T00:00:00Z",
+    };
+    const deleted = {
+      ...referenced,
+      id: "99999999-8888-7777-6666-555555555555",
+      filename: "deleted.png",
+      url: "https://cdn.example.test/deleted.png",
+      markdown_url: "https://multica-api.copilothub.ai/api/attachments/99999999-8888-7777-6666-555555555555/download",
+    };
+    mockDraftStore.draft.title = "Image draft";
+    mockDraftStore.draft.description = `![kept.png](${referenced.markdown_url})`;
+    mockDraftStore.draft.attachments = [referenced, deleted];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockSetDraft).toHaveBeenCalledWith({ attachments: [referenced] });
     });
   });
 

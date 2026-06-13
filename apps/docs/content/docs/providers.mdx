@@ -17,7 +17,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
 | **Codex** | OpenAI | ⚠️ Code exists but unreachable | ✅ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
-| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
+| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ✅ | `.cursor/skills/` | Dynamic discovery |
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
 | **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` (fallback) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
@@ -46,7 +46,7 @@ From GitHub. Model routing goes through your GitHub account entitlement — the 
 
 ### Cursor
 
-From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else.
+From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else. MCP config is materialized into the task workspace's `.cursor/mcp.json`, with Cursor's project approval file written under a per-task `CURSOR_DATA_DIR` so managed MCP servers do not depend on the user's global Cursor approvals.
 
 ### Gemini
 
@@ -90,9 +90,9 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: provider-specific support
 
-**Of the 12 tools, seven consume `mcp_config`: Claude Code, Codex, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other five accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, eight consume `mcp_config`: Claude Code, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other four accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
-The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
+The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.

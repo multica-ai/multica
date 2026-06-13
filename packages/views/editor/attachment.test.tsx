@@ -259,6 +259,39 @@ describe("Attachment — image dispatch", () => {
     );
   });
 
+  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {
+    configStore.setState({ cdnDomain: "cdn.example.test" });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const mediaUrl = "https://cdn.example.test/uploads/ws/shot.png";
+    const att = makeRecord({
+      id,
+      url: mediaUrl,
+      markdown_url: markdownUrl,
+      download_url: "",
+    });
+    resolverState.attachments = [att];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("View"));
+
+    const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
+      img.getAttribute("src"),
+    );
+    expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
+    expect(imageSrcs).not.toContain("");
+  });
+
   it("forceKind=image renders as image even when filename is empty (markdown ![](url) regression)", () => {
     renderWithQuery(
       <Attachment
