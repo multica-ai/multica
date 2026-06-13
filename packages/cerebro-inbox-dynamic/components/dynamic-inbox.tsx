@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Trash2 } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2 } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -37,6 +37,16 @@ import {
   DropdownMenuLabel,
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Button } from "@multica/ui/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import { Input } from "@multica/ui/components/ui/input";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useQueryClient } from "@tanstack/react-query";
@@ -131,7 +141,7 @@ function SortableSection({
 
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
-  const { layout, setLayout } = useInboxLayout();
+  const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const setMode = useSetInboxMode();
@@ -167,6 +177,8 @@ export function DynamicInbox() {
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [presetName, setPresetName] = useState("");
   // TECH-3413 #6 — frozen copy of the selected entry, captured at selection
   // time. While a row is open we render it from this snapshot so marking it
   // read doesn't move it out of its group/section until you pick another row.
@@ -313,6 +325,18 @@ export function DynamicInbox() {
     setLayout(next);
     setActiveTabId(next.activeTabId ?? next.tabs[0]?.id ?? "");
   };
+  const applyUserPreset = (presetLayout: InboxLayout) => {
+    setLayout(presetLayout);
+    setActiveTabId(presetLayout.activeTabId ?? presetLayout.tabs[0]?.id ?? "");
+  };
+  const onSavePreset = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const cleanName = presetName.trim();
+    if (!cleanName) return;
+    saveUserPreset(cleanName);
+    setPresetName("");
+    setSavePresetOpen(false);
+  };
 
   const detail = useMemo(() => {
     if (!selected) return null;
@@ -411,6 +435,32 @@ export function DynamicInbox() {
               onNewIssue={() => openCreateIssueWithPreference()}
               onNewReminder={() => setShowReminder(true)}
             />
+            <Dialog open={savePresetOpen} onOpenChange={setSavePresetOpen}>
+              <DialogContent>
+                <form onSubmit={onSavePreset} className="space-y-4">
+                  <DialogHeader>
+                    <DialogTitle>Save inbox preset</DialogTitle>
+                    <DialogDescription>
+                      Save the current tabs and sections as a shortcut in this menu.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <Input
+                    value={presetName}
+                    onChange={(e) => setPresetName(e.target.value)}
+                    placeholder="Preset name"
+                    autoFocus
+                  />
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setSavePresetOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit" disabled={!presetName.trim()}>
+                      <Save className="size-4" /> Save preset
+                    </Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={<button type="button" className="rounded p-1.5 text-muted-foreground hover:bg-muted" title="Inbox menu" />}
@@ -446,11 +496,43 @@ export function DynamicInbox() {
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Start from preset</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setSavePresetOpen(true)}>
+                    <Save className="mr-2 size-4" /> Save current as preset...
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {INBOX_PRESETS.map((p) => (
                     <DropdownMenuItem key={p.key} onClick={() => applyPreset(p.build)}>
                       {p.label}
                     </DropdownMenuItem>
                   ))}
+                  {userPresets.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuLabel>My presets</DropdownMenuLabel>
+                      {userPresets.map((preset) => (
+                        <DropdownMenuItem
+                          key={preset.id}
+                          className="pr-1"
+                          onClick={() => applyUserPreset(preset.layout)}
+                        >
+                          <span className="min-w-0 flex-1 truncate">{preset.label}</span>
+                          <button
+                            type="button"
+                            className="ml-2 rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                            title={`Delete ${preset.label}`}
+                            aria-label={`Delete ${preset.label}`}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              deleteUserPreset(preset.id);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        </DropdownMenuItem>
+                      ))}
+                    </>
+                  )}
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => void setMode("classic")}>

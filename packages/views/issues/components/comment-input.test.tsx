@@ -21,6 +21,8 @@ vi.mock("@multica/cerebro-preferences/views", () => ({
   useSubmitOnEnter: () => false,
 }));
 
+// CEREBRO-PATCH(comment-drafts): this unit test focuses on CommentInput's
+// editor wiring; draft persistence is covered in cerebro-comment-drafts.
 vi.mock("@multica/cerebro-comment-drafts", () => ({
   DraftSavedHint: () => null,
   useCommentDraft: () => ({

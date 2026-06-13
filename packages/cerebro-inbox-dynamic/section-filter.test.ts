@@ -13,11 +13,15 @@ import {
   type SectionFilterContext,
 } from "./section-filter";
 import {
-  isValidLayout,
-  operatorPreset,
-  sectionLabel,
-  makeId,
+  deleteUserInboxPreset,
   dedupeLayoutIds,
+  isValidLayout,
+  makeId,
+  makeUserInboxPresetsBlob,
+  operatorPreset,
+  readUserInboxPresets,
+  sectionLabel,
+  upsertUserInboxPreset,
   type InboxLayout,
 } from "./layout";
 
@@ -255,5 +259,49 @@ describe("layout", () => {
     expect(dedupeLayoutIds(collided)).toEqual(fixed);
     // activeTabId still points at a real tab.
     expect(tabIds).toContain(fixed.activeTabId);
+  });
+
+  it("saves a named user preset in the preferences blob shape", () => {
+    const layout = operatorPreset();
+    const presets = upsertUserInboxPreset([], {
+      id: "preset_1",
+      label: "  Morning queue  ",
+      layout,
+    });
+    const blob = makeUserInboxPresetsBlob(presets);
+
+    expect(blob).toEqual({
+      version: 1,
+      presets: [{ id: "preset_1", label: "Morning queue", layout }],
+    });
+  });
+
+  it("loads only valid user presets from preferences", () => {
+    const layout = operatorPreset();
+    const presets = readUserInboxPresets({
+      version: 1,
+      presets: [
+        { id: "preset_1", label: "Mine", layout },
+        { id: "broken", label: "Broken", layout: { version: 99, tabs: [] } },
+      ],
+    });
+
+    expect(presets).toHaveLength(1);
+    expect(presets[0]?.label).toBe("Mine");
+    expect(presets[0]?.layout).toEqual(layout);
+  });
+
+  it("replaces a user preset by name and deletes it by id", () => {
+    const first = operatorPreset();
+    const second = { ...operatorPreset(), activeTabId: "replacement" };
+    const saved = upsertUserInboxPreset(
+      [{ id: "old", label: "Mine", layout: first }],
+      { id: "new", label: "Mine", layout: second },
+    );
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]?.id).toBe("new");
+    expect(saved[0]?.layout.activeTabId).toBe("replacement");
+    expect(deleteUserInboxPreset(saved, "new")).toEqual([]);
   });
 });

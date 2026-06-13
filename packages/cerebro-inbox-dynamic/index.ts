@@ -5,7 +5,12 @@
 // per user via the inbox mode preference (see @multica/cerebro-inbox).
 export { CerebroInboxSwitcher } from "./components/cerebro-inbox-switcher";
 export { DynamicInbox } from "./components/dynamic-inbox";
-export { useInboxLayout, INBOX_LAYOUT_KEY, INBOX_LAYOUT_MOBILE_KEY } from "./use-inbox-layout";
+export {
+  useInboxLayout,
+  INBOX_LAYOUT_KEY,
+  INBOX_LAYOUT_MOBILE_KEY,
+  USER_INBOX_PRESETS_KEY,
+} from "./use-inbox-layout";
 export { useDynamicInboxData } from "./use-dynamic-inbox-data";
 export {
   SECTION_CATALOG,
@@ -13,11 +18,16 @@ export {
   operatorPreset,
   managerPreset,
   DEFAULT_INBOX_LAYOUT,
+  deleteUserInboxPreset,
+  makeUserInboxPresetsBlob,
+  readUserInboxPresets,
+  upsertUserInboxPreset,
   isValidLayout,
   sectionLabel,
   type InboxLayout,
   type InboxTabConfig,
   type InboxSectionConfig,
+  type UserInboxPreset,
   type SectionKind,
   type SectionGroupBy,
   type SectionSort,

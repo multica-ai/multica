@@ -266,6 +266,19 @@ export const INBOX_PRESETS: InboxPreset[] = [
   { key: "manager", label: "Manager", build: managerPreset },
 ];
 
+export interface UserInboxPreset {
+  id: string;
+  label: string;
+  layout: InboxLayout;
+}
+
+export const USER_INBOX_PRESETS_VERSION = 1 as const;
+
+export interface UserInboxPresetsBlob {
+  version: typeof USER_INBOX_PRESETS_VERSION;
+  presets: UserInboxPreset[];
+}
+
 /** Defensive: validate an untrusted layout blob from preferences. */
 export function isValidLayout(value: unknown): value is InboxLayout {
   if (!value || typeof value !== "object") return false;
@@ -280,4 +293,61 @@ export function isValidLayout(value: unknown): value is InboxLayout {
       Array.isArray(t.sections) &&
       t.sections.every((s) => typeof s?.id === "string" && typeof s?.kind === "string"),
   );
+}
+
+export function cloneInboxLayout(layout: InboxLayout): InboxLayout {
+  return {
+    ...layout,
+    tabs: layout.tabs.map((tab) => ({
+      ...tab,
+      sections: tab.sections.map((section) => ({ ...section })),
+    })),
+  };
+}
+
+function isValidUserPreset(value: unknown): value is UserInboxPreset {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Partial<UserInboxPreset>;
+  return typeof v.id === "string" && typeof v.label === "string" && isValidLayout(v.layout);
+}
+
+export function readUserInboxPresets(value: unknown): UserInboxPreset[] {
+  if (!value || typeof value !== "object") return [];
+  const v = value as Partial<UserInboxPresetsBlob>;
+  if (v.version !== USER_INBOX_PRESETS_VERSION || !Array.isArray(v.presets)) return [];
+  return v.presets.filter(isValidUserPreset).map((preset) => ({
+    id: preset.id,
+    label: preset.label.trim(),
+    layout: cloneInboxLayout(preset.layout),
+  }));
+}
+
+export function makeUserInboxPresetsBlob(presets: UserInboxPreset[]): UserInboxPresetsBlob {
+  return {
+    version: USER_INBOX_PRESETS_VERSION,
+    presets: presets
+      .filter((preset) => preset.label.trim() && isValidLayout(preset.layout))
+      .map((preset) => ({
+        id: preset.id,
+        label: preset.label.trim(),
+        layout: cloneInboxLayout(preset.layout),
+      })),
+  };
+}
+
+export function upsertUserInboxPreset(
+  existing: UserInboxPreset[],
+  preset: UserInboxPreset,
+): UserInboxPreset[] {
+  const clean: UserInboxPreset = {
+    id: preset.id,
+    label: preset.label.trim(),
+    layout: cloneInboxLayout(preset.layout),
+  };
+  const next = existing.filter((p) => p.id !== clean.id && p.label.trim() !== clean.label);
+  return [...next, clean];
+}
+
+export function deleteUserInboxPreset(existing: UserInboxPreset[], presetId: string): UserInboxPreset[] {
+  return existing.filter((preset) => preset.id !== presetId);
 }
