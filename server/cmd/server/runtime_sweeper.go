@@ -60,6 +60,11 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// closedIssueSweepBatchSize caps how many queued tasks a single sweeper
+	// tick cancels because their linked issue is done/cancelled. Same sizing
+	// rationale as queuedExpireBatchSize — the backlog is expected to be much
+	// smaller, but the cap keeps the transaction bounded.
+	closedIssueSweepBatchSize = 500
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -85,6 +90,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepQueuedTasksForClosedIssues(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -283,6 +289,27 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+// sweepQueuedTasksForClosedIssues cancels queued tasks whose linked issues have
+// reached a terminal status (done or cancelled).  This is the sweeper arm of
+// MYW-2121: it catches the gap where an issue closed without cascade-cancelling
+// its active task (API path that missed the cancel, race condition, or
+// historical backlog).  Cancelled tasks are stamped with failure_reason
+// 'issue_closed' so they do not later expire as failed/queued_expired and
+// pollute run statistics.
+func sweepQueuedTasksForClosedIssues(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	count, err := taskSvc.CancelQueuedTasksForClosedIssues(ctx, closedIssueSweepBatchSize)
+	if err != nil {
+		slog.Warn("task sweeper: failed to cancel queued tasks for closed issues", "error", err)
+		return
+	}
+	if count > 0 {
+		slog.Info("task sweeper: cancelled queued tasks for closed issues", "count", count)
+	}
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

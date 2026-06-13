@@ -689,6 +689,133 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	}
 }
 
+// TestSweepQueuedTasksForClosedIssues verifies MYW-2121: queued tasks whose
+// linked issues are done or cancelled are automatically cancelled by the
+// sweeper so they do not later expire as failed/queued_expired and pollute
+// run/task statistics.
+func TestSweepQueuedTasksForClosedIssues(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a
+		JOIN member m ON m.workspace_id = a.workspace_id
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("failed to find test agent: %v", err)
+	}
+
+	mkIssue := func(status string) string {
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			WITH bumped AS (
+				UPDATE workspace SET issue_counter = issue_counter + 1
+				WHERE id = $1 RETURNING issue_counter
+			)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			SELECT $1, $3, $4, 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			RETURNING id
+		`, testWorkspaceID, agentID, "Closed issue sweep test", status).Scan(&issueID); err != nil {
+			t.Fatalf("failed to create %s issue: %v", status, err)
+		}
+		return issueID
+	}
+
+	doneIssueID := mkIssue("done")
+	cancelledIssueID := mkIssue("cancelled")
+	openIssueID := mkIssue("todo")
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2, $3)`, doneIssueID, cancelledIssueID, openIssueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id IN ($1, $2, $3)`, doneIssueID, cancelledIssueID, openIssueID)
+	})
+
+	var doneTaskID, cancelledTaskID, openTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, doneIssueID).Scan(&doneTaskID); err != nil {
+		t.Fatalf("failed to insert done-issue task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, cancelledIssueID).Scan(&cancelledTaskID); err != nil {
+		t.Fatalf("failed to insert cancelled-issue task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, openIssueID).Scan(&openTaskID); err != nil {
+		t.Fatalf("failed to insert open-issue task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	cancelled, err := queries.CancelQueuedTasksForClosedIssues(ctx, 100)
+	if err != nil {
+		t.Fatalf("CancelQueuedTasksForClosedIssues failed: %v", err)
+	}
+	if len(cancelled) != 2 {
+		t.Fatalf("expected exactly 2 cancelled tasks, got %d", len(cancelled))
+	}
+
+	// Verify done-issue task
+	var doneStatus, doneReason, doneErr string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
+		FROM agent_task_queue WHERE id = $1
+	`, doneTaskID).Scan(&doneStatus, &doneReason, &doneErr); err != nil {
+		t.Fatalf("failed to read done-issue task: %v", err)
+	}
+	if doneStatus != "cancelled" {
+		t.Fatalf("done-issue task: expected status=cancelled, got %q", doneStatus)
+	}
+	if doneReason != "issue_closed" {
+		t.Fatalf("done-issue task: expected failure_reason=issue_closed, got %q", doneReason)
+	}
+	if !strings.Contains(doneErr, "done") {
+		t.Fatalf("done-issue task: expected error to mention 'done', got %q", doneErr)
+	}
+
+	// Verify cancelled-issue task
+	var cStatus, cReason, cErr string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, ''), COALESCE(error, '')
+		FROM agent_task_queue WHERE id = $1
+	`, cancelledTaskID).Scan(&cStatus, &cReason, &cErr); err != nil {
+		t.Fatalf("failed to read cancelled-issue task: %v", err)
+	}
+	if cStatus != "cancelled" {
+		t.Fatalf("cancelled-issue task: expected status=cancelled, got %q", cStatus)
+	}
+	if cReason != "issue_closed" {
+		t.Fatalf("cancelled-issue task: expected failure_reason=issue_closed, got %q", cReason)
+	}
+	if !strings.Contains(cErr, "cancelled") {
+		t.Fatalf("cancelled-issue task: expected error to mention 'cancelled', got %q", cErr)
+	}
+
+	// Verify open-issue task is untouched
+	var openStatus string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status FROM agent_task_queue WHERE id = $1
+	`, openTaskID).Scan(&openStatus); err != nil {
+		t.Fatalf("failed to read open-issue task: %v", err)
+	}
+	if openStatus != "queued" {
+		t.Fatalf("open-issue task: expected status=queued, got %q", openStatus)
+	}
+}
+
 // parseUUIDBytes converts a UUID string to the 16-byte array used by pgtype.UUID.
 func parseUUIDBytes(s string) [16]byte {
 	s = strings.ReplaceAll(s, "-", "")

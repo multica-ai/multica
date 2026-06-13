@@ -762,6 +762,31 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	return nil
 }
 
+// CancelQueuedTasksForClosedIssues sweeps queued tasks whose linked issues have
+// reached a terminal status (done or cancelled) and cancels them.  This closes
+// the gap where an issue closes through a path that does not cascade-cancel
+// active tasks (API edge case, race, or historical backlog before the fix).
+//
+// Cancelled tasks are stamped with failure_reason='issue_closed' and an error
+// text that records the triggering issue status, preserving auditability.  Both
+// autopilot and regular agent tasks use the same cancelled semantics — the
+// autopilot event bus listener (EventTaskCancelled → syncRunFromTaskEvent)
+// already updates the run state, so no special autopilot handling is needed.
+//
+// Returns the number of tasks cancelled so callers can log/metric.
+func (s *TaskService) CancelQueuedTasksForClosedIssues(ctx context.Context, maxPerTick int32) (int, error) {
+	cancelled, err := s.Queries.CancelQueuedTasksForClosedIssues(ctx, maxPerTick)
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range cancelled {
+		s.captureTaskCancelled(ctx, t)
+		s.ReconcileAgentStatus(ctx, t.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+	}
+	return len(cancelled), nil
+}
+
 // CancelTasksForAgent cancels every active task belonging to an agent
 // (queued + dispatched + running), reconciles the agent's status, and
 // broadcasts task:cancelled events. Used by the agent-level "Cancel all
