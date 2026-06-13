@@ -763,6 +763,46 @@ func TestCodexCloseAllPending(t *testing.T) {
 	}
 }
 
+// TestCodexRequestAfterProcessExitFailsFast guards the transport-level hang
+// behind a stuck Codex resume: when the app-server's stdout closes, the reader
+// goroutine calls closeAllPending and exits, so a request issued afterwards —
+// e.g. the thread/start fallback after a thread/resume that killed the process
+// — has no goroutine left to complete it. It must fail fast rather than block
+// on ctx (the task's multi-hour timeout), so startOrResumeThread can surface a
+// failed result and the daemon's fresh-session retry can take over.
+func TestCodexRequestAfterProcessExitFailsFast(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+
+	// Reader goroutine observed stdout EOF.
+	c.closeAllPending(fmt.Errorf("codex process exited"))
+
+	// A long-lived context stands in for the task timeout: the request must
+	// not depend on it firing. Before the closed latch this call blocked here
+	// until ctx, pinning the runtime for the whole task timeout.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.request(ctx, "thread/start", map[string]any{})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected request after process exit to fail, got nil")
+		}
+		if !strings.Contains(err.Error(), "codex process exited") {
+			t.Fatalf("expected process-exit error, got %q", err.Error())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("request after process exit hung; expected fast failure")
+	}
+}
+
 func TestCodexHandleInvalidJSON(t *testing.T) {
 	t.Parallel()
 
