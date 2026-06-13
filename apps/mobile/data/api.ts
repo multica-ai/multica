@@ -121,8 +121,10 @@ import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
+import { Platform } from "react-native";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const CLIENT_OS = Platform.OS;
 
 if (!API_URL) {
   throw new Error(
@@ -200,7 +202,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Client-Platform": "mobile",
-      "X-Client-OS": "ios",
+      "X-Client-OS": CLIENT_OS,
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
@@ -1195,7 +1197,7 @@ class ApiClient {
     const headers: Record<string, string> = {
       // No Content-Type — let fetch set the multipart boundary.
       "X-Client-Platform": "mobile",
-      "X-Client-OS": "ios",
+      "X-Client-OS": CLIENT_OS,
       "X-Client-Version": "0.1.0",
       "X-Request-ID": rid,
     };

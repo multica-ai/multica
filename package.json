@@ -19,6 +19,12 @@
     "ios:mobile:device:staging:release": "pnpm -C apps/mobile ios:device:staging:release",
     "ios:mobile:device:prod": "pnpm -C apps/mobile ios:device:prod",
     "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
+    "android:mobile": "pnpm -C apps/mobile android",
+    "android:mobile:staging": "pnpm -C apps/mobile android:staging",
+    "android:mobile:prod": "pnpm -C apps/mobile android:prod",
+    "android:mobile:device": "pnpm -C apps/mobile android:device",
+    "android:mobile:device:staging": "pnpm -C apps/mobile android:device:staging",
+    "android:mobile:device:prod": "pnpm -C apps/mobile android:device:prod",
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",
@@ -37,6 +43,9 @@
       "@types/react": "catalog:",
       "@types/react-dom": "catalog:",
       "@xmldom/xmldom": "^0.8.13"
+    },
+    "patchedDependencies": {
+      "@react-native/gradle-plugin@0.83.6": "patches/@react-native__gradle-plugin@0.83.6.patch"
     }
   },
   "devDependencies": {
