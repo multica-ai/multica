@@ -346,6 +346,16 @@ type CerebroAgentWakeup struct {
 	OriginCommentID      pgtype.UUID        `json:"origin_comment_id"`
 }
 
+type CerebroAgentvaultAgentAccess struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Vault       string             `json:"vault"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroApprovalAudit struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

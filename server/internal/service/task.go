@@ -130,6 +130,15 @@ type TaskDelegationContext struct {
 	Source            pgtype.Text
 }
 
+const WakeupTaskContextType = "wakeup"
+
+type WakeupTaskContext struct {
+	Type        string `json:"type"`
+	WakeupID    string `json:"wakeup_id"`
+	TriggerType string `json:"trigger_type"`
+	Prompt      string `json:"prompt"`
+}
+
 func memberCommentDelegationContext(userID string, source string) (TaskDelegationContext, error) {
 	uid, err := util.ParseUUID(userID)
 	if err != nil {
@@ -677,6 +686,63 @@ func (s *TaskService) EnqueueTaskForMentionFromComment(ctx context.Context, issu
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false, delegation)
 }
 
+// EnqueueWakeupTask creates a queued issue task from a platform wakeup without
+// first creating a synthetic comment. triggerCommentID is the original thread
+// anchor the agent should reply under when it produces visible output.
+func (s *TaskService) EnqueueWakeupTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, wakeupID, triggerType, prompt string, delegation TaskDelegationContext) (db.AgentTaskQueue, error) {
+	if reason, blocked := s.blockedByAgentPass(ctx, agentID, issue.ID); blocked {
+		return db.AgentTaskQueue{}, fmt.Errorf("blocked by agent-pass: %s", reason)
+	}
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		slog.Error("wakeup task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		slog.Debug("wakeup task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		slog.Error("wakeup task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+
+	payload := WakeupTaskContext{
+		Type:        WakeupTaskContextType,
+		WakeupID:    strings.TrimSpace(wakeupID),
+		TriggerType: strings.TrimSpace(triggerType),
+		Prompt:      strings.TrimSpace(prompt),
+	}
+	contextJSON, err := json.Marshal(payload)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("encode wakeup context: %w", err)
+	}
+
+	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		IssueID:           issue.ID,
+		Priority:          priorityToInt(issue.Priority),
+		TriggerCommentID:  triggerCommentID,
+		Context:           contextJSON,
+		TriggerSummary:    pgtype.Text{String: buildWakeupTaskSummary(payload), Valid: true},
+		Title:             pgtype.Text{String: "Wakeup: " + truncateForSummary(payload.Prompt, triggerSummaryMaxLen), Valid: payload.Prompt != ""},
+		OriginalUserID:    delegation.OriginalUserID,
+		DelegatingAgentID: delegation.DelegatingAgentID,
+		SourceTaskID:      delegation.SourceTaskID,
+		DelegationSource:  delegation.Source,
+	})
+	if err != nil {
+		slog.Error("wakeup task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+
+	slog.Info("wakeup task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "trigger_comment_id", util.UUIDToString(triggerCommentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
 // The resulting task carries is_leader_task=true so that downstream
 // self-trigger guards can distinguish a comment posted while the agent was
@@ -738,6 +804,18 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+func buildWakeupTaskSummary(payload WakeupTaskContext) string {
+	triggerType := strings.TrimSpace(payload.TriggerType)
+	if triggerType == "" {
+		triggerType = "wakeup"
+	}
+	prompt := strings.TrimSpace(payload.Prompt)
+	if prompt == "" {
+		return "[wakeup:" + triggerType + "]"
+	}
+	return "[wakeup:" + triggerType + "] " + prompt
 }
 
 // QuickCreateContext is the JSON payload stored on a quick-create task's

@@ -141,6 +141,7 @@ WHERE id IN (
     SELECT id
     FROM cerebro_agent_wakeup
     WHERE cerebro_agent_wakeup.trigger_type = 'github_ci'
+      AND cerebro_agent_wakeup.state = 'pending'
       AND cerebro_agent_wakeup.watch_issue_id = ANY($1::uuid[])
     ORDER BY created_at ASC
     LIMIT $2
@@ -391,6 +392,49 @@ func (q *Queries) GetCerebroAgentWakeup(ctx context.Context, id pgtype.UUID) (Ce
 	return i, err
 }
 
+const hasRecentPendingWakeupForAgentIssue = `-- name: HasRecentPendingWakeupForAgentIssue :one
+SELECT count(*) > 0 AS has_recent
+FROM cerebro_agent_wakeup
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND state = 'pending'
+  AND created_at > now() - make_interval(mins => $3::int)
+`
+
+type HasRecentPendingWakeupForAgentIssueParams struct {
+	AgentID            pgtype.UUID `json:"agent_id"`
+	IssueID            pgtype.UUID `json:"issue_id"`
+	MinIntervalMinutes int32       `json:"min_interval_minutes"`
+}
+
+// Returns true if there is already a pending wakeup for the same
+// agent+issue created within the last @min_interval_minutes minutes.
+// Used to enforce wakeup_min_interval_minutes on creation.
+func (q *Queries) HasRecentPendingWakeupForAgentIssue(ctx context.Context, arg HasRecentPendingWakeupForAgentIssueParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRecentPendingWakeupForAgentIssue, arg.AgentID, arg.IssueID, arg.MinIntervalMinutes)
+	var has_recent bool
+	err := row.Scan(&has_recent)
+	return has_recent, err
+}
+
+const incrementWakeupPostpones = `-- name: IncrementWakeupPostpones :one
+UPDATE cerebro_agent_wakeup
+SET consecutive_postpones = consecutive_postpones + 1,
+    updated_at = now()
+WHERE id = $1
+RETURNING consecutive_postpones
+`
+
+// Increments consecutive_postpones and returns the new count.
+// Called after each successful wakeup dispatch so the sweeper can
+// notify the issue owner when the loop threshold is reached.
+func (q *Queries) IncrementWakeupPostpones(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementWakeupPostpones, id)
+	var consecutive_postpones int32
+	err := row.Scan(&consecutive_postpones)
+	return consecutive_postpones, err
+}
+
 const listCerebroAgentWakeups = `-- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
@@ -554,21 +598,6 @@ func (q *Queries) ReleaseWakeupToPending(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
-const incrementWakeupPostpones = `-- name: IncrementWakeupPostpones :one
-UPDATE cerebro_agent_wakeup
-SET consecutive_postpones = consecutive_postpones + 1,
-    updated_at = now()
-WHERE id = $1
-RETURNING consecutive_postpones
-`
-
-func (q *Queries) IncrementWakeupPostpones(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementWakeupPostpones, id)
-	var consecutivePostpones int32
-	err := row.Scan(&consecutivePostpones)
-	return consecutivePostpones, err
-}
-
 const resetWakeupPostpones = `-- name: ResetWakeupPostpones :exec
 UPDATE cerebro_agent_wakeup
 SET consecutive_postpones = 0,
@@ -576,23 +605,8 @@ SET consecutive_postpones = 0,
 WHERE id = $1
 `
 
+// Resets the postpone counter (called after inbox notification is sent).
 func (q *Queries) ResetWakeupPostpones(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, resetWakeupPostpones, id)
 	return err
-}
-
-const hasRecentPendingWakeupForAgentIssue = `-- name: HasRecentPendingWakeupForAgentIssue :one
-SELECT count(*) > 0 AS has_recent
-FROM cerebro_agent_wakeup
-WHERE agent_id = $1
-  AND issue_id = $2
-  AND state = 'pending'
-  AND created_at > now() - make_interval(mins => $3::int)
-`
-
-func (q *Queries) HasRecentPendingWakeupForAgentIssue(ctx context.Context, agentID pgtype.UUID, issueID pgtype.UUID, minIntervalMinutes int32) (bool, error) {
-	row := q.db.QueryRow(ctx, hasRecentPendingWakeupForAgentIssue, agentID, issueID, minIntervalMinutes)
-	var hasRecent bool
-	err := row.Scan(&hasRecent)
-	return hasRecent, err
 }

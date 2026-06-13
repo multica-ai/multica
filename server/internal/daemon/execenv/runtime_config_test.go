@@ -156,6 +156,30 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
+func TestWakeupTriggeredProtocolDoesNotCallWakeupANewComment(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:           "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID:  "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		WakeupPrompt:      "check CI and report result",
+		WakeupTriggerType: "time",
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	if strings.Contains(out, "This task was triggered by a NEW comment") {
+		t.Fatalf("wakeup brief must not call the wakeup a new comment, got:\n%s", out)
+	}
+	if !strings.Contains(out, "This task was triggered by a scheduled wakeup") {
+		t.Fatalf("wakeup brief missing scheduled wakeup wording, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Wakeup note: check CI and report result") {
+		t.Fatalf("wakeup brief missing note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Original thread reply parent: `66666666-7777-8888-9999-aaaaaaaaaaaa`") {
+		t.Fatalf("wakeup brief missing original thread parent, got:\n%s", out)
+	}
+}
+
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
 // new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
 // stay in sync.

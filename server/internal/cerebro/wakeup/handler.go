@@ -1,6 +1,7 @@
 package wakeup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -180,22 +181,23 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // (TECH-3487). The agent runs `multica wakeup create` from inside its task, and
 // the CLI/MCP client stamps X-Task-ID on the request. The task's trigger comment
 // is the comment the agent is currently replying to — i.e. the thread the wakeup
-// should thread back into. Returns the zero UUID (no origin) when the request is
-// not task-scoped, the task is assignment-triggered (no trigger comment), or the
-// task is bound to a different issue than the wakeup. Best-effort: any lookup
-// error degrades to "no origin", which makes dispatch post a plain root note.
+// should thread back into. When a run has no trigger comment (for example an
+// issue-assignment run that schedules the final check), fall back to the latest
+// human comment on the same issue so the wakeup still returns to the human thread
+// that asked for the work. Best-effort: any lookup error degrades to "no origin",
+// which makes dispatch post a plain root note.
 func (h *Handler) resolveOriginComment(r *http.Request, issueID pgtype.UUID) pgtype.UUID {
 	taskIDHeader := strings.TrimSpace(r.Header.Get("X-Task-ID"))
 	if taskIDHeader == "" {
-		return pgtype.UUID{}
+		return h.latestMemberComment(r.Context(), issueID)
 	}
 	taskUUID, err := util.ParseUUID(taskIDHeader)
 	if err != nil {
-		return pgtype.UUID{}
+		return h.latestMemberComment(r.Context(), issueID)
 	}
 	task, err := h.Service.Queries.GetAgentTask(r.Context(), taskUUID)
-	if err != nil || !task.TriggerCommentID.Valid {
-		return pgtype.UUID{}
+	if err != nil {
+		return h.latestMemberComment(r.Context(), issueID)
 	}
 	// Only adopt the trigger comment when the task is bound to the same issue the
 	// wakeup targets — the CLI stamps X-Task-ID on every request, so an agent
@@ -203,7 +205,18 @@ func (h *Handler) resolveOriginComment(r *http.Request, issueID pgtype.UUID) pgt
 	if !task.IssueID.Valid || util.UUIDToString(task.IssueID) != util.UUIDToString(issueID) {
 		return pgtype.UUID{}
 	}
+	if !task.TriggerCommentID.Valid {
+		return h.latestMemberComment(r.Context(), issueID)
+	}
 	return task.TriggerCommentID
+}
+
+func (h *Handler) latestMemberComment(ctx context.Context, issueID pgtype.UUID) pgtype.UUID {
+	comment, err := h.Service.Queries.GetLatestMemberCommentForIssue(ctx, issueID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return comment.ID
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

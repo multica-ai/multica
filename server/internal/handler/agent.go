@@ -228,6 +228,8 @@ type AgentTaskResponse struct {
 	TriggerSummary        *string `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType     string  `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName     string  `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	WakeupPrompt          string  `json:"wakeup_prompt,omitempty"`           // prompt stored on a platform wakeup task
+	WakeupTriggerType     string  `json:"wakeup_trigger_type,omitempty"`     // time, issue_status, or github_ci for wakeup tasks
 
 	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
 	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
@@ -341,6 +343,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	wakeupCtx := wakeupContextFromTask(t)
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -350,25 +353,27 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		workDir = t.WorkDir.String
 	}
 	return AgentTaskResponse{
-		ID:               uuidToString(t.ID),
-		AgentID:          uuidToString(t.AgentID),
-		RuntimeID:        uuidToString(t.RuntimeID),
-		IssueID:          uuidToString(t.IssueID),
-		WorkspaceID:      workspaceID,
-		Status:           t.Status,
-		Priority:         t.Priority,
-		DispatchedAt:     timestampToPtr(t.DispatchedAt),
-		StartedAt:        timestampToPtr(t.StartedAt),
-		CompletedAt:      timestampToPtr(t.CompletedAt),
-		Result:           result,
-		Error:            textToPtr(t.Error),
-		FailureReason:    failureReason,
-		Attempt:          t.Attempt,
-		MaxAttempts:      t.MaxAttempts,
-		ParentTaskID:     uuidToPtr(t.ParentTaskID),
-		CreatedAt:        timestampToString(t.CreatedAt),
-		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
-		TriggerSummary:   textToPtr(t.TriggerSummary),
+		ID:                uuidToString(t.ID),
+		AgentID:           uuidToString(t.AgentID),
+		RuntimeID:         uuidToString(t.RuntimeID),
+		IssueID:           uuidToString(t.IssueID),
+		WorkspaceID:       workspaceID,
+		Status:            t.Status,
+		Priority:          t.Priority,
+		DispatchedAt:      timestampToPtr(t.DispatchedAt),
+		StartedAt:         timestampToPtr(t.StartedAt),
+		CompletedAt:       timestampToPtr(t.CompletedAt),
+		Result:            result,
+		Error:             textToPtr(t.Error),
+		FailureReason:     failureReason,
+		Attempt:           t.Attempt,
+		MaxAttempts:       t.MaxAttempts,
+		ParentTaskID:      uuidToPtr(t.ParentTaskID),
+		CreatedAt:         timestampToString(t.CreatedAt),
+		TriggerCommentID:  uuidToPtr(t.TriggerCommentID),
+		TriggerSummary:    textToPtr(t.TriggerSummary),
+		WakeupPrompt:      wakeupCtx.Prompt,
+		WakeupTriggerType: wakeupCtx.TriggerType,
 		// CEREBRO-PATCH(task-title-builder): surface generated title to clients.
 		Title: textToPtr(t.Title),
 		// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — explain queued waits without issue comments.
@@ -384,6 +389,20 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
 		ModelOverride: t.ModelOverride.String,
 	}
+}
+
+func wakeupContextFromTask(t db.AgentTaskQueue) service.WakeupTaskContext {
+	if len(t.Context) == 0 {
+		return service.WakeupTaskContext{}
+	}
+	var payload service.WakeupTaskContext
+	if err := json.Unmarshal(t.Context, &payload); err != nil {
+		return service.WakeupTaskContext{}
+	}
+	if payload.Type != service.WakeupTaskContextType {
+		return service.WakeupTaskContext{}
+	}
+	return payload
 }
 
 // relativeWorkDir produces a privacy-safe display form of the daemon-reported

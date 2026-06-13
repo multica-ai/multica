@@ -311,6 +311,28 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildPromptWakeupUsesWakeupPromptAndOriginalReplyParent(t *testing.T) {
+	task := Task{
+		IssueID:           "issue-123",
+		TriggerCommentID:  "thread-root-456",
+		WakeupPrompt:      "check CI and report result",
+		WakeupTriggerType: "time",
+	}
+	out := BuildPrompt(task, "claude")
+	if !strings.Contains(out, "[WAKEUP]") {
+		t.Fatalf("wakeup prompt missing wakeup marker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "This is NOT a new user comment") {
+		t.Fatalf("wakeup prompt must not present itself as a new comment, got:\n%s", out)
+	}
+	if !strings.Contains(out, "check CI and report result") {
+		t.Fatalf("wakeup prompt missing note, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--parent thread-root-456 --content-stdin") {
+		t.Fatalf("wakeup prompt must force replies under original thread anchor, got:\n%s", out)
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
