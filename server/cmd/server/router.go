@@ -70,6 +70,7 @@ import (
 	cerebrogithubprheal "github.com/multica-ai/multica/server/internal/cerebro/githubprheal"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebromentiongate "github.com/multica-ai/multica/server/internal/cerebro/mentiongate"
+	cerebronote "github.com/multica-ai/multica/server/internal/cerebro/note" // CEREBRO-PATCH(router-notes-import): TECH-3421 Notes feature.
 	cerebroprivateagentrun "github.com/multica-ai/multica/server/internal/cerebro/privateagentrun" // CEREBRO-PATCH(router-private-agent-run-request): FIR-2385.
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
@@ -520,6 +521,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// surface to a single line per cerebro inbox feature.
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
+	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes feature.
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
@@ -1708,6 +1710,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}", h.DeleteArtifactFolder)
 			})
 			r.Post("/api/artifact-uploads", h.UploadArtifactFile)
+
+			r.Route("/api/notes", cerebroNoteHandler.Routes) // CEREBRO-PATCH(cerebro-notes-routes): TECH-3421 Notes feature.
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

@@ -27,6 +27,7 @@ export type CerebroFlagKey =
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
   | "cerebro_inbox_dynamic"
+  | "cerebro_notes"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -165,6 +166,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
   cerebro_inbox_dynamic: false,
+  // TECH-3421: OFF by default until the Notes UI ships + is QA'd on staging.
+  // Gates the Notes feature (private-by-default notes built on artifacts):
+  // the Notes nav entry, quick-capture, the notes list/editor surface, and the
+  // Notes box in the dynamic inbox.
+  cerebro_notes: false,
   cerebro_inbox_slack_block: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,

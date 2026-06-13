@@ -39,6 +39,7 @@
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-inbox-dynamic": "workspace:*",
     "@multica/cerebro-members": "workspace:*",
+    "@multica/cerebro-notes": "workspace:*",
     "@multica/cerebro-notifications": "workspace:*",
     "@multica/cerebro-preferences": "workspace:*",
     "@multica/cerebro-profile": "workspace:*",

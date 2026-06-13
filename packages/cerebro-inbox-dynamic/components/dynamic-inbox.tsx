@@ -76,6 +76,9 @@ import {
 import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
+// TECH-3421 — the Notes box renders its own data (recent notes), so it is
+// dispatched here instead of going through DynamicInboxSection.
+import { NotesInboxBox } from "@multica/cerebro-notes/views";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -138,6 +141,7 @@ function SortableSection({
 
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
+  const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
@@ -512,8 +516,12 @@ export function DynamicInbox() {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Add section</DropdownMenuLabel>
                   {SECTION_CATALOG.filter(
+                    // TECH-3422 — Chat only when slack-block is on.
                     (c) => c.kind !== "team" || slackBlockEnabled,
-                  ).map((c) => (
+                  )
+                    // TECH-3421 — only offer the Notes box when Notes is enabled.
+                    .filter((c) => c.kind !== "notes" || notesEnabled)
+                    .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
                     </DropdownMenuItem>
@@ -604,7 +612,19 @@ export function DynamicInbox() {
                 {activeTab.sections.map((section, i) => (
                   <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
-                      section.kind === "team" ? (
+                      // TECH-3421 — the Notes box renders its own data (recent
+                      // notes); dispatched here like the Chat block, not via
+                      // DynamicInboxSection.
+                      section.kind === "notes" ? (
+                        <NotesInboxBox
+                          title={section.title}
+                          dragHandle={handle}
+                          onRemove={() => removeSection(section.id)}
+                          onMove={(dir) => moveSection(section.id, dir)}
+                          isFirst={i === 0}
+                          isLast={i === activeTab.sections.length - 1}
+                        />
+                      ) : section.kind === "team" ? (
                         <div className="relative">
                           <div className="absolute left-2 top-2.5 z-10">{handle}</div>
                           <SlackBlock

@@ -4070,4 +4070,73 @@ export class ApiClient {
       body: JSON.stringify({ token }),
     });
   }
+
+  // CEREBRO-PATCH(cerebro-notes-client): TECH-3421 Notes feature. Bodies are
+  // generic so the @multica/cerebro-notes package owns the schema via its own
+  // zod parse (API Response Compatibility rule). Notes = artifacts(kind=note)
+  // + a cerebro_note row (owner/visibility/pin); see /api/notes.
+  async listNotes<T = unknown>(params?: {
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<T> {
+    const s = new URLSearchParams();
+    if (params?.q) s.set("q", params.q);
+    if (params?.limit != null) s.set("limit", String(params.limit));
+    if (params?.offset != null) s.set("offset", String(params.offset));
+    const qs = s.toString();
+    return this.fetch<T>(`/api/notes${qs ? `?${qs}` : ""}`);
+  }
+
+  async listRecentNotes<T = unknown>(limit?: number): Promise<T> {
+    const qs = limit != null ? `?limit=${limit}` : "";
+    return this.fetch<T>(`/api/notes/recent${qs}`);
+  }
+
+  async getNote<T = unknown>(id: string): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}`);
+  }
+
+  async createNote<T = unknown>(body: {
+    title?: string;
+    body?: string;
+    folder_id?: string | null;
+    visibility?: string;
+  }): Promise<T> {
+    return this.fetch<T>(`/api/notes`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async updateNote<T = unknown>(
+    id: string,
+    body: { title?: string; body?: string },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteNote(id: string): Promise<void> {
+    await this.fetch(`/api/notes/${id}`, { method: "DELETE" });
+  }
+
+  async setNoteVisibility<T = unknown>(
+    id: string,
+    body: { visibility: string; shared_user_ids?: string[] },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async setNotePin<T = unknown>(id: string, pinned: boolean): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/pin`, {
+      method: "PUT",
+      body: JSON.stringify({ pinned }),
+    });
+  }
 }

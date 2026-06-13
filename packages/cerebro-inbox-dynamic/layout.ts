@@ -42,6 +42,9 @@ export type SectionKind =
   | "unread"
   | "pinned"
   | "project"
+  // TECH-3421 — a self-contained box of the user's recent notes (custom
+  // renderer, not a slice of the inbox feed). See NotesInboxBox.
+  | "notes"
   | "all"
   // TECH-3413 #4 — a fully dynamic box: the user composes the filter
   // (unread / pinned / mentioned / project) instead of picking a fixed kind.
@@ -138,6 +141,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "reminders", label: "Reminders" },
   { kind: "pinned", label: "Pinned issues" },
   { kind: "project", label: "Project…", needsProject: true },
+  { kind: "notes", label: "Notes" },
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },

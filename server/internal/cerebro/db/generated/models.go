@@ -356,6 +356,16 @@ type CerebroAgentvaultAgentAccess struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroAgentvaultAgentAccess struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	Vault       string             `json:"vault"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroApprovalAudit struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -628,6 +638,22 @@ type CerebroIssueStatus struct {
 	SetByType       string             `json:"set_by_type"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroNote struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	OwnerID    pgtype.UUID        `json:"owner_id"`
+	Visibility string             `json:"visibility"`
+	Pinned     bool               `json:"pinned"`
+	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroNoteShare struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroPersonaMaskAudit struct {
