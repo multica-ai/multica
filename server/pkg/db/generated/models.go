@@ -446,6 +446,13 @@ type LarkInboundMessageDedup struct {
 	ClaimToken     pgtype.UUID        `json:"claim_token"`
 }
 
+type LarkInboxNotificationDelivery struct {
+	InboxItemID    pgtype.UUID        `json:"inbox_item_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	LarkOpenID     string             `json:"lark_open_id"`
+	ClaimedAt      pgtype.Timestamptz `json:"claimed_at"`
+}
+
 type LarkInstallation struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

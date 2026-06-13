@@ -30,6 +30,11 @@ type APIClient interface {
 	// target the same card.
 	SendInteractiveCard(ctx context.Context, p SendCardParams) (string, error)
 
+	// SendDirectInteractiveCard posts an interactive card to a Lark user by
+	// open_id. Used for member-targeted notifications where there is no
+	// existing Lark chat_id yet.
+	SendDirectInteractiveCard(ctx context.Context, p SendDirectCardParams) (string, error)
+
 	// PatchInteractiveCard replaces the body of a previously-sent card.
 	// The throttling decision belongs to the caller; this method just
 	// performs the network call.
@@ -200,6 +205,13 @@ type SendCardParams struct {
 	CardJSON string
 }
 
+type SendDirectCardParams struct {
+	InstallationID InstallationCredentials
+	OpenID         OpenID
+	// CardJSON is the raw Lark interactive card JSON body.
+	CardJSON string
+}
+
 // PatchCardParams is the input shape for updating an existing card.
 type PatchCardParams struct {
 	InstallationID    InstallationCredentials
@@ -317,6 +329,11 @@ func (s *stubAPIClient) IsConfigured() bool { return false }
 
 func (s *stubAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParams) (string, error) {
 	s.log.Warn("lark stub client: SendInteractiveCard called", "chat_id", string(p.ChatID))
+	return "", ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) SendDirectInteractiveCard(ctx context.Context, p SendDirectCardParams) (string, error) {
+	s.log.Warn("lark stub client: SendDirectInteractiveCard called", "open_id", string(p.OpenID))
 	return "", ErrAPIClientNotConfigured
 }
 

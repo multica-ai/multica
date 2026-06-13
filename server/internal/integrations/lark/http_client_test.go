@@ -352,6 +352,48 @@ func TestHTTPClient_SendInteractiveCard_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendDirectInteractiveCard_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_direct_card", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_direct_card_1"},
+		},
+		func(r *http.Request, body map[string]string) {
+			if got := r.URL.Query().Get("receive_id_type"); got != "open_id" {
+				t.Errorf("receive_id_type: got %q want open_id", got)
+			}
+			if body["receive_id"] != "ou_user_1" {
+				t.Errorf("receive_id: got %q", body["receive_id"])
+			}
+			if body["msg_type"] != "interactive" {
+				t.Errorf("msg_type: got %q want interactive", body["msg_type"])
+			}
+			if !strings.Contains(body["content"], "\"tag\"") {
+				t.Errorf("content not a card body: %q", body["content"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendDirectInteractiveCard(context.Background(), SendDirectCardParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_1"),
+		CardJSON:       `{"tag":"div","text":"hi"}`,
+	})
+	if err != nil {
+		t.Fatalf("send direct card: %v", err)
+	}
+	if msgID != "om_direct_card_1" {
+		t.Errorf("message id: got %q want om_direct_card_1", msgID)
+	}
+	if got := fake.lastAuth(); got != "Bearer tok_direct_card" {
+		t.Errorf("Authorization header: got %q want Bearer tok_direct_card", got)
+	}
+}
+
 // TestHTTPClient_SendTextMessage_HappyPath pins the wire shape of the
 // plain text outbound used for chat replies + /issue confirmations.
 // Path, query, bearer auth, msg_type, and the double-JSON-encoded
@@ -960,8 +1002,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})

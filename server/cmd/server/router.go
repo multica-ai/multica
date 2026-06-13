@@ -223,6 +223,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				h.LarkAPIClient = larkClient
 				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
+				inboxNotifier := lark.NewInboxNotifier(queries, installSvc, larkClient, lark.InboxNotifierConfig{
+					Logger:    slog.Default(),
+					PublicURL: strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+				})
+				inboxNotifier.Register(bus)
 
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
