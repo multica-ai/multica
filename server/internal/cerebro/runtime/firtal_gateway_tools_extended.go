@@ -1635,6 +1635,7 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalAssignIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListCommentsTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalAddCommentTool{queries: queries, tctx: tctx})
+	r.Register(&FirtalCreateFileTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalCreateProjectTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListProjectsTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListArtifactsTool{queries: queries, tctx: tctx})
