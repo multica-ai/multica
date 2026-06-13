@@ -1,5 +1,6 @@
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
+import type { OAuthProviderPublicConfig } from "../api/schemas";
 
 interface ConfigState {
   cdnDomain: string;
@@ -11,11 +12,13 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  oauthProviders: OAuthProviderPublicConfig[];
   setCdnDomain: (domain: string) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    oauthProviders?: OAuthProviderPublicConfig[];
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -30,9 +33,10 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  oauthProviders: [],
   setCdnDomain: (domain) => set({ cdnDomain: domain }),
-  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
-    set({ allowSignup, googleClientId, workspaceCreationDisabled }),
+  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false, oauthProviders = [] }) =>
+    set({ allowSignup, googleClientId, workspaceCreationDisabled, oauthProviders }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
 }));

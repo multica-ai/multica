@@ -6,6 +6,7 @@ const {
   mockPush,
   mockSearchParams,
   mockLoginWithGoogle,
+  mockLoginWithOAuthProvider,
   mockListWorkspaces,
   mockListMyInvitations,
   mockSetQueryData,
@@ -13,6 +14,7 @@ const {
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
   mockLoginWithGoogle: vi.fn(),
+  mockLoginWithOAuthProvider: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
   mockSetQueryData: vi.fn(),
@@ -54,7 +56,10 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({
+        loginWithGoogle: mockLoginWithGoogle,
+        loginWithOAuthProvider: mockLoginWithOAuthProvider,
+      }),
   };
 });
 
@@ -70,6 +75,7 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaces: mockListWorkspaces,
     listMyInvitations: mockListMyInvitations,
     googleLogin: vi.fn(),
+    oauthLogin: vi.fn(),
   },
 }));
 
@@ -94,6 +100,7 @@ describe("CallbackPage", () => {
     );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithOAuthProvider.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
@@ -225,5 +232,22 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
+  });
+
+  it("uses the provider encoded in OAuth state for Feishu/Lark callback", async () => {
+    mockSearchParams.set("state", "provider:feishu_lark,next:/invite/lark-invite");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithOAuthProvider).toHaveBeenCalledWith(
+        "feishu_lark",
+        "test-code",
+        "http://localhost:3000/auth/callback",
+        undefined,
+      );
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/invite/lark-invite");
   });
 });

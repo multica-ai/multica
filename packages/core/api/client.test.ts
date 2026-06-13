@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError } from "./client";
+import { EMPTY_APP_CONFIG } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -31,6 +32,37 @@ describe("ApiClient", () => {
         statusText: "Conflict",
       });
     }
+  });
+
+  it("logs 401 responses as warnings instead of errors", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "missing authorization" }), {
+          status: 401,
+          statusText: "Unauthorized",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const client = new ApiClient("https://api.example.test", { logger });
+
+    await expect(client.getMe()).rejects.toMatchObject({
+      status: 401,
+      message: "missing authorization",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "← 401 /api/me",
+      expect.objectContaining({ error: "missing authorization" }),
+    );
+    expect(logger.error).not.toHaveBeenCalled();
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
@@ -652,5 +684,61 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello" });
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
+  });
+
+  it("posts generic OAuth login requests to the selected provider endpoint", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ token: "jwt", user: { id: "u1", email: "a@example.com" } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.oauthLogin("feishu_lark", {
+      code: "oauth-code",
+      redirectUri: "https://app.example.test/auth/callback",
+      codeVerifier: "pkce-verifier",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/auth/oauth/feishu_lark",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          code: "oauth-code",
+          redirect_uri: "https://app.example.test/auth/callback",
+          code_verifier: "pkce-verifier",
+        }),
+      }),
+    );
+  });
+
+  it("falls back when app config OAuth provider shape drifts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          cdn_domain: 123,
+          allow_signup: "yes",
+          oauth_providers: [
+            {
+              id: "feishu_lark",
+              label: null,
+              client_id: "cli_lark",
+              authorization_url: "https://open.feishu.cn/open-apis/authen/v1/authorize",
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getConfig()).resolves.toEqual(EMPTY_APP_CONFIG);
   });
 });
