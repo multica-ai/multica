@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -562,6 +563,51 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
+
+	// If the same Lark app is currently bound to a different agent in this
+	// workspace, revoke the old installation before upserting the new one.
+	// With the partial unique index (migration 119) the UNIQUE constraint
+	// only applies to active rows, so a revoked row no longer blocks the
+	// insert; the revoke is still necessary for direct-rebind (binding to
+	// B without first unbinding from A) so the new installation can take
+	// the app_id without violating the partial unique index.
+	//
+	// Only revoke if the existing row belongs to a DIFFERENT AGENT in
+	// the SAME WORKSPACE. Cross-workspace conflicts surface as an explicit
+	// error rather than silently writing to another tenant's data.
+	existing, err := qtx.GetActiveLarkInstallationByAppID(ctx, res.ClientID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		s.cfg.Logger.Error("lark registration: look up active app_id binding",
+			"session_id", sess.id, "app_id", res.ClientID, "err", err)
+		sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+		return
+	}
+	if err == nil {
+		if !uuidEqual(existing.WorkspaceID, sess.workspaceID) {
+			s.cfg.Logger.Error("lark registration: app_id already bound in another workspace",
+				"session_id", sess.id, "app_id", res.ClientID,
+				"conflict_workspace_id", uuidString(existing.WorkspaceID))
+			sess.markError(RegistrationReasonInstallationConflict,
+				"app_id already bound to another workspace", s.gcDeadline())
+			return
+		}
+		if existing.AgentID != sess.agentID {
+			s.cfg.Logger.Info("lark registration: revoking previous app_id binding",
+				"session_id", sess.id,
+				"app_id", res.ClientID,
+				"old_agent_id", uuidString(existing.AgentID),
+				"new_agent_id", uuidString(sess.agentID))
+			if revokeErr := qtx.SetLarkInstallationStatus(ctx, db.SetLarkInstallationStatusParams{
+				ID:     existing.ID,
+				Status: "revoked",
+			}); revokeErr != nil {
+				s.cfg.Logger.Error("lark registration: revoke old installation",
+					"session_id", sess.id, "err", revokeErr)
+				sess.markError(RegistrationReasonInternalError, revokeErr.Error(), s.gcDeadline())
+				return
+			}
+		}
+	}
 
 	inst, err := qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
 		WorkspaceID:        sess.workspaceID,

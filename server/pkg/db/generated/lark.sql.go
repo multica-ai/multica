@@ -600,6 +600,40 @@ func (q *Queries) GetLarkInstallationByAppID(ctx context.Context, appID string) 
 	return i, err
 }
 
+const getActiveLarkInstallationByAppID = `-- name: GetActiveLarkInstallationByAppID :one
+SELECT id, workspace_id, agent_id, app_id, app_secret_encrypted, tenant_key, bot_open_id, installer_user_id, status, ws_lease_token, ws_lease_expires_at, installed_at, created_at, updated_at, bot_union_id, region FROM lark_installation WHERE app_id = $1 AND status = 'active'
+`
+
+// Same lookup as GetLarkInstallationByAppID but scoped to active rows
+// only. The partial unique index (migration 119) guarantees at most one
+// active row per app_id, so this always returns zero or one row.
+// Used by:
+//   - the inbound dispatcher to route events to their installation,
+//   - the registration service to detect re-bind conflicts.
+func (q *Queries) GetActiveLarkInstallationByAppID(ctx context.Context, appID string) (LarkInstallation, error) {
+	row := q.db.QueryRow(ctx, getActiveLarkInstallationByAppID, appID)
+	var i LarkInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.AppID,
+		&i.AppSecretEncrypted,
+		&i.TenantKey,
+		&i.BotOpenID,
+		&i.InstallerUserID,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BotUnionID,
+		&i.Region,
+	)
+	return i, err
+}
+
 const getLarkInstallationInWorkspace = `-- name: GetLarkInstallationInWorkspace :one
 SELECT id, workspace_id, agent_id, app_id, app_secret_encrypted, tenant_key, bot_open_id, installer_user_id, status, ws_lease_token, ws_lease_expires_at, installed_at, created_at, updated_at, bot_union_id, region FROM lark_installation
 WHERE id = $1 AND workspace_id = $2

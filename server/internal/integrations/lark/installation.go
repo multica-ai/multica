@@ -102,7 +102,7 @@ func (s *InstallationService) DecryptAppSecret(inst db.LarkInstallation) (string
 }
 
 // GetInWorkspace is the workspace-scoped lookup helper. Internal
-// callers (Dispatcher) use GetLarkInstallationByAppID directly because
+// callers (Dispatcher) use GetActiveLarkInstallationByAppID directly because
 // the event payload only carries app_id; HTTP-side callers always
 // know the workspace and should use this so a forged installation_id
 // from a different workspace returns NotFound instead of leaking
