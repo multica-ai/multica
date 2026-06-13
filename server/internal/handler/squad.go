@@ -863,12 +863,44 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	details, _ := json.Marshal(map[string]string{
-		"squad_id": uuidToString(squad.ID),
-		"task_id":  util.UUIDToString(taskUUID),
-		"outcome":  req.Outcome,
-		"reason":   req.Reason,
-	})
+	// delegated_to: when outcome=='action', recover which member(s) the leader
+	// just routed the work to by parsing @mentions out of the leader's most
+	// recent comment on this issue. The activity row stores it as a
+	// `delegated_to_<type>` field (member-id or agent-id list) so a future
+	// timeline / metrics view can show "leader routed to X" without re-
+	// scanning the comment thread. We fail open: any lookup or parse failure
+	// silently drops the field — the evaluation row itself must still land.
+	delegatedAgents := []string{}
+	delegatedMembers := []string{}
+	if req.Outcome == "action" {
+		latest, lcErr := h.Queries.GetLatestAgentCommentOnIssue(
+			r.Context(),
+			db.GetLatestAgentCommentOnIssueParams{
+				IssueID:  issue.ID,
+				AuthorID: squad.LeaderID,
+			},
+		)
+		if lcErr == nil {
+			for _, m := range util.ParseMentions(latest.Content) {
+				switch m.Type {
+				case "agent":
+					delegatedAgents = append(delegatedAgents, m.ID)
+				case "member":
+					delegatedMembers = append(delegatedMembers, m.ID)
+				}
+			}
+		}
+	}
+
+	detailsMap := map[string]any{
+		"squad_id":             uuidToString(squad.ID),
+		"task_id":              util.UUIDToString(taskUUID),
+		"outcome":              req.Outcome,
+		"reason":               req.Reason,
+		"delegated_to_agents":  delegatedAgents,
+		"delegated_to_members": delegatedMembers,
+	}
+	details, _ := json.Marshal(detailsMap)
 
 	activity, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
 		WorkspaceID: issue.WorkspaceID,
@@ -882,6 +914,12 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to record evaluation")
 		return
 	}
+
+	// Aggregate observability — Prometheus only (operational telemetry on every
+	// leader turn, not product behaviour, so deliberately not paired with a
+	// PostHog Capture). Increment AFTER the activity row landed so a 500 above
+	// does not inflate the counter.
+	h.Metrics.RecordSquadLeaderEvaluation(req.Outcome)
 
 	h.publish(protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), "agent", actorID, map[string]any{
 		"issue_id": uuidToString(issue.ID),
