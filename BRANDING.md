@@ -29,6 +29,13 @@ the SAME commit.
 | server/internal/handler/user_language_test.go | +1 test for vi | Keep both sides |
 | packages/views/locales/index.ts | +25 vi imports + vi block in RESOURCES | Re-apply block on conflict |
 
+| packages/views/locales/{en,zh-Hans,ko,ja}/settings.json | +"vietnamese" language label key | Re-apply 1 key per file |
+| packages/views/settings/components/preferences-tab.tsx | +1 vi option in languageOptions | Re-apply 1 line |
+| apps/web/app/layout.tsx | +vi in HTML_LANG | Re-apply 1 line (see also Task 6/12) |
+| apps/desktop/src/renderer/src/App.tsx | +vi in HTML_LANG | Re-apply 1 line |
+| packages/views/onboarding/templates/index.ts | +vi→en content fallback | Re-apply 1 line |
+| apps/web/lib/use-cases-i18n.ts | +vi UseCaseText block | Re-apply block |
+
 ## Upstream sync playbook
 <!-- filled in by the final task -->
 
