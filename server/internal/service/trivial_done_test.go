@@ -30,3 +30,68 @@ func TestIsTrivialDoneOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeAgentVisibleOutput(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "plain text unchanged",
+			in:   "Done with details",
+			want: "Done with details",
+		},
+		{
+			name: "openclaw nested result payload",
+			in: `{
+				"runId": "run-1",
+				"status": "ok",
+				"result": {
+					"payloads": [
+						{"text": "Готово. Posted artifact comment."},
+						{"text": "⚠️ 🛠️ multica issue get VID-1 --output json failed"}
+					]
+				}
+			}`,
+			want: "Готово. Posted artifact comment.",
+		},
+		{
+			name: "legacy payloads",
+			in: `{
+				"payloads": [
+					{"text": "First"},
+					{"text": "Second"}
+				],
+				"meta": {"durationMs": 10}
+			}`,
+			want: "First\n\nSecond",
+		},
+		{
+			name: "technical only suppresses",
+			in: `{
+				"result": {
+					"payloads": [
+						{"text": "⚠️ 🛠️ tool failed"}
+					]
+				}
+			}`,
+			want: "",
+		},
+		{
+			name: "non envelope json unchanged",
+			in:   `{"artifact_name":"qc-report.md"}`,
+			want: `{"artifact_name":"qc-report.md"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeAgentVisibleOutput(tt.in); got != tt.want {
+				t.Fatalf("normalizeAgentVisibleOutput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

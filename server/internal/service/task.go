@@ -135,6 +135,61 @@ func isTrivialDoneOutput(output string) bool {
 	return false
 }
 
+type openclawCompletionEnvelope struct {
+	Result struct {
+		Payloads []struct {
+			Text string `json:"text"`
+		} `json:"payloads"`
+	} `json:"result"`
+	Payloads []struct {
+		Text string `json:"text"`
+	} `json:"payloads"`
+}
+
+// normalizeAgentVisibleOutput strips OpenClaw completion envelopes that can
+// arrive as literal text in task output. Without this guard, Multica publishes
+// the whole JSON wrapper as a fallback issue comment instead of the user's
+// visible assistant text.
+func normalizeAgentVisibleOutput(output string) string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" || trimmed[0] != '{' {
+		return output
+	}
+
+	var envelope openclawCompletionEnvelope
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+		return output
+	}
+
+	payloads := envelope.Result.Payloads
+	if len(payloads) == 0 {
+		payloads = envelope.Payloads
+	}
+	if len(payloads) == 0 {
+		return output
+	}
+
+	var parts []string
+	for _, payload := range payloads {
+		text := strings.TrimSpace(payload.Text)
+		if text == "" || isTechnicalOpenclawPayload(text) {
+			continue
+		}
+		parts = append(parts, text)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+func isTechnicalOpenclawPayload(text string) bool {
+	return strings.HasPrefix(text, "⚠️") ||
+		strings.HasPrefix(text, "🛠️") ||
+		strings.Contains(text, " failed`") ||
+		strings.Contains(text, "` failed")
+}
+
 func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
@@ -1276,8 +1331,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
 					// decoded into real newlines before the comment hits the DB. See
 					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
-					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
+					body := normalizeAgentVisibleOutput(util.UnescapeBackslashEscapes(payload.Output))
+					if body == "" {
+						slog.Warn("suppressing empty normalized fallback output",
+							"task_id", util.UUIDToString(task.ID),
+							"issue_id", util.UUIDToString(task.IssueID),
+							"agent_id", util.UUIDToString(task.AgentID),
+						)
+					} else if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
 						slog.Warn("suppressing trivial comment-trigger fallback output",
 							"task_id", util.UUIDToString(task.ID),
 							"issue_id", util.UUIDToString(task.IssueID),
@@ -1310,7 +1371,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			// Same unescape as the issue-comment path above: literal `\n` from
 			// agent stdout becomes a real newline so the chat panel renders
 			// paragraph breaks instead of one wall of prose.
-			body := util.UnescapeBackslashEscapes(payload.Output)
+			body := normalizeAgentVisibleOutput(util.UnescapeBackslashEscapes(payload.Output))
 			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 				ChatSessionID: task.ChatSessionID,
 				Role:          "assistant",
