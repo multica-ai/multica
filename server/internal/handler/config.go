@@ -48,7 +48,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 	}
-	if h.Storage != nil {
+	if h.Storage != nil && h.CFSigner == nil {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()

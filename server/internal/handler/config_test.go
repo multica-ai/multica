@@ -61,6 +61,33 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 }
 
+func TestGetConfigOmitsCdnDomainInCloudFrontSignedMode(t *testing.T) {
+	origStorage := testHandler.Storage
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = &mockStorage{}
+	testHandler.CFSigner = testCloudFrontSigner(t)
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.CFSigner = origSigner
+	}()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.CdnDomain != "" {
+		t.Fatalf("cdn_domain: want empty in CloudFront signed mode, got %q", cfg.CdnDomain)
+	}
+}
+
 func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 	t.Setenv("MULTICA_APP_URL", "https://multica.internal.example/")
 

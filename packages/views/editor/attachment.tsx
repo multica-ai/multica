@@ -35,6 +35,8 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
+import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import { useQuery } from "@tanstack/react-query";
 import { useT } from "../i18n";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
@@ -243,16 +245,25 @@ function pickInlineMediaURL(
   cdnDomain: string,
 ): string {
   const dl = record.download_url ?? "";
-  if (
-    /^https?:\/\//i.test(dl) &&
-    /[?&](Signature|X-Amz-Signature|Key-Pair-Id|Expires|X-Amz-Expires)=/i.test(dl)
-  ) {
+  if (hasSignedHTTPURL(dl)) {
     return dl;
   }
-  if (storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
+  if (
+    storageURLMatchesCdnDomain(record.url, cdnDomain) &&
+    !attachmentIdFromDownloadURL(record.markdown_url)
+  ) {
+    return record.url;
+  }
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
   return fallback;
+}
+
+function hasSignedHTTPURL(rawURL: string): boolean {
+  return (
+    /^https?:\/\//i.test(rawURL) &&
+    /[?&](Signature|X-Amz-Signature|Key-Pair-Id|Expires|X-Amz-Expires)=/i.test(rawURL)
+  );
 }
 
 function storageURLMatchesCdnDomain(rawURL: string, cdnDomain: string): boolean {
@@ -302,51 +313,70 @@ export function Attachment({
   const preview = useAttachmentPreview();
 
   const state = normalize(attachment, resolveAttachment, cdnDomain);
+  const shouldRefreshInlineMedia = Boolean(
+    state.record?.id &&
+      !hasSignedHTTPURL(state.record.download_url ?? "") &&
+      attachmentIdFromDownloadURL(state.record.markdown_url || state.url),
+  );
+  const { data: refreshedRecord } = useQuery({
+    queryKey: ["attachments", state.record?.id, "inline-media"],
+    queryFn: () => api.getAttachment(state.record!.id),
+    enabled: shouldRefreshInlineMedia,
+    staleTime: 25 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+  const renderState = refreshedRecord
+    ? normalize(
+        { kind: "record", attachment: refreshedRecord },
+        resolveAttachment,
+        cdnDomain,
+      )
+    : state;
   const forceKind =
     attachment.kind === "url" ? attachment.forceKind : undefined;
   const kind =
     forceKind ??
-    (state.filename || state.contentType
-      ? getPreviewKind(state.contentType, state.filename)
+    (renderState.filename || renderState.contentType
+      ? getPreviewKind(renderState.contentType, renderState.filename)
       : null);
 
   const openPreview = () => {
-    if (state.record) {
+    if (renderState.record) {
       preview.tryOpen({
         kind: "full",
         attachment: {
-          ...state.record,
-          download_url: state.url || state.record.download_url,
+          ...renderState.record,
+          download_url: renderState.url || renderState.record.download_url,
         },
       });
       return;
     }
-    if (state.url) {
+    if (renderState.url) {
       preview.tryOpen({
         kind: "url",
-        url: state.url,
-        filename: state.filename,
+        url: renderState.url,
+        filename: renderState.filename,
       });
     }
   };
 
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
+    if (renderState.attachmentId) {
+      download(renderState.attachmentId);
       return;
     }
-    if (state.url) openByUrl(state.url);
+    if (renderState.url) openByUrl(renderState.url);
   };
 
   if (kind === "image") {
     return (
       <>
         <ImageAttachmentView
-          src={state.url}
-          alt={state.filename}
-          uploading={state.uploading}
-          width={state.width}
-          height={state.height}
+          src={renderState.url}
+          alt={renderState.filename}
+          uploading={renderState.uploading}
+          width={renderState.width}
+          height={renderState.height}
           editable={editable}
           selected={selected}
           onView={openPreview}
@@ -359,12 +389,12 @@ export function Attachment({
     );
   }
 
-  if (kind === "html" && state.attachmentId && !state.uploading) {
+  if (kind === "html" && renderState.attachmentId && !renderState.uploading) {
     return (
       <>
         <HtmlAttachmentPreview
-          attachmentId={state.attachmentId}
-          filename={state.filename}
+          attachmentId={renderState.attachmentId}
+          filename={renderState.filename}
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}
@@ -377,11 +407,11 @@ export function Attachment({
   return (
     <>
       <AttachmentCard
-        filename={state.filename}
-        contentType={state.contentType}
-        attachmentId={state.attachmentId}
-        href={state.url || undefined}
-        uploading={state.uploading}
+        filename={renderState.filename}
+        contentType={renderState.contentType}
+        attachmentId={renderState.attachmentId}
+        href={renderState.url || undefined}
+        uploading={renderState.uploading}
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
