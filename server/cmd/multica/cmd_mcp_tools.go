@@ -115,8 +115,6 @@ func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionSt
 	registerSkillLearningTools(srv, client)
 	// CEREBRO-PATCH(cerebro-wakeup-mcp-tools): FIR-3013 agent wakeup scheduling tools.
 	registerWakeupTools(srv, client)
-	// CEREBRO-PATCH(cerebro-create-file-mcp-tools): TECH-3416 Fase 2a create_file MCP tool.
-	registerCreateFileTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues
