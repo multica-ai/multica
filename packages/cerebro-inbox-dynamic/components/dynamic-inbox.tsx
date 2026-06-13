@@ -69,7 +69,6 @@ import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
-  INBOX_PRESETS,
   makeId,
   type InboxLayout,
   type InboxSectionConfig,
@@ -320,11 +319,6 @@ export function DynamicInbox() {
     setLayout({ ...layout, tabs: remaining, activeTabId: nextActive });
     if (activeTabId === id) setActiveTabId(nextActive);
   };
-  const applyPreset = (build: () => InboxLayout) => {
-    const next = build();
-    setLayout(next);
-    setActiveTabId(next.activeTabId ?? next.tabs[0]?.id ?? "");
-  };
   const applyUserPreset = (presetLayout: InboxLayout) => {
     setLayout(presetLayout);
     setActiveTabId(presetLayout.activeTabId ?? presetLayout.tabs[0]?.id ?? "");
@@ -499,12 +493,6 @@ export function DynamicInbox() {
                   <DropdownMenuItem onClick={() => setSavePresetOpen(true)}>
                     <Save className="mr-2 size-4" /> Save current as preset...
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  {INBOX_PRESETS.map((p) => (
-                    <DropdownMenuItem key={p.key} onClick={() => applyPreset(p.build)}>
-                      {p.label}
-                    </DropdownMenuItem>
-                  ))}
                   {userPresets.length > 0 && (
                     <>
                       <DropdownMenuSeparator />

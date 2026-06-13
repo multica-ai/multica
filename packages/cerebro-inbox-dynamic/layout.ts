@@ -218,7 +218,7 @@ function section(kind: SectionKind, extra: Partial<InboxSectionConfig> = {}): In
   return { id: makeId(kind), kind, groupBy: "none", sort: "newest", showPriority: true, ...extra };
 }
 
-/** Built-in presets the user can start from (mirrors the brainstorm). */
+/** Initial dynamic inbox layout for users without a saved layout. */
 export function operatorPreset(): InboxLayout {
   const tabId = makeId("tab");
   return {
@@ -238,33 +238,7 @@ export function operatorPreset(): InboxLayout {
   };
 }
 
-export function managerPreset(): InboxLayout {
-  const tabId = makeId("tab");
-  return {
-    version: INBOX_LAYOUT_VERSION,
-    activeTabId: tabId,
-    tabs: [
-      {
-        id: tabId,
-        title: "Inbox",
-        sections: [section("unread"), section("running"), section("pinned")],
-      },
-    ],
-  };
-}
-
 export const DEFAULT_INBOX_LAYOUT = operatorPreset;
-
-export interface InboxPreset {
-  key: string;
-  label: string;
-  build: () => InboxLayout;
-}
-
-export const INBOX_PRESETS: InboxPreset[] = [
-  { key: "operator", label: "Operator", build: operatorPreset },
-  { key: "manager", label: "Manager", build: managerPreset },
-];
 
 export interface UserInboxPreset {
   id: string;
