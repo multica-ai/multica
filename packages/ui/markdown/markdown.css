@@ -7,3 +7,6 @@
 .markdown-content .katex-display > .katex {
   white-space: nowrap;
 }
+
+/* CEREBRO-PATCH(markdown-overflow-guard): FIR-2560 follow-up — break long unbreakable tokens (URLs, hashes, slugs) on EVERY markdown surface (chat, comments, descriptions, skills). overflow-wrap:anywhere lowers min-content so flex bubbles can shrink and never force horizontal scroll; the `break-words` utility on .markdown-content is overflow-wrap:break-word, which does NOT lower min-content and so left the long-URL overflow unsolved. This unlayered rule wins over the Tailwind utility layer. */
+.markdown-content, .markdown-content p, .markdown-content li, .markdown-content a, .markdown-content code, .markdown-content h1, .markdown-content h2, .markdown-content h3, .markdown-content td, .markdown-content th { overflow-wrap: anywhere; }

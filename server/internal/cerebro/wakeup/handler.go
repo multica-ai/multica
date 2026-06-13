@@ -153,21 +153,57 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.Header.Get("X-User-ID")); raw != "" {
 		createdBy, _ = util.ParseUUID(raw)
 	}
+	// TECH-3487: record which conversation this wakeup was scheduled from, so the
+	// dispatched wakeup note threads back into it. The agent creates the wakeup
+	// from inside its task; the CLI stamps X-Task-ID on every request, and the
+	// task's trigger comment is the conversation the agent is replying in.
+	originCommentID := h.resolveOriginComment(r, issueID)
 	row, err := h.Service.Create(r.Context(), workspaceID, CreateRequest{
-		AgentID:      agentID,
-		IssueID:      issueID,
-		Prompt:       req.Prompt,
-		TriggerType:  req.TriggerType,
-		FireAt:       fireAt,
-		WatchIssueID: watchIssueID,
-		WatchStatus:  watchStatus,
-		CreatedByID:  createdBy,
+		AgentID:         agentID,
+		IssueID:         issueID,
+		Prompt:          req.Prompt,
+		TriggerType:     req.TriggerType,
+		FireAt:          fireAt,
+		WatchIssueID:    watchIssueID,
+		WatchStatus:     watchStatus,
+		CreatedByID:     createdBy,
+		OriginCommentID: originCommentID,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, toResponse(row))
+}
+
+// resolveOriginComment derives the conversation a wakeup is being scheduled from
+// (TECH-3487). The agent runs `multica wakeup create` from inside its task, and
+// the CLI/MCP client stamps X-Task-ID on the request. The task's trigger comment
+// is the comment the agent is currently replying to — i.e. the thread the wakeup
+// should thread back into. Returns the zero UUID (no origin) when the request is
+// not task-scoped, the task is assignment-triggered (no trigger comment), or the
+// task is bound to a different issue than the wakeup. Best-effort: any lookup
+// error degrades to "no origin", which makes dispatch post a plain root note.
+func (h *Handler) resolveOriginComment(r *http.Request, issueID pgtype.UUID) pgtype.UUID {
+	taskIDHeader := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+	if taskIDHeader == "" {
+		return pgtype.UUID{}
+	}
+	taskUUID, err := util.ParseUUID(taskIDHeader)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	task, err := h.Service.Queries.GetAgentTask(r.Context(), taskUUID)
+	if err != nil || !task.TriggerCommentID.Valid {
+		return pgtype.UUID{}
+	}
+	// Only adopt the trigger comment when the task is bound to the same issue the
+	// wakeup targets — the CLI stamps X-Task-ID on every request, so an agent
+	// scheduling a wakeup on a different issue must not inherit this thread.
+	if !task.IssueID.Valid || util.UUIDToString(task.IssueID) != util.UUIDToString(issueID) {
+		return pgtype.UUID{}
+	}
+	return task.TriggerCommentID
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
