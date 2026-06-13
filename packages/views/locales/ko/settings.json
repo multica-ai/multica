@@ -376,5 +376,30 @@
     "install_error_session_lost": "설치 세션이 만료되었거나 유실되었어요. 다시 스캔해 처음부터 진행하세요.",
     "install_error_forbidden": "이 워크스페이스에 Lark 봇을 설치할 권한이 더 이상 없어요. 워크스페이스 관리자에게 문의하세요.",
     "install_error_generic": "설치에 실패했어요. 다시 시도하세요."
+  },
+  "wecom": {
+    "section_title": "WeCom",
+    "not_enabled_title": "WeCom 연동이 비활성화되어 있어요",
+    "not_enabled_description": "서버에 MULTICA_WECOM_SECRET_KEY를 설정하면 WeCom 지능형 로봇 설치가 활성화됩니다.",
+    "connect_description": "Multica 에이전트를 WeCom 지능형 로봇(장연결 API 모드)에 연결하세요. 각 에이전트는 하나의 Bot에 매핑됩니다.",
+    "page_description": "이 에이전트를 WeCom 지능형 로봇에 연결하세요. Bot 자격 증명은 워크스페이스 설정 → 연동에서 입력합니다.",
+    "field_agent_id": "에이전트 ID",
+    "field_bot_id": "Bot ID",
+    "field_bot_secret": "장연결 Secret",
+    "field_corp_id": "Corp ID",
+    "field_corp_secret": "자체 구축 앱 Secret",
+    "field_self_build_agent_id": "자체 구축 AgentId(선택)",
+    "connect": "연결",
+    "connecting": "연결 중…",
+    "connected_bots": "연결된 Bot",
+    "loading": "불러오는 중…",
+    "empty": "아직 연결된 WeCom Bot이 없어요.",
+    "toast_connected": "WeCom Bot을 연결했어요",
+    "toast_connect_failed": "WeCom Bot 연결에 실패했어요",
+    "toast_disconnected": "WeCom Bot 연결을 해제했어요",
+    "toast_disconnect_failed": "연결 해제에 실패했어요",
+    "installation_bot": "Bot {{id}}",
+    "installation_agent": "에이전트 {{id}}",
+    "installation_connected": "연결됨: Bot {{id}}"
   }
 }

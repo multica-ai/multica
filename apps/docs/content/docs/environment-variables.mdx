@@ -220,6 +220,17 @@ The [GitHub PR ↔ issue integration](/github-integration) needs two variables. 
 
 **Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
 
+## WeCom integration
+
+[WeCom Bot integration](/wecom-bot-integration) stays off until `MULTICA_WECOM_SECRET_KEY` is set. Binding links require `MULTICA_PUBLIC_URL` (the user-facing frontend URL, not the backend API host).
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_WECOM_SECRET_KEY` | empty | Base64-encoded 32-byte key that encrypts Bot/Corp secrets at rest. Generate with `openssl rand -base64 32` |
+| `MULTICA_PUBLIC_URL` | empty | Prefix for bind links in Bot replies, e.g. `https://multica.example.com` (no trailing slash) |
+
+See [WeCom Bot integration](/wecom-bot-integration) for setup, group-chat behavior, and Docker deployment.
+
 ## Usage analytics
 
 By default, the server reports to Multica's official PostHog instance. To opt out, set `ANALYTICS_DISABLED=true`.

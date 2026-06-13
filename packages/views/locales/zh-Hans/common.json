@@ -24,5 +24,20 @@
     "error_already_bound": "该飞书账号已绑定到其他 Multica 用户。账户转移需要先显式解绑。",
     "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
     "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
+  },
+  "wecom_bind": {
+    "page_title": "绑定企业微信身份",
+    "verifying_auth": "正在验证登录状态…",
+    "redeeming": "正在绑定…",
+    "needs_auth_description": "请先登录 Multica 账号以完成绑定。",
+    "sign_in": "去登录",
+    "done_description": "绑定成功，可以回到企业微信继续对话。",
+    "error_missing_token": "缺少绑定 token。",
+    "error_mixed_content": "当前链接是 HTTPS（ngrok），但 API 配置为 http://localhost:8080，浏览器会拦截请求。请在 PC 用 localhost 打开绑定链接。",
+    "error_expired": "绑定链接已过期或已被使用，请在企业微信里给 Bot 再发一条消息获取新链接。",
+    "error_already_bound": "该企业微信账号已绑定到其他 Multica 用户。",
+    "error_not_member": "当前账号不是该工作区成员，请用正确的工作区账号登录后再绑定。",
+    "error_unknown": "绑定失败，链接可能已过期或已被使用。",
+    "open_localhost_bind": "在 localhost 打开绑定链接"
   }
 }

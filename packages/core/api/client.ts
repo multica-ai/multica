@@ -106,6 +106,10 @@ import type {
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  ListWecomInstallationsResponse,
+  CreateWecomInstallationRequest,
+  WecomInstallation,
+  RedeemWecomBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2126,6 +2130,34 @@ export class ApiClient {
 
   async redeemLarkBindingToken(token: string): Promise<RedeemLarkBindingTokenResponse> {
     return this.fetch(`/api/lark/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  // WeCom integration
+  async listWecomInstallations(workspaceId: string): Promise<ListWecomInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wecom/installations`);
+  }
+
+  async createWecomInstallation(
+    workspaceId: string,
+    body: CreateWecomInstallationRequest,
+  ): Promise<WecomInstallation> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wecom/installations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wecom/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemWecomBindingToken(token: string): Promise<RedeemWecomBindingTokenResponse> {
+    return this.fetch(`/api/wecom/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });
