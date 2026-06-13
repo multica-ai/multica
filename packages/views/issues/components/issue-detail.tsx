@@ -184,8 +184,11 @@ function formatWakeupFireAt(value: string | undefined): string {
   if (Number.isNaN(date.getTime())) return value;
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
   const formatted = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
     timeZoneName: "short",
   }).format(date);
   return `${formatted} (${timeZone})`; // CEREBRO-PATCH(wakeup-scheduled-activity): show the user's actual timezone.
