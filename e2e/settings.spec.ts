@@ -1,7 +1,45 @@
 import { test, expect } from "@playwright/test";
-import { loginAsDefault, openWorkspaceMenu } from "./helpers";
+import { createTestApi, loginAsDefault, openWorkspaceMenu } from "./helpers";
 
 test.describe("Settings", () => {
+  test("mobile settings page can reopen sidebar and navigate away", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const api = await createTestApi();
+    const workspaceId = api.getWorkspaceId();
+    const workspaceSlug = api.getWorkspaceSlug();
+    if (!workspaceId || !workspaceSlug) {
+      throw new Error("Expected createTestApi() to ensure an E2E workspace");
+    }
+
+    // This endpoint is one-way for the shared E2E user. Keep it in this
+    // regression only to prevent the starter modal from covering the mobile
+    // sidebar trigger.
+    await api.dismissStarterContent(workspaceId);
+    await page.addInitScript((token) => {
+      localStorage.setItem("multica_token", token);
+    }, api.getToken());
+    await page.goto(`/${workspaceSlug}/settings`);
+    await page.waitForURL("**/settings");
+
+    const sidebarTrigger = page.getByRole("button", {
+      name: /toggle sidebar/i,
+    });
+    await expect(sidebarTrigger).toBeVisible();
+
+    await sidebarTrigger.click();
+    const sidebarSheet = page.locator('[data-slot="sidebar"][data-mobile="true"]');
+    await expect(sidebarSheet).toBeVisible();
+
+    await page
+      .getByRole("dialog", { name: "Sidebar" })
+      .getByRole("link", { name: "Issues", exact: true })
+      .click();
+    await page.waitForURL("**/issues");
+    await expect(page).toHaveURL(/\/issues/);
+  });
+
   test("updating workspace name reflects in sidebar immediately", async ({
     page,
   }) => {
