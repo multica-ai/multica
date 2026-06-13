@@ -46,6 +46,8 @@ import {
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 // CEREBRO-PATCH(thread-side-panel-cost-badge-import): FIR-39 per-comment cost badge on channel thread replies.
 import { CommentCostBadge } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for channel thread replies.
+import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
 import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ReadonlyContent } from "../../editor";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
@@ -497,6 +499,8 @@ function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputPro
   const [isEmpty, setIsEmpty] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const { uploadWithToast } = useFileUpload(api);
+  // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist this channel thread reply's unsent text.
+  const draft = useCommentDraft(`reply:${channelId}:${parentId}`);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -521,6 +525,7 @@ function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputPro
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
+      draft.clear(); // CEREBRO-PATCH(comment-drafts): TECH-3491 — sent, drop the stored draft.
       setIsEmpty(true);
       uploadMapRef.current.clear();
     } catch {
@@ -545,7 +550,12 @@ function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputPro
           <ContentEditor
             ref={editorRef}
             placeholder="Reply…"
-            onUpdate={(md) => setIsEmpty(!md.trim())}
+            // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
+            defaultValue={draft.defaultValue}
+            onUpdate={(md) => {
+              setIsEmpty(!md.trim());
+              draft.save(md); // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist as you type.
+            }}
             onSubmit={handleSend}
             onUploadFile={handleUpload}
             debounceMs={100}
@@ -557,6 +567,8 @@ function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputPro
           />
         </div>
         <div className="absolute bottom-0 right-0 flex items-center gap-1">
+          {/* CEREBRO-PATCH(comment-drafts): TECH-3491 — "Kladde gemt" cue. */}
+          <DraftSavedHint show={draft.saved} className="mr-1" />
           <FileUploadButton
             size="sm"
             onAttach={(files) =>

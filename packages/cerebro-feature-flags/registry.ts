@@ -134,7 +134,10 @@ export type CerebroFlagKey =
   // Block stops, Ask → inbox + wait). Default OFF = observe-only dry run.
   | "cerebro_local_tool_policy_enforce"
   // TECH-3196: Agent Vault — per-agent secret brokering via the internal path.
-  | "cerebro_agent_vault";
+  | "cerebro_agent_vault"
+  // TECH-3491: per-device draft persistence for the comment / channel / DM
+  // composers — a half-written message survives navigating away or a reload.
+  | "cerebro_comment_drafts";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -310,6 +313,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
+  // TECH-3491: ON by default — saving an unsent comment/channel/DM message as a
+  // per-device draft is the whole point of the feature; a deploy turning it on
+  // is the intended behaviour change. Off restores the old "lose it on navigate"
+  // behaviour and hides the "Kladde gemt" hint.
+  cerebro_comment_drafts: true,
 };
 
 /**
@@ -837,6 +845,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Broker per-agent access to secrets via Infisical Agent Vault over the internal path: the backend swaps a placeholder for the real credential on the way out, so an agent uses a secret without ever holding it. An admin-controlled table sets which key-boxes each agent may reach. TECH-3196.",
+  },
+  // TECH-3491: per-device drafts for the comment / channel / DM composers.
+  {
+    key: "cerebro_comment_drafts",
+    label: "Save unsent messages as drafts",
+    group: "issues",
+    description:
+      "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
   },
   // FIR-2563: per-workspace approval gate toggle.
   {

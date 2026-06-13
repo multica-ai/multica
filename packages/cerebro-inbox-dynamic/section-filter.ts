@@ -7,7 +7,7 @@
 import { classifyInboxAction, inboxActionOrderIndex } from "@multica/cerebro-inbox";
 import type { InboxActionContext, InboxActionCategory } from "@multica/cerebro-inbox";
 import type { InboxItem, ChatSession, Channel } from "@multica/core/types";
-import type { InboxSectionConfig } from "./layout";
+import type { InboxSectionConfig, FilterCondition } from "./layout";
 
 export type DynInboxEntry =
   | { kind: "notif"; id: string; time: number; item: InboxItem }
@@ -80,13 +80,9 @@ export function entryMatchesSection(
     case "project":
       return !!section.projectId && entryProjectId(entry) === section.projectId;
     case "filter":
-      // TECH-3413 #4 — AND of every enabled predicate. An empty filter shows
-      // everything (the user narrows it from the section settings).
-      if (section.filterUnread && !entryIsUnread(entry)) return false;
-      if (section.filterPinned && !ctx.matchesPins(entry)) return false;
-      if (section.filterMentioned && !entryIsMentioned(entry, ctx)) return false;
-      if (section.projectId && entryProjectId(entry) !== section.projectId) return false;
-      return true;
+      // TECH-3413 #5 — AND of every condition in the filter builder. An empty
+      // filter shows everything (the user stacks conditions to narrow it).
+      return sectionFilters(section).every((c) => conditionMatches(c, entry, ctx));
     case "act_now":
     case "running":
     case "reminders":
@@ -97,6 +93,40 @@ export function entryMatchesSection(
     }
     default:
       return false;
+  }
+}
+
+/**
+ * TECH-3413 #5 — the effective filter conditions for a "filter" section.
+ * Returns `section.filters` when set; otherwise seeds the list from the legacy
+ * toggle booleans so filter sections saved before the builder keep working.
+ */
+export function sectionFilters(section: InboxSectionConfig): FilterCondition[] {
+  if (section.filters) return section.filters;
+  const seeded: FilterCondition[] = [];
+  if (section.filterUnread) seeded.push({ field: "unread" });
+  if (section.filterMentioned) seeded.push({ field: "mentioned" });
+  if (section.filterPinned) seeded.push({ field: "pinned" });
+  if (section.projectId) seeded.push({ field: "project", projectId: section.projectId });
+  return seeded;
+}
+
+function conditionMatches(
+  cond: FilterCondition,
+  entry: DynInboxEntry,
+  ctx: SectionFilterContext,
+): boolean {
+  switch (cond.field) {
+    case "unread":
+      return entryIsUnread(entry);
+    case "mentioned":
+      return entryIsMentioned(entry, ctx);
+    case "pinned":
+      return ctx.matchesPins(entry);
+    case "project":
+      return !!cond.projectId && entryProjectId(entry) === cond.projectId;
+    default:
+      return true;
   }
 }
 

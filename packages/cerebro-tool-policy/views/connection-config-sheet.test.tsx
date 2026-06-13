@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
 vi.mock("@multica/core/api", async () => {
@@ -10,6 +12,36 @@ vi.mock("@multica/core/api", async () => {
   return { ...actual, api: { cerebroRequest: mockCerebroRequest } };
 });
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+
+// Base UI dropdown menus render through a portal and are awkward to drive in
+// jsdom, so we flatten them — the trigger and items render inline as plain
+// buttons (the established pattern across the repo's view tests). The item
+// forwards `disabled` so we can assert futile-choice gating.
+vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuTrigger: ({
+    children,
+    ...props
+  }: { children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type="button" {...props}>
+      {children}
+    </button>
+  ),
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    disabled,
+  }: {
+    children: ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+  }) => (
+    <button type="button" role="menuitem" onClick={onClick} disabled={disabled}>
+      {children}
+    </button>
+  ),
+}));
 
 import { ConnectionConfigSheet } from "./connection-config-sheet";
 import type { ToolPolicyRow } from "../core";
@@ -74,22 +106,38 @@ describe("ConnectionConfigSheet (TECH-3287 hul 1/6/7)", () => {
     expect(within(banner).getByText(/Workspace/)).toBeInTheDocument();
   });
 
-  it("disables 'Tillad alle' and per-tool Allow/Ask when the connection floor is Deny", () => {
+  it("disables 'Tillad alle' and the looser per-endpoint choices when the connection floor is Deny", () => {
     renderSheet(connRow("deny", { decided_by: "workspace" }));
     expect(screen.getByRole("button", { name: /Tillad alle/ })).toBeDisabled();
     const tool = screen.getByTestId("connection-tool-lookup_order");
-    expect(within(tool).getByRole("button", { name: "Allow" })).toBeDisabled();
-    expect(within(tool).getByRole("button", { name: "Ask" })).toBeDisabled();
+    // The pill dropdown lists the choices; looser-than-floor ones are disabled.
+    expect(within(tool).getByRole("menuitem", { name: "Allow" })).toBeDisabled();
+    expect(within(tool).getByRole("menuitem", { name: "Ask" })).toBeDisabled();
     // Tightening + clearing stay available.
-    expect(within(tool).getByRole("button", { name: "Deny" })).toBeEnabled();
-    expect(within(tool).getByRole("button", { name: "Inherit" })).toBeEnabled();
+    expect(within(tool).getByRole("menuitem", { name: "Deny" })).toBeEnabled();
+    expect(within(tool).getByRole("menuitem", { name: /Inherit/ })).toBeEnabled();
   });
 
-  it("leaves all controls enabled and shows no banner when the connection allows", () => {
+  it("leaves all choices enabled and shows no banner when the connection allows", () => {
     renderSheet(connRow("allow"));
     expect(screen.queryByTestId("connection-blocked-banner")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Tillad alle/ })).toBeEnabled();
     const tool = screen.getByTestId("connection-tool-lookup_order");
-    expect(within(tool).getByRole("button", { name: "Allow" })).toBeEnabled();
+    expect(within(tool).getByRole("menuitem", { name: "Allow" })).toBeEnabled();
+  });
+
+  it("renders one decision pill per endpoint showing its effective verdict", () => {
+    renderSheet(connRow("allow"));
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    // Single compact control per row (the app-wide pill), not a 4-button row.
+    expect(within(tool).getByRole("button", { name: /^Decision:/ })).toBeInTheDocument();
+  });
+
+  it("writes the chosen setting for the endpoint when a menu choice is clicked", async () => {
+    const user = userEvent.setup();
+    renderSheet(connRow("allow"));
+    const tool = screen.getByTestId("connection-tool-lookup_order");
+    await user.click(within(tool).getByRole("menuitem", { name: "Deny" }));
+    expect(mockCerebroRequest).toHaveBeenCalled();
   });
 });

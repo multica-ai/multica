@@ -6,6 +6,16 @@
 // server-synced user.preferences blob (see use-inbox-layout.ts), with an
 // optional separate layout for the mobile/PWA view.
 
+// TECH-3413 #5 — one condition in the filter builder. `project` needs a
+// projectId; the boolean predicates ignore it.
+export type FilterField = "unread" | "mentioned" | "pinned" | "project";
+
+export interface FilterCondition {
+  field: FilterField;
+  /** Required when field === "project". */
+  projectId?: string;
+}
+
 /** What a section pulls from the merged inbox feed. */
 export type SectionKind =
   | "act_now"
@@ -63,6 +73,11 @@ export interface InboxSectionConfig {
   filterPinned?: boolean;
   /** Only rows that @-mention you. */
   filterMentioned?: boolean;
+  // TECH-3413 #5 — filter BUILDER: an explicit, stackable list of conditions
+  // (AND of all). Replaces the fixed toggles above; when present it is the
+  // source of truth. Empty array = show everything. The legacy booleans are
+  // kept only as a migration seed (see `sectionFilters` in section-filter.ts).
+  filters?: FilterCondition[];
   /** TECH-3422 — for the "team" (Slack) section: how many people to show.
    *  0 / undefined = show all. Starred people always count first. */
   maxPeople?: number;

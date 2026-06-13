@@ -11,7 +11,12 @@ export {
   CerebroUnarchiveAction,
   // Exported for the desktop reminder-picker interaction test (FIR-2546).
   CustomReminderPicker,
+  // TECH-3352 — shared mobile swipe surface + reminder sheet so channel/DM rows
+  // reuse the exact same mobile gestures as issue rows.
+  MobileRowActions,
+  ReminderSheet,
 } from "./components/cerebro-inbox-row-actions";
+export { useCerebroInboxStrings } from "./strings";
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 // TECH-3413 — classic vs dynamic inbox mode (per-user, server-synced) + the
 // toolbar button that switches the classic inbox into the dynamic inbox.

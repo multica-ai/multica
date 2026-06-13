@@ -1,22 +1,26 @@
 "use client";
 
-// TECH-3352 — per-row "remind me" (snooze) + "mark as unread/read" controls for
-// channel/DM rows in the inbox, bringing them to parity with notification rows
-// (CerebroInboxRowActions). Archive already existed; this adds the rest.
-import { useState } from "react";
+// TECH-3352 — per-row inbox controls for channel/DM rows, aligned with issue
+// rows so the whole inbox behaves identically:
+//   - Desktop: a single "..." (3-dot) dropdown menu (mark read/unread, remind,
+//     archive). Same affordance as issue rows.
+//   - Mobile: the exact same swipe surface as issue rows (swipe-archive +
+//     swipe-left reveal + long-press drawer), reused from @multica/cerebro-inbox.
+import { useState, type ReactNode } from "react";
 import { Archive, BellOff, BellPlus, Mail, MailOpen, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { Channel } from "@multica/core/types";
 import { useMarkChannelRead } from "@multica/core/channels";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   CerebroSwipeArchive,
+  MobileRowActions,
+  ReminderSheet,
+  useCerebroInboxStrings,
   isMuted,
-  addHours,
-  nextLocalNineAm,
-  nextBusinessDayNineAm,
-  nextMondayNineAm,
   toDateTimeLocalValue,
+  nextBusinessDayNineAm,
 } from "@multica/cerebro-inbox";
 import {
   DropdownMenu,
@@ -25,16 +29,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@multica/ui/components/ui/dialog";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import { useMuteChannel, useUnmuteChannel, useMarkChannelUnread } from "./state-mutations";
 
 export function CerebroChannelRowActions({
@@ -45,12 +39,14 @@ export function CerebroChannelRowActions({
   onArchive: () => void;
 }) {
   const enabled = useFeatureFlag("cerebro_channel_row_actions");
+  const isMobile = useIsMobile();
   const mute = useMuteChannel();
   const unmute = useUnmuteChannel();
   const markUnread = useMarkChannelUnread();
   const markRead = useMarkChannelRead();
-  const [customOpen, setCustomOpen] = useState(false);
-  const [customValue, setCustomValue] = useState(() =>
+  const strings = useCerebroInboxStrings();
+  const [reminderOpen, setReminderOpen] = useState(false);
+  const [customReminder, setCustomReminder] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
   );
 
@@ -58,23 +54,86 @@ export function CerebroChannelRowActions({
   if (!enabled) return <CerebroSwipeArchive onArchive={onArchive} />;
 
   const muted = isMuted(channel.muted_until);
-  const isUnread = channel.unread_count > 0;
+  const unread = channel.unread_count > 0;
 
-  const snooze = (d: Date) =>
+  const toggleRead = () => {
+    if (unread) markRead.mutate(channel.id);
+    else markUnread.mutate(channel.id);
+  };
+
+  // "Remind me" = open the shared reminder sheet (presets + custom). Unmuting a
+  // snoozed channel is the inverse and happens directly.
+  const toggleMute = () => {
+    if (muted) unmute.mutate(channel.id);
+    else setReminderOpen(true);
+  };
+
+  const schedule = (mutedUntil: Date) => {
     mute.mutate(
-      { id: channel.id, mutedUntil: d },
+      { id: channel.id, mutedUntil },
       { onError: () => toast.error("Kunne ikke sætte påmindelse") },
     );
-
-  const commitCustom = () => {
-    const d = new Date(customValue);
-    if (Number.isNaN(d.getTime()) || d.getTime() <= Date.now()) {
-      toast.error("Vælg et tidspunkt i fremtiden");
-      return;
-    }
-    snooze(d);
-    setCustomOpen(false);
+    setReminderOpen(false);
+    setCustomReminder(toDateTimeLocalValue(mutedUntil));
   };
+
+  const reminderSheet = (
+    <ReminderSheet
+      isMobile={isMobile}
+      customReminder={customReminder}
+      open={reminderOpen}
+      strings={strings}
+      onCustomReminderChange={setCustomReminder}
+      onOpenChange={setReminderOpen}
+      onSchedule={schedule}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        <MobileRowActions
+          muted={muted}
+          unread={unread}
+          onArchive={onArchive}
+          onToggleRead={toggleRead}
+          onToggleMute={toggleMute}
+          strings={strings}
+          renderDrawerMenu={(close) => (
+            <div className="flex flex-col">
+              <DrawerButton
+                onClick={() => {
+                  close();
+                  toggleRead();
+                }}
+              >
+                {unread ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
+                {unread ? "Markér som læst" : "Markér som ulæst"}
+              </DrawerButton>
+              <DrawerButton
+                onClick={() => {
+                  close();
+                  toggleMute();
+                }}
+              >
+                {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
+                {muted ? "Fjern påmindelse" : "Påmind mig"}
+              </DrawerButton>
+              <DrawerButton
+                onClick={() => {
+                  close();
+                  onArchive();
+                }}
+              >
+                <Archive className="size-4" /> Arkivér
+              </DrawerButton>
+            </div>
+          )}
+        />
+        {reminderSheet}
+      </>
+    );
+  }
 
   return (
     <>
@@ -85,72 +144,51 @@ export function CerebroChannelRowActions({
               type="button"
               aria-label="Channel actions"
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100"
+              className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
             />
           }
         >
           <MoreHorizontal className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          {isUnread ? (
-            <DropdownMenuItem onClick={() => markRead.mutate(channel.id)}>
-              <MailOpen className="size-4" /> Markér som læst
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem onClick={() => markUnread.mutate(channel.id)}>
-              <Mail className="size-4" /> Markér som ulæst
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem disabled>
-            <BellPlus className="size-4" /> Påmind mig
+          <DropdownMenuItem onClick={toggleRead}>
+            {unread ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
+            {unread ? "Markér som læst" : "Markér som ulæst"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => snooze(addHours(1))}>Om 1 time</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => snooze(nextLocalNineAm())}>I morgen kl. 9</DropdownMenuItem>
-          <DropdownMenuItem onClick={() => snooze(nextBusinessDayNineAm())}>
-            Næste hverdag kl. 9
+          <DropdownMenuItem onClick={toggleMute}>
+            {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
+            {muted ? "Fjern påmindelse" : "Påmind mig"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => snooze(nextMondayNineAm())}>
-            Næste mandag kl. 9
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setCustomOpen(true)}>Vælg tidspunkt…</DropdownMenuItem>
-          {muted && (
-            <DropdownMenuItem onClick={() => unmute.mutate(channel.id)}>
-              <BellOff className="size-4" /> Fjern påmindelse
-            </DropdownMenuItem>
-          )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onArchive}>
             <Archive className="size-4" /> Arkivér
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {/* Keep the mobile swipe-right archive gesture the channel row had before. */}
-      <CerebroSwipeArchive hideOnDesktop onArchive={onArchive} />
-
-      <Dialog open={customOpen} onOpenChange={setCustomOpen}>
-        <DialogContent className="sm:max-w-sm" onClick={(e) => e.stopPropagation()}>
-          <DialogHeader>
-            <DialogTitle>Påmind mig</DialogTitle>
-          </DialogHeader>
-          <div className="grid gap-2 py-1">
-            <Label htmlFor="channel-remind">Tidspunkt</Label>
-            <Input
-              id="channel-remind"
-              type="datetime-local"
-              value={customValue}
-              onChange={(e) => setCustomValue(e.target.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCustomOpen(false)}>
-              Annullér
-            </Button>
-            <Button onClick={commitCustom}>Sæt påmindelse</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {reminderSheet}
     </>
+  );
+}
+
+// Plain full-width button for the mobile long-press drawer. Not a
+// DropdownMenuItem — Base UI's Menu.Item no-ops onClick outside a menu context.
+function DrawerButton({
+  children,
+  onClick,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-accent"
+    >
+      {children}
+    </button>
   );
 }

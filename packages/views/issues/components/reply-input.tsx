@@ -27,6 +27,8 @@ import { useT } from "../../i18n";
 import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — confirm before waking a foreign private agent.
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for thread replies.
+import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +41,8 @@ interface ReplyInputProps {
   avatarId: string;
   onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
   size?: "sm" | "default";
+  // CEREBRO-PATCH(comment-drafts): TECH-3491 — root comment id, scopes this reply's draft to its thread.
+  rootCommentId?: string;
   /**
    * CEREBRO-PATCH(reply-target-agent-indicator): the agent the backend
    * trigger will actually wake when the draft has no @agent mentions —
@@ -60,6 +64,7 @@ function ReplyInput({
   avatarId,
   onSubmit,
   size = "default",
+  rootCommentId, // CEREBRO-PATCH(comment-drafts): TECH-3491
   triggerAgentId,
 }: ReplyInputProps) {
   const { t } = useT("issues");
@@ -75,6 +80,8 @@ function ReplyInput({
   const { uploadWithToast } = useFileUpload(api);
   // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
   const { confirmBeforeSend, confirmDialog } = usePrivateAgentSendConfirm({ triggerAgentId });
+  // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist this thread reply's unsent text.
+  const draft = useCommentDraft(`reply:${issueId}:${rootCommentId ?? ""}`);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -107,6 +114,7 @@ function ReplyInput({
     try {
       await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
       editorRef.current?.clearContent();
+      draft.clear(); // CEREBRO-PATCH(comment-drafts): TECH-3491 — sent, drop the stored draft.
       setIsEmpty(true);
       setMarkdown("");
       uploadMapRef.current.clear();
@@ -197,9 +205,12 @@ function ReplyInput({
                   <ContentEditor
                     ref={editorRef}
                     placeholder={placeholderText}
+                    // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
+                    defaultValue={draft.defaultValue}
                     onUpdate={(md) => {
                       setMarkdown(md);
                       setIsEmpty(!md.trim());
+                      draft.save(md); // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist as you type.
                     }}
                     onSubmit={handleSubmit}
                     onUploadFile={handleUpload}
@@ -216,6 +227,8 @@ function ReplyInput({
                   onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
                 <div className="flex items-center gap-1">
+                  {/* CEREBRO-PATCH(comment-drafts): TECH-3491 — "Kladde gemt" cue. */}
+                  <DraftSavedHint show={draft.saved} className="mr-1" />
                   {pinEnabled && (
                     <PinButton
                       isPinned={isPinned}
