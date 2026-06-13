@@ -93,6 +93,7 @@ type Config struct {
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
+	AutoReloadOnVersionChange      bool                  // watch multica/agent CLI --version output and gracefully restart when it changes (default: true for CLI-launched daemons)
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
@@ -124,8 +125,9 @@ type Overrides struct {
 	// DisableAutoUpdate, when true, forces the auto-update poller off. There
 	// is no symmetric "force on" override because the env/default already
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
-	DisableAutoUpdate       bool
-	AutoUpdateCheckInterval time.Duration // 0 = use env/default
+	DisableAutoUpdate         bool
+	AutoUpdateCheckInterval   time.Duration // 0 = use env/default
+	AutoReloadOnVersionChange *bool         // nil = use env/default
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -471,6 +473,19 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	autoReloadOnVersionChange := true
+	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_RELOAD")); v != "" {
+		switch strings.ToLower(v) {
+		case "false", "0", "no", "off":
+			autoReloadOnVersionChange = false
+		case "true", "1", "yes", "on":
+			autoReloadOnVersionChange = true
+		}
+	}
+	if overrides.AutoReloadOnVersionChange != nil {
+		autoReloadOnVersionChange = *overrides.AutoReloadOnVersionChange
+	}
+
 	return Config{
 		ServerBaseURL:                  serverBaseURL,
 		DaemonID:                       daemonID,
@@ -489,6 +504,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCArtifactPatterns:             gcArtifactPatterns,
 		AutoUpdateEnabled:              autoUpdateEnabled,
 		AutoUpdateCheckInterval:        autoUpdateInterval,
+		AutoReloadOnVersionChange:      autoReloadOnVersionChange,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
 		PollInterval:                   pollInterval,

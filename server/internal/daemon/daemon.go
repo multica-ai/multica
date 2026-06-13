@@ -116,15 +116,16 @@ type Daemon struct {
 
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
+	restartMu     sync.Mutex         // guards restartBinary
 	restartBinary string             // non-empty after a successful update; path to the new binary
 	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 
-	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
-	// microseconds it takes to make a decision; ClaimTask itself runs without
-	// the lock so a slow per-runtime claim cannot stall auto-update or any
-	// other poller.
+	// claimMu guards pauseClaims, claimsInFlight, and reload-pending state. It
+	// is held only for the microseconds it takes to make a decision; ClaimTask
+	// itself runs without the lock so a slow per-runtime claim cannot stall
+	// auto-update, auto-reload, or any other poller.
 	//
 	// The pair is the auto-update path's barrier against the issue's
 	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
@@ -136,6 +137,16 @@ type Daemon struct {
 	claimMu        sync.Mutex
 	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	reloadPending  bool
+	// reloadPendingReason is surfaced through /health so the CLI/Desktop can
+	// explain why the daemon stopped claiming tasks while it drains.
+	reloadPendingReason string
+
+	versionReloadMu              sync.Mutex
+	versionReloadBaseline        map[string]versionProbeResult
+	versionReloadBaselineReady   bool
+	versionReloadCheckInProgress bool
+	versionReloadHeartbeatCount  int
 
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
@@ -620,6 +631,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
+		"auto_reload_on_version_change", d.cfg.AutoReloadOnVersionChange,
 		"launched_by", d.cfg.LaunchedBy,
 	)
 
@@ -647,6 +659,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.preflightAuth(ctx); err != nil {
 		return err
 	}
+	d.initVersionReloadBaseline()
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
@@ -676,6 +689,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 // RestartBinary returns the path to the new binary if the daemon needs to restart
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
 	return d.restartBinary
 }
 
@@ -1352,6 +1367,8 @@ func (d *Daemon) runRuntimeHeartbeat(ctx context.Context, rid string) {
 }
 
 func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
+	d.maybeTriggerVersionReloadCheck(d.recoveryContext())
+
 	// Skip HTTP heartbeat for runtimes that successfully acked a recent
 	// WebSocket heartbeat. The WS path keeps last_seen_at fresh and delivers
 	// actions, so the HTTP write would be a duplicate DB update. If the WS
@@ -1789,9 +1806,16 @@ func (d *Daemon) tryEnterClaim() bool {
 
 // exitClaim releases the in-flight claim recorded by tryEnterClaim.
 func (d *Daemon) exitClaim() {
+	shouldRestart := false
 	d.claimMu.Lock()
-	defer d.claimMu.Unlock()
 	d.claimsInFlight--
+	if d.reloadPending && d.claimsInFlight == 0 && d.activeTasks.Load() == 0 {
+		shouldRestart = true
+	}
+	d.claimMu.Unlock()
+	if shouldRestart {
+		d.triggerPendingReloadIfIdle()
+	}
 }
 
 // trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
@@ -1804,7 +1828,7 @@ func (d *Daemon) exitClaim() {
 func (d *Daemon) trySetClaimBarrier() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+	if d.pauseClaims || d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
 		return false
 	}
 	d.pauseClaims = true
@@ -1818,6 +1842,9 @@ func (d *Daemon) trySetClaimBarrier() bool {
 func (d *Daemon) releaseClaimBarrier() {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
+	if d.reloadPending {
+		return
+	}
 	d.pauseClaims = false
 }
 
@@ -1826,11 +1853,35 @@ func (d *Daemon) releaseClaimBarrier() {
 // so the restarted daemon picks up the new Cellar version automatically.
 // For non-brew installs, it resolves to the absolute path of the replaced binary.
 // The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
-func (d *Daemon) triggerRestart() {
-	newBin, err := os.Executable()
+func (d *Daemon) triggerRestart() bool {
+	d.restartMu.Lock()
+	defer d.restartMu.Unlock()
+
+	if d.restartBinary != "" {
+		d.logger.Debug("daemon restart already scheduled", "new_binary", d.restartBinary)
+		return true
+	}
+
+	newBin, err := d.resolveRestartBinary()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
-		return
+		return false
+	}
+
+	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
+	d.restartBinary = newBin
+
+	// Cancel the main context to trigger graceful shutdown.
+	if d.cancelFunc != nil {
+		d.cancelFunc()
+	}
+	return true
+}
+
+func (d *Daemon) resolveRestartBinary() (string, error) {
+	newBin, err := os.Executable()
+	if err != nil {
+		return "", err
 	}
 	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
 	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
@@ -1849,14 +1900,7 @@ func (d *Daemon) triggerRestart() {
 			newBin = resolved
 		}
 	}
-
-	d.logger.Info("scheduling daemon restart", "new_binary", newBin)
-	d.restartBinary = newBin
-
-	// Cancel the main context to trigger graceful shutdown.
-	if d.cancelFunc != nil {
-		d.cancelFunc()
-	}
+	return newBin, nil
 }
 
 // pollLoop supervises one runtimePoller goroutine per registered runtime,

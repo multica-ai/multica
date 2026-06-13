@@ -84,6 +84,7 @@ func init() {
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	f.Bool("auto-reload-on-version-change", true, "Gracefully restart when multica or agent CLI --version output changes (env: MULTICA_DAEMON_AUTO_RELOAD=0 to disable)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -103,6 +104,7 @@ func init() {
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	rf.Bool("auto-reload-on-version-change", true, "Gracefully restart when multica or agent CLI --version output changes (env: MULTICA_DAEMON_AUTO_RELOAD=0 to disable)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -315,6 +317,10 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
 		args = append(args, "--auto-update-interval", d.String())
 	}
+	if cmd.Flags().Changed("auto-reload-on-version-change") {
+		b, _ := cmd.Flags().GetBool("auto-reload-on-version-change")
+		args = append(args, fmt.Sprintf("--auto-reload-on-version-change=%t", b))
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -369,6 +375,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
 		overrides.AutoUpdateCheckInterval = d
+	}
+	if cmd.Flags().Changed("auto-reload-on-version-change") {
+		b, _ := cmd.Flags().GetBool("auto-reload-on-version-change")
+		overrides.AutoReloadOnVersionChange = &b
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)
@@ -613,6 +623,14 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	}
 	if version, ok := health["cli_version"].(string); ok && version != "" {
 		rows = append(rows, row{"Version", version})
+	}
+	if pending, ok := health["reload_pending"].(bool); ok && pending {
+		reason, _ := health["reload_pending_reason"].(string)
+		value := "pending"
+		if reason != "" {
+			value += " (" + reason + ")"
+		}
+		rows = append(rows, row{"Reload", value})
 	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
