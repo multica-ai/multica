@@ -1,88 +1,88 @@
 {
   "bubble_menu": {
-    "bold": "Bold",
-    "italic": "Italic",
-    "strikethrough": "Strikethrough",
+    "bold": "Đậm",
+    "italic": "Nghiêng",
+    "strikethrough": "Gạch ngang",
     "code": "Code",
-    "highlight": "Highlight",
-    "link": "Link",
-    "list": "List",
-    "quote": "Quote",
+    "highlight": "Tô sáng",
+    "link": "Liên kết",
+    "list": "Danh sách",
+    "quote": "Trích dẫn",
     "url_aria_label": "URL",
     "heading_dropdown": {
-      "text": "Text",
-      "normal_text": "Normal Text",
-      "heading_1": "Heading 1",
-      "heading_2": "Heading 2",
-      "heading_3": "Heading 3"
+      "text": "Văn bản",
+      "normal_text": "Văn bản thường",
+      "heading_1": "Tiêu đề 1",
+      "heading_2": "Tiêu đề 2",
+      "heading_3": "Tiêu đề 3"
     },
     "list_dropdown": {
-      "bullet_list": "Bullet List",
-      "ordered_list": "Ordered List",
-      "task_list": "Task List"
+      "bullet_list": "Danh sách dấu đầu dòng",
+      "ordered_list": "Danh sách có số",
+      "task_list": "Danh sách tác vụ"
     },
     "sub_issue": {
-      "tooltip": "Create sub-issue from selection",
-      "created": "Created {{identifier}}",
-      "create_failed": "Failed to create sub-issue"
+      "tooltip": "Tạo công việc con từ vùng chọn",
+      "created": "Đã tạo {{identifier}}",
+      "create_failed": "Tạo công việc con thất bại"
     }
   },
   "image": {
-    "view": "View image",
-    "download": "Download",
-    "copy_link": "Copy link",
-    "delete": "Delete",
-    "link_copied": "Link copied",
-    "copy_link_failed": "Failed to copy link"
+    "view": "Xem ảnh",
+    "download": "Tải về",
+    "copy_link": "Sao chép liên kết",
+    "delete": "Xóa",
+    "link_copied": "Đã sao chép liên kết",
+    "copy_link_failed": "Sao chép liên kết thất bại"
   },
   "attachment": {
-    "download_failed": "Couldn't fetch a download link. Try again in a moment.",
-    "preview": "Preview",
-    "preview_loading": "Loading preview…",
-    "preview_failed": "Couldn't load preview",
-    "preview_too_large": "File is too large to preview. Please download.",
-    "preview_unsupported": "This file type can't be previewed.",
-    "close": "Close",
-    "open_in_new_tab": "Open in new tab",
-    "remove": "Remove attachment"
+    "download_failed": "Không thể lấy liên kết tải về. Thử lại sau.",
+    "preview": "Xem trước",
+    "preview_loading": "Đang tải xem trước…",
+    "preview_failed": "Không thể tải xem trước",
+    "preview_too_large": "Tệp quá lớn để xem trước. Vui lòng tải về.",
+    "preview_unsupported": "Loại tệp này không hỗ trợ xem trước.",
+    "close": "Đóng",
+    "open_in_new_tab": "Mở trong tab mới",
+    "remove": "Xóa tệp đính kèm"
   },
   "link_hover": {
-    "copy_link": "Copy link",
-    "open_link": "Open link",
-    "link_copied": "Link copied",
-    "copy_failed": "Failed to copy"
+    "copy_link": "Sao chép liên kết",
+    "open_link": "Mở liên kết",
+    "link_copied": "Đã sao chép liên kết",
+    "copy_failed": "Sao chép thất bại"
   },
   "mention": {
-    "group_users": "Users",
-    "group_issues": "Issues",
-    "all_members": "All members",
-    "searching": "Searching...",
-    "no_results": "No results",
-    "group_current": "Current page",
-    "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_users": "Người dùng",
+    "group_issues": "Công việc",
+    "all_members": "Tất cả thành viên",
+    "searching": "Đang tìm...",
+    "no_results": "Không có kết quả",
+    "group_current": "Trang hiện tại",
+    "group_recent": "Đã xem gần đây",
+    "group_search": "Kết quả tìm kiếm"
   },
   "slash_command": {
-    "no_skills_configured": "No skills configured",
-    "no_results": "No matching skills",
+    "no_skills_configured": "Chưa có Skill nào được cài đặt",
+    "no_results": "Không có Skill phù hợp",
     "commands": {
-      "note": "Add a note — won't trigger any agents"
+      "note": "Thêm ghi chú — sẽ không kích hoạt Agent nào"
     }
   },
   "code_block": {
-    "copy_code": "Copy code",
-    "show_preview": "Show preview",
-    "show_source": "Show source",
-    "fullscreen": "Fullscreen"
+    "copy_code": "Sao chép code",
+    "show_preview": "Xem trước",
+    "show_source": "Xem nguồn",
+    "fullscreen": "Toàn màn hình"
   },
   "file_card": {
-    "uploading": "Uploading {{filename}}"
+    "uploading": "Đang tải lên {{filename}}"
   },
   "title_editor": {
-    "title_aria_label": "Title"
+    "title_aria_label": "Tiêu đề"
   },
   "mermaid": {
-    "render_error": "Unable to render Mermaid diagram.",
-    "rendering": "Rendering diagram…"
+    "render_error": "Không thể hiển thị sơ đồ Mermaid.",
+    "rendering": "Đang hiển thị sơ đồ…"
   }
 }

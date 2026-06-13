@@ -1,54 +1,54 @@
 {
   "header": {
-    "back": "Back",
-    "log_out": "Log out"
+    "back": "Quay lại",
+    "log_out": "Đăng xuất"
   },
   "not_found": {
-    "title": "Invitation not found",
-    "description": "This invitation may have expired, been revoked, or doesn't belong to your account.",
-    "go_to_dashboard": "Go to dashboard"
+    "title": "Không tìm thấy lời mời",
+    "description": "Lời mời này có thể đã hết hạn, bị thu hồi, hoặc không thuộc tài khoản của bạn.",
+    "go_to_dashboard": "Đến trang chính"
   },
   "accepted": {
-    "title": "You joined {{workspace_name}}!",
-    "redirecting": "Redirecting to workspace..."
+    "title": "Bạn đã tham gia {{workspace_name}}!",
+    "redirecting": "Đang chuyển đến workspace..."
   },
   "declined": {
-    "title": "Invitation declined",
-    "description": "You won't be added to this workspace.",
-    "go_to_dashboard": "Go to dashboard"
+    "title": "Đã từ chối lời mời",
+    "description": "Bạn sẽ không được thêm vào workspace này.",
+    "go_to_dashboard": "Đến trang chính"
   },
   "main": {
-    "join_title": "Join {{workspace_name}}",
+    "join_title": "Tham gia {{workspace_name}}",
     "fallback_workspace_name": "workspace",
-    "invited_role_admin": "invited you to join as an admin.",
-    "invited_role_member": "invited you to join as a member.",
-    "already_handled_accepted": "This invitation has already been accepted.",
-    "already_handled_declined": "This invitation has already been declined.",
-    "expired": "This invitation has expired.",
-    "decline": "Decline",
-    "declining": "Declining...",
-    "accept": "Accept & Join",
-    "joining": "Joining..."
+    "invited_role_admin": "đã mời bạn tham gia với vai trò quản trị viên.",
+    "invited_role_member": "đã mời bạn tham gia với vai trò thành viên.",
+    "already_handled_accepted": "Lời mời này đã được chấp nhận.",
+    "already_handled_declined": "Lời mời này đã được từ chối.",
+    "expired": "Lời mời này đã hết hạn.",
+    "decline": "Từ chối",
+    "declining": "Đang từ chối...",
+    "accept": "Chấp nhận & Tham gia",
+    "joining": "Đang tham gia..."
   },
   "errors": {
-    "accept_failed": "Failed to accept invitation",
-    "decline_failed": "Failed to decline invitation"
+    "accept_failed": "Chấp nhận lời mời thất bại",
+    "decline_failed": "Từ chối lời mời thất bại"
   },
   "batch": {
-    "log_out": "Log out",
-    "empty_title": "No pending invitations",
-    "empty_hint": "Continue to set up your own workspace.",
-    "empty_continue": "Continue to setup",
-    "title": "You've been invited",
-    "subtitle": "Pick the workspaces you want to join. You can always handle the rest later from the sidebar.",
-    "submit_skip": "Skip and set up my own workspace",
-    "submit_join_one": "Join 1 workspace",
-    "submit_join_other": "Join {{count}} workspaces",
-    "joining": "Joining...",
-    "error_generic": "Failed to process invitations. Please try again.",
+    "log_out": "Đăng xuất",
+    "empty_title": "Không có lời mời nào đang chờ",
+    "empty_hint": "Tiếp tục để cài đặt workspace của bạn.",
+    "empty_continue": "Tiếp tục đến cài đặt",
+    "title": "Bạn được mời",
+    "subtitle": "Chọn các workspace bạn muốn tham gia. Bạn luôn có thể xử lý phần còn lại sau từ sidebar.",
+    "submit_skip": "Bỏ qua và cài đặt workspace của tôi",
+    "submit_join_one": "Tham gia 1 workspace",
+    "submit_join_other": "Tham gia {{count}} workspace",
+    "joining": "Đang tham gia...",
+    "error_generic": "Xử lý lời mời thất bại. Vui lòng thử lại.",
     "row_workspace_fallback": "Workspace",
-    "row_inviter_fallback": "Someone",
-    "row_invited_admin": "{{inviter}} invited you as an admin",
-    "row_invited_member": "{{inviter}} invited you as a member"
+    "row_inviter_fallback": "Ai đó",
+    "row_invited_admin": "{{inviter}} đã mời bạn với vai trò quản trị viên",
+    "row_invited_member": "{{inviter}} đã mời bạn với vai trò thành viên"
   }
 }

@@ -1,76 +1,76 @@
 {
   "page": {
     "title": "Squads",
-    "new_button": "New Squad",
-    "empty_no_squads": "No squads yet. Create one to get started.",
-    "empty_no_match": "No squads match your filters."
+    "new_button": "Squad mới",
+    "empty_no_squads": "Chưa có Squad nào. Tạo một cái để bắt đầu.",
+    "empty_no_match": "Không có Squad nào khớp với bộ lọc."
   },
   "inspector": {
-    "details_section": "Details",
-    "archive_button": "Archive"
+    "details_section": "Chi tiết",
+    "archive_button": "Lưu trữ"
   },
   "archive_dialog": {
-    "title": "Archive this squad?",
-    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
-    "cancel": "Cancel",
-    "confirm": "Archive",
-    "archiving": "Archiving…"
+    "title": "Lưu trữ Squad này?",
+    "description": "\"{{name}}\" sẽ được lưu trữ. Các công việc hiện đang được giao cho Squad này sẽ được chuyển cho người dẫn đầu. Không thể hoàn tác — hãy tạo Squad mới nếu bạn cần định tuyến lại.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ",
+    "archiving": "Đang lưu trữ…"
   },
   "name_editor": {
-    "cancel": "Cancel"
+    "cancel": "Hủy"
   },
   "add_member_dialog": {
-    "title": "Add Member",
-    "description": "Add a workspace member or agent to this squad.",
-    "label_member": "Member",
-    "label_role": "Role",
-    "label_optional": "(optional)",
-    "placeholder_role_inline": "Add role…",
-    "cancel": "Cancel"
+    "title": "Thêm thành viên",
+    "description": "Thêm thành viên workspace hoặc Agent vào Squad này.",
+    "label_member": "Thành viên",
+    "label_role": "Vai trò",
+    "label_optional": "(tùy chọn)",
+    "placeholder_role_inline": "Thêm vai trò…",
+    "cancel": "Hủy"
   },
   "description_dialog": {
-    "title": "Edit description",
-    "placeholder_empty": "Add a description",
-    "cancel": "Cancel"
+    "title": "Sửa mô tả",
+    "placeholder_empty": "Thêm mô tả",
+    "cancel": "Hủy"
   },
   "discard_changes_dialog": {
-    "title": "Discard unsaved changes?",
-    "description": "You have unsaved changes on this tab. Switching tabs will discard them.",
-    "keep_editing": "Keep editing",
-    "discard_button": "Discard"
+    "title": "Bỏ qua thay đổi chưa lưu?",
+    "description": "Bạn có thay đổi chưa lưu trên tab này. Chuyển tab sẽ bỏ qua các thay đổi đó.",
+    "keep_editing": "Tiếp tục chỉnh sửa",
+    "discard_button": "Bỏ qua"
   },
   "members_tab": {
-    "section_title": "Members",
-    "section_count_one": "{{count}} member in this squad",
-    "section_count_other": "{{count}} members in this squad",
-    "add_member_button": "Add Member",
-    "create_agent_button": "Create Agent",
-    "leader_chip": "Leader",
-    "view_agent_tooltip": "Open agent detail",
-    "make_leader_tooltip": "Make squad leader",
-    "remove_member_tooltip": "Remove from squad",
-    "status_working": "Working",
-    "status_idle": "Idle",
-    "status_offline": "Offline",
-    "status_unstable": "Unstable",
-    "status_archived": "Archived",
-    "issue_status_blocked": "blocked",
-    "active_issue_more": "and {{count}} more",
-    "last_active_label": "last active {{time}}"
+    "section_title": "Thành viên",
+    "section_count_one": "{{count}} thành viên trong Squad này",
+    "section_count_other": "{{count}} thành viên trong Squad này",
+    "add_member_button": "Thêm thành viên",
+    "create_agent_button": "Tạo Agent",
+    "leader_chip": "Dẫn đầu",
+    "view_agent_tooltip": "Mở chi tiết Agent",
+    "make_leader_tooltip": "Đặt làm người dẫn đầu Squad",
+    "remove_member_tooltip": "Xóa khỏi Squad",
+    "status_working": "Đang làm",
+    "status_idle": "Rảnh",
+    "status_offline": "Ngoại tuyến",
+    "status_unstable": "Không ổn định",
+    "status_archived": "Đã lưu trữ",
+    "issue_status_blocked": "bị chặn",
+    "active_issue_more": "và {{count}} công việc khác",
+    "last_active_label": "hoạt động lần cuối {{time}}"
   },
   "profile_card": {
-    "unavailable": "Squad unavailable",
-    "detail_link": "Detail →",
-    "archived": "Archived",
-    "member_count_one": "{{count}} member",
-    "member_count_other": "{{count}} members",
-    "members_section": "Members",
-    "more_members_one": "+{{count}} more",
-    "more_members_other": "+{{count}} more"
+    "unavailable": "Squad không khả dụng",
+    "detail_link": "Chi tiết →",
+    "archived": "Đã lưu trữ",
+    "member_count_one": "{{count}} thành viên",
+    "member_count_other": "{{count}} thành viên",
+    "members_section": "Thành viên",
+    "more_members_one": "+{{count}} nữa",
+    "more_members_other": "+{{count}} nữa"
   },
   "instructions_tab": {
-    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
-    "unsaved_changes": "Unsaved changes",
-    "save_button": "Save"
+    "description": "Hướng dẫn Squad được đưa vào prompt của Agent dẫn đầu mỗi khi làm việc trên công việc được giao cho Squad này. Dùng để cung cấp cho người dẫn đầu các hướng dẫn chung của Squad, quy ước làm việc, hoặc ngữ cảnh cần tuân theo mọi tác vụ.",
+    "unsaved_changes": "Thay đổi chưa lưu",
+    "save_button": "Lưu"
   }
 }

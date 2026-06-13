@@ -1,58 +1,58 @@
 {
-  "title": "Usage",
-  "subtitle": "Token spend and agent activity across this workspace.",
+  "title": "Mức sử dụng",
+  "subtitle": "Lượng token tiêu thụ và hoạt động của Agent trong workspace này.",
   "filter": {
-    "project_label": "Project",
-    "all_projects": "All projects",
-    "period_label": "Period"
+    "project_label": "Dự án",
+    "all_projects": "Tất cả dự án",
+    "period_label": "Khoảng thời gian"
   },
   "kpi": {
-    "cost_label": "Cost · {{days}}D",
-    "tokens_label": "Tokens · {{days}}D",
-    "tokens_hint": "Input {{input}} · Output {{output}}",
-    "run_time_label": "Run time · {{days}}D",
-    "run_time_hint": "Across {{tasks}} tasks",
-    "tasks_label": "Tasks · {{days}}D",
-    "tasks_hint": "{{failed}} failed"
+    "cost_label": "Chi phí · {{days}}N",
+    "tokens_label": "Token · {{days}}N",
+    "tokens_hint": "Đầu vào {{input}} · Đầu ra {{output}}",
+    "run_time_label": "Thời gian chạy · {{days}}N",
+    "run_time_hint": "Trên {{tasks}} tác vụ",
+    "tasks_label": "Tác vụ · {{days}}N",
+    "tasks_hint": "{{failed}} thất bại"
   },
   "dim": {
-    "label": "Dimension",
-    "daily": "Daily",
-    "weekly": "Weekly"
+    "label": "Chiều",
+    "daily": "Hàng ngày",
+    "weekly": "Hàng tuần"
   },
   "daily": {
-    "title_cost": "Daily cost",
-    "title_tokens": "Daily tokens",
-    "title_time": "Daily run time",
-    "title_tasks": "Daily tasks",
-    "metric_cost": "Cost",
-    "metric_tokens": "Tokens",
-    "metric_time": "Time",
-    "metric_tasks": "Tasks",
-    "no_data": "No usage in this window."
+    "title_cost": "Chi phí hàng ngày",
+    "title_tokens": "Token hàng ngày",
+    "title_time": "Thời gian chạy hàng ngày",
+    "title_tasks": "Tác vụ hàng ngày",
+    "metric_cost": "Chi phí",
+    "metric_tokens": "Token",
+    "metric_time": "Thời gian",
+    "metric_tasks": "Tác vụ",
+    "no_data": "Không có dữ liệu trong khoảng này."
   },
   "weekly": {
-    "title_cost": "Weekly cost",
-    "title_tokens": "Weekly tokens",
-    "title_time": "Weekly run time",
-    "title_tasks": "Weekly tasks",
-    "partial_label": "{{range}} (partial · {{covered}} / 7 days)"
+    "title_cost": "Chi phí hàng tuần",
+    "title_tokens": "Token hàng tuần",
+    "title_time": "Thời gian chạy hàng tuần",
+    "title_tasks": "Tác vụ hàng tuần",
+    "partial_label": "{{range}} (một phần · {{covered}} / 7 ngày)"
   },
   "leaderboard": {
-    "title": "Leaderboard",
-    "caption": "{{count}} agents",
+    "title": "Bảng xếp hạng",
+    "caption": "{{count}} Agent",
     "header_agent": "Agent",
-    "header_tokens": "Tokens",
-    "header_cost": "Cost",
-    "header_time": "Time",
-    "header_tasks": "Tasks",
-    "no_data": "No agent activity in this window."
+    "header_tokens": "Token",
+    "header_cost": "Chi phí",
+    "header_time": "Thời gian",
+    "header_tasks": "Tác vụ",
+    "no_data": "Không có hoạt động Agent trong khoảng này."
   },
   "empty": {
-    "title": "No usage yet",
-    "body": "Once agents start running tasks here, their token spend and run time will appear in this view."
+    "title": "Chưa có dữ liệu",
+    "body": "Khi Agent bắt đầu chạy tác vụ, lượng token tiêu thụ và thời gian chạy sẽ xuất hiện ở đây."
   },
   "duration": {
-    "less_than_minute": "<1m"
+    "less_than_minute": "<1p"
   }
 }
