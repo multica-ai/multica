@@ -49,7 +49,6 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import {
@@ -57,8 +56,6 @@ import {
   useInboxActionGroupLabels,
   useSetInboxMode,
 } from "@multica/cerebro-inbox";
-import { api } from "@multica/core/api";
-import { chatKeys } from "@multica/core/chat/queries";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
@@ -150,7 +147,6 @@ export function DynamicInbox() {
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
-  const qc = useQueryClient();
 
   const [activeTabId, setActiveTabId] = useState<string>(
     layout.activeTabId ?? layout.tabs[0]?.id ?? "",
@@ -200,15 +196,13 @@ export function DynamicInbox() {
     // ever set the row the user clicked.
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
+  // TECH-3489 — issues and channels still archive via their host mutations.
+  // Chat rows own archive/unarchive/delete inside CerebroChatSessionRowActions;
+  // for a chat entry this only clears the selection if that row was open (the
+  // row passes it as `onCleared`).
   const onArchive = (entry: DynInboxEntry) => {
     if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
-    else if (entry.kind === "chat") {
-      // Mirror the classic inbox: archive the session, then refresh the list.
-      void api
-        .updateChatSession(entry.session.id, { status: "archived" })
-        .then(() => qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) }));
-    }
     if (selected && selected.id === entry.id) clearSelection();
   };
 

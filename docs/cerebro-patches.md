@@ -472,6 +472,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `handler-cerebro-routes` | server/internal/handler/handler.go | 37 | Server handler additions |
 | `inbox-chat-panel` | packages/views/inbox/components/inbox-chat-panel.tsx | 298 | Inbox view additions |
 | `inbox-chat-row-swipe` | packages/views/inbox/components/inbox-page.tsx | 4 | Mount cerebro swipe-archive on chat session rows so they match issue/channel swipe behavior (JEH-663) |
+| `inbox-chat-row-actions` | packages/views/inbox/components/inbox-page.tsx | ~12 | TECH-3489 — replace the chat row's plain archive button + swipe with `CerebroChatSessionRowActions` (3-dot menu: mark read / rename / convert / archive / delete; unarchive in the archived view). Adds an unnamed `group` to the row so the menu reveals on hover, and removes the now-superseded `handleArchiveChat`. |
 | `inbox-archive-pagination` | server/pkg/db/queries/inbox.sql<br>server/pkg/db/generated/inbox.sql.go<br>server/internal/handler/inbox.go<br>packages/core/api/client.ts<br>packages/core/inbox/queries.ts<br>packages/views/inbox/components/inbox-page.tsx<br>packages/cerebro-inbox/mutations.ts | ~70 | JEH-1165 — archived inbox loads in 50-row batches via limit/offset and a viewport sentinel. Active inbox remains on the existing unpaged query. |
 | `inbox-folder-handler` | server/internal/handler/inbox_folder.go | 413 | Inbox-folder server handler (cerebro-only feature) |
 | `inbox-keyboard-shortcuts` | packages/views/inbox/components/inbox-page.tsx | 4 | Mounts cerebro `e` = archive shortcut for the inbox page (JEH-663) |

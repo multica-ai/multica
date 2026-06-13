@@ -11,7 +11,7 @@ import {
 } from "@multica/views/inbox/components/inbox-list-item";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { CerebroSwipeArchive } from "@multica/cerebro-inbox";
+import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
 import type { ChatSession } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 
@@ -114,7 +114,10 @@ function ChatSessionRow({
           <span className="truncate">{agentName}</span>
         </p>
       </div>
-      <CerebroSwipeArchive onArchive={onArchive} />
+      {/* TECH-3489 — full 3-dot menu (mark read / rename / convert / archive /
+          delete) + mobile swipe, matching issue and channel rows. The dynamic
+          inbox only lists active chats, so this is always the archive variant. */}
+      <CerebroChatSessionRowActions session={session} onCleared={onArchive} />
     </div>
   );
 }

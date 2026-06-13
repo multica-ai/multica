@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
@@ -32,7 +32,6 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — `isMuted` powers the muted/non-muted view filter
 import {
   useInboxKeyboardShortcuts,
-  CerebroSwipeArchive,
   useUnarchiveInbox,
   isMuted,
   formatPlannedDateTime,
@@ -60,6 +59,8 @@ import {
 } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(inbox-channel-archive-import): JEH-851 — per-user channel archive mutation.
 import { useArchiveChannel } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(inbox-chat-row-actions): TECH-3489 — 3-dot menu + unarchive for chat rows.
+import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
 import { useInboxViewStore, INBOX_VIEW_OPTIONS, type InboxView } from "@multica/core/inbox";
 import { channelListOptions } from "@multica/core/channels";
 import { useChatStore } from "@multica/core/chat";
@@ -97,7 +98,6 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { projectListOptions } from "@multica/core/projects";
 import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
-import { chatKeys } from "@multica/core/chat/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -373,7 +373,6 @@ export function InboxPage() {
   const selected = selectedChatSession
     ? null
     : items.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
-  const qc = useQueryClient();
   // CEREBRO-PATCH(inbox-message-refresh): FIR-2684 — staleTime is Infinity, so re-opening a cached issue won't refetch; force-refresh the opened message so the latest comment is always present (without a full-page reload).
   useInboxMessageRefresh(wsId, selected?.issue_id ?? null);
 
@@ -414,16 +413,10 @@ export function InboxPage() {
     (replaceSilent ?? replace)(url);
   }, [replace, replaceSilent, wsPaths]);
 
-  // CEREBRO-PATCH(inbox-page-archive-chat): FIR-1958 — soft-archive via
-  // updateChatSession(status: "archived") instead of deleteChatSession so the
-  // chat resurfaces in the "Show archived" view (and can be unarchived from
-  // the chat-session header). Prefix invalidation of chatKeys.sessions also
-  // refreshes the archived list (chatKeys.archivedSessions is nested under it).
-  const handleArchiveChat = useCallback(async (sessionId: string) => {
-    if (sessionId === selectedKey) setSelectedKey(null, "");
-    await api.updateChatSession(sessionId, { status: "archived" });
-    qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
-  }, [selectedKey, setSelectedKey, wsId, qc]);
+  // CEREBRO-PATCH(inbox-chat-row-actions): TECH-3489 — chat archive / unarchive
+  // / delete now live in CerebroChatSessionRowActions (cerebro-chat), which owns
+  // the shared chat mutations. The row passes `onCleared` so an archived /
+  // unarchived / deleted open chat drops out of the selection here.
 
   // Shared inbox links (?issue=<id>) may point to notifications not in this
   // user's inbox (archived, or never received). Fall back to the issue page
@@ -936,7 +929,9 @@ export function InboxPage() {
           key={`chat:${session.id}`}
           // CEREBRO-PATCH(inbox-chat-row-swipe): `relative` is required so the
           // cerebro swipe overlay (absolute inset-0) covers the row.
-          className={`group/chat relative flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
+          // CEREBRO-PATCH(inbox-chat-row-actions): TECH-3489 — unnamed `group`
+          // lets the row-actions 3-dot button reveal on hover (desktop).
+          className={`group group/chat relative flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors hover:bg-accent/50 ${
             session.id === selectedKey ? "bg-accent" : ""
           }`}
           onClick={() => setSelectedKey("chat", session.id)}
@@ -963,24 +958,17 @@ export function InboxPage() {
               {agent?.name} · {timeAgo(session.updated_at)}
             </span>
           </div>
-          <button
-            type="button"
-            className="flex h-9 w-9 sm:h-6 sm:w-6 sm:hidden shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent sm:group-hover/chat:flex"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleArchiveChat(session.id);
+          {/* CEREBRO-PATCH(inbox-chat-row-actions): TECH-3489 — full 3-dot menu
+              (mark read / rename / convert / archive / delete) + mobile swipe,
+              matching issue and channel rows. In the archived view it reopens
+              the chat instead of archiving. onCleared drops the open row from
+              the selection after archive/unarchive/delete. */}
+          <CerebroChatSessionRowActions
+            session={session}
+            isArchivedView={isArchivedView}
+            onCleared={() => {
+              if (session.id === selectedKey) setSelectedKey(null, "");
             }}
-            title="Archive"
-            aria-label="Archive chat"
-          >
-            <Archive className="size-4 sm:size-3" />
-          </button>
-          {/* CEREBRO-PATCH(inbox-chat-row-swipe): swipe-right archives chat
-              sessions, matching issue/channel rows. hideOnDesktop avoids
-              stacking with the existing hover archive button above. */}
-          <CerebroSwipeArchive
-            hideOnDesktop
-            onArchive={() => handleArchiveChat(session.id)}
           />
         </div>
       );

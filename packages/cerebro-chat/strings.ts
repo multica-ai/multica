@@ -30,6 +30,20 @@ type StringTable = {
   untitled: string;
   toast_converted: string;
   toast_convert_failed: string;
+  // TECH-3489 — chat row-actions menu (inbox).
+  mark_read: string;
+  rename: string;
+  rename_dialog_title: string;
+  rename_placeholder: string;
+  rename_save: string;
+  delete: string;
+  delete_dialog_title: string;
+  delete_dialog_description: string;
+  delete_confirm: string;
+  delete_confirming: string;
+  toast_archive_failed: string;
+  toast_unarchive_failed: string;
+  toast_delete_failed: string;
   // JEH-736 — session price chip + token breakdown tooltip.
   session_price_label: string;
   session_price_aria: string;
@@ -67,6 +81,20 @@ const en: StringTable = {
   untitled: "New chat",
   toast_converted: "Issue created",
   toast_convert_failed: "Failed to create issue",
+  mark_read: "Mark as read",
+  rename: "Rename",
+  rename_dialog_title: "Rename chat",
+  rename_placeholder: "Chat title",
+  rename_save: "Save",
+  delete: "Delete",
+  delete_dialog_title: "Delete chat session",
+  delete_dialog_description:
+    "The session and its conversation history will be permanently deleted. This can't be undone.",
+  delete_confirm: "Delete",
+  delete_confirming: "Deleting…",
+  toast_archive_failed: "Couldn't archive the chat",
+  toast_unarchive_failed: "Couldn't reopen the chat",
+  toast_delete_failed: "Couldn't delete the chat",
   session_price_label: "Session price",
   session_price_aria: "Session price and token breakdown",
   session_token_breakdown_input: "Input",
@@ -103,6 +131,20 @@ const da: StringTable = {
   untitled: "Ny chat",
   toast_converted: "Issue oprettet",
   toast_convert_failed: "Kunne ikke oprette issue",
+  mark_read: "Markér som læst",
+  rename: "Omdøb",
+  rename_dialog_title: "Omdøb chat",
+  rename_placeholder: "Chat-titel",
+  rename_save: "Gem",
+  delete: "Slet",
+  delete_dialog_title: "Slet chat-session",
+  delete_dialog_description:
+    "Sessionen og hele samtalen slettes permanent. Det kan ikke fortrydes.",
+  delete_confirm: "Slet",
+  delete_confirming: "Sletter…",
+  toast_archive_failed: "Kunne ikke arkivere chatten",
+  toast_unarchive_failed: "Kunne ikke genåbne chatten",
+  toast_delete_failed: "Kunne ikke slette chatten",
   session_price_label: "Sessions-pris",
   session_price_aria: "Sessions-pris og token-fordeling",
   session_token_breakdown_input: "Input",

@@ -22,6 +22,7 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
+  | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
@@ -159,6 +160,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
+  cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
@@ -471,6 +473,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
+  },
+  {
+    key: "cerebro_chat_row_actions",
+    label: "Chat row actions",
+    group: "inbox",
+    description:
+      "Give agent chat sessions the same inbox row menu as notifications and channels: a 3-dot menu (and mobile swipe) to mark read, rename, convert to issue, archive, unarchive, and delete a chat — so an archived chat can be reopened and continued.",
   },
   {
     key: "cerebro_inbox_action_grouping",
