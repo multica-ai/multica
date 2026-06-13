@@ -39,6 +39,14 @@ const (
 	EventTaskFailed                  = "task:failed"                    // running → failed
 	EventTaskMessage                 = "task:message"
 	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
+	// EventTaskPendingContext — emitted when a task is parked in
+	// 'pending_context' because the MUL-4059 no-context guard rejected
+	// it. The front-end subscribes by `task:` prefix + re-snapshots,
+	// so this event is informational; the snapshot query already sees
+	// the new status. Kept distinct from EventTaskQueued so a future
+	// UI can render a tailored "waiting for context" card without
+	// parsing the snapshot's status field.
+	EventTaskPendingContext = "task:pending_context" // ∅ → pending_context (guard rejected)
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"

@@ -39,6 +39,15 @@ type Task struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
+	// MaxInactivitySecs is the resolved per-task cap the server's
+	// inactivity sweeper will use to fail this task if no activity
+	// arrives. The daemon's soft-kill watcher uses the same value to
+	// SIGTERM the agent before the server hard-fails it. 0 means
+	// "use server default" (1200 = 20 min, MUL-4059).
+	//
+	// MUL-4059: populated by the claim endpoint alongside the task
+	// payload so the daemon doesn't need to re-resolve the chain.
+	MaxInactivitySecs int `json:"max_inactivity_secs,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`

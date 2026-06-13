@@ -162,6 +162,17 @@ type AgentTaskResponse struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
+	// MaxInactivitySecs is the resolved per-task cap (MUL-4059). The
+	// daemon uses this to soft-kill the agent before the server's
+	// inactivity sweeper hard-fails it. 0 means "use server default"
+	// (1200 = 20 min).
+	MaxInactivitySecs int `json:"max_inactivity_secs,omitempty"`
+	// P2-10 review fix: the audit JSON envelope that used to live
+	// here as `ContextGuardReason` was a misleading name (the field
+	// was the raw `agent_task_queue.context_guard` JSONB blob, not
+	// a "reason" string) and the daemon never read it. Dropped on
+	// the wire; the front-end can read the envelope out of the
+	// task-detail endpoint when it needs to render an audit card.
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -305,12 +316,24 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
 	}
+	// MUL-4059: surface the resolved inactivity cap so the daemon
+	// can soft-kill proactively. The guard's audit reason stays in
+	// the row (agent_task_queue.context_guard JSONB) for the
+	// task-detail endpoint to render; the claim response no longer
+	// carries it (P2-10 review fix: the previous ContextGuardReason
+	// string was the raw JSONB, not a human-readable reason, and
+	// the daemon never consulted it).
+	var maxInactivitySecs int
+	if t.MaxInactivitySecs.Valid {
+		maxInactivitySecs = int(t.MaxInactivitySecs.Int32)
+	}
 	return AgentTaskResponse{
-		ID:               uuidToString(t.ID),
-		AgentID:          uuidToString(t.AgentID),
-		RuntimeID:        uuidToString(t.RuntimeID),
-		IssueID:          uuidToString(t.IssueID),
-		WorkspaceID:      workspaceID,
+		ID:                uuidToString(t.ID),
+		AgentID:           uuidToString(t.AgentID),
+		RuntimeID:         uuidToString(t.RuntimeID),
+		IssueID:           uuidToString(t.IssueID),
+		WorkspaceID:       workspaceID,
+		MaxInactivitySecs: maxInactivitySecs,
 		Status:           t.Status,
 		Priority:         t.Priority,
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),

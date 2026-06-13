@@ -108,8 +108,12 @@ SELECT * FROM chat_message
 WHERE id = $1;
 
 -- name: CreateChatTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id, initiator_user_id)
-VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
+-- max_inactivity_secs is the resolved cap for this task (MUL-4059). NULL
+-- is the "use server default" sentinel — the inactivity sweeper
+-- substitutes the default at scan time, so a future change to the default
+-- is honoured for legacy rows too.
+INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, chat_session_id, initiator_user_id, max_inactivity_secs)
+VALUES ($1, $2, NULL, 'queued', $3, $4, $5, sqlc.narg('max_inactivity_secs'))
 RETURNING *;
 
 -- name: GetLastChatTaskSession :one
@@ -126,7 +130,7 @@ WHERE chat_session_id = $1
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'inactivity_timeout')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )

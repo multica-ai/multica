@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -470,6 +471,19 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// the task initiator — surfaced to the agent under `## Task Initiator`.
 	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
 	if err != nil {
+		// P0-3 review fix: the MUL-4059 no-context guard returns a
+		// dedicated sentinel when the workspace has no repos / no
+		// project local_directory. Surface that to the user as a
+		// 422 with a tailored message so they can fix the workspace
+		// config (instead of seeing a generic 500 that suggests the
+		// backend is broken). Without this branch the user gets a
+		// silent "message sent but no agent reply" — exactly the
+		// symptom #4059 describes.
+		if errors.Is(err, service.ErrChatTaskContextMissing) {
+			writeError(w, http.StatusUnprocessableEntity,
+				"this workspace has no linked repository; ask the workspace owner to link a repo or a project local_directory before sending chat messages")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
 	}

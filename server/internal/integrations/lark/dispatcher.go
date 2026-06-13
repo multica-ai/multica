@@ -109,6 +109,15 @@ const (
 	// unarchive or rebind"). Kept separate from OutcomeAgentOffline
 	// because the user-facing remediation differs.
 	OutcomeAgentArchived Outcome = "agent_archived"
+
+	// OutcomeNoContext — the message landed in chat_session, but
+	// the MUL-4059 no-context guard rejected the enqueue because the
+	// workspace has no linked repo and no project local_directory.
+	// The adapter should reply with a clear "ask the workspace
+	// owner to link a repo" message. P0-3 review fix: without this
+	// outcome the user got nothing back — exactly the silent-no-
+	// reply symptom #4059 describes.
+	OutcomeNoContext Outcome = "no_context"
 )
 
 // DispatchResult is the typed return from Dispatcher.Handle. Callers
@@ -604,6 +613,15 @@ func (d *Dispatcher) flushChatRun(inst db.LarkInstallation, msg InboundMessage, 
 			d.emitFlushReply(ctx, inst, msg, sessionID, OutcomeAgentOffline)
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			d.emitFlushReply(ctx, inst, msg, sessionID, OutcomeAgentArchived)
+		case errors.Is(err, service.ErrChatTaskContextMissing):
+			// P0-3 review fix: the MUL-4059 no-context guard rejects
+			// chats whose workspace has no repos / no project
+			// local_directory. Without this branch the user gets
+			// nothing back (exactly the silent-no-reply symptom
+			// #4059 describes); with it, the dispatcher emits an
+			// explicit "ask the workspace owner to link a repo" so
+			// the user knows what to do.
+			d.emitFlushReply(ctx, inst, msg, sessionID, OutcomeNoContext)
 		default:
 			// Infra failure (DB down, etc.). Nothing to retry against —
 			// the inbound frame was ACKed long ago. Log so the gap is

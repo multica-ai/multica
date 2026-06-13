@@ -46,6 +46,12 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// MaxInactivitySecs is the resolved per-task inactivity cap
+	// (MUL-4059). The daemon's soft-kill watcher uses this value to
+	// SIGTERM the agent before the server's hard sweeper fails the
+	// row. 0 means "use the daemon default" (1200 = 20 min) or
+	// "disabled" if the daemon doesn't ship an inactivity watcher.
+	MaxInactivitySecs int
 }
 
 // runContext derives the execution context for an agent subprocess from the

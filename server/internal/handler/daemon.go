@@ -22,6 +22,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/service/inactivity"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1468,6 +1469,28 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 				}
+				// P2-8 review fix: also fill ProjectResources for
+				// the autopilot's project so the daemon's secondary
+				// context-guard check (daemonTaskHasUsableContext)
+				// sees the (B) local_directory path. Without this,
+				// an autopilot set up against a project that only
+				// has a local_directory resource (no workspace
+				// repos) gets the (B) rule skipped on the daemon
+				// side and ends up killed with failure_reason =
+				// 'no_context' despite the server-side guard having
+				// already let it through. The query is the same
+				// one the issue path uses; the per-task
+				// overhead is one SELECT against an indexed PK.
+				if ap.ProjectID.Valid {
+					for _, pr := range h.listProjectResourcesForProject(r.Context(), ap.ProjectID) {
+						resp.ProjectResources = append(resp.ProjectResources, ProjectResourceData{
+							ID:           uuidToString(pr.ID),
+							ResourceType: pr.ResourceType,
+							ResourceRef:  json.RawMessage(pr.ResourceRef),
+							Label:        pr.Label.String,
+						})
+					}
+				}
 			}
 		}
 	}
@@ -1753,6 +1776,15 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// MUL-4059: refresh last_activity_at. StartTask is the first
+	// server-visible signal that the daemon has actually launched the
+	// agent — without this refresh the inactivity sweeper could
+	// mis-fire on a freshly-started task whose daemon is still
+	// spawning its first child process. Activity write is best-effort
+	// (the inactivity package logs and swallows its own errors), so a
+	// transient DB blip here never blocks the response.
+	inactivity.ApplyAgentActivity(r.Context(), h.Queries, parseUUID(taskID))
+
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
 	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
@@ -1827,6 +1859,10 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.TaskService.ReportProgress(r.Context(), taskID, workspaceID, req.Summary, req.Step, req.Total)
+	// MUL-4059: progress is an activity signal. Refresh
+	// last_activity_at so the inactivity sweeper sees the task as
+	// alive without waiting for the next message batch.
+	inactivity.ApplyAgentActivity(r.Context(), h.Queries, parseUUID(taskID))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -1963,6 +1999,10 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 	}
 
+	// MUL-4059: usage reports also count as activity (a model call is
+	// the strongest possible signal that the agent is alive). Refresh
+	// last_activity_at once for the whole batch.
+	inactivity.ApplyAgentActivity(r.Context(), h.Queries, parseUUID(taskID))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -2058,6 +2098,13 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// MUL-4059: refresh last_activity_at for the batch. We do this
+	// exactly ONCE for the batch (not once per message) because the
+	// sweep tick compares last_activity_at against now() — writing
+	// the same timestamp N times for one batch is wasted work. Same
+	// pattern the existing task message broadcast uses.
+	inactivity.ApplyAgentActivity(r.Context(), h.Queries, parseUUID(taskID))
 
 	workspaceID := ""
 	if task.IssueID.Valid {

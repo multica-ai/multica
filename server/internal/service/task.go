@@ -18,6 +18,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/service/contextguard"
+	"github.com/multica-ai/multica/server/internal/service/inactivity"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -39,6 +41,16 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+
+	// ContextGuardDefaultPolicy is the server-side default applied when
+	// workspace.settings.context_guard_policy is unset (MUL-4059).
+	// Empty string → use the package-level PolicyDefault
+	// (block_and_notify).
+	ContextGuardDefaultPolicy string
+	// InactivityDefaultSecs is the server-side default applied when no
+	// task / agent / workspace override is set (MUL-4059). 0 → use
+	// inactivity.DefaultDefaultMaxInactivitySecs (1200 = 20 min).
+	InactivityDefaultSecs int
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -113,6 +125,141 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 		wakeup = wakeups[0]
 	}
 	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+}
+
+// ---------------------------------------------------------------------------
+// MUL-4059 helpers (no-context guard + max-inactivity cap)
+// ---------------------------------------------------------------------------
+
+// contextGuardService returns a guard service bound to the current
+// task service's Queries handle. The result is stateless apart from
+// the query runner; callers can invoke HasUsableContext / ResolvePolicy
+// on it without worrying about lifecycle.
+//
+// We always read defaults from the TaskService fields so a server-
+// wide config change via /admin endpoints takes effect immediately
+// for the next enqueue (the guard consults the defaults on every
+// call — no caching). Same model as empty-claim cache invalidation.
+func (s *TaskService) contextGuardService() *contextguard.Service {
+	def := contextguard.Defaults{
+		Policy: contextguard.Policy(s.ContextGuardDefaultPolicy),
+	}
+	return contextguard.NewService(s.Queries, def)
+}
+
+// inactivityDefaults returns the inactivity.Defaults snapshot to
+// pass into ComputeTaskMaxInactivity. Same rationale as
+// contextGuardService: read live config every call, no caching.
+func (s *TaskService) inactivityDefaults() inactivity.Defaults {
+	return inactivity.Defaults{
+		DefaultMaxInactivitySecs: s.InactivityDefaultSecs,
+	}
+}
+
+// resolvedMaxInactivitySecs returns the per-task inactivity cap
+// resolved at enqueue time. Stored on the row via CreateAgentTask /
+// CreateQuickCreateTask / CreateChatTask so the inactivity sweeper
+// never has to re-read configuration.
+//
+// taskOverride is the explicit override the enqueue path carries
+// through (currently always 0; future autopilot long-running flag
+// will pass through). workspaceID is optional — if invalid (chat
+// sessions whose workspace_id lives in chat_session, not the
+// workspace table itself), we fall through to the agent / defaults.
+func (s *TaskService) resolvedMaxInactivitySecs(ctx context.Context, taskOverride int, agent db.Agent, workspaceID pgtype.UUID) int {
+	var workspace db.Workspace
+	if workspaceID.Valid {
+		if w, err := s.Queries.GetWorkspace(ctx, workspaceID); err == nil {
+			workspace = w
+		}
+	}
+	return inactivity.ComputeTaskMaxInactivity(taskOverride, agent, workspace, s.inactivityDefaults())
+}
+
+// guardDecision walks the workspace/project context guard and
+// returns the resolved policy, the (positive/negative) verdict, and
+// the audit reason. The caller (Enqueue*) then translates this into
+// either "queue normally" or "park in pending_context with the reason
+// JSONB-stamped on the row".
+//
+// workspaceID is required; projectID may be invalid for chat /
+// autopilot / quick_create-without-project. Both are passed by the
+// caller rather than re-resolved from the issue to avoid an extra DB
+// round-trip on the hot path.
+func (s *TaskService) guardDecision(ctx context.Context, workspaceID, projectID pgtype.UUID) (contextguard.Policy, contextguard.Reason, error) {
+	svc := s.contextGuardService()
+	workspace, err := s.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return contextguard.Policy(""), contextguard.Reason{}, fmt.Errorf("guard: load workspace: %w", err)
+	}
+	policy := svc.ResolvePolicy(workspace)
+	reason, reasonErr := svc.HasUsableContext(ctx, workspaceID, projectID)
+	return policy, reason, reasonErr
+}
+
+// createSystemComment writes a brief system-authored comment on the
+// issue so the user can see why their task is parked. Skipped when the
+// issue_id is invalid (chat / autopilot / quick_create have no
+// natural comment anchor) — those callers surface the guard verdict
+// through their own channel (chat message / inbox notification).
+//
+// workspaceID is required by the comment schema; pass the issue's
+// workspace so the row satisfies the comment FK / not-null constraint.
+// Pass authorID as the agent ID so the comment author attribution
+// looks consistent in the UI (system comments normally have author_type
+// = 'system' but agentID carries the workspace-side attribution the
+// audit log expects).
+func (s *TaskService) createSystemComment(ctx context.Context, issueID, workspaceID, authorID pgtype.UUID, body string) {
+	if !issueID.Valid || !workspaceID.Valid {
+		return
+	}
+	if _, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issueID,
+		WorkspaceID: workspaceID,
+		AuthorType:  "system",
+		AuthorID:    authorID,
+		Content:     body,
+		Type:        "comment",
+	}); err != nil {
+		slog.Warn("context guard: failed to post system comment",
+			"issue_id", util.UUIDToString(issueID), "error", err)
+	}
+}
+
+// markIssueBlocked flips the issue to 'blocked' status when the guard
+// parks a task. Best-effort: a DB blip here must not block the enqueue,
+// because the task row in 'pending_context' is already the source of
+// truth. The status flip is purely a UI hint.
+//
+// Refuses to flip when the issue is already in a terminal state
+// (done / cancelled) — the task is being abandoned by the user, no
+// point in flipping back to blocked.
+func (s *TaskService) markIssueBlocked(ctx context.Context, issueID pgtype.UUID, workspaceID pgtype.UUID) {
+	if !issueID.Valid || !workspaceID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("context guard: failed to load issue for status flip",
+			"issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		return
+	}
+	if issue.Status == "blocked" {
+		return
+	}
+	if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issueID,
+		Status:      "blocked",
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		slog.Warn("context guard: failed to mark issue blocked",
+			"issue_id", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, db.AgentTaskQueue{IssueID: issueID})
 }
 
 var trivialDoneMarkers = []string{
@@ -416,7 +563,11 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "codex_semantic_inactivity", "inactivity_timeout":
+		// MUL-4059: inactivity_timeout is classified as a "timeout"
+		// for analytics grouping — both are server-side "no observed
+		// activity" signals. The dedicated reason string stays in
+		// the row so dashboards can still split the two.
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -463,6 +614,32 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	// MUL-4059: no-context guard. Resolve the per-task inactivity cap
+	// and consult the context guard BEFORE inserting the row so the
+	// guard verdict decides the initial status. The same helper pair
+	// (resolvedMaxInactivitySecs + guardDecision) is used by every
+	// other enqueue path; keep their call sites in sync.
+	maxInactivity := s.resolvedMaxInactivitySecs(ctx, 0, agent, issue.WorkspaceID)
+
+	policy, reason, _ := s.guardDecision(ctx, issue.WorkspaceID, issue.ProjectID)
+	if policy != contextguard.PolicyOff && !reason.OK {
+		switch policy {
+		case contextguard.PolicyReject:
+			return db.AgentTaskQueue{}, contextguard.ErrContextMissing
+		case contextguard.PolicyBlockAndNotify, "":
+			// "" = unset, falls back to PolicyDefault which is
+			// block_and_notify. Stamping the audit reason into the
+			// context_guard column lets the UI / sweeper explain why
+			// the task is parked without re-running the guard.
+			return s.parkIssueTaskPendingContext(ctx, issue, agent, triggerCommentID, forceFreshSession, reason, maxInactivity)
+		case contextguard.PolicyWarn:
+			slog.Warn("context guard: policy=warn, proceeding with parked task",
+				"issue_id", util.UUIDToString(issue.ID),
+				"hint", reason.Hint)
+			// fall through to normal enqueue
+		}
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           issue.AssigneeID,
 		RuntimeID:         agent.RuntimeID,
@@ -471,6 +648,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		TriggerCommentID:  triggerCommentID,
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		MaxInactivitySecs: pgtype.Int4{Int32: int32(maxInactivity), Valid: true},
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -482,6 +660,7 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		"issue_id", util.UUIDToString(issue.ID),
 		"agent_id", util.UUIDToString(issue.AssigneeID),
 		"force_fresh_session", forceFreshSession,
+		"max_inactivity_secs", maxInactivity,
 	)
 	// Order matters: broadcast first, notify daemon second. notifyTaskAvailable
 	// kicks an in-process channel that the daemon picks up over HTTP and
@@ -491,6 +670,104 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 	// in the desired observe-order makes correctness independent of timing.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+// parkIssueTaskPendingContext creates the task in 'pending_context' status
+// (MUL-4059). The companion sweepPendingContextTasks will revalidate when
+// the workspace gains context; without revalidation the row is cancelled
+// after the per-task retry budget.
+//
+// Implementation note: CreateAgentTask always inserts with status='queued',
+// so we insert then immediately MarkAgentTaskPendingContext to flip the
+// row. The two writes happen in the same code path without a transaction
+// (status='queued' is never observed by any daemon because the claim path
+// is gated on the sweeper / event-bus cycle) — this matches the existing
+// pattern for the 'waiting_local_directory' race.
+func (s *TaskService) parkIssueTaskPendingContext(
+	ctx context.Context,
+	issue db.Issue,
+	agent db.Agent,
+	triggerCommentID pgtype.UUID,
+	forceFreshSession bool,
+	reason contextguard.Reason,
+	maxInactivity int,
+) (db.AgentTaskQueue, error) {
+	reasonBytes, err := contextguard.EncodeReason(reason)
+	if err != nil {
+		slog.Warn("context guard: encode reason failed", "error", err)
+	}
+
+	// P1-6 review fix: the previous implementation did
+	// CreateAgentTask + MarkAgentTaskPendingContext as two separate
+	// non-transactional calls. A concurrent cancel that landed
+	// between them left the row in 'cancelled' status but still
+	// flipped the issue to 'blocked' + posted a misleading "this
+	// task is waiting because the agent has no execution context"
+	// system comment. Wrap the two writes in a single transaction
+	// so the row is either fully parked or fully cancelled — never
+	// half-parked. The post-write side effects (issue flip +
+	// comment + event) are deliberately outside the transaction so
+	// a slow / failing comment insert never holds a DB lock.
+	var task db.AgentTaskQueue
+	err = s.runInTx(ctx, func(qtx *db.Queries) error {
+		inserted, err := qtx.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+			AgentID:           issue.AssigneeID,
+			RuntimeID:         agent.RuntimeID,
+			IssueID:           issue.ID,
+			Priority:          priorityToInt(issue.Priority),
+			TriggerCommentID:  triggerCommentID,
+			TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
+			ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+			MaxInactivitySecs: pgtype.Int4{Int32: int32(maxInactivity), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("create task: %w", err)
+		}
+		parked, err := qtx.MarkAgentTaskPendingContext(ctx, db.MarkAgentTaskPendingContextParams{
+			ID:           inserted.ID,
+			ContextGuard: reasonBytes,
+		})
+		if err != nil {
+			// The transaction rolls back: the 'queued' insert and
+			// the status flip are both undone. Caller sees the
+			// error and surfaces a 5xx; the user retries. The
+			// pre-fix behaviour was a silent "task in limbo with
+			// a wrong system comment" which is strictly worse.
+			return fmt.Errorf("mark pending_context: %w", err)
+		}
+		task = parked
+		return nil
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+
+	slog.Info("task parked in pending_context",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(issue.AssigneeID),
+		"hint", reason.Hint,
+	)
+	// Flip the issue to 'blocked' so the UI surfaces "this issue is
+	// waiting for you to add context" rather than the silent "queued"
+	// spinner. Best-effort: failure here is logged and swallowed.
+	s.markIssueBlocked(ctx, issue.ID, issue.WorkspaceID)
+	// System comment carries the actionable hint to the user. Body
+	// intentionally short — front-end renders a custom card on
+	// pending_context tasks using the JSONB column instead.
+	s.createSystemComment(ctx, issue.ID, issue.WorkspaceID, agent.ID,
+		"⚠️ This task is waiting because the agent has no execution context. "+
+			"Add a linked repository or a project local_directory to run it. "+
+			"Reason: "+reason.Hint)
+	// P2-9 review fix: emit the dedicated EventTaskPendingContext
+	// event so the front-end can subscribe precisely to "a task was
+	// parked" without parsing the snapshot. The previous broadcast
+	// re-used EventTaskQueued; that meant the UI could only learn
+	// about a park by polling the next snapshot. The general
+	// `task:` subscription still re-snapshots the workspace so this
+	// is an additive signal, not a breaking change.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskPendingContext, task)
 	return task, nil
 }
 
@@ -526,6 +803,27 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	// MUL-4059: no-context guard runs identically for assignee and
+	// mention-driven enqueues; the only difference is the agent (the
+	// guard consults the workspace/project, not the trigger). Parking
+	// the task uses the same parkIssueTaskPendingContext helper as the
+	// assignee path so the audit trail / system comment / status flip
+	// are identical.
+	maxInactivity := s.resolvedMaxInactivitySecs(ctx, 0, agent, issue.WorkspaceID)
+	policy, reason, _ := s.guardDecision(ctx, issue.WorkspaceID, issue.ProjectID)
+	if policy != contextguard.PolicyOff && !reason.OK {
+		switch policy {
+		case contextguard.PolicyReject:
+			return db.AgentTaskQueue{}, contextguard.ErrContextMissing
+		case contextguard.PolicyBlockAndNotify, "":
+			return s.parkIssueTaskPendingContext(ctx, issue, agent, triggerCommentID, forceFreshSession, reason, maxInactivity)
+		case contextguard.PolicyWarn:
+			slog.Warn("context guard: policy=warn, proceeding with parked task",
+				"issue_id", util.UUIDToString(issue.ID),
+				"hint", reason.Hint)
+		}
+	}
+
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
 		RuntimeID:         agent.RuntimeID,
@@ -535,13 +833,14 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		TriggerSummary:    s.buildCommentTriggerSummary(ctx, triggerCommentID),
 		IsLeaderTask:      pgtype.Bool{Bool: isLeader, Valid: isLeader},
 		ForceFreshSession: pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		MaxInactivitySecs: pgtype.Int4{Int32: int32(maxInactivity), Valid: true},
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader, "max_inactivity_secs", maxInactivity)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
@@ -615,6 +914,36 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
+	// MUL-4059: no-context guard. Quick-create tasks have no issue_id
+	// yet, but they DO belong to a workspace (workspace_id is mandatory
+	// in the request) and may have a project (projectID may be invalid).
+	// The reject policy maps to a 422 at the handler layer; here we
+	// honour block_and_notify by parking the task as pending_context,
+	// but quick-create has no issue to comment on. We instead log a
+	// structured warning and let the request fail with a sentinel
+	// error so the inbox notification path surfaces the misconfig.
+	maxInactivity := s.resolvedMaxInactivitySecs(ctx, 0, agent, workspaceID)
+	policy, reason, _ := s.guardDecision(ctx, workspaceID, projectID)
+	if policy != contextguard.PolicyOff && !reason.OK {
+		switch policy {
+		case contextguard.PolicyReject, contextguard.PolicyBlockAndNotify, "":
+			// Quick-create has no issue to comment on / flip to
+			// blocked, so we surface the guard verdict via the
+			// inbox failure path the quick-create completion flow
+			// already uses. Returning the sentinel error here lets
+			// the caller (handler) render a "this workspace has no
+			// repos, link one first" message.
+			slog.Warn("context guard: quick-create task rejected",
+				"agent_id", util.UUIDToString(agentID),
+				"workspace_id", util.UUIDToString(workspaceID),
+				"hint", reason.Hint)
+			return db.AgentTaskQueue{}, contextguard.ErrContextMissing
+		case contextguard.PolicyWarn:
+			slog.Warn("context guard: policy=warn, proceeding with quick-create",
+				"hint", reason.Hint)
+		}
+	}
+
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
 		Prompt:      prompt,
@@ -644,10 +973,11 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		AgentID:   agentID,
-		RuntimeID: agent.RuntimeID,
-		Priority:  priorityToInt("high"),
-		Context:   contextJSON,
+		AgentID:           agentID,
+		RuntimeID:         agent.RuntimeID,
+		Priority:          priorityToInt("high"),
+		Context:           contextJSON,
+		MaxInactivitySecs: pgtype.Int4{Int32: int32(maxInactivity), Valid: true},
 	})
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
@@ -661,6 +991,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		"workspace_id", util.UUIDToString(workspaceID),
 		"project_id", payload.ProjectID,
 		"parent_issue_id", payload.ParentIssueID,
+		"max_inactivity_secs", maxInactivity,
 	)
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next 30 s poll
@@ -687,6 +1018,21 @@ var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 // enqueues the task and the daemon claims it on next online; that
 // path returns a task row, not this error.
 var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
+
+// ErrChatTaskContextMissing signals that the MUL-4059 no-context guard
+// rejected the chat task because the workspace has no repos. Callers
+// (Lark dispatcher, web chat) map this to a user-visible "this
+// workspace has no linked repos; ask the user to link one" message
+// rather than retrying.
+//
+// Exported so cross-package callers (the Lark dispatcher lives in
+// server/internal/integrations/lark, the web chat handler in
+// server/internal/handler/chat) can use `errors.Is(err,
+// service.ErrChatTaskContextMissing)` to surface a tailored message.
+// P0-3 review fix: the original draft declared this with a lowercase
+// name; both callers landed in the generic-error path, which is
+// exactly the "silent no-reply" behaviour #4059 describes.
+var ErrChatTaskContextMissing = errors.New("chat task: workspace has no usable execution context")
 
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
@@ -721,12 +1067,36 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
 
+	// MUL-4059: no-context guard. Chat tasks have no issue / project
+	// link, so the guard collapses to the (A) workspace-repos check
+	// only. A workspace with zero repos cannot run a tool-using agent
+	// — we surface the verdict as a chat system message and return
+	// ErrChatTaskContextMissing so the caller (Lark dispatcher / web
+	// chat) renders a user-visible message rather than a silent empty
+	// queue.
+	maxInactivity := s.resolvedMaxInactivitySecs(ctx, 0, agent, chatSession.WorkspaceID)
+	policy, reason, _ := s.guardDecision(ctx, chatSession.WorkspaceID, pgtype.UUID{})
+	if policy != contextguard.PolicyOff && !reason.OK {
+		switch policy {
+		case contextguard.PolicyReject, contextguard.PolicyBlockAndNotify, "":
+			slog.Warn("context guard: chat task rejected (no workspace repos)",
+				"chat_session_id", util.UUIDToString(chatSession.ID),
+				"agent_id", util.UUIDToString(chatSession.AgentID),
+				"hint", reason.Hint)
+			return db.AgentTaskQueue{}, ErrChatTaskContextMissing
+		case contextguard.PolicyWarn:
+			slog.Warn("context guard: policy=warn, proceeding with chat",
+				"hint", reason.Hint)
+		}
+	}
+
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:         chatSession.AgentID,
-		RuntimeID:       agent.RuntimeID,
-		Priority:        2, // medium priority for chat
-		ChatSessionID:   chatSession.ID,
-		InitiatorUserID: initiatorUserID,
+		AgentID:           chatSession.AgentID,
+		RuntimeID:         agent.RuntimeID,
+		Priority:          2, // medium priority for chat
+		ChatSessionID:     chatSession.ID,
+		InitiatorUserID:   initiatorUserID,
+		MaxInactivitySecs: pgtype.Int4{Int32: int32(maxInactivity), Valid: true},
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1495,18 +1865,37 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
+//
+// MUL-4059: inactivity_timeout is included so an auto-retry of a
+// stalled task gets one fresh chance to make progress. The retry
+// inherits the parent task's session_id/work_dir via CreateRetryTask
+// (unless the failure was codex_semantic_inactivity, which still
+// resets) so the child resumes the conversation when the backend
+// supports it. This matches the existing 'timeout' treatment: both
+// are server-side "we couldn't observe activity" signals, both are
+// retryable, neither resets the session.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	"inactivity_timeout":        true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
 	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
 	// CreateRetryTask's fresh-session CASE WHEN.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+	//
+	// P1-7 review fix: 'inactivity_timeout' is also resume-unsafe.
+	// The server-side inactivity sweeper has no way to tell "the
+	// agent is genuinely stuck" from "the agent is running a
+	// long build that doesn't emit a single message for 20
+	// minutes", so resuming the same session deterministically
+	// re-plays whichever case tripped the original timeout.
+	// Forcing a fresh session (and clearing session_id +
+	// work_dir) gives the agent a clean slate on retry.
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "inactivity_timeout":
 		return true
 	default:
 		return false

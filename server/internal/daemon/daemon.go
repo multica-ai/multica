@@ -2061,6 +2061,32 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
+		// MUL-4059: daemon-side secondary context guard. The server is
+		// the authoritative gate and the claim response only hands us a
+		// task after its guard passed (or the revalidation sweep
+		// promoted a previously-parked row). Still, defence-in-depth:
+		// a misconfigured server (AGENT_CONTEXT_GUARD_DEFAULT_POLICY=off)
+		// could in principle hand us a task that has no repos and no
+		// project local_directory. We refuse to even enter handleTask
+		// in that case — fail-fast with no_context so the user sees a
+		// clear failure reason rather than the daemon spinning in
+		// execenv.Prepare until the inactivity timeout fires.
+		if !daemonTaskHasUsableContext(*task) {
+			d.logger.Warn("claim task: secondary context guard rejected task",
+				"task", shortID(task.ID),
+				"repos", len(task.Repos),
+				"project_resources", len(task.ProjectResources))
+			if failErr := d.client.FailTask(pollerCtx, task.ID,
+				"daemon: no executable context (no linked repo or project local_directory)",
+				"", "", "no_context"); failErr != nil {
+				d.logger.Warn("claim task: fail-on-no_context failed",
+					"task", shortID(task.ID), "error", failErr)
+			}
+			d.exitClaim()
+			sem <- slot
+			continue
+		}
+
 		taskTarget := task.IssueID
 		if taskTarget == "" && task.ChatSessionID != "" {
 			taskTarget = "chat:" + shortID(task.ChatSessionID)
@@ -2077,6 +2103,28 @@ func (d *Daemon) runRuntimePoller(
 		}(*task, slot)
 		// Loop immediately: more tasks may already be queued for this runtime.
 	}
+}
+
+// daemonTaskHasUsableContext is the daemon-side mirror of the server's
+// contextguard.HasUsableContext. Returns true iff the claimed task has at
+// least one linked repo OR at least one project_resource of type
+// local_directory. Workspace context (workspace.context, the system
+// prompt) is intentionally NOT counted: it answers questions but does
+// not give the agent a place to run.
+//
+// Lives next to the claim path so the daemon never silently starts a
+// task the server's guard would have rejected if it were still on.
+// MUL-4059.
+func daemonTaskHasUsableContext(task Task) bool {
+	if len(task.Repos) > 0 {
+		return true
+	}
+	for _, r := range task.ProjectResources {
+		if r.ResourceType == "local_directory" {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
@@ -2995,6 +3043,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		// MUL-4059: thread the server-resolved inactivity cap through
+		// ExecOptions so the daemon's soft-kill watcher reads the same
+		// value the server's hard sweeper will use. task.MaxInactivitySecs
+		// is 0 when the server didn't stamp it (legacy daemon / pre-4059
+		// claim) — the watcher falls back to 1200 in that case.
+		MaxInactivitySecs: task.MaxInactivitySecs,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3297,6 +3351,25 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
+	// MUL-4059: max-inactivity soft-kill watcher. Sits next to the
+	// idle watchdog but uses the server-resolved per-task cap rather
+	// than the daemon-local AgentIdleWatchdog. The server's hard
+	// failInactiveRunningTasks sweeper will catch the same case if
+	// the soft kill below is unreachable (daemon crash, watcher
+	// deadlock, etc.); the soft kill exists so the agent gets a
+	// graceful SIGTERM instead of an abrupt fail row.
+	//
+	// We deliberately do NOT tie the inactivity watcher to the
+	// in-flight tool count: the server's definition of "activity"
+	// includes progress / session-pin / usage reports that fire even
+	// during long tool runs, so the server cap is the right budget
+	// for this watcher. The daemon's idle watchdog still handles the
+	// "queue is empty and backend silent" case the inactivity cap
+	// does not cover.
+	if opts.MaxInactivitySecs > 0 {
+		go d.runInactivityWatcher(agentCtx, time.Duration(opts.MaxInactivitySecs)*time.Second, &lastActivityAt, agentCancel, taskLog, taskID)
+	}
+
 	go func() {
 		var seq atomic.Int32
 		var mu sync.Mutex
@@ -3589,6 +3662,62 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			)
 			firedThreshold.Store(int64(threshold))
 			fired.Store(true)
+			cancel()
+			return
+		}
+	}
+}
+
+// runInactivityWatcher is the MUL-4059 soft-kill that fires when the
+// agent has been silent for longer than the server-resolved per-task
+// inactivity cap. Shares the lastActivityAt counter with the idle
+// watchdog — same source of truth on "did the agent do something?"
+// — but uses a different threshold and a different disposition.
+//
+// Differences vs the idle watchdog:
+//   - Threshold is fixed at the server's resolved value
+//     (task.MaxInactivitySecs) — not configurable per-daemon, not
+//     inflated for in-flight tools. The server's definition of
+//     activity includes progress / session-pin / usage reports, so a
+//     long-running tool is still covered by those signals.
+//   - The disposition logs the inactivity threshold so the row's
+//     failure_reason can be inferred from the daemon log; the
+//     idle watchdog leaves its own marker. The server-side
+//     inactivity sweeper stamps 'inactivity_timeout' on the row
+//     regardless — this watcher just gives the agent a graceful exit.
+//
+// The watcher does NOT touch the idle watchdog's `fired` flag. Two
+// distinct dispositions can land on the same task over its lifetime
+// if the server and daemon disagree on which check tripped first;
+// the server's authoritative failure_reason resolves the ambiguity.
+func (d *Daemon) runInactivityWatcher(agentCtx context.Context, window time.Duration, lastActivityAt *atomic.Int64, cancel context.CancelFunc, taskLog *slog.Logger, taskID string) {
+	if window <= 0 {
+		return
+	}
+	interval := window / 2
+	if window >= time.Minute && interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-agentCtx.Done():
+			return
+		case <-ticker.C:
+			last := time.Unix(0, lastActivityAt.Load())
+			idleFor := time.Since(last)
+			if idleFor < window {
+				continue
+			}
+			taskLog.Warn("inactivity watcher firing: no server-visible activity, soft-killing run",
+				"task", shortID(taskID),
+				"idle_for", idleFor.Round(time.Second).String(),
+				"threshold", window.String(),
+			)
 			cancel()
 			return
 		}

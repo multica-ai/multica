@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service/inactivity"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -92,6 +93,13 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "pin session failed")
 		return
 	}
+	// MUL-4059: session-pin is an activity signal. The agent has
+	// produced enough state to write its resume pointer — the daemon
+	// is alive. Refresh last_activity_at so the inactivity sweeper
+	// sees the task as live even if no message / progress batch has
+	// arrived yet (which can happen on very fast runs that complete
+	// before the first message flush).
+	inactivity.ApplyAgentActivity(r.Context(), h.Queries, parseUUID(taskID))
 	w.WriteHeader(http.StatusNoContent)
 }
 

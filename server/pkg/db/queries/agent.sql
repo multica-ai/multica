@@ -134,15 +134,22 @@ WHERE agent_id = $1
 ORDER BY created_at DESC;
 
 -- name: CreateAgentTask :one
+-- Inserts a new task. max_inactivity_secs is resolved at enqueue time
+-- (task > agent > workspace > server-default chain) and stored on the
+-- row so the inactivity sweeper has a stable value to compare against
+-- without re-reading the configuration every tick. NULL is the legacy
+-- "use server default" sentinel and is preserved for backwards compat
+-- with rows written before migration 120.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task
+    trigger_summary, force_fresh_session, is_leader_task, max_inactivity_secs
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
-    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE)
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
+    sqlc.narg('max_inactivity_secs')
 )
 RETURNING *;
 
@@ -150,8 +157,11 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+-- max_inactivity_secs follows the same convention as CreateAgentTask.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, max_inactivity_secs
+)
+VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg('max_inactivity_secs'))
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
@@ -179,16 +189,18 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
+    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
+    max_inactivity_secs
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    CASE WHEN p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout') THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout') THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
-    p.is_leader_task
+    p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout'),
+    p.is_leader_task,
+    p.max_inactivity_secs
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -199,9 +211,14 @@ RETURNING *;
 -- (#1587). Prior :exec form silently dropped that info, so internal cancel
 -- paths (issue status flips to cancelled/done, etc.) left agents stuck at
 -- status="working" with no self-correction.
+-- pending_context is included (MUL-4059) so an issue going from
+-- blocked → cancelled / done while the task is waiting on the user to
+-- supply context is also swept; without this, the issue close leaves
+-- the row in pending_context and the daemon claim skip treats it as
+-- alive forever.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: CancelAgentTasksByIssueAndAgent :many
@@ -211,7 +228,7 @@ RETURNING *;
 -- still-running @-mention agent on the same issue.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
@@ -222,7 +239,7 @@ RETURNING *;
 -- behave consistently.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: CancelAgentTasksByTriggerComment :many
@@ -233,7 +250,7 @@ RETURNING *;
 -- and we'd lose the ability to find the affected tasks.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: CancelAgentTasksByChatSession :many
@@ -244,7 +261,7 @@ RETURNING *;
 -- could no longer reach those tasks.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: GetAgentTask :one
@@ -393,7 +410,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'inactivity_timeout')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
@@ -520,7 +537,7 @@ RETURNING t.*;
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: CountRunningTasks :one
@@ -529,9 +546,18 @@ WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_direc
 
 -- name: HasActiveTaskForIssue :one
 -- Returns true if there is any queued, dispatched, waiting_local_directory,
--- or running task for the issue.
+-- running, or pending_context task for the issue. P1-10 review fix:
+-- pending_context is included so HandleFailedTasks's fallback path
+-- (which uses this query to decide whether to flip the issue back
+-- to 'todo' on a failed task) leaves a 'blocked' issue alone when
+-- a parked task is still waiting for context. Without this, the
+-- fallback would silently re-shuffle the issue out of 'blocked' on
+-- the next failure — exactly the MUL-4059 'agent does nothing for
+-- 20 minutes' symptom. pending_context still doesn't make the agent
+-- 'working' (see RefreshAgentStatusFromTasks below) so the agent-
+-- presence indicator stays correct.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context');
 
 -- name: HasPendingTaskForIssue :one
 -- Returns true if there is a queued or dispatched (but not yet running) task for the issue.
@@ -582,9 +608,11 @@ ORDER BY priority DESC, created_at ASC;
 -- banner shows up the moment a task is enqueued — not only after a runtime
 -- claims it. The queued window can be long when the runtime is offline or
 -- busy on a prior task, and a silent UI during that window looks like the
--- platform never received the trigger.
+-- platform never received the trigger. 'pending_context' (MUL-4059) is
+-- included so the UI can surface the guard state and not look idle while
+-- the user is being prompted to link a repo / project local_directory.
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 ORDER BY created_at DESC;
 
 -- name: GetWorkspaceAgentRunCounts :many
@@ -645,11 +673,12 @@ ORDER BY atq.agent_id, bucket;
 --
 -- No UI windows in SQL: stickiness is decided by "is the latest outcome a
 -- failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
--- no workspace_id column.
+-- no workspace_id column. pending_context (MUL-4059) counts as active so the
+-- presence indicator stays "working"-ish while the guard waits for context.
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 
 UNION ALL
 
@@ -673,6 +702,15 @@ WHERE id = $1
 RETURNING *;
 
 -- name: RefreshAgentStatusFromTasks :one
+-- P1-10 review fix: pending_context is intentionally NOT in the
+-- 'working' set. A parked task means the agent is NOT doing work
+-- (it cannot even start). Including it here would incorrectly flip
+-- the agent's UI status to 'working' while the task is parked —
+-- a confusing state for the user. The presence indicator uses a
+-- separate query (ListWorkspaceAgentTaskSnapshot) that DOES include
+-- pending_context, so the two data sources are aligned: a parked
+-- task is visible in the snapshot but does not mark the agent
+-- 'working' here. See MUL-4059 design 1.4 for the split.
 UPDATE agent AS a
 SET status = CASE WHEN EXISTS (
     SELECT 1 FROM agent_task_queue q
@@ -680,4 +718,145 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
+RETURNING *;
+
+-- ============================================================================
+-- MUL-4059: no-context runtime safeguard + max-inactivity timeout
+--
+-- The four queries below are the SQL surface that powers the two new
+-- sweepers and the daemon activity hook. Together they let the runtime
+-- sweeper flip a stale 'pending_context' row back to 'queued' when the
+-- workspace gained context, and fail a 'running' row whose daemon has
+-- not produced any server-visible activity for max_inactivity_secs.
+--
+-- Concurrency: every UPDATE re-checks status as a defensive predicate so
+-- a concurrent dispatcher (claim, complete, fail) cannot have a stale
+-- sweeper transition a row that is already on its way out of the source
+-- state. Same pattern used by FailStaleTasks.
+-- ============================================================================
+
+-- name: ListPendingContextTasks :many
+-- Returns tasks stuck in 'pending_context' whose guard evaluation is
+-- older than the revalidate window. Companion to MarkAgentTaskRequeued
+-- — caller is expected to invoke the guard service, then call
+-- MarkAgentTaskRequeued on rows that now pass, or
+-- MarkAgentTaskPendingContextCancelled on rows that don't after the
+-- per-task retry budget is exhausted. Stale cutoff is supplied as a
+-- parameter (sweepPendingContextTasks passes now - interval) so the
+-- partial index stays small and the planner does a single index range
+-- scan instead of a filter.
+SELECT * FROM agent_task_queue
+WHERE status = 'pending_context'
+  AND context_guard_checked_at IS NOT NULL
+  AND context_guard_checked_at < now() - make_interval(secs => @stale_secs::double precision)
+ORDER BY context_guard_checked_at ASC
+LIMIT @row_limit;
+
+-- name: MarkAgentTaskPendingContext :one
+-- Transitions a freshly-enqueued task into 'pending_context' because
+-- the context guard rejected it. The companion sweepPendingContextTasks
+-- will revalidate; this query does NOT consider timing — the caller is
+-- the enqueue path, which has just consulted the guard.
+--
+-- context_guard JSONB records the audit trail (which (A) repos and (B)
+-- project resources were seen, why the guard rejected). The JSONB
+-- column is updated in the same transaction so a follow-up read can
+-- answer "why was this task parked?" without re-running the guard.
+UPDATE agent_task_queue
+SET status = 'pending_context',
+    context_guard = $2,
+    context_guard_checked_at = now()
+WHERE id = $1 AND status = 'queued'
+RETURNING *;
+
+-- name: MarkAgentTaskRequeued :one
+-- Promotes a 'pending_context' row back to 'queued' after the guard
+-- passed on revalidation. Used by sweepPendingContextTasks when a
+-- workspace gained a repo / project directory between sweeps.
+-- max_inactivity_secs is preserved (the original enqueue's value is
+-- still the right cap; we are not opening a new run, we are letting
+-- the existing one proceed).
+UPDATE agent_task_queue
+SET status = 'queued',
+    context_guard = NULL,
+    context_guard_checked_at = NULL
+WHERE id = $1 AND status = 'pending_context'
+RETURNING *;
+
+-- name: RefreshPendingContextEnvelope :exec
+-- Refreshes the context_guard JSONB envelope (with a new revalidations
+-- counter / hint) and bumps context_guard_checked_at without changing
+-- the row's status. Used by sweepPendingContextTasks between guard
+-- re-evaluation ticks so the next tick sees the row as fresh. The
+-- status='pending_context' guard matches the expected state and is
+-- also what makes the operation idempotent across concurrent sweep
+-- ticks.
+UPDATE agent_task_queue
+SET context_guard = $2,
+    context_guard_checked_at = now()
+WHERE id = $1 AND status = 'pending_context';
+
+-- name: MarkAgentTaskPendingContextCancelled :one
+-- Terminal transition for a 'pending_context' row whose guard has
+-- failed revalidation past the retry budget. failure_reason is
+-- 'no_context' so HandleFailedTasks / retryableReasons can decide
+-- whether to retry it the same way it handles the other timeout
+-- classes. error carries the audit trail so the UI can surface
+-- "context guard failed: missing repo + project local_directory".
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'no_context',
+    error = $2
+WHERE id = $1 AND status = 'pending_context'
+RETURNING *;
+
+-- name: UpdateAgentTaskActivity :exec
+-- Refreshes last_activity_at for a single task. Called by the daemon
+-- message / progress / session / usage endpoints in handler/daemon.go
+-- so the inactivity sweeper sees the task as alive. We deliberately
+-- do NOT gate this on status — a running task whose daemon just got
+-- cancelled may still call this once before noticing, and writing
+-- the timestamp on a now-terminal row is harmless (no sweeper will
+-- ever look at it).
+UPDATE agent_task_queue
+SET last_activity_at = now()
+WHERE id = $1;
+
+-- name: FailInactiveRunningTasks :many
+-- Fails running tasks whose last activity exceeds the per-task
+-- max_inactivity_secs cap, falling back to the server default when
+-- the column is NULL. P0-2 review fix: the original draft used a
+-- single scalar `@max_inactivity_secs` parameter and the caller
+-- passed only the server default, so the entire task→agent→
+-- workspace→server-default chain was dead code at the sweeper layer.
+-- `COALESCE(max_inactivity_secs, 1200)` makes the cap per-row, and the
+-- activity signal is computed against THAT cap rather than a global
+-- scalar.
+--
+-- The hardcoded server default (1200s) inside the COALESCE is a
+-- belt-and-braces fallback in case the Go caller forgets to pass
+-- anything; the daemon-side soft-kill watcher also receives
+-- `task.MaxInactivitySecs` and uses the per-task value directly. The
+-- two layers MUST stay aligned: changing the default here without
+-- changing `inactivity.DefaultDefaultMaxInactivitySecs` in Go would
+-- create a window where the server's hard fail trips later than the
+-- daemon's soft kill (or vice versa).
+--
+-- No parameters: the cap is per-row. Legacy callers that used to
+-- pass `@max_inactivity_secs` as a scalar now have nothing to pass.
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = 'no task activity for ' || COALESCE(max_inactivity_secs, 1200)::text || 's',
+    failure_reason = 'inactivity_timeout'
+WHERE status = 'running'
+  AND (
+    (last_activity_at IS NOT NULL
+      AND last_activity_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+    OR (last_activity_at IS NULL AND started_at IS NOT NULL
+      AND started_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+    OR (last_activity_at IS NULL AND started_at IS NULL
+      AND created_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+  )
 RETURNING *;

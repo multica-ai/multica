@@ -332,6 +332,16 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
+	// MUL-4059: wire the no-context guard / inactivity defaults so
+	// enqueue paths consult the right policy and every running task
+	// has a stable inactivity cap. The inactivity default is 20 min
+	// (1200s) by default and can be overridden via
+	// AGENT_TASK_MAX_INACTIVITY_SECS. The context-guard default is
+	// block_and_notify and can be overridden via
+	// AGENT_CONTEXT_GUARD_DEFAULT_POLICY (accepts reject /
+	// block_and_notify / warn / off).
+	taskSvc.InactivityDefaultSecs = envPositiveInt("AGENT_TASK_MAX_INACTIVITY_SECS", 1200)
+	taskSvc.ContextGuardDefaultPolicy = os.Getenv("AGENT_CONTEXT_GUARD_DEFAULT_POLICY")
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 

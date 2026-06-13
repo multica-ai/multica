@@ -177,8 +177,8 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
@@ -212,6 +212,10 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -219,8 +223,8 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 const cancelAgentTasksByAgent = `-- name: CancelAgentTasksByAgent :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Bulk-cancel every active (queued/dispatched/running) task for an agent.
@@ -265,6 +269,10 @@ func (q *Queries) CancelAgentTasksByAgent(ctx context.Context, agentID pgtype.UU
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -279,8 +287,8 @@ func (q *Queries) CancelAgentTasksByAgent(ctx context.Context, agentID pgtype.UU
 const cancelAgentTasksByChatSession = `-- name: CancelAgentTasksByChatSession :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Cancels active tasks belonging to a chat session. Called from
@@ -325,6 +333,10 @@ func (q *Queries) CancelAgentTasksByChatSession(ctx context.Context, chatSession
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -339,8 +351,8 @@ func (q *Queries) CancelAgentTasksByChatSession(ctx context.Context, chatSession
 const cancelAgentTasksByIssue = `-- name: CancelAgentTasksByIssue :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Cancels every active task on the issue and returns the affected rows so the
@@ -348,6 +360,11 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // (#1587). Prior :exec form silently dropped that info, so internal cancel
 // paths (issue status flips to cancelled/done, etc.) left agents stuck at
 // status="working" with no self-correction.
+// pending_context is included (MUL-4059) so an issue going from
+// blocked → cancelled / done while the task is waiting on the user to
+// supply context is also swept; without this, the issue close leaves
+// the row in pending_context and the daemon claim skip treats it as
+// alive forever.
 func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, cancelAgentTasksByIssue, issueID)
 	if err != nil {
@@ -385,6 +402,10 @@ func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UU
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -399,8 +420,8 @@ func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UU
 const cancelAgentTasksByIssueAndAgent = `-- name: CancelAgentTasksByIssueAndAgent :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type CancelAgentTasksByIssueAndAgentParams struct {
@@ -449,6 +470,10 @@ func (q *Queries) CancelAgentTasksByIssueAndAgent(ctx context.Context, arg Cance
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -463,8 +488,8 @@ func (q *Queries) CancelAgentTasksByIssueAndAgent(ctx context.Context, arg Cance
 const cancelAgentTasksByTriggerComment = `-- name: CancelAgentTasksByTriggerComment :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
-WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Cancels active tasks whose trigger is the given comment. Called when a
@@ -509,6 +534,10 @@ func (q *Queries) CancelAgentTasksByTriggerComment(ctx context.Context, triggerC
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -547,7 +576,7 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
@@ -590,6 +619,10 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (Agen
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -673,7 +706,7 @@ const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2, session_id = $3, work_dir = $4
 WHERE id = $1 AND status = 'running'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type CompleteAgentTaskParams struct {
@@ -719,6 +752,10 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -813,15 +850,16 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task
+    trigger_summary, force_fresh_session, is_leader_task, max_inactivity_secs
 )
 VALUES (
     $1, $2, $3, 'queued', $4, $5,
     $6,
     COALESCE($7::boolean, FALSE),
-    COALESCE($8::boolean, FALSE)
+    COALESCE($8::boolean, FALSE),
+    $9
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type CreateAgentTaskParams struct {
@@ -833,8 +871,15 @@ type CreateAgentTaskParams struct {
 	TriggerSummary    pgtype.Text `json:"trigger_summary"`
 	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
 	IsLeaderTask      pgtype.Bool `json:"is_leader_task"`
+	MaxInactivitySecs pgtype.Int4 `json:"max_inactivity_secs"`
 }
 
+// Inserts a new task. max_inactivity_secs is resolved at enqueue time
+// (task > agent > workspace > server-default chain) and stored on the
+// row so the inactivity sweeper has a stable value to compare against
+// without re-reading the configuration every tick. NULL is the legacy
+// "use server default" sentinel and is preserved for backwards compat
+// with rows written before migration 120.
 func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAgentTask,
 		arg.AgentID,
@@ -845,6 +890,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.TriggerSummary,
 		arg.ForceFreshSession,
 		arg.IsLeaderTask,
+		arg.MaxInactivitySecs,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -875,32 +921,41 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
 
 const createQuickCreateTask = `-- name: CreateQuickCreateTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context, max_inactivity_secs
+)
+VALUES ($1, $2, NULL, 'queued', $3, $4, $5)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type CreateQuickCreateTaskParams struct {
-	AgentID   pgtype.UUID `json:"agent_id"`
-	RuntimeID pgtype.UUID `json:"runtime_id"`
-	Priority  int32       `json:"priority"`
-	Context   []byte      `json:"context"`
+	AgentID           pgtype.UUID `json:"agent_id"`
+	RuntimeID         pgtype.UUID `json:"runtime_id"`
+	Priority          int32       `json:"priority"`
+	Context           []byte      `json:"context"`
+	MaxInactivitySecs pgtype.Int4 `json:"max_inactivity_secs"`
 }
 
 // Quick-create tasks have no issue / chat / autopilot link; the entire job
 // description (prompt, requester, workspace) lives in context JSONB. The
 // daemon detects this variant via context.type == "quick_create".
+// max_inactivity_secs follows the same convention as CreateAgentTask.
 func (q *Queries) CreateQuickCreateTask(ctx context.Context, arg CreateQuickCreateTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createQuickCreateTask,
 		arg.AgentID,
 		arg.RuntimeID,
 		arg.Priority,
 		arg.Context,
+		arg.MaxInactivitySecs,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -931,6 +986,10 @@ func (q *Queries) CreateQuickCreateTask(ctx context.Context, arg CreateQuickCrea
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -940,19 +999,21 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
+    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
+    max_inactivity_secs
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
+    CASE WHEN p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout') THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout') THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
-    p.is_leader_task
+    p.failure_reason IN ('codex_semantic_inactivity', 'inactivity_timeout'),
+    p.is_leader_task,
+    p.max_inactivity_secs
 FROM agent_task_queue p
 WHERE p.id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Clones a parent task into a fresh queued attempt. Carries forward the
@@ -996,6 +1057,10 @@ func (q *Queries) CreateRetryTask(ctx context.Context, id pgtype.UUID) (AgentTas
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -1018,7 +1083,7 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
-RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.context_guard, t.context_guard_checked_at, t.last_activity_at, t.max_inactivity_secs
 `
 
 type ExpireStaleQueuedTasksParams struct {
@@ -1086,6 +1151,10 @@ func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQue
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -1106,7 +1175,7 @@ SET status = 'failed',
     session_id = COALESCE($4, session_id),
     work_dir = COALESCE($5, work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type FailAgentTaskParams struct {
@@ -1163,8 +1232,103 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
+}
+
+const failInactiveRunningTasks = `-- name: FailInactiveRunningTasks :many
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = 'no task activity for ' || COALESCE(max_inactivity_secs, 1200)::text || 's',
+    failure_reason = 'inactivity_timeout'
+WHERE status = 'running'
+  AND (
+    (last_activity_at IS NOT NULL
+      AND last_activity_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+    OR (last_activity_at IS NULL AND started_at IS NOT NULL
+      AND started_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+    OR (last_activity_at IS NULL AND started_at IS NULL
+      AND created_at < now() - make_interval(secs => COALESCE(max_inactivity_secs, 1200)::double precision))
+  )
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
+`
+
+// Fails running tasks whose last activity exceeds the per-task
+// max_inactivity_secs cap, falling back to the server default when
+// the column is NULL. P0-2 review fix: the original draft used a
+// single scalar `@max_inactivity_secs` parameter and the caller
+// passed only the server default, so the entire task→agent→
+// workspace→server-default chain was dead code at the sweeper layer.
+// `COALESCE(max_inactivity_secs, 1200)` makes the cap per-row, and the
+// activity signal is computed against THAT cap rather than a global
+// scalar.
+//
+// The hardcoded server default (1200s) inside the COALESCE is a
+// belt-and-braces fallback in case the Go caller forgets to pass
+// anything; the daemon-side soft-kill watcher also receives
+// `task.MaxInactivitySecs` and uses the per-task value directly. The
+// two layers MUST stay aligned: changing the default here without
+// changing `inactivity.DefaultDefaultMaxInactivitySecs` in Go would
+// create a window where the server's hard fail trips later than the
+// daemon's soft kill (or vice versa).
+//
+// No parameters: the cap is per-row. Legacy callers that used to
+// pass `@max_inactivity_secs` as a scalar now have nothing to pass.
+func (q *Queries) FailInactiveRunningTasks(ctx context.Context) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failInactiveRunningTasks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const failStaleTasks = `-- name: FailStaleTasks :many
@@ -1173,7 +1337,7 @@ SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout'
 WHERE (status = 'dispatched' AND dispatched_at < now() - make_interval(secs => $1::double precision))
    OR (status = 'running' AND started_at < now() - make_interval(secs => $2::double precision))
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type FailStaleTasksParams struct {
@@ -1226,6 +1390,10 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -1313,7 +1481,7 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 }
 
 const getAgentTask = `-- name: GetAgentTask :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
 WHERE id = $1
 `
 
@@ -1348,12 +1516,16 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
 
 const getAgentTaskInWorkspace = `-- name: GetAgentTaskInWorkspace :one
-SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id FROM agent_task_queue atq
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.context_guard, atq.context_guard_checked_at, atq.last_activity_at, atq.max_inactivity_secs FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1 AND a.workspace_id = $2
 `
@@ -1401,6 +1573,10 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -1412,7 +1588,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'inactivity_timeout')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
@@ -1624,11 +1800,20 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 `
 
 // Returns true if there is any queued, dispatched, waiting_local_directory,
-// or running task for the issue.
+// running, or pending_context task for the issue. P1-10 review fix:
+// pending_context is included so HandleFailedTasks's fallback path
+// (which uses this query to decide whether to flip the issue back
+// to 'todo' on a failed task) leaves a 'blocked' issue alone when
+// a parked task is still waiting for context. Without this, the
+// fallback would silently re-shuffle the issue out of 'blocked' on
+// the next failure — exactly the MUL-4059 'agent does nothing for
+// 20 minutes' symptom. pending_context still doesn't make the agent
+// 'working' (see RefreshAgentStatusFromTasks below) so the agent-
+// presence indicator stays correct.
 func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, hasActiveTaskForIssue, issueID)
 	var has_active bool
@@ -1806,8 +1991,8 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 }
 
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 ORDER BY created_at DESC
 `
 
@@ -1815,7 +2000,9 @@ ORDER BY created_at DESC
 // banner shows up the moment a task is enqueued — not only after a runtime
 // claims it. The queued window can be long when the runtime is offline or
 // busy on a prior task, and a silent UI during that window looks like the
-// platform never received the trigger.
+// platform never received the trigger. 'pending_context' (MUL-4059) is
+// included so the UI can surface the guard state and not look idle while
+// the user is being prompted to link a repo / project local_directory.
 func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listActiveTasksByIssue, issueID)
 	if err != nil {
@@ -1853,6 +2040,10 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -1865,7 +2056,7 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC
 `
@@ -1907,6 +2098,10 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2016,8 +2211,98 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listPendingContextTasks = `-- name: ListPendingContextTasks :many
+
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
+WHERE status = 'pending_context'
+  AND context_guard_checked_at IS NOT NULL
+  AND context_guard_checked_at < now() - make_interval(secs => $1::double precision)
+ORDER BY context_guard_checked_at ASC
+LIMIT $2
+`
+
+type ListPendingContextTasksParams struct {
+	StaleSecs float64 `json:"stale_secs"`
+	RowLimit  int32   `json:"row_limit"`
+}
+
+// ============================================================================
+// MUL-4059: no-context runtime safeguard + max-inactivity timeout
+//
+// The four queries below are the SQL surface that powers the two new
+// sweepers and the daemon activity hook. Together they let the runtime
+// sweeper flip a stale 'pending_context' row back to 'queued' when the
+// workspace gained context, and fail a 'running' row whose daemon has
+// not produced any server-visible activity for max_inactivity_secs.
+//
+// Concurrency: every UPDATE re-checks status as a defensive predicate so
+// a concurrent dispatcher (claim, complete, fail) cannot have a stale
+// sweeper transition a row that is already on its way out of the source
+// state. Same pattern used by FailStaleTasks.
+// ============================================================================
+// Returns tasks stuck in 'pending_context' whose guard evaluation is
+// older than the revalidate window. Companion to MarkAgentTaskRequeued
+// — caller is expected to invoke the guard service, then call
+// MarkAgentTaskRequeued on rows that now pass, or
+// MarkAgentTaskPendingContextCancelled on rows that don't after the
+// per-task retry budget is exhausted. Stale cutoff is supplied as a
+// parameter (sweepPendingContextTasks passes now - interval) so the
+// partial index stays small and the planner does a single index range
+// scan instead of a filter.
+func (q *Queries) ListPendingContextTasks(ctx context.Context, arg ListPendingContextTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listPendingContextTasks, arg.StaleSecs, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC
 `
@@ -2059,6 +2344,10 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2071,7 +2360,7 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
 `
@@ -2121,6 +2410,10 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2133,7 +2426,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 }
 
 const listTasksByIssue = `-- name: ListTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC
 `
@@ -2175,6 +2468,10 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2187,15 +2484,15 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 }
 
 const listWorkspaceAgentTaskSnapshot = `-- name: ListWorkspaceAgentTaskSnapshot :many
-SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id FROM agent_task_queue atq
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.context_guard, atq.context_guard_checked_at, atq.last_activity_at, atq.max_inactivity_secs FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 
 UNION ALL
 
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id FROM (
-  SELECT DISTINCT ON (atq.agent_id) atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.context_guard, t.context_guard_checked_at, t.last_activity_at, t.max_inactivity_secs FROM (
+  SELECT DISTINCT ON (atq.agent_id) atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.context_guard, atq.context_guard_checked_at, atq.last_activity_at, atq.max_inactivity_secs
   FROM agent_task_queue atq
   JOIN agent a ON a.id = atq.agent_id
   WHERE a.workspace_id = $1
@@ -2221,7 +2518,8 @@ SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.st
 //
 // No UI windows in SQL: stickiness is decided by "is the latest outcome a
 // failure?", not a 2-minute clock. JOINs agent because agent_task_queue has
-// no workspace_id column.
+// no workspace_id column. pending_context (MUL-4059) counts as active so the
+// presence indicator stays "working"-ish while the guard waits for context.
 func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceAgentTaskSnapshot, workspaceID)
 	if err != nil {
@@ -2259,6 +2557,10 @@ func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceI
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2270,11 +2572,187 @@ func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceI
 	return items, nil
 }
 
+const markAgentTaskPendingContext = `-- name: MarkAgentTaskPendingContext :one
+UPDATE agent_task_queue
+SET status = 'pending_context',
+    context_guard = $2,
+    context_guard_checked_at = now()
+WHERE id = $1 AND status = 'queued'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
+`
+
+type MarkAgentTaskPendingContextParams struct {
+	ID           pgtype.UUID `json:"id"`
+	ContextGuard []byte      `json:"context_guard"`
+}
+
+// Transitions a freshly-enqueued task into 'pending_context' because
+// the context guard rejected it. The companion sweepPendingContextTasks
+// will revalidate; this query does NOT consider timing — the caller is
+// the enqueue path, which has just consulted the guard.
+//
+// context_guard JSONB records the audit trail (which (A) repos and (B)
+// project resources were seen, why the guard rejected). The JSONB
+// column is updated in the same transaction so a follow-up read can
+// answer "why was this task parked?" without re-running the guard.
+func (q *Queries) MarkAgentTaskPendingContext(ctx context.Context, arg MarkAgentTaskPendingContextParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, markAgentTaskPendingContext, arg.ID, arg.ContextGuard)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
+	)
+	return i, err
+}
+
+const markAgentTaskPendingContextCancelled = `-- name: MarkAgentTaskPendingContextCancelled :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'no_context',
+    error = $2
+WHERE id = $1 AND status = 'pending_context'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
+`
+
+type MarkAgentTaskPendingContextCancelledParams struct {
+	ID    pgtype.UUID `json:"id"`
+	Error pgtype.Text `json:"error"`
+}
+
+// Terminal transition for a 'pending_context' row whose guard has
+// failed revalidation past the retry budget. failure_reason is
+// 'no_context' so HandleFailedTasks / retryableReasons can decide
+// whether to retry it the same way it handles the other timeout
+// classes. error carries the audit trail so the UI can surface
+// "context guard failed: missing repo + project local_directory".
+func (q *Queries) MarkAgentTaskPendingContextCancelled(ctx context.Context, arg MarkAgentTaskPendingContextCancelledParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, markAgentTaskPendingContextCancelled, arg.ID, arg.Error)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
+	)
+	return i, err
+}
+
+const markAgentTaskRequeued = `-- name: MarkAgentTaskRequeued :one
+UPDATE agent_task_queue
+SET status = 'queued',
+    context_guard = NULL,
+    context_guard_checked_at = NULL
+WHERE id = $1 AND status = 'pending_context'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
+`
+
+// Promotes a 'pending_context' row back to 'queued' after the guard
+// passed on revalidation. Used by sweepPendingContextTasks when a
+// workspace gained a repo / project directory between sweeps.
+// max_inactivity_secs is preserved (the original enqueue's value is
+// still the right cap; we are not opening a new run, we are letting
+// the existing one proceed).
+func (q *Queries) MarkAgentTaskRequeued(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, markAgentTaskRequeued, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
+	)
+	return i, err
+}
+
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory', wait_reason = $2
 WHERE id = $1 AND status = 'dispatched'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type MarkAgentTaskWaitingLocalDirectoryParams struct {
@@ -2322,6 +2800,10 @@ func (q *Queries) MarkAgentTaskWaitingLocalDirectory(ctx context.Context, arg Ma
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -2339,7 +2821,7 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 type ReclaimStaleDispatchedTaskForRuntimeParams struct {
@@ -2383,6 +2865,10 @@ func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg 
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -2395,7 +2881,7 @@ SET status = 'failed',
     failure_reason = 'runtime_recovery',
     wait_reason = NULL
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Called by the daemon at startup. Atomically fails any dispatched/running/
@@ -2441,6 +2927,10 @@ func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID 
 			&i.IsLeaderTask,
 			&i.WaitReason,
 			&i.InitiatorUserID,
+			&i.ContextGuard,
+			&i.ContextGuardCheckedAt,
+			&i.LastActivityAt,
+			&i.MaxInactivitySecs,
 		); err != nil {
 			return nil, err
 		}
@@ -2463,6 +2953,15 @@ WHERE a.id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level
 `
 
+// P1-10 review fix: pending_context is intentionally NOT in the
+// 'working' set. A parked task means the agent is NOT doing work
+// (it cannot even start). Including it here would incorrectly flip
+// the agent's UI status to 'working' while the task is parked —
+// a confusing state for the user. The presence indicator uses a
+// separate query (ListWorkspaceAgentTaskSnapshot) that DOES include
+// pending_context, so the two data sources are aligned: a parked
+// task is visible in the snapshot but does not mark the agent
+// 'working' here. See MUL-4059 design 1.4 for the split.
 func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
 	row := q.db.QueryRow(ctx, refreshAgentStatusFromTasks, id)
 	var i Agent
@@ -2491,6 +2990,30 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.ThinkingLevel,
 	)
 	return i, err
+}
+
+const refreshPendingContextEnvelope = `-- name: RefreshPendingContextEnvelope :exec
+UPDATE agent_task_queue
+SET context_guard = $2,
+    context_guard_checked_at = now()
+WHERE id = $1 AND status = 'pending_context'
+`
+
+type RefreshPendingContextEnvelopeParams struct {
+	ID           pgtype.UUID `json:"id"`
+	ContextGuard []byte      `json:"context_guard"`
+}
+
+// Refreshes the context_guard JSONB envelope (with a new revalidations
+// counter / hint) and bumps context_guard_checked_at without changing
+// the row's status. Used by sweepPendingContextTasks between guard
+// re-evaluation ticks so the next tick sees the row as fresh. The
+// status='pending_context' guard matches the expected state and is
+// also what makes the operation idempotent across concurrent sweep
+// ticks.
+func (q *Queries) RefreshPendingContextEnvelope(ctx context.Context, arg RefreshPendingContextEnvelopeParams) error {
+	_, err := q.db.Exec(ctx, refreshPendingContextEnvelope, arg.ID, arg.ContextGuard)
+	return err
 }
 
 const restoreAgent = `-- name: RestoreAgent :one
@@ -2533,7 +3056,7 @@ const startAgentTask = `-- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running', started_at = now(), wait_reason = NULL
 WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, context_guard, context_guard_checked_at, last_activity_at, max_inactivity_secs
 `
 
 // Transitions a task to running. Accepts either 'dispatched' (the normal
@@ -2573,6 +3096,10 @@ func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTask
 		&i.IsLeaderTask,
 		&i.WaitReason,
 		&i.InitiatorUserID,
+		&i.ContextGuard,
+		&i.ContextGuardCheckedAt,
+		&i.LastActivityAt,
+		&i.MaxInactivitySecs,
 	)
 	return i, err
 }
@@ -2751,6 +3278,24 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.ThinkingLevel,
 	)
 	return i, err
+}
+
+const updateAgentTaskActivity = `-- name: UpdateAgentTaskActivity :exec
+UPDATE agent_task_queue
+SET last_activity_at = now()
+WHERE id = $1
+`
+
+// Refreshes last_activity_at for a single task. Called by the daemon
+// message / progress / session / usage endpoints in handler/daemon.go
+// so the inactivity sweeper sees the task as alive. We deliberately
+// do NOT gate this on status — a running task whose daemon just got
+// cancelled may still call this once before noticing, and writing
+// the timestamp on a now-terminal row is harmless (no sweeper will
+// ever look at it).
+func (q *Queries) UpdateAgentTaskActivity(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updateAgentTaskActivity, id)
+	return err
 }
 
 const updateAgentTaskSession = `-- name: UpdateAgentTaskSession :exec

@@ -186,11 +186,13 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- We use 'cancelled' rather than 'failed' so the daemon's per-task status
 -- poller (watchTaskCancellation) interrupts the running agent gracefully.
 -- Returns the affected rows so the caller can broadcast task:cancelled and
--- reconcile per-agent status.
+-- reconcile per-agent status. pending_context (MUL-4059) is included so a
+-- member revoke also stops tasks that were parked waiting for context — the
+-- next attempt will re-evaluate the guard against the new runtime / agent.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY(@runtime_ids::uuid[]) OR agent_id = ANY(@agent_ids::uuid[]))
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'pending_context')
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
