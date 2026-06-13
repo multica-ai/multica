@@ -221,7 +221,7 @@ describe("useIssueDetailScrollRestore", () => {
     expect(rafCallbacks).toHaveLength(0);
   });
 
-  it("does not restore while disabled so comment deep-links can control scroll", () => {
+  it("keeps the comment deep-link position when its highlight clears", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");
 
@@ -239,9 +239,11 @@ describe("useIssueDetailScrollRestore", () => {
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(0);
 
+    scroller.scrollTop = 500;
+
     rerender(<Harness restoreKey={issueA} />);
     flushNextAnimationFrame();
-    expect(scroller.scrollTop).toBe(720);
+    expect(scroller.scrollTop).toBe(500);
   });
 
   it("does not yank scroll to top when a same-issue comment highlight clears", () => {

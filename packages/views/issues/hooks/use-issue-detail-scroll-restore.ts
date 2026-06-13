@@ -17,11 +17,9 @@ export function useIssueDetailScrollRestore({
   disabled = false,
 }: UseIssueDetailScrollRestoreArgs) {
   const restoredKeyRef = useRef<string | null>(null);
-  const wasDisabledForKeyRef = useRef(false);
 
   useLayoutEffect(() => {
     restoredKeyRef.current = null;
-    wasDisabledForKeyRef.current = false;
   }, [restoreKey]);
 
   useLayoutEffect(() => {
@@ -42,17 +40,14 @@ export function useIssueDetailScrollRestore({
   useLayoutEffect(() => {
     if (!scrollContainerEl || !ready) return;
     if (disabled) {
-      wasDisabledForKeyRef.current = true;
+      restoredKeyRef.current = restoreKey;
       return;
     }
     if (restoredKeyRef.current === restoreKey) return;
 
     restoredKeyRef.current = restoreKey;
 
-    const savedScrollTop = scrollPositions.get(restoreKey);
-    if (savedScrollTop === undefined && wasDisabledForKeyRef.current) return;
-
-    const target = savedScrollTop ?? 0;
+    const target = scrollPositions.get(restoreKey) ?? 0;
     return restoreScrollTopWithRetry(scrollContainerEl, target);
   }, [scrollContainerEl, restoreKey, ready, disabled]);
 }
