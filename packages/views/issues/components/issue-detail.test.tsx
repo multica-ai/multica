@@ -851,6 +851,28 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("renders scheduled wakeup activity with a timezone label", async () => {
+    // CEREBRO-PATCH(wakeup-scheduled-activity): cover scheduled wakeup rendering in the fork UI.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-wakeup",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "wakeup_scheduled",
+        details: { fire_at: "2026-06-13T14:00:00Z" },
+        created_at: "2026-06-13T13:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/scheduled wakeup for/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/\(.+\)/)).toBeInTheDocument();
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)
