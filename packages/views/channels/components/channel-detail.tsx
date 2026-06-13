@@ -367,7 +367,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
         <div
           className={cn(
             // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — `relative` so JumpToLatestButton docks to the message column.
-            "relative flex flex-1 min-h-0 flex-col",
+            // CEREBRO-PATCH(channels-mobile-col-min-width): TECH-3490 — min-w-0 lets this flex column shrink below its content's intrinsic width; without it the message stream (long URLs, file-chip filenames) forces the column past the viewport on mobile and text is clipped at the right edge.
+            "relative flex min-w-0 flex-1 min-h-0 flex-col",
             threadFullScreen && "hidden",
           )}
         >
