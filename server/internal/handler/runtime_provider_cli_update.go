@@ -272,6 +272,10 @@ func (h *Handler) ReportProviderCLIUpdateResult(w http.ResponseWriter, r *http.R
 		return
 	}
 	if updateRequestTerminal(existing.Status) {
+		if existing.Status == UpdateTimeout {
+			writeError(w, http.StatusConflict, "provider CLI update already timed out before result report")
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
 	}
