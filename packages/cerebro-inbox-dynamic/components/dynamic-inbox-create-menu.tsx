@@ -5,6 +5,7 @@ import { BellPlus, ListPlus, MessageSquarePlus, Plus } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -97,12 +98,14 @@ export function DynamicInboxCreateMenu({
         sideOffset={isFloating ? 12 : 8}
         className="w-[min(calc(100vw-2rem),20rem)] rounded-xl p-1.5 shadow-lg"
       >
-        <DropdownMenuLabel className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Create
-        </DropdownMenuLabel>
-        {actions.map((action) => (
-          <CreateMenuItem key={action.title} {...action} />
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="px-2 pb-1 pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Create
+          </DropdownMenuLabel>
+          {actions.map((action) => (
+            <CreateMenuItem key={action.title} {...action} />
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
