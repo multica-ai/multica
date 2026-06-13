@@ -7,6 +7,7 @@ import {
   entryIsMentioned,
   entryMatchesSection,
   selectSectionEntries,
+  sectionFilters,
   type DynInboxEntry,
   type SectionFilterContext,
 } from "./section-filter";
@@ -126,6 +127,30 @@ describe("section-filter", () => {
     expect(
       entryMatchesSection(proj, { id: "s", kind: "filter", filterUnread: true, projectId: "pX" }, ctx),
     ).toBe(false);
+  });
+
+  it("'filter' builder ANDs explicit conditions; seeds from legacy toggles (#5)", () => {
+    const unreadPinned = notifEntry(1, { read: false, issue_id: "pinned-iss" });
+    const readPinned = notifEntry(1, { read: true, issue_id: "pinned-iss" });
+
+    // Explicit builder conditions: unread AND pinned.
+    const cfg = {
+      id: "s",
+      kind: "filter" as const,
+      filters: [{ field: "unread" as const }, { field: "pinned" as const }],
+    };
+    expect(entryMatchesSection(unreadPinned, cfg, ctx)).toBe(true);
+    expect(entryMatchesSection(readPinned, cfg, ctx)).toBe(false);
+
+    // Empty filters array = everything (the builder starts empty).
+    expect(
+      entryMatchesSection(readPinned, { id: "s", kind: "filter", filters: [] }, ctx),
+    ).toBe(true);
+
+    // sectionFilters seeds from the legacy booleans when `filters` is absent.
+    expect(
+      sectionFilters({ id: "s", kind: "filter", filterUnread: true, projectId: "p1" }),
+    ).toEqual([{ field: "unread" }, { field: "project", projectId: "p1" }]);
   });
 });
 

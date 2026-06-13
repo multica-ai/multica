@@ -19,8 +19,10 @@ import {
   selectSectionEntries,
   groupSectionEntries,
   type DynInboxEntry,
+  sectionFilters,
   type SectionFilterContext,
 } from "../section-filter";
+import { FilterBuilder } from "./filter-builder";
 import { sectionLabel, type InboxSectionConfig } from "../layout";
 import { DynamicInboxRow } from "./dynamic-inbox-row";
 
@@ -186,42 +188,13 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                   Hide muted {section.excludeMuted ? "✓" : ""}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
-              {/* TECH-3413 #4 — composable filter, AND of the enabled toggles. */}
-              {section.kind === "filter" && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Filter</DropdownMenuLabel>
-                    <DropdownMenuItem
-                      onClick={() => props.onChange({ ...section, filterUnread: !section.filterUnread })}
-                    >
-                      Unread only {section.filterUnread ? "✓" : ""}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => props.onChange({ ...section, filterPinned: !section.filterPinned })}
-                    >
-                      Pinned only {section.filterPinned ? "✓" : ""}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => props.onChange({ ...section, filterMentioned: !section.filterMentioned })}
-                    >
-                      Mentions me {section.filterMentioned ? "✓" : ""}
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </>
-              )}
-              {(section.kind === "project" || section.kind === "filter") && projects.length > 0 && (
+              {/* TECH-3413 #5 — the "filter" kind is configured by the inline
+                  FilterBuilder (chips) in the section body, not here. */}
+              {section.kind === "project" && projects.length > 0 && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel>Project</DropdownMenuLabel>
-                    {section.kind === "filter" && (
-                      <DropdownMenuItem
-                        onClick={() => props.onChange({ ...section, projectId: undefined })}
-                      >
-                        Any project {!section.projectId ? "✓" : ""}
-                      </DropdownMenuItem>
-                    )}
                     {projects.map((p) => (
                       <DropdownMenuItem
                         key={p.id}
@@ -245,6 +218,16 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           </button>
         </div>
       </header>
+
+      {!isCollapsed && section.kind === "filter" && (
+        <div className="border-b border-border/60">
+          <FilterBuilder
+            filters={sectionFilters(section)}
+            projects={projects}
+            onChange={(filters) => props.onChange({ ...section, filters })}
+          />
+        </div>
+      )}
 
       {!isCollapsed && (
         <div className="divide-y divide-border/60">
