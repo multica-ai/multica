@@ -81,18 +81,23 @@ Contracts:
 Source:
 
 ```text
-server/internal/handler/squad_briefing.go         # buildSquadLeaderBriefing ~104, buildSquadRoster ~121, renderMemberRow ~169
-server/internal/handler/daemon.go                  # briefing injection ~1187, ~1530
+server/internal/handler/squad_briefing.go         # buildSquadLeaderBriefing ~116, buildSquadExecutionState ~150, buildSquadRoster ~192, renderMemberRow ~240
+server/internal/handler/daemon.go                  # briefing injection ~1187 (issue.ID), ~1530 (quick-create, zero issue ID)
+server/pkg/db/queries/agent.sql                    # ListActiveTasksByIssue ~580 (queued/dispatched/running/waiting_local_directory)
 ```
 
 Contracts:
 
 - squad leader tasks append briefing to leader agent instructions
   (daemon.go:1187, 1530);
-- briefing includes operating protocol, roster, and optional instructions
-  (squad_briefing.go:104-117);
-- `instructions` section appears only when non-empty (squad_briefing.go:110-112);
-- archived agent members are skipped from roster (squad_briefing.go:178-179);
+- briefing includes operating protocol, roster, optional execution state, and
+  optional instructions (squad_briefing.go buildSquadLeaderBriefing);
+- Current Execution State is a claim-time snapshot of active worker tasks on the
+  issue; a "worker session" is an active task with `is_leader_task = false`, so
+  the leader's own claim is excluded; section is omitted when the issue ID is
+  invalid (quick-create) or the lookup fails (buildSquadExecutionState);
+- `instructions` section appears only when non-empty (squad_briefing.go);
+- archived agent members are skipped from roster (squad_briefing.go);
 - no traced behavior injects `instructions` into every squad member.
 
 ## Issue Assignment

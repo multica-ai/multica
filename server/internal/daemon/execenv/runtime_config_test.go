@@ -156,6 +156,45 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
+// MUL-3114: a worker that stops mid-task (interim report, blocked, waiting on
+// input) must mark the issue `blocked` rather than leaving it looking like
+// work is still progressing. Both the comment-triggered and assignment-
+// triggered workflows must carry this rule.
+func TestBriefCarriesBlockedOnStallGuidance(t *testing.T) {
+	t.Parallel()
+	const issueID = "55555555-6666-7777-8888-999999999999"
+
+	// Comment-triggered: the "do not change status" guardrail keeps its
+	// narrow blocked-on-stall exception.
+	comment := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:          issueID,
+		TriggerCommentID: "66666666-7777-8888-9999-aaaaaaaaaaaa",
+	})
+	for _, want := range []string{
+		"Do NOT change the issue status unless the comment explicitly asks for it",
+		"must stop before the task is finished",
+		"multica issue status " + issueID + " blocked",
+		"blocked_reason",
+	} {
+		if !strings.Contains(comment, want) {
+			t.Errorf("comment-triggered brief missing %q\n--- brief ---\n%s", want, comment)
+		}
+	}
+
+	// Assignment-triggered: the blocked step also covers stopping with the
+	// task unfinished and nothing continuing automatically.
+	assignment := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: issueID})
+	for _, want := range []string{
+		"run `multica issue status " + issueID + " blocked`",
+		"must stop with unfinished work",
+		"blocked_reason",
+	} {
+		if !strings.Contains(assignment, want) {
+			t.Errorf("assignment-triggered brief missing %q\n--- brief ---\n%s", want, assignment)
+		}
+	}
+}
+
 // The CLAUDE.md workflow surface must carry the same issue-wide since-delta
 // new-comment hint as the per-turn prompt. PR #2816 requires the two surfaces
 // stay in sync.
@@ -275,7 +314,8 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 		"Complete the task within your Agent Identity boundaries.",
 		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
 		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
-		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		"If blocked, or if you must stop with unfinished work and no automatic continuation",
+		"run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids status changes.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("assignment-triggered brief missing identity-bound workflow text %q\n---\n%s", want, out)

@@ -1213,7 +1213,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					ID:          issue.AssigneeID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, issue.ID)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -1588,7 +1588,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						// Quick-create runs have no issue yet, so there is no
+						// active-task snapshot to take — pass a zero issue ID
+						// and buildSquadLeaderBriefing omits the execution-state
+						// section.
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, pgtype.UUID{})
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {

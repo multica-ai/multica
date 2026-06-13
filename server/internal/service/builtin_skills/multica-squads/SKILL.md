@@ -135,10 +135,17 @@ agent instructions. The briefing includes:
 
 - Squad Operating Protocol;
 - Squad Roster;
+- Current Execution State, only when the task is issue-bound (omitted for
+  quick-create runs that have no issue yet);
 - Squad Instructions, only when `instructions` is non-empty.
 
 Roster entries include member name, member type, mention markdown, and non-empty
 role. Archived agent members are skipped from the briefing roster.
+
+Current Execution State is a claim-time snapshot telling the leader whether any
+worker (non-leader) agent task is still active on the issue, so it does not
+silently record `no_action` when a session has actually stopped. The leader's
+own claim is excluded from the count.
 
 ## Issue assignment behavior
 

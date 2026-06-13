@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -53,11 +55,11 @@ Your responsibilities, in order:
    - a delegated member posts an update or asks you a question;
    - a delegated member finishes and the issue moves forward;
    - someone @mentions you again on this issue.
-5. **Re-evaluate on each trigger.** When you wake up again, read the new
-   activity and decide whether to delegate the next step, escalate to
-   the human reporter, or close the loop. If no action is needed
-   (e.g. a member posted a progress update that requires no response),
-   record ` + "`" + `no_action` + "`" + ` and exit silently.
+5. **Re-evaluate on each trigger.** Read the new activity and the
+   **Current Execution State** snapshot. If no worker task is active and
+   the issue is not done, delegate the next step, mark ` + "`" + `blocked` + "`" + `, or
+   escalate; do not silently record ` + "`" + `no_action` + "`" + `. Use ` + "`" + `no_action` + "`" + `
+   only when no follow-up is needed.
 
 Hard rules:
 - EVERY delegation MUST use the full mention markdown syntax
@@ -90,22 +92,30 @@ Hard rules:
 
 // buildSquadLeaderBriefing composes the full system briefing appended to a
 // squad leader's Instructions when it claims a task on a squad-assigned
-// issue. The returned string contains three sections:
+// issue. The returned string contains up to four sections:
 //
 //  1. Squad Operating Protocol (constant, system-level rules).
 //  2. Squad Roster (data — leader self-row + members with literal
 //     `[@Name](mention://<type>/<UUID>)` strings ready to paste).
-//  3. Squad Instructions (user-defined `squad.instructions`, omitted when
+//  3. Current Execution State (a claim-time snapshot of whether any worker
+//     agent task is still running on this issue; omitted when issueID is
+//     invalid, e.g. quick-create runs where no issue exists yet).
+//  4. Squad Instructions (user-defined `squad.instructions`, omitted when
 //     empty so we don't leave a dangling heading).
 //
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad) string {
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, issueID pgtype.UUID) string {
 	var sb strings.Builder
 	sb.WriteString(squadOperatingProtocol)
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
+
+	if execState := buildSquadExecutionState(ctx, q, issueID); execState != "" {
+		sb.WriteString("\n\n")
+		sb.WriteString(execState)
+	}
 
 	if trimmed := strings.TrimSpace(squad.Instructions); trimmed != "" {
 		sb.WriteString("\n\n## Squad Instructions (")
@@ -113,6 +123,59 @@ func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad
 		sb.WriteString(")\n\n")
 		sb.WriteString(trimmed)
 	}
+	return sb.String()
+}
+
+// buildSquadExecutionState renders the "## Current Execution State" section: a
+// claim-time snapshot of whether any worker agent task is still active on this
+// issue. It exists because a delegated agent's task ends the moment it stops
+// producing output — an interim "I'll continue later" comment does not mean a
+// session is still running (MUL-3114). Surfacing the machine truth lets the
+// leader avoid silently recording no_action on an issue that has actually
+// stalled.
+//
+// "Worker session" = an active task that is NOT a leader task. The leader's own
+// claim is itself active at this point, and any queued leader re-trigger is
+// coordination rather than execution — neither counts as a worker running.
+//
+// Returns "" when issueID is invalid (quick-create runs have no issue yet) or
+// the lookup fails — the briefing simply omits the section rather than guessing.
+func buildSquadExecutionState(ctx context.Context, q *db.Queries, issueID pgtype.UUID) string {
+	if !issueID.Valid {
+		return ""
+	}
+	tasks, err := q.ListActiveTasksByIssue(ctx, issueID)
+	if err != nil {
+		return ""
+	}
+
+	workers := make([]db.AgentTaskQueue, 0, len(tasks))
+	for _, t := range tasks {
+		if t.IsLeaderTask {
+			continue
+		}
+		workers = append(workers, t)
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Current Execution State\n\n")
+	sb.WriteString("This is a live snapshot taken when you were triggered — read it before you decide.\n\n")
+
+	if len(workers) == 0 {
+		sb.WriteString("**No worker task is currently active on this issue.** ")
+		sb.WriteString("Nothing will continue automatically unless you delegate a new step. Before `no_action`, confirm the issue is done or waiting on a human; otherwise delegate, mark `blocked`, or escalate.\n")
+		return sb.String()
+	}
+
+	fmt.Fprintf(&sb, "**%d worker task(s) currently active on this issue:**\n", len(workers))
+	for _, t := range workers {
+		name := "a squad member"
+		if ag, err := q.GetAgent(ctx, t.AgentID); err == nil {
+			name = ag.Name
+		}
+		fmt.Fprintf(&sb, "- %s — status `%s`\n", name, t.Status)
+	}
+	sb.WriteString("\nUsually wait for active worker tasks to finish. Re-delegate only if the active work is wrong/stuck or you have an independent next step.\n")
 	return sb.String()
 }
 
