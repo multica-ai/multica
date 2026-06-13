@@ -1,8 +1,8 @@
 {
-  "attach_file": "Attach file",
-  "toggle_sidebar": "Toggle Sidebar",
-  "pagination_previous": "Go to previous page",
-  "pagination_next": "Go to next page",
-  "copy_code": "Copy code",
-  "plain_text": "plain text"
+  "attach_file": "Đính kèm tệp",
+  "toggle_sidebar": "Ẩn/hiện thanh bên",
+  "pagination_previous": "Trang trước",
+  "pagination_next": "Trang tiếp theo",
+  "copy_code": "Sao chép mã",
+  "plain_text": "văn bản thuần"
 }

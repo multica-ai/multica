@@ -1,41 +1,41 @@
 {
   "nav": {
-    "inbox": "Inbox",
-    "my_issues": "My Issues",
-    "issues": "Issues",
-    "projects": "Projects",
+    "inbox": "Hộp thư",
+    "my_issues": "Công việc của tôi",
+    "issues": "Công việc",
+    "projects": "Dự án",
     "autopilots": "Autopilot",
-    "agents": "Agents",
-    "squads": "Squads",
-    "usage": "Usage",
-    "runtimes": "Runtimes",
-    "skills": "Skills",
-    "settings": "Settings"
+    "agents": "Agent",
+    "squads": "Squad",
+    "usage": "Mức sử dụng",
+    "runtimes": "Runtime",
+    "skills": "Skill",
+    "settings": "Cài đặt"
   },
   "help": {
-    "trigger": "Help",
-    "docs": "Docs",
-    "changelog": "Change log",
-    "feedback": "Feedback"
+    "trigger": "Trợ giúp",
+    "docs": "Tài liệu",
+    "changelog": "Nhật ký thay đổi",
+    "feedback": "Phản hồi"
   },
   "workspace_loader": {
-    "loading_workspace": "Loading workspace…",
-    "loading_named_prefix": "Loading"
+    "loading_workspace": "Đang tải workspace…",
+    "loading_named_prefix": "Đang tải"
   },
   "sidebar": {
-    "unpin_tooltip": "Unpin",
-    "workspaces_label": "Workspaces",
-    "create_workspace": "Create workspace",
-    "pending_invitations_label": "Pending invitations",
+    "unpin_tooltip": "Bỏ ghim",
+    "workspaces_label": "Workspace",
+    "create_workspace": "Tạo workspace",
+    "pending_invitations_label": "Lời mời đang chờ",
     "invitation_workspace_fallback": "Workspace",
-    "invitation_join": "Join",
-    "invitation_decline": "Decline",
-    "log_out": "Log out",
-    "new_issue": "New Issue",
+    "invitation_join": "Tham gia",
+    "invitation_decline": "Từ chối",
+    "log_out": "Đăng xuất",
+    "new_issue": "Công việc mới",
     "new_issue_shortcut": "C",
-    "pinned_label": "Pinned",
+    "pinned_label": "Đã ghim",
     "workspace_group": "Workspace",
-    "configure_group": "Configure",
+    "configure_group": "Cấu hình",
     "unread_overflow": "99+"
   }
 }
