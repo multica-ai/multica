@@ -457,9 +457,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString("### Squad maintenance\n")
 	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
-	b.WriteString(cerebroArtifactBrief())  // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
-	b.WriteString(cerebroWakeupBrief())    // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
-	b.WriteString(cerebroChatBrief())      // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
+	b.WriteString(cerebroArtifactBrief()) // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
+	b.WriteString(cerebroWakeupBrief())   // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
+	b.WriteString(cerebroChatBrief())     // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
 	b.WriteString(cerebroChannelsBrief()) // CEREBRO-PATCH(tech-3255-channels-brief): TECH-3255 adds Channels & DMs and Agent Usage sections to Available Commands
 
 	// Comment Formatting guardrail for ALL providers. The MUL-2904
@@ -602,6 +602,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- Complete the autopilot instructions directly\n")
 		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
+		// CEREBRO-PATCH(wakeup-system-activity): wakeup-triggered tasks carry
+		// a reply anchor but must not be described as new comments.
 		// Comment-triggered and wakeup-triggered tasks both carry a reply
 		// anchor, but wakeups are platform activity, not synthetic comments.
 		if ctx.WakeupPrompt != "" {

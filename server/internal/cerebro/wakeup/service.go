@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -152,7 +153,7 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 
-	return s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
+	row, err := s.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
 		WorkspaceID:     workspaceID,
 		AgentID:         req.AgentID,
 		IssueID:         req.IssueID,
@@ -164,6 +165,11 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		CreatedByID:     req.CreatedByID,
 		OriginCommentID: req.OriginCommentID,
 	})
+	if err != nil {
+		return cerebrodb.CerebroAgentWakeup{}, err
+	}
+	s.recordWakeupScheduledActivity(ctx, row)
+	return row, nil
 }
 
 func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, agentID pgtype.UUID, issueID pgtype.UUID, state pgtype.Text, limit int32) ([]cerebrodb.CerebroAgentWakeup, error) {
@@ -327,28 +333,89 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	return nil
 }
 
-// resolveWakeupParent returns the comment the wakeup note should be posted under
-// so it threads into the conversation that scheduled the wakeup (TECH-3487).
-// It returns the zero UUID — meaning "post as a root note" — when the wakeup has
-// no recorded origin, or the origin comment has since been deleted or moved to a
-// different issue. The returned anchor is normalized to the thread root, matching
-// how the daemon derives the triggering thread (handler/daemon.go), so the note
-// sits one level under the root and the agent's reply lands in the same thread.
+// resolveWakeupParent returns the comment the wakeup task should reply under so
+// it threads into the conversation that scheduled the wakeup (TECH-3487). The
+// returned anchor is normalized to the thread root, matching how the daemon
+// derives the triggering thread. Older wakeups may not have origin_comment_id;
+// in that case fall back to the latest human thread on the same issue so the
+// agent remains visible to the user instead of restarting from a loose root run.
 func (s *Service) resolveWakeupParent(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issueID pgtype.UUID) pgtype.UUID {
 	if !row.OriginCommentID.Valid {
-		return pgtype.UUID{}
+		return s.latestMemberThreadRoot(ctx, issueID)
 	}
 	origin, err := s.Queries.GetComment(ctx, row.OriginCommentID)
 	if err != nil {
-		return pgtype.UUID{} // origin deleted — fall back to a root note
+		return s.latestMemberThreadRoot(ctx, issueID) // origin deleted
 	}
 	if util.UUIDToString(origin.IssueID) != util.UUIDToString(issueID) {
-		return pgtype.UUID{} // origin belongs to another issue — do not cross threads
+		return s.latestMemberThreadRoot(ctx, issueID) // do not cross threads
 	}
 	if origin.ParentID.Valid {
 		return origin.ParentID // normalize to the thread root
 	}
 	return origin.ID
+}
+
+func (s *Service) latestMemberThreadRoot(ctx context.Context, issueID pgtype.UUID) pgtype.UUID {
+	comment, err := s.Queries.GetLatestMemberCommentForIssue(ctx, issueID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	if comment.ParentID.Valid {
+		return comment.ParentID
+	}
+	return comment.ID
+}
+
+func (s *Service) recordWakeupScheduledActivity(ctx context.Context, row cerebrodb.CerebroAgentWakeup) {
+	if s.Queries == nil || s.Bus == nil {
+		return
+	}
+	detailsMap := map[string]string{
+		"wakeup_id":    util.UUIDToString(row.ID),
+		"trigger_type": row.TriggerType,
+	}
+	if row.FireAt.Valid {
+		detailsMap["fire_at"] = row.FireAt.Time.UTC().Format(time.RFC3339)
+	}
+	if row.OriginCommentID.Valid {
+		detailsMap["origin_comment_id"] = util.UUIDToString(row.OriginCommentID)
+	}
+	details, err := json.Marshal(detailsMap)
+	if err != nil {
+		slog.Warn("cerebro wakeup activity details marshal failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
+		return
+	}
+	activity, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: row.WorkspaceID,
+		IssueID:     row.IssueID,
+		ActorType:   util.StrToText("agent"),
+		ActorID:     row.AgentID,
+		Action:      "wakeup_scheduled", // CEREBRO-PATCH(wakeup-scheduled-activity): TECH-3487 visible wakeup audit line.
+		Details:     details,
+	})
+	if err != nil {
+		slog.Warn("cerebro wakeup activity create failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventActivityCreated,
+		WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(row.AgentID),
+		Payload: map[string]any{
+			"issue_id": util.UUIDToString(row.IssueID),
+			"entry": map[string]any{
+				"type":       "activity",
+				"id":         util.UUIDToString(activity.ID),
+				"actor_type": "agent",
+				"actor_id":   util.UUIDToString(row.AgentID),
+				"action":     activity.Action,
+				"details":    json.RawMessage(activity.Details),
+				"created_at": util.TimestampToString(activity.CreatedAt),
+			},
+		},
+	})
 }
 
 // buildWakeupCommentContent encodes the trigger sub-type as a leading inline

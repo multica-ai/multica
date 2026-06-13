@@ -143,6 +143,7 @@ ORDER BY created_at DESC;
 -- name: CreateAgentTask :one
 -- CEREBRO-PATCH(sqlc-agent-task-title): JEH-698 — `title` column is the curated short display label generated at enqueue time (LLM or heuristic), distinct from `trigger_summary` (verbatim provenance snapshot).
 -- CEREBRO-PATCH(task-delegation-context): JEH-1436 records original user and source task provenance for comment/mention starts.
+-- CEREBRO-PATCH(wakeup-system-activity): task context stores wakeup payloads without synthetic comments.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_summary, title, force_fresh_session, is_leader_task,

@@ -20,6 +20,7 @@ func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	// CEREBRO-PATCH(wakeup-system-activity): wakeups use a dedicated prompt instead of comment prompt wrapping.
 	if task.WakeupPrompt != "" {
 		return buildWakeupPrompt(task, provider)
 	}

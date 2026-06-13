@@ -52,6 +52,19 @@ function shortDate(date: string | undefined): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
 }
 
+function wakeupDateTime(value: string | undefined): string {
+  if (!value) return "?";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  const formatted = new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZoneName: "short",
+  }).format(date);
+  return `${formatted} (${timeZone})`;
+}
+
 export function formatActivity(
   entry: TimelineEntry,
   resolveActorName: (
@@ -122,8 +135,12 @@ export function formatActivity(
           return "evaluated the squad trigger";
       }
     }
+    case "wakeup_scheduled":
+      // CEREBRO-PATCH(wakeup-scheduled-activity): mobile renders scheduled wakeups with local timezone.
+      return details.fire_at
+        ? `scheduled wakeup for ${wakeupDateTime(details.fire_at)}`
+        : "scheduled a wakeup";
     default:
       return entry.action ?? "";
   }
 }
-
