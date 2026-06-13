@@ -111,7 +111,11 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		}
 		// Enforce min interval: reject if there is already a pending wakeup
 		// for this agent+issue created within the last WakeupMinIntervalMinutes.
-		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, req.AgentID, req.IssueID, WakeupMinIntervalMinutes); err == nil && recent {
+		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, cerebrodb.HasRecentPendingWakeupForAgentIssueParams{
+			AgentID:            req.AgentID,
+			IssueID:            req.IssueID,
+			MinIntervalMinutes: WakeupMinIntervalMinutes,
+		}); err == nil && recent {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
 				"a wakeup for this agent+issue was already created within the last %d minutes; wait before creating another",
 				WakeupMinIntervalMinutes,

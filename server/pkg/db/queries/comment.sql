@@ -410,3 +410,12 @@ SELECT author_id FROM comment
 WHERE issue_id = $1 AND author_type = 'member' AND author_id IS NOT NULL
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
+
+-- name: GetLatestMemberCommentForIssue :one
+-- CEREBRO-PATCH(wakeup-origin-latest-human-comment): returns the latest human
+-- comment row on an issue so agent-created wakeups from non-comment-triggered
+-- runs can still thread back to the most recent human conversation.
+SELECT * FROM comment
+WHERE issue_id = $1 AND author_type = 'member' AND author_id IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

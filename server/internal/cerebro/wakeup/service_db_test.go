@@ -12,6 +12,7 @@ package wakeup
 import (
 	"context"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ var (
 	wkWorkspaceID pgtype.UUID
 	wkUserID      pgtype.UUID
 	wkAgentID     pgtype.UUID
+	wkRuntimeID   pgtype.UUID
 	wkIssueID     pgtype.UUID
 	wkOtherIssue  pgtype.UUID
 	wkRootID      pgtype.UUID // root comment on wkIssueID
@@ -92,17 +94,16 @@ func setupWkFixture(ctx context.Context, pool *pgxpool.Pool) error {
 		wkWorkspaceID, wkUserID); err != nil {
 		return fmt.Errorf("create member: %w", err)
 	}
-	var runtimeID pgtype.UUID
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
 		 VALUES ($1, $2, 'local', 'claude_code', 'online') RETURNING id`,
-		wkWorkspaceID, "Wakeup Origin Runtime").Scan(&runtimeID); err != nil {
+		wkWorkspaceID, "Wakeup Origin Runtime").Scan(&wkRuntimeID); err != nil {
 		return fmt.Errorf("create runtime: %w", err)
 	}
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
 		 VALUES ($1, $2, 'local', $3) RETURNING id`,
-		wkWorkspaceID, "Wakeup Origin Agent", runtimeID).Scan(&wkAgentID); err != nil {
+		wkWorkspaceID, "Wakeup Origin Agent", wkRuntimeID).Scan(&wkAgentID); err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
 	if err := pool.QueryRow(ctx,
@@ -234,6 +235,60 @@ func TestResolveWakeupParent_NoOrigin(t *testing.T) {
 	got := svc.resolveWakeupParent(ctx, row, wkIssueID)
 	if got.Valid {
 		t.Fatalf("parent = %s, want zero (no origin)", util.UUIDToString(got))
+	}
+}
+
+func TestResolveOriginComment_FallsBackToLatestMemberComment(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	handler := &Handler{Service: wkService()}
+
+	var taskID pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		 VALUES ($1, $2, $3, 'running', 0) RETURNING id`,
+		wkAgentID, wkRuntimeID, wkIssueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() {
+		wkPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	req := httptest.NewRequest("POST", "/api/cerebro/wakeups", nil)
+	req.Header.Set("X-Task-ID", util.UUIDToString(taskID))
+
+	got := handler.resolveOriginComment(req, wkIssueID)
+	if util.UUIDToString(got) != util.UUIDToString(wkReplyID) {
+		t.Fatalf("origin comment = %s, want latest member reply %s", util.UUIDToString(got), util.UUIDToString(wkReplyID))
+	}
+}
+
+func TestResolveOriginComment_TriggerCommentWinsOverLatestMemberComment(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	handler := &Handler{Service: wkService()}
+
+	var taskID pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
+		 VALUES ($1, $2, $3, 'running', 0, $4) RETURNING id`,
+		wkAgentID, wkRuntimeID, wkIssueID, wkRootID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() {
+		wkPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	req := httptest.NewRequest("POST", "/api/cerebro/wakeups", nil)
+	req.Header.Set("X-Task-ID", util.UUIDToString(taskID))
+
+	got := handler.resolveOriginComment(req, wkIssueID)
+	if util.UUIDToString(got) != util.UUIDToString(wkRootID) {
+		t.Fatalf("origin comment = %s, want task trigger %s", util.UUIDToString(got), util.UUIDToString(wkRootID))
 	}
 }
 
