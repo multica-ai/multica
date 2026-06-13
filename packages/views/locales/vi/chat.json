@@ -1,124 +1,124 @@
 {
   "fab": {
-    "running": "Multica is working...",
-    "unread_one": "{{count}} unread chat",
-    "unread_other": "{{count}} unread chats",
-    "default": "Ask Multica"
+    "running": "Hira đang xử lý...",
+    "unread_one": "{{count}} chat chưa đọc",
+    "unread_other": "{{count}} chat chưa đọc",
+    "default": "Hỏi Hira"
   },
   "input": {
-    "placeholder_no_agent": "Create an agent to start chatting",
-    "placeholder_archived": "This session is archived",
-    "placeholder_named": "Message {{name}}…",
-    "placeholder_default": "Start a message…",
-    "send_tooltip": "Send",
-    "stop_tooltip": "Stop",
-    "send_failed_toast": "Failed to send message"
+    "placeholder_no_agent": "Tạo agent để bắt đầu chat",
+    "placeholder_archived": "Phiên này đã được lưu trữ",
+    "placeholder_named": "Nhắn tin cho {{name}}…",
+    "placeholder_default": "Bắt đầu nhắn tin…",
+    "send_tooltip": "Gửi",
+    "stop_tooltip": "Dừng",
+    "send_failed_toast": "Không thể gửi tin nhắn"
   },
   "message_list": {
-    "show_details": "Show details",
-    "replied_in": "Replied in {{elapsed}}",
-    "failed_after": "Failed after {{elapsed}}",
-    "task_failed_fallback": "Task failed",
-    "tools_one": "{{count}} tool",
-    "tools_other": "{{count}} tools",
-    "tool_result_named": "{{tool}} result: ",
-    "tool_result_unnamed": "result: ",
-    "process_steps_one": "{{count}} step",
-    "process_steps_other": "{{count}} steps",
-    "copy_action": "Copy",
-    "copied_toast": "Copied",
-    "copy_failed_toast": "Copy failed",
-    "loading_older": "Loading older messages…"
+    "show_details": "Hiện chi tiết",
+    "replied_in": "Phản hồi trong {{elapsed}}",
+    "failed_after": "Thất bại sau {{elapsed}}",
+    "task_failed_fallback": "Tác vụ thất bại",
+    "tools_one": "{{count}} công cụ",
+    "tools_other": "{{count}} công cụ",
+    "tool_result_named": "Kết quả {{tool}}: ",
+    "tool_result_unnamed": "kết quả: ",
+    "process_steps_one": "{{count}} bước",
+    "process_steps_other": "{{count}} bước",
+    "copy_action": "Sao chép",
+    "copied_toast": "Đã sao chép",
+    "copy_failed_toast": "Sao chép thất bại",
+    "loading_older": "Đang tải tin nhắn cũ hơn…"
   },
   "session_history": {
-    "untitled": "Untitled",
+    "untitled": "Chưa đặt tên",
     "time": {
-      "just_now": "just now",
-      "minutes": "{{count}}m ago",
-      "hours": "{{count}}h ago",
-      "days": "{{count}}d ago"
+      "just_now": "vừa xong",
+      "minutes": "{{count}} phút trước",
+      "hours": "{{count}} giờ trước",
+      "days": "{{count}} ngày trước"
     },
-    "row_delete_aria": "Delete chat session",
-    "row_rename_aria": "Rename chat session",
-    "row_stop_aria": "Stop current run",
-    "stop_action": "Stop",
+    "row_delete_aria": "Xóa phiên chat",
+    "row_rename_aria": "Đổi tên phiên chat",
+    "row_stop_aria": "Dừng lần chạy hiện tại",
+    "stop_action": "Dừng",
     "row_subtitle": {
-      "working": "Working",
-      "completed": "Completed",
-      "new_reply": "New reply"
+      "working": "Đang làm",
+      "completed": "Hoàn tất",
+      "new_reply": "Có phản hồi mới"
     },
     "stop_dialog": {
-      "title": "Stop this run?",
-      "description_with_title": "This will cancel the current agent task in \"{{title}}\". Partial output will stay in the chat.",
-      "description_default": "This will cancel the current agent task. Partial output will stay in the chat.",
-      "cancel": "Keep running",
-      "confirm": "Stop run",
-      "confirming": "Stopping..."
+      "title": "Dừng lần chạy này?",
+      "description_with_title": "Thao tác này sẽ hủy tác vụ agent hiện tại trong \"{{title}}\". Đầu ra một phần sẽ được giữ lại trong chat.",
+      "description_default": "Thao tác này sẽ hủy tác vụ agent hiện tại. Đầu ra một phần sẽ được giữ lại trong chat.",
+      "cancel": "Tiếp tục chạy",
+      "confirm": "Dừng lần chạy",
+      "confirming": "Đang dừng..."
     },
     "delete_dialog": {
-      "title": "Delete chat session",
-      "description_with_title": "\"{{title}}\" and its messages will be permanently removed. This action cannot be undone.",
-      "description_default": "This chat session and its messages will be permanently removed. This action cannot be undone.",
-      "cancel": "Cancel",
-      "confirm": "Delete",
-      "confirming": "Deleting..."
+      "title": "Xóa phiên chat",
+      "description_with_title": "\"{{title}}\" và các tin nhắn của nó sẽ bị xóa vĩnh viễn. Không thể hoàn tác.",
+      "description_default": "Phiên chat này và các tin nhắn sẽ bị xóa vĩnh viễn. Không thể hoàn tác.",
+      "cancel": "Hủy",
+      "confirm": "Xóa",
+      "confirming": "Đang xóa..."
     }
   },
   "window": {
-    "new_chat_tooltip": "New chat",
-    "restore_tooltip": "Restore",
-    "expand_tooltip": "Expand",
-    "minimize_tooltip": "Minimize",
-    "another_running": "Another chat is running",
-    "another_unread": "Another chat has unread replies",
-    "running": "Running",
-    "unread": "Unread",
-    "no_previous": "No previous chats",
-    "untitled": "New chat",
-    "my_agents": "My agents",
-    "others": "Others",
-    "no_agents": "No agents",
-    "history_group": "Chat history",
-    "agent_filter_placeholder": "Search agents..."
+    "new_chat_tooltip": "Chat mới",
+    "restore_tooltip": "Khôi phục",
+    "expand_tooltip": "Mở rộng",
+    "minimize_tooltip": "Thu nhỏ",
+    "another_running": "Có chat khác đang chạy",
+    "another_unread": "Có chat khác có phản hồi chưa đọc",
+    "running": "Đang chạy",
+    "unread": "Chưa đọc",
+    "no_previous": "Không có chat trước đó",
+    "untitled": "Chat mới",
+    "my_agents": "Agent của tôi",
+    "others": "Khác",
+    "no_agents": "Không có agent",
+    "history_group": "Lịch sử chat",
+    "agent_filter_placeholder": "Tìm agent..."
   },
   "empty_state": {
-    "first_time_title": "Chat with your agents",
-    "first_time_intro": "✨ They know your workspace —",
-    "first_time_pillars": "issues, projects, skills",
+    "first_time_title": "Chat với agent của bạn",
+    "first_time_intro": "✨ Họ biết workspace của bạn —",
+    "first_time_pillars": "công việc, dự án, skill",
     "first_time_pillars_suffix": ".",
-    "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
-    "returning_title_named": "Hi, I'm {{name}}",
-    "returning_title_default": "Welcome to Multica",
-    "returning_subtitle": "Try asking"
+    "first_time_actions": "Hỏi tóm tắt, lên kế hoạch ngày mới, hoặc giao nhanh một tác vụ.",
+    "returning_title_named": "Xin chào, tôi là {{name}}",
+    "returning_title_default": "Chào mừng đến Hira",
+    "returning_subtitle": "Thử hỏi"
   },
   "starter_prompts": {
-    "list_open": "List my open tasks by priority",
-    "summarize_today": "Summarize what I did today",
-    "plan_next": "Plan what to work on next"
+    "list_open": "Liệt kê các công việc đang mở theo mức ưu tiên",
+    "summarize_today": "Tóm tắt những gì tôi đã làm hôm nay",
+    "plan_next": "Lên kế hoạch cho việc cần làm tiếp theo"
   },
-  "no_agent_banner": "You need an agent to start chatting.",
+  "no_agent_banner": "Bạn cần một agent để bắt đầu chat.",
   "offline_banner": {
-    "fallback_name": "the agent",
-    "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
-    "offline": "{{name}} is offline — your message will be delivered when they're back."
+    "fallback_name": "agent",
+    "unstable": "Kết nối của {{name}} không ổn định — phản hồi có thể bị chậm.",
+    "offline": "{{name}} đang ngoại tuyến — tin nhắn của bạn sẽ được gửi khi họ trở lại."
   },
   "status_pill": {
     "stages": {
-      "offline": "Offline",
-      "reconnecting": "Reconnecting",
-      "queued": "Queued",
-      "waiting_local_directory": "Waiting for local directory",
-      "starting_up": "Starting up",
-      "thinking": "Thinking",
-      "typing": "Typing"
+      "offline": "Ngoại tuyến",
+      "reconnecting": "Đang kết nối lại",
+      "queued": "Đang chờ",
+      "waiting_local_directory": "Đang chờ thư mục cục bộ",
+      "starting_up": "Đang khởi động",
+      "thinking": "Đang suy nghĩ",
+      "typing": "Đang gõ"
     },
     "tools": {
-      "running_command": "Running a command",
-      "reading_files": "Reading files",
-      "searching_code": "Searching the code",
-      "making_edits": "Making edits",
-      "searching_web": "Searching the web",
-      "fallback": "Working"
+      "running_command": "Đang chạy lệnh",
+      "reading_files": "Đang đọc file",
+      "searching_code": "Đang tìm kiếm code",
+      "making_edits": "Đang chỉnh sửa",
+      "searching_web": "Đang tìm kiếm web",
+      "fallback": "Đang làm việc"
     }
   }
 }
