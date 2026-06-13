@@ -40,6 +40,7 @@ const workspace: Workspace = {
   settings: {},
   repos: [],
   issue_prefix: "TST",
+  avatar_url: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -97,6 +98,7 @@ const attachment: Attachment = {
   filename: "evidence.png",
   url: "s3://bucket/evidence.png",
   download_url: "https://example.test/evidence.png",
+  markdown_url: "https://example.test/api/attachments/attachment-1/download",
   content_type: "image/png",
   size_bytes: 1,
   created_at: "2026-01-01T00:00:00Z",

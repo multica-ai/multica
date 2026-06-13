@@ -19,6 +19,7 @@ import type { NodeViewProps } from "@tiptap/react";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../navigation";
 import { IssueChip } from "../../issues/components/issue-chip";
+import { ProjectChip } from "../../projects/components/project-chip";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -31,10 +32,50 @@ export function MentionView({ node }: NodeViewProps) {
     );
   }
 
+  if (type === "project") {
+    return (
+      <NodeViewWrapper as="span" className="inline">
+        <ProjectMention projectId={id} fallbackLabel={label} />
+      </NodeViewWrapper>
+    );
+  }
+
   return (
     <NodeViewWrapper as="span" className="inline">
       <span className="mention">@{label ?? id}</span>
     </NodeViewWrapper>
+  );
+}
+
+function ProjectMention({
+  projectId,
+  fallbackLabel,
+}: {
+  projectId: string;
+  fallbackLabel?: string;
+}) {
+  const p = useWorkspacePaths();
+  const { push, openInNewTab } = useNavigation();
+  const projectPath = p.projectDetail(projectId);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+      if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
+      return;
+    }
+    push(projectPath);
+  };
+
+  return (
+    <a href={projectPath} onClick={handleClick} className="project-mention inline-flex">
+      <ProjectChip
+        projectId={projectId}
+        fallbackLabel={fallbackLabel}
+        className="cursor-pointer hover:bg-accent transition-colors"
+      />
+    </a>
   );
 }
 

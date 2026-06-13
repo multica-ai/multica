@@ -48,7 +48,9 @@
     "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
-    "reset": "Reset all filters"
+    "reset": "Reset all filters",
+    "active_count_one": "{{count}} filter",
+    "active_count_other": "{{count}} filters"
   },
   "display": {
     "tooltip": "Display settings",
@@ -59,6 +61,8 @@
     "descending_title": "Descending",
     "group_status": "Status",
     "group_assignee": "Assignee",
+    "group_parent": "Parent issue",
+    "group_project": "Project",
     "sort_manual": "Manual",
     "sort_priority": "Priority",
     "sort_start_date": "Start date",
@@ -78,10 +82,12 @@
     "tooltip_board": "Board view",
     "tooltip_list": "List view",
     "tooltip_gantt": "Gantt view",
+    "tooltip_swimlane": "Swimlane view",
     "section": "View",
     "board": "Board",
     "list": "List",
-    "gantt": "Gantt"
+    "gantt": "Gantt",
+    "swimlane": "Swimlane"
   },
   "gantt": {
     "header_issue": "Issue",
@@ -120,13 +126,22 @@
     "empty_status": "No issues",
     "add_issue_tooltip": "Add issue"
   },
+  "swimlane": {
+    "no_parent": "No parent",
+    "other_parents": "Other parents",
+    "no_project": "No project",
+    "no_assignee": "Unassigned",
+    "open_parent": "Open parent issue",
+    "toggle_collapse": "Toggle lane"
+  },
   "board": {
     "hidden_columns_label": "Hidden columns",
     "hide_column": "Hide column",
     "show_column": "Show column",
     "add_issue_tooltip": "Add issue",
     "empty_column": "No issues",
-    "empty_grouping": "No matching issues"
+    "empty_grouping": "No matching issues",
+    "ordered_by": "Board ordered by {{field}}"
   },
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
@@ -236,7 +251,9 @@
     "squad_leader_failed_reason": "evaluation failed: {{reason}}",
     "coalesced_badge": "×{{count}}",
     "activity_count_one": "{{count}} activity",
-    "activity_count_other": "{{count}} activities"
+    "activity_count_other": "{{count}} activities",
+    "show_more_activities_one": "Show {{count}} more activity",
+    "show_more_activities_other": "Show {{count}} more activities"
   },
   "comment": {
     "delete_title": "Delete comment",
@@ -258,14 +275,38 @@
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
-    "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse",
+    "trigger_source_issue_assignee": "assignee",
+    "trigger_source_mention_agent": "@mention",
+    "trigger_source_mention_squad_leader": "squad",
+    "trigger_source_unknown": "trigger",
+    "trigger_skipped_label": "Skipped",
+    "trigger_wont_trigger": "Won't be triggered",
+    "trigger_none_will_trigger": "No agents will be triggered",
+    "trigger_reason_issue_assignee": "{{name}} is assigned here and will be notified by this comment.",
+    "trigger_reason_mention_agent": "{{name}} is mentioned in this comment.",
+    "trigger_reason_mention_squad_leader": "{{name}} leads a squad mentioned in this comment.",
+    "trigger_reason_unknown": "{{name}} will be triggered by this comment.",
+    "trigger_will_start": "Starts working when sent",
+    "trigger_will_start_count_one": "{{count}} agent starts working when sent",
+    "trigger_will_start_count_other": "{{count}} agents start working when sent",
+    "trigger_starts_now": "It will start working right away.",
+    "trigger_starts_when_online": "It is offline now and will start once online.",
+    "trigger_click_to_skip": "Click to skip triggering this time.",
+    "trigger_click_to_manage": "Click to manage who gets triggered this time.",
+    "trigger_click_to_restore": "Won't be triggered this time. Click to restore.",
+    "trigger_preview_title": "This comment will trigger",
+    "trigger_chip_aria": "{{name}} trigger: {{state}}",
     "resolve": {
-      "resolve_action": "Resolve thread",
-      "unresolve_action": "Unresolve thread",
+      "resolve_thread_action": "Resolve thread",
+      "unresolve_thread_action": "Unresolve thread",
+      "resolve_with_comment_action": "Resolve thread with comment",
+      "unresolve_action": "Unresolve",
+      "resolution_badge": "Resolution",
       "collapse": "Collapse",
       "bar_one": "{{count}} resolved comment from {{authors}}",
       "bar_other": "{{count}} resolved comments from {{authors}}",
+      "fold_one": "{{count}} comment from {{authors}}",
+      "fold_other": "{{count}} comments from {{authors}}",
       "bar_authors_more_one": "{{names}} and {{count}} other",
       "bar_authors_more_other": "{{names}} and {{count}} others",
       "resolve_failed": "Failed to resolve thread",
@@ -273,13 +314,13 @@
     }
   },
   "reply": {
-    "placeholder": "Leave a reply...",
-    "expand_tooltip": "Expand",
-    "collapse_tooltip": "Collapse"
+    "placeholder": "Leave a reply..."
   },
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",
     "hover_header_other": "{{count}} agents working",
+    "hover_header_queued_one": "{{count}} agent queued",
+    "hover_header_queued_other": "{{count}} agents queued",
     "status_running": "Working",
     "status_queued": "Queued",
     "chip_label": "working",
@@ -289,6 +330,7 @@
   "agent_live": {
     "is_working": "{{name}} is working",
     "is_queued": "{{name}} is queued",
+    "is_waiting_local_directory": "{{name}} is waiting for the local directory",
     "queued_elapsed_prefix": "queued for {{elapsed}}",
     "fallback_name": "Agent",
     "tool_count_one": "{{count}} tool",
@@ -318,6 +360,7 @@
     "trigger_initial": "Initial run",
     "status_queued": "Queued",
     "status_dispatched": "Starting",
+    "status_waiting_local_directory": "Waiting for local directory",
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",

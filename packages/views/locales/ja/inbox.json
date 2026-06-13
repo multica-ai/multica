@@ -1,0 +1,71 @@
+{
+  "page": {
+    "title": "インボックス",
+    "back": "インボックス"
+  },
+  "menu": {
+    "mark_all_read": "すべて既読にする",
+    "archive_all": "すべてアーカイブ",
+    "archive_all_read": "既読の項目をすべてアーカイブ",
+    "archive_completed": "完了した項目をアーカイブ"
+  },
+  "list": {
+    "empty": "通知はありません",
+    "mark_done_tooltip": "完了にする",
+    "archive_tooltip": "アーカイブ",
+    "time": {
+      "just_now": "たった今",
+      "minutes": "{{count}}分",
+      "hours": "{{count}}時間",
+      "days": "{{count}}日"
+    }
+  },
+  "detail": {
+    "select_prompt": "詳細を表示する通知を選択してください",
+    "empty": "インボックスは空です",
+    "original_input": "元の入力",
+    "edit_advanced": "詳細フォームで編集",
+    "archive": "アーカイブ"
+  },
+  "types": {
+    "issue_assigned": "割り当て済み",
+    "unassigned": "割り当て解除",
+    "assignee_changed": "担当者を変更",
+    "status_changed": "ステータスを変更",
+    "priority_changed": "優先度を変更",
+    "start_date_changed": "開始日を変更",
+    "due_date_changed": "期限を変更",
+    "new_comment": "新しいコメント",
+    "mentioned": "メンションされました",
+    "review_requested": "レビューを依頼",
+    "task_completed": "タスク完了",
+    "task_failed": "タスク失敗",
+    "agent_blocked": "エージェントがブロック",
+    "agent_completed": "エージェントが完了",
+    "reaction_added": "リアクションあり",
+    "quick_create_done": "エージェントで作成",
+    "quick_create_failed": "エージェントでの作成に失敗"
+  },
+  "labels": {
+    "set_status_to": "ステータスを変更:",
+    "set_priority_to": "優先度を変更:",
+    "assigned_to": "{{name}} に割り当て",
+    "removed_assignee": "担当者を削除",
+    "set_start_date_to": "開始日: {{date}}",
+    "removed_start_date": "開始日を削除",
+    "set_due_date_to": "期限: {{date}}",
+    "removed_due_date": "期限を削除",
+    "reacted_to_comment": "あなたのコメントに {{emoji}} のリアクションをしました",
+    "created_with_agent": "エージェントで作成: {{identifier}}",
+    "failed_with_detail": "失敗: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "既読にできませんでした",
+    "archive_failed": "アーカイブできませんでした",
+    "mark_done_failed": "完了にできませんでした",
+    "mark_all_read_failed": "すべて既読にできませんでした",
+    "archive_all_failed": "すべてアーカイブできませんでした",
+    "archive_all_read_failed": "既読の項目をアーカイブできませんでした",
+    "archive_completed_failed": "完了した項目をアーカイブできませんでした"
+  }
+}

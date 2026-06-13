@@ -20,6 +20,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -50,6 +52,13 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
+	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
+	// 403 for every caller. There is no role/owner exception because the repo
+	// has no platform-admin concept; operators bootstrap the workspace with
+	// the flag off, then flip it on and restart so subsequent users join via
+	// invitation only. The public /api/config endpoint mirrors this flag so
+	// the UI can hide every "Create workspace" affordance — see #3433.
+	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -73,6 +82,8 @@ type Config struct {
 	// return 503 instead of attempting to dial a hard-coded private service.
 	CloudRuntimeFleetURL     string
 	CloudRuntimeFleetTimeout time.Duration
+	AttachmentDownloadMode   string
+	AttachmentDownloadURLTTL time.Duration
 }
 
 type cloudRuntimeProxy interface {
@@ -88,6 +99,7 @@ type Handler struct {
 	DaemonHub             *daemonws.Hub
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
+	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
@@ -99,13 +111,51 @@ type Handler struct {
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
-	PATCache              *auth.PATCache
-	DaemonTokenCache      *auth.DaemonTokenCache
-	MembershipCache       *auth.MembershipCache
-	WebhookRateLimiter    WebhookRateLimiter
-	WebhookIPRateLimiter  WebhookRateLimiter
-	CloudRuntime          cloudRuntimeProxy
-	cfg                   Config
+	// Metrics is the shared business-metrics collector built by main.go.
+	// May be nil in tests / self-hosted with the metrics listener disabled;
+	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
+	// nil Metrics as "PostHog only".
+	Metrics              *obsmetrics.BusinessMetrics
+	PATCache             *auth.PATCache
+	DaemonTokenCache     *auth.DaemonTokenCache
+	MembershipCache      *auth.MembershipCache
+	WebhookRateLimiter   WebhookRateLimiter
+	WebhookIPRateLimiter WebhookRateLimiter
+	CloudRuntime         cloudRuntimeProxy
+	// Lark integration. All three are nil when the Lark master key
+	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
+	// handlers return 503 in that case so a misconfigured self-host
+	// deployment surfaces a clear error instead of silently using a
+	// zero key. Wired in cmd/server/router.go after handler.New.
+	LarkInstallations *lark.InstallationService
+	LarkBindingTokens *lark.BindingTokenService
+	// LarkRegistration owns the device-flow install lifecycle: begin
+	// a registration session against accounts.feishu.cn, poll, and
+	// on success write lark_installation + the installer's
+	// lark_user_binding in one DB transaction. Nil when the at-rest
+	// key is unset or the RegistrationService failed to construct at
+	// boot.
+	LarkRegistration *lark.RegistrationService
+	// LarkAPIClient is the live transport that backs SendInteractiveCard,
+	// PatchInteractiveCard, SendBindingPromptCard, GetBotInfo. The
+	// router wires the real Lark HTTP client whenever
+	// MULTICA_LARK_SECRET_KEY is set; tests that need a no-op
+	// behaviour can swap in `lark.NewStubAPIClient(...)` directly. The
+	// UI consults IsConfigured() to decide whether to surface install
+	// entry points.
+	LarkAPIClient lark.APIClient
+	// LarkHub owns the per-installation supervisor goroutines that
+	// hold the §4.4 WS lease and run the EventConnector. Nil only
+	// when the master at-rest key (MULTICA_LARK_SECRET_KEY) is unset.
+	// The router constructs the Hub but does NOT call Run on it; the
+	// process owner (main.go) starts it under a long-running context
+	// and joins via WaitWithTimeout (bounded wait, fenced by
+	// ShutdownTimeout) during graceful shutdown so the lease renewer
+	// can yield cleanly when the DB is healthy without blocking
+	// process exit indefinitely if the pool is frozen — at worst the
+	// next replica waits the full TTL.
+	LarkHub *lark.Hub
+	cfg     Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -116,6 +166,15 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	if analyticsClient == nil {
 		analyticsClient = analytics.NoopClient{}
+	}
+	if mode, ok := normalizeAttachmentDownloadMode(cfg.AttachmentDownloadMode); ok {
+		cfg.AttachmentDownloadMode = string(mode)
+	} else {
+		slog.Warn("invalid ATTACHMENT_DOWNLOAD_MODE, using auto", "value", cfg.AttachmentDownloadMode)
+		cfg.AttachmentDownloadMode = string(attachmentDownloadModeAuto)
+	}
+	if cfg.AttachmentDownloadURLTTL <= 0 {
+		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
 	}
 
 	var daemonHub *daemonws.Hub
@@ -133,6 +192,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonHub:             daemonHub,
 		Bus:                   bus,
 		TaskService:           taskSvc,
+		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
@@ -183,6 +243,7 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
+func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
 
@@ -274,20 +335,31 @@ func requestUserID(r *http.Request) string {
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
-// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
-// back to "member" using the user ID from the session.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
 // member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers — X-Agent-ID names the
-// agent claiming the request, X-Task-ID names the in-flight task that
-// authorizes it — so requiring both has no effect on legitimate agent
-// callers but closes the impersonation path.
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID

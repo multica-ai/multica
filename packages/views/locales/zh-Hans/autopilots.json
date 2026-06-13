@@ -6,6 +6,7 @@
     "table": {
       "name": "名称",
       "agent": "智能体",
+      "created_by": "创建者",
       "mode": "模式",
       "status": "状态",
       "last_run": "上次运行"
@@ -71,6 +72,7 @@
     "section_run_history": "运行历史",
     "section_danger": "危险操作",
     "field_agent": "智能体",
+    "field_created_by": "创建者",
     "field_output_mode": "输出模式",
     "field_project": "关联项目",
     "no_project": "不关联项目",
@@ -258,6 +260,11 @@
     "webhook_created_description": "向下方的 URL POST 任意 JSON 即可触发该 Autopilot。请立即复制——之后也能在 Autopilot 详情页查看或重新生成。",
     "webhook_created_warning": "请把该 URL 当作密码对待，任何拿到它的人都能触发该 Autopilot。",
     "webhook_created_done": "完成",
+    "event_filter_label": "事件过滤",
+    "event_filter_docs_link_label": "了解事件过滤的工作方式",
+    "event_filter_event_placeholder": "例如 workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "next_run_label": "下次运行：",
     "output_modes": {

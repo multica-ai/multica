@@ -1,12 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  ArrowUpCircle,
-  Globe,
-  MoreHorizontal,
-  Trash2,
-} from "lucide-react";
+import { Globe, MoreHorizontal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ColumnDef } from "@tanstack/react-table";
 import { useQuery } from "@tanstack/react-query";
@@ -16,17 +11,6 @@ import {
   deriveRuntimeHealth,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
-import { useDeleteRuntime } from "@multica/core/runtimes/mutations";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -44,10 +28,11 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { workloadConfig } from "../../agents/presence";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
-  isVersionNewer,
+  isSelfHealingRuntime,
   pctChange,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
@@ -87,7 +72,6 @@ type RuntimesT = ReturnType<typeof useT<"runtimes">>["t"];
 
 interface CreateColumnsArgs {
   showOwner: boolean;
-  latestCliVersion: string | null;
   wsId: string;
   now: number;
   t: RuntimesT;
@@ -95,7 +79,6 @@ interface CreateColumnsArgs {
 
 export function createRuntimeColumns({
   showOwner,
-  latestCliVersion,
   wsId,
   now,
   t,
@@ -176,12 +159,7 @@ export function createRuntimeColumns({
       id: "cli",
       header: () => t(($) => $.list.col_cli),
       size: COL_WIDTHS.cli,
-      cell: ({ row }) => (
-        <CliCell
-          runtime={row.original.runtime}
-          latestCliVersion={latestCliVersion}
-        />
-      ),
+      cell: ({ row }) => <CliCell runtime={row.original.runtime} />,
     },
     {
       id: "actions",
@@ -382,60 +360,30 @@ function CostCell({ runtimeId }: { runtimeId: string }) {
   );
 }
 
-function CliCell({
-  runtime,
-  latestCliVersion,
-}: {
-  runtime: AgentRuntime;
-  latestCliVersion: string | null;
-}) {
-  const { t } = useT("runtimes");
+function CliCell({ runtime }: { runtime: AgentRuntime }) {
   if (runtime.runtime_mode === "cloud") {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
   const meta = runtime.metadata as Record<string, unknown> | null;
-  const cliVersion =
-    meta && typeof meta.cli_version === "string" ? meta.cli_version : null;
-  const launchedBy =
-    meta && typeof meta.launched_by === "string" ? meta.launched_by : null;
-  const isManaged = launchedBy === "desktop";
+  // `version` is the agent's own underlying CLI tool version — distinct per
+  // provider (e.g. "2.1.5 (Claude Code)", "codex-cli 0.118.0", "0.42.0").
+  // The separate `cli_version` is the shared multica daemon CLI, identical
+  // for every runtime on one machine; surfacing it here made all agents
+  // show the same number (#3838). The daemon CLI version and its update
+  // prompt belong to the machine — they live in the machine meta strip and
+  // the detail page's UpdateSection, not on a per-agent row.
+  const version =
+    meta && typeof meta.version === "string" ? meta.version : null;
 
-  if (!cliVersion) {
+  if (!version) {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
 
-  // Desktop-managed daemons can never self-update from this page (the
-  // Electron app ships and replaces the binary), so the upgrade marker
-  // would lie — suppress regardless of version comparison.
-  const hasUpdate =
-    !isManaged &&
-    !!latestCliVersion &&
-    isVersionNewer(latestCliVersion, cliVersion);
-
   return (
-    <div className="flex min-w-0 items-center gap-1 text-xs">
-      <span
-        className={`truncate font-mono ${
-          hasUpdate ? "text-warning" : "text-muted-foreground"
-        }`}
-      >
-        {cliVersion}
+    <div className="flex min-w-0 items-center text-xs">
+      <span className="truncate font-mono text-muted-foreground">
+        {version}
       </span>
-      {hasUpdate && latestCliVersion && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <ArrowUpCircle
-                className="h-3 w-3 shrink-0 text-warning"
-                aria-label={t(($) => $.list.cli_update_available_aria)}
-              />
-            }
-          />
-          <TooltipContent>
-            {t(($) => $.list.cli_update_available_tooltip, { version: latestCliVersion })}
-          </TooltipContent>
-        </Tooltip>
-      )}
     </div>
   );
 }
@@ -483,26 +431,16 @@ function RowMenu({
   canDelete: boolean;
 }) {
   const { t } = useT("runtimes");
-  const deleteMutation = useDeleteRuntime(wsId);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Delete is currently the only row action; if the row can't run it, drop
+  // the kebab entirely so the column doesn't render an empty popover. The
+  // self-healing case (local + online) is the runtime-detail parity fix —
+  // see isSelfHealingRuntime for the rationale.
+  const selfHealing = isSelfHealingRuntime(runtime);
 
-  if (!canDelete) {
+  if (!canDelete || selfHealing) {
     return <span aria-hidden />;
   }
-
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
-        setDeleteOpen(false);
-      },
-      onError: (e) => {
-        toast.error(
-          e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed),
-        );
-      },
-    });
-  };
 
   return (
     <>
@@ -535,35 +473,16 @@ function RowMenu({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog
+      <DeleteRuntimeDialog
         open={deleteOpen}
-        onOpenChange={(v) => {
-          if (deleteMutation.isPending) return;
-          setDeleteOpen(v);
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={() => {
+          setDeleteOpen(false);
+          toast.success(t(($) => $.detail.toast_deleted));
         }}
-      >
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-              <span className="mt-2 block text-xs text-muted-foreground/80">
-                {t(($) => $.list.delete_admin_hint)}
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      />
     </>
   );
 }

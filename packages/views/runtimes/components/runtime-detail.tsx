@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Trash2,
   ChevronRight,
   Cpu,
@@ -15,7 +14,7 @@ import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -24,28 +23,20 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import { formatLastSeen, isSelfHealingRuntime } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -104,7 +95,6 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
-  const deleteMutation = useDeleteRuntime(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -127,17 +117,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     (a) => a.runtime_id === runtime.id && !a.archived_at,
   );
 
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        setDeleteOpen(false);
-        navigation.replace(paths.runtimes());
-        toast.success(t(($) => $.detail.toast_deleted));
-      },
-      onError: (e) => {
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
-      },
-    });
+  // Successful delete (light or cascade) closes the dialog and navigates
+  // back to the runtimes list. Toast lives here so the cascade-mode count
+  // and the light-mode "Runtime deleted" share one entry point.
+  const handleDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(paths.runtimes());
+    toast.success(t(($) => $.detail.toast_deleted));
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
@@ -145,31 +131,22 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Topbar — back link + breadcrumb + right-side actions. Mirrors the
-          skill-detail-page topbar so users build one mental model for
-          "go back to the index" across the dashboard. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.runtimes()} />}
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_runtimes)}
-        </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canDelete && (
+      <BreadcrumbHeader
+        segments={[{ href: paths.runtimes(), label: t(($) => $.page.title) }]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {runtime.name}
+          </span>
+        }
+        actions={
+          !canDelete ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Body — single scroll container that owns the Hero card AND the
           analytic blocks below. Putting Hero inside the scroll (instead of
@@ -208,27 +185,16 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Delete confirmation — unified light/cascade dialog. Shared across
+          this page and the runtime list kebab so the two entry points stay
+          in lockstep on copy and behaviour. */}
+      <DeleteRuntimeDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={handleDeleted}
+      />
     </div>
   );
 }
@@ -484,10 +450,7 @@ function DiagnosticsCard({
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
-  // A live local daemon re-registers itself within seconds of a server-side
-  // delete (daemon self-heal, #2404), so deleting an online local runtime
-  // from the UI has no lasting effect — disable it and explain why.
-  const selfHealing = isLocal && runtime.status === "online";
+  const selfHealing = isSelfHealingRuntime(runtime);
   // canDelete here doubles as the "can edit runtime" predicate — it already
   // means "workspace owner/admin OR runtime owner", which is the same gate
   // the server enforces for the visibility PATCH.

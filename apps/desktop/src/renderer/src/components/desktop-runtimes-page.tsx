@@ -28,6 +28,11 @@ export function DesktopRuntimesPage() {
     daemonId: string | null;
     deviceName: string | null;
   }>({ daemonId: null, deviceName: null });
+  // The host's OS hostname, independent of any daemon. Used as the last
+  // fallback for the local machine name so consolidation still works when
+  // the app doesn't manage the running daemon (e.g. it lives in WSL2) and
+  // thus never reports a device name.
+  const [hostName, setHostName] = useState<string | null>(null);
 
   useEffect(() => {
     const apply = (s: DaemonStatus) => {
@@ -40,6 +45,7 @@ export function DesktopRuntimesPage() {
       }
     };
     window.daemonAPI.getStatus().then(apply);
+    window.daemonAPI.getHostName().then((name) => setHostName(name || null));
     return window.daemonAPI.onStatusChange(apply);
   }, []);
 
@@ -51,7 +57,7 @@ export function DesktopRuntimesPage() {
   return (
     <RuntimesPage
       localDaemonId={status.daemonId ?? lastIdentity.daemonId}
-      localMachineName={status.deviceName ?? lastIdentity.deviceName}
+      localMachineName={status.deviceName ?? lastIdentity.deviceName ?? hostName}
       localMachineActions={<DaemonRuntimeActions />}
       // Desktop owns a local machine for the lifetime of the app, even
       // while the daemon is stopped or hasn't registered yet. The shared

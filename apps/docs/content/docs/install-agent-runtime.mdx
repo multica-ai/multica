@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 11 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 11 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,13 +31,13 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 11 supported tools
+## The 12 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 11.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
 
 ### Claude Code (Anthropic)
 
-The most complete integration. Session resumption works, MCP works, and it's the **only one of the 11 that actually consumes the `mcp_config` field** on agents (see the [matrix](/providers#mcp-configuration-only-claude-code-actually-reads-it)).
+The most complete integration. Session resumption works, MCP works, and it consumes the `mcp_config` field on agents (see the [matrix](/providers#mcp-configuration-provider-specific-support)).
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ The most complete integration. Session resumption works, MCP works, and it's the
 
 ### Codex (OpenAI)
 
-JSON-RPC 2.0 transport with finer-grained approval gates. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
+JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written into the per-task `$CODEX_HOME/config.toml`. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
 
 | | |
 |---|---|
@@ -89,7 +89,7 @@ Supports the Gemini 2.5 and 3 series. No session resumption, no MCP — suitable
 
 ### OpenCode (SST)
 
-Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog.
+Open-source CLI agent. Dynamically discovers available models from its own configuration file — good fit for users who want to bring their own model catalog. Consumes the agent's `mcp_config` field through `OPENCODE_CONFIG_CONTENT`.
 
 | | |
 |---|---|
@@ -99,7 +99,7 @@ Open-source CLI agent. Dynamically discovers available models from its own confi
 
 ### Kiro CLI (Amazon)
 
-ACP-over-stdio transport. Session resumption works through ACP `session/load`; skills are copied into `.kiro/skills/`.
+ACP-over-stdio transport. Session resumption works through ACP `session/load`; MCP config is passed through ACP `mcpServers`; skills are copied into `.kiro/skills/`.
 
 | | |
 |---|---|
@@ -109,7 +109,7 @@ ACP-over-stdio transport. Session resumption works through ACP `session/load`; s
 
 ### Kimi (Moonshot)
 
-ACP-protocol agent, primarily aimed at the Chinese market. Skills live under `.kimi/skills/` (native discovery).
+ACP-protocol agent, primarily aimed at the Chinese market. MCP config is passed through ACP `mcpServers`; skills live under `.kimi/skills/` (native discovery).
 
 | | |
 |---|---|
@@ -119,7 +119,7 @@ ACP-protocol agent, primarily aimed at the Chinese market. Skills live under `.k
 
 ### Hermes (Nous Research)
 
-ACP-protocol agent (shares the transport with Kimi). Session resumption works. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
+ACP-protocol agent (shares the transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. The skill injection path falls back to the generic `.agent_context/skills/` — verify your skills are loading before relying on them.
 
 | | |
 |---|---|
@@ -129,7 +129,7 @@ ACP-protocol agent (shares the transport with Kimi). Session resumption works. T
 
 ### OpenClaw
 
-Open-source CLI agent orchestrator. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from Multica.
+Open-source CLI agent orchestrator. MCP config is materialized through Multica's per-task config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task, and you can't pass `--model` or `--system-prompt` from Multica.
 
 | | |
 |---|---|
@@ -147,9 +147,20 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 | Install | See Inflection's CLI docs at [pi.ai](https://pi.ai/). |
 | Authentication | Per the vendor's docs. |
 
+### Antigravity (Google)
+
+Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and runs Gemini-backed models. Session resumption works through `--conversation <id>`, captured by the daemon from the CLI log file. Model selection is managed inside the Antigravity CLI itself — Multica disables the per-agent model picker for this provider. Skills are written to `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)).
+
+| | |
+|---|---|
+| Daemon looks for | `agy` |
+| Install | Follow the official guide at [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview). The CLI ships pre-built — run `agy install` once to wire up PATH and shell aliases. |
+| Authentication | Run `agy` once interactively and complete the Google account login, or sign in via the Antigravity desktop app — the CLI reuses the keyring entry the GUI writes. |
+| Notes | The CLI emits plain assistant text on stdout, not a structured event stream; intermediate "I will run X" lines and the final reply are both relayed to Multica as text. |
+
 ## After installing
 
-1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
+1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`, `which agy`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
 2. **Restart the daemon.** `multica daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
 3. **Check the Runtimes page.** In the Multica UI, the **Runtimes** page should now list one row per `(workspace × tool)` combination. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
 4. **Go back to onboarding.** The "Connect a runtime" step polls and will pick up the new runtime within a few seconds — no need to refresh.

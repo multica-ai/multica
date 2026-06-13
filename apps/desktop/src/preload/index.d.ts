@@ -45,10 +45,43 @@ interface DesktopAPI {
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Open the OS folder picker and return the chosen absolute path.
+   *  Used by the Project settings "Add local directory" flow. */
+  pickDirectory: (
+    defaultPath?: string,
+  ) => Promise<{
+    ok: boolean;
+    path?: string;
+    basename?: string;
+    reason?: "cancelled" | "no_window" | "error";
+    error?: string;
+  }>;
+  /** Validate that a path is an existing readable+writable directory.
+   *  Mirrors the daemon's runtime check so the user sees errors before submit. */
+  validateLocalDirectory: (
+    path: string,
+  ) => Promise<{
+    ok: boolean;
+    reason?:
+      | "not_absolute"
+      | "not_found"
+      | "not_a_directory"
+      | "not_readable"
+      | "not_writable"
+      | "error";
+    error?: string;
+  }>;
 }
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   pid?: number;
   uptime?: string;
   daemonId?: string;
@@ -64,15 +97,25 @@ interface DaemonPrefs {
   autoStop: boolean;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
   restart: () => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
+  getHostName: () => Promise<string>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ) => Promise<DaemonReauthResult>;
   isCliInstalled: () => Promise<boolean>;
   getPrefs: () => Promise<DaemonPrefs>;
   setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;

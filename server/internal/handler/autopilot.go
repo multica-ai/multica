@@ -11,7 +11,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -78,6 +81,11 @@ type AutopilotTriggerResponse struct {
 	LastFiredAt       *string `json:"last_fired_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+	// EventFilters is the declared event scope. Only present for webhook
+	// triggers; omitted when the trigger accepts all events. Serializes as
+	// a JSON array of {event, actions?} objects — never as a base64 string
+	// (which is what []byte would produce through encoding/json).
+	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 type AutopilotRunResponse struct {
@@ -156,6 +164,16 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 			resp.HasSigningSecret = true
 			hint := signingSecretHint(t.SigningSecret.String)
 			resp.SigningSecretHint = &hint
+		}
+		if len(t.EventFilters) > 0 {
+			var filters []WebhookEventFilter
+			if err := json.Unmarshal(t.EventFilters, &filters); err == nil {
+				resp.EventFilters = filters
+			}
+			// On unmarshal error we deliberately drop the field instead of
+			// surfacing raw bytes or 500ing — strict write-time validation
+			// is supposed to make this branch unreachable, and the matcher
+			// fails closed if a corrupt row ever slips through.
 		}
 	}
 	return resp
@@ -249,6 +267,9 @@ type CreateAutopilotTriggerRequest struct {
 	// Provider is currently only meaningful for kind=webhook. Allowed
 	// values: "generic" (default) or "github". Unset → "generic".
 	Provider *string `json:"provider"`
+	// EventFilters is an optional list of {event, actions?} scopes. Only
+	// meaningful for webhook triggers. nil/empty means "accept all events".
+	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 // SetSigningSecretRequest is the body shape for PUT
@@ -269,6 +290,20 @@ type UpdateAutopilotTriggerRequest struct {
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
 	Label          *string `json:"label"`
+	// EventFilters is the desired event-filter set with tri-state PATCH
+	// semantics:
+	//
+	//   - omitted / explicit null (nil pointer) → leave the existing value
+	//     untouched.
+	//   - explicit [] (non-nil, length 0)       → clear filters (the trigger
+	//     reverts to "accept all events").
+	//   - explicit [...]                        → replace with the supplied
+	//     list.
+	//
+	// This is why the pointer matters: with a plain []WebhookEventFilter
+	// there is no way to tell "field absent from the PATCH body" from "field
+	// present but empty", and the user can never clear filters once set.
+	EventFilters *[]WebhookEventFilter `json:"event_filters,omitempty"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -425,6 +460,13 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	resp := autopilotToResponse(autopilot)
 	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
+		userID,
+		workspaceID,
+		uuidToString(autopilot.ID),
+		"manual",
+		"manual",
+	))
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -645,6 +687,16 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
 		return
 	}
+	if req.Kind != "webhook" && len(req.EventFilters) > 0 {
+		// event_filters narrows webhook ingress — it has no meaning for a
+		// schedule trigger and would otherwise be silently dropped.
+		writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+		return
+	}
+	if err := validateWebhookEventFilters(req.EventFilters); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Provider only applies to webhook triggers and the value space is
 	// closed — reject unknowns early so a typo on create doesn't quietly
 	// degrade into a "generic" trigger that bypasses provider-specific
@@ -698,7 +750,12 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// entry (vanishingly unlikely with 256 bits but the retry keeps
 		// the failure mode obvious if RNG is degraded), we re-generate
 		// and re-INSERT — never UPDATE.
-		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider)
+		eventFiltersBytes, err := encodeWebhookEventFilters(req.EventFilters)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
+			return
+		}
+		trigger, err := h.createWebhookTriggerWithMintedToken(r, ap.ID, ptrToText(req.Label), provider, eventFiltersBytes)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to create trigger")
 			return
@@ -750,6 +807,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 	autopilotID pgtype.UUID,
 	label pgtype.Text,
 	provider string,
+	eventFilters []byte,
 ) (db.AutopilotTrigger, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		token, err := generateWebhookToken()
@@ -763,6 +821,7 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			Label:        label,
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
+			EventFilters: eventFilters,
 		})
 		if err == nil {
 			return trigger, nil
@@ -841,6 +900,13 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
 			return false
 		}
+		// Private-leader gate: the member configuring the autopilot must have
+		// access to the private leader, same as validateAssigneePair.
+		actorType, actorID := h.resolveActor(r, requestUserID(r), util.UUIDToString(workspaceID))
+		if !h.canAccessPrivateAgent(r.Context(), leader, actorType, actorID, util.UUIDToString(workspaceID)) {
+			writeError(w, http.StatusForbidden, "cannot assign autopilot to squad with private leader")
+			return false
+		}
 		return true
 	default:
 		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
@@ -914,6 +980,28 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
+	}
+	// Tri-state PATCH for event_filters. A nil pointer (field omitted or
+	// JSON null) leaves the existing row untouched — params.EventFilters
+	// stays unset and the COALESCE in the UPDATE preserves the previous
+	// value. A non-nil pointer is authoritative: an empty slice clears
+	// filters (encoded as the JSONB literal `[]` so COALESCE replaces
+	// rather than preserves), a populated slice replaces.
+	if req.EventFilters != nil {
+		if prev.Kind != "webhook" {
+			writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+			return
+		}
+		if err := validateWebhookEventFilters(*req.EventFilters); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		encoded, err := encodeWebhookEventFiltersAlways(*req.EventFilters)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to encode event_filters")
+			return
+		}
+		params.EventFilters = encoded
 	}
 
 	// Recompute next_run_at if cron or timezone changed.

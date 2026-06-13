@@ -62,7 +62,7 @@ vi.mock("@multica/core/workspace/mutations", () => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { updateWorkspace: mockUpdateWorkspace },
+  api: { updateWorkspace: mockUpdateWorkspace, getBaseUrl: () => "http://127.0.0.1:8080" },
 }));
 
 vi.mock("@multica/core/auth", () => {

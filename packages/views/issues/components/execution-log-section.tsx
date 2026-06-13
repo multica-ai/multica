@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
+import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -14,39 +14,30 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
-
-// Mask gradient that fades the trigger-summary text into transparency at
-// the right edge. Mirrors the pattern used by the desktop tab bar
-// (apps/desktop/.../tab-bar.tsx) and the sidebar pin item
-// (packages/views/layout/app-sidebar.tsx) — gives the row a smooth
-// visual ramp toward the trailing actions instead of a hard truncate +
-// ellipsis cut.
-const TRIGGER_MASK_STYLE: React.CSSProperties = {
-  maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
-  WebkitMaskImage:
-    "linear-gradient(to right, black calc(100% - 12px), transparent)",
-};
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); past runs (terminal
 // statuses) collapse behind a "Show past runs (N)" toggle.
 //
 // Replaces:
-//   - the click-to-expand timeline that used to live inside AgentLiveCard
-//     (sticky card stays as a header-only banner)
+//   - the click-to-expand timeline that used to live inside the in-body live
+//     card (the live "agent is working" signal now lives in the header via
+//     IssueAgentHeaderChip)
 //   - the standalone <TaskRunHistory> below the main content
 //
-// Row layout — three columns, left to right:
+// Row layout — simple left/right flex:
 //   1. Agent avatar (no status dot — agent availability is not the
 //      story here; the row's right column carries the task status)
-//   2. Trigger description (e.g. "From comment", "Autopilot", "Retry"),
-//      truncated with ellipsis when narrow
-//   3. Status + relative time, swapped to hover actions (cancel /
-//      transcript) on hover
+//   2. Trigger description flexes and truncates
+//   3. Status is a normal shrink-0 right column; on hover it is replaced
+//      in place by the action buttons (status is removed, not covered).
+//      Left text keeps flex-1 so the row never shows a mid-row gap. Do
+//      not use masks/padding gymnastics here.
 //
 // One query (`listTasksByIssue`) drives both buckets — the back-end
 // returns every status, the front-end filters into active vs past on the
@@ -57,9 +48,9 @@ interface ExecutionLogSectionProps {
   issueId: string;
 }
 
-// Past-runs sort priority: failed first (needs attention), then
-// cancelled (procedural noise), then completed (the boring 'done'
-// case sinks to the bottom). Within each group, newest first.
+// Past-runs sort priority: newest first by timestamp. When two runs
+// share the same timestamp, failed ranks above cancelled, which ranks
+// above completed.
 const PAST_STATUS_RANK: Record<string, number> = {
   failed: 0,
   cancelled: 1,
@@ -89,6 +80,10 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
         (t) =>
           t.status === "queued" ||
           t.status === "dispatched" ||
+          // Daemon-parked task on a busy local_directory — still active
+          // (waiting on a path lock), not terminal. Surfacing it here is
+          // what tells the user the agent is alive and will resume.
+          t.status === "waiting_local_directory" ||
           t.status === "running",
       ),
     [tasks],
@@ -101,17 +96,15 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
         t.status === "failed" ||
         t.status === "cancelled",
     );
-    // Stable sort: failed first, cancelled second, completed last.
-    // Within group: newest completed_at first (fall back to created_at
-    // for malformed rows missing completed_at).
-    return [...past].sort((a, b) => {
-      const rankDiff =
-        (PAST_STATUS_RANK[a.status] ?? 99) -
-        (PAST_STATUS_RANK[b.status] ?? 99);
-      if (rankDiff !== 0) return rankDiff;
+    return past.toSorted((a, b) => {
       const at = a.completed_at ?? a.created_at;
       const bt = b.completed_at ?? b.created_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
+      const timeDiff = new Date(bt).getTime() - new Date(at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return (
+        (PAST_STATUS_RANK[a.status] ?? 99) -
+        (PAST_STATUS_RANK[b.status] ?? 99)
+      );
     });
   }, [tasks]);
 
@@ -120,6 +113,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   return (
     <div>
       <button
+        type="button"
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
           open ? "" : "text-muted-foreground hover:text-foreground"
         }`}
@@ -141,7 +135,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveRow key={task.id} task={task} issueId={issueId} />
+            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
 
           {pastTasks.length > 0 && (
@@ -200,24 +194,14 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
   dispatched: "text-warning",
+  // Same tone as queued/dispatched — visually "stopped" so users see the
+  // task is parked, but distinguished by the status label.
+  waiting_local_directory: "text-warning",
   running: "text-info",
   completed: "text-success",
   failed: "text-destructive",
   cancelled: "text-muted-foreground",
 };
-
-// Time anchor depends on status. Active rows want "Started 2m ago" /
-// "Queued 30s ago" — what's happening now. Past rows want "5m ago" — when
-// the verdict landed.
-function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
-  if (task.status === "running" && task.started_at) {
-    return timeAgo(task.started_at);
-  }
-  if (task.status === "dispatched" && task.dispatched_at) {
-    return timeAgo(task.dispatched_at);
-  }
-  return timeAgo(task.created_at);
-}
 
 // ─── Active row ────────────────────────────────────────────────────────────
 
@@ -248,6 +232,8 @@ function useStatusLabel(status: AgentTask["status"]): string {
   switch (status) {
     case "queued": return t(($) => $.execution_log.status_queued);
     case "dispatched": return t(($) => $.execution_log.status_dispatched);
+    case "waiting_local_directory":
+      return t(($) => $.execution_log.status_waiting_local_directory);
     case "running": return t(($) => $.execution_log.status_running);
     case "completed": return t(($) => $.execution_log.status_completed);
     case "failed": return t(($) => $.execution_log.status_failed);
@@ -255,19 +241,44 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+// One active (running / queued / dispatched / parked) task row. Running rows
+// keep status to a single live elapsed timer; transcript and stop stay available
+// as hover actions. Transcript content lazy-loads on click via TranscriptButton,
+// so the row no longer fetches task messages just to render a count.
+export function ActiveTaskRow({
+  task,
+  issueId,
+}: {
+  task: AgentTask;
+  issueId: string;
+}) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task, timeAgo);
 
-  // Transcript only meaningful once messages exist — pure-queued tasks
-  // have nothing to show yet.
-  const showTranscript = task.status !== "queued";
+  // Running rows show a live-ticking elapsed timer (the ticking digits carry
+  // "alive", the duration carries "how long"). Only running rows tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (task.status !== "running") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [task.status]);
+  const elapsed =
+    task.status === "running"
+      ? formatDuration(
+          task.started_at ?? task.dispatched_at ?? task.created_at,
+          now,
+        )
+      : "";
+
+  // Transcript only meaningful once messages exist — pure-queued and
+  // waiting_local_directory tasks haven't streamed any agent output yet.
+  const showTranscript =
+    task.status !== "queued" && task.status !== "waiting_local_directory";
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -288,18 +299,22 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
-      {/* Status + time always visible — actions append on hover, never
-          replace. Same pattern as desktop tab bar / sidebar pins. */}
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
+      <RowStatus title={label}>
+        {task.status === "running" ? (
+          <>
+            <span className="text-info tabular-nums">{elapsed}</span>
+            <span className="sr-only">{label}</span>
+          </>
+        ) : (
+          <span className={`${tone} min-w-0 truncate`}>{label}</span>
+        )}
+      </RowStatus>
       <RowActions>
         {showTranscript && (
           <TranscriptButton
             task={task}
             agentName=""
-            isLive
+            isLive={task.status === "running"}
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
@@ -328,7 +343,11 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
         onConfirm={() => void handleCancel()}
-        showRunningNote={task.status === "running" || task.status === "dispatched"}
+        showRunningNote={
+          task.status === "running" ||
+          task.status === "dispatched" ||
+          task.status === "waiting_local_directory"
+        }
       />
     </RowShell>
   );
@@ -340,7 +359,6 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
-  const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
@@ -374,10 +392,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{failureLabel ?? label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
+      <RowStatus title={failureLabel ?? label}>
+        <TaskStatusIcon status={task.status} />
+        <span className="sr-only">{failureLabel ?? label}</span>
+        <span className="text-muted-foreground">{time}</span>
+      </RowStatus>
       <RowActions>
         <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
         {canRetry && (
@@ -416,10 +435,8 @@ function RowShell({
   task: AgentTask;
   children: React.ReactNode;
 }) {
-  // `relative` so the absolute-positioned RowActions slot anchors to this
-  // row instead of an outer container.
   return (
-    <div className="group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
+    <div className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40">
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
@@ -435,40 +452,46 @@ function RowShell({
   );
 }
 
-// Trigger description with a mask-gradient right edge — text fades into
-// transparency in the trailing 12px for the same reason desktop tab /
-// sidebar pin do it: avoids a hard truncate cut against neighbouring
-// content.
 function TriggerText({ text }: { text: string }) {
+  return <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{text}</span>;
+}
+
+function RowStatus({
+  children,
+  title,
+}: {
+  children: React.ReactNode;
+  title?: string;
+}) {
   return (
-    <span
-      className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
-      style={TRIGGER_MASK_STYLE}
+    <div
+      title={title}
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs group-hover/execution-log-row:hidden"
     >
-      {text}
-    </span>
+      {children}
+    </div>
   );
 }
 
-// Hover-only action slot — absolute-positioned over the row's right edge.
-// Status + time stay anchored in the layout; on hover the action buttons
-// fade in on top of them with a left-fading gradient backdrop, so the
-// status copy is gracefully covered (not hard-clipped) and the row
-// content never reflows. Mirrors the "actions sticky over content" idiom
-// used by GitHub PR rows, Linear issue rows, etc.
+function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
+  switch (status) {
+    case "completed":
+      return <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-success" />;
+    case "failed":
+      return <XCircle aria-hidden="true" className="h-3.5 w-3.5 text-destructive" />;
+    case "cancelled":
+      return <Ban aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" />;
+    default:
+      return null;
+  }
+}
+
+// Action slot — hidden by default, replaces the status column in place on
+// hover. No absolute/gradient needed: the status is removed (not covered),
+// so nothing shows through underneath.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
-    <div
-      className={[
-        "pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 pl-6 opacity-0 transition-opacity",
-        // The gradient backdrop blends the row's hover background (accent/40)
-        // from the right and fades to transparent on the left, so the
-        // status text underneath is dimmed gracefully rather than cut.
-        "bg-gradient-to-l from-accent/95 via-accent/80 to-transparent",
-        "group-hover:pointer-events-auto group-hover:opacity-100",
-        "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-      ].join(" ")}
-    >
+    <div className="hidden h-7 items-center gap-0.5 group-hover/execution-log-row:flex">
       {children}
     </div>
   );

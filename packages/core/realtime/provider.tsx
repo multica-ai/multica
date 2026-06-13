@@ -2,7 +2,7 @@
 
 import {
   createContext,
-  useContext,
+  use,
   useEffect,
   useState,
   useCallback,
@@ -144,7 +144,7 @@ export function WSProvider({
 }
 
 export function useWS() {
-  const ctx = useContext(WSContext);
+  const ctx = use(WSContext);
   if (!ctx) throw new Error("useWS must be used within WSProvider");
   return ctx;
 }

@@ -5,8 +5,10 @@ import {
   issueKeys,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
+  type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
+import { projectKeys } from "../projects/queries";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -24,6 +26,7 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
@@ -32,6 +35,7 @@ import type {
   ListIssuesCache,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import { sortTimelineEntriesAsc } from "./timeline-sort";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -57,19 +61,26 @@ export type ToggleIssueReactionVars = {
  * Paginate one status column into the cache. Works for both the workspace
  * issue list and per-scope My Issues lists (pass `myIssues` to target the
  * latter).
+ *
+ * `sort` must match the sort the consuming `useQuery` was called with —
+ * the query key embeds it (see `listSorted` / `myListSorted`), so a load-more
+ * with the wrong sort would patch a stale cache entry that nobody is
+ * subscribed to. It is also threaded into the API request so the appended
+ * page lines up with the server-side ordering of the existing items.
  */
 export function useLoadMoreByStatus(
   status: IssueStatus,
   myIssues?: { scope: string; filter: MyIssuesFilter },
+  sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const queryKey = myIssues
-    ? issueKeys.myList(wsId, myIssues.scope, myIssues.filter)
-    : issueKeys.list(wsId);
-  const cache = qc.getQueryData<ListIssuesCache>(queryKey);
+  const activeKey = myIssues
+    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
+    : issueKeys.listSorted(wsId, sort);
+  const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
   const total = bucket?.total ?? 0;
@@ -83,9 +94,10 @@ export function useLoadMoreByStatus(
         status,
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
+        ...sort,
         ...myIssues?.filter,
       });
-      qc.setQueryData<ListIssuesCache>(queryKey, (old) => {
+      qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
         if (!old) return old;
         const prev = getBucket(old, status);
         const existingIds = new Set(prev.issues.map((i) => i.id));
@@ -98,15 +110,23 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, queryKey, status, loaded, hasMore, isLoading, myIssues?.filter]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
 
   return { loadMore, hasMore, isLoading, total };
 }
 
+/**
+ * Paginate one assignee-grouped board column into the cache. `queryKey`
+ * already pins the active cache entry (it's the same object the consuming
+ * `useQuery` registered), so the cache lookup and `setQueryData` target the
+ * right row. `sort` is threaded into the API request so the appended page
+ * lines up with the server-side ordering of the existing items.
+ */
 export function useLoadMoreByAssigneeGroup(
   group: Pick<IssueAssigneeGroup, "id" | "assignee_type" | "assignee_id">,
   queryKey: QueryKey,
   filter: AssigneeGroupedIssuesFilter,
+  sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
   const [isLoading, setIsLoading] = useState(false);
@@ -125,6 +145,7 @@ export function useLoadMoreByAssigneeGroup(
         group_by: "assignee",
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
+        ...sort,
         ...filter,
         group_assignee_type: group.assignee_type ?? "none",
         group_assignee_id: group.assignee_id ?? undefined,
@@ -150,7 +171,7 @@ export function useLoadMoreByAssigneeGroup(
     } finally {
       setIsLoading(false);
     }
-  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey]);
+  }, [filter, group.assignee_id, group.assignee_type, hasMore, isLoading, loaded, qc, queryKey, sort]);
 
   return { loadMore, hasMore, isLoading, total };
 }
@@ -165,9 +186,9 @@ export function useCreateIssue() {
   return useMutation({
     mutationFn: (data: CreateIssueRequest) => api.createIssue(data),
     onSuccess: (newIssue) => {
-      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-        old ? addIssueToBuckets(old, newIssue) : old,
-      );
+      for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+        if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));
+      }
       // Surface the just-created issue in cmd+k's Recent list without
       // requiring the user to open it first.
       useRecentIssuesStore.getState().recordVisit(wsId, newIssue.id);
@@ -182,6 +203,7 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
 }
@@ -198,7 +220,8 @@ export function useUpdateIssue() {
       // yield to the event loop, letting @dnd-kit reset its visual state
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      const firstListData = prevLists[0]?.[1];
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
 
       // Resolve parent_issue_id from the freshest source so we can keep the
@@ -208,7 +231,7 @@ export function useUpdateIssue() {
       // child may live only there, not in detail/list.
       let parentId: string | null =
         prevDetail?.parent_issue_id ??
-        (prevList ? findIssueLocation(prevList, id)?.issue.parent_issue_id : null) ??
+        (firstListData ? findIssueLocation(firstListData, id)?.issue.parent_issue_id : null) ??
         null;
       if (!parentId) {
         const childrenCaches = qc.getQueriesData<Issue[]>({
@@ -227,9 +250,9 @@ export function useUpdateIssue() {
         ? qc.getQueryData<Issue[]>(issueKeys.children(wsId, parentId))
         : undefined;
 
-      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) =>
-        old ? patchIssueInBuckets(old, id, data) : old,
-      );
+      for (const [key, cached] of prevLists) {
+        if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, data));
+      }
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
         old ? { ...old, ...data } : old,
       );
@@ -240,10 +263,14 @@ export function useUpdateIssue() {
             old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
         );
       }
-      return { prevList, prevDetail, prevChildren, parentId, id };
+      return { prevLists, prevDetail, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevLists) {
+        for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevDetail)
         qc.setQueryData(issueKeys.detail(wsId, ctx.id), ctx.prevDetail);
       if (ctx?.parentId && ctx.prevChildren !== undefined) {
@@ -259,6 +286,12 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (
+        vars.status !== undefined ||
+        Object.prototype.hasOwnProperty.call(vars, "project_id")
+      ) {
+        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
       // to resolve text-preview Eye gates, and unlike other mutations this
@@ -281,6 +314,15 @@ export function useUpdateIssue() {
         });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
       }
+      // Invalidate the batched-children cache only when the parent link
+      // actually changed. The WS path (ws-updaters.ts) invalidates
+      // unconditionally because it doesn't know what the server change
+      // touched; here onMutate already patched issueKeys.children(parent)
+      // optimistically, so we only need to flush when the parent relation
+      // itself moved.
+      if (ctx?.parentId || newParentId) {
+        qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
+      }
     },
   });
 }
@@ -301,7 +343,7 @@ export function useDeleteIssue() {
           qc.cancelQueries({ queryKey: issueKeys.children(wsId, parentId) }),
         ),
       );
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
       const prevMyLists = qc.getQueriesData<ListIssuesCache>({
         queryKey: issueKeys.myAll(wsId),
       });
@@ -317,10 +359,14 @@ export function useDeleteIssue() {
       pruneDeletedIssueFromListCaches(qc, wsId, id);
       pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
-      return { id, metadata, prevList, prevMyLists, prevDetail, prevChildren };
+      return { id, metadata, prevLists, prevMyLists, prevDetail, prevChildren };
     },
     onError: (_err, _id, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevLists) {
+        for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevMyLists) {
         for (const [key, snapshot] of ctx.prevMyLists) {
           qc.setQueryData(key, snapshot);
@@ -336,6 +382,7 @@ export function useDeleteIssue() {
       }
     },
     onSuccess: (_data, id, ctx) => {
+      useRecentContextStore.getState().forgetContext(wsId, { type: "issue", id });
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
     },
     onSettled: (_data, _err, _id, ctx) => {
@@ -343,6 +390,7 @@ export function useDeleteIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
   });
@@ -361,13 +409,13 @@ export function useBatchUpdateIssues() {
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
-      qc.setQueryData<ListIssuesCache>(issueKeys.list(wsId), (old) => {
-        if (!old) return old;
-        let next = old;
+      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      for (const [key, cached] of prevLists) {
+        if (!cached) continue;
+        let next = cached;
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
-        return next;
-      });
+        qc.setQueryData<ListIssuesCache>(key, next);
+      }
 
       // Mirror the optimistic patch into any loaded children cache so
       // sub-issue rows on a parent's detail page reflect the change too.
@@ -388,10 +436,14 @@ export function useBatchUpdateIssues() {
         );
       }
 
-      return { prevList, prevChildren, affectedParentIds };
+      return { prevLists, prevChildren, affectedParentIds };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevLists) {
+        for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {
           qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
@@ -403,6 +455,12 @@ export function useBatchUpdateIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      if (
+        _vars.updates.status !== undefined ||
+        Object.prototype.hasOwnProperty.call(_vars.updates, "project_id")
+      ) {
+        qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      }
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
           qc.invalidateQueries({
@@ -442,7 +500,7 @@ export function useBatchDeleteIssues() {
           qc.cancelQueries({ queryKey: issueKeys.children(wsId, parentId) }),
         ),
       );
-      const prevList = qc.getQueryData<ListIssuesCache>(issueKeys.list(wsId));
+      const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
       const prevMyLists = qc.getQueriesData<ListIssuesCache>({
         queryKey: issueKeys.myAll(wsId),
       });
@@ -461,10 +519,14 @@ export function useBatchDeleteIssues() {
           pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
         }
       }
-      return { prevList, prevMyLists, prevChildren, parentIssueIds, metadataById };
+      return { prevLists, prevMyLists, prevChildren, parentIssueIds, metadataById };
     },
     onError: (_err, _ids, ctx) => {
-      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevLists) {
+        for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevMyLists) {
         for (const [key, snapshot] of ctx.prevMyLists) {
           qc.setQueryData(key, snapshot);
@@ -478,13 +540,19 @@ export function useBatchDeleteIssues() {
     },
     onSuccess: (data, ids, ctx) => {
       if (data.deleted === ids.length) {
+        const { forgetContext } = useRecentContextStore.getState();
         for (const id of ids) {
+          forgetContext(wsId, { type: "issue", id });
           cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
         }
         return;
       }
 
-      if (ctx?.prevList) qc.setQueryData(issueKeys.list(wsId), ctx.prevList);
+      if (ctx?.prevLists) {
+        for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevMyLists) {
         for (const [key, snapshot] of ctx.prevMyLists) {
           qc.setQueryData(key, snapshot);
@@ -506,6 +574,7 @@ export function useBatchDeleteIssues() {
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
           parentIssueIds: Array.from(ctx.parentIssueIds),
@@ -529,12 +598,14 @@ export function useCreateComment(issueId: string) {
       type,
       parentId,
       attachmentIds,
+      suppressAgentIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds),
+      suppressAgentIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",
@@ -555,8 +626,12 @@ export function useCreateComment(issueId: string) {
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
         if (!old) return [entry];
         if (old.some((e) => e.id === entry.id)) return old;
-        return [...old, entry];
+        return sortTimelineEntriesAsc([...old, entry]);
       });
+      // Posting a comment changes the trigger answer itself (the enqueued
+      // task now dedupes follow-up triggers), so cached previews for this
+      // issue are stale the moment the create lands.
+      qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect
@@ -571,13 +646,18 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
+    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
       api.updateComment(commentId, content, attachmentIds),
-    onMutate: async ({ commentId, content }) => {
+    onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
+      const kept = new Set(attachmentIds);
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+        old?.map((e) =>
+          e.id === commentId
+            ? { ...e, content, attachments: e.attachments?.filter((a) => kept.has(a.id)) }
+            : e,
+        ),
       );
       return { prev };
     },
@@ -635,6 +715,51 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+// Every comment id in the same thread as `commentId` — the thread root plus
+// every descendant. Mirrors the server's thread walk in
+// ClearOtherThreadResolutions so the resolve optimistic update can clear sibling
+// resolutions exactly as the backend will, instead of briefly showing two
+// resolutions until the refetch settles.
+function collectThreadCommentIds(
+  entries: TimelineCache,
+  commentId: string,
+): Set<string> {
+  const byId = new Map<string, TimelineEntry>();
+  for (const e of entries) {
+    if (e.type === "comment") byId.set(e.id, e);
+  }
+  // Walk up to the thread root (cycle-guarded against malformed parent chains).
+  let rootId = commentId;
+  const guard = new Set<string>();
+  let cur = byId.get(commentId);
+  while (cur?.parent_id && byId.has(cur.parent_id) && !guard.has(cur.id)) {
+    guard.add(cur.id);
+    rootId = cur.parent_id;
+    cur = byId.get(cur.parent_id);
+  }
+  // Expand back down over the whole subtree.
+  const childrenByParent = new Map<string, string[]>();
+  for (const e of byId.values()) {
+    if (e.parent_id) {
+      const list = childrenByParent.get(e.parent_id) ?? [];
+      list.push(e.id);
+      childrenByParent.set(e.parent_id, list);
+    }
+  }
+  const ids = new Set<string>([rootId]);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (!ids.has(child)) {
+        ids.add(child);
+        stack.push(child);
+      }
+    }
+  }
+  return ids;
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -643,18 +768,29 @@ export function useResolveComment(issueId: string) {
     onMutate: async ({ commentId, resolved }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) =>
-          e.id === commentId
-            ? {
-                ...e,
-                resolved_at: resolved ? new Date().toISOString() : null,
-                resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
-                resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
-              }
-            : e,
-        ),
-      );
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        // Resolving makes this comment the sole resolution in its thread, so
+        // mirror the server (ClearOtherThreadResolutions) and clear every other
+        // resolution in the same thread. Without this the cache shows two
+        // resolutions until the settle refetch, which is exactly the flash the
+        // single-resolution fix removes. Unresolve only clears its own row.
+        const threadIds = resolved ? collectThreadCommentIds(old, commentId) : null;
+        return old.map((e) => {
+          if (e.id === commentId) {
+            return {
+              ...e,
+              resolved_at: resolved ? new Date().toISOString() : null,
+              resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+              resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+            };
+          }
+          if (resolved && e.resolved_at && threadIds?.has(e.id)) {
+            return { ...e, resolved_at: null, resolved_by_type: null, resolved_by_id: null };
+          }
+          return e;
+        });
+      });
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
