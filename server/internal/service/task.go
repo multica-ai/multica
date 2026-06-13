@@ -179,6 +179,18 @@ func (s *TaskService) CommentDelegationContext(ctx context.Context, authorType, 
 					Source:            pgtype.Text{String: source, Valid: true},
 				}, nil
 			}
+			// CEREBRO-PATCH(delegation-latest-human-fallback): when the issue
+			// creator is not a member (e.g. an agent-created issue, or a run
+			// started by a wakeup), inherit the most recent human who commented
+			// on the issue so an agent replying to a person can still fan out.
+			if human, herr := s.Queries.GetLatestMemberCommentAuthor(ctx, task.IssueID); herr == nil && human.Valid {
+				return TaskDelegationContext{
+					OriginalUserID:    human,
+					DelegatingAgentID: task.AgentID,
+					SourceTaskID:      task.ID,
+					Source:            pgtype.Text{String: source, Valid: true},
+				}, nil
+			}
 		}
 		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing original user")
 	}

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -43,10 +44,19 @@ var chatSessionListCmd = &cobra.Command{
 	RunE:  runChatSessionList,
 }
 
+// CEREBRO-PATCH(tech-3483-chat-messages): read the full body of a chat session.
+var chatSessionMessagesCmd = &cobra.Command{
+	Use:   "messages <session-id>",
+	Short: "List messages in a chat session",
+	Args:  exactArgs(1),
+	RunE:  runChatSessionMessages,
+}
+
 func init() {
 	chatCmd.AddCommand(chatSessionCmd)
 	chatSessionCmd.AddCommand(chatSessionSendCmd)
 	chatSessionCmd.AddCommand(chatSessionListCmd)
+	chatSessionCmd.AddCommand(chatSessionMessagesCmd) // CEREBRO-PATCH(tech-3483-chat-messages)
 
 	chatSessionSendCmd.Flags().String("content", "", "Message text to send (required)")
 	chatSessionSendCmd.Flags().StringArray("attachment", nil, "Local file to attach (may be repeated)")
@@ -56,6 +66,10 @@ func init() {
 	chatSessionListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	chatSessionListCmd.Flags().String("status", "", "Filter by status: all, archived (default: active only). Ignored when --all is set.")
 	chatSessionListCmd.Flags().Bool("all", false, "List all chat sessions in workspace across all creators")
+
+	// CEREBRO-PATCH(tech-3483-chat-messages): chat session messages flags.
+	chatSessionMessagesCmd.Flags().String("output", "table", "Output format: table or json")
+	chatSessionMessagesCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 }
 
 func runChatSessionSend(cmd *cobra.Command, args []string) error {
@@ -168,6 +182,54 @@ func runChatSessionList(cmd *cobra.Command, _ []string) error {
 			displayID(strVal(s, "agent_id"), fullID),
 			strVal(s, "status"),
 			updated,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+// CEREBRO-PATCH(tech-3483-chat-messages): runChatSessionMessages lists the full
+// message history of a chat session via GET /api/chat/sessions/{id}/messages.
+// The session list only exposes the title (first message); this surfaces the
+// whole conversation so the nightly learning review can read chat threads.
+func runChatSessionMessages(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	sessionID := args[0]
+
+	var messages []map[string]any
+	if err := client.GetJSON(ctx, "/api/chat/sessions/"+sessionID+"/messages", &messages); err != nil {
+		return fmt.Errorf("list chat messages: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, messages)
+	}
+
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"ID", "ROLE", "CONTENT", "CREATED"}
+	rows := make([][]string, 0, len(messages))
+	for _, m := range messages {
+		content := strVal(m, "content")
+		if utf8.RuneCountInString(content) > 80 {
+			runes := []rune(content)
+			content = string(runes[:77]) + "..."
+		}
+		created := strVal(m, "created_at")
+		if len(created) >= 16 {
+			created = created[:16]
+		}
+		rows = append(rows, []string{
+			displayID(strVal(m, "id"), fullID),
+			strVal(m, "role"),
+			content,
+			created,
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)

@@ -399,3 +399,14 @@ SELECT * FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at DESC, id DESC
 LIMIT $3;
+
+-- name: GetLatestMemberCommentAuthor :one
+-- CEREBRO-PATCH(delegation-latest-human-fallback): returns the user id of the
+-- most recent human (member) comment on an issue. Used as a delegation-origin
+-- fallback when an agent task carries no recorded original user and the issue
+-- creator is not a member (e.g. an agent-created issue, or a run started by a
+-- wakeup). Only member authors qualify, so a real human always roots the chain.
+SELECT author_id FROM comment
+WHERE issue_id = $1 AND author_type = 'member' AND author_id IS NOT NULL
+ORDER BY created_at DESC, id DESC
+LIMIT 1;

@@ -16,6 +16,7 @@ package runtime
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,93 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// seedConnectionAsk seeds an MCP connection with two tools and an agent-layer Ask
+// on draft_reply, returning a cleanup. It skips the test if the workspace_connection
+// table is absent. Shared by the TECH-3498 gateway connection-tool tests.
+func seedConnectionAsk(t *testing.T, agentID pgtype.UUID, setting toolpolicy.Setting) {
+	t.Helper()
+	pool := runtimeAccountTestPool
+	ctx := context.Background()
+	const conn = "customer-service-mcp"
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"draft_reply"},{"name":"lookup_order"}]'::jsonb, true)
+	`, runtimeAccountTestWSID, conn, "Customer Service MCP"); err != nil {
+		if strings.Contains(err.Error(), "workspace_connection") {
+			t.Skip("workspace_connection table not present; skipping connection-tool gate test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, runtimeAccountTestWSID)
+	})
+	store := toolpolicy.NewStore(pool)
+	if _, err := store.Set(ctx, toolpolicy.SetParams{
+		WorkspaceID:     runtimeAccountTestWSID,
+		ToolKey:         "connection:" + conn,
+		Layer:           toolpolicy.LayerAgent,
+		SubjectID:       agentID,
+		Setting:         setting,
+		ResourcePattern: "draft_reply",
+	}); err != nil {
+		t.Fatalf("set connection %s: %v", setting, err)
+	}
+}
+
+// TestGateConnectionTool_AskRoutesThroughInbox is the TECH-3498 gateway headline:
+// an Ask authored on a workspace-connection MCP tool — resolved through the
+// connection:<name> chain, which the generic tools: resolver never sees — routes
+// through the same inbox + await and continues when approved. A connection tool
+// left unset runs with no ask.
+func TestGateConnectionTool_AskRoutesThroughInbox(t *testing.T) {
+	ap := &gateFakeApprovals{status: approvals.StatusApproved}
+	e, agentID := newToolPolicyGatedExecutor(t, ap)
+	e.connDeny = toolpolicy.NewStore(runtimeAccountTestPool)
+	seedConnectionAsk(t, agentID, toolpolicy.SettingAsk)
+	ctx := context.Background()
+
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, GatewayRequestMeta{})
+	if !allowed {
+		t.Fatal("approved connection Ask must let the tool continue")
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("connection Ask must create exactly one inbox request, got %d", ap.intakes)
+	}
+
+	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "lookup_order", nil, GatewayRequestMeta{})
+	if !allowed {
+		t.Fatal("unset connection tool must run")
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("unset connection tool must not create another ask, got %d", ap.intakes)
+	}
+}
+
+// TestGateConnectionTool_DenyBlocksAlwaysOn proves the TECH-3174 guarantee is
+// preserved through the TECH-3498 refactor: a connection-tool Deny blocks even
+// with the approval gate OFF (e.gate == nil) and never creates an inbox ask.
+func TestGateConnectionTool_DenyBlocksAlwaysOn(t *testing.T) {
+	ap := &gateFakeApprovals{}
+	e, agentID := newToolPolicyGatedExecutor(t, ap)
+	e.connDeny = toolpolicy.NewStore(runtimeAccountTestPool)
+	e.gate = nil // approval gate OFF — Deny must still hold
+	seedConnectionAsk(t, agentID, toolpolicy.SettingDeny)
+
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, "draft_reply", nil, GatewayRequestMeta{})
+	if allowed {
+		t.Fatal("connection Deny must block even with the approval gate off")
+	}
+	if reason == "" {
+		t.Fatal("blocked call must carry a reason")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("Deny must not create an approval ask, got %d", ap.intakes)
+	}
+}
 
 // newToolPolicyGatedExecutor builds an executor wired exactly like the
 // toolpolicy gate mode: real queries + real tool-policy store + a gate whose

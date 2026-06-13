@@ -418,3 +418,80 @@ func TestConnectionToolDenied(t *testing.T) {
 		}
 	}
 }
+
+// TestConnectionToolEffective is the TECH-3498 headline: the Ask-capable resolver
+// returns the full Allow/Ask/Deny verdict per connection tool, so a tool set to
+// Ask actually surfaces SettingAsk (the Deny-only ConnectionToolDenied could
+// never see it). It also confirms an unset tool resolves Allow (ungated) and a
+// different agent is unaffected.
+func TestConnectionToolEffective(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(21)
+	other := uuidByte(22)
+	const conn = "customer-service-mcp"
+	const toolKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"draft_reply"},{"name":"lookup_order"},{"name":"search_knowledge"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Customer Service MCP"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping effective resolver test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+
+	// draft_reply = Ask, lookup_order = Deny on the agent layer; search_knowledge
+	// left unset (resolves to the allow base).
+	for _, set := range []struct {
+		tool    string
+		setting Setting
+	}{
+		{"draft_reply", SettingAsk},
+		{"lookup_order", SettingDeny},
+	} {
+		if _, err := s.Set(ctx, SetParams{
+			WorkspaceID:     tpTestWorkspaceID,
+			ToolKey:         toolKey,
+			Layer:           LayerAgent,
+			SubjectID:       agent,
+			Setting:         set.setting,
+			ResourcePattern: set.tool,
+		}); err != nil {
+			t.Fatalf("set agent %s=%s: %v", set.tool, set.setting, err)
+		}
+	}
+
+	var zero pgtype.UUID
+	cases := []struct {
+		name string
+		ag   pgtype.UUID
+		tool string
+		want Setting
+	}{
+		{"ask tool for agent", agent, "draft_reply", SettingAsk},
+		{"deny tool for agent", agent, "lookup_order", SettingDeny},
+		{"unset tool for agent", agent, "search_knowledge", SettingAllow},
+		{"ask tool different agent", other, "draft_reply", SettingAllow},
+		{"empty tool", agent, "", SettingAllow},
+	}
+	for _, c := range cases {
+		got, err := s.ConnectionToolEffective(ctx, tpTestWorkspaceID, zero, c.ag, zero, c.tool)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s: got %s want %s", c.name, got, c.want)
+		}
+	}
+}

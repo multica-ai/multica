@@ -2089,6 +2089,10 @@
       "exempt": "read-only \u2014 wraps GET chat session listing"
     },
     {
+      "id": "chat session messages",
+      "exempt": "read-only \u2014 wraps GET /api/chat/sessions/{sessionId}/messages"
+    },
+    {
       "id": "chat session send",
       "exempt": "personal-chat \u2014 wraps POST /api/chat/sessions/{sessionId}/messages (caller's own AI chat)"
     },

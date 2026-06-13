@@ -29,6 +29,11 @@ export {
   type InboxMode,
 } from "./dynamic-mode";
 export { CerebroInboxModeMenuItem } from "./components/cerebro-inbox-mode-menu-item";
+export {
+  GlobalInboxReminderDialog,
+  DEFAULT_GLOBAL_INBOX_REMINDER_LABELS,
+  type GlobalInboxReminderDialogLabels,
+} from "./components/global-inbox-reminder-dialog";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";

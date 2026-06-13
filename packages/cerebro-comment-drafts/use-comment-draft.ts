@@ -2,7 +2,13 @@
 
 import { useCallback, useState } from "react";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// useFlagValue (store selector) instead of useFeatureFlag (query hook): the
+// composer this hook lives inside is rendered in unit tests WITHOUT a
+// QueryClient or workspace route, and useFeatureFlag's useFeatureFlagsQuery
+// would throw there. useFlagValue reads the zustand store with the registry
+// default applied (default ON), needs no providers, and still sees server
+// overrides once any other useFeatureFlag consumer on the page hydrates them.
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 
 export interface CommentDraftHandle {
   /** Text to seed the editor with on mount — the stored draft, or "" when none. */
@@ -42,7 +48,7 @@ interface DraftState {
  * reads the fresh `defaultValue`.
  */
 export function useCommentDraft(key: CommentDraftKey): CommentDraftHandle {
-  const enabled = useFeatureFlag("cerebro_comment_drafts");
+  const enabled = useFlagValue("cerebro_comment_drafts");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
 
