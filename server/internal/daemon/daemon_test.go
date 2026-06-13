@@ -982,7 +982,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
-	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, "test", taskLog, "task-1")
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -994,7 +994,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	if result.Status == "failed" && result.SessionID == "" {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
-		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, "test", taskLog, "task-1")
 		if retryErr != nil {
 			t.Fatalf("retry error: %v", retryErr)
 		}
@@ -1030,7 +1030,7 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, "test", slog.Default(), "t")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1100,7 +1100,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
 		Timeout:                   5 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
-	}, slog.Default(), "task-stale")
+	}, "test", slog.Default(), "task-stale")
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -1155,7 +1155,7 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, "test", slog.Default(), "t")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1194,7 +1194,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, "test", slog.Default(), "t-idle")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1224,7 +1224,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	// emitOne=false models a backend that hangs before sending any message.
 	// lastActivityAt is initialised at executeAndDrain entry, so the same
 	// window applies even with zero traffic.
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, "test", slog.Default(), "t-idle-zero")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1245,7 +1245,7 @@ func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(80*time.Millisecond, cancel)
 
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, "test", slog.Default(), "t-idle-off")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1271,7 +1271,7 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 		},
 	}
 
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, "test", slog.Default(), "t-idle-happy")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1342,6 +1342,7 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 		longToolCallBackend{toolSilence: 200 * time.Millisecond},
 		"p",
 		agent.ExecOptions{},
+		"test",
 		slog.Default(),
 		"t-long-tool",
 	)
@@ -1383,7 +1384,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, "test", slog.Default(), "t-stuck-tool")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1419,7 +1420,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle")
+	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, "test", slog.Default(), "t-tail-idle")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1710,6 +1711,53 @@ func TestEnsureRepoReadyConcurrentMissRefreshesOnce(t *testing.T) {
 	// must serialize them so the server is only called once.
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 refresh call, got %d", got)
+	}
+}
+
+// recordingBackend fails the test if Execute is called; used to assert that
+// the dry-run short-circuit never reaches the provider.
+type recordingBackend struct {
+	t *testing.T
+}
+
+func (r recordingBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	r.t.Fatal("dry-run path must not invoke backend.Execute")
+	return nil, nil
+}
+
+func TestExecuteAndDrain_DryRunShortCircuits(t *testing.T) {
+	d := newTestDaemon(t)
+	prompt := "hello multica"
+	opts := agent.ExecOptions{
+		SystemPrompt: "be terse",
+		MaxTurns:     10,
+		DryRun:       true,
+	}
+
+	result, tools, err := d.executeAndDrain(
+		context.Background(),
+		recordingBackend{t: t},
+		prompt,
+		opts,
+		"claude",
+		slog.Default(),
+		"task-dry",
+	)
+	if err != nil {
+		t.Fatalf("dry-run executeAndDrain: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Errorf("dry-run status = %q, want completed", result.Status)
+	}
+	if tools != 0 {
+		t.Errorf("dry-run must report 0 tool calls, got %d", tools)
+	}
+	usage, ok := result.Usage["_dry_run"]
+	if !ok || usage.InputTokens == 0 {
+		t.Errorf("dry-run usage missing _dry_run entry: %+v", result.Usage)
+	}
+	if usage.OutputTokens != 0 {
+		t.Errorf("dry-run must not record output tokens, got %d", usage.OutputTokens)
 	}
 }
 

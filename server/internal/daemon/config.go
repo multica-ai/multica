@@ -102,6 +102,12 @@ type Config struct {
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
+	// DryRun, when true, makes the daemon short-circuit every agent CLI
+	// invocation and instead return a synthetic "what would have happened"
+	// result. Enabled via MULTICA_DRY_RUN=true; intended as a rehearsal mode
+	// before turning on a new autopilot or before redeploying after a
+	// runaway-cost incident. See issue #4100.
+	DryRun bool
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -419,6 +425,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Dry-run mode: env > default (false). Mirrors the KEEP_ENV pattern —
+	// truthy values activate the rehearsal path in executeAndDrain. See
+	// Config.DryRun and issue #4100.
+	dryRun := os.Getenv("MULTICA_DRY_RUN") == "true" || os.Getenv("MULTICA_DRY_RUN") == "1"
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -481,6 +492,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,
 		KeepEnvAfterTask:               keepEnv,
+		DryRun:                         dryRun,
 		GCEnabled:                      gcEnabled,
 		GCInterval:                     gcInterval,
 		GCTTL:                          gcTTL,

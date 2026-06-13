@@ -2988,6 +2988,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		DryRun:                    d.cfg.DryRun,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3026,7 +3027,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, provider, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -3038,7 +3039,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, provider, taskLog, task.ID)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -3231,7 +3232,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
 // server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, provider string, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+	// Dry-run short-circuit (issue #4100). When the daemon is launched with
+	// MULTICA_DRY_RUN=true, every task that reaches this point is treated as
+	// a rehearsal: the prompt has been fully rendered (skills, runtime brief,
+	// custom_args resolution all ran upstream), but we deliberately skip the
+	// provider call and synthesise a "what would have happened" Result. This
+	// is the smallest viable shape — daemon-wide, not per-task — to let
+	// operators rehearse autopilots and prompt templates before paying for
+	// a real run. Per-task / API-level dry-run is left to a follow-up PR.
+	if opts.DryRun {
+		taskLog.Info("dry-run: skipping backend execute",
+			"provider", provider,
+			"prompt_bytes", len(prompt),
+			"system_prompt_bytes", len(opts.SystemPrompt),
+			"max_turns", opts.MaxTurns,
+		)
+		return agent.BuildDryRunResult(prompt, opts, provider), 0, nil
+	}
+
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would

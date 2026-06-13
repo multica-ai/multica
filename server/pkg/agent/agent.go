@@ -46,6 +46,52 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// DryRun, when true, signals that the execution should NOT invoke the
+	// underlying agent CLI. The daemon short-circuits the call in
+	// executeAndDrain and produces a synthetic Result describing what would
+	// have been sent (rendered prompt size, coarse input-token estimate),
+	// without spending any provider tokens. Useful as a rehearsal before
+	// turning on a new autopilot or before redeploying after a runaway-cost
+	// incident — see issue #4100.
+	DryRun bool
+}
+
+// EstimateInputTokens returns a coarse estimate of the input token count for
+// a rendered prompt + system prompt. Used by dry-run paths; intentionally a
+// rule-of-thumb (~4 bytes/token) rather than a real tokenizer call, because
+// the whole point of dry-run is to avoid any provider round-trip.
+func EstimateInputTokens(prompt, systemPrompt string) int64 {
+	const bytesPerToken = 4
+	total := len(prompt) + len(systemPrompt)
+	if total == 0 {
+		return 0
+	}
+	return int64(total+bytesPerToken-1) / int64(bytesPerToken)
+}
+
+// BuildDryRunResult constructs the synthetic Result returned for a dry-run
+// execution. Status is "completed" so the daemon's existing happy-path
+// post-processing applies; Output carries a human-readable summary, and
+// Usage records the estimate under a special "_dry_run" model key so it
+// shows up clearly in task_usage downstream without polluting real model
+// rollups.
+func BuildDryRunResult(prompt string, opts ExecOptions, provider string) Result {
+	est := EstimateInputTokens(prompt, opts.SystemPrompt)
+	header := LaunchHeader(provider)
+	if header == "" {
+		header = provider
+	}
+	return Result{
+		Status: "completed",
+		Output: fmt.Sprintf(
+			"[dry-run] %s\nrendered prompt: %d bytes (system: %d bytes)\nestimated input tokens: %d\nmax_turns: %d (0 = backend default)\nno provider call was made.",
+			header, len(prompt), len(opts.SystemPrompt), est, opts.MaxTurns,
+		),
+		DurationMs: 0,
+		Usage: map[string]TokenUsage{
+			"_dry_run": {InputTokens: est},
+		},
+	}
 }
 
 // runContext derives the execution context for an agent subprocess from the
