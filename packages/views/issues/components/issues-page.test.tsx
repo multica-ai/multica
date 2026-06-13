@@ -486,6 +486,12 @@ describe("IssuesPage (shared)", () => {
     mockViewState.grouping = "status";
     mockViewState.statusFilters = [];
     mockViewState.priorityFilters = [];
+    mockViewState.assigneeFilters = [];
+    mockViewState.includeNoAssignee = false;
+    mockViewState.creatorFilters = [];
+    mockViewState.projectFilters = [];
+    mockViewState.includeNoProject = false;
+    mockViewState.labelFilters = [];
     mockScope = "all";
   });
 
@@ -557,6 +563,50 @@ describe("IssuesPage (shared)", () => {
       }),
     );
     expect(mockListIssues).not.toHaveBeenCalled();
+  });
+
+  it("applies project filters to status-board issue cards", async () => {
+    mockViewState.viewMode = "board";
+    mockViewState.grouping = "status";
+    mockViewState.projectFilters = ["project-a"];
+    const issuesWithProjects = [
+      { ...mockIssues[0]!, project_id: "project-a" },
+      { ...mockIssues[1]!, project_id: "project-b" },
+      { ...mockIssues[2]!, project_id: null },
+      { ...mockIssues[3]!, project_id: "project-a" },
+    ];
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: issuesWithProjects.filter((i) => i.status === params?.status),
+        total: issuesWithProjects.filter((i) => i.status === params?.status).length,
+      }),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(screen.getByText("Squad task")).toBeInTheDocument();
+    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    expect(screen.queryByText("Write tests")).not.toBeInTheDocument();
+  });
+
+  it("forwards project filters to assignee-grouped board queries", async () => {
+    mockViewState.viewMode = "board";
+    mockViewState.grouping = "assignee";
+    mockViewState.projectFilters = ["project-a", "project-b"];
+    mockViewState.includeNoProject = true;
+    mockListGroupedIssues.mockResolvedValue(mockAssigneeGroups(mockIssues));
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Implement auth");
+    expect(mockListGroupedIssues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_by: "assignee",
+        project_ids: ["project-a", "project-b"],
+        include_no_project: true,
+      }),
+    );
   });
 
   it("shows the 'Issues' section header without a workspace prefix", async () => {
