@@ -25,6 +25,7 @@ import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+import { sortIssues } from "../utils/sort";
 import {
   type DragMoveUpdates,
   makeKanbanCollision,
@@ -141,6 +142,7 @@ export function BoardView({
   const { t } = useT("issues");
   const grouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
@@ -155,6 +157,15 @@ export function BoardView({
         ? assigneeGroups.flatMap((group) => group.issues)
         : issues,
     [assigneeGroups, grouping, issues],
+  );
+  // Client-side sort before building columns, mirroring swimlane/gantt. The
+  // optimistic move appends the issue to its target bucket's tail in the cache;
+  // sorting here drops it straight into its correct slot so non-manual sorts
+  // (priority/date/title) don't jump on settle. For manual sort this is a no-op
+  // ordering (sortIssues "position" branch == the manual order).
+  const sortedGroupedIssues = useMemo(
+    () => sortIssues(groupedIssues, sortBy, sortDirection),
+    [groupedIssues, sortBy, sortDirection],
   );
   const hydratedAssigneeGroups = useMemo(() => {
     if (grouping !== "assignee" || !assigneeGroups) return undefined;
@@ -215,22 +226,21 @@ export function BoardView({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   const isDraggingRef = useRef(false);
   const isSettlingRef = useRef(false);
-  const [settleVersion, setSettleVersion] = useState(0);
 
   // --- Local columns state ---
   // Between drags: follows TQ via useEffect.
   // During drag: local-only, driven by onDragOver/onDragEnd.
   const [columns, setColumns] = useState<Record<string, string[]>>(() =>
-    buildColumns(groupedIssues, groups, grouping),
+    buildColumns(sortedGroupedIssues, groups, grouping),
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping));
+      setColumns(buildColumns(sortedGroupedIssues, groups, grouping));
     }
-  }, [groupedIssues, groups, grouping, settleVersion]);
+  }, [sortedGroupedIssues, groups, grouping]);
 
   // After a cross-column move, lock for one animation frame so dnd-kit's
   // collision detection can stabilize before processing the next move.
@@ -306,7 +316,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping));
+        setColumns(buildColumns(sortedGroupedIssues, groups, grouping));
 
       if (!over) {
         resetColumns();
@@ -359,11 +369,12 @@ export function BoardView({
           resetColumns();
           return;
         }
-        isSettlingRef.current = true;
-        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), () => {
-          isSettlingRef.current = false;
-          setSettleVersion((v) => v + 1);
-        });
+        // No settle gate here: the optimistic cache patch flows straight through
+        // the (now sorted) buildColumns effect, so the card lands in its correct
+        // sorted slot in the target column in one frame — no "stuck in source
+        // column then jump" lag. The settle gate is only needed for manual
+        // (position) reorders, which keep a hand-built local order below.
+        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position));
         return;
       }
 
@@ -384,7 +395,7 @@ export function BoardView({
         isSettlingRef.current = false;
       });
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy],
+    [sortedGroupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy],
   );
 
   return (
