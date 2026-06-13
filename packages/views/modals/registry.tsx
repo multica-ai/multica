@@ -10,6 +10,7 @@ import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { BacklogAgentHintModal } from "./backlog-agent-hint";
+import { IssueDetailModal } from "./issue-detail-modal";
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
@@ -17,6 +18,8 @@ export function ModalRegistry() {
   const close = useModalStore((s) => s.close);
 
   switch (modal) {
+    case "issue-detail":
+      return <IssueDetailModal onClose={close} data={data} />;
     case "create-workspace":
       return <CreateWorkspaceModal onClose={close} />;
     // Both modal types open the same shell so the in-modal mode switch is

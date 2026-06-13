@@ -1322,6 +1322,10 @@ function DraggableSwimLane({
                   href={paths.issueDetail(lane.parentIssue.id)}
                   aria-label={t(($) => $.swimlane.open_parent)}
                   className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                  disablePush
+                  onClick={() => {
+                    useModalStore.getState().open("issue-detail", { issueId: lane.parentIssue!.id });
+                  }}
                 >
                   <Pencil className="size-3" />
                 </AppLink>

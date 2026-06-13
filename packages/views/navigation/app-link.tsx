@@ -5,11 +5,12 @@ import { useNavigation } from "./context";
 
 interface AppLinkProps extends React.AnchorHTMLAttributes<HTMLAnchorElement> {
   href: string;
+  disablePush?: boolean;
 }
 
 export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
   function AppLink(
-    { href, children, onClick, onMouseEnter, onFocus, ...props },
+    { href, children, onClick, onMouseEnter, onFocus, disablePush, ...props },
     ref,
   ) {
     const { push, openInNewTab, prefetch } = useNavigation();
@@ -27,7 +28,9 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
       // (close popover, clear selection, blur the trigger) lands in the
       // same tick rather than getting deferred behind the transition.
       onClick?.(e);
-      push(href);
+      if (!disablePush) {
+        push(href);
+      }
     };
 
     const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
