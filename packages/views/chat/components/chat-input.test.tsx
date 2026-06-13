@@ -39,6 +39,9 @@ const dropHandlers = vi.hoisted(() => ({
 const editorProps = vi.hoisted(() => ({
   last: null as null | Record<string, unknown>,
 }));
+const editorCalls = vi.hoisted(() => ({
+  blur: vi.fn(),
+}));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -71,7 +74,7 @@ vi.mock("../../editor", () => ({
       clearContent: () => {
         valueRef.current = "";
       },
-      blur: () => {},
+      blur: editorCalls.blur,
       focus: () => {},
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
@@ -150,6 +153,10 @@ beforeEach(() => {
   state.clearInputDraft.mockClear();
 });
 
+beforeEach(() => {
+  editorCalls.blur.mockClear();
+});
+
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
   const onUploadFile =
@@ -179,6 +186,41 @@ describe("ChatInput @ context wiring", () => {
 });
 
 describe("ChatInput attachment wiring", () => {
+  it("keeps the editor focused after send so users can pre-type the next message while running", async () => {
+    const onSend = vi.fn();
+    renderInput({ onSend, isRunning: true });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "second message" } });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledWith("second message", undefined);
+    expect(editorCalls.blur).not.toHaveBeenCalled();
+  });
+
+  it("keeps send available while a task is running so follow-up messages can queue", async () => {
+    const onSend = vi.fn();
+    renderInput({ onSend, isRunning: true });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "second message" } });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledWith("second message", undefined);
+  });
+
   it("routes dropped files through the editor's upload handler", async () => {
     const { onUploadFile } = renderInput();
     expect(dropHandlers.onDrop).not.toBeNull();

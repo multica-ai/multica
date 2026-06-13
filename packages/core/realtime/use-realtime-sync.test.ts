@@ -17,6 +17,7 @@ import type {
 } from "../types";
 import {
   applyChatDoneToCache,
+  applyChatTerminalTaskToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
   invalidateChatMessageQueries,
@@ -144,6 +145,54 @@ describe("invalidateChatMessageQueries", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
+  });
+});
+
+describe("applyChatTerminalTaskToCache", () => {
+  it("clears a matching pending task when task:completed arrives without chat:done", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatPendingTask>(pendingKey, {
+      task_id: taskId,
+      status: "running",
+      created_at: "2026-05-13T05:00:00Z",
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    applyChatTerminalTaskToCache(qc, {
+      task_id: taskId,
+      agent_id: "agent-1",
+      issue_id: "",
+      chat_session_id: sessionId,
+      status: "completed",
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: pendingKey });
+  });
+
+  it("does not clear a newer queued task when an older task completes late", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatPendingTask>(pendingKey, {
+      task_id: "task-2",
+      status: "queued",
+      created_at: "2026-05-13T05:00:03Z",
+    });
+
+    applyChatTerminalTaskToCache(qc, {
+      task_id: taskId,
+      agent_id: "agent-1",
+      issue_id: "",
+      chat_session_id: sessionId,
+      status: "completed",
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({
+      task_id: "task-2",
+      status: "queued",
+      created_at: "2026-05-13T05:00:03Z",
+    });
   });
 });
 

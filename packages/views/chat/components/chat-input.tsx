@@ -168,10 +168,9 @@ export function ChatInput({
 
   const handleSend = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || isSubmitting || disabled || noAgent) {
+    if (!content || isSubmitting || disabled || noAgent) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
-        isRunning,
         isSubmitting,
         disabled,
         noAgent,
@@ -216,14 +215,6 @@ export function ChatInput({
     setIsSubmitting(false);
     if (accepted === false) return;
     editorRef.current?.clearContent();
-    // Drop focus so the caret doesn't keep blinking under the StatusPill /
-    // streaming reply that's about to take over the user's attention. The
-    // input is also `disabled` once isRunning flips, and a focused-but-
-    // disabled editor reads as a stale cursor. We deliberately don't auto-
-    // refocus on completion — that would interrupt the user if they're
-    // selecting text from the assistant reply; one click to refocus is
-    // a fair price for not stealing focus mid-action.
-    editorRef.current?.blur();
     clearInputDraft(keyAtSend);
     uploadMapRef.current.clear();
     setIsEmpty(true);
@@ -309,6 +300,8 @@ export function ChatInput({
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
+            allowSubmitWhileRunning
+            data-acceptance="send-button"
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
             stopTooltip={t(($) => $.input.stop_tooltip)}
           />
