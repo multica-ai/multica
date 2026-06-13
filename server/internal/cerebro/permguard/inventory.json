@@ -1431,10 +1431,6 @@
       "gate": "via:POST /api/artifacts/"
     },
     {
-      "id": "create_file",
-      "gate": "via:POST /api/upload-file"
-    },
-    {
       "id": "create_artifact_folder",
       "gate": "via:POST /api/artifact-folders/"
     },
