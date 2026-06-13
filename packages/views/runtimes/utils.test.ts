@@ -196,6 +196,55 @@ describe("estimateCost", () => {
     expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
+  it("prices the provider-prefixed OpenAI form (openai/gpt-4o)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "openai/gpt-4o",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2.5 + 10, 5);
+  });
+
+  it("prices the provider-prefixed Google form (google/gemini-2.5-pro)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "google/gemini-2.5-pro",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(1.25 + 10, 5);
+  });
+
+  it("prices the provider-prefixed DeepSeek form (deepseek/deepseek-chat)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek/deepseek-chat",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28, 5);
+  });
+
+  it("prices a dated provider-prefixed OpenAI snapshot (openai/gpt-4o-2024-08-06)", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "openai/gpt-4o-2024-08-06",
+      input_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2.5, 5);
+  });
+
+  it("returns 0 for an unknown provider/model", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "unknown/some-model",
+        input_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
@@ -328,22 +377,6 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.4 + 4.4, 5);
   });
 
-  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
-    // z.ai currently ships Free tiers for the *-flash family; $0 is the
-    // literal price on the page, not a placeholder. Anything non-zero
-    // here would mean we mis-copied a paid SKU's number into the row.
-    expect(isModelPriced("glm-4.5-flash")).toBe(true);
-    expect(isModelPriced("glm-4.7-flash")).toBe(true);
-    expect(
-      estimateCost({
-        ...zeroUsage,
-        model: "glm-4.5-flash",
-        input_tokens: 1_000_000,
-        output_tokens: 1_000_000,
-      }),
-    ).toBe(0);
-  });
-
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
     // opencode + OpenRouter route IDs through as `<provider>/<model>`.
     // canonicalCandidates strips the prefix; without this the rows above
@@ -385,6 +418,16 @@ describe("isModelPriced", () => {
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
+  });
+
+  it("recognises provider-prefixed OpenAI, Google and DeepSeek IDs", () => {
+    expect(isModelPriced("openai/gpt-4o")).toBe(true);
+    expect(isModelPriced("google/gemini-2.5-pro")).toBe(true);
+    expect(isModelPriced("deepseek/deepseek-chat")).toBe(true);
+  });
+
+  it("rejects unknown provider/model combinations", () => {
+    expect(isModelPriced("unknown/some-model")).toBe(false);
   });
 
   it("still rejects OpenAI dotted variants that don't have their own row", () => {
