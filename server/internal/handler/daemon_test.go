@@ -2423,16 +2423,20 @@ func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRu
 }
 
 func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtimeID, daemonID string) {
+	return createRuntimeGuardAgentWithProvider(t, ctx, "opencode")
+}
+
+func createRuntimeGuardAgentWithProvider(t *testing.T, ctx context.Context, provider string) (agentID, runtimeID, daemonID string) {
 	t.Helper()
 
-	daemonID = "runtime-guard-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	daemonID = "runtime-guard-" + provider + "-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    daemonID,
 		"device_name":  "runtime-guard-test",
 		"runtimes": []map[string]any{
-			{"name": "runtime-guard-current", "type": "opencode", "version": "test", "status": "online"},
+			{"name": "runtime-guard-current", "type": provider, "version": "test", "status": "online"},
 		},
 	}, testWorkspaceID, daemonID)
 
@@ -2458,7 +2462,7 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 		)
 		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
 		RETURNING id
-	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID); err != nil {
+	`, testWorkspaceID, "Runtime Guard Agent "+provider+" "+t.Name(), runtimeID).Scan(&agentID); err != nil {
 		t.Fatalf("setup: create runtime guard agent: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
@@ -2744,10 +2748,64 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("setup: complete claimed comment-trigger task: %v", err)
 	}
 
+	aoAgentID, aoRuntimeID, aoDaemonID := createRuntimeGuardAgentWithProvider(t, ctx, "ao")
+	var aoCommentIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'ao-comment-triggered-session-resume fixture', 'in_progress', 'none', $2, 'member', 81207, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&aoCommentIssueID); err != nil {
+		t.Fatalf("setup: create ao comment-triggered issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, aoCommentIssueID) })
+
+	var aoTriggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'route this to the existing AO session', 'comment')
+		RETURNING id
+	`, aoCommentIssueID, testWorkspaceID, testUserID).Scan(&aoTriggerCommentID); err != nil {
+		t.Fatalf("setup: create ao trigger comment: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'cg-3', '/tmp/ao-comment-prior-workdir')
+	`, aoAgentID, aoRuntimeID, aoCommentIssueID); err != nil {
+		t.Fatalf("setup: create ao comment-trigger prior task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id,
+			status, priority
+		)
+		VALUES ($1, $2, $3, $4, 'queued', 0)
+	`, aoAgentID, aoRuntimeID, aoCommentIssueID, aoTriggerCommentID); err != nil {
+		t.Fatalf("setup: create ao comment-triggered task: %v", err)
+	}
+
+	task = claimTaskForRuntimeGuard(t, aoRuntimeID, aoDaemonID)
+	if task.PriorSessionID != "cg-3" {
+		t.Fatalf("ao comment trigger: expected PriorSessionID='cg-3', got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/ao-comment-prior-workdir" {
+		t.Fatalf("ao comment trigger: expected PriorWorkDir='/tmp/ao-comment-prior-workdir', got %q", task.PriorWorkDir)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, aoCommentIssueID); err != nil {
+		t.Fatalf("setup: complete claimed ao comment-trigger task: %v", err)
+	}
+
 	var freshIssueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
+		VALUES ($1, 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81208, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&freshIssueID); err != nil {
 		t.Fatalf("setup: create force-fresh issue: %v", err)

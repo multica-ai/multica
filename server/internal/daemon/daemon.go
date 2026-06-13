@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -45,6 +46,27 @@ type taskRunnerFunc func(context.Context, Task, string, int, *slog.Logger) (Task
 
 func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
 	return f(ctx, task, provider, slot, log)
+}
+
+type multicaTaskMyMirEvent struct {
+	Provider              string `json:"provider"`
+	TaskID                string `json:"task_id"`
+	IssueID               string `json:"issue_id,omitempty"`
+	WorkspaceID           string `json:"workspace_id,omitempty"`
+	ProjectID             string `json:"project_id,omitempty"`
+	ProjectTitle          string `json:"project_title,omitempty"`
+	AgentID               string `json:"agent_id,omitempty"`
+	AgentName             string `json:"agent_name,omitempty"`
+	RuntimeID             string `json:"runtime_id,omitempty"`
+	Status                string `json:"status"`
+	FailureReason         string `json:"failure_reason,omitempty"`
+	SessionID             string `json:"session_id,omitempty"`
+	WorkDir               string `json:"work_dir,omitempty"`
+	TriggerCommentID      string `json:"trigger_comment_id,omitempty"`
+	TriggerCommentContent string `json:"trigger_comment_content,omitempty"`
+	ChatSessionID         string `json:"chat_session_id,omitempty"`
+	ChatMessage           string `json:"chat_message,omitempty"`
+	Comment               string `json:"comment,omitempty"`
 }
 
 var (
@@ -140,6 +162,13 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	// aoIssueSessions is a local fallback for Multica Cloud deployments that do
+	// not yet return prior_session_id for AO comment-triggered issue tasks. AO
+	// follow-ups must route to the existing factory session with `ao send`
+	// instead of spawning cg-N+1 on every evidence/comment reply.
+	aoIssueSessionsMu sync.RWMutex
+	aoIssueSessions   map[string]aoIssueSessionPointer
+
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
 	// on-disk path run sequentially; the second blocks on the lock and is
@@ -180,6 +209,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		aoIssueSessions:           make(map[string]aoIssueSessionPointer),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
@@ -188,6 +218,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	d.loadAOIssueSessionCache(logger)
 	return d
 }
 
@@ -2315,11 +2346,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		failureReason := taskfailure.Classify(err.Error()).String()
+		d.writeTaskMyMirEvent(ctx, task, provider, TaskResult{
+			Status:        "blocked",
+			Comment:       err.Error(),
+			FailureReason: failureReason,
+		}, taskLog)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", failureReason); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
 	}
+
+	d.rememberAOIssueSession(task, provider, result, taskLog)
 
 	_ = d.client.ReportProgress(ctx, task.ID, "Finishing task", 2, 2)
 
@@ -2333,6 +2372,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	d.writeTaskMyMirEvent(ctx, task, provider, result, taskLog)
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -2545,6 +2585,91 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	}
 }
 
+func buildMulticaTaskMyMirEvent(task Task, provider string, result TaskResult) multicaTaskMyMirEvent {
+	agentID := task.AgentID
+	agentName := ""
+	if task.Agent != nil {
+		if task.Agent.ID != "" {
+			agentID = task.Agent.ID
+		}
+		agentName = task.Agent.Name
+	}
+	return multicaTaskMyMirEvent{
+		Provider:              provider,
+		TaskID:                task.ID,
+		IssueID:               task.IssueID,
+		WorkspaceID:           task.WorkspaceID,
+		ProjectID:             task.ProjectID,
+		ProjectTitle:          task.ProjectTitle,
+		AgentID:               agentID,
+		AgentName:             agentName,
+		RuntimeID:             task.RuntimeID,
+		Status:                result.Status,
+		FailureReason:         result.FailureReason,
+		SessionID:             result.SessionID,
+		WorkDir:               result.WorkDir,
+		TriggerCommentID:      task.TriggerCommentID,
+		TriggerCommentContent: truncateLog(task.TriggerCommentContent, 1200),
+		ChatSessionID:         task.ChatSessionID,
+		ChatMessage:           truncateLog(task.ChatMessage, 1200),
+		Comment:               truncateLog(result.Comment, 4000),
+	}
+}
+
+func (d *Daemon) writeTaskMyMirEvent(parent context.Context, task Task, provider string, result TaskResult, taskLog *slog.Logger) {
+	writer := strings.TrimSpace(os.Getenv("CLAWGODE_MYMIR_TASK_EVENT_WRITER"))
+	if writer == "" || provider == "ao" {
+		return
+	}
+	if _, err := os.Stat(writer); err != nil {
+		taskLog.Warn("mymir task event writer unavailable", "writer", writer, "error", err)
+		return
+	}
+
+	event := buildMulticaTaskMyMirEvent(task, provider, result)
+	eventFile, err := os.CreateTemp("", "multica-task-mymir-event-*.json")
+	if err != nil {
+		taskLog.Warn("mymir task event file create failed", "error", err)
+		return
+	}
+	eventPath := eventFile.Name()
+	defer os.Remove(eventPath)
+
+	enc := json.NewEncoder(eventFile)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(event); err != nil {
+		_ = eventFile.Close()
+		taskLog.Warn("mymir task event encode failed", "error", err)
+		return
+	}
+	if err := eventFile.Close(); err != nil {
+		taskLog.Warn("mymir task event file close failed", "error", err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, writer, eventPath)
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		taskLog.Warn("mymir task event writer failed",
+			"writer", writer,
+			"provider", provider,
+			"task", shortID(task.ID),
+			"error", err,
+			"output", truncateLog(string(output), 1000),
+		)
+		return
+	}
+	taskLog.Info("mymir task event mirrored",
+		"writer", writer,
+		"provider", provider,
+		"task", shortID(task.ID),
+		"output", truncateLog(string(output), 500),
+	)
+}
+
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right
 // kind. The discriminator order matters: a task carrying both an issue_id
 // and a chat_session_id (theoretical, not produced today) should be treated
@@ -2612,6 +2737,8 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+	d.applyAOIssueSessionFallback(&task, provider, taskLog)
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a

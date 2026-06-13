@@ -50,6 +50,17 @@ func TestNewReturnsCopilotBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsAOBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("ao", Config{ExecutablePath: "/nonexistent/ao"})
+	if err != nil {
+		t.Fatalf("New(ao) error: %v", err)
+	}
+	if _, ok := b.(*aoBackend); !ok {
+		t.Fatalf("expected *aoBackend, got %T", b)
+	}
+}
+
 func TestNewReturnsAntigravityBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("antigravity", Config{ExecutablePath: "/nonexistent/agy"})
@@ -94,7 +105,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// runtime the daemon actually spawns. If a new backend is added, add an
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
-		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "gemini",
+		"antigravity", "ao", "claude", "codebuddy", "codex", "copilot", "cursor", "gemini",
 		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi",
 	}
 	for _, t_ := range supported {
