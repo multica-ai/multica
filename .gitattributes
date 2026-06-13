@@ -4,3 +4,12 @@ docker/entrypoint.sh text eol=lf
 
 # Default behavior
 * text=auto
+
+# Brand assets — fork-owned; on upstream merge always keep the fork's version
+apps/web/public/favicon.svg merge=ours
+apps/desktop/build/icon.png merge=ours
+apps/desktop/build/icon.icns merge=ours
+apps/desktop/build/icon.ico merge=ours
+apps/desktop/resources/icon.png merge=ours
+docs/assets/logo-light.svg merge=ours
+docs/assets/logo-dark.svg merge=ours
