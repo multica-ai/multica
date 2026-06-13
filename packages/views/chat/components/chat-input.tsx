@@ -169,10 +169,9 @@ export function ChatInput({
 
   const handleSend = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || isSubmitting || disabled || noAgent) {
+    if (!content || isSubmitting || disabled || noAgent) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
-        isRunning,
         isSubmitting,
         disabled,
         noAgent,
@@ -309,6 +308,7 @@ export function ChatInput({
             onClick={handleSend}
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
+            allowSubmitWhileRunning
             onStop={onStop}
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
             stopTooltip={t(($) => $.input.stop_tooltip)}

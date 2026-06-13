@@ -14,6 +14,7 @@ interface SubmitButtonProps {
   disabled?: boolean;
   loading?: boolean;
   running?: boolean;
+  allowSubmitWhileRunning?: boolean;
   onStop?: () => void;
   /**
    * Tooltip shown over the send button when idle. Pass a string or a node
@@ -31,37 +32,47 @@ function SubmitButton({
   disabled,
   loading,
   running,
+  allowSubmitWhileRunning,
   onStop,
   tooltip,
   stopTooltip,
 }: SubmitButtonProps) {
+  const submitButton = (
+    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
+      {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+    </Button>
+  );
+  const submit = tooltip ? (
+    <Tooltip>
+      <TooltipTrigger render={submitButton} />
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  ) : submitButton;
+
   if (running) {
     const stopButton = (
       <Button size="icon-sm" onClick={onStop}>
         <Square className="fill-current" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    const stop = stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
-    );
+    ) : stopButton;
+    if (allowSubmitWhileRunning) {
+      return (
+        <>
+          {stop}
+          {submit}
+        </>
+      );
+    }
+    return stop;
   }
 
-  const submitButton = (
-    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
-      {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-    </Button>
-  );
-  if (!tooltip) return submitButton;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={submitButton} />
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
+  return submit;
 }
 
 export { SubmitButton, type SubmitButtonProps };
