@@ -335,6 +335,39 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigIncludesWorkdirGuardrails(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID: "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/backend"},
+		},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+	s := string(content)
+	for _, want := range []string{
+		"## Workspace Isolation",
+		"Your current working directory is this task's isolated workdir:",
+		dir,
+		"Do not run `git clone`",
+		"must use `multica repo checkout <url>`",
+		"Never edit files outside the isolated workdir",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("AGENTS.md missing workdir guardrail %q\n---\n%s", want, s)
+		}
+	}
+}
+
 func TestWriteContextFiles(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
