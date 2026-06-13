@@ -699,6 +699,39 @@ func TestDownloadAttachment_ExplicitProxyStreamsPublicEndpoint(t *testing.T) {
 	}
 }
 
+func TestDownloadAttachment_ForceDownloadQueryOverridesInlineDisposition(t *testing.T) { // CEREBRO-PATCH(force-attachment-download): regression for explicit Download buttons.
+	store := &mockStorage{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "proxy"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/force-image.png"
+	body := []byte("\x89PNG\r\n\x1a\nimage")
+	store.put(key, body)
+	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "image.png", "image/png", int64(len(body)))
+
+	req, w := newDownloadRequest(t, id, testWorkspaceID)
+	q := req.URL.Query()
+	q.Set("download", "1")
+	req.URL.RawQuery = q.Encode()
+	testHandler.DownloadAttachment(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Disposition"); got != `attachment; filename="image.png"` {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+}
+
 func TestShouldProxyAttachmentURL(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -894,7 +927,6 @@ func TestIsTextPreviewable(t *testing.T) {
 	}
 }
 
-
 func tinyTextPDF(text string) []byte {
 	return buildTinyPDF(fmt.Sprintf("BT /F1 24 Tf 100 700 Td (%s) Tj ET", text))
 }
@@ -927,4 +959,3 @@ func buildTinyPDF(stream string) []byte {
 	fmt.Fprintf(&b, "trailer\n<< /Root 1 0 R /Size %d >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
 	return []byte(b.String())
 }
-

@@ -38,8 +38,6 @@ var extContentTypes = map[string]string{
 
 const maxUploadSize = 100 << 20 // 100 MB
 
-
-
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
 type attachmentDownloadMode string
@@ -114,7 +112,6 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	}
 	return resp
 }
-
 
 // CEREBRO-PATCH(persona-mask-attachment-embeds): JEH-1184 — shared response
 // builder for embedded attachment payloads. Keeps comment/chat embeds on the
@@ -675,7 +672,11 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	if att.SizeBytes >= 0 {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", att.SizeBytes))
 	}
-	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
+	if r.URL.Query().Get("download") == "1" { // CEREBRO-PATCH(force-attachment-download): force explicit Download buttons to save media files.
+		disposition = storage.AttachmentContentDisposition(att.Filename)
+	}
+	w.Header().Set("Content-Disposition", disposition)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, err := io.Copy(w, reader); err != nil {
@@ -697,7 +698,6 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 // Hard cap: 2 MB. Larger files return 413. Anything outside the text
 // whitelist returns 415.
 // ---------------------------------------------------------------------------
-
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)

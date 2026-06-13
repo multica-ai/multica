@@ -3,4 +3,4 @@ export {
   attachmentKeys,
   attachmentDetailOptions,
 } from "./queries";
-export { attachmentDownloadHref } from "./download-url";
+export { attachmentDownloadHref, attachmentForceDownloadPath } from "./download-url";
