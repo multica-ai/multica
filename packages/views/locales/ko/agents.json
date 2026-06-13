@@ -427,6 +427,7 @@
     "unavailable": "에이전트를 사용할 수 없습니다",
     "detail_link": "자세히 →",
     "runtime_label": "런타임",
+    "model_label": "모델",
     "skills_label": "스킬",
     "owner_label": "소유자",
     "unknown_runtime": "알 수 없는 런타임"

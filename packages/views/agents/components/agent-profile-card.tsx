@@ -1,11 +1,12 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime, RuntimeModel } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   deriveRuntimeHealth,
+  runtimeModelsOptions,
   type RuntimeHealth,
 } from "@multica/core/runtimes";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -33,6 +34,22 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
 
   const agent = agents.find((a) => a.id === agentId);
+  const runtime = agent
+    ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
+    : null;
+  // Friendly thinking-level label comes from the runtime model catalog
+  // (RuntimeModel.thinking.supported_levels[].label) — the same source the
+  // inspector's ThinkingPicker uses. Only fetch it when the agent actually has
+  // a thinking override AND its runtime is online: agents with no override (the
+  // common case, where no chip renders) never trigger daemon model discovery
+  // from this passive hover surface. Cold cache / offline → raw-token fallback.
+  const runtimeOnline = runtime?.status === "online";
+  const thinkingLevel = agent?.thinking_level ?? "";
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(
+      agent && thinkingLevel && runtimeOnline ? agent.runtime_id : null,
+    ),
+  );
 
   if (agentsLoading && !agent) {
     return (
@@ -55,8 +72,11 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
-  const runtime = runtimes.find((r) => r.id === agent.runtime_id) ?? null;
   const isArchived = !!agent.archived_at;
+  const modelValue = agent.model ?? "";
+  const thinkingChipLabel = thinkingLevel
+    ? resolveThinkingLabel(modelsQuery.data?.models ?? [], modelValue, thinkingLevel)
+    : null;
   const initials = agent.name
     .split(" ")
     .map((w) => w[0])
@@ -113,11 +133,19 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         </p>
       )}
 
-      {/* Meta rows — minimal set: runtime (where it lives), skills (what
-          it knows), owner (who manages it). Model is intentionally
-          omitted — power-user detail lives on the detail page. */}
+      {/* Meta rows — runtime (where it lives), model + thinking level (what it
+          runs), skills (what it knows), owner (who manages it). The thinking
+          chip renders only when the agent has a non-empty override. */}
       <div className="flex flex-col gap-1.5 text-xs">
         <RuntimeRow agent={agent} runtime={runtime} />
+        <ModelRow
+          model={modelValue || t(($) => $.pickers.model_default)}
+          isDefault={!modelValue}
+          thinkingLabel={thinkingChipLabel}
+          thinkingTitle={t(($) => $.pickers.thinking_tooltip, {
+            value: thinkingChipLabel ?? "",
+          })}
+        />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
@@ -185,6 +213,67 @@ function RuntimeRow({
       <span className="min-w-0 truncate" title={label}>
         {label}
       </span>
+    </div>
+  );
+}
+
+// Resolve a persisted thinking_level token to its friendly catalog label
+// (e.g. "xhigh" → "Extra high"), mirroring ThinkingPicker's lookup. Falls back
+// to the raw token when the catalog is unavailable (runtime offline, cold
+// cache, or the model/level dropped from the catalog) — an accepted
+// degradation for this glance surface.
+function resolveThinkingLabel(
+  models: RuntimeModel[],
+  model: string,
+  value: string,
+): string {
+  const entry = model
+    ? models.find((m) => m.id === model)
+    : models.find((m) => m.default) ?? models[0];
+  return (
+    entry?.thinking?.supported_levels.find((l) => l.value === value)?.label ??
+    value
+  );
+}
+
+// Model row + optional thinking-level chip. Model is shown as the raw id
+// (matching the inspector, which never resolves it to a friendly label); the
+// thinking chip reuses the skills-chip visual and is rendered only when the
+// agent has a non-empty thinking override. The model value gets a `title` so
+// long ids that truncate stay readable on hover.
+function ModelRow({
+  model,
+  isDefault,
+  thinkingLabel,
+  thinkingTitle,
+}: {
+  model: string;
+  isDefault: boolean;
+  thinkingLabel: string | null;
+  thinkingTitle: string;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-12 shrink-0 text-muted-foreground">
+        {t(($) => $.profile_card.model_label)}
+      </span>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <span
+          className={`min-w-0 truncate ${isDefault ? "" : "font-mono text-[11px]"}`}
+          title={model}
+        >
+          {model}
+        </span>
+        {thinkingLabel && (
+          <span
+            className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            title={thinkingTitle}
+          >
+            {thinkingLabel}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
