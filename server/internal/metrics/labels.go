@@ -31,6 +31,7 @@ const (
 	labelAction       = "action"
 	labelResult       = "result"
 	labelOp           = "op"
+	labelOutcome      = "outcome"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -75,6 +76,7 @@ var businessMetricLabels = map[string][]string{
 	"multica_autopilot_run_started_total":              {labelCadence, labelTriggerKind},
 	"multica_autopilot_run_terminal_total":             {labelCadence, labelTriggerKind, labelTerminalStatus},
 	"multica_autopilot_run_skipped_total":              {labelCadence, labelReason},
+	"multica_squad_leader_evaluation_total":            {labelOutcome},
 	"multica_webhook_delivery_total":                   {labelProvider, labelStatus},
 	"multica_github_event_received_total":              {labelEventKind, labelAction},
 	"multica_github_pr_review_total":                   {labelResult},
