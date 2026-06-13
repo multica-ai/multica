@@ -15,6 +15,8 @@ interface SubmitButtonProps {
   loading?: boolean;
   running?: boolean;
   onStop?: () => void;
+  allowSubmitWhileRunning?: boolean;
+  "data-acceptance"?: string;
   /**
    * Tooltip shown over the send button when idle. Pass a string or a node
    * (e.g. `Send · ⌘↵`). Omit to render no tooltip.
@@ -32,26 +34,47 @@ function SubmitButton({
   loading,
   running,
   onStop,
+  allowSubmitWhileRunning,
+  "data-acceptance": dataAcceptance,
   tooltip,
   stopTooltip,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
-      <Button size="icon-sm" onClick={onStop}>
+      <Button size="icon-sm" onClick={onStop} data-acceptance={dataAcceptance ? `${dataAcceptance}-stop` : undefined}>
         <Square className="fill-current" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    const stopWithTooltip = stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
+    ) : stopButton;
+    if (!allowSubmitWhileRunning) return stopWithTooltip;
+
+    const submitButton = (
+      <Button size="icon-sm" disabled={disabled || loading} onClick={onClick} data-acceptance={dataAcceptance}>
+        {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+      </Button>
+    );
+    const sendWithTooltip = tooltip ? (
+      <Tooltip>
+        <TooltipTrigger render={submitButton} />
+        <TooltipContent side="top">{tooltip}</TooltipContent>
+      </Tooltip>
+    ) : submitButton;
+
+    return (
+      <>
+        {stopWithTooltip}
+        {sendWithTooltip}
+      </>
     );
   }
 
   const submitButton = (
-    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
+    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick} data-acceptance={dataAcceptance}>
       {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
     </Button>
   );
