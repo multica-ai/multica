@@ -25,6 +25,7 @@
     "android:mobile:device": "pnpm -C apps/mobile android:device",
     "android:mobile:device:staging": "pnpm -C apps/mobile android:device:staging",
     "android:mobile:device:prod": "pnpm -C apps/mobile android:device:prod",
+    "android:mobile:prod:release": "pnpm -C apps/mobile android:prod:release",
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",

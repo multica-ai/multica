@@ -21,6 +21,7 @@
     "android:device": "expo run:android --device",
     "android:device:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo run:android --device",
     "android:device:prod": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:android --device",
+    "android:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production bash scripts/build-android-production-apk.sh",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

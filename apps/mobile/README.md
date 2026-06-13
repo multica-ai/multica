@@ -48,6 +48,7 @@ Everything below is for app developers — you can ignore the rest if you only w
 | `pnpm android:mobile:device` | Full rebuild + install on **USB Android device**, Debug | local |
 | `pnpm android:mobile:device:staging` | Full rebuild + install on **USB Android device**, Debug | staging |
 | `pnpm android:mobile:device:prod` | Full rebuild + install on **USB Android device**, Debug | production |
+| `pnpm android:mobile:prod:release` | Build standalone **Android Release APK** | production |
 
 `dev:*` runs Metro only — assumes the matching variant is already installed. `ios:mobile*` does a full native rebuild + install.
 
@@ -79,6 +80,21 @@ pnpm android:mobile:staging
 
 The first Android run performs an Expo prebuild and creates the native Gradle
 project if `apps/mobile/android/` is missing.
+
+To build a standalone production APK that connects to `multica.ai`, run:
+
+```bash
+pnpm android:mobile:prod:release
+```
+
+The APK is written to:
+
+```text
+apps/mobile/android/app/build/outputs/apk/release/multica-production-release.apk
+```
+
+This is a local sideload build signed with the generated debug keystore, not a
+Play Store upload artifact.
 
 ## First-time setup
 
