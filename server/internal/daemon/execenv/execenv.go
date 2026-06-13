@@ -59,9 +59,10 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID                 string
-	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
-	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	IssueID          string
+	TriggerCommentID string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
 	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)

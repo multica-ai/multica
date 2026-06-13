@@ -311,6 +311,7 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): proves visible replies target the original thread.
 func TestBuildPromptWakeupUsesWakeupPromptAndOriginalReplyParent(t *testing.T) {
 	task := Task{
 		IssueID:           "issue-123",

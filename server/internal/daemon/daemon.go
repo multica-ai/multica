@@ -2837,9 +2837,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
-		IssueID:                          task.IssueID,
-		TriggerCommentID:                 task.TriggerCommentID,
-		TriggerThreadID:                  task.TriggerThreadID,
+		IssueID:          task.IssueID,
+		TriggerCommentID: task.TriggerCommentID,
+		TriggerThreadID:  task.TriggerThreadID,
+		// CEREBRO-PATCH(wakeup-system-activity): pass wakeup context into the runtime brief.
 		WakeupPrompt:                     task.WakeupPrompt,
 		WakeupTriggerType:                task.WakeupTriggerType,
 		NewCommentCount:                  task.NewCommentCount,

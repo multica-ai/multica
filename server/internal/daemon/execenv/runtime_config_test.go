@@ -156,6 +156,7 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(wakeup-system-activity): wakeup runtime brief must not claim a synthetic comment exists.
 func TestWakeupTriggeredProtocolDoesNotCallWakeupANewComment(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
