@@ -381,6 +381,28 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.onTurnDone = func(aborted bool) {}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-usage","status":"completed","usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":50}}}}`)
+
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 700 {
+		t.Fatalf("input tokens = %d, want uncached 700", c.usage.InputTokens)
+	}
+	if c.usage.CacheReadTokens != 300 {
+		t.Fatalf("cache read tokens = %d, want 300", c.usage.CacheReadTokens)
+	}
+	if c.usage.OutputTokens != 50 {
+		t.Fatalf("output tokens = %d, want 50", c.usage.OutputTokens)
+	}
+}
+
 func TestCodexRawTurnCompletedDeduplication(t *testing.T) {
 	t.Parallel()
 
@@ -545,6 +567,37 @@ func TestCodexSetTurnErrorFirstWins(t *testing.T) {
 
 	if got := c.getTurnError(); got != "first" {
 		t.Fatalf("expected first-wins semantics, got %q", got)
+	}
+}
+
+func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := strings.Join([]string{
+		`{"timestamp":"2026-06-12T17:29:27.587Z","type":"turn_context","payload":{"model":"gpt-5.5"}}`,
+		`{"timestamp":"2026-06-12T17:35:37.479Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":300,"output_tokens":40,"reasoning_output_tokens":10,"total_tokens":1040},"model":"gpt-5.5"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got := parseCodexSessionFile(path)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	if got.model != "gpt-5.5" {
+		t.Fatalf("model = %q, want gpt-5.5", got.model)
+	}
+	if got.usage.InputTokens != 700 {
+		t.Fatalf("input tokens = %d, want uncached 700", got.usage.InputTokens)
+	}
+	if got.usage.CacheReadTokens != 300 {
+		t.Fatalf("cache read tokens = %d, want 300", got.usage.CacheReadTokens)
+	}
+	if got.usage.OutputTokens != 50 {
+		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
 	}
 }
 

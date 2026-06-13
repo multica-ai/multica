@@ -2717,32 +2717,45 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentMcpConfig = task.Agent.McpConfig
 		agentRuntimeConfig = task.Agent.RuntimeConfig
 	}
+	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
+	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
+	// failures fail soft to local mode — a broken JSON blob must never block
+	// task dispatch.
+	var openclawMode string
+	var openclawGateway execenv.OpenclawGatewayPin
+	if task.Agent != nil && provider == "openclaw" {
+		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+	}
+
 	// OpenClaw materializes mcp.servers from this config during execenv.Prepare,
 	// so the deterministic tool server must be merged in before Prepare/Reuse.
 	// No-op for every other provider.
 	agentMcpConfig = d.injectExecenvTools(agentMcpConfig, provider, agentRuntimeConfig, task.DeterministicTools, d.logger)
+
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			McpConfig:    agentMcpConfig,
-			Task:         taskCtx,
+			WorkDir:         task.PriorWorkDir,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			McpConfig:      agentMcpConfig,
-			Task:           taskCtx,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          task.ID,
+			AgentName:       agentName,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -2876,6 +2889,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Point Cursor at per-task project state when managed MCP is present.
+	// The workdir .cursor/mcp.json carries the managed server list, while
+	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
+	// persistent ~/.cursor/projects state.
+	if env.CursorDataDir != "" {
+		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
@@ -3026,6 +3046,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		OpenclawMode:              openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3799,7 +3820,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

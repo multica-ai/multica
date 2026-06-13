@@ -174,6 +174,26 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img?.getAttribute("alt")).toBe(att.filename);
   });
 
+  it("falls back to durable media URLs when a full attachment has no download_url", () => {
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "",
+      markdown_url: "https://api.example.test/api/attachments/att-1/download",
+      url: "https://cdn.example.test/att-1.png?Signature=old",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(att.markdown_url);
+    expect(img?.getAttribute("src")).not.toContain("Signature=");
+  });
+
   it("renders an <img> from a URL-only source for image filenames", () => {
     const url = "https://cdn.example.test/orphan.png?Signature=s";
     render(

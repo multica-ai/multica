@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1132,7 +1133,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
 		var runtimeConfig json.RawMessage
-		if agent.RuntimeConfig != nil {
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 		}
 		resp.Agent = &TaskAgentData{

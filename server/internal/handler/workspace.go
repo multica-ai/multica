@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -249,6 +250,47 @@ type UpdateWorkspaceRequest struct {
 	AvatarURL   *string `json:"avatar_url"`
 }
 
+type workspaceRepoRef struct {
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
+}
+
+func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+
+	var repos []workspaceRepoRef
+	if err := json.Unmarshal(raw, &repos); err != nil {
+		return nil, fmt.Errorf("repos must be an array of repository objects: %w", err)
+	}
+
+	normalized := make([]workspaceRepoRef, 0, len(repos))
+	seen := make(map[string]struct{}, len(repos))
+	for i, repo := range repos {
+		repo.URL = strings.TrimSpace(repo.URL)
+		repo.Description = strings.TrimSpace(repo.Description)
+		if repo.URL == "" {
+			return nil, fmt.Errorf("repos[%d]: url is required", i)
+		}
+		if !isValidGitRepoURL(repo.URL) {
+			return nil, fmt.Errorf("repos[%d]: url must be a valid http(s) or ssh git URL", i)
+		}
+		if _, ok := seen[repo.URL]; ok {
+			continue
+		}
+		seen[repo.URL] = struct{}{}
+		normalized = append(normalized, repo)
+	}
+
+	out, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := workspaceIDFromURL(r, "id")
 	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
@@ -284,7 +326,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		params.Settings = s
 	}
 	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
+		reposJSON, err := validateAndNormalizeWorkspaceRepos(req.Repos)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {

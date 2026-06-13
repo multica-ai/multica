@@ -1097,3 +1097,84 @@ func TestPrepareEnvironmentNonOpenclawSkipsConfig(t *testing.T) {
 		t.Errorf("non-openclaw providers shelled out to openclaw CLI %d times: %+v", len(stub.calls), stub.calls)
 	}
 }
+
+// ── Gateway endpoint pinning (issue #3260) ──
+//
+// When a multica agent is configured for gateway-mode openclaw and the
+// runtime_config carries a Gateway endpoint, the per-task wrapper must pin
+// that endpoint in its `gateway` block. OpenClaw deep-merges sibling object
+// keys after $include, so the wrapper's `gateway.*` settings override
+// whatever the user's global openclaw.json carried.
+
+func TestBuildPerTaskOpenclawConfigOmitsGatewayWhenZero(t *testing.T) {
+	t.Parallel()
+
+	cfg := buildPerTaskOpenclawConfig(
+		"", false, "", nil, "/workdir", nil, false,
+		OpenclawGatewayPin{},
+	)
+	if _, present := cfg["gateway"]; present {
+		t.Errorf("zero gateway must not emit a gateway block, got %v", cfg["gateway"])
+	}
+}
+
+func TestBuildPerTaskOpenclawConfigWritesGatewayBlock(t *testing.T) {
+	t.Parallel()
+
+	pin := OpenclawGatewayPin{
+		Host:  "gw.internal",
+		Port:  18789,
+		Token: "secret-token",
+		TLS:   true,
+	}
+	cfg := buildPerTaskOpenclawConfig(
+		"", false, "", nil, "/workdir", nil, false,
+		pin,
+	)
+
+	gw, ok := cfg["gateway"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected gateway map, got %T: %v", cfg["gateway"], cfg["gateway"])
+	}
+	if gw["host"] != "gw.internal" {
+		t.Errorf("gateway.host = %v, want %q", gw["host"], "gw.internal")
+	}
+	if gw["port"] != 18789 {
+		t.Errorf("gateway.port = %v, want %d", gw["port"], 18789)
+	}
+	// Token nests under gateway.auth.{mode,token} to match OpenClaw's own
+	// config shape (see ~/.openclaw/openclaw.json `gateway.auth`).
+	auth, ok := gw["auth"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected gateway.auth map, got %T: %v", gw["auth"], gw["auth"])
+	}
+	if auth["mode"] != "token" {
+		t.Errorf("gateway.auth.mode = %v, want %q", auth["mode"], "token")
+	}
+	if auth["token"] != "secret-token" {
+		t.Errorf("gateway.auth.token = %v, want %q", auth["token"], "secret-token")
+	}
+	if gw["tls"] != true {
+		t.Errorf("gateway.tls = %v, want true", gw["tls"])
+	}
+}
+
+func TestBuildPerTaskOpenclawConfigPartialGatewayOmitsZeroFields(t *testing.T) {
+	t.Parallel()
+
+	// Users may pin only host/port and rely on the user's local openclaw.json
+	// for the token (which still flows in via the $include). Zero-valued
+	// fields must not land in the wrapper as empty strings/zeros — that
+	// would override the user's value with junk.
+	cfg := buildPerTaskOpenclawConfig(
+		"", false, "", nil, "/workdir", nil, false,
+		OpenclawGatewayPin{Host: "gw.internal", Port: 18789},
+	)
+	gw := cfg["gateway"].(map[string]any)
+	if _, present := gw["auth"]; present {
+		t.Errorf("auth block must be omitted when token is empty, got %v", gw["auth"])
+	}
+	if _, present := gw["tls"]; present {
+		t.Errorf("tls field must be omitted when false, got %v", gw["tls"])
+	}
+}

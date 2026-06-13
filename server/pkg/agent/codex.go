@@ -1675,11 +1675,23 @@ func (c *codexClient) extractUsageFromMap(data map[string]any) {
 	c.usageMu.Lock()
 	defer c.usageMu.Unlock()
 
-	// Try various key conventions.
-	c.usage.InputTokens += codexInt64(usageMap, "input_tokens", "input", "prompt_tokens")
+	// Codex reports cached input as a prompt-token detail: cached_input_tokens
+	// are included in input_tokens. Persist mutually-exclusive buckets so
+	// dashboard cost math does not charge cached input twice.
+	inputTokens := codexInt64(usageMap, "input_tokens", "input", "prompt_tokens")
+	cacheReadTokens := codexInt64(usageMap, "cached_input_tokens", "cache_read_tokens", "cache_read_input_tokens")
+	c.usage.InputTokens += codexUncachedInputTokens(inputTokens, cacheReadTokens)
 	c.usage.OutputTokens += codexInt64(usageMap, "output_tokens", "output", "completion_tokens")
-	c.usage.CacheReadTokens += codexInt64(usageMap, "cache_read_tokens", "cache_read_input_tokens")
+	c.usage.CacheReadTokens += cacheReadTokens
 	c.usage.CacheWriteTokens += codexInt64(usageMap, "cache_write_tokens", "cache_creation_input_tokens")
+}
+
+func codexUncachedInputTokens(inputTokens, cachedInputTokens int64) int64 {
+	uncached := inputTokens - cachedInputTokens
+	if uncached < 0 {
+		return 0
+	}
+	return uncached
 }
 
 // codexInt64 returns the first non-zero int64 value from the map for the given keys.
@@ -1839,7 +1851,7 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 					cachedTokens = usage.CacheReadInputTokens
 				}
 				result.usage = TokenUsage{
-					InputTokens:     usage.InputTokens,
+					InputTokens:     codexUncachedInputTokens(usage.InputTokens, cachedTokens),
 					OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
 					CacheReadTokens: cachedTokens,
 				}
