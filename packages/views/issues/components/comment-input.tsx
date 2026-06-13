@@ -159,6 +159,12 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           multiple
           onSelect={(file) => editorRef.current?.uploadFile(file)}
         />
+        <kbd
+          aria-hidden
+          className="hidden sm:inline-flex h-4 items-center gap-0.5 rounded border border-border/50 bg-background/30 px-1 font-mono text-[10px] leading-none text-muted-foreground select-none"
+        >
+          {formatShortcut(modKey, enterKey)}
+        </kbd>
         <SubmitButton
           onClick={handleSubmit}
           disabled={isEmpty}
