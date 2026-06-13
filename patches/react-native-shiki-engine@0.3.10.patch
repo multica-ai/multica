@@ -1,0 +1,21 @@
+diff --git a/android/CMakeLists.txt b/android/CMakeLists.txt
+index 005caaf255529389c2684dbe8fbf0cb099d80e97..372f1f43e8ae0e41ee7c8c1ccd7cbe0566e388e6 100644
+--- a/android/CMakeLists.txt
++++ b/android/CMakeLists.txt
+@@ -5,11 +5,11 @@ set(CMAKE_VERBOSE_MAKEFILE ON)
+ 
+ # Find prebuilt oniguruma library
+ find_library(LOG_LIB log)
+-find_library(ONIG_LIB onig
+-    PATHS ${CMAKE_CURRENT_SOURCE_DIR}/src/main/jniLibs/${ANDROID_ABI}
+-    NO_CMAKE_FIND_ROOT_PATH
+-    REQUIRED
+-)
++set(ONIG_LIB "${CMAKE_CURRENT_SOURCE_DIR}/src/main/jniLibs/${ANDROID_ABI}/libonig.so")
++
++if(NOT EXISTS "${ONIG_LIB}")
++    message(FATAL_ERROR "Expected bundled Oniguruma library at ${ONIG_LIB}")
++endif()
+ 
+ # Main library
+ add_library(react-native-shiki-engine SHARED

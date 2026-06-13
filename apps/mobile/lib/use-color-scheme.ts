@@ -16,13 +16,22 @@
  * flash light before the saved preference applies. Acceptable for now —
  * the alternative is a synchronous storage backend, which secure-store isn't.
  */
+import * as SecureStore from "expo-secure-store";
 import { useColorScheme as useNativewindColorScheme } from "nativewind";
 import { useEffect, useState } from "react";
-import * as SecureStore from "expo-secure-store";
+import { THEME } from "@/lib/theme";
 
 const STORAGE_KEY = "theme-preference";
 
 export type ThemePreference = "light" | "dark" | "system";
+
+export function getThemeColors(colorScheme: "light" | "dark") {
+  const theme = THEME[colorScheme];
+  return {
+    background: theme.background,
+    statusBarStyle: colorScheme === "dark" ? "light" : "dark",
+  } as const;
+}
 
 export function useColorScheme() {
   const { colorScheme, setColorScheme: applyScheme } =

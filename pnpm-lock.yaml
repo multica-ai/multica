@@ -111,6 +111,11 @@ overrides:
   '@types/react-dom': ^19.2.0
   '@xmldom/xmldom': ^0.8.13
 
+patchedDependencies:
+  react-native-shiki-engine@0.3.10:
+    hash: fb7e90c7c49d1216ab6d9f6ea7079ab6eb508f17a3f8524c1f2c04c6fed587ce
+    path: patches/react-native-shiki-engine@0.3.10.patch
+
 importers:
 
   .:
@@ -467,7 +472,7 @@ importers:
         version: 4.23.0(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       react-native-shiki-engine:
         specifier: ^0.3.10
-        version: 0.3.10(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
+        version: 0.3.10(patch_hash=fb7e90c7c49d1216ab6d9f6ea7079ab6eb508f17a3f8524c1f2c04c6fed587ce)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       react-native-svg:
         specifier: 15.15.3
         version: 15.15.3(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
@@ -20537,7 +20542,7 @@ snapshots:
       react-native: 0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0)
       warn-once: 0.1.1
 
-  react-native-shiki-engine@0.3.10(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
+  react-native-shiki-engine@0.3.10(patch_hash=fb7e90c7c49d1216ab6d9f6ea7079ab6eb508f17a3f8524c1f2c04c6fed587ce)(react-native@0.83.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.0))(react@19.2.0):
     dependencies:
       '@shikijs/types': 3.23.0
       '@shikijs/vscode-textmate': 10.0.2

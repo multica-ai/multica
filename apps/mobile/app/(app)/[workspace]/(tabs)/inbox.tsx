@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  ActionSheetIOS,
-  Alert,
-  FlatList,
-  View,
-} from "react-native";
+import { Alert, FlatList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,6 +24,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { deduplicateInboxItems } from "@/lib/inbox-display";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 
 export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -83,7 +79,7 @@ export default function Inbox() {
       "Archive completed",
       "Archive all",
     ];
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,

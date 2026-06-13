@@ -23,7 +23,9 @@
 import { useRef } from "react";
 import { Tabs } from "expo-router";
 import { Image } from "expo-image";
-import { View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Platform, View } from "react-native";
+import type { ComponentProps } from "react";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -42,6 +44,44 @@ import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
 const BADGE_STYLE = {
   backgroundColor: THEME.light.brand,
 };
+
+type TabIconProps = {
+  color: string;
+  size: number;
+  focused: boolean;
+  iosFocused: string;
+  iosUnfocused: string;
+  androidFocused: ComponentProps<typeof Ionicons>["name"];
+  androidUnfocused: ComponentProps<typeof Ionicons>["name"];
+};
+
+function TabIcon({
+  color,
+  size,
+  focused,
+  iosFocused,
+  iosUnfocused,
+  androidFocused,
+  androidUnfocused,
+}: TabIconProps) {
+  if (Platform.OS === "ios") {
+    return (
+      <Image
+        source={focused ? `sf:${iosFocused}` : `sf:${iosUnfocused}`}
+        tintColor={color}
+        style={{ width: size, height: size }}
+      />
+    );
+  }
+
+  return (
+    <Ionicons
+      name={focused ? androidFocused : androidUnfocused}
+      size={size}
+      color={color}
+    />
+  );
+}
 
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
@@ -82,10 +122,14 @@ export default function TabsLayout() {
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                color={color}
+                size={size}
+                focused={focused}
+                iosFocused="tray.fill"
+                iosUnfocused="tray"
+                androidFocused="file-tray-full"
+                androidUnfocused="file-tray-full-outline"
               />
             ),
           }}
@@ -95,10 +139,14 @@ export default function TabsLayout() {
           options={{
             title: "My Issues",
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                color={color}
+                size={size}
+                focused={focused}
+                iosFocused="checklist"
+                iosUnfocused="checklist.unchecked"
+                androidFocused="checkbox"
+                androidUnfocused="checkbox-outline"
               />
             ),
           }}
@@ -110,10 +158,14 @@ export default function TabsLayout() {
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+              <TabIcon
+                color={color}
+                size={size}
+                focused={focused}
+                iosFocused="bubble.left.fill"
+                iosUnfocused="bubble.left"
+                androidFocused="chatbubble"
+                androidUnfocused="chatbubble-outline"
               />
             ),
           }}
@@ -122,11 +174,15 @@ export default function TabsLayout() {
           name="more"
           options={{
             title: "More",
-            tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                tintColor={color}
-                style={{ width: size, height: size }}
+            tabBarIcon: ({ color, size, focused }) => (
+              <TabIcon
+                color={color}
+                size={size}
+                focused={focused}
+                iosFocused="ellipsis"
+                iosUnfocused="ellipsis"
+                androidFocused="ellipsis-horizontal"
+                androidUnfocused="ellipsis-horizontal-outline"
               />
             ),
           }}

@@ -38,7 +38,7 @@
  * default elsewhere.
  */
 import { useCallback, useMemo } from "react";
-import { Linking, View } from "react-native";
+import { Linking, Platform, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
 import type { Attachment } from "@multica/core/types";
@@ -48,6 +48,16 @@ import { useMarkdownStyle } from "./markdown-style";
 import { splitMarkdown } from "./split-markdown";
 import { CodeBlock } from "./code-block";
 import { MarkdownImage } from "./markdown-image";
+
+// Android-only bottom padding for the native markdown container. The
+// github-flavor enriched-markdown renderer under-measures its height on
+// Android by ~one line, so without this the last line spills below any parent
+// background (the comment bubble's `bg-surface-1`). Padding the container's
+// bottom grows its reported height enough to cover the text — unlike
+// `allowTrailingMargin`, it only grows the container and does NOT re-introduce
+// the last block's paragraph spacing. Module-level constant so the object
+// identity stays stable across renders (no redundant native prop updates).
+const ANDROID_CONTAINER_STYLE = { paddingBottom: 12 };
 
 interface Props {
   content: string;
@@ -189,6 +199,14 @@ export function Markdown({
                 markdownStyle={markdownStyle}
                 onLinkPress={onLinkPress}
                 selectable={selectable}
+                // Android-only height fix (see ANDROID_CONTAINER_STYLE). iOS
+                // measures correctly and keeps the tight default — preserve the
+                // iOS baseline.
+                containerStyle={
+                  Platform.OS === "android"
+                    ? ANDROID_CONTAINER_STYLE
+                    : undefined
+                }
               />
             );
           case "code":

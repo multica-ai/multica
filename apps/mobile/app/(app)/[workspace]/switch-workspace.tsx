@@ -21,11 +21,13 @@
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   Pressable,
   ScrollView,
   View,
 } from "react-native";
 import { Image as ExpoImage } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import type { Workspace } from "@multica/core/types";
@@ -128,13 +130,21 @@ function WorkspaceRow({
       >
         {workspace.name}
       </Text>
-      {active ? (
-        <ExpoImage
-          source="sf:checkmark"
-          tintColor={iconTint}
-          style={{ width: 16, height: 16 }}
-        />
-      ) : null}
+      {active ? <CheckmarkIcon tintColor={iconTint} /> : null}
     </Pressable>
   );
+}
+
+function CheckmarkIcon({ tintColor }: { tintColor: string }) {
+  if (Platform.OS === "ios") {
+    return (
+      <ExpoImage
+        source="sf:checkmark"
+        tintColor={tintColor}
+        style={{ width: 16, height: 16 }}
+      />
+    );
+  }
+
+  return <Ionicons name="checkmark" size={16} color={tintColor} />;
 }

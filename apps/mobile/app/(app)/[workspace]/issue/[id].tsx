@@ -11,13 +11,7 @@
  * lands so the navigation bar shows `MUL-123` (Linear-style).
  */
 import { useCallback, useEffect } from "react";
-import {
-  ActionSheetIOS,
-  ActivityIndicator,
-  Alert,
-  Linking,
-  View,
-} from "react-native";
+import { ActivityIndicator, Alert, Linking, View } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
@@ -42,6 +36,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 
 export default function IssueDetail() {
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
@@ -107,7 +102,7 @@ export default function IssueDetail() {
 
   // Three-dot menu: Pin/Unpin / Copy link / Open on web (if web URL set) /
   // Delete. Mirrors apps/mobile/app/(app)/[workspace]/project/[id].tsx — same
-  // ActionSheetIOS + Alert.alert confirm pattern. Property edits (status,
+  // action-sheet wrapper + Alert.alert confirm pattern. Property edits (status,
   // priority, assignee, due_date) live on the IssueHeaderCard chips inside
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
@@ -123,7 +118,7 @@ export default function IssueDetail() {
     if (issueLink) options.push("Open on web");
     options.push("Delete issue");
     const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
