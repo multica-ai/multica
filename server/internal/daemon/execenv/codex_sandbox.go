@@ -45,8 +45,19 @@ type codexSandboxPolicy struct {
 // codexSandboxPolicyFor picks the right policy for the given platform and
 // detected Codex CLI version.
 //
-// - Non-darwin: always workspace-write with network access (Landlock is not
-//   affected by the macOS Seatbelt bug).
+// - Linux: workspace-write with network access. Landlock honors
+//   network_access and Multica CLI can reach ~/.multica through regular
+//   filesystem read/write of user home.
+// - Windows: danger-full-access. Starting with codex 0.122+, workspace-write
+//   on Windows is enforced by the experimental native Windows sandbox which
+//   spawns each exec_command under CreateProcessWithLogonW. That sandbox
+//   refuses access to user profile paths outside the workspace (including
+//   ~/.multica where the CLI stores credentials), making `multica issue get`
+//   and every other CLI call fail with "blocked by policy". We fall back to
+//   danger-full-access so the daemon-injected Multica CLI works. Users who
+//   need tighter Windows sandboxing should disable the experimental Windows
+//   sandbox in their own ~/.codex/config.toml via
+//   `[features] experimental_windows_sandbox = false`.
 // - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
 //   workspace-write with network access (upstream bug fixed).
 // - darwin otherwise (including when the version is unknown): fall back to
@@ -55,13 +66,20 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	if goos != "darwin" {
+	switch goos {
+	case "linux":
 		return codexSandboxPolicy{
 			Mode:          "workspace-write",
 			NetworkAccess: true,
-			Reason:        "non-darwin platform — seatbelt bug does not apply",
+			Reason:        "linux: Landlock honors workspace-write + network_access",
+		}
+	case "windows":
+		return codexSandboxPolicy{
+			Mode:   "danger-full-access",
+			Reason: "windows: native sandbox blocks Multica CLI access to ~/.multica credentials under workspace-write",
 		}
 	}
+	// darwin branch below
 	if codexDarwinNetworkAccessFixed(detectedVersion) {
 		return codexSandboxPolicy{
 			Mode:          "workspace-write",
