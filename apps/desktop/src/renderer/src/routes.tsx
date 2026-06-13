@@ -30,7 +30,7 @@ import { Download, Server } from "lucide-react";
 import { DaemonSettingsTab } from "./components/daemon-settings-tab";
 import { UpdatesSettingsTab } from "./components/updates-settings-tab";
 import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
-import { DesktopRouteErrorPage } from "./components/route-error-page";
+import { NotFoundPage, RouteErrorBoundary } from "./components/route-error-boundary";
 
 /**
  * Wraps `SettingsPage` so the desktop-only extra tabs can pull their labels
@@ -109,7 +109,7 @@ function PageShell() {
 export const appRoutes: RouteObject[] = [
   {
     element: <PageShell />,
-    errorElement: <DesktopRouteErrorPage />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: null },
       {
@@ -201,7 +201,17 @@ export const appRoutes: RouteObject[] = [
             element: <DesktopSettingsRoute />,
             handle: { title: "Settings" },
           },
+          {
+            path: "*",
+            element: <NotFoundPage />,
+            handle: { title: "Page not found" },
+          },
         ],
+      },
+      {
+        path: "*",
+        element: <NotFoundPage />,
+        handle: { title: "Page not found" },
       },
     ],
   },
