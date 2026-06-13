@@ -13,16 +13,25 @@ import (
 )
 
 // notifyParentOfChildDone posts a top-level system comment on the parent
-// issue when a child issue transitions from non-done into done. This replaces
-// the agent-prompt rule that previously made child agents post the
-// notification themselves (PR #2918 user feedback — the agent rule caused
-// self-mention loops, planner ping-pong, and accidental `MUL-` prefix
-// hardcoding because the agent did not always know the workspace prefix).
+// issue when a child issue transitions from a non-completed state into a
+// completed one. A child is "completed" once it reaches `in_review` (the
+// child agent has finished its work and is waiting for the parent's review)
+// or `done` (the work is accepted). Both transitions fire the notification;
+// the in_review case was MUL-2766 — squads were getting stuck because the
+// child agent followed the runtime workflow (`in_review` when done, leader
+// promotes to `done` after review) and the parent never woke up. The
+// `in_review` ↔ `done` transition itself is a no-op (the parent has already
+// been informed). This replaces the agent-prompt rule that previously made
+// child agents post the notification themselves (PR #2918 user feedback —
+// the agent rule caused self-mention loops, planner ping-pong, and
+// accidental `MUL-` prefix hardcoding because the agent did not always know
+// the workspace prefix).
 //
 // Guards on whether the comment fires at all:
-//   - prev.Status must not already be "done" (idempotent — repeat saves of
-//     done do not re-fire; only the transition fires)
-//   - issue.Status must be "done"
+//   - prev.Status must not already be a completed state (idempotent — once
+//     the parent has been told the child is in_review, moving it to done
+//     does not re-fire, and vice versa)
+//   - issue.Status must be a completed state (`in_review` or `done`)
 //   - issue.ParentIssueID must be set
 //   - parent must not be "done" or "cancelled" — the parent is already
 //     closed and a notification has no follow-up to drive
@@ -52,7 +61,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if !issue.ParentIssueID.Valid {
 		return
 	}
-	if prev.Status == "done" || issue.Status != "done" {
+	if isChildCompletedStatus(prev.Status) || !isChildCompletedStatus(issue.Status) {
 		return
 	}
 	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
@@ -83,10 +92,11 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// agent the workspace lost track of, etc.).
 	mentionPrefix := h.buildParentAssigneeMention(ctx, parent)
 
-	content := fmt.Sprintf(
-		"%sSub-issue [%s](mention://issue/%s) — \"%s\" — is done. Before promoting any waiting `backlog` sub-issue, read each sibling's description and only promote items whose stated dependencies are already satisfied — do not rely on this parent's higher-level breakdown alone. If a sibling's description conflicts with that breakdown (e.g. it lists a prerequisite the parent treats as parallel), do NOT change its status — leave it `backlog` and post a comment to confirm first.",
-		mentionPrefix, identifier, childID, title,
-	)
+	content := childCompletedSystemCommentContent(issue.Status, mentionPrefix, identifier, childID, title)
+	if content == "" {
+		// Defensive: isChildCompletedStatus already filtered the status above.
+		return
+	}
 
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
@@ -123,6 +133,48 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	// title inert and gives the platform a single place to apply the loop
 	// and idempotency guards.
 	h.dispatchParentAssigneeTrigger(ctx, parent, issue, comment, actorType, actorID)
+}
+
+// isChildCompletedStatus reports whether a child issue status represents
+// "work handed back to the parent". Both `in_review` (waiting for leader
+// review) and `done` (accepted) count: the parent's assignee should be
+// woken on the transition INTO either, and transitions between them
+// (in_review → done, done → in_review) are no-ops. See MUL-2766 for the
+// in_review case; autopilot already treats these two statuses as a single
+// completion signal (see service/autopilot.go), and this helper aligns the
+// child-done notification with that convention.
+func isChildCompletedStatus(status string) bool {
+	return status == "in_review" || status == "done"
+}
+
+// childCompletedSystemCommentContent renders the system-comment body for a
+// child-completed notification. The wording differs by status because the
+// follow-up the parent assignee should take is different:
+//
+//   - `in_review` is a coordination signal — the leader must inspect the
+//     work and either accept it (move child to `done`) or send it back
+//     (move child to `in_progress` with comment-described changes).
+//     Promoting backlog siblings is premature until the review lands.
+//   - `done` is a completion signal — the work is accepted, so the
+//     follow-up shifts to advancing the plan: promoting the next ready
+//     backlog sibling. The MUL-2538 promotion guardrails apply.
+//
+// Returns "" when the status is not a recognised completed state; callers
+// should treat that as "do not post".
+func childCompletedSystemCommentContent(status, mentionPrefix, identifier, childID, title string) string {
+	switch status {
+	case "in_review":
+		return fmt.Sprintf(
+			"%sSub-issue [%s](mention://issue/%s) — \"%s\" — is ready for review. Inspect the work the child reported, then either accept it by moving the child to `done`, or send it back by moving the child to `in_progress` with a comment describing the requested changes. Do NOT promote any waiting `backlog` sub-issue until the review lands.",
+			mentionPrefix, identifier, childID, title,
+		)
+	case "done":
+		return fmt.Sprintf(
+			"%sSub-issue [%s](mention://issue/%s) — \"%s\" — is done. Before promoting any waiting `backlog` sub-issue, read each sibling's description and only promote items whose stated dependencies are already satisfied — do not rely on this parent's higher-level breakdown alone. If a sibling's description conflicts with that breakdown (e.g. it lists a prerequisite the parent treats as parallel), do NOT change its status — leave it `backlog` and post a comment to confirm first.",
+			mentionPrefix, identifier, childID, title,
+		)
+	}
+	return ""
 }
 
 // sanitizeChildTitleForSystemComment removes mention-style markdown from a

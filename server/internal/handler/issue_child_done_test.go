@@ -154,6 +154,80 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	}
 }
 
+// TestChildInReviewNotifiesParent — MUL-2766. The runtime workflow tells
+// child agents to move their issue to `in_review` when they finish (the
+// human/leader then promotes to `done`). Before the fix, only the
+// `done` transition fired the parent notification, so squads were getting
+// stuck: leader assigned work out, child agents moved to in_review, parent
+// leader was never woken. This test asserts that the in_review transition
+// produces exactly one top-level system comment on the parent and that the
+// body uses the in_review-flavoured wording (review-action verb, not the
+// done-flavoured "Before promoting any waiting backlog sub-issue" clause).
+func TestChildInReviewNotifiesParent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("expected exactly 1 system comment on parent after in_review, got %d", got)
+	}
+	content, _, parentNull, typeStr := systemCommentOn(t, fx.parent.ID)
+	if !parentNull {
+		t.Errorf("system comment must be top-level (parent_id IS NULL)")
+	}
+	if typeStr != "system" {
+		t.Errorf("system comment type should be 'system', got %q", typeStr)
+	}
+	if !strings.Contains(content, "is ready for review") {
+		t.Errorf("expected in_review-flavoured wording, got: %s", content)
+	}
+	if strings.Contains(content, "Before promoting any waiting `backlog`") {
+		t.Errorf("in_review comment should NOT carry the done-flavoured promote-backlog clause, got: %s", content)
+	}
+	if !strings.Contains(content, fx.child.Identifier) {
+		t.Errorf("expected comment to contain child identifier %q, got: %s", fx.child.Identifier, content)
+	}
+	if !strings.Contains(content, "mention://issue/"+fx.child.ID) {
+		t.Errorf("expected mention://issue/<child-id> link in comment, got: %s", content)
+	}
+}
+
+// TestChildInReviewThenDoneDoesNotRefire — the parent has already been
+// woken on in_review; promoting the child from in_review to done is the
+// leader accepting the work, not a new completion event, and must not
+// produce a second system comment.
+func TestChildInReviewThenDoneDoesNotRefire(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("after in_review: expected 1 comment, got %d", got)
+	}
+
+	updateChildStatus(t, fx.child.ID, "done")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("after in_review→done: expected still 1 comment (no re-fire), got %d", got)
+	}
+}
+
+// TestChildDoneAfterInReviewSendBackFiresAgain — the leader-driven
+// "send back for changes" path: child reaches in_review (fires once),
+// leader sends it back by moving to in_progress, child completes again
+// and lands in_review (or done). The second completion is a real new
+// event and must fire a second notification — without this, the leader
+// would never be woken for the re-review.
+func TestChildDoneAfterInReviewSendBackFiresAgain(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	updateChildStatus(t, fx.child.ID, "in_progress")
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 2 {
+		t.Fatalf("expected 2 system comments after send-back + re-review cycle, got %d", got)
+	}
+}
+
 // TestChildDoneNotificationIsIdempotent — re-saving an already-done child
 // must NOT fire a second notification. UpdateIssue is called with the same
 // status='done' twice; only the first call is a transition and should

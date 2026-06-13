@@ -679,7 +679,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Sub-issue Protocol (PR #2918) that still belongs in the brief. The
 	// parent-notification guidance was dropped in MUL-2538: the platform
 	// now posts a system comment on the parent itself when a child enters
-	// `done`, and the agent has nothing to do or avoid on that path.
+	// a completed state (`in_review` after MUL-2766, or `done`), and the
+	// agent has nothing to do or avoid on that path.
 	// Section is skipped for chat, quick-create, and run-only autopilot
 	// runs (no parent/child semantics there).
 	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
