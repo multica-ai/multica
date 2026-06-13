@@ -15,6 +15,7 @@ import {
   BellRing,
   MailOpen,
   MailWarning,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -242,20 +243,11 @@ interface DesktopProps {
   strings: ReturnType<typeof useCerebroInboxStrings>;
 }
 
-function DesktopRowActions({
-  menuItems,
-  onArchive,
-  onToggleRead,
-  onToggleMute,
-  muted,
-  unread,
-  strings,
-}: DesktopProps) {
-  // JEH-663 — mark-unread + mute are surfaced as direct hover icons (next to
-  // archive) so the user reaches them in one click instead of going through
-  // a "..." sub-menu. The "..." dropdown trigger has been removed; the
-  // right-click menu stays as a quick keyboard-free fallback that anchors at
-  // the click point (Linear/Gmail style).
+function DesktopRowActions({ menuItems, strings }: DesktopProps) {
+  // TECH-3352 — align with channels/DM: a single "..." (3-dot) dropdown on
+  // desktop hover, instead of separate mark-unread/mute/archive icons, so every
+  // inbox row (issue, channel, DM) opens the same menu. The right-click menu
+  // stays as a keyboard-free fallback anchored at the click point (Gmail style).
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextPos, setContextPos] = useState<{ x: number; y: number }>({
@@ -277,43 +269,31 @@ function DesktopRowActions({
 
   return (
     <div ref={wrapperRef}>
-      {/* Hover-only icon group: positioned absolute over the row, only shown
-          when the parent row is hovered. Three icons left-to-right: mark
-          unread/read, mute/unmute, archive. */}
-      <div
-        className="absolute right-2 top-1/2 -translate-y-1/2 hidden items-center gap-1 sm:group-hover:flex"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <IconButton
-          aria-label={unread ? strings.mark_read_tooltip : strings.mark_unread_tooltip}
-          onClick={onToggleRead}
-          title={unread ? strings.mark_read_tooltip : strings.mark_unread_tooltip}
+      {/* Hover-only "..." trigger, positioned absolute over the row, revealed
+          when the parent row is hovered. Same affordance as channel/DM rows. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={strings.more_actions}
+              onClick={(e) => e.stopPropagation()}
+              className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+            />
+          }
         >
-          {unread ? (
-            <MailOpen className="size-3.5" />
-          ) : (
-            <MailWarning className="size-3.5" />
-          )}
-        </IconButton>
-        <IconButton
-          aria-label={muted ? strings.unmute_tooltip : strings.mute_tooltip}
-          onClick={onToggleMute}
-          title={muted ? strings.unmute_tooltip : strings.mute_tooltip}
+          <MoreHorizontal className="size-4" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="min-w-44"
+          onClick={(e) => e.stopPropagation()}
         >
-          {muted ? <BellRing className="size-3.5" /> : <BellOff className="size-3.5" />}
-        </IconButton>
-        <IconButton
-          aria-label={strings.archive_label}
-          onClick={onArchive}
-          title={strings.archive_tooltip}
-        >
-          <Archive className="size-3.5" />
-        </IconButton>
-      </div>
+          {menuItems}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
-      {/* Right-click menu: phantom 1×1 anchor at the click point lives outside
-          the hover-only group so it stays measurable even before the user
-          hovers the row. */}
+      {/* Right-click menu: phantom 1×1 anchor at the click point. */}
       <DropdownMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
         <DropdownMenuTrigger
           render={(props) => (
@@ -347,7 +327,10 @@ interface MobileProps {
   strings: ReturnType<typeof useCerebroInboxStrings>;
 }
 
-function MobileRowActions({
+// Exported so cerebro-channels can reuse the exact same mobile swipe surface
+// (swipe-archive + swipe-left reveal + long-press drawer) for channel/DM rows,
+// keeping issues, channels and DMs identical on mobile (TECH-3352 alignment).
+export function MobileRowActions({
   muted,
   unread,
   onArchive,
@@ -702,7 +685,9 @@ function MobileRowActions({
  * (a momentum wheel is a poor fit for a mouse) — but the functions are
  * identical, per the product decision on this issue.
  */
-function ReminderSheet({
+// Exported so cerebro-channels reuses the same "remind me" sheet (presets +
+// custom time) for channel/DM snooze (TECH-3352 alignment).
+export function ReminderSheet({
   isMobile,
   customReminder,
   open,
@@ -1079,40 +1064,6 @@ function DrawerActionButton({
 /* -------------------------------------------------------------------------- */
 /*  Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
-
-function IconButton({
-  children,
-  className,
-  onClick,
-  ...props
-}: React.HTMLAttributes<HTMLSpanElement>) {
-  // role=button span (not <button>) keeps this safe inside row-level click
-  // surfaces across desktop and mobile renderers.
-  return (
-    <span
-      role="button"
-      tabIndex={-1}
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClick?.(e);
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.stopPropagation();
-          (onClick as ((e: React.SyntheticEvent) => void) | undefined)?.(e);
-        }
-      }}
-      className={cn(
-        "flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </span>
-  );
-}
 
 /**
  * Swipe-only cerebro variant for inbox rows that aren't issue items —
