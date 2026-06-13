@@ -8,8 +8,8 @@
 // patched AgentToolsCard, so workspaces using either of the newer tables saw
 // nothing when they flipped the flag on.
 //
-// The button surfaces a small summary inline — "Alle data sources" / "12 af 47"
-// / "Ingen tilladt" — so the row state is visible without opening the sheet.
+// The button surfaces a small summary inline — "All data sources" / "12 of 47"
+// / "No data source access" — so the row state is visible without opening the sheet.
 // The same TanStack Query keys are reused by the sheet, so opening it does not
 // refetch.
 
@@ -50,7 +50,7 @@ function summarise(
         (id): id is string => typeof id === "string" && id.trim().length > 0,
       ).length
     : 0;
-  if (picked === 0) return "None allowed";
+  if (picked === 0) return "No data source access";
   if (totalLoaded && typeof total === "number") {
     return `${picked} of ${total} data sources`;
   }
