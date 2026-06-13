@@ -71,6 +71,11 @@ interface DesktopAPI {
       | "error";
     error?: string;
   }>;
+  /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
+   *  Returns an unsubscribe function. */
+  onCloseActiveTab: (callback: () => void) => () => void;
+  /** Ask the main process to close the window. */
+  closeWindow: () => void;
 }
 
 interface DaemonStatus {
