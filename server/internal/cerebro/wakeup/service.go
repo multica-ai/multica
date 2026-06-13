@@ -16,7 +16,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -111,7 +110,11 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		}
 		// Enforce min interval: reject if there is already a pending wakeup
 		// for this agent+issue created within the last WakeupMinIntervalMinutes.
-		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, req.AgentID, req.IssueID, WakeupMinIntervalMinutes); err == nil && recent {
+		if recent, err := s.Cerebro.HasRecentPendingWakeupForAgentIssue(ctx, cerebrodb.HasRecentPendingWakeupForAgentIssueParams{
+			AgentID:            req.AgentID,
+			IssueID:            req.IssueID,
+			MinIntervalMinutes: WakeupMinIntervalMinutes,
+		}); err == nil && recent {
 			return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf(
 				"a wakeup for this agent+issue was already created within the last %d minutes; wait before creating another",
 				WakeupMinIntervalMinutes,
@@ -296,38 +299,21 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return s.postpone(ctx, row)
 	}
 
-	// TECH-3487: anchor the wakeup note inside the conversation that scheduled
-	// it. Posting the note as a reply under the original thread root makes the
-	// agent's forced reply (the comment guard requires parent == trigger comment)
-	// resolve into that same thread, so the answer lands where the request was
-	// made instead of in a new orphaned root note. parentID stays zero (root
-	// note, pre-TECH-3487 behavior) when there is no still-valid origin thread.
-	parentID := s.resolveWakeupParent(ctx, row, issue.ID)
+	// TECH-3487: wakeups are system activity, not user-visible synthetic
+	// comments. The queued task carries wakeup context while triggerCommentID
+	// points at the original conversation anchor, so the daemon can instruct the
+	// agent to reply in that thread without wrapping the wakeup as a comment.
+	originCommentID := s.resolveWakeupParent(ctx, row, issue.ID)
 
-	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    util.MustParseUUID("00000000-0000-0000-0000-000000000000"),
-		Content:     buildWakeupCommentContent(row.TriggerType, row.Prompt),
-		Type:        commentTypeWakeup,
-		ParentID:    parentID,
-	})
-	if err != nil {
-		return fmt.Errorf("create wakeup comment: %w", err)
-	}
 	// Seed the human principal onto the woken run so the agent it starts can
 	// fan out to other agents. A wakeup is a deferred continuation of whatever
 	// a human set in motion; without an explicit origin the dispatched run
 	// would carry no human provenance and the delegation gate would block it
 	// from mentioning another agent. Resolve the human (wakeup creator → issue
-	// creator → latest human comment); fall back to the origin-less enqueue
-	// only when no human can be found, leaving the comment-time fallback to try.
-	if delegation := s.resolveWakeupOrigin(ctx, row, issue); delegation.OriginalUserID.Valid {
-		if _, err := s.Tasks.EnqueueTaskForMentionFromComment(ctx, issue, row.AgentID, comment.ID, delegation); err != nil {
-			return fmt.Errorf("enqueue agent task: %w", err)
-		}
-	} else if _, err := s.Tasks.EnqueueTaskForMention(ctx, issue, row.AgentID, comment.ID); err != nil {
+	// creator → latest human comment); if no human can be found, the task still
+	// runs but cannot fan out to other agents.
+	delegation := s.resolveWakeupOrigin(ctx, row, issue)
+	if _, err := s.Tasks.EnqueueWakeupTask(ctx, issue, row.AgentID, originCommentID, util.UUIDToString(row.ID), row.TriggerType, row.Prompt, delegation); err != nil {
 		return fmt.Errorf("enqueue agent task: %w", err)
 	}
 	if err := s.Cerebro.MarkWakeupDispatched(ctx, row.ID); err != nil {
@@ -338,23 +324,6 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	// loop threshold is reached.
 	go s.checkPostponeLimit(context.Background(), row, issue)
 
-	if s.Bus != nil {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventCommentCreated,
-			WorkspaceID: util.UUIDToString(row.WorkspaceID),
-			ActorType:   "system",
-			Payload: map[string]any{
-				"comment": map[string]any{
-					"id":          util.UUIDToString(comment.ID),
-					"issue_id":    util.UUIDToString(comment.IssueID),
-					"content":     comment.Content,
-					"type":        comment.Type,
-					"author_type": "system",
-					"created_at":  comment.CreatedAt,
-				},
-			},
-		})
-	}
 	return nil
 }
 

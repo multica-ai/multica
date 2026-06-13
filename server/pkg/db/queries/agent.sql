@@ -144,12 +144,12 @@ ORDER BY created_at DESC;
 -- CEREBRO-PATCH(sqlc-agent-task-title): JEH-698 — `title` column is the curated short display label generated at enqueue time (LLM or heuristic), distinct from `trigger_summary` (verbatim provenance snapshot).
 -- CEREBRO-PATCH(task-delegation-context): JEH-1436 records original user and source task provenance for comment/mention starts.
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_summary, title, force_fresh_session, is_leader_task,
     original_user_id, delegating_agent_id, source_task_id, delegation_source
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id), sqlc.narg(context),
     sqlc.narg(trigger_summary), sqlc.narg(title),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),

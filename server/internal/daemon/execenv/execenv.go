@@ -62,6 +62,8 @@ type TaskContextForEnv struct {
 	IssueID                 string
 	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
 	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
+	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks
 	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
 	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
@@ -84,7 +86,7 @@ type TaskContextForEnv struct {
 	// CEREBRO-PATCH(execenv-user-profile-prompt): compiled user
 	// communication profile (JEH-304); empty if user has no profile.
 	UserProfilePrompt string
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	IsSquadLeader     bool // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,

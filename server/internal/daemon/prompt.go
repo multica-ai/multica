@@ -20,6 +20,9 @@ func BuildPrompt(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	if task.WakeupPrompt != "" {
+		return buildWakeupPrompt(task, provider)
+	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, provider)
 	}
@@ -42,6 +45,42 @@ func BuildPrompt(task Task, provider string) string {
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildWakeupPrompt(task Task, provider string) string {
+	var b strings.Builder
+	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	b.WriteString("[WAKEUP] The platform re-invoked you from a scheduled wakeup. This is NOT a new user comment and no wakeup comment was created.\n\n")
+	if task.WakeupTriggerType != "" {
+		fmt.Fprintf(&b, "Wakeup type: `%s`\n\n", task.WakeupTriggerType)
+	}
+	b.WriteString("Wakeup note:\n")
+	fmt.Fprintf(&b, "> %s\n\n", task.WakeupPrompt)
+	if task.TriggerCommentID != "" {
+		fmt.Fprintf(&b, "Reply target: post any visible result in the original thread using parent comment ID `%s`.\n\n", task.TriggerCommentID)
+	}
+	if snap, ok := snapshotIssueContext(task); ok {
+		b.WriteString(snap)
+		if task.TriggerCommentID != "" {
+			b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+		}
+		return b.String()
+	}
+	if bundle, ok := bundleContextInstruction(task); ok {
+		b.WriteString(bundle)
+		if task.TriggerCommentID != "" {
+			b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+		}
+		return b.String()
+	}
+	fmt.Fprintf(&b, "Start by running `multica issue context %s --output json` to understand the issue context and recent thread.\n\n", task.IssueID)
+	if task.TriggerCommentID != "" {
+		b.WriteString(execenv.BuildCommentReplyInstructions(provider, task.IssueID, task.TriggerCommentID))
+	} else {
+		fmt.Fprintf(&b, "If you reply, post it with `multica issue comment add %s` using `--content-stdin`.\n\n", task.IssueID)
+	}
 	return b.String()
 }
 

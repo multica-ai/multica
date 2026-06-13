@@ -312,6 +312,7 @@ var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "web_fetch", Description: "Fetch the text content of an allowlisted URL.", Status: ToolStatusImplemented},
 	{Name: "firtal_registry", Description: "Query the Firtal Data Registry: discover data sources, fetch schema, and execute structured queries.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
+	{Name: "create_file", Description: "Create a file from inline content (md, txt, csv, json, html, svg, xml) and attach it to the current chat or issue.", Status: ToolStatusNewlyImplemented},
 }
 
 var multicaMCPToolMatrix = []ToolMeta{

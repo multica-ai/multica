@@ -47,12 +47,8 @@ func TestWorker_DrainsQueueAndUpsertsEmbedding(t *testing.T) {
 		BatchSize: 8,
 	})
 
-	processed, err := w.Tick(ctx)
-	if err != nil {
+	if err := tickUntilEmbedding(ctx, t, pool, w, issueID); err != nil {
 		t.Fatalf("worker tick: %v", err)
-	}
-	if processed == 0 {
-		t.Fatalf("expected worker to process the seeded queue row, got 0")
 	}
 
 	// Embedding row should now exist.
@@ -78,10 +74,21 @@ func TestWorker_DrainsQueueAndUpsertsEmbedding(t *testing.T) {
 		t.Errorf("expected queue row drained, got %d remaining", count)
 	}
 
-	// Re-running with no fresh writes should be a no-op.
-	processed2, _ := w.Tick(ctx)
-	if processed2 != 0 {
-		t.Errorf("expected idle tick to process 0 rows, got %d", processed2)
+	// Re-running with no fresh writes must not requeue this issue. Other
+	// packages share the CI database and may enqueue unrelated rows in
+	// parallel, so assert on the target row instead of the global processed
+	// count.
+	if _, err := w.Tick(ctx); err != nil {
+		t.Fatalf("idle worker tick: %v", err)
+	}
+	if err := pool.QueryRow(ctx,
+		`SELECT count(*) FROM cerebro_search_embedding_queue WHERE target_type='issue' AND target_id=$1`,
+		issueID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count queue after idle tick: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("expected no queue row for target after idle tick, got %d", count)
 	}
 }
 
@@ -181,6 +188,27 @@ func seedIssue(t *testing.T, pool *pgxpool.Pool, wsID, userID pgtype.UUID, title
 		_, _ = pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id)
 	})
 	return id
+}
+
+func tickUntilEmbedding(ctx context.Context, t *testing.T, pool *pgxpool.Pool, w *Worker, issueID pgtype.UUID) error {
+	t.Helper()
+	for i := 0; i < 20; i++ {
+		if _, err := w.Tick(ctx); err != nil {
+			return err
+		}
+		var count int
+		if err := pool.QueryRow(ctx,
+			`SELECT count(*) FROM cerebro_search_embedding WHERE target_type='issue' AND target_id=$1`,
+			issueID,
+		).Scan(&count); err != nil {
+			return err
+		}
+		if count == 1 {
+			return nil
+		}
+	}
+	t.Fatalf("expected worker to process the seeded queue row")
+	return nil
 }
 
 // unitVec returns a EmbeddingDim-length unit vector with weight at one bucket.

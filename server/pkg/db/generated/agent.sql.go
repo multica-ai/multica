@@ -897,17 +897,17 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 
 const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id, context,
     trigger_summary, title, force_fresh_session, is_leader_task,
     original_user_id, delegating_agent_id, source_task_id, delegation_source
 )
 VALUES (
-    $1, $2, $3, 'queued', $4, $5,
-    $6, $7,
-    COALESCE($8::boolean, FALSE),
+    $1, $2, $3, 'queued', $4, $5, $6,
+    $7, $8,
     COALESCE($9::boolean, FALSE),
-    $10, $11,
-    $12, $13
+    COALESCE($10::boolean, FALSE),
+    $11, $12,
+    $13, $14
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, title, model_override
 `
@@ -918,6 +918,7 @@ type CreateAgentTaskParams struct {
 	IssueID           pgtype.UUID `json:"issue_id"`
 	Priority          int32       `json:"priority"`
 	TriggerCommentID  pgtype.UUID `json:"trigger_comment_id"`
+	Context           []byte      `json:"context"`
 	TriggerSummary    pgtype.Text `json:"trigger_summary"`
 	Title             pgtype.Text `json:"title"`
 	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
@@ -937,6 +938,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.IssueID,
 		arg.Priority,
 		arg.TriggerCommentID,
+		arg.Context,
 		arg.TriggerSummary,
 		arg.Title,
 		arg.ForceFreshSession,
