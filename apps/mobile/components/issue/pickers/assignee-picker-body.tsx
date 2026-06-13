@@ -4,7 +4,7 @@
  * status-picker-body.tsx for the split rationale.
  *
  * Mirrors web `packages/views/issues/components/pickers/assignee-picker.tsx`
- * (mobile skips frequency-sort; alphabetical instead).
+ * frequency sorting while keeping mobile's selected-row pin.
  *
  * Header + search bar are owned by the iOS native nav header registered in
  * `app/(app)/[workspace]/_layout.tsx` (assignee Stack.Screen sets
@@ -28,6 +28,7 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
+import { assigneeFrequencyOptions } from "@/data/queries/assignee-frequency";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
@@ -66,6 +67,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
   // Tint color for the checkmark accessory. Project uses a monochrome
@@ -78,18 +80,29 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase();
     const matchName = (name: string) => !q || name.toLowerCase().includes(q);
+    const freqMap = new Map<string, number>();
+    for (const entry of frequency) {
+      freqMap.set(
+        `${entry.assignee_type}:${entry.assignee_id}`,
+        entry.frequency,
+      );
+    }
+    const getFreq = (type: string, id: string) =>
+      freqMap.get(`${type}:${id}`) ?? 0;
 
     const memberRows: Row[] = [...members]
       .filter((m) => matchName(m.name))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort(
+        (a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id),
+      )
       .map((m) => ({ kind: "member" as const, member: m }));
     const agentRows: Row[] = [...agents]
       .filter((a) => matchName(a.name))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id))
       .map((a) => ({ kind: "agent" as const, agent: a }));
     const squadRows: Row[] = [...squads]
       .filter((s) => !s.archived_at && matchName(s.name))
-      .sort((a, b) => a.name.localeCompare(b.name))
+      .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id))
       .map((s) => ({ kind: "squad" as const, squad: s }));
 
     if (q) return [...memberRows, ...agentRows, ...squadRows];
@@ -108,7 +121,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
       ...agentRows.filter((r) => !isRowSelected(value, r)),
       ...squadRows.filter((r) => !isRowSelected(value, r)),
     ];
-  }, [members, agents, squads, query, value]);
+  }, [members, agents, squads, frequency, query, value]);
 
   const isSelected = (row: Row) => isRowSelected(value, row);
 

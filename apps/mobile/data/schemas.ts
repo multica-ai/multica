@@ -10,6 +10,7 @@
  * (root CLAUDE.md "API Response Compatibility") for these endpoints.
  */
 import { z } from "zod";
+import type { AssigneeFrequencyEntry } from "@multica/core/types/activity";
 import type {
   Agent,
   AgentTask,
@@ -620,6 +621,18 @@ export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
 
 export const RuntimeListSchema = z.array(RuntimeSchema).default([]);
 export const EMPTY_RUNTIME_LIST: RuntimeDevice[] = [];
+
+export const AssigneeFrequencyEntrySchema: z.ZodType<AssigneeFrequencyEntry> =
+  z.object({
+    assignee_type: z.string().default(""),
+    assignee_id: z.string().default(""),
+    frequency: z.number().default(0),
+  }).loose();
+
+export const AssigneeFrequencyListSchema = z
+  .array(AssigneeFrequencyEntrySchema)
+  .default([]);
+export const EMPTY_ASSIGNEE_FREQUENCY_LIST: AssigneeFrequencyEntry[] = [];
 
 // Squad schema — fields mobile actually consumes for the @mention suggestion
 // bar (id, name, archived_at filter) plus identity/timestamp fields that are

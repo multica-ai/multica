@@ -57,6 +57,7 @@ import type {
   User,
   Workspace,
 } from "@multica/core/types";
+import type { AssigneeFrequencyEntry } from "@multica/core/types/activity";
 import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
@@ -68,6 +69,7 @@ import {
   ActiveTasksResponseSchema,
   AgentListSchema,
   AgentTaskListSchema,
+  AssigneeFrequencyListSchema,
   AttachmentListSchema,
   AttachmentSchema,
   ChatMessageListSchema,
@@ -78,6 +80,7 @@ import {
   EMPTY_ACTIVE_TASKS_RESPONSE,
   EMPTY_AGENT_LIST,
   EMPTY_AGENT_TASK_LIST,
+  EMPTY_ASSIGNEE_FREQUENCY_LIST,
   EMPTY_ATTACHMENT_LIST,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
@@ -538,6 +541,20 @@ class ApiClient {
     return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
       endpoint: "listSquads",
     });
+  }
+
+  async getAssigneeFrequency(
+    opts?: { signal?: AbortSignal },
+  ): Promise<AssigneeFrequencyEntry[]> {
+    const raw = await this.fetch<unknown>("/api/assignee-frequency", {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(
+      raw,
+      AssigneeFrequencyListSchema,
+      EMPTY_ASSIGNEE_FREQUENCY_LIST,
+      { endpoint: "getAssigneeFrequency" },
+    );
   }
 
   // --- Issues ---
