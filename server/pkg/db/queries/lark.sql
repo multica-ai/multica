@@ -405,3 +405,32 @@ RETURNING *;
 -- handles dedup can sweep these too.
 DELETE FROM lark_binding_token
 WHERE expires_at < $1;
+
+-- =====================
+-- lark_issue_comment_mirror
+-- =====================
+
+-- name: ClaimLarkIssueCommentMirror :one
+INSERT INTO lark_issue_comment_mirror (
+    comment_id, issue_id, chat_session_id, installation_id, lark_chat_id, status
+) VALUES (
+    $1, $2, $3, $4, $5, 'claimed'
+)
+ON CONFLICT (comment_id) DO NOTHING
+RETURNING *;
+
+-- name: MarkLarkIssueCommentMirrorSent :exec
+UPDATE lark_issue_comment_mirror
+SET status = 'sent',
+    error = NULL,
+    sent_at = now(),
+    updated_at = now()
+WHERE comment_id = $1;
+
+-- name: MarkLarkIssueCommentMirrorFailed :exec
+UPDATE lark_issue_comment_mirror
+SET status = 'failed',
+    error = $2,
+    failed_at = now(),
+    updated_at = now()
+WHERE comment_id = $1;
