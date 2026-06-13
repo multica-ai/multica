@@ -40,6 +40,9 @@ export type SectionGroupBy = "none" | "action" | "project";
 /** How rows inside a section are ordered. */
 export type SectionSort = "newest" | "oldest";
 
+/** Semantic colour token for a circle count badge. */
+export type SectionBadgeColor = "brand" | "warning" | "success" | "destructive" | "muted";
+
 export interface InboxSectionConfig {
   /** Stable id for React keys + reorder/remove. */
   id: string;
@@ -63,6 +66,8 @@ export interface InboxSectionConfig {
   defaultCollapsed?: boolean;
   /** #3: how the count renders — plain number or a coloured circle badge. */
   countStyle?: "plain" | "circle";
+  /** #6: semantic colour for the circle count badge. Default "brand". */
+  badgeColor?: SectionBadgeColor;
   /** #4 (partial): hide muted rows in this box (e.g. reminders without muted). */
   excludeMuted?: boolean;
   // --- TECH-3413 #4: composable filter for kind === "filter" (AND of the

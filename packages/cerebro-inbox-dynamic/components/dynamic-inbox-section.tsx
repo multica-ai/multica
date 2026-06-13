@@ -23,7 +23,7 @@ import {
   type SectionFilterContext,
 } from "../section-filter";
 import { FilterBuilder } from "./filter-builder";
-import { sectionLabel, type InboxSectionConfig } from "../layout";
+import { sectionLabel, type InboxSectionConfig, type SectionBadgeColor } from "../layout";
 import { DynamicInboxRow } from "./dynamic-inbox-row";
 
 export interface DynamicInboxSectionProps {
@@ -48,6 +48,53 @@ export interface DynamicInboxSectionProps {
 
 function entryKey(entry: DynInboxEntry): string {
   return entry.kind === "notif" ? entry.item.issue_id ?? entry.item.id : entry.id;
+}
+
+const BADGE_COLOR_OPTIONS: Array<{
+  value: SectionBadgeColor;
+  label: string;
+  className: string;
+  swatchClassName: string;
+}> = [
+  {
+    value: "brand",
+    label: "Brand",
+    className: "bg-primary/10 text-primary",
+    swatchClassName: "bg-primary",
+  },
+  {
+    value: "warning",
+    label: "Warning",
+    className: "bg-warning/15 text-warning",
+    swatchClassName: "bg-warning",
+  },
+  {
+    value: "success",
+    label: "Success",
+    className: "bg-success/10 text-success",
+    swatchClassName: "bg-success",
+  },
+  {
+    value: "destructive",
+    label: "Destructive",
+    className: "bg-destructive/10 text-destructive",
+    swatchClassName: "bg-destructive",
+  },
+  {
+    value: "muted",
+    label: "Muted",
+    className: "bg-muted text-muted-foreground",
+    swatchClassName: "bg-muted-foreground",
+  },
+];
+
+const DEFAULT_BADGE_COLOR_CLASS_NAME = "bg-primary/10 text-primary";
+
+function badgeColorClassName(color: SectionBadgeColor | undefined): string {
+  return (
+    BADGE_COLOR_OPTIONS.find((option) => option.value === (color ?? "brand"))?.className ??
+    DEFAULT_BADGE_COLOR_CLASS_NAME
+  );
 }
 
 // Resolve the running/queued pip for a row from the same task state the
@@ -92,6 +139,8 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
 
   // #3: count as a plain number or a coloured circle badge.
   const countCircle = section.countStyle === "circle";
+  const badgeColor = section.badgeColor ?? "brand";
+  const badgeClassName = badgeColorClassName(badgeColor);
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
@@ -111,7 +160,9 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           {headerLabel}
         </span>
         {countCircle ? (
-          <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">
+          <span
+            className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-semibold ${badgeClassName}`}
+          >
             {selected.length}
           </span>
         ) : (
@@ -182,6 +233,23 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                 >
                   Count as circle badge {countCircle ? "✓" : ""}
                 </DropdownMenuItem>
+                {countCircle && (
+                  <>
+                    <DropdownMenuLabel>Badge color</DropdownMenuLabel>
+                    {BADGE_COLOR_OPTIONS.map((option) => (
+                      <DropdownMenuItem
+                        key={option.value}
+                        onClick={() => props.onChange({ ...section, badgeColor: option.value })}
+                      >
+                        <span
+                          aria-hidden
+                          className={`mr-2 inline-block size-2.5 rounded-full ${option.swatchClassName}`}
+                        />
+                        {option.label} {badgeColor === option.value ? "✓" : ""}
+                      </DropdownMenuItem>
+                    ))}
+                  </>
+                )}
                 <DropdownMenuItem
                   onClick={() => props.onChange({ ...section, excludeMuted: !section.excludeMuted })}
                 >
