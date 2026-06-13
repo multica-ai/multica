@@ -23,7 +23,7 @@ export {
   DEFAULT_INBOX_MODE,
   type InboxMode,
 } from "./dynamic-mode";
-export { CerebroInboxModeButton } from "./components/cerebro-inbox-mode-button";
+export { CerebroInboxModeMenuItem } from "./components/cerebro-inbox-mode-menu-item";
 export { CerebroInboxTimestamp } from "./components/cerebro-inbox-timestamp";
 export { CerebroInboxReminderRow } from "./components/cerebro-inbox-reminder-row";
 export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-request-row";

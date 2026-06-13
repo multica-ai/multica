@@ -66,6 +66,9 @@ export interface InboxSectionConfig {
   /** TECH-3422 — for the "team" (Slack) section: how many people to show.
    *  0 / undefined = show all. Starred people always count first. */
   maxPeople?: number;
+  /** TECH-3422 — sort order for the "team" (Chat) section's people + channels.
+   *  Starred always float to the top regardless. Default "name". */
+  teamSort?: "name" | "recent" | "unread";
 }
 
 export interface InboxTabConfig {
@@ -105,7 +108,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "filter", label: "Custom filter…" },
   // TECH-3422 — only surfaced in the Add-section menu when the
   // cerebro_inbox_slack_block flag is on (filtered in DynamicInbox).
-  { kind: "team", label: "Team & channels (Slack)" },
+  { kind: "team", label: "Chat" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {

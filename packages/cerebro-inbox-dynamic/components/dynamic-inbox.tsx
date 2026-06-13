@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -37,6 +37,7 @@ import {
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
@@ -118,6 +119,7 @@ export function DynamicInbox() {
   const actionLabels = useInboxActionGroupLabels();
   const setMode = useSetInboxMode();
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
+  const isMobile = useIsMobile();
 
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
@@ -302,11 +304,10 @@ export function DynamicInbox() {
     );
   }, [selected, clearSelection]);
 
-  return (
-    <ResizablePanelGroup orientation="horizontal">
-      <ResizablePanel id="list" defaultSize={420} minSize={300} className="flex flex-col">
-        {/* tabs */}
-        <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
+  const listColumn = (
+    <>
+      {/* tabs */}
+      <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
           {layout.tabs.map((tab) => (
             <button
               key={tab.id}
@@ -416,6 +417,8 @@ export function DynamicInbox() {
                             onOpenChannel={onOpenChannel}
                             maxPeople={section.maxPeople}
                             onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                            sort={section.teamSort}
+                            onSetSort={(s) => changeSection({ ...section, teamSort: s })}
                             onRemove={() => removeSection(section.id)}
                             onMove={(dir) => moveSection(section.id, dir)}
                             isFirst={i === 0}
@@ -448,6 +451,37 @@ export function DynamicInbox() {
             </SortableContext>
           </DndContext>
         </div>
+    </>
+  );
+
+  // TECH-3413 (Jesper feedback): mobile/PWA has no room for the side-by-side
+  // split. It renders a single column — the section list, or (when a row is
+  // open) that message full-screen with a Back button — mirroring how the
+  // classic inbox behaves on a phone.
+  if (isMobile) {
+    if (selected) {
+      return (
+        <div className="flex h-full flex-col min-h-0">
+          <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+            >
+              <ArrowLeft className="size-4" /> Back
+            </button>
+          </div>
+          <div className="flex flex-1 flex-col min-h-0">{detail}</div>
+        </div>
+      );
+    }
+    return <div className="flex h-full flex-col min-h-0">{listColumn}</div>;
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal">
+      <ResizablePanel id="list" defaultSize={420} minSize={300} className="flex flex-col">
+        {listColumn}
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
