@@ -96,6 +96,7 @@ import type {
   AdminWorkspaceSummary,
   AdminPendingInvitation,
   MemberRole,
+  Autopilot,
   AutopilotTrigger,
   AutopilotRun,
   CreateAutopilotRequest,

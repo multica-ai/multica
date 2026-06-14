@@ -113,7 +113,8 @@
     "./skills": "./skills/index.ts",
     "./skills/frontmatter": "./skills/frontmatter.ts",
     "./skills/stores": "./skills/stores/index.ts",
-    "./autopilots/stores": "./autopilots/stores/index.ts"
+    "./autopilots/stores": "./autopilots/stores/index.ts",
+    "./admin": "./admin/index.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",
