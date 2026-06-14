@@ -852,3 +852,153 @@ func TestRunAilRunUsesDigestIssueEnvFallback(t *testing.T) {
 		t.Fatalf("post count = %d, want 1", postCount)
 	}
 }
+
+func TestRunAilRunDigestIssueFlagOverridesEnvFallback(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	stage2Dir := filepath.Join(tmp, "stage2")
+	stage3Dir := filepath.Join(tmp, "stage3")
+	stage5Dir := filepath.Join(tmp, "diagnostics", "stage5")
+	var postedPath string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		postedPath = r.URL.Path
+		if r.URL.Path != "/api/issues/flag-tune/comments" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case http.MethodPost:
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "comment-1"})
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv(ailTuningIssueEnv, "env-tune")
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "t1", AgentID: "a1", Status: "failed", FailureReason: "agent_error"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+
+	cmd := newAilRunTestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	_ = cmd.Flags().Set("events-path", eventsPath)
+	_ = cmd.Flags().Set("stage2-output-dir", stage2Dir)
+	_ = cmd.Flags().Set("stage3-output-dir", stage3Dir)
+	setTestFlag(t, cmd, "stage5-output-dir", stage5Dir)
+	setTestFlag(t, cmd, "digest-issue", "flag-tune")
+	if err := runAilRun(cmd, nil); err != nil {
+		t.Fatalf("runAilRun: %v", err)
+	}
+
+	var result struct {
+		Stage5DigestPost  bool   `json:"stage5_digest_posted"`
+		Stage5DigestIssue string `json:"stage5_digest_issue"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("decode stdout: %v\n%s", err, buf.String())
+	}
+	if !result.Stage5DigestPost {
+		t.Fatal("stage5_digest_posted = false, want true")
+	}
+	if result.Stage5DigestIssue != "flag-tune" {
+		t.Fatalf("stage5_digest_issue = %q, want flag-tune", result.Stage5DigestIssue)
+	}
+	if postedPath != "/api/issues/flag-tune/comments" {
+		t.Fatalf("posted path = %q, want flag digest issue path", postedPath)
+	}
+}
+
+func TestRunAilRunReturnsErrorWhenStage5DigestWriteFails(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	stage2Dir := filepath.Join(tmp, "stage2")
+	stage3Dir := filepath.Join(tmp, "stage3")
+	blockingFile := filepath.Join(tmp, "blocking-stage5")
+	if err := os.WriteFile(blockingFile, []byte("block"), 0o644); err != nil {
+		t.Fatalf("write blocking file: %v", err)
+	}
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "t1", AgentID: "a1", Status: "failed", FailureReason: "agent_error"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+
+	cmd := newAilRunTestCmd()
+	_ = cmd.Flags().Set("events-path", eventsPath)
+	_ = cmd.Flags().Set("stage2-output-dir", stage2Dir)
+	_ = cmd.Flags().Set("stage3-output-dir", stage3Dir)
+	setTestFlag(t, cmd, "stage5-output-dir", filepath.Join(blockingFile, "stage5"))
+
+	err := runAilRun(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when stage5 output dir parent is a file, got nil")
+	}
+	if !strings.Contains(err.Error(), "stage5:") {
+		t.Fatalf("expected error to contain \"stage5:\", got: %v", err)
+	}
+}
+
+func TestPostAilStage5DigestReturnsListCommentsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/issues/tune-err/comments" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	_, err := postAilStage5Digest(newAilRunTestCmd(), "tune-err", ail.BuildStage5Digest(ail.Stage3Result{WindowDuration: "24h0m0s"}))
+
+	if err == nil {
+		t.Fatal("expected list comments error, got nil")
+	}
+	if !strings.Contains(err.Error(), "list comments") {
+		t.Fatalf("error = %v, want list comments context", err)
+	}
+}
+
+func TestPostAilStage5DigestReturnsAddCommentError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues/tune-err/comments" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		switch r.Method {
+		case http.MethodGet:
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		case http.MethodPost:
+			http.Error(w, "write failed", http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	posted, err := postAilStage5Digest(newAilRunTestCmd(), "tune-err", ail.BuildStage5Digest(ail.Stage3Result{WindowDuration: "24h0m0s"}))
+
+	if err == nil {
+		t.Fatal("expected add comment error, got nil")
+	}
+	if posted {
+		t.Fatal("posted = true, want false")
+	}
+	if !strings.Contains(err.Error(), "add comment") {
+		t.Fatalf("error = %v, want add comment context", err)
+	}
+}

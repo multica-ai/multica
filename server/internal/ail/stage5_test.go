@@ -122,6 +122,25 @@ func TestRunStage5DigestWritesDigestAndWatermark(t *testing.T) {
 	}
 }
 
+func TestRunStage5DigestReturnsErrorGivenBlockedWatermarkPath(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmp, defaultStage5WatermarkFile), 0o755); err != nil {
+		t.Fatalf("create blocking watermark directory: %v", err)
+	}
+
+	digest, err := RunStage5Digest(Stage5Config{OutputDir: tmp}, Stage3Result{WindowDuration: "24h0m0s"})
+
+	if err == nil {
+		t.Fatal("expected error for blocked watermark path, got nil")
+	}
+	if digest.Marker == "" {
+		t.Fatal("digest marker should be returned with the error")
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, defaultStage5DigestFile)); statErr != nil {
+		t.Fatalf("digest artifact should be written before watermark error: %v", statErr)
+	}
+}
+
 func TestRunStage5DigestReturnsErrorGivenBlockedOutputPath(t *testing.T) {
 	tmp := t.TempDir()
 	blockingFile := filepath.Join(tmp, "blocking-file")
@@ -235,5 +254,30 @@ func TestBuildStage5DigestSortsToolContractsAndHandlesMissingSourceSignature(t *
 	}
 	if digest.RecommendedTools[1].ExampleInput["failure_reason"] != "" {
 		t.Fatalf("missing signature failure_reason = %v, want empty string", digest.RecommendedTools[1].ExampleInput["failure_reason"])
+	}
+}
+
+func TestStage5MarkerStableForEquivalentDigestAndChangesWithWindow(t *testing.T) {
+	stage3 := Stage3Result{
+		WindowStart:    "2026-01-15T00:00:00Z",
+		WindowEnd:      "2026-01-16T00:00:00Z",
+		WindowDuration: "24h0m0s",
+		TotalEvents:    2,
+		RepeatSignatures: []Stage3Signature{
+			{Key: "agent_error::E_TIMEOUT", FailureReason: "agent_error", ErrorSignature: "E_TIMEOUT", Count: 2, UniqueTasks: 2, UniqueAgents: 1},
+		},
+	}
+	first := BuildStage5Digest(stage3)
+	second := BuildStage5Digest(stage3)
+	second.Marker = "ignored stale marker"
+
+	if Stage5Marker(first) != Stage5Marker(second) {
+		t.Fatalf("equivalent digests should have the same marker: %q vs %q", Stage5Marker(first), Stage5Marker(second))
+	}
+
+	stage3.WindowEnd = "2026-01-17T00:00:00Z"
+	changed := BuildStage5Digest(stage3)
+	if first.Marker == changed.Marker {
+		t.Fatalf("marker should change when the digest window changes: %q", first.Marker)
 	}
 }
