@@ -1,5 +1,22 @@
 # 单能力 Tasks
 
+## Reverse Sync 状态
+
+本任务包在 2026-06-12 回写当前代码状态：Flowtime Session 已部分实现，不能再按“从零新增”执行。
+
+已由当前代码完成或基本完成：
+
+- `server/internal/handler/focus.go` `CompleteFocus` 已按 Focus elapsed 创建 `time_entry`。
+- `server/internal/handler/focus.go` `suggestedBreakSeconds` 已提供首版休息建议算法。
+- `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` 已支持 Flowtime 正向计时、start/pause/resume/complete。
+- `apps/workspace/src/features/time-tracking/hooks/use-focus.ts` 已提供 Focus mutation hooks。
+
+剩余缺口：
+
+- My Time / Focus history 对 Flowtime 来源和结束原因的解释仍不足。
+- Daily Review 尚未消费 Flowtime duration、pause、abandon、break signals。
+- 需要确认 `time_entry.type` 当前约束是否已经允许 `flowtime`，不要重复创建迁移。
+
 ## 实现目标
 
 实现 Flowtime 开放式专注模式，完成时按实际时长写入 `time_entry(type='flowtime')` 并生成休息建议。
@@ -14,6 +31,7 @@
 ### Task 1：扩展 `time_entry.type`
 
 - 目标：允许 `flowtime` 类型。
+- 当前状态：执行前必须先检查当前 migration 和 `time_entry` 约束；如已允许则不要新增重复迁移。
 - 文件：
   - `server/migrations/*_time_entry_flowtime_type.up.sql`
   - `server/migrations/*_time_entry_flowtime_type.down.sql`
@@ -28,6 +46,7 @@
 ### Task 2：实现 Flowtime complete 计算
 
 - 目标：后端按实际 elapsed 创建 time entry。
+- 当前状态：已部分完成；见 `server/internal/handler/focus.go` `CompleteFocus`。
 - 文件：
   - `server/internal/handler/focus.go`
   - 必要时新增 `server/internal/service/focus.go`
@@ -43,6 +62,7 @@
 ### Task 3：实现休息建议算法
 
 - 目标：首版固定分段算法。
+- 当前状态：已部分完成；见 `server/internal/handler/focus.go` `suggestedBreakSeconds`。
 - 文件：
   - `server/internal/service/focus.go`
   - 或 `server/internal/handler/focus.go`
@@ -57,6 +77,7 @@
 ### Task 4：前端 Flowtime UI
 
 - 目标：在 `/focus` 中支持 Flowtime 正向计时。
+- 当前状态：已部分完成；见 `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`。
 - 文件：
   - `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`
   - `apps/workspace/src/features/time-tracking/components/FocusSessionPanel.tsx`

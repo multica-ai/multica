@@ -35,6 +35,7 @@ type IssueResponse struct {
 	CreatorID     string                         `json:"creator_id"`
 	ParentIssueID *string                        `json:"parent_issue_id"`
 	ProjectID     *string                        `json:"project_id"`
+	IssueTypeID   *string                        `json:"issue_type_id"`
 	Position      float64                        `json:"position"`
 	DueDate       *string                        `json:"due_date"`
 	StartDate     *string                        `json:"start_date"`
@@ -283,6 +284,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
+		IssueTypeID:   uuidToPtr(i.IssueTypeID),
 		Position:      i.Position,
 		DueDate:       timestampToPtr(i.DueDate),
 		StartDate:     timestampToPtr(i.StartDate),
@@ -292,6 +294,38 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 	}
+}
+
+func (h *Handler) defaultIssueTypeID(ctx context.Context, workspaceID string) (pgtype.UUID, error) {
+	workspaceUUID := parseUUID(workspaceID)
+	if err := h.Queries.EnsureDefaultIssueTypes(ctx, workspaceUUID); err != nil {
+		return pgtype.UUID{}, err
+	}
+	issueType, err := h.Queries.GetIssueTypeByKey(ctx, db.GetIssueTypeByKeyParams{
+		WorkspaceID: workspaceUUID,
+		Key:         "task",
+	})
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return issueType.ID, nil
+}
+
+func (h *Handler) validateIssueTypeID(ctx context.Context, workspaceID string, raw *string) (pgtype.UUID, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return h.defaultIssueTypeID(ctx, workspaceID)
+	}
+	issueTypeID := parseUUID(*raw)
+	if !issueTypeID.Valid {
+		return pgtype.UUID{}, fmt.Errorf("invalid issue_type_id")
+	}
+	if _, err := h.Queries.GetIssueType(ctx, db.GetIssueTypeParams{
+		ID:          issueTypeID,
+		WorkspaceID: parseUUID(workspaceID),
+	}); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("issue_type_id not found")
+	}
+	return issueTypeID, nil
 }
 
 func issueToReferenceResponse(i db.Issue, issuePrefix string) IssueReferenceResponse {
@@ -334,6 +368,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	var priorityFilter pgtype.Text
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
+	}
+	var issueTypeFilter pgtype.UUID
+	if issueTypeID := r.URL.Query().Get("issue_type_id"); issueTypeID != "" {
+		issueTypeFilter = parseUUID(issueTypeID)
 	}
 	var assigneeFilter pgtype.UUID
 	if a := r.URL.Query().Get("assignee_id"); a != "" {
@@ -415,6 +453,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ArchivedOnly:    archivedOnly,
 		Status:          statusFilter,
 		Priority:        priorityFilter,
+		IssueTypeID:     issueTypeFilter,
 		AssigneeID:      assigneeFilter,
 		AssigneeType:    assigneeTypeFilter,
 		CreatorID:       creatorFilter,
@@ -444,6 +483,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		ArchivedOnly:    archivedOnly,
 		Status:          statusFilter,
 		Priority:        priorityFilter,
+		IssueTypeID:     issueTypeFilter,
 		AssigneeID:      assigneeFilter,
 		AssigneeType:    assigneeTypeFilter,
 		CreatorID:       creatorFilter,
@@ -503,6 +543,7 @@ type CreateIssueRequest struct {
 	AssigneeID    *string `json:"assignee_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
+	IssueTypeID   *string `json:"issue_type_id"`
 	DueDate       *string `json:"due_date"`
 	StartDate     *string `json:"start_date"`
 	EndDate       *string `json:"end_date"`
@@ -568,6 +609,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	issueTypeID, err := h.validateIssueTypeID(r.Context(), workspaceID, req.IssueTypeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	dueDate, err := parseOptionalRFC3339Timestamp(req.DueDate, "due_date")
 	if err != nil {
@@ -621,6 +667,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		CreatorID:     parseUUID(actualCreatorID),
 		ParentIssueID: parentIssueID,
 		ProjectID:     projectID,
+		IssueTypeID:   issueTypeID,
 		Position:      0,
 		DueDate:       dueDate,
 		StartDate:     startDate,
@@ -666,6 +713,7 @@ type UpdateIssueRequest struct {
 	ParentIssueID *string  `json:"parent_issue_id"`
 	Position      *float64 `json:"position"`
 	ProjectID     *string  `json:"project_id"`
+	IssueTypeID   *string  `json:"issue_type_id"`
 	DueDate       *string  `json:"due_date"`
 	StartDate     *string  `json:"start_date"`
 	EndDate       *string  `json:"end_date"`
@@ -704,6 +752,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		AssigneeID:    prevIssue.AssigneeID,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
+		IssueTypeID:   prevIssue.IssueTypeID,
 		DueDate:       prevIssue.DueDate,
 		StartDate:     prevIssue.StartDate,
 		EndDate:       prevIssue.EndDate,
@@ -751,6 +800,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
 		}
+	}
+	if _, ok := rawFields["issue_type_id"]; ok {
+		issueTypeID, err := h.validateIssueTypeID(r.Context(), workspaceID, req.IssueTypeID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.IssueTypeID = issueTypeID
 	}
 	if _, ok := rawFields["parent_issue_id"]; ok {
 		validatedParentIssueID, err := h.validateParentIssue(r.Context(), workspaceID, &id, req.ParentIssueID)
@@ -1376,6 +1433,18 @@ func (h *Handler) BulkCreateIssues(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	if err := qtx.EnsureDefaultIssueTypes(r.Context(), parseUUID(workspaceID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
+	defaultIssueType, err := qtx.GetIssueTypeByKey(r.Context(), db.GetIssueTypeByKeyParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Key:         "task",
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create issues")
+		return
+	}
 	created := make([]IssueResponse, 0, len(req.Issues))
 
 	for _, item := range req.Issues {
@@ -1403,6 +1472,7 @@ func (h *Handler) BulkCreateIssues(w http.ResponseWriter, r *http.Request) {
 			Priority:    priority,
 			CreatorType: creatorType,
 			CreatorID:   parseUUID(actualCreatorID),
+			IssueTypeID: defaultIssueType.ID,
 			Position:    0,
 			Number:      issueNumber,
 		})

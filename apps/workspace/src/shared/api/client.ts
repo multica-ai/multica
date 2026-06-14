@@ -57,9 +57,17 @@ import type {
   TimeEntryOverlapConflict,
   TimeEntryOverlapErrorPayload,
   TeamTimeStats,
-  DailyReview,
-  DailyPlan,
-  AutomationTemplate,
+	  DailyReview,
+	  ConfirmDailyReviewRequest,
+	  DailyPlan,
+	  IssueType,
+	  Plan,
+	  PlanItem,
+	  UpsertPlanRequest,
+	  CreatePlanItemRequest,
+	  UpdatePlanItemRequest,
+	  PlanCandidatesResponse,
+	  AutomationTemplate,
   StandupSummaryResult,
   PomodoroSession,
   CompletePomodoroBody,
@@ -245,9 +253,10 @@ export class ApiClient {
     if (params?.offset) search.set("offset", String(params.offset));
     const wsId = params?.workspace_id ?? this.workspaceId;
     if (wsId) search.set("workspace_id", wsId);
-    if (params?.status) search.set("status", params.status);
-    if (params?.priority) search.set("priority", params.priority);
-    if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
+	    if (params?.status) search.set("status", params.status);
+	    if (params?.priority) search.set("priority", params.priority);
+	    if (params?.issue_type_id) search.set("issue_type_id", params.issue_type_id);
+	    if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_type) search.set("assignee_type", params.assignee_type);
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.creator_type) search.set("creator_type", params.creator_type);
@@ -294,9 +303,42 @@ export class ApiClient {
     });
   }
 
-  async deleteLabel(id: string): Promise<void> {
-    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
-  }
+	  async deleteLabel(id: string): Promise<void> {
+	    await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+	  }
+
+	  async listIssueTypes(includeArchived = false): Promise<IssueType[]> {
+	    const search = new URLSearchParams();
+	    if (includeArchived) search.set("include_archived", "true");
+	    const qs = search.toString();
+	    return this.fetch(`/api/issue-types${qs ? `?${qs}` : ""}`);
+	  }
+
+	  async createIssueType(data: {
+	    key: string;
+	    name: string;
+	    description?: string;
+	    color?: string;
+	    icon?: string;
+	    load_profile?: string;
+	    position?: number;
+	  }): Promise<IssueType> {
+	    return this.fetch("/api/issue-types", {
+	      method: "POST",
+	      body: JSON.stringify(data),
+	    });
+	  }
+
+	  async updateIssueType(id: string, data: Partial<Pick<IssueType, "name" | "description" | "color" | "icon" | "load_profile" | "position">>): Promise<IssueType> {
+	    return this.fetch(`/api/issue-types/${id}`, {
+	      method: "PATCH",
+	      body: JSON.stringify(data),
+	    });
+	  }
+
+	  async archiveIssueType(id: string): Promise<IssueType> {
+	    return this.fetch(`/api/issue-types/${id}/archive`, { method: "POST" });
+	  }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     const search = new URLSearchParams();
@@ -1178,8 +1220,11 @@ export class ApiClient {
   }
 
   /** Confirm (sign off) a specific daily review. */
-  async confirmDailyReview(reviewId: string): Promise<DailyReview> {
-    return this.fetch(`/api/daily-reviews/${reviewId}/confirm`, { method: "POST" });
+  async confirmDailyReview(reviewId: string, body?: ConfirmDailyReviewRequest): Promise<DailyReview> {
+    return this.fetch(`/api/daily-reviews/${reviewId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify(body ?? {}),
+    });
   }
 
   // Daily Plans
@@ -1204,9 +1249,54 @@ export class ApiClient {
   }
 
   /** Confirm (sign off) a specific daily plan. */
-  async confirmDailyPlan(planId: string): Promise<DailyPlan> {
-    return this.fetch(`/api/daily-plans/${planId}/confirm`, { method: "POST" });
-  }
+	  async confirmDailyPlan(planId: string): Promise<DailyPlan> {
+	    return this.fetch(`/api/daily-plans/${planId}/confirm`, { method: "POST" });
+	  }
+
+	  // Plans
+
+	  async getPlan(date = "today"): Promise<Plan> {
+	    const search = new URLSearchParams({ date });
+	    return this.fetch(`/api/plans?${search}`);
+	  }
+
+	  async upsertPlan(body: UpsertPlanRequest): Promise<Plan> {
+	    return this.fetch("/api/plans", {
+	      method: "POST",
+	      body: JSON.stringify(body),
+	    });
+	  }
+
+	  async listPlanCandidates(date: string, issueTypeId?: string): Promise<PlanCandidatesResponse> {
+	    const search = new URLSearchParams({ date });
+	    if (issueTypeId) search.set("issue_type_id", issueTypeId);
+	    return this.fetch(`/api/plans/candidates?${search}`);
+	  }
+
+	  async createPlanItem(planId: string, body: CreatePlanItemRequest): Promise<PlanItem> {
+	    return this.fetch(`/api/plans/${planId}/items`, {
+	      method: "POST",
+	      body: JSON.stringify(body),
+	    });
+	  }
+
+	  async updatePlanItem(itemId: string, body: UpdatePlanItemRequest): Promise<PlanItem> {
+	    return this.fetch(`/api/plan-items/${itemId}`, {
+	      method: "PATCH",
+	      body: JSON.stringify(body),
+	    });
+	  }
+
+	  async deletePlanItem(itemId: string): Promise<void> {
+	    await this.fetch(`/api/plan-items/${itemId}`, { method: "DELETE" });
+	  }
+
+	  async startPlanItemFocus(itemId: string, body: Partial<StartFocusRequest>): Promise<FocusMutationResponse> {
+	    return this.fetch(`/api/plan-items/${itemId}/start-focus`, {
+	      method: "POST",
+	      body: JSON.stringify(body),
+	    });
+	  }
 
   // Automation Templates
 
@@ -1314,6 +1404,10 @@ export class ApiClient {
 
   async resumeFocus(): Promise<FocusMutationResponse> {
     return this.fetch("/api/focus/resume", { method: "POST", body: "{}" });
+  }
+
+  async completeQuickStart(): Promise<FocusMutationResponse> {
+    return this.fetch("/api/focus/quick-start/complete", { method: "POST", body: "{}" });
   }
 
   async completeFocus(body?: CompleteFocusRequest): Promise<FocusCompleteResponse> {

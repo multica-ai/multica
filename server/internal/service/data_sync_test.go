@@ -54,7 +54,22 @@ func (s *stubDataSyncQuerier) CreateIssue(_ context.Context, arg db.CreateIssueP
 		Title:       arg.Title,
 		Status:      arg.Status,
 		Priority:    arg.Priority,
+		IssueTypeID: arg.IssueTypeID,
 		Number:      arg.Number,
+	}, nil
+}
+
+func (s *stubDataSyncQuerier) EnsureDefaultIssueTypes(_ context.Context, _ pgtype.UUID) error {
+	return nil
+}
+
+func (s *stubDataSyncQuerier) GetIssueTypeByKey(_ context.Context, arg db.GetIssueTypeByKeyParams) (db.IssueType, error) {
+	return db.IssueType{
+		ID:          util.ParseUUID("22222222-2222-2222-2222-222222222222"),
+		WorkspaceID: arg.WorkspaceID,
+		Key:         arg.Key,
+		Name:        "Task",
+		LoadProfile: "neutral",
 	}, nil
 }
 

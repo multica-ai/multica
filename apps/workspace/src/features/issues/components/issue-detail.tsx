@@ -87,7 +87,7 @@ import { api } from "@/shared/api";
 import { queryKeys } from "@/shared/query";
 import { downloadBlob, timeAgo } from "@/shared/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { IssueTimerSection } from "@/features/time-tracking";
+import { IssueTimerSection, StartFocusButton } from "@/features/time-tracking";
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -980,6 +980,12 @@ export function IssueDetail({ issueId, onDelete, defaultSidebarOpen = true, layo
             <span className="truncate">{issue.title}</span>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            <StartFocusButton
+              issueId={issue.id}
+              issueTitle={issue.title}
+              size="sm"
+              variant="outline"
+            />
             {/* Issue navigation */}
             {allIssues.length > 1 && (
               <div className="flex items-center gap-0.5 mr-1">

@@ -35,6 +35,15 @@ type DailyReviewResponse struct {
 	GeneratedBy  string  `json:"generated_by"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
+	EnergyLevel  *int32  `json:"energy_level"`
+	EnergyNote   *string `json:"energy_note"`
+	RecoveryNeed *bool   `json:"recovery_need"`
+}
+
+type ConfirmDailyReviewRequest struct {
+	EnergyLevel  *int32  `json:"energy_level"`
+	EnergyNote   *string `json:"energy_note"`
+	RecoveryNeed *bool   `json:"recovery_need"`
 }
 
 func dailyReviewToResponse(r db.DailyReview) DailyReviewResponse {
@@ -53,7 +62,17 @@ func dailyReviewToResponse(r db.DailyReview) DailyReviewResponse {
 		GeneratedBy:  r.GeneratedBy,
 		CreatedAt:    util.TimestampToString(r.CreatedAt),
 		UpdatedAt:    util.TimestampToString(r.UpdatedAt),
+		EnergyLevel:  int4ToPtr(r.EnergyLevel),
+		EnergyNote:   textToPtr(r.EnergyNote),
+		RecoveryNeed: boolToPtr(r.RecoveryNeed),
 	}
+}
+
+func boolToPtr(value pgtype.Bool) *bool {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Bool
 }
 
 // GenerateReview handles POST /api/daily-reviews/generate.
@@ -137,7 +156,23 @@ func (h *DailyReviewHandler) ConfirmReview(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	review, err := h.reviewSvc.ConfirmReview(r.Context(), workspaceID, reviewID)
+	var req ConfirmDailyReviewRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	if req.EnergyLevel != nil && (*req.EnergyLevel < 1 || *req.EnergyLevel > 5) {
+		writeError(w, http.StatusBadRequest, "invalid energy_level")
+		return
+	}
+
+	review, err := h.reviewSvc.ConfirmReview(r.Context(), workspaceID, reviewID, service.ReviewEnergyInput{
+		EnergyLevel:  req.EnergyLevel,
+		EnergyNote:   req.EnergyNote,
+		RecoveryNeed: req.RecoveryNeed,
+	})
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "review not found")

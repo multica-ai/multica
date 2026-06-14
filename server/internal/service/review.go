@@ -19,6 +19,13 @@ type ReviewService struct {
 	llm *llm.LLMClient
 }
 
+// ReviewEnergyInput carries optional self-reported energy signals for review confirmation.
+type ReviewEnergyInput struct {
+	EnergyLevel  *int32
+	EnergyNote   *string
+	RecoveryNeed *bool
+}
+
 // NewReviewService creates a ReviewService wired to the given queries and LLM client.
 func NewReviewService(q *db.Queries, llmClient *llm.LLMClient) *ReviewService {
 	return &ReviewService{q: q, llm: llmClient}
@@ -72,8 +79,10 @@ func (s *ReviewService) GenerateReviewDraft(ctx context.Context, workspaceID, us
 		openIssues = nil
 	}
 
+	focusSignals := s.loadFocusSignals(ctx, workspaceID, userID, dayStart, dayEnd)
+
 	// Generate draft content via LLM, falling back to a structured template.
-	content := s.generateContent(ctx, entries, completedIssues, openIssues, date)
+	content := s.generateContent(ctx, entries, completedIssues, openIssues, focusSignals, date)
 
 	reviewDate := pgtype.Date{Time: dayStart, Valid: true}
 	review, err := s.q.UpsertDailyReview(ctx, db.UpsertDailyReviewParams{
@@ -92,10 +101,26 @@ func (s *ReviewService) GenerateReviewDraft(ctx context.Context, workspaceID, us
 }
 
 // ConfirmReview marks a review draft as confirmed by the user.
-func (s *ReviewService) ConfirmReview(ctx context.Context, workspaceID, reviewID pgtype.UUID) (db.DailyReview, error) {
+func (s *ReviewService) ConfirmReview(ctx context.Context, workspaceID, reviewID pgtype.UUID, energy ReviewEnergyInput) (db.DailyReview, error) {
+	var energyLevel pgtype.Int4
+	if energy.EnergyLevel != nil {
+		energyLevel = pgtype.Int4{Int32: *energy.EnergyLevel, Valid: true}
+	}
+	var energyNote pgtype.Text
+	if energy.EnergyNote != nil && strings.TrimSpace(*energy.EnergyNote) != "" {
+		energyNote = pgtype.Text{String: strings.TrimSpace(*energy.EnergyNote), Valid: true}
+	}
+	var recoveryNeed pgtype.Bool
+	if energy.RecoveryNeed != nil {
+		recoveryNeed = pgtype.Bool{Bool: *energy.RecoveryNeed, Valid: true}
+	}
+
 	review, err := s.q.ConfirmDailyReview(ctx, db.ConfirmDailyReviewParams{
-		ID:          reviewID,
-		WorkspaceID: workspaceID,
+		ID:           reviewID,
+		WorkspaceID:  workspaceID,
+		EnergyLevel:  energyLevel,
+		EnergyNote:   energyNote,
+		RecoveryNeed: recoveryNeed,
 	})
 	if err != nil {
 		return db.DailyReview{}, fmt.Errorf("confirm review: %w", err)
@@ -123,9 +148,44 @@ func (s *ReviewService) ListReviews(ctx context.Context, workspaceID, userID pgt
 	})
 }
 
+// loadFocusSignals summarizes today's Focus events for review generation.
+func (s *ReviewService) loadFocusSignals(ctx context.Context, workspaceID, userID pgtype.UUID, since, until time.Time) focusSignalSummary {
+	events, err := s.q.ListFocusEventsByUserRange(ctx, db.ListFocusEventsByUserRangeParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+		CreatedFrom: pgtype.Timestamptz{Time: since, Valid: true},
+		CreatedTo:   pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("review: failed to list focus events", "error", err)
+		return focusSignalSummary{}
+	}
+
+	var summary focusSignalSummary
+	for _, event := range events {
+		switch event.EventType {
+		case "focus_completed":
+			summary.CompletedCount++
+			if event.DurationSeconds.Valid {
+				summary.TotalFocusSeconds += int64(event.DurationSeconds.Int32)
+			}
+		case "focus_abandoned":
+			summary.AbandonedCount++
+		case "break_skipped":
+			summary.BreakSkippedCount++
+		case "break_completed":
+			summary.BreakCompletedCount++
+		}
+		if event.Reason.Valid && event.Reason.String == "low_energy" {
+			summary.LowEnergyCount++
+		}
+	}
+	return summary
+}
+
 // generateContent tries LLM generation and falls back to a structured template.
-func (s *ReviewService) generateContent(ctx context.Context, entries []db.TimeEntry, completed, open []db.Issue, date time.Time) string {
-	prompt := s.buildReviewPrompt(entries, completed, open, date)
+func (s *ReviewService) generateContent(ctx context.Context, entries []db.TimeEntry, completed, open []db.Issue, focusSignals focusSignalSummary, date time.Time) string {
+	prompt := s.buildReviewPrompt(entries, completed, open, focusSignals, date)
 
 	if s.llm.IsConfigured() {
 		content, err := s.llm.Generate(ctx, prompt)
@@ -135,11 +195,11 @@ func (s *ReviewService) generateContent(ctx context.Context, entries []db.TimeEn
 		slog.Warn("review: LLM generation failed, using template", "error", err)
 	}
 
-	return s.templateReview(entries, completed, open, date)
+	return s.templateReview(entries, completed, open, focusSignals, date)
 }
 
 // buildReviewPrompt constructs the LLM prompt from context data.
-func (s *ReviewService) buildReviewPrompt(entries []db.TimeEntry, completed, open []db.Issue, date time.Time) string {
+func (s *ReviewService) buildReviewPrompt(entries []db.TimeEntry, completed, open []db.Issue, focusSignals focusSignalSummary, date time.Time) string {
 	var sb strings.Builder
 	sb.WriteString("You are a personal productivity assistant. Generate a nightly review in Chinese markdown.\n\n")
 	sb.WriteString(fmt.Sprintf("Today: %s\n\n", date.Format("2006-01-02")))
@@ -165,6 +225,13 @@ func (s *ReviewService) buildReviewPrompt(entries []db.TimeEntry, completed, ope
 	}
 	sb.WriteString("\n")
 
+	sb.WriteString("Focus signals:\n")
+	sb.WriteString(fmt.Sprintf("- Focus completed: %d\n", focusSignals.CompletedCount))
+	sb.WriteString(fmt.Sprintf("- Focus abandoned: %d\n", focusSignals.AbandonedCount))
+	sb.WriteString(fmt.Sprintf("- Low-energy reasons: %d\n", focusSignals.LowEnergyCount))
+	sb.WriteString(fmt.Sprintf("- Breaks skipped/completed: %d/%d\n", focusSignals.BreakSkippedCount, focusSignals.BreakCompletedCount))
+	sb.WriteString(fmt.Sprintf("- Focused total: %s\n\n", formatSeconds(focusSignals.TotalFocusSeconds)))
+
 	sb.WriteString("Assigned issues completed today:\n")
 	if len(completed) == 0 {
 		sb.WriteString("- None\n")
@@ -188,6 +255,7 @@ func (s *ReviewService) buildReviewPrompt(entries []db.TimeEntry, completed, ope
 	sb.WriteString(`Sections to include:
 ## 今日完成
 ## 时间分布 (top 3 time blocks)
+## 专注与恢复
 ## 遗留问题
 ## 简短反思 (1-2 sentences)
 
@@ -197,7 +265,7 @@ Keep it under 400 words. Be concrete, not generic.`)
 }
 
 // templateReview produces a structured Markdown review without LLM.
-func (s *ReviewService) templateReview(entries []db.TimeEntry, completed, open []db.Issue, date time.Time) string {
+func (s *ReviewService) templateReview(entries []db.TimeEntry, completed, open []db.Issue, focusSignals focusSignalSummary, date time.Time) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Daily Review - %s\n\n", date.Format("2006-01-02")))
 
@@ -225,6 +293,16 @@ func (s *ReviewService) templateReview(entries []db.TimeEntry, completed, open [
 			sb.WriteString(fmt.Sprintf("- %s: %s\n", desc, formatSeconds(e.DurationSeconds)))
 		}
 		sb.WriteString(fmt.Sprintf("\nTotal: %s\n", formatSeconds(totalSec)))
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### 专注与恢复\n")
+	sb.WriteString(fmt.Sprintf("- Completed focus blocks: %d\n", focusSignals.CompletedCount))
+	sb.WriteString(fmt.Sprintf("- Abandoned focus blocks: %d\n", focusSignals.AbandonedCount))
+	sb.WriteString(fmt.Sprintf("- Focused total: %s\n", formatSeconds(focusSignals.TotalFocusSeconds)))
+	sb.WriteString(fmt.Sprintf("- Breaks skipped/completed: %d/%d\n", focusSignals.BreakSkippedCount, focusSignals.BreakCompletedCount))
+	if focusSignals.LowEnergyCount > 0 || focusSignals.BreakSkippedCount > focusSignals.BreakCompletedCount {
+		sb.WriteString("- Recovery note: consider a lighter next-day plan and protect breaks.\n")
 	}
 	sb.WriteString("\n")
 

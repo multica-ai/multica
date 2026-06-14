@@ -65,9 +65,10 @@ export interface Issue {
   assignee_id: string | null;
   creator_type: IssueAssigneeType;
   creator_id: string;
-  parent_issue_id: string | null;
-  project_id: string | null;
-  position: number;
+	  parent_issue_id: string | null;
+	  project_id: string | null;
+	  issue_type_id?: string | null;
+	  position: number;
   due_date: string | null;
   start_date: string | null;
   end_date: string | null;

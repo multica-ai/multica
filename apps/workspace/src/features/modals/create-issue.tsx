@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { CalendarDays, Check, ChevronRight, Download, Loader2, Maximize2, Mic, Minimize2, Paperclip, Pencil, Square, Trash2, UserMinus, X as XIcon } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, Download, Loader2, Maximize2, Mic, Minimize2, Paperclip, Pencil, Shapes, Square, Trash2, UserMinus, X as XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { UpdateIssueRequest, IssueStatus, IssuePriority, IssueAssigneeType } from "@/shared/types";
@@ -35,6 +35,7 @@ import { useIssueDraftStore } from "@/features/issues/stores/draft-store";
 import { getCreateIssueInitialValues } from "@/features/issues/utils/template";
 import { applyVoiceTranscriptToDraft } from "@/features/issues/utils/voice-transcript";
 import { useIssueTranscription, useIssueVoiceRecorder } from "@/features/issues/hooks";
+import { useIssueTypesQuery } from "@/features/issues/hooks";
 import { useFileUpload } from "@/shared/hooks/use-file-upload";
 import { FileUploadButton } from "@/components/common/file-upload-button";
 import { ActorAvatar } from "@/components/common/actor-avatar";
@@ -105,6 +106,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [status, setStatus] = useState<IssueStatus>(initialValues.status);
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(initialValues.projectId);
   const [priority, setPriority] = useState<IssuePriority>(initialValues.priority);
+  const [issueTypeId, setIssueTypeId] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(initialValues.assigneeType);
   const [assigneeId, setAssigneeId] = useState<string | undefined>(initialValues.assigneeId);
@@ -130,6 +132,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   const [voiceTranscript, setVoiceTranscript] = useState("");
   const [keepOriginalRecording, setKeepOriginalRecording] = useState(false);
   const [pendingVoiceTranscription, setPendingVoiceTranscription] = useState(false);
+  const { data: issueTypes = [] } = useIssueTypesQuery();
 
   const assigneeQuery = assigneeFilter.toLowerCase();
   const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(assigneeQuery));
@@ -139,6 +142,9 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
     assigneeType && assigneeId
       ? getActorName(assigneeType, assigneeId)
       : "Assignee";
+  const selectedIssueType = issueTypes.find((item) => item.id === issueTypeId)
+    ?? issueTypes.find((item) => item.key === "task")
+    ?? issueTypes[0];
 
   const dueDateObj = dueDate ? new Date(dueDate) : undefined;
 
@@ -233,6 +239,12 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
   };
 
   useEffect(() => {
+    if (!issueTypeId && selectedIssueType?.id) {
+      setIssueTypeId(selectedIssueType.id);
+    }
+  }, [issueTypeId, selectedIssueType?.id]);
+
+  useEffect(() => {
     if (!pendingVoiceTranscription || !voiceRecorder.recording) return;
     const recording = voiceRecorder.recording;
     setPendingVoiceTranscription(false);
@@ -293,6 +305,7 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
         description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         status,
         priority,
+        issue_type_id: issueTypeId,
         project_id: selectedProjectId,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
@@ -543,6 +556,26 @@ export function CreateIssueModal({ onClose, data }: { onClose: () => void; data?
                     <PriorityIcon priority={p} className="h-3 w-3" inheritColor />
                     {PRIORITY_CONFIG[p].label}
                   </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {/* Issue type */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton>
+                  <Shapes className="size-3.5 text-muted-foreground" />
+                  <span>{selectedIssueType?.name ?? "Issue type"}</span>
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-48">
+              {issueTypes.map((issueType) => (
+                <DropdownMenuItem key={issueType.id} onClick={() => setIssueTypeId(issueType.id)}>
+                  <Shapes className="size-3.5 text-muted-foreground" />
+                  <span>{issueType.name}</span>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

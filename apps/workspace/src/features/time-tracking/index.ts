@@ -7,5 +7,6 @@ export { LiveDuration, formatDuration, getElapsedSeconds } from "./components/Li
 export { GlobalTimerWidget } from "./components/GlobalTimerWidget";
 export { IssueTimerSection } from "./components/IssueTimerSection";
 export { PomodoroStatusPill } from "./components/PomodoroStatusPill";
+export { StartFocusButton } from "./components/StartFocusButton";
 export { TimeEntryEditSheet } from "./components/TimeEntryEditSheet";
 export { TeamTimePage } from "./pages/TeamTimePage";

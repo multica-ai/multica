@@ -19,6 +19,15 @@ type DailyPlanService struct {
 	llm *llm.LLMClient
 }
 
+type focusSignalSummary struct {
+	CompletedCount      int
+	AbandonedCount      int
+	LowEnergyCount      int
+	BreakSkippedCount   int
+	BreakCompletedCount int
+	TotalFocusSeconds   int64
+}
+
 // NewDailyPlanService creates a DailyPlanService wired to the given queries and LLM client.
 func NewDailyPlanService(q *db.Queries, llmClient *llm.LLMClient) *DailyPlanService {
 	return &DailyPlanService{q: q, llm: llmClient}
@@ -60,6 +69,8 @@ func (s *DailyPlanService) GeneratePlanDraft(ctx context.Context, workspaceID, u
 		prevReview = &review
 	}
 
+	focusSignals := s.loadFocusSignals(ctx, workspaceID, userID, yesterdayStart, yesterdayStart.Add(24*time.Hour))
+
 	// Collect top issue IDs (first 3 by priority order).
 	topIssueIDs := make([]pgtype.UUID, 0, 3)
 	for i, issue := range openIssues {
@@ -70,7 +81,7 @@ func (s *DailyPlanService) GeneratePlanDraft(ctx context.Context, workspaceID, u
 	}
 
 	// Generate draft content via LLM, falling back to structured template.
-	content := s.generatePlanContent(ctx, openIssues, prevReview, planDate)
+	content := s.generatePlanContent(ctx, openIssues, prevReview, focusSignals, planDate)
 
 	dayStart := time.Date(planDate.Year(), planDate.Month(), planDate.Day(), 0, 0, 0, 0, time.UTC)
 	plan, err := s.q.UpsertDailyPlan(ctx, db.UpsertDailyPlanParams{
@@ -121,9 +132,44 @@ func (s *DailyPlanService) ListPlans(ctx context.Context, workspaceID, userID pg
 	})
 }
 
+// loadFocusSignals summarizes yesterday's Focus events for energy-aware planning.
+func (s *DailyPlanService) loadFocusSignals(ctx context.Context, workspaceID, userID pgtype.UUID, since, until time.Time) focusSignalSummary {
+	events, err := s.q.ListFocusEventsByUserRange(ctx, db.ListFocusEventsByUserRangeParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+		CreatedFrom: pgtype.Timestamptz{Time: since, Valid: true},
+		CreatedTo:   pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	if err != nil {
+		slog.Warn("plan: failed to list focus events", "error", err)
+		return focusSignalSummary{}
+	}
+
+	var summary focusSignalSummary
+	for _, event := range events {
+		switch event.EventType {
+		case "focus_completed":
+			summary.CompletedCount++
+			if event.DurationSeconds.Valid {
+				summary.TotalFocusSeconds += int64(event.DurationSeconds.Int32)
+			}
+		case "focus_abandoned":
+			summary.AbandonedCount++
+		case "break_skipped":
+			summary.BreakSkippedCount++
+		case "break_completed":
+			summary.BreakCompletedCount++
+		}
+		if event.Reason.Valid && event.Reason.String == "low_energy" {
+			summary.LowEnergyCount++
+		}
+	}
+	return summary
+}
+
 // generatePlanContent tries LLM generation and falls back to a structured template.
-func (s *DailyPlanService) generatePlanContent(ctx context.Context, issues []db.Issue, prevReview *db.DailyReview, planDate time.Time) string {
-	prompt := s.buildPlanPrompt(issues, prevReview, planDate)
+func (s *DailyPlanService) generatePlanContent(ctx context.Context, issues []db.Issue, prevReview *db.DailyReview, focusSignals focusSignalSummary, planDate time.Time) string {
+	prompt := s.buildPlanPrompt(issues, prevReview, focusSignals, planDate)
 
 	if s.llm.IsConfigured() {
 		content, err := s.llm.Generate(ctx, prompt)
@@ -133,11 +179,11 @@ func (s *DailyPlanService) generatePlanContent(ctx context.Context, issues []db.
 		slog.Warn("plan: LLM generation failed, using template", "error", err)
 	}
 
-	return s.templatePlan(issues, planDate)
+	return s.templatePlan(issues, prevReview, focusSignals, planDate)
 }
 
 // buildPlanPrompt constructs the LLM prompt from context data.
-func (s *DailyPlanService) buildPlanPrompt(issues []db.Issue, prevReview *db.DailyReview, planDate time.Time) string {
+func (s *DailyPlanService) buildPlanPrompt(issues []db.Issue, prevReview *db.DailyReview, focusSignals focusSignalSummary, planDate time.Time) string {
 	var sb strings.Builder
 	sb.WriteString("You are a personal productivity assistant. Generate a next-day plan in Chinese markdown.\n\n")
 	sb.WriteString(fmt.Sprintf("Tomorrow: %s\n\n", planDate.Format("2006-01-02")))
@@ -157,6 +203,27 @@ func (s *DailyPlanService) buildPlanPrompt(issues []db.Issue, prevReview *db.Dai
 	sb.WriteString("\n")
 
 	if prevReview != nil {
+		sb.WriteString("Energy signals from yesterday:\n")
+		if prevReview.EnergyLevel.Valid {
+			sb.WriteString(fmt.Sprintf("- Energy level: %d/5\n", prevReview.EnergyLevel.Int32))
+		} else {
+			sb.WriteString("- Energy level: not recorded\n")
+		}
+		if prevReview.RecoveryNeed.Valid && prevReview.RecoveryNeed.Bool {
+			sb.WriteString("- User requested lower load or recovery.\n")
+		}
+		if prevReview.EnergyNote.Valid {
+			sb.WriteString(fmt.Sprintf("- Energy note: %s\n", prevReview.EnergyNote.String))
+		}
+		sb.WriteString(fmt.Sprintf("- Focus completed: %d, abandoned: %d, low-energy reasons: %d, breaks skipped/completed: %d/%d, focused total: %s\n\n",
+			focusSignals.CompletedCount,
+			focusSignals.AbandonedCount,
+			focusSignals.LowEnergyCount,
+			focusSignals.BreakSkippedCount,
+			focusSignals.BreakCompletedCount,
+			formatSeconds(focusSignals.TotalFocusSeconds),
+		))
+
 		sb.WriteString("Yesterday's review notes:\n")
 		// Include only the first 500 chars to keep the prompt concise.
 		notes := prevReview.DraftContent
@@ -169,6 +236,7 @@ func (s *DailyPlanService) buildPlanPrompt(issues []db.Issue, prevReview *db.Dai
 
 	sb.WriteString(`Output:
 ## 🐸 三只青蛙 (Top 3 most important/hardest — do these first)
+## 🔋 精力安排 (high-energy work and low-energy fallback)
 ## 📋 建议顺序 (numbered list with time estimates)
 ## ⏰ 预计专注时间
 
@@ -178,7 +246,7 @@ Keep it under 300 words. Be specific about issue titles.`)
 }
 
 // templatePlan produces a structured Markdown plan without LLM.
-func (s *DailyPlanService) templatePlan(issues []db.Issue, planDate time.Time) string {
+func (s *DailyPlanService) templatePlan(issues []db.Issue, prevReview *db.DailyReview, focusSignals focusSignalSummary, planDate time.Time) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## Tomorrow's Plan - %s\n\n", planDate.Format("2006-01-02")))
 
@@ -195,6 +263,25 @@ func (s *DailyPlanService) templatePlan(issues []db.Issue, planDate time.Time) s
 		for i := len(issues); i < 3; i++ {
 			sb.WriteString(fmt.Sprintf("%d. -\n", i+1))
 		}
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### 🔋 精力安排\n")
+	lowEnergy := focusSignals.LowEnergyCount > 0 || focusSignals.AbandonedCount > 0
+	if prevReview != nil {
+		if prevReview.EnergyLevel.Valid && prevReview.EnergyLevel.Int32 <= 2 {
+			lowEnergy = true
+		}
+		if prevReview.RecoveryNeed.Valid && prevReview.RecoveryNeed.Bool {
+			lowEnergy = true
+		}
+	}
+	if lowEnergy {
+		sb.WriteString("- 高精力窗口：只安排 1 个最重要任务，避免连续深度工作。\n")
+		sb.WriteString("- 低精力备选：选择小修复、整理、回复、复盘类任务。\n")
+	} else {
+		sb.WriteString("- 高精力窗口：优先处理三只青蛙中的第 1 个。\n")
+		sb.WriteString("- 低精力备选：保留一个低风险任务作为下午或中断后的恢复项。\n")
 	}
 	sb.WriteString("\n")
 

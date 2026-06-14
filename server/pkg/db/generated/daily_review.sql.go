@@ -13,18 +13,33 @@ import (
 
 const confirmDailyReview = `-- name: ConfirmDailyReview :one
 UPDATE daily_review
-SET status = 'confirmed', confirmed_at = now(), updated_at = now()
+SET
+    status = 'confirmed',
+    confirmed_at = now(),
+    energy_level = $3,
+    energy_note = $4,
+    recovery_need = $5,
+    updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at
+RETURNING id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need
 `
 
 type ConfirmDailyReviewParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID           pgtype.UUID `json:"id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	EnergyLevel  pgtype.Int4 `json:"energy_level"`
+	EnergyNote   pgtype.Text `json:"energy_note"`
+	RecoveryNeed pgtype.Bool `json:"recovery_need"`
 }
 
 func (q *Queries) ConfirmDailyReview(ctx context.Context, arg ConfirmDailyReviewParams) (DailyReview, error) {
-	row := q.db.QueryRow(ctx, confirmDailyReview, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, confirmDailyReview,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.EnergyLevel,
+		arg.EnergyNote,
+		arg.RecoveryNeed,
+	)
 	var i DailyReview
 	err := row.Scan(
 		&i.ID,
@@ -37,12 +52,15 @@ func (q *Queries) ConfirmDailyReview(ctx context.Context, arg ConfirmDailyReview
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EnergyLevel,
+		&i.EnergyNote,
+		&i.RecoveryNeed,
 	)
 	return i, err
 }
 
 const getDailyReviewByDate = `-- name: GetDailyReviewByDate :one
-SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at FROM daily_review
+SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need FROM daily_review
 WHERE workspace_id = $1 AND user_id = $2 AND review_date = $3
 `
 
@@ -66,12 +84,15 @@ func (q *Queries) GetDailyReviewByDate(ctx context.Context, arg GetDailyReviewBy
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EnergyLevel,
+		&i.EnergyNote,
+		&i.RecoveryNeed,
 	)
 	return i, err
 }
 
 const getDailyReviewByID = `-- name: GetDailyReviewByID :one
-SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at FROM daily_review
+SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need FROM daily_review
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -94,12 +115,15 @@ func (q *Queries) GetDailyReviewByID(ctx context.Context, arg GetDailyReviewByID
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EnergyLevel,
+		&i.EnergyNote,
+		&i.RecoveryNeed,
 	)
 	return i, err
 }
 
 const listDailyReviews = `-- name: ListDailyReviews :many
-SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at FROM daily_review
+SELECT id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need FROM daily_review
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY review_date DESC
 LIMIT $3
@@ -131,6 +155,9 @@ func (q *Queries) ListDailyReviews(ctx context.Context, arg ListDailyReviewsPara
 			&i.GeneratedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.EnergyLevel,
+			&i.EnergyNote,
+			&i.RecoveryNeed,
 		); err != nil {
 			return nil, err
 		}
@@ -152,7 +179,7 @@ DO UPDATE SET
     status = 'draft',
     confirmed_at = NULL,
     updated_at = now()
-RETURNING id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at
+RETURNING id, workspace_id, user_id, review_date, draft_content, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need
 `
 
 type UpsertDailyReviewParams struct {
@@ -183,6 +210,9 @@ func (q *Queries) UpsertDailyReview(ctx context.Context, arg UpsertDailyReviewPa
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.EnergyLevel,
+		&i.EnergyNote,
+		&i.RecoveryNeed,
 	)
 	return i, err
 }

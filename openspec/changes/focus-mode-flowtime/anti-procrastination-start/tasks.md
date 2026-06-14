@@ -1,5 +1,19 @@
 # 单能力 Tasks
 
+## Reverse Sync 状态
+
+本任务包在 2026-06-12 回写当前代码状态：Anti-Procrastination Start 已部分实现，不能再按“从零新增”执行。
+
+已由当前代码完成或基本完成：
+
+- `server/internal/handler/focus.go` `validFocusReason` 已支持 `unclear_next_step`、`too_large`、`low_energy`、`avoidance`、`interruption`、`blocked`、`urgent_work`、`not_needed`、`other`。
+- `server/internal/handler/focus.go` `StartFocus` / `transitionFocusWithReason` 已支持 start/pause/abandon reason 写入。
+- `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` 已提供 `2 min start` mode、commitment、start friction、pause reason、abandon reason UI。
+
+剩余缺口：
+
+- Complete and take break 作为 quick start 后续动作仍未单独实现；当前完成态默认 Continue Flowtime。
+
 ## 实现目标
 
 实现 2 分钟反拖延启动、下一步承诺和轻量原因记录，原因数据写入 `focus_events`。
@@ -14,6 +28,7 @@
 ### Task 1：扩展原因枚举和事件写入
 
 - 目标：支持 start/pause/abandon reason。
+- 当前状态：已部分完成；见 `server/internal/handler/focus.go` `validFocusReason` / `transitionFocusWithReason`。
 - 文件：
   - `server/internal/handler/focus.go`
   - `server/internal/service/focus.go`
@@ -31,6 +46,7 @@
 ### Task 2：实现 two-minute start preset
 
 - 目标：支持 `mode=quick_start`、`preset=two_minute_start`。
+- 当前状态：已完成；`quick_start` mode、真实 2 分钟倒计时和 completed event 已存在。
 - 文件：
   - `server/internal/handler/focus.go`
   - `server/internal/service/focus.go`
@@ -47,6 +63,7 @@
 ### Task 3：实现下一步承诺 UI
 
 - 目标：启动前提供轻量 commitment 输入。
+- 当前状态：已部分完成；见 `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`。
 - 文件：
   - `apps/workspace/src/features/time-tracking/components/FocusContextEditor.tsx`
   - 或新增 `AntiProcrastinationStartPanel.tsx`
@@ -60,6 +77,7 @@
 ### Task 4：实现原因选择 UI
 
 - 目标：启动、暂停、放弃支持可选原因。
+- 当前状态：已部分完成；见 `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`。
 - 文件：
   - `apps/workspace/src/features/time-tracking/components/FocusReasonPicker.tsx`
   - `apps/workspace/src/features/time-tracking/components/FocusSessionPanel.tsx`
@@ -74,6 +92,7 @@
 ### Task 5：处理 quick start 后续动作
 
 - 目标：2 分钟结束后支持继续 Flowtime 或完成。
+- 当前状态：已部分完成；Continue Flowtime 已完成，Complete and take break 仍待后续实现。
 - 文件：
   - `server/internal/handler/focus.go`
   - `server/internal/service/focus.go`

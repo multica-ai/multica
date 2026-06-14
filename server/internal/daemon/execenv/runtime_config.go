@@ -44,9 +44,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	// Inject workspace-level context (design guidelines, naming conventions, etc.)
 	// so the agent has project-specific guidance when executing tasks.
-	if ctx.WorkspaceContext != "" {
+	workspaceContext := strings.TrimSpace(ctx.WorkspaceContext)
+	if workspaceContext != "" {
 		b.WriteString("## Workspace Context\n\n")
-		b.WriteString(ctx.WorkspaceContext)
+		b.WriteString(workspaceContext)
 		b.WriteString("\n\n")
 	}
 

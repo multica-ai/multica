@@ -1,6 +1,6 @@
 -- name: CreateTimeEntry :one
-INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO time_entry (workspace_id, user_id, issue_id, plan_item_id, description, start_time, stop_time, duration_seconds, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: GetTimeEntryByID :one
@@ -31,9 +31,10 @@ ORDER BY start_time DESC;
 UPDATE time_entry
 SET description      = COALESCE($3, description),
     issue_id         = $4,
-    start_time       = COALESCE($5, start_time),
-    stop_time        = COALESCE($6, stop_time),
-    duration_seconds = COALESCE($7, duration_seconds),
+    plan_item_id     = $5,
+    start_time       = COALESCE($6, start_time),
+    stop_time        = COALESCE($7, stop_time),
+    duration_seconds = COALESCE($8, duration_seconds),
     updated_at       = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

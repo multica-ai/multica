@@ -17,7 +17,7 @@ UPDATE issue SET
     archived_by = COALESCE(archived_by, $2),
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id
 `
 
 type ArchiveIssueParams struct {
@@ -53,6 +53,7 @@ func (q *Queries) ArchiveIssue(ctx context.Context, arg ArchiveIssueParams) (Iss
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
@@ -157,57 +158,58 @@ WHERE workspace_id = $1
   )
   AND ($4::text IS NULL OR status = $4)
   AND ($5::text IS NULL OR priority = $5)
-  AND ($6::uuid IS NULL OR assignee_id = $6)
-  AND ($7::text IS NULL OR assignee_type = $7)
-  AND ($8::uuid IS NULL OR creator_id = $8)
-  AND ($9::uuid IS NULL OR project_id = $9)
-  AND ($10::text IS NULL OR creator_type = $10)
+  AND ($6::uuid IS NULL OR issue_type_id = $6)
+  AND ($7::uuid IS NULL OR assignee_id = $7)
+  AND ($8::text IS NULL OR assignee_type = $8)
+  AND ($9::uuid IS NULL OR creator_id = $9)
+  AND ($10::uuid IS NULL OR project_id = $10)
+  AND ($11::text IS NULL OR creator_type = $11)
   AND (
-      COALESCE(cardinality($11::uuid[]), 0) = 0
+      COALESCE(cardinality($12::uuid[]), 0) = 0
       OR (
-          $12::text = 'any'
+          $13::text = 'any'
           AND EXISTS (
               SELECT 1
               FROM issue_to_label itl
               WHERE itl.issue_id = issue.id
-                AND itl.label_id = ANY($11::uuid[])
+                AND itl.label_id = ANY($12::uuid[])
           )
       )
       OR (
-          $12::text = 'all'
+          $13::text = 'all'
           AND (
               SELECT count(DISTINCT itl.label_id)
               FROM issue_to_label itl
               WHERE itl.issue_id = issue.id
-                AND itl.label_id = ANY($11::uuid[])
-          ) = cardinality($11::uuid[])
+                AND itl.label_id = ANY($12::uuid[])
+          ) = cardinality($12::uuid[])
       )
   )
   AND (
       (
-          $13::text IS NULL
-          AND $14::uuid IS NULL
-          AND $15::int IS NULL
+          $14::text IS NULL
+          AND $15::uuid IS NULL
+          AND $16::int IS NULL
       )
-      OR title ILIKE '%' || $13 || '%'
-      OR COALESCE(description, '') ILIKE '%' || $13 || '%'
-      OR ($14::uuid IS NOT NULL AND id = $14)
-      OR ($15::int IS NOT NULL AND number = $15)
+      OR title ILIKE '%' || $14 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $14 || '%'
+      OR ($15::uuid IS NOT NULL AND id = $15)
+      OR ($16::int IS NOT NULL AND number = $16)
   )
-  AND ($16::date IS NULL OR timezone('UTC', due_date)::date >= $16::date)
-  AND ($17::date IS NULL OR timezone('UTC', due_date)::date <= $17::date)
-  AND ($18::date IS NULL OR timezone('UTC', start_date)::date >= $18::date)
-  AND ($19::date IS NULL OR timezone('UTC', start_date)::date <= $19::date)
-  AND ($20::date IS NULL OR timezone('UTC', end_date)::date >= $20::date)
-  AND ($21::date IS NULL OR timezone('UTC', end_date)::date <= $21::date)
+  AND ($17::date IS NULL OR timezone('UTC', due_date)::date >= $17::date)
+  AND ($18::date IS NULL OR timezone('UTC', due_date)::date <= $18::date)
+  AND ($19::date IS NULL OR timezone('UTC', start_date)::date >= $19::date)
+  AND ($20::date IS NULL OR timezone('UTC', start_date)::date <= $20::date)
+  AND ($21::date IS NULL OR timezone('UTC', end_date)::date >= $21::date)
+  AND ($22::date IS NULL OR timezone('UTC', end_date)::date <= $22::date)
   AND (
-      $22::text IS NULL
+      $23::text IS NULL
       OR (
-          $22::text = 'backlog'
+          $23::text = 'backlog'
           AND status = 'backlog'
       )
       OR (
-          $22::text = 'today'
+          $23::text = 'today'
           AND status NOT IN ('done', 'cancelled')
           AND (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -222,7 +224,7 @@ WHERE workspace_id = $1
           )
       )
       OR (
-          $22::text = 'upcoming'
+          $23::text = 'upcoming'
           AND status NOT IN ('done', 'cancelled')
           AND NOT (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -250,6 +252,7 @@ type CountListedIssuesParams struct {
 	ArchivedOnly    pgtype.Bool   `json:"archived_only"`
 	Status          pgtype.Text   `json:"status"`
 	Priority        pgtype.Text   `json:"priority"`
+	IssueTypeID     pgtype.UUID   `json:"issue_type_id"`
 	AssigneeID      pgtype.UUID   `json:"assignee_id"`
 	AssigneeType    pgtype.Text   `json:"assignee_type"`
 	CreatorID       pgtype.UUID   `json:"creator_id"`
@@ -276,6 +279,7 @@ func (q *Queries) CountListedIssues(ctx context.Context, arg CountListedIssuesPa
 		arg.ArchivedOnly,
 		arg.Status,
 		arg.Priority,
+		arg.IssueTypeID,
 		arg.AssigneeID,
 		arg.AssigneeType,
 		arg.CreatorID,
@@ -303,10 +307,10 @@ const createIssue = `-- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, project_id, position, due_date, start_date, end_date, number
+    parent_issue_id, project_id, issue_type_id, position, due_date, start_date, end_date, number
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id
 `
 
 type CreateIssueParams struct {
@@ -321,6 +325,7 @@ type CreateIssueParams struct {
 	CreatorID     pgtype.UUID        `json:"creator_id"`
 	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
+	IssueTypeID   pgtype.UUID        `json:"issue_type_id"`
 	Position      float64            `json:"position"`
 	DueDate       pgtype.Timestamptz `json:"due_date"`
 	StartDate     pgtype.Timestamptz `json:"start_date"`
@@ -341,6 +346,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.CreatorID,
 		arg.ParentIssueID,
 		arg.ProjectID,
+		arg.IssueTypeID,
 		arg.Position,
 		arg.DueDate,
 		arg.StartDate,
@@ -372,6 +378,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
@@ -386,7 +393,7 @@ func (q *Queries) DeleteIssue(ctx context.Context, id pgtype.UUID) error {
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE id = $1
 `
 
@@ -417,12 +424,13 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -458,12 +466,13 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -499,12 +508,13 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
@@ -542,6 +552,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.StartDate,
 			&i.EndDate,
 			&i.ProjectID,
+			&i.IssueTypeID,
 		); err != nil {
 			return nil, err
 		}
@@ -554,7 +565,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listIssues = `-- name: ListIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE workspace_id = $1
   AND (
       (COALESCE($4::bool, false) = true)
@@ -570,57 +581,58 @@ WHERE workspace_id = $1
   )
   AND ($6::text IS NULL OR status = $6)
   AND ($7::text IS NULL OR priority = $7)
-  AND ($8::uuid IS NULL OR assignee_id = $8)
-  AND ($9::text IS NULL OR assignee_type = $9)
-  AND ($10::uuid IS NULL OR creator_id = $10)
-  AND ($11::uuid IS NULL OR project_id = $11)
-  AND ($12::text IS NULL OR creator_type = $12)
+  AND ($8::uuid IS NULL OR issue_type_id = $8)
+  AND ($9::uuid IS NULL OR assignee_id = $9)
+  AND ($10::text IS NULL OR assignee_type = $10)
+  AND ($11::uuid IS NULL OR creator_id = $11)
+  AND ($12::uuid IS NULL OR project_id = $12)
+  AND ($13::text IS NULL OR creator_type = $13)
   AND (
-      COALESCE(cardinality($13::uuid[]), 0) = 0
+      COALESCE(cardinality($14::uuid[]), 0) = 0
       OR (
-          $14::text = 'any'
+          $15::text = 'any'
           AND EXISTS (
               SELECT 1
               FROM issue_to_label itl
               WHERE itl.issue_id = issue.id
-                AND itl.label_id = ANY($13::uuid[])
+                AND itl.label_id = ANY($14::uuid[])
           )
       )
       OR (
-          $14::text = 'all'
+          $15::text = 'all'
           AND (
               SELECT count(DISTINCT itl.label_id)
               FROM issue_to_label itl
               WHERE itl.issue_id = issue.id
-                AND itl.label_id = ANY($13::uuid[])
-          ) = cardinality($13::uuid[])
+                AND itl.label_id = ANY($14::uuid[])
+          ) = cardinality($14::uuid[])
       )
   )
   AND (
       (
-          $15::text IS NULL
-          AND $16::uuid IS NULL
-          AND $17::int IS NULL
+          $16::text IS NULL
+          AND $17::uuid IS NULL
+          AND $18::int IS NULL
       )
-      OR title ILIKE '%' || $15 || '%'
-      OR COALESCE(description, '') ILIKE '%' || $15 || '%'
-      OR ($16::uuid IS NOT NULL AND id = $16)
-      OR ($17::int IS NOT NULL AND number = $17)
+      OR title ILIKE '%' || $16 || '%'
+      OR COALESCE(description, '') ILIKE '%' || $16 || '%'
+      OR ($17::uuid IS NOT NULL AND id = $17)
+      OR ($18::int IS NOT NULL AND number = $18)
   )
-  AND ($18::date IS NULL OR timezone('UTC', due_date)::date >= $18::date)
-  AND ($19::date IS NULL OR timezone('UTC', due_date)::date <= $19::date)
-  AND ($20::date IS NULL OR timezone('UTC', start_date)::date >= $20::date)
-  AND ($21::date IS NULL OR timezone('UTC', start_date)::date <= $21::date)
-  AND ($22::date IS NULL OR timezone('UTC', end_date)::date >= $22::date)
-  AND ($23::date IS NULL OR timezone('UTC', end_date)::date <= $23::date)
+  AND ($19::date IS NULL OR timezone('UTC', due_date)::date >= $19::date)
+  AND ($20::date IS NULL OR timezone('UTC', due_date)::date <= $20::date)
+  AND ($21::date IS NULL OR timezone('UTC', start_date)::date >= $21::date)
+  AND ($22::date IS NULL OR timezone('UTC', start_date)::date <= $22::date)
+  AND ($23::date IS NULL OR timezone('UTC', end_date)::date >= $23::date)
+  AND ($24::date IS NULL OR timezone('UTC', end_date)::date <= $24::date)
   AND (
-      $24::text IS NULL
+      $25::text IS NULL
       OR (
-          $24::text = 'backlog'
+          $25::text = 'backlog'
           AND status = 'backlog'
       )
       OR (
-          $24::text = 'today'
+          $25::text = 'today'
           AND status NOT IN ('done', 'cancelled')
           AND (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -635,7 +647,7 @@ WHERE workspace_id = $1
           )
       )
       OR (
-          $24::text = 'upcoming'
+          $25::text = 'upcoming'
           AND status NOT IN ('done', 'cancelled')
           AND NOT (
               (due_date IS NOT NULL AND timezone('UTC', due_date)::date = timezone('UTC', now())::date)
@@ -667,6 +679,7 @@ type ListIssuesParams struct {
 	ArchivedOnly    pgtype.Bool   `json:"archived_only"`
 	Status          pgtype.Text   `json:"status"`
 	Priority        pgtype.Text   `json:"priority"`
+	IssueTypeID     pgtype.UUID   `json:"issue_type_id"`
 	AssigneeID      pgtype.UUID   `json:"assignee_id"`
 	AssigneeType    pgtype.Text   `json:"assignee_type"`
 	CreatorID       pgtype.UUID   `json:"creator_id"`
@@ -695,6 +708,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue
 		arg.ArchivedOnly,
 		arg.Status,
 		arg.Priority,
+		arg.IssueTypeID,
 		arg.AssigneeID,
 		arg.AssigneeType,
 		arg.CreatorID,
@@ -744,6 +758,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]Issue
 			&i.StartDate,
 			&i.EndDate,
 			&i.ProjectID,
+			&i.IssueTypeID,
 		); err != nil {
 			return nil, err
 		}
@@ -845,7 +860,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 
 const listOpenIssuesForMember = `-- name: ListOpenIssuesForMember :many
 
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE workspace_id = $1
   AND assignee_type = 'member'
   AND assignee_id = $2
@@ -897,6 +912,7 @@ func (q *Queries) ListOpenIssuesForMember(ctx context.Context, arg ListOpenIssue
 			&i.StartDate,
 			&i.EndDate,
 			&i.ProjectID,
+			&i.IssueTypeID,
 		); err != nil {
 			return nil, err
 		}
@@ -909,7 +925,7 @@ func (q *Queries) ListOpenIssuesForMember(ctx context.Context, arg ListOpenIssue
 }
 
 const listRecentlyCompletedIssuesForMember = `-- name: ListRecentlyCompletedIssuesForMember :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id FROM issue
 WHERE workspace_id = $1
   AND assignee_type = 'member'
   AND assignee_id = $2
@@ -960,6 +976,7 @@ func (q *Queries) ListRecentlyCompletedIssuesForMember(ctx context.Context, arg 
 			&i.StartDate,
 			&i.EndDate,
 			&i.ProjectID,
+			&i.IssueTypeID,
 		); err != nil {
 			return nil, err
 		}
@@ -977,7 +994,7 @@ UPDATE issue SET
     archived_by = NULL,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id
 `
 
 type RestoreIssueParams struct {
@@ -1012,6 +1029,7 @@ func (q *Queries) RestoreIssue(ctx context.Context, arg RestoreIssueParams) (Iss
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
@@ -1028,11 +1046,12 @@ UPDATE issue SET
     due_date = $9,
     parent_issue_id = $10,
     project_id = $11,
-    start_date = $12,
-    end_date = $13,
+    issue_type_id = COALESCE($12, issue_type_id),
+    start_date = $13,
+    end_date = $14,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id
 `
 
 type UpdateIssueParams struct {
@@ -1047,6 +1066,7 @@ type UpdateIssueParams struct {
 	DueDate       pgtype.Timestamptz `json:"due_date"`
 	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
+	IssueTypeID   pgtype.UUID        `json:"issue_type_id"`
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 }
@@ -1064,6 +1084,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.DueDate,
 		arg.ParentIssueID,
 		arg.ProjectID,
+		arg.IssueTypeID,
 		arg.StartDate,
 		arg.EndDate,
 	)
@@ -1092,6 +1113,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }
@@ -1101,7 +1123,7 @@ UPDATE issue SET
     status = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, archived_at, archived_by, created_at, updated_at, number, start_date, end_date, project_id, issue_type_id
 `
 
 type UpdateIssueStatusParams struct {
@@ -1136,6 +1158,7 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.StartDate,
 		&i.EndDate,
 		&i.ProjectID,
+		&i.IssueTypeID,
 	)
 	return i, err
 }

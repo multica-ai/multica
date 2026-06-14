@@ -281,6 +281,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Patch("/current", h.UpdateCurrentFocus)
 				r.Get("/events", h.ListFocusEvents)
 				r.Post("/start", h.StartFocus)
+				r.Post("/quick-start/complete", h.CompleteQuickStart)
 				r.Post("/pause", h.PauseFocus)
 				r.Post("/resume", h.ResumeFocus)
 				r.Post("/complete", h.CompleteFocus)
@@ -308,6 +309,13 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Post("/", h.CreateLabel)
 				r.Patch("/{id}", h.UpdateLabel)
 				r.Delete("/{id}", h.DeleteLabel)
+			})
+
+			r.Route("/api/issue-types", func(r chi.Router) {
+				r.Get("/", h.ListIssueTypes)
+				r.Post("/", h.CreateIssueType)
+				r.Patch("/{id}", h.UpdateIssueType)
+				r.Post("/{id}/archive", h.ArchiveIssueType)
 			})
 
 			// Attachments
@@ -411,6 +419,19 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Get("/tomorrow", planHandler.GetTomorrowPlan)
 				r.Get("/", planHandler.ListPlans)
 				r.Post("/{id}/confirm", planHandler.ConfirmPlan)
+			})
+
+			r.Route("/api/plans", func(r chi.Router) {
+				r.Get("/", h.GetPlan)
+				r.Post("/", h.UpsertPlan)
+				r.Get("/candidates", h.ListPlanCandidates)
+				r.Post("/{id}/items", h.CreatePlanItem)
+			})
+
+			r.Route("/api/plan-items", func(r chi.Router) {
+				r.Patch("/{id}", h.UpdatePlanItem)
+				r.Delete("/{id}", h.DeletePlanItem)
+				r.Post("/{id}/start-focus", h.StartPlanItemFocus)
 			})
 
 			// Automation templates and rules

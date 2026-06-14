@@ -12,6 +12,15 @@ export interface DailyReview {
   generated_by: string;
   created_at: string;
   updated_at: string;
+  energy_level: number | null;
+  energy_note: string | null;
+  recovery_need: boolean | null;
+}
+
+export interface ConfirmDailyReviewRequest {
+  energy_level?: number;
+  energy_note?: string;
+  recovery_need?: boolean;
 }
 
 export interface DailyPlan {

@@ -78,10 +78,19 @@ export const queryKeys = {
     today: (workspaceId: string) => ["daily-review", "today", workspaceId] as const,
     list: (workspaceId: string) => ["daily-review", "list", workspaceId] as const,
   },
-  dailyPlan: {
-    tomorrow: (workspaceId: string) => ["daily-plan", "tomorrow", workspaceId] as const,
-    list: (workspaceId: string) => ["daily-plan", "list", workspaceId] as const,
-  },
+	  dailyPlan: {
+	    tomorrow: (workspaceId: string) => ["daily-plan", "tomorrow", workspaceId] as const,
+	    list: (workspaceId: string) => ["daily-plan", "list", workspaceId] as const,
+	  },
+	  issueTypes: {
+	    list: (workspaceId: string, includeArchived = false) =>
+	      ["issue-types", workspaceId, { includeArchived }] as const,
+	  },
+	  plan: {
+	    byDate: (workspaceId: string, date: string) => ["plan", workspaceId, date] as const,
+	    candidates: (workspaceId: string, date: string, issueTypeId?: string) =>
+	      ["plan", workspaceId, date, "candidates", issueTypeId ?? "all"] as const,
+	  },
   automation: {
     templates: (workspaceId: string) => ["automation", "templates", workspaceId] as const,
   },
@@ -94,7 +103,7 @@ export const queryKeys = {
   },
 } as const;
 
-const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking", "pomodoro", "focus"]);
+const WORKSPACE_SCOPED_ROOTS = new Set(["workspace", "issues", "projects", "inbox", "runtimes", "tasks", "time-tracking", "pomodoro", "focus", "issue-types", "plan"]);
 
 export function isWorkspaceScopedQueryKey(queryKey: readonly unknown[]): boolean {
   const root = queryKey[0];

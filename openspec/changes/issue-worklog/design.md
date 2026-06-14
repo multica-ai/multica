@@ -6,7 +6,9 @@ The backend uses the same polymorphic actor pattern (`author_type` + `author_id`
 
 The frontend adds a worklog panel inside the existing issue detail layout, reusing the same actor avatar, time-formatting, and mutation hook patterns already present in the issue detail and comment features.
 
-A key design driver is **future reusability**: a Pomodoro focus timer feature (planned) will need to produce time-log records in the same canonical model. Rather than coupling worklogs to issues via a direct foreign key on the `worklog` row, this change uses a `worklog` table as the authoritative time-log entity and a `worklog_issue` join table that associates worklogs with issues. This allows Pomodoro sessions and other future sources to write into `worklog` without schema changes, and enables a worklog entry to eventually be associated with more than one issue or other entity types.
+> Reverse sync, 2026-06-12: this design predates the current `time_entry` / Focus implementation. New Focus, Pomodoro, Flowtime, Daily Review, and planning features must use `time_entry` as the actual-work history model. `worklog` now remains a legacy issue-bound duration model and must not be expanded as the canonical timer or Focus history model.
+
+A key design driver was **future reusability** for an earlier Pomodoro direction. That assumption has been superseded by the current `time_entry` model. The `worklog` table and `worklog_issue` join table remain valid for lightweight issue-bound manual logs, but new timer-generated records must be written to `time_entry`.
 
 Constraints:
 
@@ -29,7 +31,8 @@ Constraints:
 
 **Non-Goals:**
 
-- Pomodoro timer UI or session state in this change — but the schema must not block it.
+- Pomodoro timer UI or session state in this change.
+- New Pomodoro, Focus, Flowtime, Daily Review, or planning writes into `worklog`; those flows use `time_entry`.
 - Automatic worklog creation from agent task duration.
 - Worklog-based reporting, burn-down charts, or aggregated analytics across issues.
 - Billing or invoicing integration.
@@ -52,7 +55,7 @@ Rather than a single `worklog_issue` table with `issue_id` baked in, the schema 
 | `author_id` | `UUID` | Polymorphic author |
 | `duration_minutes` | `INT` | Positive integer, required |
 | `description` | `TEXT` | Nullable |
-| `type` | `TEXT` | `'manual'` (default) — `'pomodoro'` reserved for the timer feature |
+| `type` | `TEXT` | `'manual'` (default); do not reserve new timer semantics here |
 | `logged_at` | `TIMESTAMPTZ` | Defaults to `now()` at insert time |
 | `created_at` | `TIMESTAMPTZ` | `now()` |
 | `updated_at` | `TIMESTAMPTZ` | `now()` |
@@ -71,7 +74,7 @@ A `UNIQUE(worklog_id, issue_id)` constraint prevents duplicate links.
 
 Why this approach:
 
-- Decouples the canonical time record from the issue domain. When the Pomodoro feature arrives, sessions can write `worklog` rows of `type = 'pomodoro'` and link them to issues through the same `worklog_issue` table — no schema migration needed.
+- Decouples manual issue-bound log rows from the issue domain. This no longer makes `worklog` the canonical timer history model; timer and Focus history are handled by `time_entry`.
 - Keeps the `worklog` row clean for potential future links to projects, sprints, or personal time without a `project_worklog`, `sprint_worklog` proliferation — or a messy polymorphic nullable column pattern.
 - `workspace_id` on both tables ensures every query stays within the workspace boundary without extra joins.
 
@@ -143,18 +146,22 @@ Alternatives considered:
 - [Agent worklog creation requires no user action] → Mitigation: entries show actor type visually (robot icon for agents), consistent with assignee rendering.
 - [Duration parsing edge cases] → Mitigation: unit-test the parser for common formats and reject invalid input with a clear validation message.
 - [Extra join for issue worklog queries] → The `worklog_issue` join table adds one join to every list query, but the workloads are small (typically < 100 entries per issue) and the architectural flexibility outweighs the negligible query cost.
-- [Pomodoro type added speculatively] → The `type` column is additive; the default `'manual'` covers all current use cases and the column is ignored by UI until the Pomodoro feature lands.
+- [Historical Pomodoro assumption] → Earlier versions expected Pomodoro to write `worklog(type='pomodoro')`. Current code writes Pomodoro and Focus history to `time_entry`; do not implement new Pomodoro writes through `worklog`.
 
-## Future: Pomodoro Integration
+## Superseded: Pomodoro Integration
 
-When the Pomodoro focus-timer feature is introduced, it will:
+The original future plan below is superseded by the current `time_entry` model and must not be used for new implementation:
 
 1. Track a `pomodoro_session` (start_time, end_time, status, linked issue_id) separately.
 2. On session completion, create a `worklog` row with `type = 'pomodoro'` and `duration_minutes = 25` (or the actual elapsed time).
 3. Insert a matching `worklog_issue` row to associate it with the active issue.
 4. Pomodoro-created entries render identically in the worklog section with a tomato icon as the source indicator.
 
-No schema changes to `worklog` or `worklog_issue` are needed for this path.
+Current canonical direction:
+
+1. Pomodoro and Focus sessions write actual work to `time_entry`.
+2. Break behavior writes to `focus_events`, not `time_entry`.
+3. `worklog` remains issue-bound manual duration history only.
 
 ## Migration Plan
 

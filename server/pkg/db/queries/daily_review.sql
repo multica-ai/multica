@@ -26,6 +26,12 @@ LIMIT $3;
 
 -- name: ConfirmDailyReview :one
 UPDATE daily_review
-SET status = 'confirmed', confirmed_at = now(), updated_at = now()
+SET
+    status = 'confirmed',
+    confirmed_at = now(),
+    energy_level = sqlc.narg('energy_level'),
+    energy_note = sqlc.narg('energy_note'),
+    recovery_need = sqlc.narg('recovery_need'),
+    updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;

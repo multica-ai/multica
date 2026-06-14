@@ -8,9 +8,10 @@ INSERT INTO focus_sessions (
     workspace_id,
     mode,
     phase,
-    preset,
-    issue_id,
-    description,
+	    preset,
+	    issue_id,
+	    plan_item_id,
+	    description,
     commitment_text,
     label_ids,
     first_started_at,
@@ -26,9 +27,10 @@ INSERT INTO focus_sessions (
     @workspace_id,
     @mode,
     'focusing',
-    @preset,
-    @issue_id,
-    @description,
+	    @preset,
+	    @issue_id,
+	    @plan_item_id,
+	    @description,
     @commitment_text,
     @label_ids,
     NOW(),
@@ -43,9 +45,10 @@ INSERT INTO focus_sessions (
 ON CONFLICT (user_id, workspace_id) DO UPDATE SET
     mode = EXCLUDED.mode,
     phase = EXCLUDED.phase,
-    preset = EXCLUDED.preset,
-    issue_id = EXCLUDED.issue_id,
-    description = EXCLUDED.description,
+	    preset = EXCLUDED.preset,
+	    issue_id = EXCLUDED.issue_id,
+	    plan_item_id = EXCLUDED.plan_item_id,
+	    description = EXCLUDED.description,
     commitment_text = EXCLUDED.commitment_text,
     label_ids = EXCLUDED.label_ids,
     first_started_at = NOW(),
@@ -63,9 +66,10 @@ UPDATE focus_sessions
 SET
     mode = @mode,
     phase = @phase,
-    preset = @preset,
-    issue_id = @issue_id,
-    description = @description,
+	    preset = @preset,
+	    issue_id = @issue_id,
+	    plan_item_id = @plan_item_id,
+	    description = @description,
     commitment_text = @commitment_text,
     label_ids = @label_ids,
     first_started_at = @first_started_at,
@@ -108,4 +112,12 @@ SELECT * FROM focus_events
 WHERE workspace_id = @workspace_id
   AND user_id = @user_id
   AND focus_session_id = @focus_session_id
+ORDER BY created_at ASC;
+
+-- name: ListFocusEventsByUserRange :many
+SELECT * FROM focus_events
+WHERE workspace_id = @workspace_id
+  AND user_id = @user_id
+  AND created_at >= @created_from
+  AND created_at < @created_to
 ORDER BY created_at ASC;

@@ -9,9 +9,10 @@ export interface CreateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
-  parent_issue_id?: string;
-  project_id?: string;
-  due_date?: string;
+	  parent_issue_id?: string;
+	  project_id?: string;
+	  issue_type_id?: string;
+	  due_date?: string;
   start_date?: string;
   end_date?: string;
 }
@@ -23,10 +24,11 @@ export interface UpdateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
-  parent_issue_id?: string | null;
-  position?: number;
-  project_id?: string | null;
-  due_date?: string | null;
+	  parent_issue_id?: string | null;
+	  position?: number;
+	  project_id?: string | null;
+	  issue_type_id?: string | null;
+	  due_date?: string | null;
   start_date?: string | null;
   end_date?: string | null;
 }
@@ -41,8 +43,9 @@ export interface ListIssuesParams {
   assignee_type?: IssueAssigneeType;
   creator_id?: string;
   creator_type?: "member" | "agent";
-  project_id?: string;
-  label_ids?: string[];
+	  project_id?: string;
+	  issue_type_id?: string;
+	  label_ids?: string[];
   label_match_mode?: "any" | "all";
   search?: string;
   due_from?: string;

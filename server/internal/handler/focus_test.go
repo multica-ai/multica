@@ -191,3 +191,79 @@ func TestFocusBreakSkipDoesNotCreateTimeEntry(t *testing.T) {
 		t.Fatalf("break skip should not create a time entry: before=%d after=%d", before, after)
 	}
 }
+
+func TestCompleteQuickStartConvertsSessionToFlowtimeAndWritesEvent(t *testing.T) {
+	ensureFocusSchema(t)
+	cleanupFocusRows(t)
+	t.Cleanup(func() { cleanupFocusRows(t) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/focus/start", map[string]any{
+		"mode":            "quick_start",
+		"preset":          "two_minute_start",
+		"commitment_text": "Open the document",
+	})
+	testHandler.StartFocus(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("StartFocus: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	startedAt := time.Now().Add(-125 * time.Second).UTC()
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE focus_sessions
+		SET first_started_at = $1, started_at = $1
+		WHERE user_id = $2 AND workspace_id = $3
+	`, startedAt, testUserID, testWorkspaceID); err != nil {
+		t.Fatalf("backdate quick start session: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/focus/quick-start/complete", nil)
+	testHandler.CompleteQuickStart(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteQuickStart: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Session focusSessionResponse `json:"session"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode quick start response: %v", err)
+	}
+	if response.Session.Mode != focusModeFlowtime {
+		t.Fatalf("expected session mode to become flowtime, got %q", response.Session.Mode)
+	}
+	if response.Session.Phase != focusPhaseFocusing {
+		t.Fatalf("expected session to keep focusing, got %q", response.Session.Phase)
+	}
+	if response.Session.Preset == nil || *response.Session.Preset != "flowtime_default" {
+		t.Fatalf("expected flowtime_default preset, got %v", response.Session.Preset)
+	}
+	if response.Session.ElapsedFocusSeconds < 120 {
+		t.Fatalf("expected elapsed quick start time to be retained, got %d", response.Session.ElapsedFocusSeconds)
+	}
+
+	var eventType string
+	var duration int
+	var nextMode string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT event_type, duration_seconds, metadata->>'next_mode'
+		FROM focus_events
+		WHERE user_id = $1
+		  AND workspace_id = $2
+		  AND event_type = 'quick_start_completed'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, testUserID, testWorkspaceID).Scan(&eventType, &duration, &nextMode); err != nil {
+		t.Fatalf("query quick start completed event: %v", err)
+	}
+	if eventType != focusEventQuickStartCompleted {
+		t.Fatalf("expected quick_start_completed event, got %q", eventType)
+	}
+	if duration < 120 {
+		t.Fatalf("expected event duration to include quick start countdown, got %d", duration)
+	}
+	if nextMode != focusModeFlowtime {
+		t.Fatalf("expected metadata next_mode flowtime, got %q", nextMode)
+	}
+}

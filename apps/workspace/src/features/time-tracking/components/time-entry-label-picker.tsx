@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Hash, Plus } from "lucide-react";
+import { ChevronDown, Hash, Plus } from "lucide-react";
 import type { TimeEntryLabel } from "@/shared/types";
 import {
   PropertyPicker,
@@ -50,6 +50,7 @@ export function TimeEntryLabelPicker({
 
   const normalizedFilter = filter.trim().toLowerCase();
   const exactMatch = labels.find((label) => label.name.toLowerCase() === normalizedFilter) ?? null;
+  const selectedLabels = labels.filter((label) => selectedIdSet.has(label.id));
 
   return (
     <PropertyPicker
@@ -65,11 +66,16 @@ export function TimeEntryLabelPicker({
       searchable
       searchPlaceholder="Search or create label..."
       onSearchChange={setFilter}
-      trigger={selectedIds.length > 0 ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-1">
-          {labels
-            .filter((label) => selectedIdSet.has(label.id))
-            .map((label) => (
+      triggerRender={
+        <button
+          type="button"
+          className="flex min-h-9 w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        />
+      }
+      trigger={selectedLabels.length > 0 ? (
+        <>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+            {selectedLabels.map((label) => (
               <span
                 key={label.id}
                 className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px]"
@@ -79,9 +85,14 @@ export function TimeEntryLabelPicker({
                 <span className="truncate">{label.name}</span>
               </span>
             ))}
-        </div>
+          </div>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </>
       ) : (
-        <span className="text-muted-foreground">No labels</span>
+        <>
+          <span className="text-muted-foreground">No labels</span>
+          <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        </>
       )}
     >
       {sortedFilteredLabels.map((label) => {

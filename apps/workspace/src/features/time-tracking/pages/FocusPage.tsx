@@ -19,6 +19,7 @@ import {
   useAbandonFocusMutation,
   useCompleteFocusBreakMutation,
   useCompleteFocusMutation,
+  useCompleteQuickStartMutation,
   useFocusQuery,
   usePauseFocusMutation,
   useResumeFocusMutation,
@@ -199,6 +200,7 @@ export function FocusPage() {
   const updateFocus = useUpdateFocusMutation();
   const pauseFocus = usePauseFocusMutation();
   const resumeFocus = useResumeFocusMutation();
+  const completeQuickStart = useCompleteQuickStartMutation();
   const completeFocus = useCompleteFocusMutation();
   const abandonFocus = useAbandonFocusMutation();
   const startBreak = useStartFocusBreakMutation();
@@ -220,13 +222,19 @@ export function FocusPage() {
   }, [session?.id, session?.phase]);
 
   const selectedMode = modeOptions.find((option) => option.value === mode) ?? defaultModeOption;
+  const currentMode = session ? (modeOptions.find((option) => option.value === session.mode) ?? selectedMode) : selectedMode;
   const elapsed = session ? getLiveElapsedSeconds(session) : 0;
+  const quickStartRemaining = session?.mode === "quick_start" && session.phase === "focusing"
+    ? Math.max(0, 120 - elapsed)
+    : 0;
+  const quickStartReady = session?.mode === "quick_start" && session.phase === "focusing" && quickStartRemaining <= 0;
   const breakRemaining = session ? getBreakRemainingSeconds(session) : 0;
   const isBusy =
     startFocus.isPending ||
     updateFocus.isPending ||
     pauseFocus.isPending ||
     resumeFocus.isPending ||
+    completeQuickStart.isPending ||
     completeFocus.isPending ||
     abandonFocus.isPending ||
     startBreak.isPending ||
@@ -284,6 +292,12 @@ export function FocusPage() {
     });
   };
 
+  const handleCompleteQuickStart = () => {
+    completeQuickStart.mutate(undefined, {
+      onError: () => toast.error("Failed to complete quick start"),
+    });
+  };
+
   const isActive = session?.phase === "focusing" || session?.phase === "paused";
   const canEditContext = !session || session.phase === "idle" || isActive;
 
@@ -317,14 +331,25 @@ export function FocusPage() {
                 <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
                   {session?.phase ?? "idle"}
                 </span>
+                <span className="rounded-full border px-2.5 py-1 text-xs text-muted-foreground">
+                  {currentMode.label}
+                </span>
               </div>
 
               <div className="flex flex-col items-center gap-2 py-5">
                 <span className="font-mono text-6xl font-bold tabular-nums text-foreground">
-                  {session?.phase === "breaking" ? formatDuration(breakRemaining) : formatDuration(elapsed)}
+                  {session?.phase === "breaking"
+                    ? formatDuration(breakRemaining)
+                    : session?.mode === "quick_start" && session.phase === "focusing"
+                      ? formatDuration(quickStartRemaining)
+                      : formatDuration(elapsed)}
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {session?.phase === "breaking" ? "Break remaining" : selectedMode.label}
+                  {session?.phase === "breaking"
+                    ? "Break remaining"
+                    : session?.mode === "quick_start" && session.phase === "focusing"
+                      ? "Quick start remaining"
+                      : selectedMode.label}
                 </span>
               </div>
 
@@ -379,6 +404,12 @@ export function FocusPage() {
                     <Button disabled={isBusy} onClick={handlePause}>
                       <Pause className="mr-2 size-4" />
                       Pause
+                    </Button>
+                  )}
+                  {quickStartReady && (
+                    <Button disabled={isBusy} onClick={handleCompleteQuickStart}>
+                      <Check className="mr-2 size-4" />
+                      Continue Flowtime
                     </Button>
                   )}
                   {isActive && (

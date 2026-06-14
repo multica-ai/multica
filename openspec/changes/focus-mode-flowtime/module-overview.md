@@ -20,36 +20,64 @@
 
 | 能力 | 当前状态 | 优先级 | 备注 |
 | --- | --- | --- | --- |
-| Focus Mode Core | 未开始 | P1 | 统一入口、上下文、状态模型、与普通 timer 互斥 |
-| Flowtime Session | 未开始 | P1 | 开放式专注、按实际时长生成记录、动态建议休息 |
-| Break Flow | 未开始 | P2 | 休息行为持久化到 `focus_events`，不写入 `time_entry` |
-| Anti-Procrastination Start | 未开始 | P2 | 2 分钟启动、下一步承诺、阻力/暂停/放弃原因 |
+| Focus Mode Core | Phase 1 已完成 | P1 | `/focus`、`focus_sessions`、`/api/focus/*` 已存在，并已接入 issue/today/my-time |
+| Flowtime Session | Phase 1 已完成 | P1 | Flowtime 可按实际时长写入 `time_entry` 并生成休息建议，review/plan 已消费 focus signals |
+| Break Flow | Phase 1 已完成 | P2 | break started/skipped/completed 已写 `focus_events`，review/plan 已汇总 |
+| Anti-Procrastination Start | Phase 1 已完成 | P2 | quick start、commitment、reason、真实 2 分钟倒计时和 `quick_start_completed` 写入已存在 |
+
+## Reverse Sync 说明
+
+本文件在 2026-06-12 回写当前代码状态。此前本 change 的能力列表仍按“未开始”描述，但代码已经实现了 Focus 主入口、后端 Focus API、`focus_sessions` / `focus_events`、Flowtime complete、break flow 基础行为。
+
+当前代码证据：
+
+- 证据：`server/migrations/045_focus_mode.up.sql` `focus_sessions` / `focus_events`
+- 当前行为：数据库已定义 Focus 当前状态和事件表，mode 支持 `pomodoro`、`flowtime`、`quick_start`。
+
+- 证据：`server/internal/handler/focus.go` `StartFocus` / `CompleteFocus` / `PauseFocus` / `AbandonFocus` / `transitionFocusBreak`
+- 当前行为：后端已支持 Focus 生命周期、Flowtime 完成、休息开始/跳过/完成，并写入 `time_entry` 与 `focus_events`。
+
+- 证据：`server/cmd/server/router.go` `/api/focus`
+- 当前行为：Focus API route group 已注册。
+
+- 证据：`apps/workspace/src/router.tsx` `focusRoute` / `pomodoroRoute`
+- 当前行为：`/focus` 渲染 FocusPage，`/pomodoro` 重定向到 `/focus`。
+
+- 证据：`apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` `FocusPage` / `modeOptions`
+- 当前行为：前端已有 Flowtime、Pomodoro、2 min start、next step、start friction、pause/abandon reason、break suggested/breaking UI。
+
+Phase 1 后剩余缺口：
+
+1. Inbox 入口后置，不阻塞 issue/today/my-time 的工作流。
+2. Focus history/reporting 后置，不在本轮做复杂行为分析。
+3. Pomodoro legacy UI 的全面收敛后置，不作为新 Focus 主线扩展。
+4. 旧 `/api/pomodoro/*` 和 `pomodoro_sessions` 仍存在，属于 legacy/parallel 能力，后续不能作为新 Focus 主线扩展。
 
 ## 当前状态基线
 
-### `/pomodoro` 已是独立入口，但还不是 Focus Mode
+### `/focus` 已是主入口，`/pomodoro` 已重定向
 
-- 证据：`apps/workspace/src/router.tsx` `pomodoroRoute`
-- 当前行为：`path: "pomodoro"` 挂载 `PomodoroPage`。
-- 当前缺口：路由和导航仍以 Pomodoro 命名，无法表达 Flowtime、反拖延启动和通用 Focus Mode。
+- 证据：`apps/workspace/src/router.tsx` `focusRoute` / `pomodoroRoute`
+- 当前行为：`/focus` 挂载 `FocusPage`，`/pomodoro` 使用 `<Navigate to="/focus" replace />`。
+- 当前缺口：Focus 已接入 Issue Detail、Today、My Time；Inbox 入口后置。
 
-### 页面已接近 Focus 工作台，但能力仍以番茄钟为中心
+### Focus 页面已覆盖 Flowtime、Pomodoro 和 Quick Start
 
-- 证据：`apps/workspace/src/features/time-tracking/pages/PomodoroPage.tsx` `PomodoroPage`
-- 当前行为：页面渲染 `PomodoroTimer variant="page"`、`PomodoroTodaySummary`、`PomodoroRecentSessions`，并固定 `TODAY_TARGET = 6`。
-- 当前缺口：今日目标以番茄个数衡量，不适合 Flowtime 的实际专注时长和启动成功率。
+- 证据：`apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` `FocusPage` / `modeOptions`
+- 当前行为：页面支持 Flowtime、Pomodoro、2 min start，支持 issue/description/commitment/labels/reason 上下文，并在 quick start 中显示 2 分钟倒计时完成态。
+- 当前缺口：无 Phase 1 阻塞缺口。
 
-### 当前计时状态强绑定 Pomodoro phase
+### 当前 Focus 状态已从 Pomodoro phase 升级为 Focus phase
 
-- 证据：`apps/workspace/src/shared/types/pomodoro.ts` `PomodoroPhase`
-- 当前行为：前端 phase 只有 `work | break | long_break`。
-- 当前缺口：没有 `flow`, `suggested_break`, `two_minute_start`, `abandoned` 等 Focus Mode 需要的状态语义。
+- 证据：`server/migrations/045_focus_mode.up.sql` `focus_sessions`
+- 当前行为：Focus phase 支持 `idle`、`focusing`、`paused`、`break_suggested`、`breaking`、`abandoned`。
+- 当前缺口：Quick Start completion 已通过 `quick_start_completed` 事件和 flowtime 续接回写；无 Phase 1 阻塞缺口。
 
-### 完成记录已经落到通用 `time_entry`
+### 完成记录继续落到通用 `time_entry`
 
-- 证据：`server/internal/handler/pomodoro.go` `CompletePomodoro`
-- 当前行为：work phase 完成时创建 `time_entry`，并设置 `type = "pomodoro"`。
-- 当前缺口：duration 写入固定 `phase_duration_seconds`，不是实际专注时长；缺少 Flowtime、启动方式、结束原因、休息建议等结构化字段。
+- 证据：`server/internal/handler/focus.go` `CompleteFocus`
+- 当前行为：Focus complete 按 elapsed 创建 `time_entry`，quick start 会作为 flowtime 历史写入。
+- 当前缺口：Daily Review 已消费 focus signals；完整 Focus history/reporting 后置。
 
 ### `time_entry` 是新的时间记录主线
 

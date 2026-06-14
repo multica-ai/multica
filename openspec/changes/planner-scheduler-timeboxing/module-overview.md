@@ -159,6 +159,8 @@
 - 所有计划数据必须绑定当前 user；团队可见性要作为后续明确决策，不默认公开个人计划。
 - 第一版必须复用现有 `issue`、`time_entry`、`daily_plan`、calendar 组件，不新建平行任务系统。
 - planned block 与 actual time entry 必须分开建模，避免把“计划”误写成“已工作”。
+- `time_entry` 是 actual work 的主线，承载普通 timer、Pomodoro、Flowtime、Focus completion 等实际工作记录。
+- `worklog` 是 legacy issue-bound duration model，不参与新的 planner、scheduler、timeboxing、Focus 或 Daily Review 主链路。
 - 前端展示可以先本地派生；跨页面 summary、timeboxing、weekly planner 必须有服务端契约。
 - 执行时如果发现需要改变数据模型，必须先更新对应能力包的 `design.md` 和 `tasks.md`。
 

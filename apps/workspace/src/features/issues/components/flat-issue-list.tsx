@@ -7,6 +7,7 @@ import { useIssueSelectionStore } from "@/features/issues/stores/selection-store
 import { useViewStore } from "@/features/issues/stores/view-store-context";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@/features/issues/config";
 import { useProjectsQuery } from "@/features/projects/queries";
+import { StartFocusButton } from "@/features/time-tracking";
 import { sortIssues } from "@/features/issues/utils/sort";
 import {
   formatIssueSchedule,
@@ -120,6 +121,15 @@ const FlatIssueRow = memo(function FlatIssueRow({
           ) : null}
         </div>
       </Link>
+      <div className="mt-0.5 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100">
+        <StartFocusButton
+          issueId={issue.id}
+          issueTitle={issue.title}
+          size="icon-xs"
+          variant="ghost"
+          showLabel={false}
+        />
+      </div>
     </div>
   );
 });

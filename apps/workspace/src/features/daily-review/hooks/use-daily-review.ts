@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { DailyReview } from "@/shared/types";
+import type { ConfirmDailyReviewRequest, DailyReview } from "@/shared/types";
 import { api } from "@/shared/api";
 import { queryKeys } from "@/shared/query";
 import { useWorkspaceStore } from "@/features/workspace";
@@ -43,8 +43,8 @@ export function useGenerateReviewMutation() {
 export function useConfirmReviewMutation() {
   const qc = useQueryClient();
   const workspaceId = useWorkspaceStore((s) => s.workspace?.id ?? "");
-  return useMutation<DailyReview, Error, string>({
-    mutationFn: (reviewId) => api.confirmDailyReview(reviewId),
+  return useMutation<DailyReview, Error, { reviewId: string; data?: ConfirmDailyReviewRequest }>({
+    mutationFn: ({ reviewId, data }) => api.confirmDailyReview(reviewId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.dailyReview.today(workspaceId) });
       qc.invalidateQueries({ queryKey: queryKeys.dailyReview.list(workspaceId) });

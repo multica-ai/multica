@@ -1,5 +1,20 @@
 # 单能力 Tasks
 
+## Reverse Sync 状态
+
+本任务包在 2026-06-12 回写当前代码状态：Break Flow 已部分实现，不能再按“从零新增”执行。
+
+已由当前代码完成或基本完成：
+
+- `server/migrations/045_focus_mode.up.sql` 已包含 `focus_events`。
+- `server/internal/handler/focus.go` `transitionFocusBreak` 已支持 break start/skip/complete，并写入事件。
+- `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` 已展示 `break_suggested` 和 `breaking` 操作。
+
+剩余缺口：
+
+- Break events 尚未进入 Daily Review。
+- Break history 的单独查询/展示仍需按实际 UI 需求确认。
+
 ## 实现目标
 
 实现 break flow 的持久化事件和 UI 操作，让建议休息、开始休息、跳过休息、完成休息都有可恢复和可分析的记录。
@@ -14,6 +29,7 @@
 ### Task 1：新增 `focus_events`
 
 - 目标：新增 Focus 行为事件表。
+- 当前状态：已完成；见 `server/migrations/045_focus_mode.up.sql`。
 - 文件：
   - `server/migrations/*_focus_events.up.sql`
   - `server/migrations/*_focus_events.down.sql`
@@ -40,6 +56,7 @@
 ### Task 3：实现 break API
 
 - 目标：支持 start/skip/complete break。
+- 当前状态：已部分完成；见 `server/internal/handler/focus.go` `transitionFocusBreak`。
 - 文件：
   - `server/internal/handler/focus.go`
   - `server/cmd/server/router.go`
@@ -56,6 +73,7 @@
 ### Task 4：前端 break UI
 
 - 目标：Focus 页面展示和操作 break flow。
+- 当前状态：已部分完成；见 `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`。
 - 文件：
   - `apps/workspace/src/features/time-tracking/components/FocusBreakPanel.tsx`
   - `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`

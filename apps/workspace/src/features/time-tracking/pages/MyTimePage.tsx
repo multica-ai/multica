@@ -15,6 +15,7 @@ import { LiveDuration, formatDuration } from "../components/LiveDuration";
 import { TimeEntryEditSheet } from "../components/TimeEntryEditSheet";
 import { TimeEntryCreateSheet } from "../components/TimeEntryCreateSheet";
 import { ConfirmTimerSwitchDialog } from "../components/ConfirmTimerSwitchDialog";
+import { StartFocusButton } from "../components/StartFocusButton";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -293,6 +294,7 @@ export function MyTimePage() {
           <h1 className="text-lg font-semibold">My Time</h1>
         </div>
         <div className="flex items-center gap-2">
+          <StartFocusButton />
           <Button
             variant="outline"
             size="sm"

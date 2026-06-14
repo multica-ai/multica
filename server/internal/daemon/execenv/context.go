@@ -124,6 +124,13 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**Trigger:** New Assignment\n\n")
 	}
 
+	workspaceContext := strings.TrimSpace(ctx.WorkspaceContext)
+	if workspaceContext != "" {
+		b.WriteString("## Workspace Context\n\n")
+		b.WriteString(workspaceContext)
+		b.WriteString("\n\n")
+	}
+
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 

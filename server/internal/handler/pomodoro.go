@@ -278,6 +278,7 @@ func (h *PomodoroHandler) CompletePomodoro(w http.ResponseWriter, r *http.Reques
 			WorkspaceID:     workspaceID,
 			UserID:          userID,
 			IssueID:         issueID,
+			PlanItemID:      pgtype.UUID{},
 			Description:     pgtype.Text{String: desc, Valid: true},
 			StartTime:       existing.StartedAt,
 			StopTime:        stopTime,

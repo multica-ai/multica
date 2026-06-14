@@ -1,5 +1,24 @@
 # 单能力 Tasks
 
+## Reverse Sync 状态
+
+本任务包在 2026-06-12 回写当前代码状态：Focus Mode Core 已部分实现，不能再按“从零新增”执行。
+
+已由当前代码完成或基本完成：
+
+- `server/migrations/045_focus_mode.up.sql` 已新增 `focus_sessions` 和 `focus_events`。
+- `server/internal/handler/focus.go` 已提供 current/start/update/pause/resume/complete/abandon/break API 处理逻辑。
+- `server/cmd/server/router.go` 已注册 `/api/focus/*` route group。
+- `apps/workspace/src/router.tsx` 已注册 `/focus`，并将 `/pomodoro` 重定向到 `/focus`。
+- `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx` 已提供 Focus 页面基础 UI。
+
+剩余缺口：
+
+- Focus 入口尚未贯穿 Issue Detail、Today、My Time、Inbox。
+- Quick Start 尚未形成真实 2 分钟倒计时和 `quick_start_completed` 写入路径。
+- Focus signals 尚未进入 Daily Review。
+- 旧 `pomodoro_sessions` 和 `/api/pomodoro/*` 仍保留，后续不得作为新 Focus 主线扩展。
+
 ## 实现目标
 
 新增 Focus Mode 主入口和当前状态模型，为 Pomodoro、Flowtime、break flow、反拖延启动提供统一基础。
@@ -15,6 +34,7 @@
 ### Task 1：新增数据库模型
 
 - 目标：新增 `focus_sessions` 当前状态表。
+- 当前状态：已完成；见 `server/migrations/045_focus_mode.up.sql`。
 - 文件：
   - `server/migrations/*_focus_sessions.up.sql`
   - `server/migrations/*_focus_sessions.down.sql`
@@ -30,6 +50,7 @@
 ### Task 2：新增 Focus API
 
 - 目标：实现 `/api/focus/*` 当前状态接口。
+- 当前状态：已部分完成；见 `server/internal/handler/focus.go` 和 `server/cmd/server/router.go`。
 - 文件：
   - `server/internal/handler/focus.go`
   - `server/cmd/server/router.go`
@@ -46,6 +67,7 @@
 ### Task 3：新增前端 Focus route 与 query hooks
 
 - 目标：前端接入 `/focus`。
+- 当前状态：已部分完成；见 `apps/workspace/src/router.tsx`、`apps/workspace/src/features/time-tracking/hooks/use-focus.ts`。
 - 文件：
   - `apps/workspace/src/router.tsx`
   - `apps/workspace/src/features/layout/navigation.ts`
@@ -63,6 +85,7 @@
 ### Task 4：实现 Focus 页面基础 UI
 
 - 目标：构建 Focus 工作台基础骨架。
+- 当前状态：已部分完成；见 `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`。
 - 文件：
   - `apps/workspace/src/features/time-tracking/pages/FocusPage.tsx`
   - `apps/workspace/src/features/time-tracking/components/FocusSessionPanel.tsx`
@@ -79,6 +102,7 @@
 ### Task 5：全局状态入口迁移
 
 - 目标：全局 pill 显示 Focus 状态。
+- 当前状态：待确认；实现前必须先检查当前 app shell/header 是否已有 Focus 状态入口。
 - 文件：
   - `apps/workspace/src/features/time-tracking/components/PomodoroStatusPill.tsx`
   - 或新增 `FocusStatusPill.tsx`

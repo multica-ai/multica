@@ -12,7 +12,8 @@ export interface TimeEntry {
   workspace_id: string;
   user_id: string;
   /** Linked issue ID (nullable). */
-  issue_id: string | null;
+	  issue_id: string | null;
+	  plan_item_id?: string | null;
   description: string | null;
   start_time: string;
   /** Null while the timer is running. */

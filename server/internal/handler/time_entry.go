@@ -23,6 +23,7 @@ type TimeEntryResponse struct {
 	WorkspaceID     string                   `json:"workspace_id"`
 	UserID          string                   `json:"user_id"`
 	IssueID         *string                  `json:"issue_id"`
+	PlanItemID      *string                  `json:"plan_item_id,omitempty"`
 	Description     *string                  `json:"description"`
 	StartTime       string                   `json:"start_time"`
 	StopTime        *string                  `json:"stop_time"`
@@ -43,9 +44,9 @@ type TimeEntryLabelResponse struct {
 
 // CreateTimeEntryRequest is used for both "start live timer" and "create manual entry".
 type CreateTimeEntryRequest struct {
-	Description    *string  `json:"description"`
-	IssueID        *string  `json:"issue_id"`
-	LabelIDs       []string `json:"label_ids"`
+	Description *string  `json:"description"`
+	IssueID     *string  `json:"issue_id"`
+	LabelIDs    []string `json:"label_ids"`
 	// StartTime is required. ISO 8601 / RFC 3339.
 	StartTime string `json:"start_time"`
 	// StopTime is optional. Omit to start a live timer; include for manual entries.
@@ -69,9 +70,9 @@ type SwitchTimeEntryRequest struct {
 //   - "issue_id": null in body   → outer pointer non-nil, inner nil → clear the issue link
 //   - "issue_id": "uuid" in body → both pointers non-nil → link to this issue
 type UpdateTimeEntryRequest struct {
-	Description    *string   `json:"description"`
-	IssueID        **string  `json:"issue_id"`
-	LabelIDs       *[]string `json:"label_ids"`
+	Description *string   `json:"description"`
+	IssueID     **string  `json:"issue_id"`
+	LabelIDs    *[]string `json:"label_ids"`
 	// StartTime and StopTime are ISO 8601 / RFC 3339. Only valid for stopped entries.
 	StartTime      *string `json:"start_time"`
 	StopTime       *string `json:"stop_time"`
@@ -92,6 +93,7 @@ func timeEntryToResponse(e db.TimeEntry) TimeEntryResponse {
 		WorkspaceID:     uuidToString(e.WorkspaceID),
 		UserID:          uuidToString(e.UserID),
 		IssueID:         uuidToPtr(e.IssueID),
+		PlanItemID:      uuidToPtr(e.PlanItemID),
 		Description:     textToPtr(e.Description),
 		StartTime:       timestampToString(e.StartTime),
 		StopTime:        timestampToPtr(e.StopTime),
@@ -256,6 +258,7 @@ func (h *Handler) CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:     parseUUID(workspaceID),
 			UserID:          parseUUID(userID),
 			IssueID:         parseOptionalUUID(req.IssueID),
+			PlanItemID:      pgtype.UUID{},
 			Description:     ptrToText(req.Description),
 			StartTime:       pgTimestamp(startTime),
 			StopTime:        pgTimestamp(stopTime),

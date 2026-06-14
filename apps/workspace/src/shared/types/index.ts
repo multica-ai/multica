@@ -44,7 +44,18 @@ export type { Attachment } from "./attachment";
 export type { TranscriptionResponse } from "./transcription";
 export type { NotificationPreference, UpdateNotificationPreferenceRequest, TestNotificationPreferenceRequest } from "./notification-preference";
 export type { TimeEntry, TimeEntryLabel, CreateTimeEntryRequest, SwitchTimeEntryRequest, UpdateTimeEntryRequest, TimeEntryOverlapConflict, TimeEntryOverlapErrorPayload, ListTimeEntriesResponse, TeamTimeUserStat, TeamTimeProjectStat, TeamTimeStats } from "./time-entry";
-export type { DailyReview, DailyPlan } from "./daily";
+export type { DailyReview, ConfirmDailyReviewRequest, DailyPlan } from "./daily";
+export type {
+  IssueType,
+  IssueTypeLoadProfile,
+  Plan,
+  PlanItem,
+  PlanItemStatus,
+  UpsertPlanRequest,
+  CreatePlanItemRequest,
+  UpdatePlanItemRequest,
+  PlanCandidatesResponse,
+} from "./plan";
 export type { AutomationTemplate, StandupSummaryResult } from "./automation";
 export type { PomodoroPhase, PomodoroStatus, PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "./pomodoro";
 export type {

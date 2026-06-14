@@ -9,6 +9,7 @@ import {
   isIssueScheduleOverdue,
 } from "@/features/issues/utils/workbench-view";
 import { Link } from "@/shared/router";
+import { StartFocusButton } from "@/features/time-tracking";
 import { PriorityIcon } from "./priority-icon";
 import { IssueTaskStatusBadge } from "./issue-task-status-badge";
 
@@ -64,6 +65,13 @@ export const ListRow = memo(function ListRow({ issue }: { issue: Issue }) {
           />
         )}
       </Link>
+      <StartFocusButton
+        issueId={issue.id}
+        issueTitle={issue.title}
+        size="icon-xs"
+        variant="ghost"
+        showLabel={false}
+      />
     </div>
   );
 });

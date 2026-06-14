@@ -44,6 +44,8 @@ type dataSyncQuerier interface {
 	ListIssues(ctx context.Context, arg db.ListIssuesParams) ([]db.Issue, error)
 	IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (int32, error)
 	CreateIssue(ctx context.Context, arg db.CreateIssueParams) (db.Issue, error)
+	EnsureDefaultIssueTypes(ctx context.Context, workspaceID pgtype.UUID) error
+	GetIssueTypeByKey(ctx context.Context, arg db.GetIssueTypeByKeyParams) (db.IssueType, error)
 }
 
 // DataSyncService implements the workspace export / import pipeline.
@@ -269,6 +271,32 @@ func (s *DataSyncService) ApplyImport(ctx context.Context, targetWorkspaceID, cr
 
 	switch payload.SourceType {
 	case "issue-csv", "canonical-json":
+		if err := s.Queries.EnsureDefaultIssueTypes(ctx, wsUUID); err != nil {
+			return &WorkspaceImportResult{
+				Summary: "apply: blocked by validation errors",
+				Errors: []WorkspaceImportError{{
+					Code:    "issue_type_seed_failed",
+					Message: fmt.Sprintf("seed issue types: %v", err),
+				}},
+				Created: created,
+				Failed:  len(payload.Issues),
+			}, nil
+		}
+		defaultIssueType, err := s.Queries.GetIssueTypeByKey(ctx, db.GetIssueTypeByKeyParams{
+			WorkspaceID: wsUUID,
+			Key:         "task",
+		})
+		if err != nil {
+			return &WorkspaceImportResult{
+				Summary: "apply: blocked by validation errors",
+				Errors: []WorkspaceImportError{{
+					Code:    "issue_type_default_missing",
+					Message: fmt.Sprintf("load default issue type: %v", err),
+				}},
+				Created: created,
+				Failed:  len(payload.Issues),
+			}, nil
+		}
 		for _, item := range payload.Issues {
 			number, err := s.Queries.IncrementIssueCounter(ctx, wsUUID)
 			if err != nil {
@@ -296,6 +324,7 @@ func (s *DataSyncService) ApplyImport(ctx context.Context, targetWorkspaceID, cr
 				Priority:    priority,
 				CreatorType: creatorType,
 				CreatorID:   creatorUUID,
+				IssueTypeID: defaultIssueType.ID,
 				Number:      number,
 			}
 			if item.Description != nil {

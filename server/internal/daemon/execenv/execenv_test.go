@@ -217,10 +217,13 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 
 	// Issue details should NOT be in the context file (agent fetches via CLI).
-	for _, absent := range []string{"## Description", "## Workspace Context"} {
+	for _, absent := range []string{"## Description"} {
 		if strings.Contains(s, absent) {
 			t.Errorf("content should NOT contain %q — agent fetches details via CLI", absent)
 		}
+	}
+	if strings.Contains(s, "## Workspace Context") {
+		t.Error("content should not contain Workspace Context when workspace context is empty")
 	}
 
 	// Verify skill directory and files.
@@ -238,6 +241,58 @@ func TestWriteContextFiles(t *testing.T) {
 	}
 	if string(supportFile) != "package main" {
 		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
+	}
+}
+
+func TestWriteContextFilesIncludesWorkspaceContext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "workspace-context-issue",
+		WorkspaceContext: "Use concise issue updates and prefer small PRs.",
+	}
+
+	if err := writeContextFiles(dir, "", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
+	if err != nil {
+		t.Fatalf("failed to read issue_context.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"## Workspace Context",
+		"Use concise issue updates and prefer small PRs.",
+		"## Quick Start",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("content missing %q", want)
+		}
+	}
+}
+
+func TestWriteContextFilesOmitsBlankWorkspaceContext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "blank-workspace-context-issue",
+		WorkspaceContext: "   \n\t  ",
+	}
+
+	if err := writeContextFiles(dir, "", ctx); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, ".agent_context", "issue_context.md"))
+	if err != nil {
+		t.Fatalf("failed to read issue_context.md: %v", err)
+	}
+	if strings.Contains(string(content), "## Workspace Context") {
+		t.Error("content should not contain Workspace Context for blank workspace context")
 	}
 }
 
@@ -438,6 +493,57 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 	if strings.Contains(s, "## Skills") {
 		t.Error("should not have Skills section when there are no skills")
+	}
+}
+
+func TestInjectRuntimeConfigIncludesWorkspaceContext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		WorkspaceContext: "Prefer short status comments and link every PR.",
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+
+	s := string(content)
+	for _, want := range []string{
+		"## Workspace Context",
+		"Prefer short status comments and link every PR.",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("CLAUDE.md missing %q", want)
+		}
+	}
+}
+
+func TestInjectRuntimeConfigOmitsBlankWorkspaceContext(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:          "test-issue-id",
+		WorkspaceContext: " \n\t ",
+	}
+
+	if err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
+	if err != nil {
+		t.Fatalf("failed to read CLAUDE.md: %v", err)
+	}
+	if strings.Contains(string(content), "## Workspace Context") {
+		t.Error("CLAUDE.md should not contain Workspace Context for blank workspace context")
 	}
 }
 

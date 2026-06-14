@@ -80,6 +80,15 @@ export function useResumeFocusMutation() {
   });
 }
 
+/** Marks a quick-start block complete and continues the same session as Flowtime. */
+export function useCompleteQuickStartMutation() {
+  const invalidate = useFocusInvalidation();
+  return useMutation({
+    mutationFn: () => api.completeQuickStart(),
+    onSuccess: invalidate,
+  });
+}
+
 /** Completes the current Focus session and writes its time entry. */
 export function useCompleteFocusMutation() {
   const invalidate = useFocusInvalidation();
