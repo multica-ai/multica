@@ -1,6 +1,6 @@
 -- name: CreateInvitation :one
-INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO workspace_invitation (workspace_id, inviter_id, invitee_email, invitee_user_id, role, invitee_name)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
 RETURNING *;
 
 -- name: GetInvitation :one
@@ -60,3 +60,20 @@ WHERE workspace_id = $1
   AND invitee_email = $2
   AND status = 'pending'
   AND expires_at <= now();
+
+-- name: GetLatestPendingInvitationNameByEmail :one
+-- Returns the invitee_name from the most recent non-expired pending invitation
+-- for this email address that has a non-empty invitee_name. Used at registration
+-- time to set user.name from the invitation rather than the email prefix or OAuth name.
+-- Uses the same expires_at > now() guard as every other live-invitation query in this
+-- file (expiry is lazy — rows stay pending until CreateInvitation flips them).
+-- The secondary id DESC sort makes the result deterministic when two invitations share
+-- the same created_at timestamp.
+SELECT invitee_name FROM workspace_invitation
+WHERE invitee_email = $1
+  AND status = 'pending'
+  AND expires_at > now()
+  AND invitee_name IS NOT NULL
+  AND invitee_name <> ''
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
