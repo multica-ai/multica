@@ -81,10 +81,10 @@ describe("useDownloadAttachment (web)", () => {
       );
     expect(anchor).toBeDefined();
     expect(anchor!.getAttribute("href")).toBe(
-      "/api/attachments/att-1/download?workspace_slug=acme",
+      "/api/attachments/att-1/download?workspace_slug=acme&download=1",
     );
     expect(anchor!.href).toBe(
-      "http://localhost:3000/api/attachments/att-1/download?workspace_slug=acme",
+      "http://localhost:3000/api/attachments/att-1/download?workspace_slug=acme&download=1",
     );
     // Empty download attribute intentionally defers the final filename to the
     // endpoint / redirected object Content-Disposition header.
@@ -119,7 +119,7 @@ describe("useDownloadAttachment (web)", () => {
       );
     expect(anchor).toBeDefined();
     expect(anchor!.href).toBe(
-      "https://api.example.test/api/attachments/att%201%2Fslash/download?workspace_slug=acme",
+      "https://api.example.test/api/attachments/att%201%2Fslash/download?workspace_slug=acme&download=1",
     );
   });
 
@@ -150,7 +150,7 @@ describe("useDownloadAttachment (web)", () => {
       );
     expect(anchor).toBeDefined();
     expect(anchor!.getAttribute("href")).toBe(
-      "/api/attachments/att-1/download?workspace_slug=team%2Fspace",
+      "/api/attachments/att-1/download?workspace_slug=team%2Fspace&download=1",
     );
   });
 

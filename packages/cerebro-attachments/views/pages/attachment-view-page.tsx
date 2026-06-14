@@ -7,7 +7,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { attachmentDetailOptions } from "@multica/cerebro-attachments/core/queries";
 import { viewableKind } from "@multica/cerebro-attachments/core/viewable";
-import { attachmentDownloadHref } from "@multica/cerebro-attachments/core/download-url";
+import {
+  attachmentDownloadHref,
+  attachmentForceDownloadPath,
+} from "@multica/cerebro-attachments/core/download-url";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
@@ -88,9 +91,12 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   const downloadHref = attachment.download_url
     ? attachmentDownloadHref(attachment.download_url, wsId)
     : "";
+  const forcedDownloadHref = attachment.download_url
+    ? attachmentForceDownloadPath(attachment.id, wsId)
+    : "";
   const handleDownload = () => {
-    if (downloadHref) {
-      window.open(downloadHref, "_blank", "noopener,noreferrer");
+    if (forcedDownloadHref) {
+      window.open(forcedDownloadHref, "_blank", "noopener,noreferrer");
     }
   };
   const handleCopyLink = async () => {
@@ -171,13 +177,13 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             <PdfViewer
               fileUrl={downloadHref}
               title={attachment.filename}
-              downloadUrl={downloadHref}
+              downloadUrl={forcedDownloadHref}
             />
           ) : kind === "html" ? (
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={downloadHref} />
+              <FallbackUnavailable downloadUrl={forcedDownloadHref} />
             ) : (
               <iframe
                 srcDoc={body.data}
@@ -190,7 +196,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={downloadHref} />
+              <FallbackUnavailable downloadUrl={forcedDownloadHref} />
             ) : (
               <div className="prose prose-sm max-w-none dark:prose-invert">
                 <ArtifactBody body={body.data} />
@@ -200,7 +206,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
             body.isLoading ? (
               <p className="text-sm text-muted-foreground">Loading…</p>
             ) : body.isError || !body.data ? (
-              <FallbackUnavailable downloadUrl={downloadHref} isPdf={kind === "pdf"} />
+              <FallbackUnavailable downloadUrl={forcedDownloadHref} isPdf={kind === "pdf"} />
             ) : (
               <pre className="overflow-x-auto rounded border border-border bg-muted/40 p-3 text-xs">
                 <code>{body.data}</code>
@@ -209,7 +215,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
           ) : (
             // Non-viewable filetype — keep behavior consistent: nothing to render
             // inline, but still expose download.
-            <FallbackUnavailable downloadUrl={downloadHref} />
+            <FallbackUnavailable downloadUrl={forcedDownloadHref} />
           )}
         </div>
       </div>

@@ -15,7 +15,7 @@ function attachmentDownloadEndpoint(
   attachmentId: string,
   workspaceSlug: string,
 ): string {
-  const params = new URLSearchParams({ workspace_slug: workspaceSlug });
+  const params = new URLSearchParams({ workspace_slug: workspaceSlug, download: "1" }); // CEREBRO-PATCH(force-attachment-download): explicit Download buttons should save, not preview.
   const path = `/api/attachments/${encodeURIComponent(attachmentId)}/download`;
   const endpoint = `${path}?${params.toString()}`;
   return resolvePublicFileUrl(endpoint) ?? endpoint;

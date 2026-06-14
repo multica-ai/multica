@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { attachmentDownloadHref } from "./download-url";
+import {
+  attachmentDownloadHref,
+  attachmentForceDownloadPath,
+} from "./download-url";
 
 const WS = "11bd8321-b6ac-4bee-ae41-6659a5064608";
 
@@ -37,5 +40,19 @@ describe("attachmentDownloadHref", () => {
   it("handles an empty/undefined download url", () => {
     expect(attachmentDownloadHref("", WS)).toBe("");
     expect(attachmentDownloadHref(undefined, WS)).toBe("");
+  });
+});
+
+describe("attachmentForceDownloadPath", () => {
+  it("builds a download endpoint with workspace context and forced download", () => {
+    expect(attachmentForceDownloadPath("att 1/slash", WS)).toBe(
+      `/api/attachments/att%201%2Fslash/download?download=1&workspace_id=${WS}`,
+    );
+  });
+
+  it("keeps the forced download signal when workspace id is unavailable", () => {
+    expect(attachmentForceDownloadPath("att-1", "")).toBe(
+      "/api/attachments/att-1/download?download=1",
+    );
   });
 });
