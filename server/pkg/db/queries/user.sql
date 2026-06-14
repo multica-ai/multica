@@ -78,3 +78,23 @@ UPDATE "user" SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: ListUsers :many
+-- Returns all users matching an optional search term (ILIKE on name or email),
+-- ordered by name, with limit/offset pagination. Used by super-admin endpoints only.
+SELECT id, name, email, avatar_url, created_at, updated_at
+FROM "user"
+WHERE ($1::text = '' OR name ILIKE '%' || $1 || '%' OR email ILIKE '%' || $1 || '%')
+ORDER BY name ASC, id ASC
+LIMIT $2
+OFFSET $3;
+
+-- name: AdminUpdateUserName :one
+-- Updates only the name field for a given user. Used by super-admin endpoints.
+-- Non-empty validation is enforced at the handler level (empty string would write
+-- '' rather than no-op because the name column is NOT NULL with no COALESCE).
+UPDATE "user" SET
+    name = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
