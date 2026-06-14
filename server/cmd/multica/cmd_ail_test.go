@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/ail"
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func newAilStage2TestCmd() *cobra.Command {
@@ -1037,6 +1039,23 @@ func TestPostAilStage5DigestReturnsListCommentsError(t *testing.T) {
 	}
 }
 
+func TestPostAilStage5DigestReturnsClientConstructionError(t *testing.T) {
+	original := newAilAPIClient
+	t.Cleanup(func() { newAilAPIClient = original })
+	newAilAPIClient = func(cmd *cobra.Command) (*cli.APIClient, error) {
+		return nil, errors.New("missing client")
+	}
+
+	_, err := postAilStage5Digest(newAilRunTestCmd(), "tune-err", ail.BuildStage5Digest(ail.Stage3Result{WindowDuration: "24h0m0s"}))
+
+	if err == nil {
+		t.Fatal("expected client construction error, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing client") {
+		t.Fatalf("error = %v, want missing client", err)
+	}
+}
+
 func TestPostAilStage5DigestReturnsAddCommentError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/issues/tune-err/comments" {
@@ -1066,6 +1085,40 @@ func TestPostAilStage5DigestReturnsAddCommentError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "add comment") {
 		t.Fatalf("error = %v, want add comment context", err)
+	}
+}
+
+func TestRunAilRunReturnsErrorWhenStage5DigestPostFails(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	stage2Dir := filepath.Join(tmp, "stage2")
+	stage3Dir := filepath.Join(tmp, "stage3")
+	stage5Dir := filepath.Join(tmp, "diagnostics", "stage5")
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "t1", AgentID: "a1", Status: "failed", FailureReason: "agent_error"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+
+	cmd := newAilRunTestCmd()
+	setTestFlag(t, cmd, "events-path", eventsPath)
+	setTestFlag(t, cmd, "stage2-output-dir", stage2Dir)
+	setTestFlag(t, cmd, "stage3-output-dir", stage3Dir)
+	setTestFlag(t, cmd, "stage5-output-dir", stage5Dir)
+	setTestFlag(t, cmd, "digest-issue", "tune-1")
+
+	err := runAilRun(cmd, nil)
+
+	if err == nil {
+		t.Fatal("expected stage5 digest post error, got nil")
+	}
+	if !strings.Contains(err.Error(), "stage5 digest post") {
+		t.Fatalf("error = %v, want stage5 digest post context", err)
 	}
 }
 

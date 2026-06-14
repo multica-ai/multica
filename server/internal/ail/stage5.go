@@ -267,16 +267,10 @@ func stage5ExportedTypeName(s string) string {
 	}
 	var b strings.Builder
 	for _, part := range parts {
-		if part == "" {
-			continue
-		}
 		b.WriteString(strings.ToUpper(part[:1]))
 		if len(part) > 1 {
 			b.WriteString(part[1:])
 		}
-	}
-	if b.Len() == 0 {
-		return "Tool"
 	}
 	return b.String()
 }

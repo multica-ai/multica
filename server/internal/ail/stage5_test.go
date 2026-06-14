@@ -141,6 +141,19 @@ func TestRunStage5DigestReturnsErrorGivenBlockedWatermarkPath(t *testing.T) {
 	}
 }
 
+func TestRunStage5DigestReturnsErrorGivenBlockedDigestPath(t *testing.T) {
+	tmp := t.TempDir()
+	if err := os.Mkdir(filepath.Join(tmp, defaultStage5DigestFile), 0o755); err != nil {
+		t.Fatalf("create blocking digest directory: %v", err)
+	}
+
+	_, err := RunStage5Digest(Stage5Config{OutputDir: tmp}, Stage3Result{WindowDuration: "24h0m0s"})
+
+	if err == nil {
+		t.Fatal("expected error for blocked digest path, got nil")
+	}
+}
+
 func TestRunStage5DigestReturnsErrorGivenBlockedOutputPath(t *testing.T) {
 	tmp := t.TempDir()
 	blockingFile := filepath.Join(tmp, "blocking-file")

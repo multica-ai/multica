@@ -15,6 +15,8 @@ import (
 
 const ailTuningIssueEnv = "MULTICA_AIL_TUNING_ISSUE_ID"
 
+var newAilAPIClient = newAPIClient
+
 var ailCmd = &cobra.Command{
 	Use:   "ail",
 	Short: "Agent improvement loop operations",
@@ -295,7 +297,7 @@ func runAilStage8(cmd *cobra.Command, _ []string) error {
 }
 
 func postAilStage5Digest(cmd *cobra.Command, issueID string, digest ail.Stage5Digest) (bool, error) {
-	client, err := newAPIClient(cmd)
+	client, err := newAilAPIClient(cmd)
 	if err != nil {
 		return false, err
 	}
