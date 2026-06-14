@@ -1065,7 +1065,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
 	}
 	if len(labelIdsFilter) > 0 {
-		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM issue_label il WHERE il.issue_id = i.id AND il.label_id = ANY(%s::uuid[]))", addArg(labelIdsFilter)))
+		where = append(where, fmt.Sprintf("EXISTS (SELECT 1 FROM issue_to_label il WHERE il.issue_id = i.id AND il.label_id = ANY(%s::uuid[]))", addArg(labelIdsFilter)))
 	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
@@ -2309,13 +2309,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-			ID:          id,
-			WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "project_id must reference a project in this workspace")
-			return
-		}
+		// Cross-workspace project existence is enforced inside
+		// IssueService.Create (atomically with the create, returning
+		// ErrProjectNotFound), so every entry point — HTTP, Lark, future
+		// MCP — inherits the boundary check without duplicating the lookup
+		// here.
 		projectID = id
 	}
 	if req.ParentIssueID != nil {
@@ -2330,7 +2328,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// point — HTTP, Lark, future MCP — gets the same boundary check
 	// without duplicating the lookup here.
 
-	if !projectID.Valid {
+	// project_id is mandatory for top-level issues (OPE-1372): the Web UI
+	// enforces it client-side, but CLI/API callers could otherwise create
+	// orphan issues with no project. Sub-issues are exempt — IssueService.Create
+	// back-fills the project from the parent when it is not pinned explicitly,
+	// so requiring it here would break the documented inheritance contract.
+	if !projectID.Valid && !parentIssueID.Valid {
 		writeError(w, http.StatusBadRequest, "project_id is required")
 		return
 	}
@@ -2983,8 +2986,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canAccessPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
-			return http.StatusForbidden, "cannot assign to squad with private leader"
+		if !h.canDispatchToPrivateAgent(ctx, leader, actorType, actorID, workspaceID) {
+			return http.StatusForbidden, "squad leader must be one of your agents or a workspace agent"
 		}
 		return 0, ""
 	default:
@@ -3022,7 +3025,7 @@ func (h *Handler) shouldEnqueueOnComment(ctx context.Context, issue db.Issue, ac
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return false
 	}
-	if !h.canAccessPrivateAgent(ctx, agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
+	if !h.canDispatchToPrivateAgent(ctx, agent, actorType, actorID, uuidToString(issue.WorkspaceID)) {
 		return false
 	}
 	// Coalescing queue: allow enqueue when a task is running (so the agent

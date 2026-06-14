@@ -889,7 +889,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	} else {
 		// Issue / autopilot / quick_create tasks are all visible on the
 		// agent Activity tab + workspace snapshot, which gate private
-		// agents. Mirror that gate here.
+		// agents. Mirror the dispatch gate here: viewing is open to all
+		// members (OPE-817), but cancelling another member's private-agent
+		// task is an owner/admin-grade action.
 		agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 			ID:          task.AgentID,
 			WorkspaceID: wsUUID,
@@ -899,7 +901,7 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+		if !h.canDispatchToPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
 			writeError(w, http.StatusForbidden, "you do not have access to this agent")
 			return
 		}
