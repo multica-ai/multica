@@ -148,6 +148,22 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+var issueReorderCmd = &cobra.Command{
+	Use:   "reorder <id>",
+	Short: "Move an issue within its status column",
+	Long: "Reposition an issue inside its current status column by computing a new\n" +
+		"ordering position, the same value the board's drag-and-drop sets.\n\n" +
+		"Pick exactly one target:\n" +
+		"  --before <id>  place it directly above another issue in the same column\n" +
+		"  --after  <id>  place it directly below another issue in the same column\n" +
+		"  --top          move it to the top of its column\n" +
+		"  --bottom       move it to the bottom of its column\n\n" +
+		"Reorder stays inside the issue's current column. To move an issue to a\n" +
+		"different column, change its status first with `multica issue status`.",
+	Args: exactArgs(1),
+	RunE: runIssueReorder,
+}
+
 // Comment subcommands.
 
 var issueCommentCmd = &cobra.Command{
@@ -273,6 +289,14 @@ var validIssuePriorities = []string{
 	"urgent", "high", "medium", "low", "none",
 }
 
+// validIssueSortColumns are the sort keys `issue list --sort` accepts. They
+// mirror the server's ListIssues handler. "position" is the default and is
+// always sorted ascending (the board's manual drag order), so --direction is
+// only meaningful for the other columns.
+var validIssueSortColumns = []string{
+	"position", "title", "created_at", "start_date", "due_date", "priority",
+}
+
 func validateIssueStatus(status string) error {
 	return validateIssueEnum("status", status, validIssueStatuses)
 }
@@ -299,6 +323,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -329,6 +354,8 @@ func init() {
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
+	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
+	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc) for non-position sorts; ignored for position")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -372,10 +399,18 @@ func init() {
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
+	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue reorder
+	issueReorderCmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
+	issueReorderCmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
+	issueReorderCmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
+	issueReorderCmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
+	issueReorderCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -496,6 +531,26 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		params.Set("metadata", filter)
+	}
+	if v, _ := cmd.Flags().GetString("sort"); v != "" {
+		valid := false
+		for _, c := range validIssueSortColumns {
+			if c == v {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid --sort %q; valid values: %s", v, strings.Join(validIssueSortColumns, ", "))
+		}
+		params.Set("sort", v)
+	}
+	if v, _ := cmd.Flags().GetString("direction"); v != "" {
+		d := strings.ToLower(v)
+		if d != "asc" && d != "desc" {
+			return fmt.Errorf("invalid --direction %q; valid values: asc, desc", v)
+		}
+		params.Set("direction", d)
 	}
 
 	path := "/api/issues"
@@ -1125,6 +1180,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["stage"] = stage
 	}
+	if cmd.Flags().Changed("position") {
+		v, _ := cmd.Flags().GetFloat64("position")
+		body["position"] = v
+	}
 
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
@@ -1246,6 +1305,269 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Reorder command
+// ---------------------------------------------------------------------------
+
+// runIssueReorder repositions an issue inside its current status column. The
+// new position is computed client-side by computeReorderPosition, which mirrors
+// the board/list drag-and-drop math (computePosition in
+// packages/views/issues/utils/drag-utils.ts) so the CLI and UI agree on where
+// an issue lands. Only the issue's own position changes; its column membership
+// (status) is left untouched, so cross-column moves still go through
+// `issue status`.
+func runIssueReorder(cmd *cobra.Command, args []string) error {
+	before, _ := cmd.Flags().GetString("before")
+	after, _ := cmd.Flags().GetString("after")
+	top, _ := cmd.Flags().GetBool("top")
+	bottom, _ := cmd.Flags().GetBool("bottom")
+
+	modes := 0
+	for _, set := range []bool{before != "", after != "", top, bottom} {
+		if set {
+			modes++
+		}
+	}
+	if modes != 1 {
+		return fmt.Errorf("exactly one of --before, --after, --top, or --bottom is required")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	wsID := client.WorkspaceID
+	if wsID == "" {
+		wsID, err = requireWorkspaceID(cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	target, err := fetchIssue(ctx, client, issueRef.ID)
+	if err != nil {
+		return fmt.Errorf("get issue: %w", err)
+	}
+	status := strVal(target, "status")
+	if status == "" {
+		return fmt.Errorf("issue %s has no status, cannot determine its column", issueRef.Display)
+	}
+
+	// Resolve the relative target up front, before any no-op shortcut, so a bad
+	// --before/--after value (typo, self-reference) always errors instead of
+	// being swallowed by the single-issue-column fast path below.
+	relative := before != "" || after != ""
+	var otherRef resolvedID
+	if relative {
+		otherInput := before
+		if after != "" {
+			otherInput = after
+		}
+		otherRef, err = resolveIssueRef(ctx, client, otherInput)
+		if err != nil {
+			return fmt.Errorf("resolve target issue: %w", err)
+		}
+		if otherRef.ID == issueRef.ID {
+			return fmt.Errorf("cannot reorder issue %s relative to itself", issueRef.Display)
+		}
+	}
+
+	// Scope the column to the issue's own project (when it has one) so the
+	// computed position lands relative to the project board the issue lives on,
+	// not a blend of every project's issues in this status.
+	projectID := strVal(target, "project_id")
+	column, err := fetchIssueColumn(ctx, client, wsID, projectID, status)
+	if err != nil {
+		return fmt.Errorf("list %s column: %w", status, err)
+	}
+
+	// Build the column order with the target removed, plus a lookup of every
+	// position in the column (the target's own included, for the no-op check).
+	positions := make(map[string]float64, len(column))
+	ordered := make([]string, 0, len(column))
+	for _, raw := range column {
+		id := strVal(raw, "id")
+		if id == "" {
+			continue
+		}
+		positions[id] = floatVal(raw, "position")
+		if id != issueRef.ID {
+			ordered = append(ordered, id)
+		}
+	}
+	if len(ordered) == 0 {
+		// The active issue is alone in its column. A relative move cannot
+		// succeed here (its target is necessarily in another column), so report
+		// that rather than a misleading "nothing to reorder".
+		if relative {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+		}
+		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", issueRef.Display, status)
+		return issueReorderOutput(cmd, target)
+	}
+
+	insertIdx := 0
+	switch {
+	case top:
+		insertIdx = 0
+	case bottom:
+		insertIdx = len(ordered)
+	default:
+		idx := indexOfString(ordered, otherRef.ID)
+		if idx == -1 {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+		}
+		if before != "" {
+			insertIdx = idx
+		} else {
+			insertIdx = idx + 1
+		}
+	}
+
+	reordered := make([]string, 0, len(ordered)+1)
+	reordered = append(reordered, ordered[:insertIdx]...)
+	reordered = append(reordered, issueRef.ID)
+	reordered = append(reordered, ordered[insertIdx:]...)
+
+	currentPos := positions[issueRef.ID]
+	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
+	if newPos == currentPos {
+		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", issueRef.Display)
+		return issueReorderOutput(cmd, target)
+	}
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), map[string]any{"position": newPos}, &result); err != nil {
+		return fmt.Errorf("reorder issue: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))
+	return issueReorderOutput(cmd, result)
+}
+
+// issueReorderOutput prints an issue map as a table or JSON, matching the
+// update command's output contract.
+func issueReorderOutput(cmd *cobra.Command, issue map[string]any) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
+		rows := [][]string{{
+			issueDisplayKey(issue),
+			strVal(issue, "title"),
+			strVal(issue, "status"),
+			strVal(issue, "priority"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, issue)
+}
+
+// reorderTargetNotInColumnError explains why a --before/--after target could
+// not be used. It fetches the target only to report its actual column in the
+// message, so the common mistake (target lives in a different column) gets a
+// precise, actionable error instead of a bare "not found".
+func reorderTargetNotInColumnError(ctx context.Context, client *cli.APIClient, otherRef, issueRef resolvedID, status string) error {
+	if other, err := fetchIssue(ctx, client, otherRef.ID); err == nil {
+		if otherStatus := strVal(other, "status"); otherStatus != "" && otherStatus != status {
+			return fmt.Errorf("issue %s is in the %q column but %s is in %q; move one with `multica issue status` first, or pick a target in the same column", otherRef.Display, otherStatus, issueRef.Display, status)
+		}
+	}
+	return fmt.Errorf("issue %s was not found in the %q column", otherRef.Display, status)
+}
+
+// fetchIssue retrieves a single issue by canonical ID.
+func fetchIssue(ctx context.Context, client *cli.APIClient, id string) (map[string]any, error) {
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(id), &issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
+}
+
+// fetchIssueColumn returns every issue in a status column ordered by position
+// ascending, paginating through the list endpoint so columns larger than one
+// page (the server caps a page at 100) still produce a complete, correctly
+// ordered set. A non-empty projectID scopes the column to that project,
+// matching a project board; an empty projectID lists the whole workspace
+// column.
+func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, projectID, status string) ([]map[string]any, error) {
+	var all []map[string]any
+	offset := 0
+	for {
+		params := url.Values{}
+		params.Set("workspace_id", workspaceID)
+		params.Set("status", status)
+		if projectID != "" {
+			params.Set("project_id", projectID)
+		}
+		params.Set("sort", "position")
+		params.Set("limit", "100")
+		params.Set("offset", fmt.Sprintf("%d", offset))
+
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
+			return nil, err
+		}
+		page, _ := result["issues"].([]any)
+		for _, raw := range page {
+			if m, ok := raw.(map[string]any); ok {
+				all = append(all, m)
+			}
+		}
+		total, _ := result["total"].(float64)
+		offset += len(page)
+		if len(page) == 0 || offset >= int(total) {
+			break
+		}
+	}
+	return all, nil
+}
+
+// computeReorderPosition computes the position that places activeID at its
+// index in ids. It mirrors computePosition in
+// packages/views/issues/utils/drag-utils.ts: the top of a column is one less
+// than the next item, the bottom is one more than the previous, and any
+// interior slot is the midpoint of its neighbours. fallback is returned when
+// activeID is alone in (or absent from) the column, leaving its position
+// unchanged.
+func computeReorderPosition(ids []string, activeID string, positions map[string]float64, fallback float64) float64 {
+	idx := indexOfString(ids, activeID)
+	if idx == -1 || len(ids) == 1 {
+		return fallback
+	}
+	if idx == 0 {
+		return positions[ids[1]] - 1
+	}
+	if idx == len(ids)-1 {
+		return positions[ids[idx-1]] + 1
+	}
+	return (positions[ids[idx-1]] + positions[ids[idx+1]]) / 2
+}
+
+func indexOfString(s []string, target string) int {
+	for i, v := range s {
+		if v == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
