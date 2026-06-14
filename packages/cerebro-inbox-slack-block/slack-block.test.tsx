@@ -330,7 +330,8 @@ describe("SlackBlock", () => {
     // Defaults carry a trailing "✓", so match loosely.
     expect(screen.getByText(/Recent conversation/)).toBeInTheDocument();
     expect(screen.getByText("Name")).toBeInTheDocument();
-    expect(screen.getByText(/By type/)).toBeInTheDocument();
+    expect(screen.getByText(/Unread first/)).toBeInTheDocument();
+    expect(screen.getByText("By type")).toBeInTheDocument();
     expect(screen.getByText("Flat list")).toBeInTheDocument();
     // No Danish remnants.
     expect(screen.queryByText("Ulæste øverst")).not.toBeInTheDocument();
@@ -373,6 +374,18 @@ describe("SlackBlock", () => {
 
     await user.click(screen.getByText(/Show agents/));
     expect(onSetShowAgents).toHaveBeenCalledWith(true);
+  });
+
+  // TECH-3494 — "Unread first" is the default grouping.
+  it("defaults to unread-first grouping with an Unread group on top", async () => {
+    await act(async () => {
+      renderBlock();
+    });
+    const unreadHeader = screen.getByText("Unread");
+    expect(unreadHeader).toBeInTheDocument();
+    // Alice's DM is unread (count 2) → she sits under the Unread group.
+    const groupEl = unreadHeader.parentElement as HTMLElement;
+    expect(within(groupEl).getByText("Alice")).toBeInTheDocument();
   });
 
   // TECH-3494 #3 — group by type shows headers; flat list shows none.

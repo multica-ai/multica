@@ -49,7 +49,7 @@ import { useMemberPresence } from "../hooks/use-member-presence";
 import { useChannelTyping } from "../hooks/use-channel-typing";
 
 export type TeamSort = "name" | "recent";
-export type TeamGroupBy = "type" | "none";
+export type TeamGroupBy = "unread" | "type" | "none";
 
 export interface SlackBlockProps {
   wsId: string;
@@ -88,6 +88,7 @@ const SORT_OPTIONS: Array<{ label: string; value: TeamSort }> = [
 ];
 
 const GROUP_OPTIONS: Array<{ label: string; value: TeamGroupBy }> = [
+  { label: "Unread first", value: "unread" },
   { label: "By type", value: "type" },
   { label: "Flat list", value: "none" },
 ];
@@ -140,7 +141,7 @@ export function SlackBlock({
   onSetLimit,
   sort = "recent",
   onSetSort,
-  groupBy = "type",
+  groupBy = "unread",
   onSetGroupBy,
   showAgents = false,
   onSetShowAgents,
@@ -381,14 +382,21 @@ export function SlackBlock({
     );
   };
 
-  const groups: Array<{ label: string; items: ChatItem[] }> =
-    groupBy === "type"
-      ? [
-          { label: "Channels", items: shownItems.filter((i) => i.kind === "channel") },
-          { label: "People", items: shownItems.filter((i) => i.kind === "person") },
-          { label: "Agents", items: shownItems.filter((i) => i.kind === "agent") },
-        ].filter((g) => g.items.length > 0)
-      : [{ label: "", items: shownItems }];
+  let groups: Array<{ label: string; items: ChatItem[] }>;
+  if (groupBy === "type") {
+    groups = [
+      { label: "Channels", items: shownItems.filter((i) => i.kind === "channel") },
+      { label: "People", items: shownItems.filter((i) => i.kind === "person") },
+      { label: "Agents", items: shownItems.filter((i) => i.kind === "agent") },
+    ].filter((g) => g.items.length > 0);
+  } else if (groupBy === "unread") {
+    groups = [
+      { label: "Unread", items: shownItems.filter((i) => i.unread > 0) },
+      { label: "Read", items: shownItems.filter((i) => i.unread === 0) },
+    ].filter((g) => g.items.length > 0);
+  } else {
+    groups = [{ label: "", items: shownItems }];
+  }
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card text-sm">
