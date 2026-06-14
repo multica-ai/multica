@@ -30,4 +30,5 @@ matches what you are about to touch before you start.
   reminders, agent activity, …), and how per-row actions stay identical across
   kinds (desktop 3-dot menu + shared `MobileRowActions` swipe). Read before
   touching the inbox list, a `Cerebro*RowActions` component, or adding a
-  notification type. Notes that note-mentions are not yet an inbox type.
+  notification type. Covers the reminder family and how note @-mentions surface
+  as `mentioned` inbox items.

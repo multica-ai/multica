@@ -14,12 +14,24 @@ describe("viewableKind", () => {
   });
 
   it.each([
+    ["image/png", "x.png", "image"],
+    ["image/jpeg", "photo.jpg", "image"],
+    ["image/webp", "shot.webp", "image"],
+    ["IMAGE/GIF", "anim.gif", "image"],
+    ["image/png; charset=binary", "x.png", "image"],
+  ] as const)("recognises image %s by content_type", (ct, name, expected) => {
+    expect(viewableKind(ct, name)).toBe(expected);
+  });
+
+  it.each([
     ["application/octet-stream", "plan.html", "html"],
     ["application/octet-stream", "PLAN.HTM", "html"],
     ["application/octet-stream", "notes.md", "markdown"],
     ["application/octet-stream", "data.JSON", "json"],
     ["application/octet-stream", "manual.PDF", "pdf"],
     ["application/octet-stream", "log.txt", "text"],
+    ["application/octet-stream", "screenshot.PNG", "image"],
+    ["application/octet-stream", "photo.jpeg", "image"],
   ] as const)(
     "falls back to extension for %s/%s",
     (ct, name, expected) => {
@@ -28,7 +40,9 @@ describe("viewableKind", () => {
   );
 
   it.each([
-    ["image/png", "x.png"],
+    // SVG is the deliberate carve-out — server forces download, no inline render.
+    ["image/svg+xml", "logo.svg"],
+    ["image/svg+xml; charset=utf-8", "logo.svg"],
     ["application/octet-stream", "binary.bin"],
     ["application/octet-stream", "noext"],
   ])("returns null for non-viewable %s/%s", (ct, name) => {
@@ -41,10 +55,12 @@ describe("isViewableAttachment", () => {
     expect(isViewableAttachment("text/html", "x.html")).toBe(true);
     expect(isViewableAttachment("application/octet-stream", "x.md")).toBe(true);
     expect(isViewableAttachment("application/pdf", "doc.pdf")).toBe(true);
+    expect(isViewableAttachment("image/png", "x.png")).toBe(true);
+    expect(isViewableAttachment("application/octet-stream", "shot.jpg")).toBe(true);
   });
 
   it("returns false otherwise", () => {
-    expect(isViewableAttachment("image/png", "x.png")).toBe(false);
+    expect(isViewableAttachment("image/svg+xml", "logo.svg")).toBe(false);
     expect(isViewableAttachment("application/octet-stream", "doc.bin")).toBe(false);
   });
 });

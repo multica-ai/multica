@@ -642,6 +642,21 @@ type CerebroNote struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroNoteReference struct {
+	ID            pgtype.UUID        `json:"id"`
+	NoteID        pgtype.UUID        `json:"note_id"`
+	Object        string             `json:"object"`
+	Type          pgtype.Text        `json:"type"`
+	RefID         string             `json:"ref_id"`
+	Label         pgtype.Text        `json:"label"`
+	Url           pgtype.Text        `json:"url"`
+	Metadata      []byte             `json:"metadata"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroNoteShare struct {
 	ArtifactID pgtype.UUID        `json:"artifact_id"`
 	UserID     pgtype.UUID        `json:"user_id"`

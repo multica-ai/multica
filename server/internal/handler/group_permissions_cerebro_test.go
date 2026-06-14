@@ -130,6 +130,31 @@ func TestCerebroRequireLocalRuntimePolicy_NilQueriesPasses(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 tests for the connections capability gate + middleware.
+func TestCerebroRequireConnectionsPolicy_NilQueriesPasses(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPost, "/api/workspaces/x/connections", nil)
+	w := httptest.NewRecorder()
+	if !h.cerebroRequireConnectionsPolicy(w, r, "00000000-0000-0000-0000-000000000000") {
+		t.Fatalf("nil CerebroQueries: connections gate must pass, got body=%q", w.Body.String())
+	}
+}
+
+func TestRequireConnectionsManagePolicy_NilQueriesCallsNext(t *testing.T) {
+	// With nil CerebroQueries the gate fails open, so the middleware must
+	// invoke the wrapped handler (preserving upstream-only test fixtures).
+	h := &Handler{}
+	called := false
+	mw := h.RequireConnectionsManagePolicy("id")
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+	r := httptest.NewRequest(http.MethodPost, "/api/workspaces/x/connections", nil)
+	w := httptest.NewRecorder()
+	mw(next).ServeHTTP(w, r)
+	if !called {
+		t.Fatalf("expected next handler to be called when gate passes, got status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
 func TestCerebroRequireCapability_UnknownCapabilityFailsClosed(t *testing.T) {
 	// Mistyped capability identifier in the handler should never silently
 	// pass — we'd rather see 500 in a test than ship a backdoor.

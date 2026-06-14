@@ -22,6 +22,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/go-chi/chi/v5" // CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 URL param read for the connections policy middleware.
 	"github.com/jackc/pgx/v5/pgtype"
 
 	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy resolve for local runtime creation.
@@ -213,6 +214,74 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 		return false
 	}
 	return true
+}
+
+// cerebroRequireConnectionsPolicy gates workspace-connection writes (create /
+// edit / delete / test) on the manage_connections capability, resolved through
+// the unified tool-policy chain (workspace > group > user) — the twin of
+// cerebroRequireLocalRuntimePolicy. TECH-3513 slice 1: this replaces the old
+// hardcoded owner/admin router role check with the controllable engine, so
+// "who may administer connections" is settable Allow/Ask/Deny at group and
+// member level like every other platform capability.
+//
+// The chain is consulted unconditionally (like the local-runtime and repo-
+// checkout gates), so it is live regardless of CEREBRO_APPROVAL_GATE_ENABLED.
+// Base = Allow + admin bypass preserve today's behavior 1:1 (owner/admin still
+// pass with no stored rows); an admin tightens a group/member to Ask/Deny to
+// restrict. Ask has no inbox path here, so anything other than Allow blocks.
+//
+// nil-queries fails open for the same reason as cerebroRequireLocalRuntimePolicy:
+// upstream-only test fixtures must keep working.
+//
+// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 connection writes gated on manage_connections capability.
+func (h *Handler) cerebroRequireConnectionsPolicy(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     "manage_connections",
+		UserID:      viewer.UserID,
+		Base:        toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+	if eff.Setting != toolpolicy.SettingAllow {
+		writeError(w, http.StatusForbidden, "managing workspace connections is not allowed for you — ask a workspace admin")
+		return false
+	}
+	return true
+}
+
+// RequireConnectionsManagePolicy is the router middleware wrapper around
+// cerebroRequireConnectionsPolicy. It reads the workspace id from the named
+// URL param and blocks the request when the manage_connections capability does
+// not resolve to Allow for the caller.
+//
+// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 router middleware for the connections capability gate.
+func (h *Handler) RequireConnectionsManagePolicy(param string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !h.cerebroRequireConnectionsPolicy(w, r, chi.URLParam(r, param)) {
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // cerebroRequireRuntimeAccess gates an action on the viewer being a member of

@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { forwardRef, useImperativeHandle, type Ref } from "react";
+import { renderWithI18n } from "../../test/i18n";
 
 const focusSpy = vi.hoisted(() => vi.fn());
 
@@ -158,5 +159,68 @@ describe("CommentInput — JEH-1200 click-to-focus", () => {
     expect(submitButton).not.toBeNull();
     fireEvent.mouseDown(submitButton!);
     expect(focusSpy).not.toHaveBeenCalled();
+  });
+});
+
+// CEREBRO-PATCH(composer-height-cap): TECH-3536 — mobile height cap + expand pill.
+describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
+  let origInnerWidth: number;
+  let origVisualViewport: typeof window.visualViewport;
+
+  function setViewport(innerWidth: number, vvHeight: number | null) {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: innerWidth,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value:
+        vvHeight == null
+          ? null
+          : { height: vvHeight, addEventListener: () => {}, removeEventListener: () => {} },
+    });
+  }
+
+  beforeEach(() => {
+    origInnerWidth = window.innerWidth;
+    origVisualViewport = window.visualViewport;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: origInnerWidth,
+    });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: origVisualViewport,
+    });
+  });
+
+  it("caps the editor at 50% of the viewport and expands to 80% on toggle", () => {
+    setViewport(400, 800); // mobile width, 800px of space above the keyboard
+    const { getByTestId, getByRole } = renderWithI18n(
+      <CommentInput issueId="c1" onSubmit={vi.fn()} />,
+    );
+
+    const scrollContainer = getByTestId("content-editor").parentElement!;
+    expect(scrollContainer.style.maxHeight).toBe("400px"); // 50% of 800
+
+    fireEvent.click(getByRole("button", { name: "Expand" }));
+    expect(scrollContainer.style.maxHeight).toBe("640px"); // 80% of 800
+
+    fireEvent.click(getByRole("button", { name: "Collapse" }));
+    expect(scrollContainer.style.maxHeight).toBe("400px");
+  });
+
+  it("applies no cap and hides the pill on desktop", () => {
+    setViewport(1280, 900); // desktop width
+    const { getByTestId, queryByRole } = renderWithI18n(
+      <CommentInput issueId="c1" onSubmit={vi.fn()} />,
+    );
+
+    const scrollContainer = getByTestId("content-editor").parentElement!;
+    expect(scrollContainer.style.maxHeight).toBe("");
+    expect(queryByRole("button", { name: "Expand" })).toBeNull();
   });
 });

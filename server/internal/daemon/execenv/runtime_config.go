@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time" // CEREBRO-PATCH(execenv-current-time): time injection for currentTime brief section
 )
 
 // runtimeMarkerBegin and runtimeMarkerEnd delimit the Multica-managed brief
@@ -347,6 +348,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	fmt.Fprintf(&b, "# currentTime\nThe current time is %s.\n\n", time.Now().Format("15:04:05 MST")) // CEREBRO-PATCH(execenv-current-time): inject wall-clock time so agents can reason about deadlines and schedules
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.

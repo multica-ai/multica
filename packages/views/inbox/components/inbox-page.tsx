@@ -346,6 +346,9 @@ export function InboxPage() {
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   // CEREBRO-PATCH(inbox-pinned-filter): FIR-2653 — gate the "Pinned" view option.
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
+  // CEREBRO-PATCH(inbox-archive-to-list): TECH-3535 — on archive, return to the
+  // list instead of auto-advancing to the next message when the user opts in.
+  const archiveToListEnabled = useFeatureFlag("cerebro_inbox_archive_to_list");
   const inboxViewOptions = useMemo(
     () =>
       INBOX_VIEW_OPTIONS.filter(
@@ -527,7 +530,9 @@ export function InboxPage() {
         : items.filter((i) => !isMuted(i.muted_until));
       const vidx = visible.findIndex((i) => i.id === id);
       const next = (vidx >= 0 ? visible[vidx + 1] ?? visible[vidx - 1] : null) ?? null;
-      setSelectedKey(next ? "issue" : null, next ? (next.issue_id ?? next.id) : "");
+      // CEREBRO-PATCH(inbox-archive-to-list): TECH-3535 — opt out of auto-advance.
+      const target = archiveToListEnabled ? null : next;
+      setSelectedKey(target ? "issue" : null, target ? (target.issue_id ?? target.id) : "");
     }
     archiveMutation.mutate(id, {
       onError: () => toast.error(t(($) => $.errors.archive_failed)),

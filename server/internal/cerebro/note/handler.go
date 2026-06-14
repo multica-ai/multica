@@ -140,6 +140,11 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Put("/{id}/visibility", h.SetVisibility)
 	r.Put("/{id}/pin", h.SetPin)
 	r.Get("/{id}/shares", h.ListShares)
+	// References on a note (TECH-3421): mirror of the issue-reference feature,
+	// keyed by the note's artifact id. See references.go.
+	r.Get("/{id}/references", h.ListReferences)
+	r.Post("/{id}/references", h.CreateReference)
+	r.Delete("/{id}/references/{refId}", h.DeleteReference)
 }
 
 // --- request / response shapes ---

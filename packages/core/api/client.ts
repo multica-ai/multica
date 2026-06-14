@@ -4155,4 +4155,28 @@ export class ApiClient {
       body: JSON.stringify({ pinned }),
     });
   }
+
+  // CEREBRO-PATCH(cerebro-notes-client): TECH-3421 — Note references: mirror of
+  // the issue-reference methods above, keyed by the note's artifact id.
+  //   GET    /api/notes/{id}/references            — list references on a note
+  //   POST   /api/notes/{id}/references            — UPSERT a reference (owner)
+  //   DELETE /api/notes/{id}/references/{refId}    — drop a reference (owner)
+  // Bodies are `unknown` so the cerebro-notes package owns the schema.
+  async listNoteReferences<T = unknown>(noteId: string): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/references`);
+  }
+  async createNoteReference<T = unknown>(
+    noteId: string,
+    payload: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/references`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+  async deleteNoteReference(noteId: string, refId: string): Promise<void> {
+    await this.fetch<void>(`/api/notes/${noteId}/references/${refId}`, {
+      method: "DELETE",
+    });
+  }
 }

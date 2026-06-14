@@ -12,16 +12,9 @@ import {
   Globe,
   NotebookPen,
   ChevronLeft,
-  Link2,
-  Hash,
-  MessageSquare,
-  User as UserIcon,
-  ListTodo,
-  AtSign,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
   DropdownMenu,
@@ -36,9 +29,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { useNavigation } from "@multica/views/navigation";
+import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   notesListOptions,
@@ -49,20 +41,9 @@ import {
   useSetNoteVisibility,
   firstLineTitle,
   VISIBILITY_LABELS,
-  distinctNoteLinks,
-  insertNoteLink,
-  noteLinkHref,
 } from "../core";
-import type { Note, NoteVisibility, NoteLink, NoteLinkType } from "../core";
-import { NoteLinkPicker } from "./note-link-picker";
-
-const LINK_ICON: Record<NoteLinkType, React.ReactNode> = {
-  issue: <ListTodo className="size-3" />,
-  channel: <Hash className="size-3" />,
-  dm: <UserIcon className="size-3" />,
-  chat: <MessageSquare className="size-3" />,
-  member: <AtSign className="size-3" />,
-};
+import type { Note, NoteVisibility } from "../core";
+import { NoteReferences } from "./note-references";
 
 const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
   private: <Lock className="size-3" />,
@@ -249,62 +230,23 @@ function NoteEditor({
   const deleteNote = useDeleteNote();
   const setPin = useSetNotePin();
   const setVisibility = useSetNoteVisibility();
-  const paths = useWorkspacePaths();
-  const { push } = useNavigation();
 
   const [title, setTitle] = React.useState(note.title);
-  const [body, setBody] = React.useState(note.body);
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
-  const [pickerOpen, setPickerOpen] = React.useState(false);
-
-  const bodyRef = React.useRef<HTMLTextAreaElement | null>(null);
-  // Caret offset captured the moment the picker opens, so the link lands where
-  // the user was typing even though the popover steals focus from the textarea.
-  const caretRef = React.useRef<number>(note.body.length);
+  const editorRef = React.useRef<ContentEditorRef>(null);
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-
-  const links = React.useMemo(() => distinctNoteLinks(body), [body]);
 
   function saveTitle() {
     if (title !== note.title) updateNote.mutate({ id: note.id, title });
   }
-  function saveBody() {
-    if (body !== note.body) updateNote.mutate({ id: note.id, body });
-  }
 
-  // openPicker remembers where the caret is right now so the inserted link is
-  // placed there even after the popover takes focus.
-  function openPicker() {
-    caretRef.current = bodyRef.current?.selectionStart ?? body.length;
-    setPickerOpen(true);
-  }
-
-  // The "@" key opens the picker when it starts a new token (start of body or
-  // after whitespace); mid-word "@" (e.g. an email) types literally.
-  function handleBodyKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.key !== "@") return;
-    const el = e.currentTarget;
-    const pos = el.selectionStart ?? 0;
-    const prev = pos > 0 ? el.value[pos - 1] : "";
-    if (pos === 0 || /\s/.test(prev ?? "")) {
-      e.preventDefault();
-      caretRef.current = pos;
-      setPickerOpen(true);
-    }
-  }
-
-  function handlePick(link: NoteLink) {
-    const next = insertNoteLink(body, caretRef.current, link);
-    setBody(next.body);
-    updateNote.mutate({ id: note.id, body: next.body });
-    // Restore focus + caret after React commits the new value.
-    requestAnimationFrame(() => {
-      const el = bodyRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(next.caret, next.caret);
-    });
+  // The body is the shared rich editor (same as issue comments/descriptions):
+  // typing "@" opens the identical mention picker, and inline mentions are
+  // stored as markdown that round-trips through the editor. Auto-save on the
+  // debounced update and again on blur so nothing is lost on navigate-away.
+  function saveBody(markdown: string) {
+    if (markdown !== note.body) updateNote.mutate({ id: note.id, body: markdown });
   }
 
   function applyVisibility(v: NoteVisibility) {
@@ -384,23 +326,6 @@ function NoteEditor({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <NoteLinkPicker
-          open={pickerOpen}
-          onOpenChange={setPickerOpen}
-          onPick={handlePick}
-          trigger={
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={openPicker}
-              title="Tag a person, or link an issue, channel, DM or chat"
-            >
-              <Link2 className="size-4" />
-              <span className="hidden sm:inline">Link</span>
-            </Button>
-          }
-        />
-
         <Button
           size="sm"
           variant={note.pinned ? "secondary" : "ghost"}
@@ -431,59 +356,18 @@ function NoteEditor({
           placeholder="Title (optional — first line becomes the title)"
           className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50"
         />
-        {links.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-              Linked
-            </span>
-            {links.map((link) => {
-              // A "member" tag is a person mention, not a place — render it as a
-              // static badge. The other link types navigate on click.
-              const href = noteLinkHref(paths, link);
-              const label = link.type === "member" ? `@${link.label}` : link.label;
-              const inner = (
-                <>
-                  <span className="text-muted-foreground">
-                    {LINK_ICON[link.type]}
-                  </span>
-                  <span className="truncate">{label}</span>
-                </>
-              );
-              const className =
-                "inline-flex max-w-[16rem] items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs";
-              if (!href) {
-                return (
-                  <span
-                    key={`${link.type}:${link.id}`}
-                    className={className}
-                    title={link.label}
-                  >
-                    {inner}
-                  </span>
-                );
-              }
-              return (
-                <button
-                  key={`${link.type}:${link.id}`}
-                  type="button"
-                  onClick={() => push(href)}
-                  className={`${className} hover:bg-muted`}
-                  title={link.label}
-                >
-                  {inner}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <Textarea
-          ref={bodyRef}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          onBlur={saveBody}
-          onKeyDown={handleBodyKeyDown}
-          placeholder="Just start writing… (type “@” to tag a person or link an issue, channel, DM or chat)"
-          className="min-h-[50vh] flex-1 resize-none border-0 px-0 text-[15px] leading-7 shadow-none focus-visible:ring-0"
+
+        <NoteReferences noteId={note.id} />
+
+        {/* Body uses the SAME rich editor as issue comments + descriptions, so
+            "@" behaves identically (people, agents, issues, …) inline. */}
+        <ContentEditor
+          ref={editorRef}
+          defaultValue={note.body}
+          onUpdate={saveBody}
+          onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
+          placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
+          className="min-h-[50vh] flex-1"
         />
       </div>
     </div>

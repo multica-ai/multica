@@ -173,7 +173,17 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
         </h1>
 
         <div className="mt-6">
-          {kind === "pdf" && inlinePdf && downloadHref ? (
+          {kind === "image" ? (
+            downloadHref ? (
+              <img
+                src={downloadHref}
+                alt={attachment.filename}
+                className="mx-auto max-h-[80vh] max-w-full rounded border border-border object-contain"
+              />
+            ) : (
+              <FallbackUnavailable downloadUrl={forcedDownloadHref} />
+            )
+          ) : kind === "pdf" && inlinePdf && downloadHref ? (
             <PdfViewer
               fileUrl={downloadHref}
               title={attachment.filename}
