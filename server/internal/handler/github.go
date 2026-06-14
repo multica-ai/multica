@@ -846,6 +846,7 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		Additions:           p.PullRequest.Additions,
 		Deletions:           p.PullRequest.Deletions,
 		ChangedFiles:        p.PullRequest.ChangedFiles,
+		Provider:            "github",
 	})
 	if err != nil {
 		slog.Warn("github: upsert pr failed", "err", err)
