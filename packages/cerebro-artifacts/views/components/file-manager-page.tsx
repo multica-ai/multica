@@ -13,8 +13,11 @@ import {
   Trash2,
   ArrowLeftRight,
   MoreHorizontal,
+  Repeat,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { NoteTypesPanel } from "./note-types-panel";
 import { Input } from "@multica/ui/components/ui/input";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -57,6 +60,7 @@ import {
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
@@ -547,6 +551,8 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
   );
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [query, setQuery] = React.useState("");
+  const noteTypesEnabled = useFeatureFlag("cerebro_note_types");
+  const [noteTypesOpen, setNoteTypesOpen] = React.useState(false);
   const [newFolderOpen, setNewFolderOpen] = React.useState(false);
   // Parent for the "New folder" dialog: null = current folder context,
   // otherwise an explicit folder id (e.g. when invoked from a tree item).
@@ -961,6 +967,17 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            {noteTypesEnabled && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setNoteTypesOpen(true)}
+              >
+                <Repeat className="mr-1 size-4" />
+                <span className="hidden sm:inline">Note typer</span>
+                <span className="sm:hidden">Typer</span>
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -1514,6 +1531,22 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {noteTypesEnabled && (
+        <Sheet open={noteTypesOpen} onOpenChange={setNoteTypesOpen}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+            <SheetHeader>
+              <SheetTitle>Note typer</SheetTitle>
+              <SheetDescription>
+                Skabeloner til tilbagevendende noter — fx business reviews.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <NoteTypesPanel />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
     </div>
   );
 }

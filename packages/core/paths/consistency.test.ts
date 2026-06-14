@@ -22,6 +22,7 @@ describe("paths.workspace() shape", () => {
         "channels",
         "projects",
         "documents",
+        "notes",
         "autopilots",
         // CEREBRO-PATCH(autopilot-new-path): full-page create route (JEH-1766)
         "autopilotNew",

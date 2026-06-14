@@ -37,6 +37,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/note-types/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
       "gate": "via:DELETE /api/cerebro/projects/{projectID}/sprint-settings/"
     },
@@ -86,6 +90,10 @@
     },
     {
       "id": "DELETE /api/chat/sessions/{sessionId}/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/chat/sessions/{sessionId}/mute",
       "gate": "workspace_member"
     },
     {
@@ -163,6 +171,10 @@
     {
       "id": "DELETE /api/me/profile",
       "gate": "self_only"
+    },
+    {
+      "id": "DELETE /api/notes/{id}",
+      "gate": "workspace_member"
     },
     {
       "id": "DELETE /api/pins/{itemType}/{itemId}",
@@ -501,6 +513,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/note-types/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/note-types/{id}/run",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/presence/ping",
       "gate": "workspace_member"
     },
@@ -581,11 +601,11 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/chat/sessions/{sessionId}/convert-to-issue",
+      "id": "POST /api/chat/sessions/{sessionId}/agent-message",
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/chat/sessions/{sessionId}/agent-message",
+      "id": "POST /api/chat/sessions/{sessionId}/convert-to-issue",
       "gate": "workspace_member"
     },
     {
@@ -593,15 +613,11 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/chat/sessions/{sessionId}/read",
-      "gate": "workspace_member"
-    },
-    {
       "id": "POST /api/chat/sessions/{sessionId}/mute",
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/chat/sessions/{sessionId}/mute",
+      "id": "POST /api/chat/sessions/{sessionId}/read",
       "gate": "workspace_member"
     },
     {
@@ -925,6 +941,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/notes/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/persona/approvals/{id}/approve",
       "gate": "self_only"
     },
@@ -1121,10 +1141,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "POST /api/workspaces/{id}/mcp",
-      "gate": "workspace_member"
-    },
-    {
       "id": "POST /api/workspaces/{id}/credentials",
       "gate": "workspace_member"
     },
@@ -1163,6 +1179,10 @@
     {
       "id": "POST /api/workspaces/{id}/leave",
       "gate": "self_only"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/mcp",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/workspaces/{id}/members",
@@ -1249,6 +1269,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/note-types/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
       "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
     },
@@ -1303,6 +1327,18 @@
     {
       "id": "PUT /api/me/profile",
       "gate": "self_only"
+    },
+    {
+      "id": "PUT /api/notes/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/notes/{id}/pin",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/notes/{id}/visibility",
+      "gate": "workspace_member"
     },
     {
       "id": "PUT /api/notification-preferences/",

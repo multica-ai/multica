@@ -37,7 +37,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
-import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
+import { ContentEditor } from "@multica/views/editor";
 import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
@@ -183,75 +183,92 @@ function ConnectionRow({
   );
 }
 
+type SaveStatus = "idle" | "saving" | "saved";
+
+/**
+ * Google-Docs-style inline editor: the document is directly editable in place
+ * and every change autosaves (debounced) — no Save button. A small status line
+ * shows "Saving…" / "Saved". The editor mounts once per document (key on id),
+ * so an autosave updating artifact.body never remounts it mid-typing.
+ */
 function MarkdownDocumentEditor({
   artifact,
   onSave,
-  isSaving,
 }: {
   artifact: Artifact;
   onSave: (body: string) => Promise<void>;
-  isSaving: boolean;
 }) {
-  const editorRef = React.useRef<ContentEditorRef>(null);
-  const [draft, setDraft] = React.useState(artifact.body);
-  const [resetVersion, setResetVersion] = React.useState(0);
+  const lastSavedRef = React.useRef(artifact.body);
+  const savingRef = React.useRef(false);
+  const pendingRef = React.useRef<string | null>(null);
+  const [status, setStatus] = React.useState<SaveStatus>("idle");
 
+  // Re-baseline when the user navigates to a different document.
   React.useEffect(() => {
-    setDraft(artifact.body);
-    setResetVersion((v) => v + 1);
-  }, [artifact.id, artifact.body]);
+    lastSavedRef.current = artifact.body;
+    setStatus("idle");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifact.id]);
 
-  const isDirty = draft !== artifact.body;
+  const flush = React.useCallback(
+    async (body: string) => {
+      if (body === lastSavedRef.current) return;
+      if (savingRef.current) {
+        pendingRef.current = body;
+        return;
+      }
+      savingRef.current = true;
+      setStatus("saving");
+      try {
+        await onSave(body);
+        lastSavedRef.current = body;
+      } finally {
+        savingRef.current = false;
+        const queued = pendingRef.current;
+        pendingRef.current = null;
+        if (queued !== null && queued !== lastSavedRef.current) {
+          void flush(queued);
+        } else {
+          setStatus("saved");
+        }
+      }
+    },
+    [onSave],
+  );
 
-  const handleSave = async () => {
-    const nextBody = editorRef.current?.getMarkdown() ?? draft;
-    if (nextBody === artifact.body) {
-      setDraft(nextBody);
-      return;
-    }
-    await onSave(nextBody);
-  };
-
-  const handleRevert = () => {
-    setDraft(artifact.body);
-    setResetVersion((v) => v + 1);
-  };
+  const handleUpdate = React.useCallback(
+    (body: string) => {
+      void flush(body);
+    },
+    [flush],
+  );
 
   return (
     <section className="overflow-hidden rounded-md border border-border bg-card shadow-sm">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2">
-        <div className="text-xs font-medium text-muted-foreground">
-          Markdown document
-        </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8"
-            onClick={handleRevert}
-            disabled={!isDirty || isSaving}
-          >
-            <RotateCcw className="mr-1 size-4" />
-            Revert
-          </Button>
-          <Button
-            size="sm"
-            className="h-8"
-            onClick={handleSave}
-            disabled={!isDirty || isSaving}
-          >
-            <Save className="mr-1 size-4" />
-            {isSaving ? "Saving…" : "Save"}
-          </Button>
+        <div className="text-xs font-medium text-muted-foreground">Note</div>
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          {status === "saving" && (
+            <>
+              <RotateCcw className="size-3.5 animate-spin" />
+              Gemmer…
+            </>
+          )}
+          {status === "saved" && (
+            <>
+              <Save className="size-3.5" />
+              Gemt
+            </>
+          )}
         </div>
       </div>
       <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
         <ContentEditor
-          key={`${artifact.id}:${resetVersion}`}
-          ref={editorRef}
+          key={artifact.id}
           defaultValue={artifact.body}
-          onUpdate={setDraft}
-          placeholder="Write something…"
+          onUpdate={handleUpdate}
+          debounceMs={800}
+          placeholder="Skriv noget…"
           className="min-h-[60vh]"
         />
       </div>
@@ -499,7 +516,6 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
             <MarkdownDocumentEditor
               artifact={artifact}
               onSave={handleSaveMarkdownBody}
-              isSaving={update.isPending}
             />
           ) : (
             <ArtifactContent artifact={artifact} />

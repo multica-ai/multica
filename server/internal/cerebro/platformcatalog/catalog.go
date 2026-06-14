@@ -299,6 +299,31 @@ var catalog = []Capability{
 			"DELETE /api/attachments/{id}",
 		},
 	},
+	{
+		Key:         "manage_notes",
+		Title:       "Create / edit / delete notes",
+		Category:    CategoryArtifacts,
+		Description: "Create, edit, delete, pin, or change the visibility of notes (built on the Document feature).",
+		Ops: []string{
+			"POST /api/notes/",
+			"PUT /api/notes/{id}",
+			"DELETE /api/notes/{id}",
+			"PUT /api/notes/{id}/pin",
+			"PUT /api/notes/{id}/visibility",
+		},
+	},
+	{
+		Key:         "manage_note_types",
+		Title:       "Create / edit / delete note types",
+		Category:    CategoryArtifacts,
+		Description: "Create, edit, delete, or run note types — reusable note templates with recurrence (e.g. business reviews).",
+		Ops: []string{
+			"POST /api/cerebro/note-types/",
+			"PUT /api/cerebro/note-types/{id}",
+			"DELETE /api/cerebro/note-types/{id}",
+			"POST /api/cerebro/note-types/{id}/run",
+		},
+	},
 
 	// --- Agents (styring af agenter) -----------------------------------------
 	{
