@@ -876,6 +876,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateDeterministicTool)
 				r.Post("/test", h.TestDeterministicTool)
 				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetDeterministicTool)
 					r.Put("/", h.UpdateDeterministicTool)
 					r.Delete("/", h.DeleteDeterministicTool)
 				})

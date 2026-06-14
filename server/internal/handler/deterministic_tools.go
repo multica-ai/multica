@@ -170,6 +170,18 @@ func (h *Handler) loadDeterministicToolForUser(w http.ResponseWriter, r *http.Re
 	return tool, true
 }
 
+// GetDeterministicTool returns a single workspace-authored tool by id. The
+// caller must be a member of the owning workspace (enforced by
+// loadDeterministicToolForUser, which mirrors the membership check used by
+// Update/Delete).
+func (h *Handler) GetDeterministicTool(w http.ResponseWriter, r *http.Request) {
+	tool, ok := h.loadDeterministicToolForUser(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, deterministicToolToResponse(tool))
+}
+
 // UpdateDeterministicTool edits an existing tool. Any subset of fields may be set.
 func (h *Handler) UpdateDeterministicTool(w http.ResponseWriter, r *http.Request) {
 	tool, ok := h.loadDeterministicToolForUser(w, r)
