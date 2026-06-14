@@ -22,8 +22,9 @@ Allowed Multica mutations:
 1. Set the watchdog tick status with `multica issue status`.
 2. Rename the watchdog tick with `multica issue update "$MULTICA_ISSUE_ID" --title "..."` when requested.
 3. Add recovery comments with `multica issue comment add`.
-4. Update master issue state with `multica issue update {master_issue_id} --description-stdin` using `shared-state-ops`.
-5. Close the watchdog tick with `multica issue status "$MULTICA_ISSUE_ID" done`.
+4. Update recovered task issue status with `multica issue status {target_issue_id} {issue_status}` when returned by `coding_watchdog_analyze`.
+5. Update master issue state with `multica issue update {master_issue_id} --description-stdin` using `shared-state-ops`.
+6. Close the watchdog tick with `multica issue status "$MULTICA_ISSUE_ID" done`.
 
 ## Required Flow
 
@@ -53,8 +54,11 @@ Call shape:
 ```
 
 For each returned action, post exactly the returned `content` to
-`target_issue_id` with `multica issue comment add --content-stdin`. Apply any
-returned state patches with `shared-state-ops`. If `coding_watchdog_analyze` is unavailable, stop and report that the deterministic tool plane is not enabled.
+`target_issue_id` with `multica issue comment add --content-stdin`. If an action
+includes `issue_status`, run `multica issue status "${target_issue_id}" "${issue_status}"`
+only after the recovery comment succeeds. Apply any returned state patches with
+`shared-state-ops`. If `coding_watchdog_analyze` is unavailable, stop and report
+that the deterministic tool plane is not enabled.
 
 ### 1. Start Tick
 
@@ -139,7 +143,7 @@ Exact names:
 For each active master issue:
 
 1. Iterate `state.tasks[]`; task issues come only from `task_issue_id` in master state.
-2. Skip tasks whose state is `committed`, `failed`, or `awaiting_clarification`, or whose `task_issue_id` is empty.
+2. Skip tasks whose state is `committed`, `done`, `failed`, or `awaiting_clarification`, or whose `task_issue_id` is empty.
 3. Fetch each remaining task's comments with `multica issue comment list "$TASK_ISSUE_ID" --output json`.
 4. Fetch master comments once when any task may need review-pass recovery.
 5. Call `coding_watchdog_analyze` with the state, task comments, master comments, resolved agent IDs, and current time.
@@ -152,6 +156,7 @@ The deterministic tool only proposes actions; you must execute them. For each re
 
 - Post exactly the returned `content` to `target_issue_id` with `multica issue comment add --content-stdin`.
 - Increment `RECOVERED` only after the recovery comment succeeds.
+- If the action includes `issue_status`, run `multica issue status "${target_issue_id}" "${issue_status}"` after the comment succeeds and before counting the recovery complete. This is how review-passed task issues are marked `done`.
 - Apply returned `state_patches` with `shared-state-ops` and `multica issue update {master_issue_id} --description-stdin`.
 - Do not use file editing tools for state writes.
 

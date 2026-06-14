@@ -293,6 +293,20 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
+func TestAssignmentTriggeredProtocolSkipsInReviewForCodingTeam(t *testing.T) {
+	t.Parallel()
+	const issueID = "33333333-4444-5555-6666-777777777777"
+	ctx := TaskContextForEnv{IssueID: issueID, AgentName: "Coding Team Implementer"}
+	out := buildMetaSkillContent("claude", ctx)
+
+	if strings.Contains(out, "Run `multica issue status "+issueID+" in_review`") {
+		t.Fatalf("coding-team agent should not receive forced in_review step, got: %s", out)
+	}
+	if !strings.Contains(out, "8. This role follows coding-team handoff state progression") {
+		t.Fatalf("coding-team agent should receive handoff-managed status guidance, got: %s", out)
+	}
+}
+
 func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

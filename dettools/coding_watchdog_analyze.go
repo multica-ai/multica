@@ -45,7 +45,7 @@ func Run(input map[string]any) map[string]any {
 			skips = append(skips, skip("", "missing task_issue_id"))
 			continue
 		}
-		if status == "committed" || status == "failed" || status == "awaiting_clarification" {
+		if status == "committed" || status == "done" || status == "failed" || status == "awaiting_clarification" {
 			skips = append(skips, skip(taskID, "terminal or blocked task status"))
 			continue
 		}
@@ -154,7 +154,7 @@ func recoveryAction(masterID, taskID, stage, role, agentID string) map[string]an
 		actionType = "master_task_complete_comment"
 		content = mention(role, agentID) + "\n\nTASK_COMPLETE\ntask_issue_id: " + taskID + "\nstatus: committed"
 	}
-	return map[string]any{
+	action := map[string]any{
 		"type":            actionType,
 		"target_issue_id": target,
 		"task_issue_id":   taskID,
@@ -163,6 +163,10 @@ func recoveryAction(masterID, taskID, stage, role, agentID string) map[string]an
 		"agent_id":        agentID,
 		"content":         content,
 	}
+	if stage == "review_passed" {
+		action["issue_status"] = "done"
+	}
+	return action
 }
 
 func patchForStage(taskID, stage string) any {
@@ -198,7 +202,7 @@ func hasMasterTaskComplete(comments []any, taskID, agentID string) bool {
 		if strings.Contains(body, mentionNeedle) &&
 			strings.Contains(body, "TASK_COMPLETE") &&
 			strings.Contains(body, "task_issue_id: "+taskID) &&
-			strings.Contains(body, "status: committed") {
+			(strings.Contains(body, "status: committed") || strings.Contains(body, "status: done")) {
 			return true
 		}
 	}
