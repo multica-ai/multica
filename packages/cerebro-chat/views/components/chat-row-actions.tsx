@@ -14,7 +14,7 @@
 // selection after archive/unarchive/delete. Snooze ("remind me") and
 // mark-as-unread are intentionally absent — chat sessions have no backend
 // support for either today (see TECH-3489).
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Archive,
   ArchiveRestore,
@@ -37,6 +37,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
   CerebroSwipeArchive,
   CerebroUnarchiveAction,
+  MobileRowActions,
   ReminderSheet,
   useCerebroInboxStrings,
   isMuted,
@@ -113,6 +114,13 @@ export function CerebroChatSessionRowActions({
   );
 
   const muted = isMuted(session.muted_until);
+
+  // Swipe-left / drawer read toggle: mark a read chat unread, or a read chat
+  // read. Mark-as-unread is meaningless on an archived chat, so skip it there.
+  const toggleRead = () => {
+    if (session.has_unread) markRead.mutate(session.id);
+    else if (!isArchivedView) markUnread.mutate(session.id);
+  };
 
   // "Remind me" opens the shared reminder sheet (presets + custom). Removing a
   // reminder on a snoozed chat is the inverse and happens directly.
@@ -196,67 +204,117 @@ export function CerebroChatSessionRowActions({
     });
   }
 
+  // Long-press drawer (mobile) — the same action set as the desktop dropdown,
+  // rendered as full-width buttons so it matches issue/channel/DM rows exactly.
+  const drawerMenu = (close: () => void) => (
+    <div className="flex flex-col">
+      {session.has_unread ? (
+        <DrawerButton onClick={() => { close(); markRead.mutate(session.id); }}>
+          <MailOpen className="size-4" /> {s.mark_read}
+        </DrawerButton>
+      ) : (
+        !isArchivedView && (
+          <DrawerButton onClick={() => { close(); markUnread.mutate(session.id); }}>
+            <Mail className="size-4" /> {s.mark_unread}
+          </DrawerButton>
+        )
+      )}
+      {!isArchivedView && (
+        <DrawerButton onClick={() => { close(); toggleMute(); }}>
+          {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
+          {muted ? s.remind_remove : s.remind}
+        </DrawerButton>
+      )}
+      <DrawerButton onClick={() => { close(); startRename(); }}>
+        <Pencil className="size-4" /> {s.rename}
+      </DrawerButton>
+      <DrawerButton onClick={() => { close(); setConfirm("convert"); }}>
+        <FileText className="size-4" /> {s.convert_to_issue}
+      </DrawerButton>
+      {isArchivedView ? (
+        <DrawerButton onClick={() => { close(); reopen(); }}>
+          <ArchiveRestore className="size-4" /> {s.unarchive}
+        </DrawerButton>
+      ) : (
+        <DrawerButton onClick={() => { close(); archive(); }}>
+          <Archive className="size-4" /> {s.archive}
+        </DrawerButton>
+      )}
+      <DrawerButton onClick={() => { close(); setConfirm("delete"); }}>
+        <Trash2 className="size-4" /> {s.delete}
+      </DrawerButton>
+    </div>
+  );
+
   return (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              aria-label={s.more_actions}
-              onClick={(e) => e.stopPropagation()}
-              className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground opacity-100 hover:bg-accent hover:text-foreground sm:opacity-0 sm:group-hover:opacity-100"
-            />
-          }
-        >
-          <MoreHorizontal className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-          {session.has_unread ? (
-            <DropdownMenuItem onClick={() => markRead.mutate(session.id)}>
-              <MailOpen className="size-4" /> {s.mark_read}
-            </DropdownMenuItem>
-          ) : (
-            !isArchivedView && (
-              <DropdownMenuItem onClick={() => markUnread.mutate(session.id)}>
-                <Mail className="size-4" /> {s.mark_unread}
-              </DropdownMenuItem>
-            )
-          )}
-          {!isArchivedView && (
-            <DropdownMenuItem onClick={toggleMute}>
-              {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
-              {muted ? s.remind_remove : s.remind}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onClick={startRename}>
-            <Pencil className="size-4" /> {s.rename}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setConfirm("convert")}>
-            <FileText className="size-4" /> {s.convert_to_issue}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {isArchivedView ? (
-            <DropdownMenuItem onClick={reopen}>
-              <ArchiveRestore className="size-4" /> {s.unarchive}
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem onClick={archive}>
-              <Archive className="size-4" /> {s.archive}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem variant="destructive" onClick={() => setConfirm("delete")}>
-            <Trash2 className="size-4" /> {s.delete}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      {/* Keep the mobile swipe gesture: swipe-right archives an active chat, or
-          reopens an archived one — matching issue and channel rows. */}
-      {isArchivedView ? (
-        <CerebroUnarchiveAction onUnarchive={reopen} />
+      {isMobile ? (
+        // Mobile: the exact same swipe surface (swipe-archive + swipe-left
+        // reveal + long-press drawer) as issue/channel/DM rows, reused from
+        // @multica/cerebro-inbox so all four row types behave identically.
+        <MobileRowActions
+          muted={muted}
+          unread={!!session.has_unread}
+          onArchive={isArchivedView ? reopen : archive}
+          onToggleRead={toggleRead}
+          onToggleMute={toggleMute}
+          strings={inboxStrings}
+          renderDrawerMenu={drawerMenu}
+        />
       ) : (
-        <CerebroSwipeArchive hideOnDesktop onArchive={archive} />
+        // Desktop: a single hover "..." dropdown, matching issue/channel rows.
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={s.more_actions}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+              />
+            }
+          >
+            <MoreHorizontal className="size-4" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+            {session.has_unread ? (
+              <DropdownMenuItem onClick={() => markRead.mutate(session.id)}>
+                <MailOpen className="size-4" /> {s.mark_read}
+              </DropdownMenuItem>
+            ) : (
+              !isArchivedView && (
+                <DropdownMenuItem onClick={() => markUnread.mutate(session.id)}>
+                  <Mail className="size-4" /> {s.mark_unread}
+                </DropdownMenuItem>
+              )
+            )}
+            {!isArchivedView && (
+              <DropdownMenuItem onClick={toggleMute}>
+                {muted ? <BellOff className="size-4" /> : <BellPlus className="size-4" />}
+                {muted ? s.remind_remove : s.remind}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={startRename}>
+              <Pencil className="size-4" /> {s.rename}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setConfirm("convert")}>
+              <FileText className="size-4" /> {s.convert_to_issue}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {isArchivedView ? (
+              <DropdownMenuItem onClick={reopen}>
+                <ArchiveRestore className="size-4" /> {s.unarchive}
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={archive}>
+                <Archive className="size-4" /> {s.archive}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirm("delete")}>
+              <Trash2 className="size-4" /> {s.delete}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       {/* "Remind me" time picker (presets + custom), shared with channel/DM rows. */}
@@ -343,5 +401,29 @@ export function CerebroChatSessionRowActions({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+// Plain full-width button for the mobile long-press drawer. Not a
+// DropdownMenuItem — Base UI's Menu.Item no-ops onClick outside a menu context.
+// Mirrors the same helper in @multica/cerebro-channels for a consistent drawer.
+function DrawerButton({
+  children,
+  onClick,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-accent"
+    >
+      {children}
+    </button>
   );
 }
