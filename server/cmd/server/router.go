@@ -639,6 +639,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 
+		// Super-admin endpoints. Every handler calls requireSuperAdmin internally.
+		// Rate-limited to prevent enumeration of all user emails by a compromised
+		// super-admin credential.
+		adminRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_ADMIN", 60), time.Minute, trustedProxies)
+		r.With(adminRL).Route("/api/admin", func(r chi.Router) {
+			r.Get("/users", h.AdminListUsers)
+			r.Patch("/users/{id}", h.AdminUpdateUser)
+		})
+
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
