@@ -607,7 +607,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// Comment-triggered and wakeup-triggered tasks both carry a reply
 		// anchor, but wakeups are platform activity, not synthetic comments.
 		if ctx.WakeupPrompt != "" {
-			b.WriteString("**This task was triggered by a scheduled wakeup.** The platform started you directly; no user-visible wakeup comment was created. Your primary job is to continue from the wakeup note and post any visible result in the original thread.\n\n")
+			// CEREBRO-PATCH(approval-system-activity): TECH-3533 frame owner-approved run-requests, not just scheduled wakeups.
+			if ctx.WakeupTriggerType == "approval" {
+				b.WriteString("**This task was triggered by an owner approving a run-request.** The platform started you directly via a system activity. Your primary job is to carry out the approved request in the note below and post the result in the original thread.\n\n")
+			} else {
+				b.WriteString("**This task was triggered by a scheduled wakeup.** The platform started you directly; no user-visible wakeup comment was created. Your primary job is to continue from the wakeup note and post any visible result in the original thread.\n\n")
+			}
 			if ctx.WakeupTriggerType != "" {
 				fmt.Fprintf(&b, "- Wakeup type: `%s`\n", ctx.WakeupTriggerType)
 			}

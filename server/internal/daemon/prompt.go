@@ -53,7 +53,12 @@ func buildWakeupPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	b.WriteString("[WAKEUP] The platform re-invoked you from a scheduled wakeup. This is NOT a new user comment and no wakeup comment was created.\n\n")
+	// CEREBRO-PATCH(approval-system-activity): TECH-3533 frame owner-approved run-requests, not just scheduled wakeups.
+	if task.WakeupTriggerType == "approval" {
+		b.WriteString("[APPROVAL] An owner approved a request for you to act on this issue. This is a system trigger, not a new user comment. Carry out the approved request from the note below and post your result in the original thread.\n\n")
+	} else {
+		b.WriteString("[WAKEUP] The platform re-invoked you from a scheduled wakeup. This is NOT a new user comment and no wakeup comment was created.\n\n")
+	}
 	if task.WakeupTriggerType != "" {
 		fmt.Fprintf(&b, "Wakeup type: `%s`\n\n", task.WakeupTriggerType)
 	}
