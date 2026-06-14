@@ -1,6 +1,6 @@
 import * as React from "react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Artifact } from "@multica/core/types";
 
@@ -152,7 +152,7 @@ describe("DocumentViewPage markdown body", () => {
     currentMember.role = "member";
   });
 
-  it("renders owned markdown documents as an inline editor and saves body changes", () => {
+  it("renders owned markdown documents as an inline editor and autosaves body changes", async () => {
     renderPage(artifact());
 
     expect(screen.getByLabelText("Markdown editor")).toHaveValue(
@@ -162,16 +162,19 @@ describe("DocumentViewPage markdown body", () => {
     expect(
       screen.queryByText("Edit body"),
     ).not.toBeInTheDocument();
+    // Google-Docs style: no Save button — editing autosaves.
+    expect(screen.queryByText("Save")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Markdown editor"), {
       target: { value: "# Readme\n\nChanged body" },
     });
-    fireEvent.click(screen.getByText("Save"));
 
-    expect(updateArtifactMutateAsync).toHaveBeenCalledWith({
-      id: "art-1",
-      data: { body: "# Readme\n\nChanged body" },
-    });
+    await waitFor(() =>
+      expect(updateArtifactMutateAsync).toHaveBeenCalledWith({
+        id: "art-1",
+        data: { body: "# Readme\n\nChanged body" },
+      }),
+    );
   });
 
   it("lets workspace admins edit agent-authored markdown documents", () => {

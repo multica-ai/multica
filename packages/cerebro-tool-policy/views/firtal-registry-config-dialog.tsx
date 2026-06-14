@@ -130,8 +130,8 @@ export function FirtalRegistryConfigDialog({
         <SheetHeader className="border-b">
           <SheetTitle>firtal_registry — data sources</SheetTitle>
           <SheetDescription>
-            Choose which data sources the agent may see via Firtal Data Registry.
-            Without permission the agent sees no sources.
+            Turning on firtal_registry only gives the agent the Registry tool.
+            Choose data sources here before the agent can list or run them.
           </SheetDescription>
         </SheetHeader>
 
@@ -140,7 +140,7 @@ export function FirtalRegistryConfigDialog({
             <div className="space-y-0.5">
               <Label htmlFor="allow-all-ds">Tillad alle data sources</Label>
               <p className="text-xs text-muted-foreground">
-                Disables the allowlist — the agent sees everything in the registry.
+                Gives this agent access to list and run every Registry data source.
               </p>
             </div>
             <Switch
@@ -152,6 +152,14 @@ export function FirtalRegistryConfigDialog({
 
           {!allowAll && (
             <div className="flex flex-1 flex-col gap-2">
+              {selected.size === 0 ? (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                  This agent has the firtal_registry tool, but it cannot use any
+                  data source until at least one source is selected or all data
+                  sources are allowed.
+                </div>
+              ) : null}
+
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input

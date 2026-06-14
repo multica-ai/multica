@@ -42,6 +42,9 @@ export type SectionKind =
   | "unread"
   | "pinned"
   | "project"
+  // TECH-3421 — a self-contained box of the user's recent notes (custom
+  // renderer, not a slice of the inbox feed). See NotesInboxBox.
+  | "notes"
   | "all"
   // TECH-3413 #4 — a fully dynamic box: the user composes the filter
   // (unread / pinned / mentioned / project) instead of picking a fixed kind.
@@ -99,12 +102,21 @@ export interface InboxSectionConfig {
   // source of truth. Empty array = show everything. The legacy booleans are
   // kept only as a migration seed (see `sectionFilters` in section-filter.ts).
   filters?: FilterCondition[];
-  /** TECH-3422 — for the "team" (Slack) section: how many people to show.
-   *  0 / undefined = show all. Starred people always count first. */
-  maxPeople?: number;
-  /** TECH-3422 — sort order for the "team" (Chat) section's people + channels.
-   *  Starred always float to the top regardless. Default "name". */
-  teamSort?: "name" | "recent" | "unread";
+  /** TECH-3494 — for the "team" (Chat) section: total rows to show across
+   *  channels + people + agents. 0 = all. undefined defaults to 10. */
+  teamLimit?: number;
+  /** TECH-3494 — sort order across all kinds in the "team" (Chat) section.
+   *  Starred float to the top regardless. Default "recent". */
+  teamSort?: "name" | "recent";
+  /** TECH-3494 — keep unread "team" (Chat) rows first. Default true.
+   *  Backcompat: persisted `teamGroupBy: "unread"` means true. */
+  teamUnreadFirst?: boolean;
+  /** TECH-3494 — group the "team" (Chat) section by kind or one flat list.
+   *  Default "type". */
+  teamGroupBy?: "unread" | "type" | "none";
+  /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
+   *  undefined / false = only people + channels. Opt-in via section settings. */
+  showAgents?: boolean;
 }
 
 export interface InboxTabConfig {
@@ -138,6 +150,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "reminders", label: "Reminders" },
   { kind: "pinned", label: "Pinned issues" },
   { kind: "project", label: "Project…", needsProject: true },
+  { kind: "notes", label: "Notes" },
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },

@@ -283,6 +283,29 @@ describe("SimpleToolPolicyTable", () => {
     });
   });
 
+  it("explains when firtal_registry is enabled without data source access", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
+    });
+    mockGetAgentTools.mockResolvedValue([
+      {
+        name: "firtal_registry",
+        enabled: true,
+        config: {},
+      },
+    ]);
+    mockUseFeatureFlag.mockImplementation(
+      (key) => key === "cerebro_firtal_registry_allowlist_ui",
+    );
+    renderTable();
+    const fdrRow = await screen.findByTestId("tool-row-firtal_registry");
+    await waitFor(() => {
+      expect(
+        within(fdrRow).getByTestId("firtal-registry-configure"),
+      ).toHaveTextContent("No data source access");
+    });
+  });
+
   it("hides the Konfigurer button when the flag is off", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],

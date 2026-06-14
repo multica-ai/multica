@@ -22,6 +22,7 @@ import {
   Sun,
   BookOpenText,
   Settings,
+  NotebookPen, // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 Notes group icon.
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
@@ -118,15 +119,42 @@ interface CommandItem {
   onSelect: () => void;
 }
 
+// CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — Notes hits in Cmd+K.
+interface NoteHit {
+  id: string;
+  title: string;
+  body: string;
+}
+
+// noteSearchTitle / noteSearchSnippet derive a display title + snippet from a
+// note: a titleless note borrows its first non-empty body line (Apple Notes
+// pattern); the snippet is the remaining body. Defensive against missing fields.
+function noteSearchTitle(note: NoteHit): string {
+  const t = (note.title ?? "").trim();
+  if (t) return t;
+  const first = (note.body ?? "")
+    .split("\n")
+    .map((l) => l.replace(/^#+\s*/, "").trim())
+    .find((l) => l.length > 0);
+  return first || "New note";
+}
+
+function noteSearchSnippet(note: NoteHit): string {
+  const lines = (note.body ?? "").split("\n").filter((l) => l.trim().length > 0);
+  const skipTitle = !(note.title ?? "").trim() && lines.length > 0 ? 1 : 0;
+  return lines.slice(skipTitle).join(" ");
+}
+
 interface SearchResults {
   issues: SearchIssueResult[];
   // CEREBRO-PATCH(typeahead-comments): FIR-2605 — issues matched via comment body, shown in their own section.
   comments: SearchIssueResult[];
   projects: SearchProjectResult[];
   chatSessions: SearchChatSessionResult[];
+  notes: NoteHit[]; // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — Notes group.
 }
 
-const EMPTY_RESULTS: SearchResults = { issues: [], comments: [], projects: [], chatSessions: [] };
+const EMPTY_RESULTS: SearchResults = { issues: [], comments: [], projects: [], chatSessions: [], notes: [] };
 
 export function SearchCommand() {
   const { t } = useT("search");
@@ -323,6 +351,7 @@ export function SearchCommand() {
     results.comments.length > 0 || // CEREBRO-PATCH(typeahead-comments): FIR-2605
     results.projects.length > 0 ||
     results.chatSessions.length > 0 ||
+    results.notes.length > 0 || // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421
     filteredMembers.length > 0;
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -384,7 +413,8 @@ export function SearchCommand() {
       abortRef.current = controller;
       try {
         // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — third Promise.all leg for Cmd+K chat-session search.
-        const [issueRes, projectRes, chatRes] = await Promise.all([
+        // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — fourth leg for Notes search.
+        const [issueRes, projectRes, chatRes, noteRes] = await Promise.all([
           api.searchIssues({
             q: q.trim(),
             limit: 20,
@@ -402,6 +432,10 @@ export function SearchCommand() {
             limit: 10,
             signal: controller.signal,
           }).catch(() => ({ chat_sessions: [], total: 0 })),
+          // CEREBRO-PATCH(cerebro-notes-search-ui): owner-scoped Notes search; never throws into the palette.
+          api
+            .listNotes<NoteHit[]>({ q: q.trim(), limit: 10 })
+            .catch(() => [] as NoteHit[]),
         ]);
         if (!controller.signal.aborted) {
           // CEREBRO-PATCH(typeahead-comments): FIR-2605 — split by match_source so comment hits get their own section.
@@ -412,6 +446,7 @@ export function SearchCommand() {
             comments: commentHits,
             projects: projectRes.projects,
             chatSessions: chatRes.chat_sessions,
+            notes: Array.isArray(noteRes) ? noteRes : [], // CEREBRO-PATCH(cerebro-notes-search-ui): defensive — bad shape → empty.
           });
           setIsLoading(false);
         }
@@ -440,6 +475,9 @@ export function SearchCommand() {
       } else if (value.startsWith("chat:")) {
         // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — open chat session via inbox ?chat= deeplink.
         push(`${p.inbox()}?chat=${encodeURIComponent(value.slice(5))}`);
+      } else if (value.startsWith("note:")) {
+        // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — open the note via /notes ?note= deeplink.
+        push(`${p.notes()}?note=${encodeURIComponent(value.slice(5))}`);
       } else {
         push(p.issueDetail(value));
       }
@@ -756,6 +794,43 @@ export function SearchCommand() {
                         <span className="text-xs text-muted-foreground truncate">
                           <HighlightText
                             text={session.matched_snippet}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {/* CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — Notes group in Cmd+K. */}
+            {!isLoading && results.notes.length > 0 && (
+              <CommandPrimitive.Group
+                heading="Notes"
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {results.notes.map((note) => (
+                  <CommandPrimitive.Item
+                    key={`note:${note.id}`}
+                    value={`note:${note.id}`}
+                    onSelect={handleSelect}
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <NotebookPen className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">
+                        <HighlightText
+                          text={noteSearchTitle(note)}
+                          query={query}
+                        />
+                      </span>
+                    </div>
+                    {noteSearchSnippet(note) && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <span className="truncate text-xs text-muted-foreground">
+                          <HighlightText
+                            text={noteSearchSnippet(note)}
                             query={query}
                           />
                         </span>

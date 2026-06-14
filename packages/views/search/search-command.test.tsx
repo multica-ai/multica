@@ -29,6 +29,7 @@ const {
   mockSearchIssues,
   mockSearchProjects,
   mockSearchChatSessions,
+  mockListNotes,
   mockRecentItems,
   mockAllIssues,
   mockSetTheme,
@@ -44,6 +45,7 @@ const {
   mockSearchIssues: vi.fn(),
   mockSearchProjects: vi.fn(),
   mockSearchChatSessions: vi.fn(),
+  mockListNotes: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
   mockSetTheme: vi.fn(),
@@ -73,6 +75,7 @@ vi.mock("@multica/core/api", () => ({
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
     searchChatSessions: mockSearchChatSessions,
+    listNotes: mockListNotes,
   },
 }));
 
@@ -177,6 +180,7 @@ describe("SearchCommand", () => {
     mockSearchIssues.mockReset().mockResolvedValue({ issues: [] });
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockSearchChatSessions.mockReset().mockResolvedValue({ chat_sessions: [], total: 0 });
+    mockListNotes.mockReset().mockResolvedValue([]);
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockSetTheme.mockReset();

@@ -27,6 +27,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -180,8 +181,9 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// verdict in by TIGHTENING, so an Ask/Deny authored on a connection tool is
 	// enforced on the local runtime exactly as on the gateway. Built-in tools (no
 	// mcp__ prefix) skip this entirely.
+	connName := ""
 	if connTool := connectionToolFromName(req.ToolName); connTool != "" {
-		connEff, cErr := store.ConnectionToolEffective(r.Context(), wsUUID, runtimeID, agentID, ownerID, connTool)
+		connEff, resolvedConn, cErr := store.ConnectionToolEffective(r.Context(), wsUUID, runtimeID, agentID, ownerID, connTool)
 		if cErr != nil {
 			if mode == localtoolpolicy.ModeEnforce {
 				slog.Warn("local tool-policy: connection resolve failed — failing closed",
@@ -195,8 +197,14 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			}
 			slog.Warn("local tool-policy observe: connection resolve failed — keeping base verdict",
 				"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", cErr)
-		} else if toolpolicy.MoreRestrictive(connEff, eff.Setting) == connEff && connEff != eff.Setting {
-			eff = toolpolicy.Effective{Setting: connEff, Reason: "workspace connection permission"}
+		} else {
+			// Record the deciding connection name so the ask context can surface
+			// "which integration" even when the connection verdict does not tighten
+			// (e.g. an Ask folded with an equal base) — TECH-3498.
+			connName = resolvedConn
+			if toolpolicy.MoreRestrictive(connEff, eff.Setting) == connEff && connEff != eff.Setting {
+				eff = toolpolicy.Effective{Setting: connEff, Reason: "workspace connection permission"}
+			}
 		}
 	}
 
@@ -216,7 +224,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			})
 			return
 		}
-		allowed, askDecision, approvalID, askErr := h.toolPolicyAsk(r.Context(), wsUUID, agentID, req.ToolName, req.ResourcePattern, eff.Reason, req.Args)
+		allowed, askDecision, approvalID, askErr := h.toolPolicyAsk(r.Context(), wsUUID, agentID, req.ToolName, req.ResourcePattern, connName, eff.Reason, req.Args)
 		if askErr != nil {
 			slog.Error("local tool-policy approval ask failed",
 				"workspace_id", workspaceID, "agent_id", req.AgentID, "tool", req.ToolName, "error", askErr)
@@ -304,7 +312,14 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 // instead of piling up duplicates — the same machinery and rejoining semantics
 // as repoCheckoutAsk. The requester is the agent making the call; the resource
 // is the tool's resource pattern (binary / path / URL).
-func (h *Handler) toolPolicyAsk(ctx context.Context, wsID, agentID pgtype.UUID, toolName, resourcePattern, reason string, args map[string]any) (allowed bool, decision string, approvalID pgtype.UUID, err error) {
+func (h *Handler) toolPolicyAsk(ctx context.Context, wsID, agentID pgtype.UUID, toolName, resourcePattern, connection, reason string, args map[string]any) (allowed bool, decision string, approvalID pgtype.UUID, err error) {
+	// CEREBRO-PATCH(daemon-connection-ask-context): TECH-3498 — a human-readable
+	// purpose for the inbox: connection tools name the integration, everything
+	// else names the tool, so the approval card shows what/which/why.
+	purpose := fmt.Sprintf("Agent requested tool %q", toolName)
+	if connection != "" {
+		purpose = fmt.Sprintf("Agent wants to use tool %q on connection %q", toolName, connection)
+	}
 	req := permgate.Request{
 		Permission: permissions.Request{
 			WorkspaceID: wsID,
@@ -317,9 +332,12 @@ func (h *Handler) toolPolicyAsk(ctx context.Context, wsID, agentID pgtype.UUID, 
 		RequesterID:   agentID,
 		Surface:       approvals.SurfaceSystem,
 		Context: map[string]any{
-			"tool_name": toolName,
-			"resource":  resourcePattern,
-			"args":      args,
+			"tool_name":       toolName,
+			"resource":        resourcePattern,
+			"connection":      connection,
+			"args":            args,
+			"connection_tool": connection != "",
+			"purpose":         purpose,
 		},
 	}
 	res, err := h.ApprovalGate.EvaluateDecisionReusing(ctx, req, permissions.Decision{

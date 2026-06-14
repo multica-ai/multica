@@ -2,14 +2,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { approveApproval, delegateApproval, rejectApproval } from "./api";
 import { approvalKeys } from "./queries";
-import type { DelegateRequest } from "./types";
+import type { ApproveRequest, DelegateRequest } from "./types";
 
 export function useApproveApproval() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (vars: { id: string; note?: string }) =>
-      approveApproval(wsId, vars.id, vars.note),
+    mutationFn: (vars: { id: string } & ApproveRequest) =>
+      approveApproval(wsId, vars.id, {
+        note: vars.note,
+        grant_for_seconds: vars.grant_for_seconds,
+        grant_at_level: vars.grant_at_level,
+      }),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: approvalKeys.all(wsId) });
     },

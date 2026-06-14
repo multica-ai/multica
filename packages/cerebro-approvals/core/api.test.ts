@@ -50,7 +50,7 @@ describe("approvals api compatibility", () => {
 
   it("tolerates a partial response from approve()", async () => {
     mockCerebroRequest.mockResolvedValueOnce({ id: "a1", status: "approved" });
-    const res = await approveApproval("ws", "a1", "ok");
+    const res = await approveApproval("ws", "a1", { note: "ok" });
     expect(res?.status).toBe("approved");
     expect(res?.capability).toBe("");
   });

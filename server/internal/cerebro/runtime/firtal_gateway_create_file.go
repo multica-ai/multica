@@ -36,7 +36,7 @@ func (t *FirtalCreateFileTool) Description() string {
 	return "Create a file from inline content and attach it to the current chat or issue. " +
 		"Supported formats: " + strings.Join(filegen.SupportedFormats(), ", ") + ". " +
 		"Provide `content` for text formats (md, txt, html, svg, xml, json) or `rows` for tabular data (csv). " +
-		"The file is attached to the current conversation by default; pass issue_id to target a specific issue."
+		"The file is attached to the conversation you are in — you cannot choose a different target."
 }
 
 func (t *FirtalCreateFileTool) InputSchema() map[string]any {
@@ -64,10 +64,6 @@ func (t *FirtalCreateFileTool) InputSchema() map[string]any {
 					"type":  "array",
 					"items": map[string]any{"type": "string"},
 				},
-			},
-			"issue_id": map[string]any{
-				"type":        "string",
-				"description": "Optional: attach to this issue (UUID or identifier like JEH-123) instead of the current conversation.",
 			},
 		},
 	}
@@ -107,7 +103,7 @@ func (t *FirtalCreateFileTool) Call(ctx context.Context, args map[string]any) (s
 
 	filename = ensureExt(filename, res.Ext)
 
-	target, err := t.resolveTarget(ctx, args)
+	target, err := t.resolveTarget()
 	if err != nil {
 		return "", err
 	}
@@ -168,24 +164,19 @@ func (a attachTarget) apply(p *db.CreateAttachmentParams) {
 	p.ChatMessageID = a.chatMessageID
 }
 
-// resolveTarget decides where the file attaches. An explicit issue_id arg wins;
-// otherwise it falls back to the surface the task runs on (chat message or
-// issue) pinned in the ToolContext. At least one target must resolve.
-func (t *FirtalCreateFileTool) resolveTarget(ctx context.Context, args map[string]any) (attachTarget, error) {
-	if ref, ok := args["issue_id"].(string); ok && strings.TrimSpace(ref) != "" {
-		issue, err := resolveIssue(ctx, t.queries, t.tctx.WorkspaceID, ref)
-		if err != nil {
-			return attachTarget{}, err
-		}
-		return attachTarget{issueID: issue.ID, label: "issue:" + util.UUIDToString(issue.ID)}, nil
-	}
+// resolveTarget decides where the file attaches: the surface the task runs on
+// (chat message or issue) pinned in the ToolContext by the server. The model
+// cannot choose the target — least privilege, so an agent can only attach to
+// the conversation it is actually in (TECH-3416 guardrail). At least one of the
+// server-set surfaces must resolve.
+func (t *FirtalCreateFileTool) resolveTarget() (attachTarget, error) {
 	if t.tctx.ChatMessageID.Valid {
 		return attachTarget{chatMessageID: t.tctx.ChatMessageID, label: "chat"}, nil
 	}
 	if t.tctx.IssueID.Valid {
 		return attachTarget{issueID: t.tctx.IssueID, label: "issue:" + util.UUIDToString(t.tctx.IssueID)}, nil
 	}
-	return attachTarget{}, fmt.Errorf("create_file: no attachment target — pass issue_id or run inside a chat/issue")
+	return attachTarget{}, fmt.Errorf("create_file: no attachment target — must run inside a chat or issue")
 }
 
 // ensureExt appends ".<ext>" when filename has no extension or a different one,

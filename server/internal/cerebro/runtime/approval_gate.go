@@ -73,6 +73,27 @@ func decodeToolArgs(raw string) map[string]any {
 	return args
 }
 
+// askContext builds the verbatim Context map attached to an approval ask so the
+// human reviewer sees what the agent is trying to do: the tool, which connection
+// it targets (empty for non-connection tools), the originating task, the raw
+// args, a connection_tool flag, and a plain-language purpose string (TECH-3498).
+func askContext(toolName, connName, taskID string, args map[string]any, connectionTool bool) map[string]any {
+	var purpose string
+	if connectionTool && connName != "" {
+		purpose = fmt.Sprintf("Agent wants to use tool %q on connection %q", toolName, connName)
+	} else {
+		purpose = fmt.Sprintf("Agent requested tool %q", toolName)
+	}
+	return map[string]any{
+		"tool_name":       toolName,
+		"connection":      connName,
+		"task_id":         taskID,
+		"args":            args,
+		"connection_tool": connectionTool,
+		"purpose":         purpose,
+	}
+}
+
 // connectionToolSetting resolves the effective Allow/Ask/Deny verdict for a
 // workspace-connection per-tool rule, through the same chain the permissions
 // screen writes. The customer-service MCP tools are dispatched server-side on
@@ -83,28 +104,31 @@ func decodeToolArgs(raw string) map[string]any {
 // per-call check must not take the whole gateway fleet offline on a transient
 // error. A genuine Deny/Ask holds in every non-error case, which is the
 // requirement. The caller decides what to do with each verdict.
+// It returns the resolved setting plus the connection name of the deciding row
+// ("" when the tool is not a connection tool), so the caller can surface "which
+// integration" in the approval context (TECH-3498).
 func (e *FirtalGatewayExecutor) connectionToolSetting(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
 	toolName string,
 	meta GatewayRequestMeta,
-) toolpolicy.Setting {
+) (toolpolicy.Setting, string) {
 	if e.connDeny == nil || !agentID.Valid || toolName == "" {
-		return toolpolicy.SettingAllow
+		return toolpolicy.SettingAllow, ""
 	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {
 		e.logger.Warn("connection policy: agent lookup failed — allowing",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow
+		return toolpolicy.SettingAllow, ""
 	}
-	eff, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, toolName)
+	eff, connName, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, toolName)
 	if err != nil {
 		e.logger.Warn("connection policy: resolve failed — allowing",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow
+		return toolpolicy.SettingAllow, ""
 	}
-	return eff
+	return eff, connName
 }
 
 // guardConnectionAsk routes an Ask verdict on a workspace-connection tool through
@@ -115,7 +139,7 @@ func (e *FirtalGatewayExecutor) connectionToolSetting(
 func (e *FirtalGatewayExecutor) guardConnectionAsk(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
-	toolName string,
+	toolName, connName string,
 	args map[string]any,
 	meta GatewayRequestMeta,
 ) (bool, string) {
@@ -125,19 +149,18 @@ func (e *FirtalGatewayExecutor) guardConnectionAsk(
 			Actor:       permissions.Actor{Type: "agent", ID: agentID},
 			Agent:       agentID,
 			Capability:  toolName,
+			Resource:    toolName,
 		},
 		RequesterType: approvals.RequesterAgent,
 		RequesterID:   agentID,
 		Surface:       approvals.SurfaceSystem,
-		Context: map[string]any{
-			"tool_name":       toolName,
-			"task_id":         meta.TaskID,
-			"args":            args,
-			"connection_tool": true,
-		},
+		Context: askContext(toolName, connName, meta.TaskID, args, true),
 	}
 	decision := permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "connection tool requires approval"}
-	res, err := e.gate.GuardDecision(ctx, req, decision)
+	// GuardDecisionReusing: a still-valid period-grant (an approved row with a
+	// future expires_at) short-circuits to allow without raising a new ask, so a
+	// time-boxed grant covers subsequent gateway calls for the same tool (TECH-3498).
+	res, err := e.gate.GuardDecisionReusing(ctx, req, decision)
 	if err != nil {
 		e.logger.Warn("connection Ask gate error — failing closed",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
@@ -182,7 +205,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// --disallowedTools. A Deny here makes the tool uncallable regardless of the
 	// approval-gate rollout. Ask needs the approval inbox, so it is routed below
 	// alongside the rest of the Ask machinery (a no-op when the gate is off).
-	connSetting := e.connectionToolSetting(ctx, agentID, workspaceID, toolName, meta)
+	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, toolName, meta)
 	if connSetting == toolpolicy.SettingDeny {
 		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
@@ -209,7 +232,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// (the generic resolver below keys on the bare tool name and never sees the
 	// connection:<name> rows, so it would resolve such a tool to Allow).
 	if connSetting == toolpolicy.SettingAsk {
-		return e.guardConnectionAsk(ctx, agentID, workspaceID, toolName, args, meta)
+		return e.guardConnectionAsk(ctx, agentID, workspaceID, toolName, connName, args, meta)
 	}
 
 	// FIR-2230: when the unified per-tool policy chain is wired, it decides this

@@ -4,20 +4,28 @@ package inbox
 // member only creates the request (see internal/cerebro/privateagentrun); the
 // agent owner accepts it here.
 //
-// FIR-2409: approving no longer starts the agent directly. Instead it posts a
-// visible approval comment on the issue (authored by the owner, mentioning the
-// agent) and triggers the run with THAT comment as the trigger — so the
-// approval is recorded in the thread and the run goes through the same task
-// engine + pending-dedup as an ordinary tag.
+// FIR-2409: approving posts a visible approval comment on the issue (authored
+// by the owner, mentioning the agent) so the approval is recorded in the thread.
+//
+// TECH-3533: the run is NO LONGER triggered off that approval comment. Doing so
+// handed the agent the owner's content-free acknowledgment as its triggering
+// comment, so the agent saw no task and no-op'd (the bug Jesper hit on
+// TECH-3472). Instead the run is started via the System Activity task path with
+// an explicit prompt that embeds the ORIGINAL request, anchored to the original
+// thread. Same pending-dedup as before so a double approval can't double-run.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -108,16 +116,22 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// FIR-2409: record the approval as a visible comment in the thread (a reply
-	// to the originally tagged comment), authored by the approving owner and
-	// mentioning the agent. This is what the run is triggered from, so the
-	// approval lives in the issue history instead of starting the agent silently.
+	// Record the approval as a visible comment in the thread (a reply to the
+	// originally tagged comment), authored by the approving owner and mentioning
+	// the agent, so the approval lives in the issue history.
 	ownerUUID, perr := util.ParseUUID(userID)
 	if perr != nil {
 		writeError(w, http.StatusInternalServerError, "invalid owner id")
 		return
 	}
-	approval, err := h.Upstream.CreateComment(r.Context(), db.CreateCommentParams{
+
+	// Load the original request comment so its body can seed the agent's
+	// instruction and anchor the reply in the conversation that asked for it.
+	original, oerr := h.Upstream.GetComment(r.Context(), commentID)
+	ownerName := h.memberDisplayName(r.Context(), ownerUUID)
+	requesterName := h.memberDisplayName(r.Context(), item.ActorID)
+
+	if _, err := h.Upstream.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: wsUUID,
 		AuthorType:  "member",
@@ -128,20 +142,33 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 		),
 		Type:     "comment",
 		ParentID: commentID,
-	})
-	if err != nil {
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to post approval comment")
 		return
 	}
 
-	// Trigger via the same task engine a tag uses, off the approval comment, and
-	// honour the same pending-dedup so a double approval can't double-run.
+	// Reply anchor = the original request's thread root so the woken agent's
+	// output lands back in the conversation that asked for it.
+	replyAnchor := commentID
+	if oerr == nil && original.ParentID.Valid {
+		replyAnchor = original.ParentID
+	}
+
+	// Trigger via the System Activity task path (the same engine wakeups use),
+	// honouring the pending-dedup so a double approval can't double-run. The
+	// human principal is the approving owner, so the woken run carries
+	// provenance and may fan out to other agents.
 	pending, perr := h.Upstream.HasPendingTaskForIssueAndAgent(r.Context(), db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
 		AgentID: agentID,
 	})
 	if perr == nil && !pending {
-		if _, err := h.Tasks.EnqueueTaskForMention(r.Context(), issue, agentID, approval.ID); err != nil {
+		delegation := service.TaskDelegationContext{
+			OriginalUserID: ownerUUID,
+			Source:         pgtype.Text{String: "approval", Valid: true},
+		}
+		prompt := buildApprovalPrompt(ownerName, requesterName, original, oerr)
+		if _, err := h.Tasks.EnqueueWakeupTask(r.Context(), issue, agentID, replyAnchor, "", triggerTypeApproval, prompt, delegation); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to start agent")
 			return
 		}
@@ -155,4 +182,36 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 		"id":     util.UUIDToString(item.ID),
 		"status": "queued",
 	})
+}
+
+// triggerTypeApproval is the System Activity sub-type for an owner-approved
+// cross-actor run-request. It flows through EnqueueWakeupTask onto the task's
+// wakeup context (WakeupTriggerType) and lets the daemon prompt builder frame
+// the run as an approval rather than a scheduled wakeup (TECH-3533).
+const triggerTypeApproval = "approval"
+
+// memberDisplayName resolves a member's name for the approval prompt, falling
+// back to a neutral label so the instruction always reads naturally.
+func (h *Handler) memberDisplayName(ctx context.Context, id pgtype.UUID) string {
+	if id.Valid {
+		if u, err := h.Upstream.GetUser(ctx, id); err == nil && strings.TrimSpace(u.Name) != "" {
+			return u.Name
+		}
+	}
+	return "a teammate"
+}
+
+// buildApprovalPrompt frames the woken run as an approved cross-actor request:
+// the owner approved <requester>'s ask, with the original request quoted so the
+// agent acts on the real instruction instead of an empty trigger (TECH-3533).
+func buildApprovalPrompt(ownerName, requesterName string, original db.Comment, oerr error) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s approved %s's request to run you on this issue. Carry out that request now.", ownerName, requesterName)
+	if oerr == nil {
+		if c := strings.TrimSpace(original.Content); c != "" {
+			fmt.Fprintf(&b, "\n\nThe original request was:\n> %s", c)
+		}
+	}
+	b.WriteString("\n\nRead the issue context and the thread to understand exactly what is needed, then post your result in the original thread.")
+	return b.String()
 }

@@ -184,6 +184,7 @@ function formatWakeupFireAt(value: string | undefined): string {
   if (Number.isNaN(date.getTime())) return value;
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
   const formatted = new Intl.DateTimeFormat(undefined, {
+    // CEREBRO-PATCH(wakeup-scheduled-activity): combine explicit fields with timeZoneName.
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -191,7 +192,7 @@ function formatWakeupFireAt(value: string | undefined): string {
     minute: "2-digit",
     timeZoneName: "short",
   }).format(date);
-  return `${formatted} (${timeZone})`; // CEREBRO-PATCH(wakeup-scheduled-activity): show the user's actual timezone.
+  return `${formatted} (${timeZone})`;
 }
 
 function formatActivity(

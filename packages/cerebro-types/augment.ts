@@ -262,4 +262,14 @@ declare module "@multica/core/types/channel" {
   }
 }
 
+// TECH-3352 — chat sessions gain the same per-user snooze ("remind me") as
+// channels/DMs. A future timestamp hides the chat from normal inbox views
+// until then; null/absent means not snoozed. The server overlays this from
+// chat_session.muted_until (per creator); older servers omit the field.
+declare module "@multica/core/types/chat" {
+  interface ChatSession {
+    muted_until?: string | null;
+  }
+}
+
 export {};

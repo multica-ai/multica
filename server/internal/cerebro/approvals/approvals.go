@@ -243,17 +243,21 @@ func (s *Service) FindReusable(ctx context.Context, q ReusableQuery) (cerebrodb.
 }
 
 // Approve marks a pending ask approved. Race-safe: ErrAlreadyDecided if the ask
-// is no longer pending, ErrNotFound if it does not exist.
-func (s *Service) Approve(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string) (cerebrodb.CerebroApprovalRequest, error) {
-	return s.decide(ctx, id, workspaceID, actorID, StatusApproved, note, surface)
+// is no longer pending, ErrNotFound if it does not exist. expiresAt time-boxes
+// the grant for FindReusable (TECH-3498): the caller computes it — now() for a
+// one-shot approve (not reusable for a future call), now()+duration for a period
+// grant, or an invalid value for never-expires. An invalid value writes NULL.
+func (s *Service) Approve(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string, expiresAt pgtype.Timestamptz) (cerebrodb.CerebroApprovalRequest, error) {
+	return s.decide(ctx, id, workspaceID, actorID, StatusApproved, note, surface, expiresAt)
 }
 
-// Reject marks a pending ask rejected.
+// Reject marks a pending ask rejected. A rejected ask is never reusable, so it
+// passes a zero (NULL) expiry.
 func (s *Service) Reject(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string) (cerebrodb.CerebroApprovalRequest, error) {
-	return s.decide(ctx, id, workspaceID, actorID, StatusRejected, note, surface)
+	return s.decide(ctx, id, workspaceID, actorID, StatusRejected, note, surface, pgtype.Timestamptz{})
 }
 
-func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UUID, status, note, surface string) (cerebrodb.CerebroApprovalRequest, error) {
+func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UUID, status, note, surface string, expiresAt pgtype.Timestamptz) (cerebrodb.CerebroApprovalRequest, error) {
 	if status != StatusApproved && status != StatusRejected {
 		return cerebrodb.CerebroApprovalRequest{}, ErrInvalidDecision
 	}
@@ -272,6 +276,7 @@ func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UU
 		Status:       status,
 		DecidedByID:  actorID,
 		DecisionNote: pgtype.Text{String: note, Valid: note != ""},
+		ExpiresAt:    expiresAt,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cerebrodb.CerebroApprovalRequest{}, s.classifyMissing(ctx, qtx, id, workspaceID)

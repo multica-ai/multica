@@ -156,6 +156,8 @@ type Artifact struct {
 	FileSizeBytes   pgtype.Int8        `json:"file_size_bytes"`
 	OriginIssueID   pgtype.UUID        `json:"origin_issue_id"`
 	RequesterUserID pgtype.UUID        `json:"requester_user_id"`
+	NoteTypeID      pgtype.UUID        `json:"note_type_id"`
+	PeriodKey       pgtype.Text        `json:"period_key"`
 }
 
 type ArtifactFolder struct {
@@ -630,6 +632,40 @@ type CerebroIssueStatus struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroNote struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	OwnerID    pgtype.UUID        `json:"owner_id"`
+	Visibility string             `json:"visibility"`
+	Pinned     bool               `json:"pinned"`
+	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroNoteShare struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroNoteType struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Name                 string             `json:"name"`
+	Icon                 string             `json:"icon"`
+	TemplateBody         string             `json:"template_body"`
+	RecurrenceMode       string             `json:"recurrence_mode"`
+	CadenceUnit          string             `json:"cadence_unit"`
+	CadenceCount         int32              `json:"cadence_count"`
+	TargetFolderID       pgtype.UUID        `json:"target_folder_id"`
+	RunningDocArtifactID pgtype.UUID        `json:"running_doc_artifact_id"`
+	LastPeriodKey        string             `json:"last_period_key"`
+	Enabled              bool               `json:"enabled"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroPersonaMaskAudit struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -967,6 +1003,7 @@ type ChatSession struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
 }
 
 type Comment struct {

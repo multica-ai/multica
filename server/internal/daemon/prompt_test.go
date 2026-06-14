@@ -334,6 +334,30 @@ func TestBuildPromptWakeupUsesWakeupPromptAndOriginalReplyParent(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(approval-system-activity): proves owner-approved run-requests are
+// framed as an approval (TECH-3533), not as a scheduled wakeup.
+func TestBuildPromptApprovalSystemActivityFraming(t *testing.T) {
+	task := Task{
+		IssueID:           "issue-123",
+		TriggerCommentID:  "thread-root-456",
+		WakeupPrompt:      "Jakob approved your request to run you on this issue. Carry out that request now.",
+		WakeupTriggerType: "approval",
+	}
+	out := BuildPrompt(task, "claude")
+	if !strings.Contains(out, "[APPROVAL]") {
+		t.Fatalf("approval prompt missing approval marker, got:\n%s", out)
+	}
+	if strings.Contains(out, "scheduled wakeup") {
+		t.Fatalf("approval prompt must not present itself as a scheduled wakeup, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Carry out that request now") {
+		t.Fatalf("approval prompt missing the embedded original request, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--parent thread-root-456 --content-stdin") {
+		t.Fatalf("approval prompt must reply under the original thread anchor, got:\n%s", out)
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
