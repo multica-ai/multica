@@ -3,7 +3,9 @@ package ail
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -143,6 +145,65 @@ func TestRunStage6GenerateDerivesContractFromStage3Digest(t *testing.T) {
 	}
 	if result.ExampleInput["failure_reason"] != "runtime_offline" {
 		t.Fatalf("example failure_reason = %v, want runtime_offline", result.ExampleInput["failure_reason"])
+	}
+}
+
+func TestGeneratedStage6CandidateRejectsMultipleJSONValuesAndPreservesMatchedFalse(t *testing.T) {
+	tmp := t.TempDir()
+	candidatePath := filepath.Join(tmp, "contract.json")
+	prospectDir := filepath.Join(tmp, "prospect")
+	contract := stage6TestContract("detect_agent_error_e_parse")
+	contract.ExampleOutput["matched"] = false
+	writeStage6TestContract(t, candidatePath, contract)
+
+	if _, err := RunStage6Generate(Stage6Config{
+		CandidateJSONPath: candidatePath,
+		ProspectDir:       prospectDir,
+		HumanApproveRef:   "PER-12",
+		Owner:             "platform",
+	}); err != nil {
+		t.Fatalf("RunStage6Generate: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(prospectDir, "go.mod"), []byte("module prospecttest\n\ngo 1.24.0\n"), 0o644); err != nil {
+		t.Fatalf("write generated go.mod: %v", err)
+	}
+	extraTest := `package prospect
+
+import "testing"
+
+func TestGeneratedCandidateRejectsMultipleJSONValues(t *testing.T) {
+	raw := []byte(` + strconv.Quote(`{"failure_reason":"agent_error"} {"failure_reason":"agent_error"}`) + `)
+
+	_, err := RunDetectAgentErrorEParse(raw)
+	if err == nil {
+		t.Fatal("expected invalid input error, got nil")
+	}
+	if !IsDetectAgentErrorEParseInvalidInput(err) {
+		t.Fatalf("error = %v, want INVALID_INPUT", err)
+	}
+}
+
+func TestGeneratedCandidatePreservesMatchedFalse(t *testing.T) {
+	got, err := DetectAgentErrorEParse(DetectAgentErrorEParseInput{FailureReason: "agent_error"})
+	if err != nil {
+		t.Fatalf("DetectAgentErrorEParse: %v", err)
+	}
+
+	if got.Matched {
+		t.Fatal("Matched = true, want false from Stage 5 example output")
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(prospectDir, "stage6_extra_test.go"), []byte(extraTest), 0o644); err != nil {
+		t.Fatalf("write generated extra test: %v", err)
+	}
+
+	cmd := exec.Command("go", "test", ".")
+	cmd.Dir = prospectDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated candidate go test failed: %v\n%s", err, out)
 	}
 }
 
@@ -402,6 +463,35 @@ func TestUpsertStage6ManifestAppendsAndSorts(t *testing.T) {
 	}
 	if err := upsertStage6Manifest(blockingPath, first); err == nil {
 		t.Fatal("expected mkdir error from blocked manifest parent, got nil")
+	}
+}
+
+func TestUpsertStage6ManifestPreservesSameToolDifferentSourceCluster(t *testing.T) {
+	tmp := t.TempDir()
+	manifestPath := filepath.Join(tmp, "manifest.json")
+
+	first := Stage6ManifestItem{ToolName: "detect_shared", SourceClusterID: "cluster-a", Status: stage6CandidateStatus, Owner: "platform", GeneratedAt: "2026-06-14T16:00:00Z"}
+	second := Stage6ManifestItem{ToolName: "detect_shared", SourceClusterID: "cluster-b", Status: stage6CandidateStatus, Owner: "runtime", GeneratedAt: "2026-06-14T16:01:00Z"}
+	replacement := Stage6ManifestItem{ToolName: "detect_shared", SourceClusterID: "cluster-a", Status: stage6CandidateStatus, Owner: "eval", GeneratedAt: "2026-06-14T16:02:00Z"}
+	if err := upsertStage6Manifest(manifestPath, first); err != nil {
+		t.Fatalf("upsert first: %v", err)
+	}
+	if err := upsertStage6Manifest(manifestPath, second); err != nil {
+		t.Fatalf("upsert second: %v", err)
+	}
+	if err := upsertStage6Manifest(manifestPath, replacement); err != nil {
+		t.Fatalf("upsert replacement: %v", err)
+	}
+
+	manifest := readStage6TestManifest(t, manifestPath)
+	if len(manifest.Items) != 2 {
+		t.Fatalf("items len = %d, want same tool preserved across two source clusters", len(manifest.Items))
+	}
+	if manifest.Items[0].SourceClusterID != "cluster-a" || manifest.Items[0].Owner != "eval" {
+		t.Fatalf("first item not replaced in place by exact source cluster: %#v", manifest.Items[0])
+	}
+	if manifest.Items[1].SourceClusterID != "cluster-b" || manifest.Items[1].Owner != "runtime" {
+		t.Fatalf("second item should remain untouched: %#v", manifest.Items[1])
 	}
 }
 
