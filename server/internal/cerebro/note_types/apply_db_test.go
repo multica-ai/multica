@@ -133,17 +133,24 @@ func resetNoteTypeState(t *testing.T, ctx context.Context) {
 
 func createNoteType(t *testing.T, ctx context.Context, mode, cadence string) cerebrodb.CerebroNoteType {
 	t.Helper()
+	return createNoteTypeFull(t, ctx, mode, cadence, 1, false, 1, "## Review {{periode}}\n- Tal:")
+}
+
+func createNoteTypeFull(t *testing.T, ctx context.Context, mode, cadence string, count int32, numbering bool, nextNumber int32, template string) cerebrodb.CerebroNoteType {
+	t.Helper()
 	q := cerebrodb.New(applyTestPool)
 	nt, err := q.CreateCerebroNoteType(ctx, cerebrodb.CreateCerebroNoteTypeParams{
-		WorkspaceID:    applyTestWorkspaceID,
-		Name:           "Business Review",
-		Icon:           "",
-		TemplateBody:   "## Review {{periode}}\n- Tal:",
-		RecurrenceMode: mode,
-		CadenceUnit:    cadence,
-		CadenceCount:   1,
-		Enabled:        true,
-		CreatedBy:      applyTestUserID,
+		WorkspaceID:      applyTestWorkspaceID,
+		Name:             "Business Review",
+		Icon:             "",
+		TemplateBody:     template,
+		RecurrenceMode:   mode,
+		CadenceUnit:      cadence,
+		CadenceCount:     count,
+		Enabled:          true,
+		CreatedBy:        applyTestUserID,
+		NumberingEnabled: numbering,
+		NextNumber:       nextNumber,
 	})
 	if err != nil {
 		t.Fatalf("create note type: %v", err)
@@ -324,6 +331,62 @@ func TestApply_Manual_AppendsEachRun(t *testing.T) {
 	if n := strings.Count(bodyOf(t, ctx, art1), "## Review"); n != 2 {
 		t.Errorf("expected 2 sections after two manual runs, got %d", n)
 	}
+}
+
+// Numbering: each materialised note is stamped with an incrementing number
+// starting from the chosen next_number, and the counter advances.
+func TestApply_Numbering(t *testing.T) {
+	if applyTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	resetNoteTypeState(t, ctx)
+	// new_note, manual cadence (always creates), numbering from 5.
+	nt := createNoteTypeFull(t, ctx, ModeNewNote, CadenceManual, 1, true, 5, "## Review #{{nummer}} – {{periode}}")
+
+	_, art1, _ := applyAt(t, ctx, nt.ID, time.Date(2026, time.February, 11, 9, 0, 0, 0, time.UTC))
+	_, art2, refreshed := applyAt(t, ctx, nt.ID, time.Date(2026, time.February, 11, 11, 0, 0, 0, time.UTC))
+
+	if t1 := titleOf(t, ctx, art1); !strings.Contains(t1, "#5") {
+		t.Errorf("first note title should carry #5, got %q", t1)
+	}
+	if t2 := titleOf(t, ctx, art2); !strings.Contains(t2, "#6") {
+		t.Errorf("second note title should carry #6, got %q", t2)
+	}
+	if b1 := bodyOf(t, ctx, art1); !strings.Contains(b1, "Review #5") {
+		t.Errorf("first note body should render {{nummer}}=5, got %q", b1)
+	}
+	if refreshed.NextNumber != 7 {
+		t.Errorf("next_number should have advanced to 7, got %d", refreshed.NextNumber)
+	}
+}
+
+// An idempotent no-op must NOT burn a number.
+func TestApply_Numbering_NoOpDoesNotBurn(t *testing.T) {
+	if applyTestPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	resetNoteTypeState(t, ctx)
+	nt := createNoteTypeFull(t, ctx, ModeRunningDoc, CadenceMonth, 1, true, 1, "## Review #{{nummer}}")
+	now := time.Date(2026, time.February, 11, 9, 0, 0, 0, time.UTC)
+
+	applyAt(t, ctx, nt.ID, now)                                   // creates, assigns #1, next→2
+	_, _, refreshed := applyAt(t, ctx, nt.ID, now.Add(time.Hour)) // idempotent no-op
+	if refreshed.NextNumber != 2 {
+		t.Errorf("no-op should not burn a number; next_number = %d, want 2", refreshed.NextNumber)
+	}
+}
+
+func titleOf(t *testing.T, ctx context.Context, artifactID pgtype.UUID) string {
+	t.Helper()
+	var title string
+	if err := applyTestPool.QueryRow(ctx,
+		`SELECT title FROM artifact WHERE id = $1`, artifactID,
+	).Scan(&title); err != nil {
+		t.Fatalf("get title: %v", err)
+	}
+	return title
 }
 
 func countArtifacts(t *testing.T, ctx context.Context, ntID pgtype.UUID) int {

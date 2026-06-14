@@ -2,6 +2,7 @@ package notetypes
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -31,6 +32,24 @@ func registerAsNote(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.Cere
 	return err
 }
 
+// assignNumber returns the running number to stamp on this materialisation and
+// advances the counter, or 0 when numbering is disabled. Called only on the
+// paths that actually create/append, so idempotent no-ops never burn a number.
+func assignNumber(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteType) (int32, error) {
+	if !nt.NumberingEnabled {
+		return 0, nil
+	}
+	return q.BumpCerebroNoteTypeNumber(ctx, nt.ID)
+}
+
+// newNoteTitle builds the per-note title, prefixing "#N" when numbering is on.
+func newNoteTitle(name string, t time.Time, unit string, number int32) string {
+	if number > 0 {
+		return fmt.Sprintf("%s #%d – %s", name, number, PeriodLabel(t, unit))
+	}
+	return name + " – " + PeriodLabel(t, unit)
+}
+
 // Apply materialises a single note type for the period that `now` falls in.
 // It is the shared core used by both the daily Sweeper and the manual RunNow
 // endpoint, and should be called inside a transaction (pass q = queries.WithTx).
@@ -38,8 +57,8 @@ func registerAsNote(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.Cere
 // Returns created=true when a note was created or a running doc was appended,
 // created=false when the period was already materialised (idempotent no-op).
 func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteType, now time.Time) (bool, pgtype.UUID, error) {
-	key := PeriodKey(now, nt.CadenceUnit)
-	rendered := RenderTemplate(nt.TemplateBody, now, nt.CadenceUnit)
+	anchor := nt.CreatedAt.Time
+	key := PeriodKey(now, nt.CadenceUnit, nt.CadenceCount, anchor)
 
 	if nt.RecurrenceMode == ModeNewNote {
 		pk := pgtype.Text{String: key, Valid: true}
@@ -50,10 +69,14 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 		}); err == nil && existing.Valid {
 			return false, existing, nil
 		}
-		title := nt.Name + " – " + PeriodLabel(now, nt.CadenceUnit)
+		number, err := assignNumber(ctx, q, nt)
+		if err != nil {
+			return false, pgtype.UUID{}, err
+		}
+		rendered := RenderTemplate(nt.TemplateBody, now, nt.CadenceUnit, number)
 		art, err := q.CreateNoteTypeArtifact(ctx, cerebrodb.CreateNoteTypeArtifactParams{
 			WorkspaceID: nt.WorkspaceID,
-			Title:       title,
+			Title:       newNoteTitle(nt.Name, now, nt.CadenceUnit, number),
 			Body:        rendered,
 			AuthorID:    nt.CreatedBy,
 			NoteTypeID:  nt.ID,
@@ -85,10 +108,14 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 
 	// running_doc: first run creates the single rolling document.
 	if !nt.RunningDocArtifactID.Valid {
+		number, err := assignNumber(ctx, q, nt)
+		if err != nil {
+			return false, pgtype.UUID{}, err
+		}
 		art, err := q.CreateNoteTypeArtifact(ctx, cerebrodb.CreateNoteTypeArtifactParams{
 			WorkspaceID: nt.WorkspaceID,
 			Title:       nt.Name,
-			Body:        rendered,
+			Body:        RenderTemplate(nt.TemplateBody, now, nt.CadenceUnit, number),
 			AuthorID:    nt.CreatedBy,
 			NoteTypeID:  nt.ID,
 			FolderID:    nt.TargetFolderID,
@@ -111,6 +138,11 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 	}
 
 	// Subsequent runs prepend the freshly rendered section above the history.
+	number, err := assignNumber(ctx, q, nt)
+	if err != nil {
+		return false, pgtype.UUID{}, err
+	}
+	rendered := RenderTemplate(nt.TemplateBody, now, nt.CadenceUnit, number)
 	row, err := q.GetNoteTypeArtifactBody(ctx, nt.RunningDocArtifactID)
 	if err != nil {
 		return false, pgtype.UUID{}, err

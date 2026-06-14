@@ -679,6 +679,8 @@ type CerebroNoteType struct {
 	CreatedBy            pgtype.UUID        `json:"created_by"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	NumberingEnabled     bool               `json:"numbering_enabled"`
+	NextNumber           int32              `json:"next_number"`
 }
 
 type CerebroPersonaMaskAudit struct {

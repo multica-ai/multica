@@ -28,6 +28,8 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useDeleteArtifact,
   useUpdateArtifact,
+  parseOutline,
+  countDocument,
 } from "@multica/cerebro-artifacts/core";
 import { Input } from "@multica/ui/components/ui/input";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -194,9 +196,11 @@ type SaveStatus = "idle" | "saving" | "saved";
 function MarkdownDocumentEditor({
   artifact,
   onSave,
+  onBodyChange,
 }: {
   artifact: Artifact;
   onSave: (body: string) => Promise<void>;
+  onBodyChange?: (body: string) => void;
 }) {
   const lastSavedRef = React.useRef(artifact.body);
   const savingRef = React.useRef(false);
@@ -238,9 +242,10 @@ function MarkdownDocumentEditor({
 
   const handleUpdate = React.useCallback(
     (body: string) => {
+      onBodyChange?.(body);
       void flush(body);
     },
-    [flush],
+    [flush, onBodyChange],
   );
 
   return (
@@ -276,6 +281,67 @@ function MarkdownDocumentEditor({
   );
 }
 
+/**
+ * Outline (heading navigation) + word/character count for the open document.
+ * The outline scrolls to the Nth heading element inside `contentRef`, which
+ * works for both the live editor and the read-only render (both emit real
+ * <h1>–<h6> tags in document order). Hidden when there are fewer than 2
+ * headings — a single- or no-heading doc needs no navigator.
+ */
+function DocumentToolsSidebar({
+  body,
+  contentRef,
+}: {
+  body: string;
+  contentRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const outline = React.useMemo(() => parseOutline(body), [body]);
+  const counts = React.useMemo(() => countDocument(body), [body]);
+
+  const scrollToHeading = React.useCallback(
+    (index: number) => {
+      const root = contentRef.current;
+      if (!root) return;
+      const headings = root.querySelectorAll("h1, h2, h3, h4, h5, h6");
+      const el = headings.item(index);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    [contentRef],
+  );
+
+  return (
+    <aside className="hidden w-56 shrink-0 lg:block">
+      <div className="sticky top-4 flex flex-col gap-3">
+        {outline.length >= 2 && (
+          <nav aria-label="Dokument-oversigt" className="flex flex-col gap-1">
+            <div className="px-2 text-xs font-medium text-muted-foreground">
+              Oversigt
+            </div>
+            <ul className="flex flex-col">
+              {outline.map((h) => (
+                <li key={h.index}>
+                  <button
+                    type="button"
+                    onClick={() => scrollToHeading(h.index)}
+                    className="w-full truncate rounded px-2 py-1 text-left text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                    style={{ paddingLeft: `${0.5 + (h.level - 1) * 0.6}rem` }}
+                    title={h.text}
+                  >
+                    {h.text}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        )}
+        <div className="px-2 text-xs text-muted-foreground">
+          {counts.words} ord · {counts.characters} tegn
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -289,6 +355,15 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState("");
+  // Body used to drive the outline + word count. Seeded from the loaded doc and
+  // kept live by the editor's onBodyChange; only re-seeded when the doc changes
+  // (id), so autosave refetches never clobber what the user is typing.
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const [liveBody, setLiveBody] = React.useState("");
+  React.useEffect(() => {
+    setLiveBody(artifact?.body ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [artifact?.id]);
 
   if (isLoading) {
     return (
@@ -511,14 +586,23 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
           Updated {formatDateTime(artifact.updated_at)}
         </p>
 
-        <div className="mt-6">
-          {artifact.format === "md" && canEdit ? (
-            <MarkdownDocumentEditor
-              artifact={artifact}
-              onSave={handleSaveMarkdownBody}
+        <div className="mt-6 flex gap-6">
+          <div ref={contentRef} className="min-w-0 flex-1">
+            {artifact.format === "md" && canEdit ? (
+              <MarkdownDocumentEditor
+                artifact={artifact}
+                onSave={handleSaveMarkdownBody}
+                onBodyChange={setLiveBody}
+              />
+            ) : (
+              <ArtifactContent artifact={artifact} />
+            )}
+          </div>
+          {artifact.format === "md" && (
+            <DocumentToolsSidebar
+              body={liveBody || artifact.body}
+              contentRef={contentRef}
             />
-          ) : (
-            <ArtifactContent artifact={artifact} />
           )}
         </div>
 

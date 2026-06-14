@@ -34,3 +34,9 @@ export {
   type RecurrenceMode,
   type CadenceUnit,
 } from "./note-types-types";
+export {
+  parseOutline,
+  countDocument,
+  type OutlineHeading,
+  type DocumentCounts,
+} from "./document-outline";

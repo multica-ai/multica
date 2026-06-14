@@ -29,6 +29,8 @@ vi.mock("@multica/cerebro-artifacts/core", () => ({
     mutateAsync: updateArtifactMutateAsync,
     isPending: false,
   }),
+  parseOutline: () => [],
+  countDocument: () => ({ words: 0, characters: 0 }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({

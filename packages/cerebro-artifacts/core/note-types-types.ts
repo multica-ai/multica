@@ -3,8 +3,8 @@
 export type RecurrenceMode = "running_doc" | "new_note";
 export const RECURRENCE_MODES: RecurrenceMode[] = ["running_doc", "new_note"];
 
-export type CadenceUnit = "manual" | "week" | "month" | "quarter";
-export const CADENCE_UNITS: CadenceUnit[] = ["manual", "week", "month", "quarter"];
+export type CadenceUnit = "manual" | "day" | "week" | "month" | "quarter";
+export const CADENCE_UNITS: CadenceUnit[] = ["manual", "day", "week", "month", "quarter"];
 
 export interface NoteType {
   id: string;
@@ -18,6 +18,8 @@ export interface NoteType {
   target_folder_id: string | null;
   running_doc_artifact_id: string | null;
   enabled: boolean;
+  numbering_enabled: boolean;
+  next_number: number;
   created_at: string;
   updated_at: string;
 }
@@ -31,6 +33,8 @@ export interface NoteTypeWriteInput {
   cadence_count?: number;
   target_folder_id?: string | null;
   enabled?: boolean;
+  numbering_enabled?: boolean;
+  next_number?: number;
 }
 
 export interface NoteTypeRunResult {
