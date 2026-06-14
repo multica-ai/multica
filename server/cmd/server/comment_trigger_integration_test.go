@@ -18,6 +18,7 @@ import (
 // X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
+	body = withDefaultIssueProject(method, path, body)
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -624,6 +625,7 @@ func createPlainMember(t *testing.T) testMemberAccount {
 // authRequestWithToken makes an authenticated request using a specific token.
 func authRequestWithToken(t *testing.T, method, path string, body any, token string) *http.Response {
 	t.Helper()
+	body = withDefaultIssueProject(method, path, body)
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)

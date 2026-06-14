@@ -29,6 +29,7 @@ var (
 	testToken       string
 	testUserID      string
 	testWorkspaceID string
+	testProjectID   string
 )
 
 // jwtSecret is resolved at runtime via auth.JWTSecret() so it respects
@@ -147,6 +148,14 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, workspaceID, "Integration Test Project").Scan(&testProjectID); err != nil {
+		return "", "", err
+	}
+
 	return userID, workspaceID, nil
 }
 
@@ -163,6 +172,7 @@ func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) erro
 // Helper to make authenticated requests
 func authRequest(t *testing.T, method, path string, body any) *http.Response {
 	t.Helper()
+	body = withDefaultIssueProject(method, path, body)
 	var bodyReader io.Reader
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -181,6 +191,36 @@ func authRequest(t *testing.T, method, path string, body any) *http.Response {
 		t.Fatalf("request failed: %v", err)
 	}
 	return resp
+}
+
+// withDefaultIssueProject back-fills project_id on CreateIssue bodies that omit
+// it (project_id is mandatory for top-level issues — OPE-1372). Mirrors the
+// handler-package test helper: only the POST /api/issues collection endpoint is
+// affected, and bodies that already pin project_id or carry a parent_issue_id
+// (sub-issues inherit the parent's project) are left untouched. Tests asserting
+// the "project_id is required" rejection must bypass this helper.
+func withDefaultIssueProject(method, path string, body any) any {
+	if method != http.MethodPost {
+		return body
+	}
+	if p, _, _ := strings.Cut(path, "?"); p != "/api/issues" {
+		return body
+	}
+	m, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	if _, hasProject := m["project_id"]; hasProject {
+		return body
+	}
+	if _, hasParent := m["parent_issue_id"]; hasParent {
+		return body
+	}
+	if testProjectID == "" {
+		return body
+	}
+	m["project_id"] = testProjectID
+	return m
 }
 
 func readJSON(t *testing.T, resp *http.Response, v any) {

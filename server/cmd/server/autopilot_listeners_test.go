@@ -69,6 +69,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				IssueTitleTemplate: pgtype.Text{},
 				CreatedByType:      "member",
 				CreatedByID:        parseUUID(testUserID),
+				ManualOptions:      []string{},
 			})
 			if err != nil {
 				t.Fatalf("CreateAutopilot: %v", err)
@@ -164,6 +165,7 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		IssueTitleTemplate: pgtype.Text{String: "Linked issue", Valid: true},
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(testUserID),
+		ManualOptions:      []string{},
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilot: %v", err)
@@ -361,6 +363,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		IssueTitleTemplate: pgtype.Text{},
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(testUserID),
+		ManualOptions:      []string{},
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilot: %v", err)
@@ -466,6 +469,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 		IssueTitleTemplate: pgtype.Text{},
 		CreatedByType:      "member",
 		CreatedByID:        parseUUID(testUserID),
+		ManualOptions:      []string{},
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilot: %v", err)
