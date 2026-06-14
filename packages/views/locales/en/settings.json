@@ -340,6 +340,8 @@
     "invite_email_placeholder": "user@company.com",
     "invite_button": "Invite",
     "inviting": "Inviting...",
+    "invite_name_label": "Display name (optional)",
+    "invite_name_placeholder": "Leave blank to use their default name after signup",
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",
     "no_members": "No members found.",

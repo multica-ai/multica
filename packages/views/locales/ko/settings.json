@@ -265,6 +265,8 @@
     "invite_email_placeholder": "user@company.com",
     "invite_button": "초대",
     "inviting": "초대하는 중...",
+    "invite_name_label": "표시 이름 (선택 사항)",
+    "invite_name_placeholder": "비워두면 가입 후 기본 이름을 사용합니다",
     "toast_invitation_sent": "초대를 보냈습니다",
     "toast_invitation_failed": "초대를 보내지 못했습니다",
     "no_members": "멤버를 찾을 수 없습니다.",

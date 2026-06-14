@@ -340,6 +340,8 @@
     "invite_email_placeholder": "user@company.com",
     "invite_button": "招待",
     "inviting": "招待中...",
+    "invite_name_label": "表示名（任意）",
+    "invite_name_placeholder": "空白の場合、登録後のデフォルト名を使用します",
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",
     "no_members": "メンバーが見つかりません。",
