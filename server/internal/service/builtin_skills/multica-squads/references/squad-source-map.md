@@ -121,23 +121,26 @@ Contracts:
 Source:
 
 ```text
-server/internal/handler/comment.go                # comment-trigger ~940-941, squad mention ~1089
-server/internal/handler/squad.go                   # shouldEnqueueSquadLeaderOnComment ~909, enqueueSquadLeaderTask ~1027
+server/internal/handler/comment.go                # comment triggers ~1057-1199, squad mention branch ~1352
+server/internal/handler/squad.go                   # enqueueSquadLeaderTask ~986 (assign/backlog paths), lastTaskWasLeader ~915
 server/internal/service/task.go                   # EnqueueTaskForSquadLeader
 ```
 
 Contracts:
 
-- commenting on a squad-assigned issue can wake the leader
-  (comment.go:940-941 → shouldEnqueueSquadLeaderOnComment at squad.go:909);
-- explicit `mention://squad/<id>` resolves squad and enqueues leader
-  (comment.go:1089);
+- commenting on a squad-assigned issue can wake the leader — the comment path
+  computes triggers via `computeCommentAgentTriggers` (comment.go:1124), whose
+  assigned-squad branch is `computeAssignedSquadLeaderCommentTrigger`
+  (comment.go:1162-1199); the same computation backs the trigger-preview
+  endpoint;
+- explicit `mention://squad/<id>` resolves squad and adds the leader trigger
+  (comment.go:1352-1391);
 - squad mention does not fan out to members — enqueue targets `squad.LeaderID`
-  only (squad.go:1050);
+  only (comment.go:1104-1112, and squad.go:1007 on the assign/backlog paths);
 - leader task uses `is_leader_task=true` (via `EnqueueTaskForSquadLeader`);
 - leader self-trigger loops are guarded — same-leader / last-task-was-leader
-  guards (squad.go:929-932, lastTaskWasLeader at squad.go:959) and member
-  explicit-mention skip (squad.go:939-941).
+  guards (comment.go:1173-1176, lastTaskWasLeader at squad.go:915) and member
+  explicit-mention skip (comment.go:1177-1179).
 
 ## Autopilot
 

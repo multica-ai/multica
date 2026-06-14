@@ -466,11 +466,26 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enqueue a chat task after the message exists.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	// Enqueue a chat task after the message exists. For web chat the sender is
+	// the authenticated request user (sessions are creator-only), so they are
+	// the task initiator — surfaced to the agent under `## Task Initiator`.
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
+	}
+	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
+		ID:     msg.ID,
+		TaskID: task.ID,
+	}); err != nil {
+		// Don't fail the send: the task already exists and the user message
+		// is persisted. The link is only needed for precise empty-cancel
+		// cleanup; older/unlinked rows simply keep the historical behavior.
+		slog.Warn("link user chat message to task failed",
+			"message_id", uuidToString(msg.ID),
+			"task_id", uuidToString(task.ID),
+			"error", err,
+		)
 	}
 
 	// Touch session updated_at.
@@ -699,6 +714,18 @@ type PendingChatTaskItem struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+type CancelledChatMessageResponse struct {
+	ChatSessionID  string `json:"chat_session_id"`
+	MessageID      string `json:"message_id"`
+	Content        string `json:"content"`
+	RestoreToInput bool   `json:"restore_to_input"`
+}
+
+type CancelTaskByUserResponse struct {
+	AgentTaskResponse
+	CancelledChatMessage *CancelledChatMessageResponse `json:"cancelled_chat_message,omitempty"`
+}
+
 // ListPendingChatTasks returns every in-flight chat task owned by the current
 // user in this workspace. Drives the FAB's "running" indicator when the chat
 // window is closed (no per-session query is subscribed). Tasks belonging to
@@ -878,13 +905,25 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cancelled, err := h.TaskService.CancelTask(r.Context(), taskUUID)
+	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*cancelled, workspaceID))
+	resp := CancelTaskByUserResponse{
+		AgentTaskResponse: taskToResponse(cancelled.Task, workspaceID),
+	}
+	if cancelled.CancelledChatMessage != nil {
+		resp.CancelledChatMessage = &CancelledChatMessageResponse{
+			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,
+			MessageID:      cancelled.CancelledChatMessage.MessageID,
+			Content:        cancelled.CancelledChatMessage.Content,
+			RestoreToInput: cancelled.CancelledChatMessage.RestoreToInput,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------
@@ -1067,7 +1106,7 @@ func (h *Handler) RetryChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Enqueue a new task.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return

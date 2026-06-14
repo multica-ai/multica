@@ -30,7 +30,7 @@ make selfhost
 
 `make selfhost`는 다음을 수행합니다.
 
-1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET**을 함께 만듭니다
+1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET과 Postgres 비밀번호**를 함께 만듭니다
 2. 공식 Docker 이미지(PostgreSQL, Multica backend, Multica frontend)를 받아옵니다
 3. `docker-compose.selfhost.yml`을 사용해 모든 서비스를 시작합니다
 4. 백엔드의 `/health` 엔드포인트가 준비될 때까지 기다립니다
@@ -49,7 +49,7 @@ make selfhost
 - **백엔드**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**포트는 `127.0.0.1`에서만 수신합니다.** `docker-compose.selfhost.yml`은 공개된 모든 포트를 loopback에 바인딩합니다 — `ss -tlnp`에서는 `0.0.0.0:8080`이 보이지 않으며, 설계상 다른 기기에서는 서비스에 접근할 수 없습니다. 기본 `JWT_SECRET`과 Postgres 자격 증명이 공개 인터넷에 노출되어서는 절대 안 됩니다. 기기 간 접근이 필요하면 TLS를 종료하는 리버스 프록시를 스택 앞에 두세요 — [5b단계 — 기기 간: 리버스 프록시를 앞에 두기](#5b-cross-machine-front-with-a-reverse-proxy)를 참고하세요.
+**포트는 `127.0.0.1`에서만 수신합니다.** `docker-compose.selfhost.yml`은 공개된 모든 포트를 loopback에 바인딩합니다 — `ss -tlnp`에서는 `0.0.0.0:8080`이 보이지 않으며, 설계상 다른 기기에서는 서비스에 접근할 수 없습니다. 서버 시크릿과 Postgres 자격 증명이 공개 인터넷에 노출되어서는 절대 안 됩니다. 기기 간 접근이 필요하면 TLS를 종료하는 리버스 프록시를 스택 앞에 두세요 — [5b단계 — 기기 간: 리버스 프록시를 앞에 두기](#5b-cross-machine-front-with-a-reverse-proxy)를 참고하세요.
 </Callout>
 
 ## 2. 중요: 프로덕션 안전 설정 유지하기
@@ -154,13 +154,17 @@ multica setup self-host
 
 ### 5b. 기기 간: 리버스 프록시를 앞에 두기
 
-compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 기본 `JWT_SECRET`이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
+compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 서버 시크릿이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
 
 ```bash
 multica setup self-host \
   --server-url https://<your-domain> \
   --app-url https://<your-domain>
 ```
+
+<Callout type="info">
+플래그 대신 환경 변수를 선호한다면, 해당 플래그를 생략할 때 `setup self-host`가 `MULTICA_SERVER_URL`과 `MULTICA_APP_URL`을 읽습니다(둘 다 설정하면 플래그가 우선합니다). `MULTICA_SERVER_URL`은 [환경 변수](/environment-variables)에 나오는 `ws://…/ws` 데몬 형식도 허용하며 HTTP 기본 URL로 정규화합니다.
+</Callout>
 
 단일 호스트네임에서 프런트엔드와 백엔드를 모두 앞단에 두는(데몬과 웹 앱 모두에 필요한 WebSocket 지원 포함) 최소 Caddyfile은 다음과 같습니다.
 

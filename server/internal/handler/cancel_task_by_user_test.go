@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -310,6 +311,133 @@ func TestCancelTaskByUser_ChatTask_NonCreator_Returns403(t *testing.T) {
 	}
 	if got := taskStatus(t, taskID); got != "running" {
 		t.Fatalf("chat task was mutated: status = %q", got)
+	}
+}
+
+func TestCancelTaskByUser_ChatTaskWithTranscript_PersistsAssistantSnapshot(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatTranscriptAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, chat_session_id, created_at)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, NULL, $2, now() - interval '5 seconds')
+		RETURNING id
+	`, agentID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', 'please answer', $2)
+	`, sessionID, taskID); err != nil {
+		t.Fatalf("create linked user chat message: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'partial answer')
+	`, taskID); err != nil {
+		t.Fatalf("create task message: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage != nil {
+		t.Fatalf("expected no restore payload when transcript exists, got %#v", resp.CancelledChatMessage)
+	}
+	if got := taskStatus(t, taskID); got != "cancelled" {
+		t.Fatalf("task not cancelled: status = %q", got)
+	}
+
+	var role, content, messageTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT role, content, COALESCE(task_id::text, '')
+		FROM chat_message
+		WHERE chat_session_id = $1 AND role = 'assistant'
+	`, sessionID).Scan(&role, &content, &messageTaskID); err != nil {
+		t.Fatalf("read cancelled assistant chat message: %v", err)
+	}
+	if role != "assistant" || content != "Stopped." || messageTaskID != taskID {
+		t.Fatalf("assistant snapshot mismatch: role=%q content=%q task_id=%q", role, content, messageTaskID)
+	}
+}
+
+func TestCancelTaskByUser_ChatTaskWithoutTranscript_RestoresUserDraft(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "CancelChatNoTranscriptAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, chat_session_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, NULL, $2)
+		RETURNING id
+	`, agentID, sessionID).Scan(&taskID); err != nil {
+		t.Fatalf("create chat task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	var userMessageID string
+	const userContent = "keep this prompt"
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id)
+		VALUES ($1, 'user', $2, $3)
+		RETURNING id
+	`, sessionID, userContent, taskID).Scan(&userMessageID); err != nil {
+		t.Fatalf("create linked user chat message: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CancelTaskByUserResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode cancel response: %v", err)
+	}
+	if resp.CancelledChatMessage == nil {
+		t.Fatal("expected restore payload for empty transcript cancel")
+	}
+	if resp.CancelledChatMessage.MessageID != userMessageID ||
+		resp.CancelledChatMessage.Content != userContent ||
+		!resp.CancelledChatMessage.RestoreToInput {
+		t.Fatalf("restore payload mismatch: %#v", resp.CancelledChatMessage)
+	}
+
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM chat_message
+		WHERE chat_session_id = $1 AND role = 'assistant'
+	`, sessionID).Scan(&count); err != nil {
+		t.Fatalf("count assistant chat messages: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no assistant snapshot for empty transcript, got %d", count)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM chat_message
+		WHERE id = $1
+	`, userMessageID).Scan(&count); err != nil {
+		t.Fatalf("count deleted user chat message: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected linked user message to be deleted, got %d", count)
 	}
 }
 

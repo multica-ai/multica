@@ -57,6 +57,29 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesFable5(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	fable, ok := ids["claude-fable-5"]
+	if !ok {
+		t.Fatalf("missing Claude Fable 5 in: %+v", models)
+	}
+	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
+		t.Errorf("unexpected Fable entry: %+v", fable)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
 func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	// Gemini CLI has no `models list` subcommand, so we expose the
 	// CLI's own aliases (auto / pro / flash / flash-lite) plus
@@ -935,15 +958,54 @@ func TestHermesModelSelectionSupported(t *testing.T) {
 	}
 }
 
-// TestAntigravityModelSelectionUnsupported pins that the antigravity
-// provider reports model selection as unsupported: `agy` has no
-// `--model` flag and antigravityBackend deliberately drops opts.Model on
-// the floor, so the UI must render a disabled "Managed by runtime"
-// picker rather than an empty dropdown that accepts a silently-ignored
-// custom value.
-func TestAntigravityModelSelectionUnsupported(t *testing.T) {
-	if ModelSelectionSupported("antigravity") {
-		t.Error("antigravity should not be model-selection-supported: agy has no --model flag")
+// TestAntigravityModelSelectionSupported pins that the antigravity provider
+// now reports model selection as supported: agy 1.0.6 added a `--model` flag
+// (MUL-3125) and buildAntigravityArgs wires opts.Model through, so the UI
+// must render the live picker rather than a disabled "Managed by runtime"
+// label.
+func TestAntigravityModelSelectionSupported(t *testing.T) {
+	if !ModelSelectionSupported("antigravity") {
+		t.Error("antigravity should be model-selection-supported now that agy 1.0.6 has --model")
+	}
+}
+
+// TestParseAntigravityModels covers the `agy models` line-per-name format:
+// each non-blank line becomes a Model whose ID and Label are the verbatim
+// display string `--model` expects, duplicates collapse, and blanks drop.
+func TestParseAntigravityModels(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"Gemini 3.5 Flash (Medium)",
+		"Claude Opus 4.6 (Thinking)",
+		"", // blank line — skipped
+		"GPT-OSS 120B (Medium)",
+		"Claude Opus 4.6 (Thinking)", // duplicate — collapsed
+	}, "\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+		{ID: "Claude Opus 4.6 (Thinking)", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+		{ID: "GPT-OSS 120B (Medium)", Label: "GPT-OSS 120B (Medium)", Provider: "antigravity"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseAntigravityModels len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+// TestParseAntigravityModelsEmpty pins that empty / whitespace-only output
+// yields no models (so cachedDiscovery treats it as a transient miss and
+// retries rather than caching a blank catalog).
+func TestParseAntigravityModelsEmpty(t *testing.T) {
+	t.Parallel()
+	if got := parseAntigravityModels("   \n\t\n"); len(got) != 0 {
+		t.Errorf("expected no models for blank output, got %+v", got)
 	}
 }
 

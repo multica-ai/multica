@@ -13,7 +13,7 @@ Multica は **12 個の AI コーディングツール**を標準でサポート
 
 | ツール | ベンダー | セッション再開 | MCP | スキル注入パス | モデル選択 |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Antigravity CLI 自体の内部で管理 |
+| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | 動的探索（`agy models`） |
 | **Claude Code** | Anthropic | ✅ | **✅（実際に使用する唯一のツール）** | `.claude/skills/` | 静的 + flag |
 | **Codex** | OpenAI | ⚠️ コードは存在するが到達不可 | ❌ | `$CODEX_HOME/skills/` | 静的 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静的（アカウントの権限で決定） |
@@ -30,7 +30,7 @@ Multica は **12 個の AI コーディングツール**を標準でサポート
 
 ### Antigravity
 
-Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。**セッション再開が動作します** — `--conversation <id>` を通じて行われ、stdout が構造化されたイベントストリームではなくプレーンテキストであるため、デーモンが CLI のログファイルから conversation UUID をキャプチャします。`--model` flag はありません — モデル選択は Antigravity CLI の設定内にあるため、Multica はこのプロバイダーに対してエージェントごとのモデルピッカーを無効にします。スキルは `.agents/skills/` に配置されます（CLI が Gemini CLI のワークスペーススキルレイアウトをそのまま継承します — [Antigravity 移行ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
+Google が提供します。CLI バイナリ名は `agy` です。Google の Antigravity サービスと連携し、Gemini ベースのデフォルトモデルが付属しています。**セッション再開が動作します** — `--conversation <id>` を通じて行われ、stdout が構造化されたイベントストリームではなくプレーンテキストであるため、デーモンが CLI のログファイルから conversation UUID をキャプチャします。**モデル選択が動作します** — `--model` flag（agy 1.0.6 で追加）を通じて行われ、デーモンが `agy models` でカタログを列挙し、選択された値をそのまま渡します。これらは `provider/model` slug ではなく `Claude Opus 4.6 (Thinking)` のような人間が読める表示名である点に注意してください。また agy は認識できない値を渡すと黙って空実行するため、手入力ではなく検出されたリストから選ぶことをおすすめします。スキルは `.agents/skills/` に配置されます（CLI が Gemini CLI のワークスペーススキルレイアウトをそのまま継承します — [Antigravity 移行ドキュメント](https://antigravity.google/docs/gcli-migration)を参照）。
 
 ### Claude Code
 

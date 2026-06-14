@@ -13,7 +13,7 @@ Multica 内置支持 **12 款 AI 编程工具**。它们都实现了同一套接
 
 | 工具 | 厂商 | 会话恢复 | MCP | Skill 注入路径 | 模型选择 |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅（`--conversation <id>`）| ❌ | `.agents/skills/` | 由 Antigravity CLI 自己管理 |
+| **Antigravity** | Google | ✅（`--conversation <id>`）| ❌ | `.agents/skills/` | 动态发现（`agy models`）|
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | 静态 + flag |
 | **Codex** | OpenAI | ⚠️ 代码存在但不可达 | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
@@ -30,7 +30,7 @@ Multica 内置支持 **12 款 AI 编程工具**。它们都实现了同一套接
 
 ### Antigravity
 
-Google 出品。CLI 二进制名为 `agy`，搭配 Google Antigravity 服务，默认走 Gemini 系列模型。**会话恢复真用**——通过 `--conversation <id>`；因为 stdout 是纯文本而非结构化事件流，守护进程从 CLI 的日志文件里抓取 conversation UUID。CLI 没有 `--model` flag——模型选择保存在 Antigravity 自己的设置里，因此 Multica 禁用了这款工具的模型选择控件。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 迁移文档](https://antigravity.google/docs/gcli-migration)）。
+Google 出品。CLI 二进制名为 `agy`，搭配 Google Antigravity 服务，默认走 Gemini 系列模型。**会话恢复真用**——通过 `--conversation <id>`；因为 stdout 是纯文本而非结构化事件流，守护进程从 CLI 的日志文件里抓取 conversation UUID。**模型选择真用**——通过 `--model` flag（agy 1.0.6 新增）：守护进程用 `agy models` 枚举可选项，并把选中的值原样传入。注意这些是 `Claude Opus 4.6 (Thinking)` 这样的人类可读显示名，而非 `provider/model` slug；而且 agy 遇到无法识别的值会静默空跑，所以优先从发现列表里挑选，不要手填。Skill 文件写入 `.agents/skills/`（CLI 沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 迁移文档](https://antigravity.google/docs/gcli-migration)）。
 
 ### Claude Code
 

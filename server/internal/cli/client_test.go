@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -304,8 +305,12 @@ func TestUploadFileWithURL(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
-		if !strings.Contains(err.Error(), "upload file returned 400") {
-			t.Errorf("unexpected error message: %s", err.Error())
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) {
+			t.Fatalf("expected *HTTPError, got %T: %v", err, err)
+		}
+		if httpErr.StatusCode != 400 {
+			t.Errorf("expected status 400, got %d", httpErr.StatusCode)
 		}
 	})
 

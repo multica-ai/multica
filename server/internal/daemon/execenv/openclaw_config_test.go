@@ -386,21 +386,33 @@ func TestPrepareOpenclawConfigIgnoresDoctorWarningsFromConfigFile(t *testing.T) 
 		t.Fatalf("mkdir workdir: %v", err)
 	}
 
-	fakeHome := t.TempDir()
-	t.Setenv("HOME", fakeHome)
-	if err := os.MkdirAll(filepath.Join(fakeHome, ".openclaw"), 0o755); err != nil {
-		t.Fatalf("mkdir home/.openclaw: %v", err)
-	}
-	realPath := filepath.Join(fakeHome, ".openclaw", "openclaw.json")
-	if err := os.WriteFile(realPath, []byte(`{}`), 0o600); err != nil {
+	userConfigDir := t.TempDir()
+	userConfigPath := filepath.Join(userConfigDir, "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write user cfg: %v", err)
 	}
 
-	warningPath := filepath.Join(t.TempDir(), "runs.sqlite.migrated")
+	// Simulate OpenClaw's output with UI borders (Doctor warnings)
+	stdoutWithUI := `│
+◇  Doctor warnings ──────────────────────────────────────────────────────╮
+│                                                                        │
+│  - Left plugin install index in place because shared SQLite state has  │
+│    conflicting plugin install metadata for: qqbot                      │
+│                                                                        │
+├────────────────────────────────────────────────────────────────────────╯
+[state-migrations] Legacy state migration warnings:
+- Left plugin install index in place because shared SQLite state has conflicting plugin install metadata for: qqbot
+│
+◇  Doctor warnings ──────────────────────────────────────────────────────╮
+│                                                                        │
+│  - Left plugin install index in place because shared SQLite state has  │
+│    conflicting plugin install metadata for: qqbot                      │
+│                                                                        │
+├────────────────────────────────────────────────────────────────────────╯
+` + userConfigPath + "\n"
+
 	stub := installOpenclawStub(t, map[string]openclawResponse{
-		"config file": {stdout: "\x1b[33mDoctor warnings\x1b[0m\n" +
-			"- Left migrated task registry sidecar in place because archive already exists: " + warningPath + "\n" +
-			"~/.openclaw/openclaw.json\n"},
+		"config file":                   {stdout: stdoutWithUI},
 		"config get agents.list --json": {stdout: "null"},
 	})
 
@@ -408,10 +420,11 @@ func TestPrepareOpenclawConfigIgnoresDoctorWarningsFromConfigFile(t *testing.T) 
 	if err != nil {
 		t.Fatalf("prepareOpenclawConfig: %v", err)
 	}
+
 	got := mustReadJSON(t, result.ConfigPath)
 	include := got["$include"].([]any)
-	if include[0] != realPath {
-		t.Errorf("$include[0] = %v, want %q (doctor warnings must not be parsed as the config path)", include[0], realPath)
+	if include[0] != userConfigPath {
+		t.Errorf("$include[0] = %v, want %q (path must be extracted from last non-empty line)", include[0], userConfigPath)
 	}
 }
 

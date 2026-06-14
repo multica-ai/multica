@@ -570,7 +570,7 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 		t.Fatalf("count tasks before: %v", err)
 	}
 
-	testHandler.enqueueMentionedAgentTasks(ctx, issue, comment, nil, "member", testUserID, nil)
+	enqueueMentionedAgentTasksForTest(t, ctx, issue, comment, nil, "member", testUserID)
 
 	var afterCount int
 	if err := testPool.QueryRow(ctx,
@@ -629,11 +629,11 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	}
 
 	cases := []struct {
-		name       string
-		actorType  string
-		actorID    string
-		want       bool
-		reason     string
+		name      string
+		actorType string
+		actorID   string
+		want      bool
+		reason    string
 	}{
 		{
 			name:      "plain member — denied",

@@ -76,9 +76,11 @@ export function RuntimeList({
   now,
 }: {
   runtimes: AgentRuntime[];
-  // Kept on the API surface for callers — the CLI column re-derives
-  // update state per row via metadata.cli_version + the server-proxied
-  // manifest query, so this prop is now unused.
+  // Kept on the API surface for callers, but unused here: the CLI column
+  // shows each agent's own tool version, while the multica daemon CLI
+  // update prompt lives at the machine/detail level (UpdateSection), so the
+  // table no longer derives per-row update state. Left to avoid scope creep
+  // on the page-level wrapper that still computes the set.
   updatableIds?: Set<string>;
   now: number;
 }) {
@@ -93,8 +95,7 @@ export function RuntimeList({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: latestCliManifest = null } = useQuery(latestCliManifestOptions());
-  const latestCliVersion = latestCliManifest?.version ?? null;
+  useQuery(latestCliManifestOptions());
 
   const currentMember = user
     ? members.find((m) => m.user_id === user.id)
@@ -140,12 +141,11 @@ export function RuntimeList({
     () =>
       createRuntimeColumns({
         showOwner,
-        latestCliVersion,
         wsId,
         now,
         t,
       }),
-    [showOwner, latestCliVersion, wsId, now, t],
+    [showOwner, wsId, now, t],
   );
 
   const table = useReactTable({

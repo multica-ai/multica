@@ -262,8 +262,6 @@
     "col_cli": "CLI",
     "cost_delta_flat": "flat",
     "cli_managed_badge": "Desktop",
-    "cli_update_available_aria": "Update available",
-    "cli_update_available_tooltip": "Update available: {{version}}",
     "row_actions_aria": "Row actions",
     "delete_action": "Delete",
     "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",

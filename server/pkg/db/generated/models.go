@@ -110,6 +110,7 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	WaitReason        pgtype.Text        `json:"wait_reason"`
+	InitiatorUserID   pgtype.UUID        `json:"initiator_user_id"`
 }
 
 type Attachment struct {
@@ -593,6 +594,22 @@ type LocalCliMessage struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Source    pgtype.Text        `json:"source"`
 	SourceKey pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliMessageOutbox struct {
+	ID            pgtype.UUID        `json:"id"`
+	MessageID     pgtype.UUID        `json:"message_id"`
+	RunID         pgtype.UUID        `json:"run_id"`
+	Kind          string             `json:"kind"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	AppOrigin     pgtype.Text        `json:"app_origin"`
+	LastError     pgtype.Text        `json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LockedUntil   pgtype.Timestamptz `json:"locked_until"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LocalCliRun struct {

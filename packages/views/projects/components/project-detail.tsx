@@ -182,6 +182,24 @@ export function ProjectIssuesContent({
     [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
   );
 
+  const activeFilters = useMemo(() => ({
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters,
+    agentRunningFilter,
+  }), [
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    labelFilters,
+    agentRunningFilter,
+  ]);
+
   // Gantt rides its own dedicated query (scheduled-only) so it doesn't have
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
@@ -288,6 +306,7 @@ export function ProjectIssuesContent({
         <SwimLaneView
           issues={issues}
           unfilteredIssues={swimlaneIssues}
+          activeFilters={activeFilters}
           visibleStatuses={visibleStatuses}
           hiddenStatuses={hiddenStatuses}
           onMoveIssue={handleMoveIssue}

@@ -8,6 +8,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        DATE: ${DATE:-unknown}
         GOPROXY: ${DOCKER_BUILD_GOPROXY:-https://goproxy.cn,direct}
         HTTP_PROXY: ${DOCKER_BUILD_HTTP_PROXY:-}
         HTTPS_PROXY: ${DOCKER_BUILD_HTTPS_PROXY:-}

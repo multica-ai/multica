@@ -34,7 +34,9 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -121,8 +123,14 @@ interface ContentEditorProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
-  /** Enable the chat-only `/` skill picker. Defaults false. */
+  /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
+   * lists the active agent's skills (chat); "command" shows the fixed built-in
+   * command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -188,6 +196,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
+      slashCommandMode = "skill",
       attachments,
       selectionQuoteActions,
     },
@@ -198,7 +207,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
-    const onUploadFileRef = useRef(onUploadFile);
+    const onUploadFileRef = useRef<
+      ((file: File) => Promise<UploadResult | null>) | undefined
+    >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
     // When the editor fires onUpdate (debounced save), we set this flag to
@@ -206,6 +217,60 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // cache confirms our write.  This prevents the editor from being
     // overwritten by cache rollback + refetch after a 409 Conflict.
     const suppressSyncRef = useRef(false);
+
+    // In-session record of attachments freshly uploaded through this editor.
+    // Surfaces (like the quick-create modal) that don't have a server-supplied
+    // `attachments` prop still need the AttachmentDownloadProvider to know
+    // about images the user just pasted/dropped — without a record in scope,
+    // Attachment.normalize() can't swap the persisted /api/attachments/<id>/
+    // download URL to a freshly-loadable one, and the <img> renders broken in
+    // any environment where the renderer's origin doesn't proxy /api to the
+    // API host (MUL-3192, Desktop/Electron).
+    const [sessionUploads, setSessionUploads] = useState<Attachment[]>([]);
+    // Wrap the caller-supplied uploader so we can stash each successful result
+    // in `sessionUploads`. The wrapper is rebuilt only when the underlying
+    // `onUploadFile` identity changes, so the inner ref handed to Tiptap stays
+    // stable across renders the way the original passthrough did.
+    const wrappedOnUploadFile = useMemo(() => {
+      if (!onUploadFile) return undefined;
+      return async (file: File): Promise<UploadResult | null> => {
+        const result = await onUploadFile(file);
+        // Only track attachments that carry a persisted id — the no-workspace
+        // avatar branch returns an id-less record that the resolver can't key
+        // off of, and tracking it would just bloat memory without helping
+        // anyone. See useFileUpload's `markdownLink` docstring for why.
+        if (result?.id) {
+          setSessionUploads((prev) =>
+            // Deduplicate on id so a re-upload (or a paste-then-drop of the
+            // same blob) doesn't create a parallel record.
+            prev.some((a) => a.id === result.id) ? prev : [...prev, result],
+          );
+        }
+        return result;
+      };
+    }, [onUploadFile]);
+
+    // Merged list fed to AttachmentDownloadProvider. Caller-supplied attachments
+    // (issue / comment editors that pre-load the full attachments[] from the
+    // server) take precedence — we only append session uploads the caller
+    // doesn't already have, so a parent re-render that includes the same record
+    // doesn't end up with two copies.
+    const providerAttachments = useMemo(() => {
+      if (sessionUploads.length === 0) return attachments;
+      const seen = new Set<string>();
+      const merged: Attachment[] = [];
+      for (const a of attachments ?? []) {
+        if (a.id) seen.add(a.id);
+        merged.push(a);
+      }
+      for (const a of sessionUploads) {
+        if (!seen.has(a.id)) {
+          seen.add(a.id);
+          merged.push(a);
+        }
+      }
+      return merged;
+    }, [attachments, sessionUploads]);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -219,7 +284,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
-    onUploadFileRef.current = onUploadFile;
+    onUploadFileRef.current = wrappedOnUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
@@ -273,6 +338,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
+        slashCommandMode,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -483,7 +549,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <AttachmentDownloadProvider attachments={attachments}>
+      <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
           className="relative flex flex-1 min-h-full flex-col"

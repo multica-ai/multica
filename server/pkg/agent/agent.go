@@ -85,6 +85,7 @@ type ExecOptions struct {
 	// relies on cwd-scoped context files such as AGENTS.md instead.
 	SystemPrompt              string
 	VisibleLanguage           string
+	ThreadName                string
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
@@ -198,7 +199,7 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
 	case "codebuddy":
-		return newCodebuddyBackend(cfg), nil
+		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":

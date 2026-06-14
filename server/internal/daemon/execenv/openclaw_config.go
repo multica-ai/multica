@@ -373,6 +373,8 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if err != nil {
 		return "", false, err
 	}
+	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
+	// the actual path. The path is always the last non-empty line.
 	path, err := openclawConfigPathFromOutput(out)
 	if err != nil {
 		return "", false, err

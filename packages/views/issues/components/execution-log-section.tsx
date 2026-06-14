@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, MessageSquarePlus, RotateCw, Search, Square, X } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
@@ -37,8 +38,9 @@ const TRIGGER_MASK_STYLE: React.CSSProperties = {
 // statuses) collapse behind a "Show past runs (N)" toggle.
 //
 // Replaces:
-//   - the click-to-expand timeline that used to live inside AgentLiveCard
-//     (sticky card stays as a header-only banner)
+//   - the click-to-expand timeline that used to live inside the in-body live
+//     card (the live "agent is working" signal now lives in the header via
+//     IssueAgentHeaderChip)
 //   - the standalone <TaskRunHistory> below the main content
 //
 // Row layout — simple left/right flex:
@@ -61,6 +63,14 @@ interface ExecutionLogSectionProps {
 }
 
 export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLogSectionProps) {
+// Past-runs sort priority: newest first by timestamp. When two runs
+// share the same timestamp, failed ranks above cancelled, which ranks
+// above completed.
+const PAST_STATUS_RANK: Record<string, number> = {
+  failed: 0,
+  cancelled: 1,
+  completed: 2,
+};
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
@@ -118,12 +128,22 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
   );
 
   const pastTasks = useMemo(() => {
-    return displayTasks.filter(
+    const past = displayTasks.filter(
       (t) =>
         t.status === "completed" ||
         t.status === "failed" ||
         t.status === "cancelled",
     );
+    return past.toSorted((a, b) => {
+      const at = a.completed_at ?? a.created_at;
+      const bt = b.completed_at ?? b.created_at;
+      const timeDiff = new Date(bt).getTime() - new Date(at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return (
+        (PAST_STATUS_RANK[a.status] ?? 99) -
+        (PAST_STATUS_RANK[b.status] ?? 99)
+      );
+    });
   }, [displayTasks]);
 
   // Filter runs by agent name or trigger summary text
@@ -193,7 +213,7 @@ export function ExecutionLogSection({ issueId, onHighlightComment }: ExecutionLo
           )}
 
           {filteredActive.map((task) => (
-            <ActiveRow
+            <ActiveTaskRow
               key={task.id}
               task={task}
               issueId={issueId}
@@ -275,19 +295,6 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
   cancelled: "text-muted-foreground",
 };
 
-function activeTimeText(task: AgentTask, timeAgo: (dateStr: string) => string): string {
-  if (task.status === "running" && task.started_at) {
-    return timeAgo(task.started_at);
-  }
-  if (
-    (task.status === "dispatched" || task.status === "waiting_local_directory") &&
-    task.dispatched_at
-  ) {
-    return timeAgo(task.dispatched_at);
-  }
-  return timeAgo(task.created_at);
-}
-
 // ─── Active row ────────────────────────────────────────────────────────────
 
 function useTriggerText(task: AgentTask): string {
@@ -345,7 +352,11 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({
+// One active (running / queued / dispatched / parked) task row. Running rows
+// keep status to a single live elapsed timer; transcript and stop stay available
+// as hover actions. Transcript content lazy-loads on click via TranscriptButton,
+// so the row no longer fetches task messages just to render a count.
+export function ActiveTaskRow({
   task,
   issueId,
   runIndex,
@@ -359,17 +370,32 @@ function ActiveRow({
   onHighlightComment?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
-  const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
-  const time = activeTimeText(task, timeAgo);
 
-  // Transcript only meaningful once messages exist — pure-queued tasks
-  // have nothing to show yet.
-  const showTranscript = task.status !== "queued";
+  // Running rows show a live-ticking elapsed timer (the ticking digits carry
+  // "alive", the duration carries "how long"). Only running rows tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (task.status !== "running") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [task.status]);
+  const elapsed =
+    task.status === "running"
+      ? formatDuration(
+          task.started_at ?? task.dispatched_at ?? task.created_at,
+          now,
+        )
+      : "";
+
+  // Transcript only meaningful once messages exist — pure-queued and
+  // waiting_local_directory tasks haven't streamed any agent output yet.
+  const showTranscript =
+    task.status !== "queued" && task.status !== "waiting_local_directory";
   const showCancel = task.kind !== "local_cli";
 
   const handleCancel = async () => {
@@ -398,16 +424,22 @@ function ActiveRow({
       <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
       {/* Status + time always visible — actions append on hover, never
           replace. Same pattern as desktop tab bar / sidebar pins. */}
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
+      <RowStatus title={label}>
+        {task.status === "running" ? (
+          <>
+            <span className="text-info tabular-nums">{elapsed}</span>
+            <span className="sr-only">{label}</span>
+          </>
+        ) : (
+          <span className={`${tone} min-w-0 truncate`}>{label}</span>
+        )}
+      </RowStatus>
       <RowActions>
         {showTranscript && (
           <TranscriptButton
             task={task}
             agentName=""
-            isLive
+            isLive={task.status === "running"}
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
@@ -644,6 +676,17 @@ function RowActions({ children }: { children: React.ReactNode }) {
         "group-hover:pointer-events-auto group-hover:opacity-100",
         "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
       ].join(" ")}
+    >
+      {children}
+    </div>
+  );
+}
+
+function RowStatus({ children, title }: { children: React.ReactNode; title?: string }) {
+  return (
+    <div
+      className="ml-auto flex min-w-16 max-w-28 shrink-0 justify-end overflow-hidden text-right text-xs tabular-nums"
+      title={title}
     >
       {children}
     </div>

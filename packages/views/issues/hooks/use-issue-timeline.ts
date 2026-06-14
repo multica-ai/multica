@@ -265,7 +265,12 @@ export function useIssueTimeline(
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], type = "comment") => {
+    async (
+      content: string,
+      attachmentIds?: string[],
+      type = "comment",
+      suppressAgentIds?: string[],
+    ) => {
       if (!content.trim()) return;
       if (submitting) throw new Error("Comment submission already in progress");
       if (!userId) {
@@ -274,20 +279,27 @@ export function useIssueTimeline(
       }
       setSubmitting(true);
       try {
-        await createComment({ content, type, attachmentIds });
+        await createComment({ content, type, attachmentIds, suppressAgentIds });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_failed),
         );
+      } finally {
+        setSubmitting(false);
       }
     },
-    [userId, createComment, t],
+    [submitting, userId, createComment, t],
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[]) => {
+    async (
+      parentId: string,
+      content: string,
+      attachmentIds?: string[],
+      suppressAgentIds?: string[],
+    ) => {
       if (!content.trim()) return;
       if (!userId) {
         toast.error(t(($) => $.comment.login_required));
@@ -299,6 +311,7 @@ export function useIssueTimeline(
           type: "comment",
           parentId,
           attachmentIds,
+          suppressAgentIds,
         });
       } catch (err) {
         toast.error(
