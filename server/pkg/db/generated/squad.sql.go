@@ -683,6 +683,17 @@ type UpdateSquadMemberRoleParams struct {
 	Role       string      `json:"role"`
 }
 
+const getSquadCapability = `-- name: GetSquadCapability :one
+SELECT capability FROM squad WHERE id = $1
+`
+
+func (q *Queries) GetSquadCapability(ctx context.Context, id pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getSquadCapability, id)
+	var capability []byte
+	err := row.Scan(&capability)
+	return capability, err
+}
+
 const setSquadCapability = `-- name: SetSquadCapability :exec
 UPDATE squad SET capability = $2, updated_at = now() WHERE id = $1
 `

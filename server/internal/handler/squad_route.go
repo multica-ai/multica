@@ -67,6 +67,16 @@ func tokenize(query string) []string {
 	return tokens
 }
 
+// allInSet returns true when every token in subset is present in superset.
+func allInSet(subset []string, superset map[string]bool) bool {
+	for _, t := range subset {
+		if !superset[t] {
+			return false
+		}
+	}
+	return true
+}
+
 // matchScore computes the overlap score between query tokens and a squad's
 // capability. Returns score and the list of matched keywords.
 func matchScore(tokens []string, cap SquadCapability) (int, []string) {
@@ -79,9 +89,26 @@ func matchScore(tokens []string, cap SquadCapability) (int, []string) {
 	}
 
 	// Exact keyword match: +10 points each.
+	// Two strategies:
+	//   (a) Full keyword as-is in tokenSet — works for Latin words.
+	//   (b) CJK: tokenize the keyword itself into characters and check
+	//       that every character is in the tokenSet. This handles the
+	//       case where the query tokenizer splits "决策分析" into
+	//       ["决","策","分","析"] but the keyword is stored as the
+	//       phrase "决策分析".
 	for _, kw := range cap.Keywords {
 		kwLower := strings.ToLower(strings.TrimSpace(kw))
+		if kwLower == "" {
+			continue
+		}
 		if tokenSet[kwLower] {
+			score += 10
+			matched[kw] = true
+			continue
+		}
+		// CJK exact: split keyword into characters and check all are present.
+		kwTokens := tokenize(kwLower)
+		if len(kwTokens) > 1 && allInSet(kwTokens, tokenSet) {
 			score += 10
 			matched[kw] = true
 			continue

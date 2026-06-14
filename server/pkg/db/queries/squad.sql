@@ -119,6 +119,9 @@ WHERE assignee_type = 'squad' AND assignee_id = $1;
 -- name: SetSquadCapability :exec
 UPDATE squad SET capability = $2, updated_at = now() WHERE id = $1;
 
+-- name: GetSquadCapability :one
+SELECT capability FROM squad WHERE id = $1;
+
 -- name: ListSquadsWithCapability :many
 SELECT id, name, capability FROM squad
 WHERE workspace_id = $1 AND archived_at IS NULL

@@ -83,29 +83,17 @@ func (h *Handler) GetSquadCapability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Re-fetch with capability column via ListSquadsWithCapability filtered to this squad.
-	rows, err := h.Queries.ListSquadsWithCapability(r.Context(), squad.WorkspaceID)
+	// Re-fetch capability directly by squad ID.
+	raw, err := h.Queries.GetSquadCapability(r.Context(), squad.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read squad capability")
 		return
 	}
 
-	for _, row := range rows {
-		if uuidToString(row.ID) == uuidToString(squad.ID) {
-			writeJSON(w, http.StatusOK, map[string]any{
-				"squad_id":   uuidToString(row.ID),
-				"name":       row.Name,
-				"capability": parseCapability(row.Capability),
-			})
-			return
-		}
-	}
-
-	// Squad exists but has no capability row (shouldn't happen with DEFAULT '{}').
 	writeJSON(w, http.StatusOK, map[string]any{
 		"squad_id":   uuidToString(squad.ID),
 		"name":       squad.Name,
-		"capability": SquadCapability{},
+		"capability": parseCapability(raw),
 	})
 }
 
