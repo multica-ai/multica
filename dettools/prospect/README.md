@@ -24,6 +24,17 @@ Each promoted/reviewed candidate is tracked in:
 Keep `status` values explicit and machine-readable:
 - `draft`
 - `awaiting_human_approve`
+- `candidate`
 - `rejected`
 - `promoted`
 - `archived`
+
+Stage 6 writes `candidate` entries with:
+
+- `tool_name`
+- `human_approve_ref`
+- `owner`
+- `source_cluster_id`
+- `generated_at`
+- `candidate_path`
+- `test_path`

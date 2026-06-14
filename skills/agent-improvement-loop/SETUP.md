@@ -30,6 +30,29 @@ Staging and production folders are both repo-local:
 - `dettools/*.go` (production catalog)
 - `dettools/prospect/*.go` (candidates, not imported)
 
+## Stage 6 candidate generation
+
+Generate prospect candidates only after a human approval reference exists:
+
+```bash
+multica ail stage6 \
+  --candidate-json <stage5-tool-contract.json> \
+  --human-approve-ref <issue-or-comment-ref> \
+  --owner <team-or-person>
+```
+
+Alternative from a Stage 3 digest:
+
+```bash
+multica ail stage6 \
+  --stage3-digest diagnostics/stage3/stage3_digest.json \
+  --tool <suggested_name> \
+  --human-approve-ref <issue-or-comment-ref> \
+  --owner <team-or-person>
+```
+
+The command writes `dettools/prospect/<tool>_candidate.go`, a matching `_test.go`, and a `candidate` entry in `dettools/prospect/manifest.json`. Keep candidates in prospect until Stage 8 promotion.
+
 ## Autopilot bootstrap
 
 ### Stage 2 + 3 (nightly)

@@ -46,6 +46,12 @@ var ailReplayCmd = &cobra.Command{
 	RunE:  runAilReplay,
 }
 
+var ailStage6Cmd = &cobra.Command{
+	Use:   "stage6",
+	Short: "Generate a Stage 6 prospect dettool candidate scaffold and manifest entry",
+	RunE:  runAilStage6,
+}
+
 var ailStage8Cmd = &cobra.Command{
 	Use:   "stage8",
 	Short: "Write Stage 8 promotion diagnostics and 30-day re-evaluation manifest",
@@ -56,6 +62,7 @@ func init() {
 	ailCmd.AddCommand(ailStage2Cmd)
 	ailCmd.AddCommand(ailStage3Cmd)
 	ailCmd.AddCommand(ailRunCmd)
+	ailCmd.AddCommand(ailStage6Cmd)
 	ailCmd.AddCommand(ailReplayCmd)
 	ailCmd.AddCommand(ailStage8Cmd)
 
@@ -99,6 +106,15 @@ func init() {
 	ailReplayCmd.Flags().String("git-revision", "", "Git revision to record in the deterministic profile")
 	ailReplayCmd.Flags().String("evaluation-results-path", "", "Optional evaluation results JSONL for metrics")
 	ailReplayCmd.Flags().String("output", "json", "Output format: json or table")
+
+	ailStage6Cmd.Flags().String("stage3-digest", "", "Path to stage3_digest.json; requires --tool")
+	ailStage6Cmd.Flags().String("candidate-json", "", "Path to a Stage 5 recommended tool contract JSON")
+	ailStage6Cmd.Flags().String("tool", "", "Suggested tool name to generate or select from --stage3-digest")
+	ailStage6Cmd.Flags().String("prospect-dir", "", "Directory for generated prospect files (default: dettools/prospect)")
+	ailStage6Cmd.Flags().String("manifest", "", "Path to prospect manifest JSON (default: <prospect-dir>/manifest.json)")
+	ailStage6Cmd.Flags().String("human-approve-ref", "", "Required human approval reference for the candidate")
+	ailStage6Cmd.Flags().String("owner", "", "Required owner responsible for the candidate")
+	ailStage6Cmd.Flags().String("output", "json", "Output format: json or table")
 
 	ailStage8Cmd.Flags().String("promotion-log", "", "Path to diagnostics/stage8-promotion.jsonl")
 	ailStage8Cmd.Flags().String("index-path", "", "Path to Stage 2 index JSONL file")
@@ -271,6 +287,29 @@ func runAilReplay(cmd *cobra.Command, _ []string) error {
 	return cli.PrintJSON(cmd.OutOrStdout(), result)
 }
 
+func runAilStage6(cmd *cobra.Command, _ []string) error {
+	stage3Digest, _ := cmd.Flags().GetString("stage3-digest")
+	candidateJSON, _ := cmd.Flags().GetString("candidate-json")
+	toolName, _ := cmd.Flags().GetString("tool")
+	prospectDir, _ := cmd.Flags().GetString("prospect-dir")
+	manifestPath, _ := cmd.Flags().GetString("manifest")
+	humanApproveRef, _ := cmd.Flags().GetString("human-approve-ref")
+	owner, _ := cmd.Flags().GetString("owner")
+
+	cfg := ail.NewStage6ConfigFromArgs(stage3Digest, candidateJSON, toolName, prospectDir, manifestPath, humanApproveRef, owner)
+	result, err := ail.RunStage6Generate(cfg)
+	if err != nil {
+		return err
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		printAilStage6Table(cmd, result)
+		return nil
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), result)
+}
+
 func runAilStage8(cmd *cobra.Command, _ []string) error {
 	promotionLog, _ := cmd.Flags().GetString("promotion-log")
 	indexPath, _ := cmd.Flags().GetString("index-path")
@@ -407,6 +446,19 @@ func printAilReplayTable(cmd *cobra.Command, cfg ail.Stage7ReplayConfig, result 
 		result.Metrics.Precision,
 		result.Metrics.InvocationCost,
 		result.Metrics.EvaluationCount)
+}
+
+func printAilStage6Table(cmd *cobra.Command, result ail.Stage6Result) {
+	w := cmd.OutOrStdout()
+	fmt.Fprintf(w, "stage6: tool=%s status=%s owner=%s approve_ref=%s\n",
+		result.ToolName, result.ManifestEntry.Status, result.ManifestEntry.Owner, result.ManifestEntry.HumanApproveRef)
+	headers := []string{"ARTIFACT", "PATH"}
+	rows := [][]string{
+		{"candidate", result.CandidatePath},
+		{"test", result.TestPath},
+		{"manifest", result.ManifestPath},
+	}
+	cli.PrintTable(w, headers, rows)
 }
 
 func printAilStage8Table(cmd *cobra.Command, result ail.Stage8Result) {

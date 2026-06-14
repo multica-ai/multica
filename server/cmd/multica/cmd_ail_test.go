@@ -334,6 +334,19 @@ func newAilReplayTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newAilStage6TestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "stage6"}
+	cmd.Flags().String("stage3-digest", "", "")
+	cmd.Flags().String("candidate-json", "", "")
+	cmd.Flags().String("tool", "", "")
+	cmd.Flags().String("prospect-dir", "", "")
+	cmd.Flags().String("manifest", "", "")
+	cmd.Flags().String("human-approve-ref", "", "")
+	cmd.Flags().String("owner", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
 func newAilStage8TestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "stage8"}
 	cmd.Flags().String("promotion-log", "", "")
@@ -786,6 +799,157 @@ func TestRunAilRunErrorWhenStage5DigestFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "stage5:") {
 		t.Fatalf("expected error to contain \"stage5:\", got: %v", err)
+	}
+}
+
+// --- Stage 6 CLI tests ---
+
+func TestRunAilStage6GeneratesCandidateManifestAndJSONStdout(t *testing.T) {
+	tmp := t.TempDir()
+	prospectDir := filepath.Join(tmp, "prospect")
+	candidateJSON := filepath.Join(tmp, "candidate.json")
+	contract := ail.Stage5ToolContract{
+		Rank:               1,
+		SuggestedName:      "detect_agent_error_e_parse",
+		SourceSignatureKey: "agent_error::E_PARSE::setup_loop",
+		GoSignature:        "func DetectAgentErrorEParse(ctx context.Context, input AgentErrorEParseInput) (AgentErrorEParseOutput, error)",
+		ExampleInput: map[string]any{
+			"failure_reason":  "agent_error",
+			"error_signature": "E_PARSE",
+			"loop_signature":  "setup_loop",
+			"example_task_id": "task-1",
+		},
+		ExampleOutput: map[string]any{
+			"decision":       "ready_for_candidate",
+			"matched":        true,
+			"source_cluster": "agent_error::E_PARSE::setup_loop",
+		},
+		DecisionHint: "ready_for_candidate",
+	}
+	raw, err := json.Marshal(contract)
+	if err != nil {
+		t.Fatalf("marshal contract: %v", err)
+	}
+	if err := os.WriteFile(candidateJSON, raw, 0o644); err != nil {
+		t.Fatalf("write candidate json: %v", err)
+	}
+
+	cmd := newAilStage6TestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	setTestFlag(t, cmd, "candidate-json", candidateJSON)
+	setTestFlag(t, cmd, "prospect-dir", prospectDir)
+	setTestFlag(t, cmd, "human-approve-ref", "PER-12")
+	setTestFlag(t, cmd, "owner", "platform")
+
+	if err := runAilStage6(cmd, nil); err != nil {
+		t.Fatalf("runAilStage6: %v", err)
+	}
+
+	var result ail.Stage6Result
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if result.ToolName != "detect_agent_error_e_parse" {
+		t.Fatalf("tool_name = %q, want detect_agent_error_e_parse", result.ToolName)
+	}
+	for _, path := range []string{result.CandidatePath, result.TestPath, result.ManifestPath} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("generated path %q not created: %v", path, err)
+		}
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(prospectDir, "manifest.json"))
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	var manifest ail.Stage6Manifest
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	if len(manifest.Items) != 1 {
+		t.Fatalf("manifest items len = %d, want 1", len(manifest.Items))
+	}
+	item := manifest.Items[0]
+	if item.Status != "candidate" || item.HumanApproveRef != "PER-12" || item.Owner != "platform" || item.SourceClusterID != "agent_error::E_PARSE::setup_loop" {
+		t.Fatalf("manifest item not populated correctly: %#v", item)
+	}
+
+	goMod := []byte("module prospecttest\n\ngo 1.24.0\n")
+	if err := os.WriteFile(filepath.Join(prospectDir, "go.mod"), goMod, 0o644); err != nil {
+		t.Fatalf("write generated go.mod: %v", err)
+	}
+	testCmd := exec.Command("go", "test", ".")
+	testCmd.Dir = prospectDir
+	out, err := testCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated candidate go test failed: %v\n%s", err, out)
+	}
+}
+
+func TestRunAilStage6GeneratesFromStage3DigestAndTableOutput(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	stage3Path := filepath.Join(tmp, "stage3_digest.json")
+	prospectDir := filepath.Join(tmp, "prospect")
+	stage3 := ail.Stage3Result{
+		WindowDuration: "24h0m0s",
+		TotalEvents:    3,
+		RepeatSignatures: []ail.Stage3Signature{
+			{Key: "runtime_offline::E_CONN::loop", FailureReason: "runtime_offline", ErrorSignature: "E_CONN", LoopSignature: "loop", Count: 3, UniqueTasks: 2, UniqueAgents: 1, ExampleTaskID: "task-9"},
+		},
+		CandidateDettools: []ail.Stage3CandidateDettool{
+			{SuggestedName: "detect_runtime_offline_e_conn_loop", SourceSignatureKey: "runtime_offline::E_CONN::loop", ExpectedDeterminismGain: 0.8, DecisionHint: "ready_for_review"},
+		},
+		AnalyzedAt: now.Format(time.RFC3339Nano),
+	}
+	raw, err := json.Marshal(stage3)
+	if err != nil {
+		t.Fatalf("marshal stage3: %v", err)
+	}
+	if err := os.WriteFile(stage3Path, raw, 0o644); err != nil {
+		t.Fatalf("write stage3 digest: %v", err)
+	}
+
+	cmd := newAilStage6TestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	setTestFlag(t, cmd, "stage3-digest", stage3Path)
+	setTestFlag(t, cmd, "tool", "detect_runtime_offline_e_conn_loop")
+	setTestFlag(t, cmd, "prospect-dir", prospectDir)
+	setTestFlag(t, cmd, "human-approve-ref", "review-comment-1")
+	setTestFlag(t, cmd, "owner", "eval")
+	setTestFlag(t, cmd, "output", "table")
+
+	if err := runAilStage6(cmd, nil); err != nil {
+		t.Fatalf("runAilStage6 from stage3: %v", err)
+	}
+
+	out := buf.String()
+	for _, want := range []string{"stage6:", "candidate", "manifest", "detect_runtime_offline_e_conn_loop"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("table output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunAilStage6ReturnsErrorGivenMissingApprovalFields(t *testing.T) {
+	tmp := t.TempDir()
+	candidateJSON := filepath.Join(tmp, "candidate.json")
+	if err := os.WriteFile(candidateJSON, []byte(`{"suggested_name":"detect_x","source_signature_key":"x","example_input":{"failure_reason":"x"}}`), 0o644); err != nil {
+		t.Fatalf("write candidate json: %v", err)
+	}
+
+	cmd := newAilStage6TestCmd()
+	setTestFlag(t, cmd, "candidate-json", candidateJSON)
+	setTestFlag(t, cmd, "owner", "platform")
+
+	err := runAilStage6(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error from missing human approve ref, got nil")
+	}
+	if !strings.Contains(err.Error(), "human approve ref") {
+		t.Fatalf("error = %v, want missing approval ref", err)
 	}
 }
 

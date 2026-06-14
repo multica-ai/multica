@@ -11,6 +11,7 @@ promotion when a candidate has human approval.
 ## Allowed actions
 
 - Load candidate files from `dettools/prospect/` and `dettools/prospect/manifest.json`.
+- Generate approved Stage 6 prospect scaffolds with `multica ail stage6` when a human approval reference and owner are present.
 - Run one-off and replay-based evaluation against deterministic subsets of logged events.
 - Compare before/after metrics and risk/false-positive signatures.
 - Emit promote/abort decisions and persist immutable diagnostics for rerun.
@@ -38,12 +39,36 @@ All evaluation runs must support rerun filters and a determinism profile:
 - `loop_signatures`
 - `determinism_profile` (tool args + env + input checksum)
 
+## Stage 6 candidate generation
+
+When a Stage 5 digest recommendation has explicit human approval, generate the prospect scaffold before replay evaluation:
+
+```bash
+multica ail stage6 \
+  --candidate-json <stage5-tool-contract.json> \
+  --human-approve-ref <issue-or-comment-ref> \
+  --owner <team-or-person>
+```
+
+If the Stage 3 digest is the source of truth, select the approved candidate by suggested tool name:
+
+```bash
+multica ail stage6 \
+  --stage3-digest diagnostics/stage3/stage3_digest.json \
+  --tool <suggested_name> \
+  --human-approve-ref <issue-or-comment-ref> \
+  --owner <team-or-person>
+```
+
+The command writes `dettools/prospect/<tool>_candidate.go`, `<tool>_candidate_test.go`, and a `candidate` manifest item. Do not import or allowlist the candidate until Stage 8 promotion.
+
 ## Stage 8 promotion workflow
 
-1. Confirm manifest status: candidate is approved and status is `promoted`.
+1. Confirm manifest status: candidate is approved for evaluation and status is `candidate`.
 2. Run Stage 8 transactional helper:
    - `scripts/stage8-promote.sh --tool <tool> --approve-ref <ticket-or-pr> [--force] [--skip-import]`
 3. Confirm `dettools/prospect/manifest.json` records:
+   - `status: promoted`
    - `promoted_at`
    - `approved_by`
    - ticket/issue reference
