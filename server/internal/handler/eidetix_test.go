@@ -194,3 +194,164 @@ func TestDisableThenClearEidetixConfig(t *testing.T) {
 		t.Errorf("after clear, configured = %v, want false", show["configured"])
 	}
 }
+
+func insertEnabledEidetixConfig(t *testing.T, box *secretbox.Box, projectID, token string) {
+	t.Helper()
+	sealed, err := box.Seal([]byte(token))
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO eidetix_project_config (project_id, enabled, endpoint_url, token_encrypted, graph_label)
+		VALUES ($1, true, 'https://eidetix.example/mcp/sse', $2, 'Marketing')
+		ON CONFLICT (project_id) DO UPDATE SET enabled = true, token_encrypted = EXCLUDED.token_encrypted
+	`, projectID, sealed); err != nil {
+		t.Fatalf("insert eidetix config: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM eidetix_project_config WHERE project_id = $1`, projectID)
+	})
+}
+
+type eidetixClaimAgent struct {
+	McpConfig json.RawMessage `json:"mcp_config"`
+	Skills    []struct {
+		Name string `json:"name"`
+	} `json:"skills"`
+}
+
+func claimAgentForEidetixTest(t *testing.T, runtimeID string) (*eidetixClaimAgent, string) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "eidetix-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("claim: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Task struct {
+			Agent *eidetixClaimAgent `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	return resp.Task.Agent, w.Body.String()
+}
+
+func eidetixAgentHasServer(t *testing.T, agent *eidetixClaimAgent) bool {
+	t.Helper()
+	if agent == nil || len(agent.McpConfig) == 0 {
+		return false
+	}
+	var mc struct {
+		McpServers map[string]json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(agent.McpConfig, &mc); err != nil {
+		t.Fatalf("mcp_config not JSON: %s", agent.McpConfig)
+	}
+	_, ok := mc.McpServers["eidetix"]
+	return ok
+}
+
+func eidetixAgentHasSkill(agent *eidetixClaimAgent) bool {
+	if agent == nil {
+		return false
+	}
+	for _, s := range agent.Skills {
+		if s.Name == "multica-eidetix" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestClaim_EnabledEidetix_MergesServerAndSkill(t *testing.T) {
+	ctx := context.Background()
+	box := newTestEidetixBox(t)
+	prev := testHandler.EidetixSecrets
+	testHandler.EidetixSecrets = box
+	t.Cleanup(func() { testHandler.EidetixSecrets = prev })
+
+	projectID := insertTestProject(t, "Eidetix Claim Enabled")
+	runtimeID := createClaimReclaimRuntime(t, ctx, "eidetix-rt-on")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "eidetix-on")
+	_ = agentID
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID); err != nil {
+		t.Fatalf("attach issue to project: %v", err)
+	}
+	insertEnabledEidetixConfig(t, box, projectID, "fake-token-not-a-secret")
+	createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	agent, body := claimAgentForEidetixTest(t, runtimeID)
+	if agent == nil {
+		t.Fatalf("claim returned no agent: %s", body)
+	}
+	if !eidetixAgentHasServer(t, agent) {
+		t.Errorf("eidetix server not merged into claim mcp_config: %s", agent.McpConfig)
+	}
+	if !eidetixAgentHasSkill(agent) {
+		t.Errorf("multica-eidetix skill not appended; body=%s", body)
+	}
+}
+
+func TestClaim_DisabledEidetix_NoMergeNoSkill(t *testing.T) {
+	ctx := context.Background()
+	box := newTestEidetixBox(t)
+	prev := testHandler.EidetixSecrets
+	testHandler.EidetixSecrets = box
+	t.Cleanup(func() { testHandler.EidetixSecrets = prev })
+
+	projectID := insertTestProject(t, "Eidetix Claim Disabled")
+	runtimeID := createClaimReclaimRuntime(t, ctx, "eidetix-rt-off")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "eidetix-off")
+	_ = agentID
+	testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID)
+	insertEnabledEidetixConfig(t, box, projectID, "fake-token-not-a-secret")
+	testPool.Exec(ctx, `UPDATE eidetix_project_config SET enabled = false WHERE project_id = $1`, projectID)
+	createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	agent, _ := claimAgentForEidetixTest(t, runtimeID)
+	if eidetixAgentHasServer(t, agent) {
+		t.Errorf("disabled config still merged eidetix server")
+	}
+	if eidetixAgentHasSkill(agent) {
+		t.Errorf("disabled config still appended the loop skill")
+	}
+}
+
+func TestClaim_DecryptFailure_FailsOpen(t *testing.T) {
+	ctx := context.Background()
+	box := newTestEidetixBox(t)
+	prev := testHandler.EidetixSecrets
+	testHandler.EidetixSecrets = box
+	t.Cleanup(func() { testHandler.EidetixSecrets = prev })
+
+	projectID := insertTestProject(t, "Eidetix Claim Garbage")
+	runtimeID := createClaimReclaimRuntime(t, ctx, "eidetix-rt-garbage")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "eidetix-garbage")
+	_ = agentID
+	testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID)
+	// Insert a row whose token_encrypted is NOT a valid sealed box — Open must fail.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO eidetix_project_config (project_id, enabled, endpoint_url, token_encrypted, graph_label)
+		VALUES ($1, true, 'https://eidetix.example/mcp/sse', $2, 'Garbage')
+	`, projectID, []byte("not-a-valid-sealed-token")); err != nil {
+		t.Fatalf("insert garbage config: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM eidetix_project_config WHERE project_id = $1`, projectID) })
+	createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	// The claim must still SUCCEED (200) and simply omit eidetix — fail open.
+	agent, body := claimAgentForEidetixTest(t, runtimeID)
+	if agent == nil {
+		t.Fatalf("decrypt failure must not break the claim; got no agent: %s", body)
+	}
+	if eidetixAgentHasServer(t, agent) {
+		t.Errorf("garbage token must not yield an eidetix server")
+	}
+	if eidetixAgentHasSkill(agent) {
+		t.Errorf("garbage token must not append the loop skill")
+	}
+}

@@ -1223,6 +1223,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
 					resp.ProjectTitle = proj.Title
 				}
+				// Eidetix shared-context: if this project is bound to an enabled
+				// Eidetix graph, merge its MCP server + the loop skill into the
+				// claim response. Fail-open — never blocks the task.
+				h.applyEidetixToClaim(r.Context(), issue.ProjectID, &resp)
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
 					for _, row := range rows {
