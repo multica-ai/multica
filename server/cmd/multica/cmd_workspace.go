@@ -46,6 +46,13 @@ var workspaceMemberListCmd = &cobra.Command{
 	RunE:  runWorkspaceMembers,
 }
 
+var workspaceMemberInviteCmd = &cobra.Command{
+	Use:   "invite",
+	Short: "Invite a new member to the workspace",
+	Long:  "Send a workspace invitation to an email address. The optional --name flag sets the invited person's display name at registration time, so they appear with the correct name immediately after signing up.",
+	RunE:  runWorkspaceMemberInvite,
+}
+
 var workspaceUpdateCmd = &cobra.Command{
 	Use:   "update [workspace-id|slug|prefix]",
 	Short: "Update workspace metadata (admin/owner only)",
@@ -74,6 +81,7 @@ func init() {
 	workspaceCmd.AddCommand(workspaceGetCmd)
 	workspaceCmd.AddCommand(workspaceMemberCmd)
 	workspaceMemberCmd.AddCommand(workspaceMemberListCmd)
+	workspaceMemberCmd.AddCommand(workspaceMemberInviteCmd)
 	workspaceCmd.AddCommand(workspaceUpdateCmd)
 	workspaceCmd.AddCommand(workspaceSwitchCmd)
 
@@ -81,6 +89,12 @@ func init() {
 	workspaceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+
+	workspaceMemberInviteCmd.Flags().String("email", "", "Invitee email address (required)")
+	workspaceMemberInviteCmd.Flags().String("role", "member", "Role to assign: member or admin")
+	workspaceMemberInviteCmd.Flags().String("name", "", "Display name for the invitee (optional; applied at registration time)")
+	workspaceMemberInviteCmd.Flags().String("output", "json", "Output format: table or json")
+	_ = workspaceMemberInviteCmd.MarkFlagRequired("email")
 
 	workspaceUpdateCmd.Flags().String("name", "", "New workspace name")
 	workspaceUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -468,5 +482,57 @@ func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
+	email, _ := cmd.Flags().GetString("email")
+	role, _ := cmd.Flags().GetString("role")
+	name, _ := cmd.Flags().GetString("name")
+
+	if email == "" {
+		return fmt.Errorf("--email is required")
+	}
+
+	wsID, err := resolveWorkspaceArg(cmd, args)
+	if err != nil {
+		return err
+	}
+
+	body := map[string]any{
+		"email": email,
+		"role":  role,
+	}
+	if n := strings.TrimSpace(name); n != "" {
+		body["invitee_name"] = n
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	var inv map[string]any
+	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &inv); err != nil {
+		return fmt.Errorf("invite member: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, inv)
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	defer w.Flush()
+	fmt.Fprintf(w, "ID\t%s\n", strVal(inv, "id"))
+	fmt.Fprintf(w, "Email\t%s\n", strVal(inv, "invitee_email"))
+	if n, ok := inv["invitee_name"].(string); ok && n != "" {
+		fmt.Fprintf(w, "Display name\t%s\n", n)
+	}
+	fmt.Fprintf(w, "Role\t%s\n", strVal(inv, "role"))
+	fmt.Fprintf(w, "Status\t%s\n", strVal(inv, "status"))
 	return nil
 }
