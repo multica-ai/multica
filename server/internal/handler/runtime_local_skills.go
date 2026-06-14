@@ -639,11 +639,17 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		// Existence + creator permission are re-verified authoritatively at
 		// report time (the skill may change between confirm and write); here we
 		// only require a well-formed target so we never enqueue a doomed write.
-		uuid, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(req.TargetSkillID), "target_skill_id")
-		if !ok {
-			return
+		//
+		// target_skill_id is optional: the flag-based overwrite contract
+		// (overwrite=true with no explicit id) lets the report path resolve the
+		// collision by skill name, so only validate the id when one is supplied.
+		if tid := strings.TrimSpace(req.TargetSkillID); tid != "" {
+			uuid, ok := parseUUIDOrBadRequest(w, tid, "target_skill_id")
+			if !ok {
+				return
+			}
+			targetSkillID = uuidToString(uuid)
 		}
-		targetSkillID = uuidToString(uuid)
 	default:
 		writeError(w, http.StatusBadRequest, "invalid action")
 		return
@@ -832,14 +838,33 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	// as the write, so a target deleted (or a creator change) between the user's
 	// confirm and this report fails cleanly without falling back to create.
 	if req.Action == LocalSkillImportActionOverwrite {
-		targetUUID, perr := util.ParseUUID(req.TargetSkillID)
-		if perr != nil {
-			failMsg := "stored target_skill_id is invalid"
-			if ferr := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); ferr != nil {
-				slog.Error("local skill import Fail failed", "error", ferr, "request_id", requestID)
+		var targetUUID pgtype.UUID
+		if strings.TrimSpace(req.TargetSkillID) == "" {
+			// Flag-based overwrite (overwrite=true, no explicit target): resolve
+			// the collision by skill name, mirroring the create path's same-name
+			// detection. overwriteSkillWithFiles still re-verifies existence,
+			// creator permission, and the name match inside the write tx.
+			existing, found, lerr := h.lookupSkillByName(r.Context(), rt.WorkspaceID, sanitizeNullBytes(name))
+			if lerr != nil {
+				h.failLocalSkillImport(w, r, requestID, "failed to resolve overwrite target: "+lerr.Error())
+				return
 			}
-			writeError(w, http.StatusInternalServerError, failMsg)
-			return
+			if !found {
+				h.failLocalSkillImport(w, r, requestID, "target skill no longer exists")
+				return
+			}
+			targetUUID = existing.ID
+		} else {
+			parsed, perr := util.ParseUUID(req.TargetSkillID)
+			if perr != nil {
+				failMsg := "stored target_skill_id is invalid"
+				if ferr := h.LocalSkillImportStore.Fail(r.Context(), requestID, failMsg); ferr != nil {
+					slog.Error("local skill import Fail failed", "error", ferr, "request_id", requestID)
+				}
+				writeError(w, http.StatusInternalServerError, failMsg)
+				return
+			}
+			targetUUID = parsed
 		}
 		resp, oerr := h.overwriteSkillWithFiles(r.Context(), skillOverwriteInput{
 			WorkspaceID:   rt.WorkspaceID,
