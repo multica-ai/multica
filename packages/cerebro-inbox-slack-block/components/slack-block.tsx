@@ -18,15 +18,13 @@ import { useMemo, useState } from "react";
 import {
   Hash,
   Star,
-  ChevronUp,
-  ChevronDown,
   Settings2,
   X,
   Search,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { channelListOptions, useCreateChannel } from "@multica/core/channels";
-import { memberListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
@@ -45,6 +43,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Input } from "@multica/ui/components/ui/input";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
+import { canAssignAgent } from "@multica/views/issues/components";
 import type { Channel } from "@multica/core/types";
 import { useMemberPresence } from "../hooks/use-member-presence";
 import { useChannelTyping } from "../hooks/use-channel-typing";
@@ -59,10 +58,12 @@ export interface SlackBlockProps {
   /** Sort order for people + channels. Starred always float to the top. */
   sort?: TeamSort;
   onSetSort: (s: TeamSort) => void;
+  /** TECH-3494 — also list the workspace's agents (opt-in). Default off. */
+  showAgents?: boolean;
+  onSetShowAgents: (v: boolean) => void;
+  /** Opens an agent chat in the parent's detail panel (no DM channel). */
+  onOpenAgentChat: (agentId: string) => void;
   onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
-  isFirst: boolean;
-  isLast: boolean;
 }
 
 export type TeamSort = "name" | "recent" | "unread";
@@ -116,10 +117,10 @@ export function SlackBlock({
   onSetMaxPeople,
   sort = "name",
   onSetSort,
+  showAgents = false,
+  onSetShowAgents,
+  onOpenAgentChat,
   onRemove,
-  onMove,
-  isFirst,
-  isLast,
 }: SlackBlockProps) {
   // Gate the whole block behind its cerebro feature flag. Reading it keeps the
   // flag wired even though the parent also gates the "Add section" entry point.
@@ -128,6 +129,11 @@ export function SlackBlock({
   const selfUserId = useAuthStore((s) => s.user?.id);
   const { data: channels = [] } = useQuery(channelListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // TECH-3494 — agents only fetched when the user opts into showing them.
+  const { data: agents = [] } = useQuery({
+    ...agentListOptions(wsId),
+    enabled: !!wsId && showAgents,
+  });
   const { onlineUserIds } = useMemberPresence(wsId);
   // Watch typing for the currently selected conversation so a member's DM row
   // can surface "skriver…" when they type.
@@ -184,6 +190,24 @@ export function SlackBlock({
   const peopleListMaxHeight =
     maxPeople && maxPeople > 0 ? `${maxPeople * 40}px` : undefined;
 
+  // TECH-3494 — agents the current user may chat with (opt-in via settings).
+  // Same gate the "new message" agent picker uses: not archived + assignable.
+  const memberRole = useMemo(
+    () => members.find((m) => m.user_id === selfUserId)?.role,
+    [members, selfUserId],
+  );
+  const visibleAgents = useMemo(() => {
+    if (!showAgents) return [];
+    return agents
+      .filter((a) => !a.archived_at && canAssignAgent(a, selfUserId, memberRole))
+      .filter((a) => {
+        if (!normalizedPeopleSearch) return true;
+        return a.name.toLowerCase().includes(normalizedPeopleSearch);
+      })
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [agents, showAgents, selfUserId, memberRole, normalizedPeopleSearch]);
+
   const channelRooms = useMemo(() => {
     const isStarred = (id: string) => favorites.includes(channelKey(id));
     return channels
@@ -229,31 +253,14 @@ export function SlackBlock({
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card text-sm">
-      {/* Control box — matches the other dynamic-inbox sections. */}
-      <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+      {/* Control box — matches the other dynamic-inbox sections. TECH-3494:
+          pl-8 clears the drag handle the parent overlays at left-2. */}
+      <header className="flex items-center gap-2 border-b border-border py-2 pl-8 pr-3">
         <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
           Chat
         </span>
         <span className="text-xs text-muted-foreground">{onlineCount} online</span>
         <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={isFirst}
-            onClick={() => onMove(-1)}
-            title="Flyt op"
-          >
-            <ChevronUp className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={isLast}
-            onClick={() => onMove(1)}
-            title="Flyt ned"
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
           <button
             type="button"
             className={`rounded p-1 hover:bg-muted ${
@@ -303,6 +310,12 @@ export function SlackBlock({
                     {opt.label} {maxPeople === opt.value ? "✓" : ""}
                   </DropdownMenuItem>
                 ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem onClick={() => onSetShowAgents(!showAgents)}>
+                  Vis agenter {showAgents ? "✓" : ""}
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -438,6 +451,48 @@ export function SlackBlock({
             </div>
           )}
         </div>
+
+        {/* TECH-3494 — agents list, shown only when "Vis agenter" is on. */}
+        {showAgents && (
+          <div className="flex flex-col gap-1">
+            <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Agenter
+            </h3>
+            {visibleAgents.length === 0 ? (
+              <p className="px-1 py-2 text-xs text-muted-foreground">
+                {normalizedPeopleSearch
+                  ? "Ingen agenter matcher søgningen."
+                  : "Ingen agenter endnu."}
+              </p>
+            ) : (
+              <div
+                className="flex flex-col gap-1 overflow-y-auto pr-1"
+                data-testid="agents-list"
+                style={{ maxHeight: peopleListMaxHeight }}
+              >
+                {visibleAgents.map((a) => (
+                  <div
+                    key={a.id}
+                    className="group flex items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors hover:bg-accent/50"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onOpenAgentChat(a.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    >
+                      <span className="shrink-0">
+                        <ActorAvatar actorType="agent" actorId={a.id} size={24} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-foreground">
+                        {a.name}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">

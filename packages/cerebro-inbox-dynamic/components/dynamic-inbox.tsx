@@ -293,19 +293,6 @@ export function DynamicInbox() {
     updateActiveTab((t) => ({ ...t, sections: t.sections.filter((s) => s.id !== id) }));
   const changeSection = (next: InboxSectionConfig) =>
     updateActiveTab((t) => ({ ...t, sections: t.sections.map((s) => (s.id === next.id ? next : s)) }));
-  const moveSection = (id: string, dir: -1 | 1) =>
-    updateActiveTab((t) => {
-      const idx = t.sections.findIndex((s) => s.id === id);
-      const swap = idx + dir;
-      if (idx < 0 || swap < 0 || swap >= t.sections.length) return t;
-      const next = [...t.sections];
-      const a = next[idx];
-      const b = next[swap];
-      if (!a || !b) return t;
-      next[idx] = b;
-      next[swap] = a;
-      return { ...t, sections: next };
-    });
 
   const addTab = () => {
     const id = makeId("tab");
@@ -422,6 +409,9 @@ export function DynamicInbox() {
               chrome, so it needs its own hamburger to open the navigation menu
               (the classic inbox gets this from PageHeader). md:hidden on desktop. */}
           <MobileSidebarTrigger className="-mb-1 mr-1" />
+          {/* TECH-3494 — tabs scroll horizontally and tuck behind the fixed
+              create/⋯ buttons when there are more than fit. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {layout.tabs.map((tab) =>
             editingTabId === tab.id ? (
               // TECH-3502 #2/#4 — inline rename of a tab.
@@ -441,7 +431,7 @@ export function DynamicInbox() {
                     setEditingTabId(null);
                   }
                 }}
-                className="-mb-px w-28 border-b-2 border-primary bg-transparent px-2 pb-2 pt-2 text-sm font-semibold text-foreground outline-none"
+                className="-mb-px w-28 shrink-0 border-b-2 border-primary bg-transparent px-2 pb-2 pt-2 text-sm font-semibold text-foreground outline-none"
                 aria-label="Tab name"
               />
             ) : (
@@ -451,7 +441,7 @@ export function DynamicInbox() {
                 onClick={() => setActiveTabId(tab.id)}
                 onDoubleClick={() => setEditingTabId(tab.id)}
                 title="Double-click to rename"
-                className={`-mb-px border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
+                className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
                   tab.id === activeTab.id
                     ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground"
@@ -461,9 +451,10 @@ export function DynamicInbox() {
               </button>
             ),
           )}
+          </div>
           {/* create-menu (main) + ⋯ settings menu — tab add/rename/remove now
               lives in ⋯ (TECH-3502 #2) */}
-          <div className="ml-auto flex items-center gap-1 pb-1">
+          <div className="flex shrink-0 items-center gap-1 pb-1">
             <DynamicInboxCreateMenu {...createMenuProps} />
             <Dialog open={savePresetOpen} onOpenChange={setSavePresetOpen}>
               <DialogContent>
@@ -609,7 +600,7 @@ export function DynamicInbox() {
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-3">
-                {activeTab.sections.map((section, i) => (
+                {activeTab.sections.map((section) => (
                   <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
                       // TECH-3421 — the Notes box renders its own data (recent
@@ -620,9 +611,6 @@ export function DynamicInbox() {
                           title={section.title}
                           dragHandle={handle}
                           onRemove={() => removeSection(section.id)}
-                          onMove={(dir) => moveSection(section.id, dir)}
-                          isFirst={i === 0}
-                          isLast={i === activeTab.sections.length - 1}
                         />
                       ) : section.kind === "team" ? (
                         <div className="relative">
@@ -635,10 +623,10 @@ export function DynamicInbox() {
                             onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
                             sort={section.teamSort}
                             onSetSort={(s) => changeSection({ ...section, teamSort: s })}
+                            showAgents={section.showAgents}
+                            onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
+                            onOpenAgentChat={handleAgentChatStarted}
                             onRemove={() => removeSection(section.id)}
-                            onMove={(dir) => moveSection(section.id, dir)}
-                            isFirst={i === 0}
-                            isLast={i === activeTab.sections.length - 1}
                           />
                         </div>
                       ) : (
@@ -655,9 +643,6 @@ export function DynamicInbox() {
                           onArchive={onArchive}
                           onChange={changeSection}
                           onRemove={() => removeSection(section.id)}
-                          onMove={(dir) => moveSection(section.id, dir)}
-                          isFirst={i === 0}
-                          isLast={i === activeTab.sections.length - 1}
                         />
                       )
                     }

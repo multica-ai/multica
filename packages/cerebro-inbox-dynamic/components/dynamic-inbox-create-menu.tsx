@@ -82,7 +82,7 @@ export function DynamicInboxCreateMenu({
               "inline-flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isFloating
                 ? "h-14 w-14 rounded-full bg-primary text-primary-foreground shadow-lg ring-1 ring-primary/20 transition-transform hover:bg-primary/90 active:scale-95"
-                : "h-10 min-w-10 gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium text-foreground shadow-sm hover:bg-muted",
+                : "h-10 min-w-10 gap-2 rounded-md px-2 text-sm font-medium text-foreground hover:bg-muted",
             )}
             title="Create"
             aria-label="Create"

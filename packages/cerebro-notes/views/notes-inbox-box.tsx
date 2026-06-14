@@ -7,7 +7,7 @@
 // owns its own data + chrome so the dynamic inbox only has to mount it.
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, NotebookPen, Pin, Plus, X } from "lucide-react";
+import { NotebookPen, Pin, Plus, X } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
@@ -22,9 +22,6 @@ import {
 export interface NotesInboxBoxProps {
   title?: string;
   onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
-  isFirst: boolean;
-  isLast: boolean;
   /** Max notes to show; defaults to 6. */
   limit?: number;
   /** Drag handle injected by the dynamic inbox's sortable wrapper. */
@@ -34,9 +31,6 @@ export interface NotesInboxBoxProps {
 export function NotesInboxBox({
   title,
   onRemove,
-  onMove,
-  isFirst,
-  isLast,
   limit = 6,
   dragHandle,
 }: NotesInboxBoxProps) {
@@ -74,24 +68,6 @@ export function NotesInboxBox({
           >
             <Plus className="size-3.5" />
             New
-          </button>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={isFirst}
-            onClick={() => onMove(-1)}
-            title="Move up"
-          >
-            <ChevronUp className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={isLast}
-            onClick={() => onMove(1)}
-            title="Move down"
-          >
-            <ChevronDown className="size-3.5" />
           </button>
           <button
             type="button"

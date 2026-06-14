@@ -108,6 +108,9 @@ export interface InboxSectionConfig {
   /** TECH-3422 — sort order for the "team" (Chat) section's people + channels.
    *  Starred always float to the top regardless. Default "name". */
   teamSort?: "name" | "recent" | "unread";
+  /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
+   *  undefined / false = only people. Opt-in via the section settings. */
+  showAgents?: boolean;
 }
 
 export interface InboxTabConfig {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel, MemberWithUser } from "@multica/core/types";
 
@@ -65,6 +65,13 @@ const members: MemberWithUser[] = [
   },
 ];
 
+// TECH-3494 — agents for the opt-in "Vis agenter" list. One archived agent
+// proves archived agents are filtered out.
+const agents = [
+  { id: "agent-sara", name: "Sara - CTO", archived_at: null },
+  { id: "agent-old", name: "Old Bot", archived_at: "2026-01-01" },
+];
+
 const baseChannel = (over: Partial<Channel>): Channel => ({
   id: "c",
   workspace_id: "ws",
@@ -118,6 +125,7 @@ vi.mock("@tanstack/react-query", async () => {
       const key = (options.queryKey?.[2] ?? options.queryKey?.[1]) as string;
       if (key === "members") return { data: members };
       if (key === "channels") return { data: channels };
+      if (key === "agents") return { data: agents };
       return { data: [] };
     },
   };
@@ -130,6 +138,13 @@ vi.mock("@multica/core/channels", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws", "members"] }),
+  agentListOptions: () => ({ queryKey: ["workspaces", "ws", "agents"] }),
+}));
+
+// canAssignAgent gate — every agent is assignable in these tests; archived
+// filtering is exercised separately via the archived_at field.
+vi.mock("@multica/views/issues/components", () => ({
+  canAssignAgent: () => true,
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -216,10 +231,9 @@ function renderBlock(
     onOpenChannel: () => {},
     onSetMaxPeople: () => {},
     onSetSort: () => {},
+    onSetShowAgents: () => {},
+    onOpenAgentChat: () => {},
     onRemove: () => {},
-    onMove: () => {},
-    isFirst: true,
-    isLast: true,
     ...overrides,
   };
   return render(<SlackBlock {...props} />);
@@ -287,19 +301,59 @@ describe("SlackBlock", () => {
     expect(screen.getByText("skriver…")).toBeInTheDocument();
   });
 
-  // #2 — the control box header with reorder + remove controls.
-  it("renders the control box (move up/down + remove)", async () => {
+  // #2 — the control box header. Reorder is drag-and-drop now (TECH-3494
+  // removed the up/down arrows), so only the remove control remains here.
+  it("removes the block via the control box", async () => {
     const onRemove = vi.fn();
-    const onMove = vi.fn();
     const user = userEvent.setup();
     await act(async () => {
-      renderBlock({ onRemove, onMove, isFirst: false, isLast: false });
+      renderBlock({ onRemove });
     });
 
-    await user.click(screen.getByTitle("Flyt op"));
-    expect(onMove).toHaveBeenCalledWith(-1);
+    expect(screen.queryByTitle("Flyt op")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Flyt ned")).not.toBeInTheDocument();
     await user.click(screen.getByTitle("Fjern blok"));
     expect(onRemove).toHaveBeenCalled();
+  });
+
+  // TECH-3494 #5 — opt-in agents list in the chat block.
+  it("hides agents by default and shows assignable (non-archived) agents when enabled", async () => {
+    await act(async () => {
+      renderBlock({ showAgents: false });
+    });
+    expect(screen.queryByText("Agenter")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sara - CTO")).not.toBeInTheDocument();
+
+    cleanup();
+    await act(async () => {
+      renderBlock({ showAgents: true });
+    });
+    expect(screen.getByText("Agenter")).toBeInTheDocument();
+    expect(screen.getByText("Sara - CTO")).toBeInTheDocument();
+    // Archived agent is filtered out.
+    expect(screen.queryByText("Old Bot")).not.toBeInTheDocument();
+  });
+
+  it("clicking an agent row opens that agent's chat", async () => {
+    const onOpenAgentChat = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ showAgents: true, onOpenAgentChat });
+    });
+
+    await user.click(screen.getByText("Sara - CTO"));
+    expect(onOpenAgentChat).toHaveBeenCalledWith("agent-sara");
+  });
+
+  it("toggles the agents setting from the control box", async () => {
+    const onSetShowAgents = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ showAgents: false, onSetShowAgents });
+    });
+
+    await user.click(screen.getByText(/Vis agenter/));
+    expect(onSetShowAgents).toHaveBeenCalledWith(true);
   });
 
   // #3 — max-people setting caps the visible height while keeping the rest scrollable.

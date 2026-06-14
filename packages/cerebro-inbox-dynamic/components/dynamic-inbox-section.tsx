@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, ChevronRight, Settings2, X, Pencil, Filter } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings2, X, Pencil, Filter } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -41,9 +41,6 @@ export interface DynamicInboxSectionProps {
   onArchive: (entry: DynInboxEntry) => void;
   onChange: (next: InboxSectionConfig) => void;
   onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
-  isFirst: boolean;
-  isLast: boolean;
 }
 
 function entryKey(entry: DynInboxEntry): string {
@@ -209,24 +206,6 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           <span className="text-xs text-muted-foreground">{selected.length}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={props.isFirst}
-            onClick={() => props.onMove(-1)}
-            title="Move up"
-          >
-            <ChevronUp className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={props.isLast}
-            onClick={() => props.onMove(1)}
-            title="Move down"
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<button type="button" className="rounded p-1 hover:bg-muted" title="Section settings" />}

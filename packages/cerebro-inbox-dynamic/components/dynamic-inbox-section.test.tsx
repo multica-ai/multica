@@ -75,9 +75,6 @@ function renderSection(section: Partial<InboxSectionConfig> = {}) {
     onArchive: vi.fn(),
     onChange,
     onRemove: vi.fn(),
-    onMove: vi.fn(),
-    isFirst: true,
-    isLast: true,
   };
 
   render(<DynamicInboxSection {...props} />);
