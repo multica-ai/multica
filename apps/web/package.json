@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "sh -c 'next dev --port \"${FRONTEND_PORT:-3000}\"'",
-    "build": "fumadocs-mdx && next build --webpack",
+    "build": "fumadocs-mdx && NODE_OPTIONS=--max-old-space-size=8192 next build --webpack",
     "start": "next start",
     "typecheck": "fumadocs-mdx && tsc --noEmit && tsc --noEmit -p tsconfig.sw.json",
     "lint": "eslint .",

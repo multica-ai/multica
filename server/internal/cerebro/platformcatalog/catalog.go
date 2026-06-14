@@ -303,13 +303,15 @@ var catalog = []Capability{
 		Key:         "manage_notes",
 		Title:       "Create / edit / delete notes",
 		Category:    CategoryArtifacts,
-		Description: "Create, edit, delete, pin, or change the visibility of notes (built on the Document feature).",
+		Description: "Create, edit, delete, pin, change the visibility of, or manage references on notes (built on the Document feature).",
 		Ops: []string{
 			"POST /api/notes/",
 			"PUT /api/notes/{id}",
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
 			"PUT /api/notes/{id}/visibility",
+			"POST /api/notes/{id}/references",
+			"DELETE /api/notes/{id}/references/{refId}",
 		},
 	},
 	{
