@@ -1,21 +1,24 @@
 // CEREBRO-PATCH(cerebro-notes-links): TECH-3421 — link a note to the work it is
-// about (issue / channel / DM / chat). A note link is plain navigation, not a
-// notification, so it intentionally does NOT go through the server mention
-// parser (server/internal/util/mention.go) — it is stored inline in the note
-// body as a standard markdown link with a `mention://` href and surfaced by the
-// Notes UI as a clickable chip. This keeps the feature fully fork-clean: no
-// schema change, no upstream mention coupling.
+// about (issue / channel / DM / chat) and tag people in it (member). The
+// work-links are plain navigation; the "member" tag is a person mention that the
+// backend turns into a routed notification (see server/internal/cerebro/note +
+// cerebro_note_mentions.go). Either way the reference is stored inline in the
+// note body as a standard markdown link with a `mention://` href and surfaced by
+// the Notes UI as a chip — reusing the same comment-mention markdown so it routes
+// through the existing notification engine with no new schema.
 import type { WorkspacePaths } from "@multica/core/paths";
 
-// The kinds of work a note can point at. "channel" and "dm" are issues with
-// kind channel/dm; "chat" is an agent chat session; "issue" is a normal issue.
-export type NoteLinkType = "issue" | "channel" | "dm" | "chat";
+// The kinds of thing a note can point at. "channel" and "dm" are issues with
+// kind channel/dm; "chat" is an agent chat session; "issue" is a normal issue;
+// "member" is a tagged person (notification, not navigation).
+export type NoteLinkType = "issue" | "channel" | "dm" | "chat" | "member";
 
 export const NOTE_LINK_TYPES: NoteLinkType[] = [
   "issue",
   "channel",
   "dm",
   "chat",
+  "member",
 ];
 
 export interface NoteLink {
@@ -31,7 +34,7 @@ const LINK_TYPE_SET = new Set<string>(NOTE_LINK_TYPES);
 // The label may contain escaped brackets (\[ \]); ids are uuid-ish but we accept
 // any non-slash, non-paren run so a malformed id never silently drops the chip.
 const NOTE_LINK_RE =
-  /\[((?:[^\]\\]|\\.)*)\]\(mention:\/\/(issue|channel|dm|chat)\/([^)\s/]+)\)/g;
+  /\[((?:[^\]\\]|\\.)*)\]\(mention:\/\/(issue|channel|dm|chat|member)\/([^)\s/]+)\)/g;
 
 function escapeLabel(label: string): string {
   // Keep the markdown link text balanced: escape the brackets that would
@@ -105,7 +108,11 @@ export function insertNoteLink(
   return { body: before + snippet + after, caret: nextCaret };
 }
 
-/** Resolve the in-app destination for a note link. */
+/**
+ * Resolve the in-app destination for a note link. A "member" tag is a person
+ * mention, not a place — it has no destination, so this returns "" and the chip
+ * renders as a non-clickable badge.
+ */
 export function noteLinkHref(paths: WorkspacePaths, link: NoteLink): string {
   switch (link.type) {
     case "issue":
@@ -115,6 +122,8 @@ export function noteLinkHref(paths: WorkspacePaths, link: NoteLink): string {
       return paths.channelDetail(link.id);
     case "chat":
       return `${paths.inbox()}?chat=${encodeURIComponent(link.id)}`;
+    case "member":
+      return "";
     default:
       return paths.inbox();
   }

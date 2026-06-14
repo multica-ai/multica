@@ -1,16 +1,18 @@
 "use client";
 
 // CEREBRO-PATCH(cerebro-notes-link-picker): TECH-3421 — the "@ link" picker that
-// lets a note point at the work it is about: an issue, a channel, a DM, or an
-// agent chat. Selecting an item hands a NoteLink back to the editor, which
-// inserts it into the note body as a markdown chip. Pure navigation — no server
-// mention/notification is triggered (see core/links.ts).
+// lets a note tag a person or point at the work it is about: an issue, a
+// channel, a DM, or an agent chat. Selecting an item hands a NoteLink back to
+// the editor, which inserts it into the note body as a markdown chip. Tagging a
+// person (member) becomes a routed notification on save; the work-links are pure
+// navigation (see core/links.ts + server/internal/cerebro/note).
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Hash, ListTodo, MessageSquare, User } from "lucide-react";
+import { AtSign, Hash, ListTodo, MessageSquare, User } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { channelListOptions } from "@multica/core/channels/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import type { Channel } from "@multica/core/types";
 import {
   Popover,
@@ -99,6 +101,16 @@ export function NoteLinkPicker({
 
   const chats = chatRes?.chat_sessions ?? [];
 
+  const { data: members = [] } = useQuery({
+    ...memberListOptions(wsId),
+    enabled: open,
+  });
+  const memberMatches = members
+    .filter((m) =>
+      query ? m.name.toLowerCase().includes(query.toLowerCase()) : true,
+    )
+    .slice(0, query ? 8 : 6);
+
   const pick = (link: NoteLink) => {
     onPick(link);
     onOpenChange(false);
@@ -112,20 +124,39 @@ export function NoteLinkPicker({
           <CommandInput
             value={q}
             onValueChange={setQ}
-            placeholder="Link to an issue, channel, DM or chat…"
+            placeholder="Tag a person, or link an issue, channel, DM or chat…"
             autoFocus
           />
           <CommandList className="max-h-72">
             {query.length === 0 &&
+              memberMatches.length === 0 &&
               channelGroup.length === 0 &&
               dmGroup.length === 0 && (
-                <CommandEmpty>Type to search your work…</CommandEmpty>
+                <CommandEmpty>Type to search people and your work…</CommandEmpty>
               )}
             {query.length > 0 &&
+              memberMatches.length === 0 &&
               issues.length === 0 &&
               channelGroup.length === 0 &&
               dmGroup.length === 0 &&
               chats.length === 0 && <CommandEmpty>No matches.</CommandEmpty>}
+
+            {memberMatches.length > 0 && (
+              <CommandGroup heading="People">
+                {memberMatches.map((m) => (
+                  <CommandItem
+                    key={`member:${m.user_id}`}
+                    value={`member:${m.user_id}`}
+                    onSelect={() =>
+                      pick({ type: "member", id: m.user_id, label: m.name })
+                    }
+                  >
+                    <AtSign className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{m.name}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            )}
 
             {issues.length > 0 && (
               <CommandGroup heading="Issues">

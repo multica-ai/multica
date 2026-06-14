@@ -214,10 +214,11 @@ func createInboxItemForChannel(
 		RecipientID:   parseUUID(d.RecipientID),
 		Type:          d.NotifType,
 		Severity:      d.Severity,
-		IssueID:       parseUUID(d.IssueID),
-		Title:         d.Title,
-		Body:          util.StrToText(d.Body),
-		ActorType:     util.StrToText(d.Actor.ActorType),
+		// CEREBRO-PATCH(cerebro-note-mention-inbox): TECH-3421 — note mentions target a note (an artifact), not an issue; NULL the issue_id instead of panicking on an empty string.
+		IssueID:   optionalUUID(d.IssueID),
+		Title:     d.Title,
+		Body:      util.StrToText(d.Body),
+		ActorType: util.StrToText(d.Actor.ActorType),
 		// CEREBRO-PATCH(issue-date-reminders): system-generated notifications (e.g. date reminders) have no member/agent actor — NULL the actor_id instead of panicking on an empty string.
 		ActorID: optionalUUID(d.Actor.ActorID),
 		Details: d.Details,

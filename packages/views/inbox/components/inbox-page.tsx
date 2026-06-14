@@ -505,6 +505,11 @@ export function InboxPage() {
       );
       return;
     }
+    // CEREBRO-PATCH(inbox-note-mention-deeplink): TECH-3421 — note @-mentions have no issue_id; deep-link to the note so the inbox item opens what it's about.
+    if (item.details?.note_id) {
+      push(`${wsPaths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
+      return;
+    }
     setSelectedKey("issue", item.issue_id ?? item.id);
   };
 

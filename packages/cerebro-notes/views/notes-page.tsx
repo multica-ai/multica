@@ -17,6 +17,7 @@ import {
   MessageSquare,
   User as UserIcon,
   ListTodo,
+  AtSign,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -60,6 +61,7 @@ const LINK_ICON: Record<NoteLinkType, React.ReactNode> = {
   channel: <Hash className="size-3" />,
   dm: <UserIcon className="size-3" />,
   chat: <MessageSquare className="size-3" />,
+  member: <AtSign className="size-3" />,
 };
 
 const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
@@ -391,7 +393,7 @@ function NoteEditor({
               size="sm"
               variant="ghost"
               onClick={openPicker}
-              title="Link this note to an issue, channel, DM or chat"
+              title="Tag a person, or link an issue, channel, DM or chat"
             >
               <Link2 className="size-4" />
               <span className="hidden sm:inline">Link</span>
@@ -434,20 +436,44 @@ function NoteEditor({
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
               Linked
             </span>
-            {links.map((link) => (
-              <button
-                key={`${link.type}:${link.id}`}
-                type="button"
-                onClick={() => push(noteLinkHref(paths, link))}
-                className="inline-flex max-w-[16rem] items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs hover:bg-muted"
-                title={link.label}
-              >
-                <span className="text-muted-foreground">
-                  {LINK_ICON[link.type]}
-                </span>
-                <span className="truncate">{link.label}</span>
-              </button>
-            ))}
+            {links.map((link) => {
+              // A "member" tag is a person mention, not a place — render it as a
+              // static badge. The other link types navigate on click.
+              const href = noteLinkHref(paths, link);
+              const label = link.type === "member" ? `@${link.label}` : link.label;
+              const inner = (
+                <>
+                  <span className="text-muted-foreground">
+                    {LINK_ICON[link.type]}
+                  </span>
+                  <span className="truncate">{label}</span>
+                </>
+              );
+              const className =
+                "inline-flex max-w-[16rem] items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs";
+              if (!href) {
+                return (
+                  <span
+                    key={`${link.type}:${link.id}`}
+                    className={className}
+                    title={link.label}
+                  >
+                    {inner}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={`${link.type}:${link.id}`}
+                  type="button"
+                  onClick={() => push(href)}
+                  className={`${className} hover:bg-muted`}
+                  title={link.label}
+                >
+                  {inner}
+                </button>
+              );
+            })}
           </div>
         )}
         <Textarea
@@ -456,7 +482,7 @@ function NoteEditor({
           onChange={(e) => setBody(e.target.value)}
           onBlur={saveBody}
           onKeyDown={handleBodyKeyDown}
-          placeholder="Just start writing… (type “@” to link an issue, channel, DM or chat)"
+          placeholder="Just start writing… (type “@” to tag a person or link an issue, channel, DM or chat)"
           className="min-h-[50vh] flex-1 resize-none border-0 px-0 text-[15px] leading-7 shadow-none focus-visible:ring-0"
         />
       </div>

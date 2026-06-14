@@ -13,4 +13,5 @@ func registerCoreEventListeners(bus *events.Bus, queries *db.Queries, pushSvc *s
 	registerSubscriberListeners(bus, queries)
 	registerNotificationListeners(bus, queries, pushSvc)
 	registerActivityListeners(bus, queries)
+	registerCerebroNoteMentionListener(bus, queries) // CEREBRO-PATCH(cerebro-note-mentions-register): TECH-3421 — route note @-mentions to notifications.
 }

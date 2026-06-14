@@ -9,6 +9,7 @@
 package note
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -20,10 +21,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// EventNoteMentioned fires when a note save introduces one or more new person
+// (member) mentions. The notification listener (cerebro_note_mentions.go) turns
+// each mentioned member into a routed "mentioned" inbox notification, reusing
+// the same engine + settings as comment mentions. Payload keys: "note_id",
+// "note_title", "member_ids" ([]string of the newly-mentioned user IDs).
+const EventNoteMentioned = "cerebro:note_mentioned"
 
 // validVisibility gates the visibility values a client may set. Mirrors the
 // CHECK constraint in migration 9073_cerebro_note.
@@ -45,11 +54,79 @@ const (
 type Handler struct {
 	Upstream *db.Queries
 	Cerebro  *cerebrodb.Queries
+	Bus      *events.Bus
 }
 
-// New constructs the handler. The router wires both query packages in.
-func New(upstream *db.Queries, cerebro *cerebrodb.Queries) *Handler {
-	return &Handler{Upstream: upstream, Cerebro: cerebro}
+// New constructs the handler. The router wires both query packages plus the
+// event bus (used to fan person-mentions out to the notification listener).
+func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus) *Handler {
+	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus}
+}
+
+// notifyNoteMentions handles person (@member) mentions introduced by a note
+// save. It diffs the new body against the old (oldBody is "" on create) and,
+// for every member mention that is newly added and is not the author:
+//   - shares the note with them so the notification is openable — a private
+//     note is bumped to 'shared' the first time it gains a tagged person, and
+//   - publishes EventNoteMentioned so the notification listener creates a
+//     routed "mentioned" inbox item, reusing the comment-mention engine.
+//
+// Everything here is best-effort: a note save must never fail because a share
+// or notification could not be created.
+func (h *Handler) notifyNoteMentions(ctx context.Context, wsID, artifactID, ownerID pgtype.UUID, title, oldBody, newBody, visibility string) {
+	added := newMemberMentions(oldBody, newBody, uuidStr(ownerID))
+	if len(added) == 0 {
+		return
+	}
+	for _, uid := range added {
+		mu, err := util.ParseUUID(uid)
+		if err != nil {
+			continue
+		}
+		_ = h.Cerebro.AddNoteShare(ctx, cerebrodb.AddNoteShareParams{ArtifactID: artifactID, UserID: mu})
+	}
+	// Shares only grant access when visibility is 'shared' (or 'workspace'), so
+	// a private note becomes shared the moment it gains a tagged person.
+	if visibility == "private" {
+		_ = h.Cerebro.SetNoteVisibility(ctx, cerebrodb.SetNoteVisibilityParams{ArtifactID: artifactID, Visibility: "shared"})
+	}
+	if h.Bus == nil {
+		return
+	}
+	h.Bus.Publish(events.Event{
+		Type:        EventNoteMentioned,
+		WorkspaceID: uuidStr(wsID),
+		ActorType:   "member",
+		ActorID:     uuidStr(ownerID),
+		Payload: map[string]any{
+			"note_id":    uuidStr(artifactID),
+			"note_title": title,
+			"member_ids": added,
+		},
+	})
+}
+
+// newMemberMentions returns the user IDs mentioned as members in newBody that
+// were not already mentioned in oldBody, excluding excludeID (the author).
+// Order is stable and duplicates are removed, so re-saving a note never
+// re-notifies someone already tagged.
+func newMemberMentions(oldBody, newBody, excludeID string) []string {
+	old := map[string]bool{}
+	for _, m := range util.ParseMentions(oldBody) {
+		if m.Type == "member" {
+			old[m.ID] = true
+		}
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range util.ParseMentions(newBody) {
+		if m.Type != "member" || m.ID == excludeID || old[m.ID] || seen[m.ID] {
+			continue
+		}
+		seen[m.ID] = true
+		out = append(out, m.ID)
+	}
+	return out
 }
 
 // Routes mounts the Notes endpoints under /api/notes.
@@ -92,16 +169,16 @@ type setPinRequest struct {
 // note-specific state. It is intentionally lighter than the full artifact
 // response — the Notes list and editor only need these fields.
 type NoteResponse struct {
-	ID         string   `json:"id"`
+	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
-	FolderID   *string  `json:"folder_id"`
-	Title      string   `json:"title"`
-	Body       string   `json:"body"`
-	OwnerID    string   `json:"owner_id"`
-	Visibility string   `json:"visibility"`
-	Pinned     bool     `json:"pinned"`
-	CreatedAt  string   `json:"created_at"`
-	UpdatedAt  string   `json:"updated_at"`
+	FolderID    *string `json:"folder_id"`
+	Title       string  `json:"title"`
+	Body        string  `json:"body"`
+	OwnerID     string  `json:"owner_id"`
+	Visibility  string  `json:"visibility"`
+	Pinned      bool    `json:"pinned"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
 }
 
 // --- handlers ---
@@ -190,6 +267,9 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create note")
 		return
 	}
+
+	// Tagging a person in the note body notifies them (and shares the note).
+	h.notifyNoteMentions(r.Context(), wsUUID, artifact.ID, ownerUUID, artifact.Title, "", artifact.Body, noteRow.Visibility)
 
 	writeJSON(w, http.StatusCreated, NoteResponse{
 		ID:          uuidStr(artifact.ID),
@@ -390,6 +470,10 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update note")
 		return
 	}
+
+	// Notify only people newly tagged by this edit (diff vs. the old body).
+	h.notifyNoteMentions(r.Context(), wsUUID, noteID, ownerUUID, updated.Title, artifact.Body, updated.Body, noteRow.Visibility)
+
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(updated.ID),
 		WorkspaceID: uuidStr(updated.WorkspaceID),
