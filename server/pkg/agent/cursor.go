@@ -150,7 +150,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					output.WriteString(evt.ResultText)
 				}
 				b.accumulateResultUsage(resultUsage, &evt)
-				if evt.Usage != nil {
+				if evt.Usage != nil || evt.InputTokens != 0 || evt.OutputTokens != 0 {
 					hasResultUsage = true
 				}
 				// Current Cursor Agent versions can emit the terminal result
@@ -268,17 +268,27 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 }
 
 func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *cursorStreamEvent) {
-	if evt.Usage == nil {
-		return
-	}
 	model := evt.Model
 	if model == "" {
 		model = "cursor"
 	}
 	u := usage[model]
-	u.InputTokens += evt.Usage.InputTokens
-	u.OutputTokens += evt.Usage.OutputTokens
-	u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+
+	// Cursor agent CLI v0.46+ returns token counts as top-level camelCase
+	// fields (inputTokens, outputTokens) on the result event. Older versions
+	// and some assistant messages wrap them in a nested snake_case usage
+	// object. Read from both shapes so we don't regress either variant.
+	if evt.InputTokens != 0 || evt.OutputTokens != 0 {
+		u.InputTokens += evt.InputTokens
+		u.OutputTokens += evt.OutputTokens
+	} else if evt.Usage != nil {
+		u.InputTokens += evt.Usage.InputTokens
+		u.OutputTokens += evt.Usage.OutputTokens
+		u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+	} else {
+		return
+	}
+
 	usage[model] = u
 }
 
@@ -302,10 +312,12 @@ type cursorStreamEvent struct {
 	Output string `json:"output,omitempty"`
 
 	// result fields
-	ResultText string       `json:"result,omitempty"`
-	IsError    bool         `json:"is_error,omitempty"`
-	Usage      *cursorUsage `json:"usage,omitempty"`
-	TotalCost  float64      `json:"total_cost_usd,omitempty"`
+	ResultText   string       `json:"result,omitempty"`
+	IsError      bool         `json:"is_error,omitempty"`
+	InputTokens  int64        `json:"inputTokens,omitempty"`
+	OutputTokens int64        `json:"outputTokens,omitempty"`
+	Usage        *cursorUsage `json:"usage,omitempty"`
+	TotalCost    float64      `json:"total_cost_usd,omitempty"`
 
 	// error fields
 	ErrorMsg string `json:"error,omitempty"`
