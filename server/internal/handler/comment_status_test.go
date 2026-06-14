@@ -12,8 +12,9 @@ func createIssueWithStatusForCommentTest(t *testing.T, status string) IssueRespo
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "Issue comment status test",
-		"status": status,
+		"title":      "Issue comment status test",
+		"status":     status,
+		"project_id": testProjectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {

@@ -29,6 +29,12 @@ var testUserID string
 var testWorkspaceID string
 var testRuntimeID string
 
+// testProjectID is a shared project seeded into the fixture workspace. Issue
+// creation now requires project_id (issue.go), so helpers that build issues
+// without a caller-supplied project default to this one. Cleaned up with the
+// workspace via ON DELETE CASCADE.
+var testProjectID string
+
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
 	handlerTestName          = "Handler Test User"
@@ -137,6 +143,14 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
 	`, workspaceID, "Handler Test Agent", runtimeID, userID); err != nil {
+		return "", "", err
+	}
+
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, workspaceID, "Handler Test Project").Scan(&testProjectID); err != nil {
 		return "", "", err
 	}
 

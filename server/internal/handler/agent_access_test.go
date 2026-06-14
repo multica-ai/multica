@@ -325,6 +325,7 @@ func TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(t *testing.T) {
 			"title":         "assign-to-private-agent test " + actorID,
 			"status":        "todo",
 			"priority":      "medium",
+			"project_id":    testProjectID,
 			"assignee_type": "agent",
 			"assignee_id":   agentID,
 		}
