@@ -258,6 +258,16 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type EidetixProjectConfig struct {
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	Enabled        bool               `json:"enabled"`
+	EndpointUrl    string             `json:"endpoint_url"`
+	TokenEncrypted []byte             `json:"token_encrypted"`
+	GraphLabel     pgtype.Text        `json:"graph_label"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
