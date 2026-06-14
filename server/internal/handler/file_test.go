@@ -556,6 +556,10 @@ func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.R
 func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
 	ctx := context.Background()
 
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	defer func() { testHandler.Storage = origStorage }()
+
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 INSERT INTO issue (workspace_id, title, creator_id, creator_type)
