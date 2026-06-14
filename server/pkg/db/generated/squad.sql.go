@@ -683,6 +683,52 @@ type UpdateSquadMemberRoleParams struct {
 	Role       string      `json:"role"`
 }
 
+const setSquadCapability = `-- name: SetSquadCapability :exec
+UPDATE squad SET capability = $2, updated_at = now() WHERE id = $1
+`
+
+type SetSquadCapabilityParams struct {
+	ID         pgtype.UUID `json:"id"`
+	Capability []byte      `json:"capability"`
+}
+
+func (q *Queries) SetSquadCapability(ctx context.Context, arg SetSquadCapabilityParams) error {
+	_, err := q.db.Exec(ctx, setSquadCapability, arg.ID, arg.Capability)
+	return err
+}
+
+const listSquadsWithCapability = `-- name: ListSquadsWithCapability :many
+SELECT id, name, capability FROM squad
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY created_at ASC
+`
+
+type ListSquadsWithCapabilityRow struct {
+	ID         pgtype.UUID `json:"id"`
+	Name       string      `json:"name"`
+	Capability []byte      `json:"capability"`
+}
+
+func (q *Queries) ListSquadsWithCapability(ctx context.Context, workspaceID pgtype.UUID) ([]ListSquadsWithCapabilityRow, error) {
+	rows, err := q.db.Query(ctx, listSquadsWithCapability, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSquadsWithCapabilityRow{}
+	for rows.Next() {
+		var i ListSquadsWithCapabilityRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Capability); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 func (q *Queries) UpdateSquadMemberRole(ctx context.Context, arg UpdateSquadMemberRoleParams) (SquadMember, error) {
 	row := q.db.QueryRow(ctx, updateSquadMemberRole,
 		arg.SquadID,
