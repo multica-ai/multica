@@ -48,6 +48,7 @@ import { IssueChip } from "../issues/components/issue-chip";
 import { ImageLightbox } from "./extensions/image-view";
 import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { useDownloadAttachment } from "./use-download-attachment";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
@@ -277,6 +278,7 @@ function FileCardDiv({
 }: React.ComponentProps<"div"> & { node?: { properties?: Record<string, unknown> } }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
+  const download = useDownloadAttachment();
   const dataType = node?.properties?.dataType as string | undefined;
   if (dataType !== "fileCard") {
     return <div {...props}>{children}</div>;
@@ -303,6 +305,11 @@ function FileCardDiv({
     }
   };
   const openDownload = () => {
+    // CEREBRO-PATCH(readonly-file-card-force-download): comments must use the same forced attachment download path as the main attachment list.
+    if (attachmentId) {
+      void download(attachmentId);
+      return;
+    }
     if (href) window.open(href, "_blank", "noopener,noreferrer");
   };
 

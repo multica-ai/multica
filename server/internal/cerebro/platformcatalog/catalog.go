@@ -309,6 +309,8 @@ var catalog = []Capability{
 			"PUT /api/notes/{id}",
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
+			"POST /api/notes/{id}/references",
+			"DELETE /api/notes/{id}/references/{refId}",
 			"PUT /api/notes/{id}/visibility",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
