@@ -420,8 +420,9 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateMemberRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email       string `json:"email"`
+	Role        string `json:"role"`
+	InviteeName string `json:"invitee_name"`
 }
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {

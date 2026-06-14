@@ -86,6 +86,7 @@ export interface Invitation {
   inviter_id: string;
   invitee_email: string;
   invitee_user_id: string | null;
+  invitee_name?: string | null;
   role: MemberRole;
   status: "pending" | "accepted" | "declined" | "expired";
   created_at: string;
