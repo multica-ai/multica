@@ -203,6 +203,9 @@ function InvitationRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium truncate">{invitation.invitee_email}</div>
+        {invitation.invitee_name && (
+          <div className="text-xs text-muted-foreground truncate">{invitation.invitee_name}</div>
+        )}
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <Clock className="h-3 w-3" />
           <span>{t(($) => $.members.pending_status)}</span>
@@ -238,6 +241,7 @@ export function MembersTab() {
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
+  const [inviteName, setInviteName] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
@@ -260,9 +264,11 @@ export function MembersTab() {
       await api.createMember(workspace.id, {
         email: inviteEmail,
         role: inviteRole,
+        invitee_name: inviteName.trim() || undefined,
       });
       setInviteEmail("");
       setInviteRole("member");
+      setInviteName("");
       qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
       toast.success(t(($) => $.members.toast_invitation_sent));
     } catch (e) {
@@ -371,6 +377,18 @@ export function MembersTab() {
                   {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
                 </Button>
               </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground" htmlFor="invite-display-name">
+                  {t(($) => $.members.invite_name_label)}
+                </label>
+                <Input
+                  id="invite-display-name"
+                  type="text"
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder={t(($) => $.members.invite_name_placeholder)}
+                  className="mt-1"
+                />
             </CardContent>
           </Card>
         )}
