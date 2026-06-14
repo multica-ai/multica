@@ -177,6 +177,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/notes/{id}/references/{refId}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/pins/{itemType}/{itemId}",
       "gate": "self_only"
     },
@@ -942,6 +946,10 @@
     },
     {
       "id": "POST /api/notes/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/references",
       "gate": "workspace_member"
     },
     {
