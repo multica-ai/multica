@@ -111,8 +111,13 @@ func (h *Handler) ShowEidetixConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg, err := h.Queries.GetEidetixConfigForProject(r.Context(), project.ID)
-	if err != nil {
+	if isNotFound(err) {
 		writeJSON(w, http.StatusOK, eidetixShowResponse{Configured: false})
+		return
+	}
+	if err != nil {
+		slog.Error("eidetix: get config failed", "error", err, "project_id", uuidToString(project.ID))
+		writeError(w, http.StatusInternalServerError, "failed to load eidetix config")
 		return
 	}
 	writeJSON(w, http.StatusOK, eidetixShowResponse{
@@ -142,8 +147,13 @@ func (h *Handler) PatchEidetixConfig(w http.ResponseWriter, r *http.Request) {
 		ProjectID: project.ID,
 		Enabled:   *req.Enabled,
 	})
-	if err != nil {
+	if isNotFound(err) {
 		writeError(w, http.StatusNotFound, "eidetix not configured for this project")
+		return
+	}
+	if err != nil {
+		slog.Error("eidetix: set enabled failed", "error", err, "project_id", uuidToString(project.ID))
+		writeError(w, http.StatusInternalServerError, "failed to update eidetix config")
 		return
 	}
 	writeJSON(w, http.StatusOK, eidetixShowResponse{

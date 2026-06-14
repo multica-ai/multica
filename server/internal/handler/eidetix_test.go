@@ -108,6 +108,41 @@ func TestSetAndShowEidetixConfig_TokenNeverReturned(t *testing.T) {
 	}
 }
 
+// TestEidetixConfigRejectsNonOwner proves the owner/admin write gate actually
+// BLOCKS a workspace member who is neither owner nor admin: a plain 'member'
+// PUT must return 403, never reaching the handler body.
+func TestEidetixConfigRejectsNonOwner(t *testing.T) {
+	prev := testHandler.EidetixSecrets
+	testHandler.EidetixSecrets = newTestEidetixBox(t)
+	t.Cleanup(func() { testHandler.EidetixSecrets = prev })
+
+	projectID := insertTestProject(t, "Eidetix Gate")
+
+	// Create a second user who is only a 'member' of the test workspace.
+	// member.user_id REFERENCES "user"(id) ON DELETE CASCADE, so deleting the
+	// user removes the member row too.
+	var memberUserID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"Eidetix Member", "eidetix-member@example.test").Scan(&memberUserID); err != nil {
+		t.Fatalf("insert member user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID) })
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("insert member: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(memberUserID, http.MethodPut, "/api/projects/"+projectID+"/eidetix", map[string]any{"token": "fake-token-not-a-secret"})
+	req = withURLParam(req, "id", projectID)
+	testHandler.SetEidetixConfig(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-owner PUT: status = %d, want 403; body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestDisableThenClearEidetixConfig(t *testing.T) {
 	prev := testHandler.EidetixSecrets
 	testHandler.EidetixSecrets = newTestEidetixBox(t)
