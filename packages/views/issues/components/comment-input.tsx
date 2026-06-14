@@ -29,6 +29,8 @@ import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for the new-comment / channel / DM composer.
 import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
+// CEREBRO-PATCH(composer-height-cap): TECH-3536 — cap the field at 50% of the space above the mobile keyboard, with an expand-to-80% pill.
+import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 
 interface CommentInputProps {
   issueId: string;
@@ -57,6 +59,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const editorRef = useRef<ContentEditorRef>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const submitOnEnter = useSubmitOnEnter();
+  // CEREBRO-PATCH(composer-height-cap): TECH-3536 — mobile height cap + expand state.
+  const composerHeight = useComposerHeight();
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -169,7 +173,17 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
             isPinned && "ring-emerald-500/40 shadow-lg",
           )}
         >
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, mobile only. */}
+          {composerHeight.showExpandToggle && (
+            <ComposerExpandToggle
+              isExpanded={composerHeight.isExpanded}
+              onToggle={composerHeight.toggleExpanded}
+              expandLabel={t(($) => $.comment.expand_tooltip)}
+              collapseLabel={t(($) => $.comment.collapse_tooltip)}
+            />
+          )}
+          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — maxHeight caps growth above the keyboard. */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={{ maxHeight: composerHeight.maxHeight }}>
             <ContentEditor
               // CEREBRO-PATCH(input-autofocus): JEH-756 — remount on
               // channel/DM switch so ContentEditor re-evaluates `autoFocus`

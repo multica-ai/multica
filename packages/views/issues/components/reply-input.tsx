@@ -29,6 +29,8 @@ import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for thread replies.
 import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
+// CEREBRO-PATCH(composer-height-cap): TECH-3536 — cap the reply field at 50% of the space above the mobile keyboard, with an expand-to-80% pill.
+import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -73,6 +75,8 @@ function ReplyInput({
   const measureRef = useRef<HTMLDivElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const submitOnEnter = useSubmitOnEnter();
+  // CEREBRO-PATCH(composer-height-cap): TECH-3536 — mobile height cap + expand state.
+  const composerHeight = useComposerHeight();
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -200,7 +204,17 @@ function ReplyInput({
                 "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
               )}
             >
-              <div className="flex-1 min-h-0 overflow-y-auto">
+              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, mobile only. */}
+              {composerHeight.showExpandToggle && (
+                <ComposerExpandToggle
+                  isExpanded={composerHeight.isExpanded}
+                  onToggle={composerHeight.toggleExpanded}
+                  expandLabel={t(($) => $.reply.expand_tooltip)}
+                  collapseLabel={t(($) => $.reply.collapse_tooltip)}
+                />
+              )}
+              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — maxHeight caps growth above the keyboard. */}
+              <div className="flex-1 min-h-0 overflow-y-auto" style={{ maxHeight: composerHeight.maxHeight }}>
                 <div ref={measureRef}>
                   <ContentEditor
                     ref={editorRef}
