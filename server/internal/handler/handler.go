@@ -84,6 +84,15 @@ type Config struct {
 	CloudRuntimeFleetTimeout time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
+	// SuperAdminEmails is the list of email addresses that have system-level
+	// super-admin privileges, populated via the SUPER_ADMIN_EMAILS env var
+	// (comma-separated). When empty, no one is a super-admin (deny-all).
+	// IMPORTANT: never treat an empty list as "skip check" — that would grant
+	// super-admin access to every authenticated user (fail-open).
+	// This field introduces the platform-admin concept to this repo. Its scope
+	// is currently limited to user display-name management and is orthogonal to
+	// DisableWorkspaceCreation semantics.
+	SuperAdminEmails []string
 }
 
 type cloudRuntimeProxy interface {
@@ -507,6 +516,40 @@ func (h *Handler) requireWorkspaceRole(w http.ResponseWriter, r *http.Request, w
 		return db.Member{}, false
 	}
 	return member, true
+}
+
+// isSuperAdmin reports whether email belongs to a configured super-admin.
+// Returns false when SuperAdminEmails is empty — empty list = no one is a
+// super-admin (deny-all). Uses case-insensitive comparison via contains().
+func (h *Handler) isSuperAdmin(email string) bool {
+	if len(h.cfg.SuperAdminEmails) == 0 {
+		return false
+	}
+	return contains(h.cfg.SuperAdminEmails, email)
+}
+
+// requireSuperAdmin extracts the authenticated user and verifies they are a
+// super-admin. Writes 403 and returns false when they are not.
+func (h *Handler) requireSuperAdmin(w http.ResponseWriter, r *http.Request) (db.User, bool) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return db.User{}, false
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "invalid user id")
+		return db.User{}, false
+	}
+	user, err := h.Queries.GetUser(r.Context(), userUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return db.User{}, false
+	}
+	if !h.isSuperAdmin(user.Email) {
+		writeError(w, http.StatusForbidden, "only super-admins can modify other members' display names")
+		return db.User{}, false
+	}
+	return user, true
 }
 
 // isWorkspaceEntity checks whether a user_id belongs to the given workspace,

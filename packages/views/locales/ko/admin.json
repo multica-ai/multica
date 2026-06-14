@@ -1,0 +1,15 @@
+{
+  "page_title": "사용자 관리",
+  "search_placeholder": "이름 또는 이메일로 검색",
+  "table_header_name": "표시 이름",
+  "table_header_email": "이메일",
+  "table_header_actions": "작업",
+  "empty": "사용자를 찾을 수 없습니다.",
+  "rename_button": "이름 변경",
+  "rename_save": "저장",
+  "rename_cancel": "취소",
+  "rename_placeholder": "새 표시 이름",
+  "rename_empty_error": "표시 이름은 비울 수 없습니다",
+  "rename_success": "표시 이름이 업데이트되었습니다",
+  "rename_error": "표시 이름 업데이트에 실패했습니다"
+}

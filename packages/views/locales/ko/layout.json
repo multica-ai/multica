@@ -31,6 +31,7 @@
     "invitation_join": "참가",
     "invitation_decline": "거절",
     "log_out": "로그아웃",
+    "admin_user_management": "사용자 관리",
     "new_issue": "새 이슈",
     "new_issue_shortcut": "C",
     "pinned_label": "고정됨",

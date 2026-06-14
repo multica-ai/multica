@@ -31,6 +31,7 @@
     "invitation_join": "加入",
     "invitation_decline": "拒绝",
     "log_out": "退出登录",
+    "admin_user_management": "用户管理",
     "new_issue": "新建 issue",
     "new_issue_shortcut": "C",
     "pinned_label": "固定",
