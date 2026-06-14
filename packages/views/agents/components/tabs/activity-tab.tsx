@@ -8,6 +8,7 @@ import {
   Hash,
   Loader2,
   MessageSquare,
+  PauseCircle,
   RotateCcw,
   Workflow,
   X,
@@ -40,6 +41,8 @@ import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
+// CEREBRO-PATCH(interrupted-not-failed): interrupted runs (daemon restart / pause / rate-limit) are auto-retried, not broken — render them amber, not red "Failed".
+import { isInterruptionReason } from "@multica/cerebro-runtime/views";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
@@ -359,7 +362,11 @@ function TaskRow({
   const [cancelling, setCancelling] = useState(false);
   const [retrying, setRetrying] = useState(false);
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
-  const Icon = cfg.icon;
+  // CEREBRO-PATCH(interrupted-not-failed): a run the runtime interrupted (and auto-retries) renders amber, not red — distinct from a real failure.
+  const interrupted =
+    task.status === "failed" && isInterruptionReason(task.failure_reason);
+  const Icon = interrupted ? PauseCircle : cfg.icon;
+  const iconColor = interrupted ? "text-warning" : cfg.color;
   const hasIssue = task.issue_id !== "";
   const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
   const isRunning = task.status === "running";
@@ -458,9 +465,12 @@ function TaskRow({
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape; the
   // cast is safe because the back-end only emits one of the enum values.
+  // CEREBRO-PATCH(interrupted-not-failed): show "Interrupted, retrying" for runtime interruptions so a delivered run is not mislabelled as failed.
   const failureLabel =
     task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
+      ? interrupted
+        ? `Interrupted, retrying (${failureReasonLabel[task.failure_reason as TaskFailureReason]})`
+        : failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
   // Only show duration for terminal rows. An active row's duration is
@@ -481,7 +491,7 @@ function TaskRow({
   return (
     <div className={rowClass}>
       <Icon
-        className={`h-4 w-4 shrink-0 ${cfg.color} ${
+        className={`h-4 w-4 shrink-0 ${iconColor} ${
           isRunning ? "animate-spin" : ""
         }`}
       />

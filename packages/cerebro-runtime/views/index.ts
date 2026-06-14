@@ -9,6 +9,7 @@ export {
   type ParsedRuntimePauseWaitReason,
 } from "./runtime-pause-wait-reason";
 export { usePauseRuntime, useUnpauseRuntime } from "./use-pause-mutations";
+export { isInterruptionReason } from "./task-failure-severity";
 export { RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime-tools/views";
 export { AgentToolsCard } from "@multica/cerebro-agent-tools/views";
 export * from "./docs";

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
+import { Ban, CheckCircle2, ChevronRight, Loader2, PauseCircle, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -22,6 +22,8 @@ import {
   parseRuntimePauseWaitReason,
   runtimePauseQueuedLabel,
 } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(interrupted-not-failed): a run stopped by a daemon restart / runtime pause / rate-limit is auto-retried, not broken — render it amber, not red "Failed".
+import { isInterruptionReason } from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 
 // Right-panel section that lists every agent run for this issue. Active
@@ -350,9 +352,12 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const label = useStatusLabel(task);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
+  // CEREBRO-PATCH(interrupted-not-failed): label interruptions as "Interrupted, retrying" so a run that already delivered does not read as a hard failure.
   const failureLabel =
     task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
+      ? isInterruptionReason(task.failure_reason)
+        ? `Interrupted, retrying (${failureReasonLabel[task.failure_reason as TaskFailureReason]})`
+        : failureReasonLabel[task.failure_reason as TaskFailureReason]
       : null;
 
   // Retry only makes sense for terminal-but-not-success rows. The rerun
@@ -380,7 +385,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     <RowShell task={task}>
       <TriggerText text={trigger} />
       <RowStatus title={failureLabel ?? label}>
-        <TaskStatusIcon status={task.status} />
+        <TaskStatusIcon status={task.status} failureReason={task.failure_reason} />
         <span className="sr-only">{failureLabel ?? label}</span>
         <span className="text-muted-foreground">{time}</span>
       </RowStatus>
@@ -460,7 +465,16 @@ function RowStatus({
   );
 }
 
-function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
+function TaskStatusIcon({
+  status,
+  failureReason,
+}: {
+  status: AgentTask["status"];
+  failureReason?: TaskFailureReason | "";
+}) {
+  // CEREBRO-PATCH(interrupted-not-failed): interruptions (daemon restart / pause / rate-limit) render amber, distinct from a real red failure.
+  if (status === "failed" && isInterruptionReason(failureReason))
+    return <PauseCircle aria-hidden="true" className="h-3.5 w-3.5 text-warning" />;
   switch (status) {
     case "completed":
       return <CheckCircle2 aria-hidden="true" className="h-3.5 w-3.5 text-success" />;
