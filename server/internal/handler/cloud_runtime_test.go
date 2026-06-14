@@ -80,6 +80,9 @@ func TestCreateCloudRuntimeNodeForwardsBody(t *testing.T) {
 	if proxy.req.RequestID != "api-request-id" {
 		t.Fatalf("proxied request id = %q", proxy.req.RequestID)
 	}
+	if got := proxy.req.Headers.Get(cloudRuntimeFreeServerLimitHeader); got != "1" {
+		t.Fatalf("free server limit header = %q", got)
+	}
 	if got := w.Header().Get("X-Request-ID"); got != "fleet-request-id" {
 		t.Fatalf("response request id = %q", got)
 	}

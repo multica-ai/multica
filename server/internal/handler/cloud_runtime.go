@@ -9,18 +9,28 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
 
-const maxCloudRuntimeRequestBodySize = 1 << 20
+const (
+	maxCloudRuntimeRequestBodySize = 1 << 20
+
+	// Fleet owns the billing decision; multica-api stamps the product
+	// allowance onto create-node requests so the cloud side has one
+	// threshold to enforce. More than one server is billable.
+	cloudRuntimeFreeServerLimit       = 1
+	cloudRuntimeFreeServerLimitHeader = "X-Multica-Free-Server-Limit"
+)
 
 type cloudRuntimeProxyOptions struct {
 	withUserID bool
 	withQuery  bool
 	withBody   bool
+	headers    http.Header
 }
 
 func (h *Handler) GetCloudRuntimeService(w http.ResponseWriter, r *http.Request) {
@@ -55,6 +65,9 @@ func (h *Handler) CreateCloudRuntimeNode(w http.ResponseWriter, r *http.Request)
 	h.proxyCloudRuntime(w, r, http.MethodPost, "/api/v1/nodes", cloudRuntimeProxyOptions{
 		withUserID: true,
 		withBody:   true,
+		headers: http.Header{
+			cloudRuntimeFreeServerLimitHeader: []string{strconv.Itoa(cloudRuntimeFreeServerLimit)},
+		},
 	})
 }
 
@@ -136,6 +149,7 @@ func (h *Handler) proxyCloudRuntime(w http.ResponseWriter, r *http.Request, meth
 		Body:      body,
 		UserID:    userID,
 		RequestID: cloudRuntimeRequestID(r),
+		Headers:   opts.headers,
 	})
 	if err != nil {
 		writeCloudRuntimeError(w, r, err)
