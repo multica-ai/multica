@@ -1,0 +1,15 @@
+{
+  "page_title": "用户管理",
+  "search_placeholder": "按姓名或邮箱搜索",
+  "table_header_name": "显示名",
+  "table_header_email": "邮箱",
+  "table_header_actions": "操作",
+  "empty": "未找到用户。",
+  "rename_button": "改名",
+  "rename_save": "保存",
+  "rename_cancel": "取消",
+  "rename_placeholder": "新显示名",
+  "rename_empty_error": "显示名不能为空",
+  "rename_success": "显示名已更新",
+  "rename_error": "更新显示名失败"
+}

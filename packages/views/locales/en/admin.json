@@ -1,0 +1,15 @@
+{
+  "page_title": "User Management",
+  "search_placeholder": "Search by name or email",
+  "table_header_name": "Name",
+  "table_header_email": "Email",
+  "table_header_actions": "Actions",
+  "empty": "No users found.",
+  "rename_button": "Rename",
+  "rename_save": "Save",
+  "rename_cancel": "Cancel",
+  "rename_placeholder": "New display name",
+  "rename_empty_error": "Display name cannot be empty",
+  "rename_success": "Display name updated",
+  "rename_error": "Failed to update display name"
+}

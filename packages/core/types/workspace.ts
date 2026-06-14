@@ -96,3 +96,13 @@ export interface Invitation {
   inviter_email?: string;
   workspace_name?: string;
 }
+
+/** Lightweight user shape returned by super-admin list/management endpoints. */
+export interface AdminUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}

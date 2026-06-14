@@ -1,0 +1,15 @@
+{
+  "page_title": "ユーザー管理",
+  "search_placeholder": "名前またはメールで検索",
+  "table_header_name": "表示名",
+  "table_header_email": "メール",
+  "table_header_actions": "操作",
+  "empty": "ユーザーが見つかりません。",
+  "rename_button": "名前変更",
+  "rename_save": "保存",
+  "rename_cancel": "キャンセル",
+  "rename_placeholder": "新しい表示名",
+  "rename_empty_error": "表示名は空にできません",
+  "rename_success": "表示名を更新しました",
+  "rename_error": "表示名の更新に失敗しました"
+}
