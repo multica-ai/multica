@@ -114,6 +114,7 @@ func TestQuickCreateCompletion_RequesterPreferenceDisabled(t *testing.T) {
 		"please file another bug",
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)

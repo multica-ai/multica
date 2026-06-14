@@ -257,7 +257,7 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 			{ID: "019ec09d-6222-722b-bdfa-427b105d80be", Filename: "shot.png", ContentType: "image/png"},
 		},
 	}
-	out := BuildPrompt(task, "claude")
+	out := BuildPromptWithRunMode(task, "claude")
 	for _, want := range []string{
 		"Attachments on this message:",
 		"id=019ec09d-6222-722b-bdfa-427b105d80be",

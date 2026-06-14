@@ -467,7 +467,7 @@ func TestRuntimeLocalSkillImportOverwrite_PreservesSkillIDAndAgentAssociation(t 
 	if err := json.NewDecoder(w.Body).Decode(&importReq); err != nil {
 		t.Fatalf("decode import request: %v", err)
 	}
-	if !importReq.Overwrite {
+	if importReq.Action != LocalSkillImportActionOverwrite {
 		t.Fatalf("expected overwrite request flag")
 	}
 

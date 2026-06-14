@@ -1093,8 +1093,6 @@ func TestCodexStartOrResumeThreadPromptPassesPolicyOnResume(t *testing.T) {
 			},
 		},
 	})
-			},
-	})
 	defer wait()
 
 	threadID, resumed, err := c.startOrResumeThread(
