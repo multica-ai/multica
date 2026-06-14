@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // fakeLivenessStore lets tests drive every Available / Touch / IsAliveBatch
@@ -135,7 +137,7 @@ func TestRecordHeartbeat_NoopStoreAlwaysWritesDB(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -164,7 +166,7 @@ func TestRecordHeartbeat_RedisAvailableSkipsDBWithinFlushWindow(t *testing.T) {
 	rt := loadRuntime(t, runtimeID)
 	before := rt.LastSeenAt.Time
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -196,7 +198,7 @@ func TestRecordHeartbeat_DBFlushOnStaleRow(t *testing.T) {
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -229,13 +231,70 @@ func TestRecordHeartbeat_OfflineToOnlineForcesDBWrite(t *testing.T) {
 		t.Fatalf("setup: status = %q, want offline", rt.Status)
 	}
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
 	status, _, _ := readRuntimeRow(t, runtimeID)
 	if status != "online" {
 		t.Fatalf("expected status=online after offline→online heartbeat, got %q", status)
+	}
+}
+
+func TestProcessHeartbeat_OfflineToOnlinePublishesRuntimeRefresh(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	origStore := testHandler.LivenessStore
+	testHandler.LivenessStore = NewNoopLivenessStore()
+	t.Cleanup(func() { testHandler.LivenessStore = origStore })
+
+	origBus := testHandler.Bus
+	bus := events.New()
+	testHandler.Bus = bus
+	t.Cleanup(func() { testHandler.Bus = origBus })
+
+	eventsCh := make(chan events.Event, 1)
+	bus.Subscribe(protocol.EventDaemonRegister, func(e events.Event) {
+		select {
+		case eventsCh <- e:
+		default:
+		}
+	})
+
+	setRuntimeStatus(t, runtimeID, "offline")
+	setRuntimeLastSeenAt(t, runtimeID, time.Now())
+	rt := loadRuntime(t, runtimeID)
+
+	ack, _, err := testHandler.processHeartbeat(context.Background(), rt, false)
+	if err != nil {
+		t.Fatalf("processHeartbeat: %v", err)
+	}
+	if ack == nil || ack.Status != "ok" {
+		t.Fatalf("processHeartbeat ack = %#v, want status ok", ack)
+	}
+
+	status, _, _ := readRuntimeRow(t, runtimeID)
+	if status != "online" {
+		t.Fatalf("expected status=online after heartbeat, got %q", status)
+	}
+
+	select {
+	case event := <-eventsCh:
+		if event.WorkspaceID != testWorkspaceID {
+			t.Fatalf("event workspace = %q, want %q", event.WorkspaceID, testWorkspaceID)
+		}
+		payload, _ := event.Payload.(map[string]any)
+		if payload["action"] != "heartbeat_online" {
+			t.Fatalf("event action = %v, want heartbeat_online", payload["action"])
+		}
+		if payload["runtime_id"] != runtimeID {
+			t.Fatalf("event runtime_id = %v, want %s", payload["runtime_id"], runtimeID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive daemon:register event after offline runtime heartbeat")
 	}
 }
 
@@ -262,7 +321,7 @@ func TestRecordHeartbeat_TouchErrorFallsBackToDB(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 
@@ -304,7 +363,7 @@ func TestRecordHeartbeat_SweeperRaceRecoversOnline(t *testing.T) {
 	// snapshot and the heartbeat's UPDATE.
 	setRuntimeStatus(t, runtimeID, "offline")
 
-	if err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
+	if _, err := testHandler.recordHeartbeat(context.Background(), rt); err != nil {
 		t.Fatalf("recordHeartbeat: %v", err)
 	}
 

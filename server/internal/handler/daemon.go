@@ -172,16 +172,31 @@ type DaemonRegisterRequest struct {
 	// may have registered under before switching to a persistent UUID. The
 	// handler merges any matching runtime rows into the new row so agents
 	// and tasks keep working without manual intervention.
-	LegacyDaemonIDs []string `json:"legacy_daemon_ids"`
-	DeviceName      string   `json:"device_name"`
-	CLIVersion      string   `json:"cli_version"` // multica CLI version
-	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
-	Runtimes        []struct {
-		Name    string `json:"name"`
-		Type    string `json:"type"`
-		Version string `json:"version"` // agent CLI version (claude/codex)
-		Status  string `json:"status"`
-	} `json:"runtimes"`
+	LegacyDaemonIDs []string                       `json:"legacy_daemon_ids"`
+	DeviceName      string                         `json:"device_name"`
+	CLIVersion      string                         `json:"cli_version"` // multica CLI version
+	LaunchedBy      string                         `json:"launched_by"` // "desktop" when spawned by the Electron app
+	Runtimes        []DaemonRegisterRuntimeRequest `json:"runtimes"`
+}
+
+type DaemonRegisterRuntimeRequest struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Version string `json:"version"` // agent CLI version (claude/codex)
+	Status  string `json:"status"`
+
+	// Runtime extension manifest fields. Built-in runtimes omit these; the
+	// daemon includes them for providers loaded from runtime.json.
+	External       bool   `json:"external,omitempty"`
+	IconURL        string `json:"icon_url,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Transport      string `json:"transport,omitempty"`
+	LaunchHeader   string `json:"launch_header,omitempty"`
+	Capabilities   any    `json:"capabilities,omitempty"`
+	Pricing        any    `json:"pricing,omitempty"`
+	Models         any    `json:"models,omitempty"`
+	VersionWarning string `json:"version_warning,omitempty"`
+	MinCLIVersion  string `json:"min_cli_version,omitempty"`
 }
 
 type daemonWorkspaceReposResponse struct {
@@ -327,11 +342,42 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
-		metadata, _ := json.Marshal(map[string]any{
+		metadataMap := map[string]any{
 			"version":     runtime.Version,
 			"cli_version": req.CLIVersion,
 			"launched_by": req.LaunchedBy,
-		})
+		}
+		if runtime.External {
+			metadataMap["external"] = true
+		}
+		if runtime.IconURL != "" {
+			metadataMap["icon_url"] = runtime.IconURL
+		}
+		if runtime.Description != "" {
+			metadataMap["description"] = runtime.Description
+		}
+		if runtime.Transport != "" {
+			metadataMap["transport"] = runtime.Transport
+		}
+		if runtime.LaunchHeader != "" {
+			metadataMap["launch_header"] = runtime.LaunchHeader
+		}
+		if runtime.Capabilities != nil {
+			metadataMap["capabilities"] = runtime.Capabilities
+		}
+		if runtime.Pricing != nil {
+			metadataMap["pricing"] = runtime.Pricing
+		}
+		if runtime.Models != nil {
+			metadataMap["models"] = runtime.Models
+		}
+		if runtime.VersionWarning != "" {
+			metadataMap["version_warning"] = runtime.VersionWarning
+		}
+		if runtime.MinCLIVersion != "" {
+			metadataMap["min_cli_version"] = runtime.MinCLIVersion
+		}
+		metadata, _ := json.Marshal(metadataMap)
 
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: wsUUID,
@@ -807,7 +853,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 // The actual DB write is delegated to h.HeartbeatScheduler so production can
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
-func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
+func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) (bool, error) {
 	now := time.Now()
 
 	// Decide whether the DB row needs a write *before* touching Redis, so a
@@ -831,7 +877,7 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 	}
 
 	if !needDBWrite {
-		return nil
+		return false, nil
 	}
 
 	// Either bumps last_seen_at on an already-online row (Touch + race
@@ -856,11 +902,18 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	runtimeID := uuidToString(rt.ID)
 
 	updateStart := time.Now()
-	if err := h.recordHeartbeat(ctx, rt); err != nil {
+	restoredOnline, err := h.recordHeartbeat(ctx, rt)
+	if err != nil {
 		m.UpdateMs = time.Since(updateStart).Milliseconds()
 		return nil, m, err
 	}
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
+	if restoredOnline && h.Bus != nil {
+		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "system", "", map[string]any{
+			"action":     "heartbeat_online",
+			"runtime_id": runtimeID,
+		})
+	}
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 

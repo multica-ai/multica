@@ -51,15 +51,16 @@ const (
 // `json:"-"` because it's a server-side bookkeeping field — the UI only
 // needs Status / UpdatedAt to drive the polling loop.
 type ModelListRequest struct {
-	ID           string          `json:"id"`
-	RuntimeID    string          `json:"runtime_id"`
-	Status       ModelListStatus `json:"status"`
-	Models       []ModelEntry    `json:"models,omitempty"`
-	Supported    bool            `json:"supported"`
-	Error        string          `json:"error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	RunStartedAt *time.Time      `json:"-"`
+	ID           string                         `json:"id"`
+	RuntimeID    string                         `json:"runtime_id"`
+	Status       ModelListStatus                `json:"status"`
+	Models       []ModelEntry                   `json:"models,omitempty"`
+	Pricing      map[string]RuntimeModelPricing `json:"pricing,omitempty"`
+	Supported    bool                           `json:"supported"`
+	Error        string                         `json:"error,omitempty"`
+	CreatedAt    time.Time                      `json:"created_at"`
+	UpdatedAt    time.Time                      `json:"updated_at"`
+	RunStartedAt *time.Time                     `json:"-"`
 }
 
 // ModelEntry mirrors agent.Model for the wire. `Default` tags the
@@ -100,6 +101,16 @@ type ThinkingLevel struct {
 	Description string `json:"description,omitempty"`
 }
 
+// RuntimeModelPricing is per-model pricing in USD per million tokens.
+// It mirrors runtime.json pricing and daemon dynamic model-discovery reports
+// so the frontend can feed discovered model prices into cost estimation.
+type RuntimeModelPricing struct {
+	Input      float64 `json:"input,omitempty"`
+	Output     float64 `json:"output,omitempty"`
+	CacheRead  float64 `json:"cacheRead,omitempty"`
+	CacheWrite float64 `json:"cacheWrite,omitempty"`
+}
+
 const (
 	// modelListPendingTimeout bounds how long a pending request can sit in
 	// the store before the UI is told "daemon didn't pick this up".
@@ -132,7 +143,7 @@ type ModelListStore interface {
 	// PopPending handles "queue empty after probe" by returning nil.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*ModelListRequest, error)
-	Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error
+	Complete(ctx context.Context, id string, models []ModelEntry, supported bool, pricing map[string]RuntimeModelPricing) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -250,13 +261,14 @@ func (s *InMemoryModelListStore) PopPending(_ context.Context, runtimeID string)
 	return oldest, nil
 }
 
-func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, supported bool) error {
+func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, supported bool, pricing map[string]RuntimeModelPricing) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if req, ok := s.requests[id]; ok {
 		req.Status = ModelListCompleted
 		req.Models = models
+		req.Pricing = pricing
 		req.Supported = supported
 		req.UpdatedAt = time.Now()
 	}
@@ -358,10 +370,11 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var body struct {
-		Status    string       `json:"status"` // "completed" or "failed"
-		Models    []ModelEntry `json:"models"`
-		Supported *bool        `json:"supported"`
-		Error     string       `json:"error"`
+		Status    string                         `json:"status"` // "completed" or "failed"
+		Models    []ModelEntry                   `json:"models"`
+		Pricing   map[string]RuntimeModelPricing `json:"pricing"`
+		Supported *bool                          `json:"supported"`
+		Error     string                         `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -375,7 +388,7 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, supported); err != nil {
+		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, supported, body.Pricing); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK

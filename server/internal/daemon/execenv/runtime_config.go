@@ -170,6 +170,30 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	return content, writeRuntimeConfigFile(path, content)
 }
 
+// InjectRuntimeConfigForEntry is like InjectRuntimeConfig but accepts a
+// config file name from an external runtime manifest instead of deriving
+// it from the built-in provider name.
+func InjectRuntimeConfigForEntry(workDir, configFile string, ctx TaskContextForEnv) (string, error) {
+	if configFile == "" {
+		return "", nil
+	}
+	content := buildMetaSkillContent("runtime-extension", ctx)
+	path := runtimeConfigPathForEntry(workDir, configFile)
+	return content, writeRuntimeConfigFile(path, content)
+}
+
+// CleanupRuntimeConfigForEntry is the cleanup counterpart for
+// InjectRuntimeConfigForEntry. External runtime extensions declare their
+// config filename in runtime.json, so cleanup must use that filename instead
+// of the built-in provider -> file mapping used by CleanupRuntimeConfig.
+func CleanupRuntimeConfigForEntry(workDir, configFile string) error {
+	path := runtimeConfigPathForEntry(workDir, configFile)
+	if path == "" {
+		return nil
+	}
+	return cleanupRuntimeConfigPath(path)
+}
+
 // runtimeConfigPath returns the absolute path to the runtime config file that
 // InjectRuntimeConfig writes for the given provider, or "" when the provider
 // has no file-based config target. Centralising the mapping keeps Inject /
@@ -186,6 +210,17 @@ func runtimeConfigPath(workDir, provider string) string {
 	default:
 		return ""
 	}
+}
+
+// runtimeConfigPathForEntry returns the config file path for any provider,
+// including external runtime extensions. External runtimes declare their
+// preferred config file in the manifest (e.g. "AGENTS.md"). If the
+// manifest specifies "" (empty), config injection is skipped entirely.
+func runtimeConfigPathForEntry(workDir, configFile string) string {
+	if configFile == "" {
+		return ""
+	}
+	return filepath.Join(workDir, configFile)
 }
 
 // writeRuntimeConfigFile writes the Multica runtime brief to path without
@@ -317,6 +352,10 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	if path == "" {
 		return nil
 	}
+	return cleanupRuntimeConfigPath(path)
+}
+
+func cleanupRuntimeConfigPath(path string) error {
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil

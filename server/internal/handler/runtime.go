@@ -36,15 +36,39 @@ type AgentRuntimeResponse struct {
 	LastSeenAt *string `json:"last_seen_at"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
+	// Runtime extension manifest fields. Stored in metadata by daemon
+	// registration and promoted to top-level response fields so web/desktop
+	// can render arbitrary providers without hard-coded backend switches.
+	External       bool   `json:"external,omitempty"`
+	IconURL        string `json:"icon_url,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Transport      string `json:"transport,omitempty"`
+	Capabilities   any    `json:"capabilities,omitempty"`
+	Pricing        any    `json:"pricing,omitempty"`
+	Models         any    `json:"models,omitempty"`
+	VersionWarning string `json:"version_warning,omitempty"`
+	MinCLIVersion  string `json:"min_cli_version,omitempty"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	var metadata any
+	var metadataMap map[string]any
 	if rt.Metadata != nil {
 		json.Unmarshal(rt.Metadata, &metadata)
+		if m, ok := metadata.(map[string]any); ok {
+			metadataMap = m
+		}
 	}
 	if metadata == nil {
 		metadata = map[string]any{}
+	}
+	if metadataMap == nil {
+		metadataMap = map[string]any{}
+	}
+
+	launchHeader := agent.LaunchHeader(rt.Provider)
+	if launchHeader == "" {
+		launchHeader = metadataString(metadataMap, "launch_header")
 	}
 
 	return AgentRuntimeResponse{
@@ -54,7 +78,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Name:         rt.Name,
 		RuntimeMode:  rt.RuntimeMode,
 		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
+		LaunchHeader: launchHeader,
 		Status:       rt.Status,
 		DeviceInfo:   rt.DeviceInfo,
 		Metadata:     metadata,
@@ -63,7 +87,38 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),
+
+		External:       metadataBool(metadataMap, "external"),
+		IconURL:        metadataString(metadataMap, "icon_url"),
+		Description:    metadataString(metadataMap, "description"),
+		Transport:      metadataString(metadataMap, "transport"),
+		Capabilities:   metadataValue(metadataMap, "capabilities"),
+		Pricing:        metadataValue(metadataMap, "pricing"),
+		Models:         metadataValue(metadataMap, "models"),
+		VersionWarning: metadataString(metadataMap, "version_warning"),
+		MinCLIVersion:  metadataString(metadataMap, "min_cli_version"),
 	}
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	if value, ok := metadata[key].(string); ok {
+		return value
+	}
+	return ""
+}
+
+func metadataBool(metadata map[string]any, key string) bool {
+	if value, ok := metadata[key].(bool); ok {
+		return value
+	}
+	return false
+}
+
+func metadataValue(metadata map[string]any, key string) any {
+	if value, ok := metadata[key]; ok {
+		return value
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

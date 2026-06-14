@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useManifestPricingStore } from "@multica/core/runtimes/manifest-pricing-store";
 import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
@@ -19,6 +20,7 @@ import {
 afterEach(() => {
   // Reset overrides so tests don't bleed pricing state into one another.
   useCustomPricingStore.setState({ pricings: {} });
+  useManifestPricingStore.setState({ pricings: {} });
 });
 
 const zeroUsage = {
@@ -859,5 +861,80 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+// Pricing-resolution layering: built-in MODEL_PRICING > manifest pricing
+// > user custom override. The manifest layer is how external runtime
+// extensions can ship rates without us shipping a code change.
+describe("manifest-supplied pricing", () => {
+  it("prices a manifest-only model that the catalog doesn't ship", () => {
+    useManifestPricingStore.getState().setManifestPricings({
+      "lb-coder-pro": { input: 3, output: 15, cacheRead: 0.3 },
+    });
+    expect(isModelPriced("lb-coder-pro")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "lb-coder-pro",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(18, 5);
+  });
+
+  it("does NOT shadow the maintained catalog when both define the same model", () => {
+    // Same contract as the user-custom layer: the curated catalog wins.
+    // A buggy/outdated manifest must never silently replace rates the
+    // dashboard uses for everyone else.
+    useManifestPricingStore.getState().setManifestPricings({
+      "claude-sonnet-4-6": { input: 999, output: 999 },
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "claude-sonnet-4-6",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+  });
+
+  it("user-custom override wins over manifest", () => {
+    // The user is the final authority. If a user has explicitly priced
+    // a manifest-only model in the empty-state UI, that override must
+    // hold even if a manifest later registers different rates.
+    useManifestPricingStore.getState().setManifestPricings({
+      "lb-coder-pro": { input: 3, output: 15 },
+    });
+    useCustomPricingStore.getState().setCustomPricing("lb-coder-pro", {
+      input: 1,
+      output: 4,
+      cacheRead: 0.1,
+      cacheWrite: 1,
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "lb-coder-pro",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1, 5);
+  });
+
+  it("zero-fills missing cache rates so the cost helper doesn't NaN", () => {
+    // Manifest schema makes cacheRead/cacheWrite optional. Cost
+    // estimation has to treat the gap as 0, not NaN, or the chart
+    // breaks for any runtime that ships only input/output rates.
+    useManifestPricingStore.getState().setManifestPricings({
+      "fast-model": { input: 0.5, output: 1.5 },
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "fast-model",
+        input_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.5, 5); // input only; cacheRead zero-filled
   });
 });

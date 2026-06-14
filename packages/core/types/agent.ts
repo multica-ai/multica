@@ -29,6 +29,73 @@ export interface RuntimeDevice {
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Optional fields populated only for runtime extensions loaded from
+   * `~/.multica/runtimes/<id>/runtime.json`. These come from the
+   * manifest the daemon sends at register time and let the frontend
+   * stay data-driven (logo / pricing / capability gating) rather than
+   * hard-coding a switch case for every new provider. All optional and
+   * absent on built-in runtimes.
+   */
+  external?: boolean;
+  icon_url?: string;
+  description?: string;
+  transport?: string;
+  capabilities?: RuntimeManifestCaps;
+  pricing?: Record<string, RuntimeModelPricing>;
+  models?: RuntimeManifestModelDescriptor[];
+  version_warning?: string;
+  min_cli_version?: string;
+}
+
+/**
+ * Capabilities mirror the manifest fields the daemon validates. These are
+ * advisory hints to the UI: they say "this runtime supports thinking-level
+ * pickers, MCP config, etc." Each flag corresponds 1:1 with
+ * `RuntimeManifestCaps` in `server/internal/daemon/runtime_loader.go`.
+ */
+export interface RuntimeManifestCaps {
+  thinking?: boolean;
+  mcp_config?: boolean;
+  inline_system_prompt?: boolean;
+  session_resume?: boolean;
+  max_turns?: boolean;
+  model_selection?: boolean;
+  local_skills?: boolean;
+  slash_commands?: boolean;
+  tool_calls?: boolean;
+  attachments?: boolean;
+  image_input?: boolean;
+  web_search?: boolean;
+  custom_args?: boolean;
+  extra_args?: boolean;
+}
+
+/**
+ * Per-model pricing, in USD per million tokens. The daemon reads this from
+ * the runtime manifest's `pricing` object and forwards it verbatim.
+ * Aligned with the existing built-in MODEL_PRICING shape so a single
+ * lookup helper can read both.
+ */
+export interface RuntimeModelPricing {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
+
+/**
+ * Static model descriptor from the manifest. Mirrors what daemon's
+ * `RuntimeManifestModel` puts on the wire. The frontend only needs the
+ * id/label/default/thinking trio for picker rendering; the daemon already
+ * serves a normalised model-list response when an external runtime
+ * declares `model_selection: true`.
+ */
+export interface RuntimeManifestModelDescriptor {
+  id: string;
+  label?: string;
+  default?: boolean;
+  thinking?: string[];
 }
 
 export type AgentRuntime = RuntimeDevice;
@@ -599,6 +666,7 @@ export interface RuntimeModelListRequest {
   runtime_id: string;
   status: RuntimeModelListStatus;
   models?: RuntimeModel[];
+  pricing?: Record<string, RuntimeModelPricing>;
   supported: boolean;
   error?: string;
   created_at: string;
@@ -611,6 +679,7 @@ export interface RuntimeModelListRequest {
 export interface RuntimeModelsResult {
   models: RuntimeModel[];
   supported: boolean;
+  pricing?: Record<string, RuntimeModelPricing>;
 }
 
 export type RuntimeLocalSkillStatus =

@@ -76,7 +76,10 @@ func TestRedisModelListStore_CreateGetComplete(t *testing.T) {
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 	}
-	if err := store.Complete(ctx, req.ID, models, true); err != nil {
+	pricing := map[string]RuntimeModelPricing{
+		"claude-sonnet-4-6": {Input: 3, Output: 15, CacheRead: 0.3, CacheWrite: 3.75},
+	}
+	if err := store.Complete(ctx, req.ID, models, true, pricing); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 
@@ -95,6 +98,9 @@ func TestRedisModelListStore_CreateGetComplete(t *testing.T) {
 	}
 	if !got.Supported {
 		t.Fatalf("supported flag lost on round trip")
+	}
+	if got.Pricing["claude-sonnet-4-6"].Input != 3 {
+		t.Fatalf("pricing lost on round trip: %+v", got.Pricing)
 	}
 }
 

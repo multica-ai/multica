@@ -86,12 +86,13 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	// []ModelEntry and forwards verbatim, which is the path we care
 	// about here.
 	var parsed struct {
-		Models []ModelEntry `json:"models"`
+		Models  []ModelEntry                   `json:"models"`
+		Pricing map[string]RuntimeModelPricing `json:"pricing"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
-	if err := store.Complete(ctx, req.ID, parsed.Models, true); err != nil {
+	if err := store.Complete(ctx, req.ID, parsed.Models, true, parsed.Pricing); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 
@@ -120,6 +121,64 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	}
 }
 
+// TestReportModelListResult_PreservesPricing guards the discovery pricing
+// path for external runtimes. The daemon reports dynamic prices alongside
+// discovered models; the server must preserve them so the frontend can feed
+// the cost dashboard without relying on static manifest-only pricing.
+func TestReportModelListResult_PreservesPricing(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryModelListStore()
+	req, err := store.Create(ctx, "runtime-xyz")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	body := map[string]any{
+		"status":    "completed",
+		"supported": true,
+		"models": []map[string]any{
+			{"id": "dynamic-model", "label": "Dynamic", "provider": "external"},
+		},
+		"pricing": map[string]any{
+			"dynamic-model": map[string]any{
+				"input":      3.0,
+				"output":     15.0,
+				"cacheRead":  0.3,
+				"cacheWrite": 3.75,
+			},
+		},
+	}
+	raw, _ := json.Marshal(body)
+
+	var parsed struct {
+		Models  []ModelEntry                   `json:"models"`
+		Pricing map[string]RuntimeModelPricing `json:"pricing"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		t.Fatalf("unmarshal report body: %v", err)
+	}
+	if err := store.Complete(ctx, req.ID, parsed.Models, true, parsed.Pricing); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected stored result")
+	}
+	pricing := got.Pricing["dynamic-model"]
+	if pricing.Input != 3 || pricing.Output != 15 || pricing.CacheRead != 0.3 || pricing.CacheWrite != 3.75 {
+		t.Fatalf("pricing not persisted: %+v", got.Pricing)
+	}
+
+	out, _ := json.Marshal(got)
+	if !bytes.Contains(out, []byte(`"pricing"`)) {
+		t.Errorf(`expected pricing in JSON response, got: %s`, out)
+	}
+}
+
 // TestReportModelListResult_DecodesJSONBodyDefault verifies the
 // handler's request-body parsing accepts the `default` bool from
 // the daemon POST — not just through the store API.
@@ -130,9 +189,10 @@ func TestReportModelListResult_DecodesJSONBodyDefault(t *testing.T) {
 	r := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/rt/models/req/result", bytes.NewBufferString(payload))
 
 	var body struct {
-		Status    string       `json:"status"`
-		Models    []ModelEntry `json:"models"`
-		Supported *bool        `json:"supported"`
+		Status    string                         `json:"status"`
+		Models    []ModelEntry                   `json:"models"`
+		Pricing   map[string]RuntimeModelPricing `json:"pricing"`
+		Supported *bool                          `json:"supported"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		t.Fatalf("decode: %v", err)

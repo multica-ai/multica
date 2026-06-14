@@ -1,6 +1,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { RuntimeModelsResult } from "../types/agent";
+import { useManifestPricingStore } from "./manifest-pricing-store";
 
 export const runtimeModelsKeys = {
   all: () => ["runtimes", "models"] as const,
@@ -34,7 +35,15 @@ export async function resolveRuntimeModels(
   if (current.status === "failed" || current.status === "timeout") {
     throw new Error(current.error || "model discovery failed");
   }
-  return { models: current.models ?? [], supported: current.supported };
+  const pricing = current.pricing ?? {};
+  if (Object.keys(pricing).length > 0) {
+    useManifestPricingStore.getState().mergeManifestPricings(pricing);
+  }
+  return {
+    models: current.models ?? [],
+    supported: current.supported,
+    pricing: current.pricing,
+  };
 }
 
 export function runtimeModelsOptions(runtimeId: string | null | undefined) {

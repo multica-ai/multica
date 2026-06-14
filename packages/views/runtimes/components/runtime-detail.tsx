@@ -238,7 +238,7 @@ function HeroCard({
       {/* Identity row — provider logo, name, status badge, last seen. */}
       <div className="flex items-start gap-3 border-b p-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-card">
-          <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+          <ProviderLogo provider={runtime.provider} iconUrl={runtime.icon_url} className="h-5 w-5" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

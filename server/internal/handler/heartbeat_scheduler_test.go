@@ -33,7 +33,7 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	for i := 0; i < callers; i++ {
 		go func() {
 			defer wg.Done()
-			if err := sched.Schedule(context.Background(), rt); err != nil {
+			if _, err := sched.Schedule(context.Background(), rt); err != nil {
 				t.Errorf("Schedule: %v", err)
 			}
 		}()
@@ -81,8 +81,12 @@ func TestBatchedHeartbeatScheduler_OfflineFallsBackSync(t *testing.T) {
 	}
 
 	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	restoredOnline, err := sched.Schedule(context.Background(), rt)
+	if err != nil {
 		t.Fatalf("Schedule: %v", err)
+	}
+	if !restoredOnline {
+		t.Fatal("offline row should report restoredOnline=true")
 	}
 
 	if got := sched.PendingCount(); got != 0 {
@@ -114,7 +118,7 @@ func TestBatchedHeartbeatScheduler_StopDrains(t *testing.T) {
 	defer cancel()
 	go sched.Run(ctx)
 
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if _, err := sched.Schedule(context.Background(), rt); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 	if got := sched.PendingCount(); got != 1 {
@@ -162,7 +166,7 @@ func TestBatchedHeartbeatScheduler_StopFlushesLateSchedule(t *testing.T) {
 
 	// Now Schedule a late heartbeat. Run is gone; only Stop's defensive
 	// flush can persist this.
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if _, err := sched.Schedule(context.Background(), rt); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 	if got := sched.PendingCount(); got != 1 {
@@ -207,7 +211,7 @@ func TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals(t *testing.T) {
 	rt := loadRuntime(t, runtimeID)
 
 	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0)
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	if _, err := sched.Schedule(context.Background(), rt); err != nil {
 		t.Fatalf("Schedule: %v", err)
 	}
 
@@ -225,8 +229,12 @@ func TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals(t *testing.T) {
 	// Reload and re-Schedule: rt.Status is now offline, so the scheduler
 	// takes the sync MarkAgentRuntimeOnline path and the row recovers.
 	rt2 := loadRuntime(t, runtimeID)
-	if err := sched.Schedule(context.Background(), rt2); err != nil {
+	restoredOnline, err := sched.Schedule(context.Background(), rt2)
+	if err != nil {
 		t.Fatalf("recovery Schedule: %v", err)
+	}
+	if !restoredOnline {
+		t.Fatal("recovery Schedule should report restoredOnline=true")
 	}
 	status2, _, _ := readRuntimeRow(t, runtimeID)
 	if status2 != "online" {
@@ -249,8 +257,12 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 
 	sched := NewPassthroughHeartbeatScheduler(testHandler.Queries)
 
-	if err := sched.Schedule(context.Background(), rt); err != nil {
+	restoredOnline, err := sched.Schedule(context.Background(), rt)
+	if err != nil {
 		t.Fatalf("Schedule: %v", err)
+	}
+	if restoredOnline {
+		t.Fatal("online row touch should not report restoredOnline=true")
 	}
 	_, lastSeen, _ := readRuntimeRow(t, runtimeID)
 	if !lastSeen.After(stale.Add(time.Minute)) {
@@ -260,8 +272,12 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 	// Race: snapshot still says online but DB is now offline.
 	rt2 := loadRuntime(t, runtimeID)
 	setRuntimeStatus(t, runtimeID, "offline")
-	if err := sched.Schedule(context.Background(), rt2); err != nil {
+	restoredOnline, err = sched.Schedule(context.Background(), rt2)
+	if err != nil {
 		t.Fatalf("Schedule under race: %v", err)
+	}
+	if !restoredOnline {
+		t.Fatal("race recovery should report restoredOnline=true")
 	}
 	status, _, _ := readRuntimeRow(t, runtimeID)
 	if status != "online" {

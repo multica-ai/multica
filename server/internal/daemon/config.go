@@ -267,9 +267,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
-	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
-		agents["codebuddy"] = e
-	}
 	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
 	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
 	// daemon-wide default; its value is the exact `agy models` display string
@@ -277,8 +274,70 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}
+
+	// Load user-installed runtime extensions from ~/.multica/runtimes/.
+	// Each subdirectory with a runtime.json becomes a discoverable agent
+	// provider without requiring a MULTICA_*_PATH env var. Runtime
+	// extensions support both the ACP (acp-stdio) and stream-json
+	// transports and are registered with the manifest's provider key.
+	extManifests, extErr := LoadRuntimeManifests(DefaultRuntimesDir())
+	if extErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: failed to load runtime extensions: %v\n", extErr)
+	}
+
+	// MULTICA_RUNTIMES_INCLUDE lets operators inject additional runtime
+	// directories without requiring users to create files manually. For
+	// internal / company-wide deployments, ship a directory tree under a
+	// known path (e.g. /opt/lightbox/runtimes/) and set this env var at
+	// daemon startup. The daemon merges manifests from ALL paths; the
+	// default `~/.multica/runtimes/` still works so users can add their
+	// own personal runtimes alongside the company ones.
+	//
+	// Delimiter is os.PathListSeparator so ":" on Linux/macOS and ";"
+	// on Windows — same convention as PATH. Each path is scanned with
+	// LoadRuntimeManifests (same rules: a directory tree with runtime.json
+	// in subdirectories).
+	if include := os.Getenv("MULTICA_RUNTIMES_INCLUDE"); include != "" {
+		for _, dir := range strings.Split(include, string(os.PathListSeparator)) {
+			dir = strings.TrimSpace(dir)
+			if dir == "" {
+				continue
+			}
+			extra, err := LoadRuntimeManifests(dir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to load runtime extensions from %s: %v\n", dir, err)
+				continue
+			}
+			extManifests = append(extManifests, extra...)
+		}
+	}
+
+	for _, m := range extManifests {
+		if _, exists := agents[m.Provider]; exists {
+			fmt.Fprintf(os.Stderr, "warning: runtime extension %q conflicts with built-in provider %q, skipping\n", m.ID, m.Provider)
+			continue
+		}
+		entry := m.ToAgentEntry()
+		// Best-effort version probe: if the manifest declares a minimum
+		// CLI version and we can detect the installed version, surface a
+		// non-fatal warning when the installed version is older. The
+		// manifest still loads — operators can choose to upgrade after
+		// seeing the warning, which avoids a hard-fail boot loop on a
+		// version string the daemon can't parse (build SHAs etc.).
+		if entry.MinCLIVersion != "" {
+			if detected, err := probeManifestCLIVersion(entry.Path); err == nil && detected != "" {
+				entry.DetectedVer = detected
+				if cmpErr := compareSemver(detected, entry.MinCLIVersion); cmpErr != nil {
+					entry.VersionWarning = cmpErr.Error()
+					fmt.Fprintf(os.Stderr, "warning: runtime extension %q: %s\n", m.ID, cmpErr.Error())
+				}
+			}
+		}
+		agents[m.Provider] = entry
+	}
+
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, or agy and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, agy, or place runtime extensions in %s", DefaultRuntimesDir())
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -626,7 +685,7 @@ func shellArgsFromEnv(name string) ([]string, error) {
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
 	"claude", "codex", "opencode", "openclaw", "hermes",
-	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy",
+	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "agy",
 }
 
 var codexDesktopAppBundlePaths = func() []string {

@@ -963,6 +963,48 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 	})
 }
 
+func TestCleanupRuntimeConfigForEntryRemovesExternalRuntimeBrief(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte("user instructions"), 0o644); err != nil {
+		t.Fatalf("seed AGENTS.md: %v", err)
+	}
+	if _, err := InjectRuntimeConfigForEntry(dir, "AGENTS.md", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+		t.Fatalf("InjectRuntimeConfigForEntry: %v", err)
+	}
+	withBrief, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read injected AGENTS.md: %v", err)
+	}
+	if !strings.Contains(string(withBrief), runtimeMarkerBegin) {
+		t.Fatalf("external runtime brief was not injected: %s", withBrief)
+	}
+
+	if err := CleanupRuntimeConfig(dir, "external-provider"); err != nil {
+		t.Fatalf("CleanupRuntimeConfig unknown provider: %v", err)
+	}
+	stillInjected, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read AGENTS.md after provider cleanup: %v", err)
+	}
+	if !strings.Contains(string(stillInjected), runtimeMarkerBegin) {
+		t.Fatalf("precondition broken: unknown provider cleanup unexpectedly removed brief")
+	}
+
+	if err := CleanupRuntimeConfigForEntry(dir, "AGENTS.md"); err != nil {
+		t.Fatalf("CleanupRuntimeConfigForEntry: %v", err)
+	}
+	cleaned, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read cleaned AGENTS.md: %v", err)
+	}
+	if string(cleaned) != "user instructions" {
+		t.Fatalf("cleanup left stale external runtime content: %q", cleaned)
+	}
+}
+
 // Cleanup must handle a half-block left by a previous crashed run: begin
 // marker present but no end. Otherwise the half-block would survive
 // cleanup and pollute the next manual CLI invocation in the same dir.

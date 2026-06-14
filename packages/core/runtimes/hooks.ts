@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "../auth";
-import type { AgentRuntime } from "../types";
+import type { AgentRuntime, RuntimeModelPricing } from "../types";
 import { runtimeListOptions, latestCliVersionOptions } from "./queries";
+import { useManifestPricingStore } from "./manifest-pricing-store";
 
 function stripV(v: string): string {
   return v.replace(/^v/, "");
@@ -80,4 +81,44 @@ export function useUpdatableRuntimeIds(wsId: string | undefined): Set<string> {
     }
     return ids;
   }, [runtimes, latestVersion, userId]);
+}
+
+/**
+ * Mirror runtime-extension manifest pricing into the global manifest
+ * pricing store. Mounted near the top of the runtime tree (e.g. inside
+ * the workspace shell) so any cost-estimation helper that reads from
+ * `getManifestPricing()` sees rates as soon as the runtime list arrives.
+ *
+ * No-op when no runtimes carry pricing — built-in runtimes always omit
+ * the field, so this is effectively a hook for external runtime
+ * extensions only.
+ */
+export function useSyncManifestPricing(wsId: string | undefined): void {
+  const { data: runtimes } = useQuery({
+    ...runtimeListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const setManifestPricings = useManifestPricingStore(
+    (s) => s.setManifestPricings,
+  );
+
+  useEffect(() => {
+    if (!runtimes) return;
+    const next: Record<string, RuntimeModelPricing> = {};
+    for (const rt of runtimes) {
+      const pricing = rt.pricing;
+      if (!pricing) continue;
+      for (const [modelId, p] of Object.entries(pricing)) {
+        // Last-write-wins across runtimes that share a model id. The
+        // daemon enforces unique provider keys, so collisions are rare;
+        // we accept the simpler merge instead of growing a per-provider
+        // namespace.
+        next[modelId] = p;
+      }
+    }
+    // Replace, don't merge: the runtime list is authoritative for the
+    // currently-installed manifests. Removing a runtime should drop its
+    // rates immediately.
+    setManifestPricings(next);
+  }, [runtimes, setManifestPricings]);
 }

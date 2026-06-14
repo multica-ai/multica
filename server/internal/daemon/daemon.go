@@ -741,12 +741,26 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
+	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
-			continue
+			// External runtimes pre-probe at startup, so a transient
+			// version-detection failure here should not drop them from the
+			// registration entirely — fall back to the cached value when
+			// present, or report "unknown" so the server still records the
+			// runtime.
+			if entry.IsExternal {
+				if entry.DetectedVer != "" {
+					version = entry.DetectedVer
+				} else {
+					version = "unknown"
+				}
+				d.logger.Warn("external runtime version probe failed; using fallback", "name", name, "fallback", version, "error", err)
+			} else {
+				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+				continue
+			}
 		}
 		if err := checkAgentMinVersion(name, version); err != nil {
 			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
@@ -755,15 +769,52 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 		d.setAgentVersion(name, version)
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
 		displayName := strings.ToUpper(name[:1]) + name[1:]
+		if entry.IsExternal && entry.ManifestName != "" {
+			displayName = entry.ManifestName
+		}
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		runtimes = append(runtimes, map[string]string{
+		rtPayload := map[string]any{
 			"name":    displayName,
 			"type":    name,
 			"version": version,
 			"status":  "online",
-		})
+		}
+		// Extra metadata for external runtime extensions. The server is
+		// permissive about additional fields (older servers ignore them);
+		// the desktop UI consumes them when it speaks the v2 schema. This
+		// keeps the manifest authoritative for icon/pricing/capability
+		// rather than baking them into a frontend hard-coded map.
+		if entry.IsExternal {
+			rtPayload["external"] = true
+			rtPayload["transport"] = entry.Transport
+			if entry.LaunchHeader != "" {
+				rtPayload["launch_header"] = entry.LaunchHeader
+			}
+			if entry.IconURL != "" {
+				rtPayload["icon_url"] = entry.IconURL
+			}
+			if entry.Description != "" {
+				rtPayload["description"] = entry.Description
+			}
+			if caps := entry.Caps(); caps != nil {
+				rtPayload["capabilities"] = caps
+			}
+			if len(entry.Pricing) > 0 {
+				rtPayload["pricing"] = entry.Pricing
+			}
+			if len(entry.Models) > 0 {
+				rtPayload["models"] = entry.Models
+			}
+			if entry.VersionWarning != "" {
+				rtPayload["version_warning"] = entry.VersionWarning
+			}
+			if entry.MinCLIVersion != "" {
+				rtPayload["min_cli_version"] = entry.MinCLIVersion
+			}
+		}
+		runtimes = append(runtimes, rtPayload)
 	}
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("no agent runtimes could be registered")
@@ -1450,6 +1501,26 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
+	// Three-way dispatch for external runtime extensions:
+	//  1. Dynamic discovery (CLI, ACP, or provider-local catalog) when
+	//     models_discovery is configured
+	//  2. Static models array from manifest (fallback)
+	//  3. Empty list (no discovery, no static)
+	// Built-in providers always go through agent.ListModels().
+	switch {
+	case entry.IsExternal && entry.ModelsDiscovery != nil:
+		d.discoverExternalModels(ctx, rt, requestID, entry)
+		return
+	case entry.IsExternal && len(entry.Models) > 0:
+		d.reportExternalModels(ctx, rt, requestID, entry.Models)
+		return
+	case entry.IsExternal:
+		d.reportModelListResult(ctx, rt, requestID, map[string]any{
+			"status": "completed", "models": []any{}, "supported": true,
+		})
+		return
+	}
+
 	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
@@ -1508,6 +1579,54 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+	})
+}
+
+// reportExternalModels converts AgentModel entries from a runtime.json
+// manifest into the wire format and reports them to the server. This is
+// used for external runtime extensions that declare static model lists
+// instead of using CLI-based discovery.
+func (d *Daemon) reportExternalModels(ctx context.Context, rt Runtime, requestID string, agentModels []AgentModel) {
+	type thinkingLevelWire struct {
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description,omitempty"`
+	}
+	type modelThinkingWire struct {
+		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
+		DefaultLevel    string              `json:"default_level,omitempty"`
+	}
+	type modelWire struct {
+		ID       string             `json:"id"`
+		Label    string             `json:"label"`
+		Provider string             `json:"provider,omitempty"`
+		Default  bool               `json:"default,omitempty"`
+		Thinking *modelThinkingWire `json:"thinking,omitempty"`
+	}
+	wire := make([]modelWire, 0, len(agentModels))
+	for _, m := range agentModels {
+		entry := modelWire{
+			ID:       m.ID,
+			Label:    m.Label,
+			Provider: rt.Provider,
+			Default:  m.Default,
+		}
+		if len(m.Thinking) > 0 {
+			levels := make([]thinkingLevelWire, 0, len(m.Thinking))
+			for _, lvl := range m.Thinking {
+				levels = append(levels, thinkingLevelWire{Value: lvl, Label: lvl})
+			}
+			entry.Thinking = &modelThinkingWire{
+				SupportedLevels: levels,
+				DefaultLevel:    m.Thinking[0],
+			}
+		}
+		wire = append(wire, entry)
+	}
+	d.reportModelListResult(ctx, rt, requestID, map[string]any{
+		"status":    "completed",
+		"models":    wire,
+		"supported": true,
 	})
 }
 
@@ -2611,6 +2730,83 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// providerNeedsInlineSystemPromptForEntry checks whether an external
+// runtime entry declares the inline_system_prompt capability.
+func providerNeedsInlineSystemPromptForEntry(entry AgentEntry) bool {
+	return entry.IsExternal && entry.Caps() != nil && entry.Caps().InlineSystemPrompt
+}
+
+// capabilitiesForBackend translates a registered AgentEntry's manifest caps
+// (when present) into the subset agent.Config needs at task spawn time.
+// Built-in providers fall through to a zero ConfigCapabilities — their
+// backends ignore the field and use the hard-coded behaviour the daemon has
+// always supplied. External runtimes copy each cap flag verbatim so the
+// wire layer (ACP / stream-json) can decide whether to forward each
+// optional parameter.
+func capabilitiesForBackend(entry AgentEntry) agent.ConfigCapabilities {
+	caps := entry.Caps()
+	if caps == nil {
+		return agent.ConfigCapabilities{}
+	}
+	return agent.ConfigCapabilities{
+		Thinking:       caps.Thinking,
+		McpConfig:      caps.McpConfig,
+		SessionResume:  caps.SessionResume,
+		MaxTurns:       caps.MaxTurns,
+		ModelSelection: caps.ModelSelection,
+	}
+}
+
+// applyAgentRuntimeOverrides mutates `entry` in place, applying per-agent
+// overrides from the agent metadata. This lets each agent customize its
+// runtime's behaviour without editing the global manifest file:
+//
+//   - "skills_root_override"  → entry.SkillsRoot
+//   - "config_file_override"  → entry.ConfigFile
+//   - "icon_url_override"     → entry.IconURL   (cosmetic only)
+//   - "blocked_args_override" → merged into entry.BlockedArgs (append-only)
+//
+// Keys not present in metadata are no-ops. Zero-value strings are
+// treated as "clear the override" (use the manifest default).
+func applyAgentRuntimeOverrides(entry *AgentEntry, metadata map[string]any) {
+	if len(metadata) == 0 {
+		return
+	}
+	if v, ok := metadata["skills_root_override"].(string); ok && v != "" {
+		entry.SkillsRoot = v
+	}
+	if v, ok := metadata["config_file_override"].(string); ok && v != "" {
+		entry.ConfigFile = v
+	}
+	if v, ok := metadata["icon_url_override"].(string); ok && v != "" {
+		entry.IconURL = v
+	}
+	// blocked_args_override: append-only merge. An agent can add extra
+	// blocked args but cannot remove ones the manifest declared. This
+	// prevents a compromised agent config from unblocking protocol flags
+	// a manifest author intentionally sealed.
+	if raw, ok := metadata["blocked_args_override"]; ok {
+		switch ba := raw.(type) {
+		case map[string]any:
+			if entry.BlockedArgs == nil {
+				entry.BlockedArgs = make(map[string]string)
+			}
+			for k, v := range ba {
+				if s, ok := v.(string); ok {
+					entry.BlockedArgs[k] = s
+				}
+			}
+		case map[string]string:
+			if entry.BlockedArgs == nil {
+				entry.BlockedArgs = make(map[string]string)
+			}
+			for k, v := range ba {
+				entry.BlockedArgs[k] = v
+			}
+		}
+	}
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -2787,6 +2983,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
+	// For external runtime extensions, also inject config using the
+	// manifest-declared config file (e.g. "AGENTS.md").
+	if entry.ConfigFile != "" {
+		if _, err := execenv.InjectRuntimeConfigForEntry(env.WorkDir, entry.ConfigFile, taskCtx); err != nil {
+			d.logger.Warn("execenv: inject external runtime config failed (non-fatal)", "error", err)
+		}
+	}
 	// Workdir is preserved for reuse by future tasks on the same (agent,
 	// issue) pair in cloud mode; the work_dir path is stored in DB on task
 	// completion and passed back via PriorWorkDir on the next claim, so
@@ -2803,6 +3006,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		defer func() {
 			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
 				d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
+			}
+			if entry.ConfigFile != "" {
+				if cerr := execenv.CleanupRuntimeConfigForEntry(env.WorkDir, entry.ConfigFile); cerr != nil {
+					d.logger.Warn("execenv: cleanup external runtime config failed (non-fatal)", "error", cerr)
+				}
 			}
 			// Excise the sidecar tree (.agent_context/, .multica/,
 			// provider-specific .claude/skills/ etc.) that Prepare wrote
@@ -2919,10 +3127,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// External runtime extensions ship their manifest's env block; merge it
+	// into the agent env BEFORE building the backend so downstream init can
+	// see manifest-declared keys. Existing entries (task token, daemon-level
+	// env) win — a manifest must not be able to clobber daemon-managed keys.
+	for k, v := range entry.Env {
+		if _, exists := agentEnv[k]; !exists {
+			agentEnv[k] = v
+		}
+	}
+	// Agent-level overrides: the per-agent settings UI can override certain
+	// manifest-level fields (skills_root, config_file, blocked_args). These
+	// are stored in the Agent metadata and delivered through the task claim.
+	// We apply them AFTER manifest env but BEFORE building the backend so
+	// they take effect for this task.
+	if entry.IsExternal && task.Agent != nil {
+		applyAgentRuntimeOverrides(&entry, task.Agent.Metadata)
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		Transport:      entry.Transport,
+		ACPArgs:        entry.ACPArgs,
+		IsExternal:     entry.IsExternal,
+		BlockedArgs:    entry.BlockedArgs,
+		SkillsRoot:     entry.SkillsRoot,
+		Capabilities:   capabilitiesForBackend(entry),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -3029,7 +3260,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
 	// brief into the ACP user prompt duplicates that context, bloats every turn,
 	// and has triggered upstream safety filters on harmless tasks.
-	if providerNeedsInlineSystemPrompt(provider) {
+	if providerNeedsInlineSystemPrompt(provider) || providerNeedsInlineSystemPromptForEntry(entry) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 

@@ -1,5 +1,5 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
+// coding agents (Claude Code, Codex, Copilot, OpenCode, OpenClaw,
 // Hermes, Gemini, Pi, Cursor, Kimi, Kiro, Antigravity). It mirrors the happy-cli
 // AgentBackend pattern, translated to idiomatic Go.
 package agent
@@ -127,13 +127,51 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
+	ExecutablePath string            // path to CLI binary (claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro-cli, agy)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	// Transport is "acp-stdio" or "stream-json" for external runtime
+	// extensions; empty for built-in backends. Set by the daemon from
+	// runtime.json. The factory routes external entries to the matching
+	// generic backend (ACP or stream-json) when this field is set.
+	Transport string
+	// ACPArgs are extra CLI arguments appended after the daemon's own argv
+	// (e.g. ["--acp"]). Sourced from runtime.json command.args. The name is
+	// kept for backwards-compat — they are appended for stream-json runtimes
+	// too.
+	ACPArgs []string
+	// IsExternal is true when the backend was loaded from a runtime.json
+	// extension rather than being a built-in provider.
+	IsExternal bool
+	// BlockedArgs is the set of flags external runtime extensions refuse
+	// from custom_args (translated from runtime.json command.blocked_args).
+	// Each value must be either "value" (flag takes a separate value) or
+	// "flag" (boolean flag, no value). Built-in backends ignore this and
+	// use their hard-coded blocked sets instead.
+	BlockedArgs map[string]string
+	// SkillsRoot is the manifest-declared local skills directory to expose
+	// to the spawned CLI via MULTICA_AGENT_SKILLS_ROOT. Empty means the
+	// runtime relies on its native skill discovery path.
+	SkillsRoot string
+	// Capabilities mirrors the manifest capability flags so the wire layer
+	// can decide whether to forward optional ACP / stream-json parameters
+	// (mcp config, thinking level, max turns, session resume).
+	Capabilities ConfigCapabilities
+}
+
+// ConfigCapabilities is the subset of RuntimeManifestCaps the agent package
+// needs at task spawn time. It avoids importing the daemon package (which
+// would create a cycle) by re-declaring the few flags the wire layer reads.
+type ConfigCapabilities struct {
+	Thinking       bool
+	McpConfig      bool
+	SessionResume  bool
+	MaxTurns       bool
+	ModelSelection bool
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
+// Supported types: "claude", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -142,8 +180,6 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
-	case "codebuddy":
-		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
 	case "copilot":
@@ -167,7 +203,21 @@ func New(agentType string, cfg Config) (Backend, error) {
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity)", agentType)
+		// External runtime extensions (loaded from runtime.json) use one
+		// of the supported transports. The transport field in Config
+		// determines which generic external backend handles execution.
+		switch cfg.Transport {
+		case "acp-stdio":
+			return &acpExternalBackend{cfg: cfg}, nil
+		case "stream-json":
+			return &streamJSONExternalBackend{cfg: cfg}, nil
+		}
+		if cfg.IsExternal {
+			// Backwards-compat: external entries with no explicit
+			// transport default to ACP, matching schema v1 behaviour.
+			return &acpExternalBackend{cfg: cfg}, nil
+		}
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity, or runtime extensions with transport=acp-stdio|stream-json)", agentType)
 	}
 }
 
@@ -185,7 +235,6 @@ func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 var launchHeaders = map[string]string{
 	"antigravity": "agy -p (print mode)",
 	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
 	"copilot":     "copilot (json)",
 	"cursor":      "cursor-agent (stream-json)",

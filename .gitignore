@@ -68,3 +68,6 @@ server/server
 data/
 .kilo
 .idea
+
+# CodeBuddy Code project files
+.codebuddy/

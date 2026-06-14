@@ -197,7 +197,7 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
-        <ProviderLogo provider={runtime.provider} className="h-5 w-5" />
+        <ProviderLogo provider={runtime.provider} iconUrl={runtime.icon_url} className="h-5 w-5" />
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="block min-w-0 shrink truncate text-sm font-medium">

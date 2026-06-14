@@ -4,6 +4,7 @@ import type {
   RuntimeUsageByAgent,
 } from "@multica/core/types";
 import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
+import { getManifestPricing } from "@multica/core/runtimes/manifest-pricing-store";
 
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from
@@ -257,6 +258,15 @@ const MODEL_PRICING: Record<
 function resolvePricing(model: string) {
   if (!model) return undefined;
 
+  // Layered resolution:
+  //  1. Curated MODEL_PRICING   — wins always; the dashboard shows the
+  //     same rates to everyone for SKUs we maintain.
+  //  2. User-supplied custom    — explicit override beats anything a
+  //     manifest declares (so a user can correct a stale manifest
+  //     without uninstalling the runtime).
+  //  3. Manifest-supplied       — last resort for SKUs neither the
+  //     catalog nor the user has prices for. Lets external runtime
+  //     extensions ship rates without us shipping a code change.
   for (const candidate of canonicalCandidates(model)) {
     const hit = MODEL_PRICING[candidate];
     if (hit) return hit;
@@ -265,7 +275,29 @@ function resolvePricing(model: string) {
     const hit = getCustomPricing(candidate);
     if (hit) return hit;
   }
+  for (const candidate of canonicalCandidates(model)) {
+    const hit = getManifestPricing(candidate);
+    if (hit) return normaliseManifestPricing(hit);
+  }
   return undefined;
+}
+
+// Manifest pricing fields are all optional (an author can ship just
+// {input,output} and skip cache rates). The cost-estimation helpers
+// expect every component to be a number, so we defensively zero-fill
+// missing fields. Same shape — different optionality.
+function normaliseManifestPricing(p: {
+  input?: number;
+  output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}): { input: number; output: number; cacheRead: number; cacheWrite: number } {
+  return {
+    input: p.input ?? 0,
+    output: p.output ?? 0,
+    cacheRead: p.cacheRead ?? 0,
+    cacheWrite: p.cacheWrite ?? 0,
+  };
 }
 
 // Generate the lookup candidates for a model string, in priority order:

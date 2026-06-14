@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Monitor } from "lucide-react";
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
@@ -194,15 +194,42 @@ function KiroLogo({ className }: { className: string }) {
 
 export function ProviderLogo({
   provider,
+  iconUrl,
   className = "h-4 w-4",
 }: {
   provider: string;
+  /**
+   * Optional manifest-supplied icon URL. When set, the image is rendered
+   * regardless of whether `provider` matches a known built-in. This is
+   * how external runtime extensions (loaded from `~/.multica/runtimes/`)
+   * flow their `icon_url` field through to the UI without us having to
+   * grow a hard-coded switch case for every new provider.
+   *
+   * Failures (404, broken bytes, network blocks) silently fall through
+   * to the built-in switch via React's onError; the runtime still has
+   * a sensible default mark instead of an empty placeholder.
+   */
+  iconUrl?: string;
   className?: string;
 }) {
+  const [failedIconUrl, setFailedIconUrl] = useState<string | null>(null);
+
+  if (iconUrl && failedIconUrl !== iconUrl) {
+    // Render the manifest-supplied icon. We don't try to gate this on
+    // a provider id allowlist because external runtimes register with
+    // arbitrary keys — that's the entire point of runtime extensions.
+    return (
+      <img
+        src={iconUrl}
+        alt={provider}
+        className={`${className} rounded-sm object-contain`}
+        referrerPolicy="no-referrer"
+        onError={() => setFailedIconUrl(iconUrl)}
+      />
+    );
+  }
   switch (provider) {
     case "claude":
-      return <ClaudeLogo className={className} />;
-    case "codebuddy":
       return <ClaudeLogo className={className} />;
     case "codex":
       return <CodexLogo className={className} />;

@@ -14,7 +14,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
-import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
+import { useUpdatableRuntimeIds, useSyncManifestPricing } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
@@ -126,6 +126,12 @@ export function RuntimesPage({
   useWSEvent("daemon:register", handleDaemonEvent);
 
   const updatableIds = useUpdatableRuntimeIds(wsId);
+  // Mirror runtime.json pricing into the global manifest pricing store
+  // so cost-estimation helpers can resolve external runtime models. Done
+  // here at the workspace's runtime list mount point so the data flows
+  // as soon as the user lands on /runtimes — no other component has to
+  // care about the manifest layer specifically.
+  useSyncManifestPricing(wsId);
   const now = useNowTick();
 
   const workloadIndex = useMemo(
