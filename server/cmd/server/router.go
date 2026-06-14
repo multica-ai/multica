@@ -1085,11 +1085,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
 					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
-					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection writes (admin/owner only).
-					r.Post("/connections", cerebroConnectionsHandler.Create)
-					r.Post("/connections/test", cerebroConnectionsHandler.Test) // CEREBRO-PATCH(cerebro-connections-test): TECH-3108 connection reachability + MCP tool discovery.
-					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
-					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
+					// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 connection writes moved to the manage_connections capability gate below.
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access writes (admin/owner only).
 					r.Put("/agentvault/access", cerebroAgentVaultHandler.Set)
 					r.Delete("/agentvault/access", cerebroAgentVaultHandler.Delete)
@@ -1110,6 +1106,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/approvals/{approvalId}/delegate", cerebroApprovalsHandler.Delegate)
 					// W4.6: audit feed for sandbox + admin actions.
 					r.Get("/activity", h.ListWorkspaceActivity)
+				})
+				// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 — workspace connection writes
+				// are gated on the manage_connections capability (workspace > group > user) instead of a
+				// hardcoded owner/admin role. Base=Allow + admin bypass keep today's behavior 1:1; an admin
+				// tightens a group/member to Ask/Deny to restrict who may administer connections.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(h.RequireConnectionsManagePolicy("id"))
+					r.Post("/connections", cerebroConnectionsHandler.Create)
+					r.Post("/connections/test", cerebroConnectionsHandler.Test) // connection reachability + MCP tool discovery.
+					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
+					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
