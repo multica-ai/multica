@@ -18,6 +18,8 @@ const (
 	agentImprovementMaxDecisions              = 25
 	agentImprovementMaxCandidates             = 100
 	agentImprovementMaxSignatures             = 250
+	agentImprovementMaxPayloadBytes           = 64 * 1024
+	agentImprovementMaxStringBytes            = 512
 )
 
 type agentImprovementEvaluateInput struct {
@@ -49,10 +51,10 @@ func agentImprovementEvaluateTool() Tool {
       "items": {
         "type": "object",
         "properties": {
-          "suggested_name": {"type": "string"},
-          "source_signature_key": {"type": "string"},
+          "suggested_name": {"type": "string", "maxLength": 512},
+          "source_signature_key": {"type": "string", "maxLength": 512},
           "expected_determinism_gain": {"type": "number"},
-          "decision_hint": {"type": "string"}
+          "decision_hint": {"type": "string", "maxLength": 512}
         },
         "additionalProperties": false
       }
@@ -62,17 +64,17 @@ func agentImprovementEvaluateTool() Tool {
       "items": {
         "type": "object",
         "properties": {
-          "key": {"type": "string"},
-          "failure_reason": {"type": "string"},
-          "error_signature": {"type": "string"},
-          "loop_signature": {"type": "string"},
+          "key": {"type": "string", "maxLength": 512},
+          "failure_reason": {"type": "string", "maxLength": 512},
+          "error_signature": {"type": "string", "maxLength": 512},
+          "loop_signature": {"type": "string", "maxLength": 512},
           "count": {"type": "integer"},
           "unique_tasks": {"type": "integer"},
           "unique_agents": {"type": "integer"},
-          "first_seen": {"type": "string"},
-          "last_seen": {"type": "string"},
-          "example_task_id": {"type": "string"},
-          "example_raw_ref": {"type": "string"}
+          "first_seen": {"type": "string", "maxLength": 512},
+          "last_seen": {"type": "string", "maxLength": 512},
+          "example_task_id": {"type": "string", "maxLength": 512},
+          "example_raw_ref": {"type": "string", "maxLength": 512}
         },
         "additionalProperties": false
       }
@@ -89,6 +91,10 @@ func agentImprovementEvaluateHandler(ctx context.Context, args json.RawMessage, 
 	_ = ctx
 	_ = env
 
+	if len(args) > agentImprovementMaxPayloadBytes {
+		return Errf(CodeInvalidInput, "%s input has %d bytes; maximum is %d", agentImprovementEvaluateName, len(args), agentImprovementMaxPayloadBytes)
+	}
+
 	var in agentImprovementEvaluateInput
 	if err := strictUnmarshal(args, &in); err != nil {
 		return Errf(CodeInvalidInput, "invalid %s input: %v", agentImprovementEvaluateName, err)
@@ -98,6 +104,9 @@ func agentImprovementEvaluateHandler(ctx context.Context, args json.RawMessage, 
 	}
 	if len(in.RepeatSignatures) > agentImprovementMaxSignatures {
 		return Errf(CodeInvalidInput, "repeat_signatures has %d entries; maximum is %d", len(in.RepeatSignatures), agentImprovementMaxSignatures)
+	}
+	if err := validateAgentImprovementStringBounds(in); err != nil {
+		return Errf(CodeInvalidInput, "%v", err)
 	}
 
 	maxDecisions := normalizeAgentImprovementMaxDecisions(in.MaxDecisions)
@@ -142,6 +151,51 @@ func normalizeAgentImprovementMaxDecisions(value int) int {
 		return 0
 	}
 	return value
+}
+
+func validateAgentImprovementStringBounds(in agentImprovementEvaluateInput) error {
+	for i, candidate := range in.CandidateDettools {
+		fields := map[string]string{
+			"suggested_name":       candidate.SuggestedName,
+			"source_signature_key": candidate.SourceSignatureKey,
+			"decision_hint":        candidate.DecisionHint,
+		}
+		if err := validateAgentImprovementFields(fmt.Sprintf("candidate_dettools[%d]", i), fields); err != nil {
+			return err
+		}
+	}
+	for i, signature := range in.RepeatSignatures {
+		fields := map[string]string{
+			"key":             signature.Key,
+			"failure_reason":  signature.FailureReason,
+			"error_signature": signature.ErrorSignature,
+			"loop_signature":  signature.LoopSignature,
+			"first_seen":      signature.FirstSeen,
+			"last_seen":       signature.LastSeen,
+			"example_task_id": signature.ExampleTaskID,
+			"example_raw_ref": signature.ExampleRawRef,
+		}
+		if err := validateAgentImprovementFields(fmt.Sprintf("repeat_signatures[%d]", i), fields); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentImprovementFields(prefix string, fields map[string]string) error {
+	for field, value := range fields {
+		if err := validateAgentImprovementString(prefix+"."+field, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAgentImprovementString(field, value string) error {
+	if len(value) > agentImprovementMaxStringBytes {
+		return fmt.Errorf("%s has %d bytes; maximum is %d", field, len(value), agentImprovementMaxStringBytes)
+	}
+	return nil
 }
 
 func mapAgentImprovementSignatures(signatures []ail.Stage3Signature) map[string]ail.Stage3Signature {

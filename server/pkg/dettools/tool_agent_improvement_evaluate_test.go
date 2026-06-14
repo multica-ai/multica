@@ -220,11 +220,16 @@ func TestAgentImprovementEvaluateRejectsUnknownFields(t *testing.T) {
 }
 
 func TestAgentImprovementEvaluateRejectsOversizedInput(t *testing.T) {
+	res := agentImprovementEvaluateHandler(t.Context(), json.RawMessage(strings.Repeat(" ", agentImprovementMaxPayloadBytes+1)), testEnv(t.TempDir()))
+	if res.Status != StatusError || res.ErrorCode != CodeInvalidInput {
+		t.Fatalf("payload overflow got status=%q code=%q, want error/INVALID_INPUT", res.Status, res.ErrorCode)
+	}
+
 	candidates := make([]map[string]any, agentImprovementMaxCandidates+1)
 	for i := range candidates {
 		candidates[i] = map[string]any{"suggested_name": "x", "source_signature_key": "x"}
 	}
-	res := agentImprovementEvaluateHandler(t.Context(), mustJSONRawMessage(t, map[string]any{"candidate_dettools": candidates}), testEnv(t.TempDir()))
+	res = agentImprovementEvaluateHandler(t.Context(), mustJSONRawMessage(t, map[string]any{"candidate_dettools": candidates}), testEnv(t.TempDir()))
 	if res.Status != StatusError || res.ErrorCode != CodeInvalidInput {
 		t.Fatalf("candidate overflow got status=%q code=%q, want error/INVALID_INPUT", res.Status, res.ErrorCode)
 	}
@@ -236,6 +241,30 @@ func TestAgentImprovementEvaluateRejectsOversizedInput(t *testing.T) {
 	res = agentImprovementEvaluateHandler(t.Context(), mustJSONRawMessage(t, map[string]any{"repeat_signatures": signatures}), testEnv(t.TempDir()))
 	if res.Status != StatusError || res.ErrorCode != CodeInvalidInput {
 		t.Fatalf("signature overflow got status=%q code=%q, want error/INVALID_INPUT", res.Status, res.ErrorCode)
+	}
+}
+
+func TestAgentImprovementEvaluateRejectsOversizedStrings(t *testing.T) {
+	oversized := strings.Repeat("x", agentImprovementMaxStringBytes+1)
+
+	res := agentImprovementEvaluateHandler(t.Context(), mustJSONRawMessage(t, map[string]any{
+		"candidate_dettools": []map[string]any{{
+			"suggested_name":       oversized,
+			"source_signature_key": "sig",
+		}},
+	}), testEnv(t.TempDir()))
+	if res.Status != StatusError || res.ErrorCode != CodeInvalidInput {
+		t.Fatalf("candidate string overflow got status=%q code=%q, want error/INVALID_INPUT", res.Status, res.ErrorCode)
+	}
+
+	res = agentImprovementEvaluateHandler(t.Context(), mustJSONRawMessage(t, map[string]any{
+		"repeat_signatures": []map[string]any{{
+			"key":             "sig",
+			"example_raw_ref": oversized,
+		}},
+	}), testEnv(t.TempDir()))
+	if res.Status != StatusError || res.ErrorCode != CodeInvalidInput {
+		t.Fatalf("signature string overflow got status=%q code=%q, want error/INVALID_INPUT", res.Status, res.ErrorCode)
 	}
 }
 
