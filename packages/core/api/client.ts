@@ -85,7 +85,7 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
-  Autopilot,
+  AdminUser,
   AutopilotTrigger,
   AutopilotRun,
   CreateAutopilotRequest,
@@ -2132,6 +2132,27 @@ export class ApiClient {
     return this.fetch(`/api/lark/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
+    });
+  }
+
+  // Super-admin endpoints
+  async adminListUsers(params?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AdminUser[]> {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.set("search", params.search);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.offset != null) qs.set("offset", String(params.offset));
+    const query = qs.toString();
+    return this.fetch(`/api/admin/users${query ? `?${query}` : ""}`);
+  }
+
+  async adminUpdateUser(userId: string, name: string): Promise<User> {
+    return this.fetch(`/api/admin/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
     });
   }
 }

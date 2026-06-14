@@ -26,6 +26,7 @@ import {
   LogOut,
   Plus,
   Check,
+  Shield,
   BookOpenText,
   SquarePen,
   CircleUser,
@@ -582,6 +583,19 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </>
                   )}
                   <DropdownMenuSeparator />
+                  {user?.is_super_admin && (
+                    <>
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem
+                          render={<AppLink href="/admin" />}
+                        >
+                          <Shield className="h-3.5 w-3.5" />
+                          {t(($) => $.sidebar.admin_user_management)}
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
