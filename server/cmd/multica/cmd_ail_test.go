@@ -1147,6 +1147,81 @@ func TestRunAilReplayTableOutput(t *testing.T) {
 	}
 }
 
+func TestRunAilReplayNormalizesCommaSeparatedAndRepeatedFlags(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	outputDir := filepath.Join(tmp, "stage7")
+	events := []ail.Stage2Event{
+		{TS: "2026-01-15T08:00:00Z", EventType: "failure_event", TaskID: "task-1", IssueID: "issue-1", AgentID: "agent-1", Status: "failed", FailureReason: "agent_error", LoopSignature: "install_loop"},
+		{TS: "2026-01-15T09:00:00Z", EventType: "failure_event", TaskID: "task-2", IssueID: "issue-2", AgentID: "agent-2", Status: "failed", FailureReason: "runtime_offline", LoopSignature: "runtime_loop"},
+	}
+	writeTestAilIndex(t, indexPath, []ail.Stage2Event{events[1], events[0]})
+
+	t.Setenv("AIL_CLI_A", "value-a")
+	t.Setenv("AIL_CLI_B", "value-b")
+	cmd := newAilReplayTestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	setTestFlag(t, cmd, "index-path", indexPath)
+	setTestFlag(t, cmd, "output-dir", outputDir)
+	setTestFlag(t, cmd, "issue-ids", " issue-2, issue-1 ")
+	setTestFlag(t, cmd, "issue-ids", "issue-1")
+	setTestFlag(t, cmd, "agent-ids", "agent-2,agent-1")
+	setTestFlag(t, cmd, "failure-reasons", " runtime_offline,agent_error ")
+	setTestFlag(t, cmd, "loop-signatures", "runtime_loop, install_loop")
+	setTestFlag(t, cmd, "tool-args", " candidate = detect_timeout ,mode=replay ")
+	setTestFlag(t, cmd, "tool-args", "mode=updated")
+	setTestFlag(t, cmd, "env-keys", "AIL_CLI_B, AIL_CLI_A")
+	setTestFlag(t, cmd, "env-keys", "AIL_CLI_A")
+
+	if err := runAilReplay(cmd, nil); err != nil {
+		t.Fatalf("runAilReplay: %v", err)
+	}
+
+	var result ail.Stage7ReplayDecision
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if result.EventCount != 2 {
+		t.Fatalf("event_count = %d, want 2", result.EventCount)
+	}
+	if got := result.Filters.IssueIDs; len(got) != 2 || got[0] != "issue-1" || got[1] != "issue-2" {
+		t.Fatalf("issue IDs = %#v, want normalized issue-1 issue-2", got)
+	}
+	if result.DeterminismProfile.ToolArgs["candidate"] != "detect_timeout" {
+		t.Fatalf("candidate tool arg = %#v", result.DeterminismProfile.ToolArgs)
+	}
+	if result.DeterminismProfile.ToolArgs["mode"] != "updated" {
+		t.Fatalf("mode tool arg = %#v, want updated", result.DeterminismProfile.ToolArgs)
+	}
+	if result.DeterminismProfile.Env["AIL_CLI_A"] != "value-a" || result.DeterminismProfile.Env["AIL_CLI_B"] != "value-b" {
+		t.Fatalf("env profile = %#v", result.DeterminismProfile.Env)
+	}
+	if result.Events[0].Event.IssueID != "issue-1" || result.Events[1].Event.IssueID != "issue-2" {
+		t.Fatalf("events should be sorted by timestamp, got %#v", result.Events)
+	}
+}
+
+func TestRunAilReplayReturnsTimeEndParseError(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	writeTestAilIndex(t, indexPath, []ail.Stage2Event{
+		{TS: "2026-01-15T08:00:00Z", EventType: "failure_event", TaskID: "task-1", IssueID: "issue-1", AgentID: "agent-1", Status: "failed"},
+	})
+
+	cmd := newAilReplayTestCmd()
+	setTestFlag(t, cmd, "index-path", indexPath)
+	setTestFlag(t, cmd, "time-end", "tomorrow")
+
+	err := runAilReplay(cmd, nil)
+	if err == nil {
+		t.Fatal("expected time-end parse error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse time-end") {
+		t.Fatalf("error should mention parse time-end, got: %v", err)
+	}
+}
+
 func TestRunAilReplayInvalidToolArgsReturnsError(t *testing.T) {
 	cmd := newAilReplayTestCmd()
 	setTestFlag(t, cmd, "tool-args", "missing-equals")

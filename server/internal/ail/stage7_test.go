@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -181,6 +182,136 @@ func TestRunStage7ReplayFiltersByStableEventIDAndComputesMetrics(t *testing.T) {
 	}
 	if result.Metrics.EvaluationCount != 2 {
 		t.Fatalf("evaluation_count = %d, want 2", result.Metrics.EvaluationCount)
+	}
+}
+
+func TestRunStage7ReplayNormalizesEquivalentFiltersForByteStableReplay(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	events := stage7FixtureEvents()
+	writeStage7IndexFile(t, indexPath, []Stage2Event{events[1], events[0], events[2]})
+	firstOutputDir := filepath.Join(tmp, "first")
+	secondOutputDir := filepath.Join(tmp, "second")
+	firstID := Stage7EventID(events[0])
+	secondID := Stage7EventID(events[1])
+
+	base := Stage7ReplayConfig{
+		IndexPath:   indexPath,
+		ToolArgs:    map[string]string{" candidate ": " detect_timeout ", "mode": " replay ", " ": "ignored"},
+		GitRevision: " abc123 ",
+		LookupEnv:   func(key string) string { return "env-" + key },
+	}
+	firstCfg := base
+	firstCfg.OutputDir = firstOutputDir
+	firstCfg.EventIDs = []string{secondID + "," + firstID, firstID}
+	firstCfg.IssueIDs = []string{"issue2, issue1", "issue1"}
+	firstCfg.AgentIDs = []string{"agent2", "agent1, agent2"}
+	firstCfg.FailureReasons = []string{"runtime_offline, agent_error"}
+	firstCfg.LoopSignatures = []string{"runtime_loop", "install_loop"}
+	firstCfg.EnvKeys = []string{"AIL_B,AIL_A", "AIL_A"}
+
+	secondCfg := base
+	secondCfg.OutputDir = secondOutputDir
+	secondCfg.EventIDs = []string{firstID, secondID}
+	secondCfg.IssueIDs = []string{"issue1", "issue2"}
+	secondCfg.AgentIDs = []string{"agent1", "agent2"}
+	secondCfg.FailureReasons = []string{"agent_error", "runtime_offline"}
+	secondCfg.LoopSignatures = []string{"install_loop", "runtime_loop"}
+	secondCfg.EnvKeys = []string{"AIL_A", "AIL_B"}
+
+	first, err := RunStage7Replay(firstCfg)
+	if err != nil {
+		t.Fatalf("first replay: %v", err)
+	}
+	second, err := RunStage7Replay(secondCfg)
+	if err != nil {
+		t.Fatalf("second replay: %v", err)
+	}
+	firstBytes, err := os.ReadFile(filepath.Join(firstOutputDir, defaultStage7DecisionFile))
+	if err != nil {
+		t.Fatalf("read first decision: %v", err)
+	}
+	secondBytes, err := os.ReadFile(filepath.Join(secondOutputDir, defaultStage7DecisionFile))
+	if err != nil {
+		t.Fatalf("read second decision: %v", err)
+	}
+
+	if string(firstBytes) != string(secondBytes) {
+		t.Fatalf("equivalent replay configs should produce byte-identical decisions:\nfirst:\n%s\nsecond:\n%s", firstBytes, secondBytes)
+	}
+	if first.ReplayID != second.ReplayID {
+		t.Fatalf("replay_id mismatch: %s vs %s", first.ReplayID, second.ReplayID)
+	}
+	wantEventIDs := []string{firstID, secondID}
+	sort.Strings(wantEventIDs)
+	if got := first.Filters.EventIDs; len(got) != 2 || got[0] != wantEventIDs[0] || got[1] != wantEventIDs[1] {
+		t.Fatalf("normalized event IDs = %#v, want %#v", got, wantEventIDs)
+	}
+	if _, ok := first.DeterminismProfile.ToolArgs[" "]; ok {
+		t.Fatalf("blank tool arg key should be removed: %#v", first.DeterminismProfile.ToolArgs)
+	}
+	if first.DeterminismProfile.GitRevision != "abc123" {
+		t.Fatalf("git revision = %q, want abc123", first.DeterminismProfile.GitRevision)
+	}
+}
+
+func TestRunStage7ReplayTimeStartInclusiveAndTimeEndExclusive(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	events := []Stage2Event{
+		{TS: "2026-01-15T07:59:59Z", EventType: "failure_event", IssueID: "before", AgentID: "agent-1", FailureReason: "agent_error"},
+		{TS: "2026-01-15T08:00:00Z", EventType: "failure_event", IssueID: "start", AgentID: "agent-1", FailureReason: "agent_error"},
+		{TS: "2026-01-15T08:30:00Z", EventType: "failure_event", IssueID: "middle", AgentID: "agent-1", FailureReason: "agent_error"},
+		{TS: "2026-01-15T09:00:00Z", EventType: "failure_event", IssueID: "end", AgentID: "agent-1", FailureReason: "agent_error"},
+	}
+	writeStage7IndexFile(t, indexPath, events)
+
+	result, err := RunStage7Replay(Stage7ReplayConfig{
+		IndexPath: indexPath,
+		OutputDir: filepath.Join(tmp, "stage7"),
+		TimeStart: "2026-01-15T08:00:00Z",
+		TimeEnd:   "2026-01-15T09:00:00Z",
+	})
+	if err != nil {
+		t.Fatalf("RunStage7Replay: %v", err)
+	}
+
+	if result.EventCount != 2 {
+		t.Fatalf("event_count = %d, want 2", result.EventCount)
+	}
+	gotIssues := []string{result.Events[0].Event.IssueID, result.Events[1].Event.IssueID}
+	if gotIssues[0] != "start" || gotIssues[1] != "middle" {
+		t.Fatalf("selected issues = %#v, want start and middle", gotIssues)
+	}
+}
+
+func TestBuildStage7MetricsCapturesRetryRegression(t *testing.T) {
+	tmp := t.TempDir()
+	evalPath := filepath.Join(tmp, "eval.jsonl")
+	lines := strings.Join([]string{
+		`{"event_id":"selected-1","success_on_retry_before":true,"success_on_retry_after":false,"failed_retries_before":1,"failed_retries_after":3,"actionable":false,"invocation_cost":0.10}`,
+		`{"event_id":"selected-2","success_on_retry_before":false,"success_on_retry_after":false,"failed_retries_before":2,"failed_retries_after":5,"actionable":true,"invocation_cost":0.20}`,
+	}, "\n")
+	if err := os.WriteFile(evalPath, []byte(lines), 0o644); err != nil {
+		t.Fatalf("write eval: %v", err)
+	}
+
+	metrics, err := buildStage7Metrics(evalPath, []Stage7ReplayEvent{{EventID: "selected-1"}, {EventID: "selected-2"}})
+	if err != nil {
+		t.Fatalf("build metrics: %v", err)
+	}
+
+	if metrics.SuccessOnRetryDelta != -0.5 {
+		t.Fatalf("success_on_retry_delta = %v, want -0.5", metrics.SuccessOnRetryDelta)
+	}
+	if metrics.RetryReduction != -5 {
+		t.Fatalf("retry_reduction = %d, want -5", metrics.RetryReduction)
+	}
+	if metrics.Precision != 0.5 {
+		t.Fatalf("precision = %v, want 0.5", metrics.Precision)
+	}
+	if metrics.InvocationCost < 0.299 || metrics.InvocationCost > 0.301 {
+		t.Fatalf("invocation_cost = %v, want about 0.3", metrics.InvocationCost)
 	}
 }
 
