@@ -1169,7 +1169,10 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 }
 
 // CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// Issue status is normally NOT changed here — the agent manages it via the CLI.
+// Coding Team Watchdog scan issues are the exception: the watchdog's own scan
+// issue is implementation detail bookkeeping, so completing its task also marks
+// that scan issue done even if the agent never ran an explicit CLI status update.
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -1244,6 +1247,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.markCodingTeamWatchdogIssueDone(ctx, task)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1341,6 +1345,58 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
 	return &task, nil
+}
+
+func (s *TaskService) markCodingTeamWatchdogIssueDone(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+
+	agent, err := s.Queries.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: load agent failed",
+			"task_id", util.UUIDToString(task.ID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err,
+		)
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(agent.Name), "Coding Team Watchdog") {
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		return
+	}
+
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      "done",
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: mark issue done failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Info("coding-team watchdog completion: marked issue done",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(updated.ID),
+	)
+	s.broadcastIssueUpdated(updated)
 }
 
 // FailTask marks a task as failed.
