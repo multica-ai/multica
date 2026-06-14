@@ -102,14 +102,17 @@ export interface InboxSectionConfig {
   // source of truth. Empty array = show everything. The legacy booleans are
   // kept only as a migration seed (see `sectionFilters` in section-filter.ts).
   filters?: FilterCondition[];
-  /** TECH-3422 — for the "team" (Slack) section: how many people to show.
-   *  0 / undefined = show all. Starred people always count first. */
-  maxPeople?: number;
-  /** TECH-3422 — sort order for the "team" (Chat) section's people + channels.
-   *  Starred always float to the top regardless. Default "name". */
-  teamSort?: "name" | "recent" | "unread";
+  /** TECH-3494 — for the "team" (Chat) section: total rows to show across
+   *  channels + people + agents. 0 = all. undefined defaults to 10. */
+  teamLimit?: number;
+  /** TECH-3494 — sort order across all kinds in the "team" (Chat) section.
+   *  Starred float to the top regardless. Default "recent". */
+  teamSort?: "name" | "recent";
+  /** TECH-3494 — group the "team" (Chat) section by kind, or one flat list.
+   *  Default "type". */
+  teamGroupBy?: "type" | "none";
   /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
-   *  undefined / false = only people. Opt-in via the section settings. */
+   *  undefined / false = only people + channels. Opt-in via section settings. */
   showAgents?: boolean;
 }
 

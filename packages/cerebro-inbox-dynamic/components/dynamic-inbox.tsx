@@ -619,10 +619,12 @@ export function DynamicInbox() {
                             wsId={wsId}
                             selectedChannelId={selectedChannelId}
                             onOpenChannel={onOpenChannel}
-                            maxPeople={section.maxPeople}
-                            onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                            limit={section.teamLimit}
+                            onSetLimit={(n) => changeSection({ ...section, teamLimit: n })}
                             sort={section.teamSort}
                             onSetSort={(s) => changeSection({ ...section, teamSort: s })}
+                            groupBy={section.teamGroupBy}
+                            onSetGroupBy={(g) => changeSection({ ...section, teamGroupBy: g })}
                             showAgents={section.showAgents}
                             onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
                             onOpenAgentChat={handleAgentChatStarted}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act, cleanup } from "@testing-library/react";
+import { render, screen, act, cleanup, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Channel, MemberWithUser } from "@multica/core/types";
 
@@ -141,6 +141,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["workspaces", "ws", "agents"] }),
 }));
 
+vi.mock("@multica/core/chat/queries", () => ({
+  chatSessionsOptions: () => ({ queryKey: ["chat-sessions", "ws"] }),
+}));
+
 // canAssignAgent gate — every agent is assignable in these tests; archived
 // filtering is exercised separately via the archived_at field.
 vi.mock("@multica/views/issues/components", () => ({
@@ -229,8 +233,9 @@ function renderBlock(
     wsId: "ws",
     selectedChannelId: null,
     onOpenChannel: () => {},
-    onSetMaxPeople: () => {},
+    onSetLimit: () => {},
     onSetSort: () => {},
+    onSetGroupBy: () => {},
     onSetShowAgents: () => {},
     onOpenAgentChat: () => {},
     onRemove: () => {},
@@ -284,12 +289,12 @@ describe("SlackBlock", () => {
     );
   });
 
-  it("shows 'skriver…' when a typing event arrives for a member's selected DM", async () => {
+  it("shows 'typing…' when a typing event arrives for a member's selected DM", async () => {
     await act(async () => {
       renderBlock({ selectedChannelId: "dm-alice" });
     });
 
-    expect(screen.queryByText("skriver…")).not.toBeInTheDocument();
+    expect(screen.queryByText("typing…")).not.toBeInTheDocument();
 
     await act(async () => {
       wsHandlers.get("cerebro:typing")?.({
@@ -298,11 +303,11 @@ describe("SlackBlock", () => {
       });
     });
 
-    expect(screen.getByText("skriver…")).toBeInTheDocument();
+    expect(screen.getByText("typing…")).toBeInTheDocument();
   });
 
-  // #2 — the control box header. Reorder is drag-and-drop now (TECH-3494
-  // removed the up/down arrows), so only the remove control remains here.
+  // Reorder is drag-and-drop now (TECH-3494 removed the up/down arrows), so
+  // only the remove control remains in the header.
   it("removes the block via the control box", async () => {
     const onRemove = vi.fn();
     const user = userEvent.setup();
@@ -311,24 +316,38 @@ describe("SlackBlock", () => {
     });
 
     expect(screen.queryByTitle("Flyt op")).not.toBeInTheDocument();
-    expect(screen.queryByTitle("Flyt ned")).not.toBeInTheDocument();
-    await user.click(screen.getByTitle("Fjern blok"));
+    await user.click(screen.getByTitle("Remove block"));
     expect(onRemove).toHaveBeenCalled();
   });
 
-  // TECH-3494 #5 — opt-in agents list in the chat block.
+  // TECH-3494 #2 — the whole interface is English.
+  it("uses English labels in the settings menu", async () => {
+    await act(async () => {
+      renderBlock();
+    });
+    expect(screen.getByText("Sort by")).toBeInTheDocument();
+    expect(screen.getByText("Group by")).toBeInTheDocument();
+    // Defaults carry a trailing "✓", so match loosely.
+    expect(screen.getByText(/Recent conversation/)).toBeInTheDocument();
+    expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(screen.getByText(/By type/)).toBeInTheDocument();
+    expect(screen.getByText("Flat list")).toBeInTheDocument();
+    // No Danish remnants.
+    expect(screen.queryByText("Ulæste øverst")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sortér efter")).not.toBeInTheDocument();
+  });
+
+  // TECH-3494 #5 — opt-in agents are part of the unified list.
   it("hides agents by default and shows assignable (non-archived) agents when enabled", async () => {
     await act(async () => {
       renderBlock({ showAgents: false });
     });
-    expect(screen.queryByText("Agenter")).not.toBeInTheDocument();
     expect(screen.queryByText("Sara - CTO")).not.toBeInTheDocument();
 
     cleanup();
     await act(async () => {
       renderBlock({ showAgents: true });
     });
-    expect(screen.getByText("Agenter")).toBeInTheDocument();
     expect(screen.getByText("Sara - CTO")).toBeInTheDocument();
     // Archived agent is filtered out.
     expect(screen.queryByText("Old Bot")).not.toBeInTheDocument();
@@ -352,52 +371,74 @@ describe("SlackBlock", () => {
       renderBlock({ showAgents: false, onSetShowAgents });
     });
 
-    await user.click(screen.getByText(/Vis agenter/));
+    await user.click(screen.getByText(/Show agents/));
     expect(onSetShowAgents).toHaveBeenCalledWith(true);
   });
 
-  // #3 — max-people setting caps the visible height while keeping the rest scrollable.
-  it("makes the people list scrollable at maxPeople instead of hiding people", async () => {
+  // TECH-3494 #3 — group by type shows headers; flat list shows none.
+  it("groups by type with headers, or shows a flat list", async () => {
     await act(async () => {
-      renderBlock({ maxPeople: 1 });
+      renderBlock({ groupBy: "type" });
     });
+    expect(screen.getByText("Channels")).toBeInTheDocument();
+    expect(screen.getByText("People")).toBeInTheDocument();
 
+    cleanup();
+    await act(async () => {
+      renderBlock({ groupBy: "none" });
+    });
+    expect(screen.queryByText("Channels")).not.toBeInTheDocument();
+    expect(screen.queryByText("People")).not.toBeInTheDocument();
+    // Rows are still there, just ungrouped.
     expect(screen.getByText("Alice")).toBeInTheDocument();
-    expect(screen.getByText("Bob")).toBeInTheDocument();
-    expect(screen.getByTestId("people-list")).toHaveStyle({ maxHeight: "40px" });
-    expect(screen.queryByText(/flere skjult/)).not.toBeInTheDocument();
+    expect(screen.getByText("general")).toBeInTheDocument();
   });
 
-  it("picking a people limit from settings calls onSetMaxPeople", async () => {
-    const onSetMaxPeople = vi.fn();
+  // TECH-3494 #1/#4 — one total limit across all kinds, no per-group scroll.
+  it("caps the total rows across all kinds and has no inner scroll container", async () => {
+    await act(async () => {
+      renderBlock({ limit: 1, groupBy: "none", sort: "name" });
+    });
+    // Sorted by name: Alice first. Bob and the channel fall outside the cap.
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
+    expect(screen.queryByText("general")).not.toBeInTheDocument();
+    // Old per-group scroll container is gone.
+    expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
+  });
+
+  it("picking a limit from settings calls onSetLimit", async () => {
+    const onSetLimit = vi.fn();
     const user = userEvent.setup();
     await act(async () => {
-      renderBlock({ onSetMaxPeople });
+      renderBlock({ onSetLimit });
     });
-    await user.click(screen.getByText("10"));
-    expect(onSetMaxPeople).toHaveBeenCalledWith(10);
+    await user.click(screen.getByText("15"));
+    expect(onSetLimit).toHaveBeenCalledWith(15);
   });
 
-  it("filters people from the search icon", async () => {
+  it("filters the list from the search icon", async () => {
     const user = userEvent.setup();
     await act(async () => {
       renderBlock();
     });
 
-    await user.click(screen.getByTitle("Søg personer"));
-    await user.type(screen.getByPlaceholderText("Søg personer..."), "bob");
+    await user.click(screen.getByTitle("Search"));
+    await user.type(
+      screen.getByPlaceholderText("Search conversations..."),
+      "bob",
+    );
 
     expect(screen.getByText("Bob")).toBeInTheDocument();
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
-    expect(screen.getByText("1/2")).toBeInTheDocument();
   });
 
-  // #4 — starred people float to the top and the star toggles the favorite.
+  // Starred conversations float to the top and the star toggles the favorite.
   it("sorts a starred member above non-starred and toggles the star", async () => {
     favState.keys = ["member:bob"]; // Bob starred → above Alice
     const user = userEvent.setup();
     await act(async () => {
-      renderBlock();
+      renderBlock({ groupBy: "none" });
     });
 
     const names = screen
@@ -406,11 +447,11 @@ describe("SlackBlock", () => {
     expect(names).toEqual(["presence-dot-bob", "presence-dot-alice"]);
 
     // Star Alice → toggle called with her actor key.
-    await user.click(screen.getAllByLabelText("Stjernemarkér")[0]!);
+    const aliceRow = screen.getByText("Alice").closest(".group")!;
+    await user.click(within(aliceRow as HTMLElement).getByLabelText("Star"));
     expect(favState.toggle).toHaveBeenCalledWith("member:alice");
   });
 
-  // TECH-3422 feedback #1 — the block heading reads "Chat".
   it("renders the 'Chat' heading", async () => {
     await act(async () => {
       renderBlock();
@@ -418,14 +459,23 @@ describe("SlackBlock", () => {
     expect(screen.getByText("Chat")).toBeInTheDocument();
   });
 
-  // TECH-3422 feedback #2 — a sort setting that drives onSetSort.
   it("picking a sort option from settings calls onSetSort", async () => {
     const onSetSort = vi.fn();
     const user = userEvent.setup();
     await act(async () => {
       renderBlock({ onSetSort });
     });
-    await user.click(screen.getByText("Seneste aktivitet"));
-    expect(onSetSort).toHaveBeenCalledWith("recent");
+    await user.click(screen.getByText("Name"));
+    expect(onSetSort).toHaveBeenCalledWith("name");
+  });
+
+  it("picking a group option from settings calls onSetGroupBy", async () => {
+    const onSetGroupBy = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onSetGroupBy });
+    });
+    await user.click(screen.getByText("Flat list"));
+    expect(onSetGroupBy).toHaveBeenCalledWith("none");
   });
 });
