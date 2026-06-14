@@ -69,7 +69,8 @@ Extract the JSON block from the task issue description. This gives you:
 - `title`, `description`, `acceptance_criteria`, `estimated_language`
 - `ado_id` (may be null/empty for Multica-only runs)
 
-Read the full comment list and pass it to the `coding_comment_extract` deterministic tool:
+Read the full comment list and pass it to the `coding_comment_extract` deterministic MCP tool. You MUST call this tool through MCP — do NOT regex-scan
+comments with shell commands.
 ```bash
 COMMENTS=$(multica issue comment list "$MULTICA_ISSUE_ID" --output json)
 ```
@@ -218,7 +219,7 @@ dotnet test \
 ```
 The `Threshold=99` + `ThresholdType=line` flags make `dotnet test` fail if line coverage is below 99% on the included assembly. Adjust `Include` to match the assembly that contains your changes.
 
-Use the `dotnet_test_gate` deterministic tool for the C# coverage gate instead of invoking `dotnet test` directly. Pass the target test
+You MUST call the `dotnet_test_gate` deterministic MCP tool for the C# coverage gate. Do NOT invoke `dotnet test` directly. Pass the target test
 project or solution in `targets`, set `collect_coverage: true`, set
 `coverage_threshold: 99`, and include any needed `/p:Include` value in
 `msbuild_properties`. You may proceed past this step only when the tool returns

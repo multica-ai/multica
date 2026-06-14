@@ -63,7 +63,25 @@ If no significant issues are found, say:
 Use recommendation language only.
 Do not say that code was fixed, updated, or changed.
 
-## PR-aware context
+## Deterministic tools (MCP — MUST USE)
+
+The following MCP tools from the `multica-tools` server are available. You MUST call them
+instead of shell commands for the operations listed below. They return typed, verifiable
+results with audit logging and policy enforcement.
+
+- **`diff_summarize`** — Returns a stable machine-readable diff summary (path, change type,
+  additions, deletions). MUST use instead of `git diff` — raw diffs are verbose and hard
+  to parse correctly.
+- **`repo_facts`** — Current branch, changed files, package managers. MUST use instead of
+  raw `git branch` / `git status`.
+- **`dotnet_test_gate`** — Runs .NET test suites with coverage gates. MUST use instead of
+  `dotnet test` directly — it normalizes outcomes and enforces coverage thresholds.
+- **`policy_check`** — Enforces branch naming, forbidden paths, required files. Returns
+  POLICY_FAILURE with exact violation list.
+- **`artifact_emit`** — Writes structured review artifacts. MUST use instead of
+  `echo > file` — direct writes skip audit logging and path scoping.
+
+When deriving changed files, call `diff_summarize` through MCP. Do NOT use `git diff`.
 
 If the task payload includes a PR id or URL, assume the orchestrator has already
 checked out the correct branch. You may assume:
@@ -72,14 +90,8 @@ checked out the correct branch. You may assume:
   and `git reset --hard "origin/$BRANCH"`).
 - The orchestrator has provided you with a list of changed Python files and
   related tests.
-
-You do not need to call `az repos` directly. If you must derive changes yourself, use:
-
-```bash
-git diff --name-only "origin/$BASE_BRANCH..HEAD" | grep '\.cs$'
-```
-
-Then focus your review on those files first.
+You do not need to call `az repos` directly. If you must derive changes yourself, call
+the `diff_summarize` MCP tool. Do NOT use `git diff`.
 
 ## Output location (Multica only)
 

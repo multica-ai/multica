@@ -60,7 +60,8 @@ TASK_JSON=$(multica issue get "$MULTICA_ISSUE_ID" --output json)
 
 Extract the JSON block from the task issue description for: `master_issue_id`, optional `code_org`, `code_project`, `repo_name`, `repo_url`, `branch`, `base_branch`, `title`, `description`, `acceptance_criteria`, `estimated_language`, `ado_id` (may be null/empty for Multica-only runs).
 
-Read the full comment list and pass it to the `coding_comment_extract` deterministic tool:
+Read the full comment list and pass it to the `coding_comment_extract` deterministic MCP tool. You MUST call this tool through MCP — do NOT regex-scan
+comments with shell commands.
 ```bash
 COMMENTS=$(multica issue comment list "$MULTICA_ISSUE_ID" --output json)
 ```
@@ -123,7 +124,7 @@ Your tests must add:
 
 **Do not lower line coverage.** Re-run the same coverage tooling the Implementer used (`pytest --cov ... --cov-fail-under=99` or `dotnet test /p:Threshold=99 ...`) after your tests are added. If your tests somehow drop coverage below 99% (e.g. by accidentally shadowing the Implementer's test files), fix it before commit.
 
-For C# tasks, use the `dotnet_test_gate` deterministic tool for this gate instead of invoking `dotnet test` directly. Pass the target test
+For C# tasks, you MUST call the `dotnet_test_gate` deterministic MCP tool for this gate. Do NOT invoke `dotnet test` directly. Pass the target test
 project or solution in `targets`, set `collect_coverage: true`, set
 `coverage_threshold: 99`, and include any needed `/p:Include` value in
 `msbuild_properties`. You may commit and hand off only when the tool returns

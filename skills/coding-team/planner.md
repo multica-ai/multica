@@ -246,7 +246,7 @@ Execute in order:
 
 Execute in order:
 
-1. Build a structured `implementation_plan` artifact and validate it with the `coding_plan_validate` deterministic tool before any handoff. The artifact is the downstream source of truth; the markdown plan is for humans. If validation returns non-`ok`, do not hand off. Fix the plan or use Step 5A.
+1. Build a structured `implementation_plan` artifact and you MUST validate it by calling the `coding_plan_validate` deterministic MCP tool before any handoff. The artifact is the downstream source of truth; the markdown plan is for humans. If validation returns non-`ok`, do not hand off. Fix the plan or use Step 5A.
 
    Artifact shape:
    ```json

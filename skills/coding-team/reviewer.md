@@ -57,7 +57,8 @@ TASK_JSON=$(multica issue get "$MULTICA_ISSUE_ID" --output json)
 
 Extract from the task issue description: `master_issue_id`, optional `code_org`, `code_project`, `repo_name`, `repo_url`, `branch`, `base_branch`, `ado_id` (may be null/empty for Multica-only runs), `title`, `acceptance_criteria`, `estimated_language`.
 
-Read the full comment list and pass it to the `coding_comment_extract` deterministic tool:
+Read the full comment list and pass it to the `coding_comment_extract` deterministic MCP tool. You MUST call this tool through MCP — do NOT regex-scan
+comments with shell commands.
 ```bash
 COMMENTS=$(multica issue comment list "$MULTICA_ISSUE_ID" --output json)
 ```
@@ -136,7 +137,7 @@ dotnet test \
   /p:Include="[<assembly>]*"
 ```
 
-For C# tasks, use the `dotnet_test_gate` deterministic tool for this coverage gate instead of invoking `dotnet test` directly. Pass the
+For C# tasks, you MUST call the `dotnet_test_gate` deterministic MCP tool for this coverage gate. Do NOT invoke `dotnet test` directly. Pass the
 target test project or solution in `targets`, set `collect_coverage: true`, set
 `coverage_threshold: 99`, and include any needed `/p:Include` value in
 `msbuild_properties`. A non-`ok` result is a blocking review finding:
