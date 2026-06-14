@@ -772,6 +772,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					// Per-project Eidetix binding. Owner/admin only. The PUT
+					// body carries the Bearer token, which is encrypted at rest
+					// and never returned by GET. See internal/handler/eidetix.go.
+					r.Get("/eidetix", h.ShowEidetixConfig)
+					r.Put("/eidetix", h.SetEidetixConfig)
+					r.Patch("/eidetix", h.PatchEidetixConfig)
+					r.Delete("/eidetix", h.ClearEidetixConfig)
 				})
 			})
 
