@@ -446,7 +446,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			Timeout: cfg.CloudRuntimeFleetTimeout,
 		}),
 		cfg: cfg,
-		// CEREBRO-PATCH(handler-cerebro-init): cerebro budget guard, web push,
+		// CEREBRO-PATCH(handler-push-service-wire): wire pushService into the
+		// handler so /api/push/public-key reports enabled when VAPID is set.
+		PushService: pushService,
 	}
 }
 
