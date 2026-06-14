@@ -12,6 +12,25 @@ import (
 // runningDocSeparator divides entries in a running document (newest on top).
 const runningDocSeparator = "\n\n---\n\n"
 
+// noteVisibilityWorkspace makes a materialised note visible to every member of
+// the workspace. Business-review notes are team documents, so they join the
+// Notes feature with workspace visibility rather than staying private-by-default.
+const noteVisibilityWorkspace = "workspace"
+
+// registerAsNote marks a freshly created note-type artifact as a Notes-feature
+// note (owner + workspace visibility), so it appears in the personal Notes list
+// and carries the same owner/visibility/pin model as every other note. Without
+// this row the artifact is an invisible plain document (see migration 9073).
+func registerAsNote(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteType, artifactID pgtype.UUID) error {
+	_, err := q.UpsertNote(ctx, cerebrodb.UpsertNoteParams{
+		ArtifactID: artifactID,
+		OwnerID:    nt.CreatedBy,
+		Visibility: noteVisibilityWorkspace,
+		Pinned:     false,
+	})
+	return err
+}
+
 // Apply materialises a single note type for the period that `now` falls in.
 // It is the shared core used by both the daily Sweeper and the manual RunNow
 // endpoint, and should be called inside a transaction (pass q = queries.WithTx).
@@ -44,6 +63,9 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 		if err != nil {
 			return false, pgtype.UUID{}, err
 		}
+		if err := registerAsNote(ctx, q, nt, art.ID); err != nil {
+			return false, pgtype.UUID{}, err
+		}
 		if err := q.SetCerebroNoteTypeLastPeriod(ctx, cerebrodb.SetCerebroNoteTypeLastPeriodParams{
 			ID:            nt.ID,
 			LastPeriodKey: key,
@@ -51,6 +73,14 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 			return false, pgtype.UUID{}, err
 		}
 		return true, art.ID, nil
+	}
+
+	// running_doc idempotency: this period already rolled into the document, so
+	// a repeat "Start ny" (or a double sweep) is a no-op rather than a duplicate
+	// prepend. Manual cadence uses a timestamp-unique key, so off-cycle runs are
+	// never suppressed here.
+	if nt.RunningDocArtifactID.Valid && nt.LastPeriodKey == key {
+		return false, nt.RunningDocArtifactID, nil
 	}
 
 	// running_doc: first run creates the single rolling document.
@@ -65,6 +95,9 @@ func Apply(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.CerebroNoteTy
 			PeriodKey:   pgtype.Text{}, // NULL: one row reused across periods.
 		})
 		if err != nil {
+			return false, pgtype.UUID{}, err
+		}
+		if err := registerAsNote(ctx, q, nt, art.ID); err != nil {
 			return false, pgtype.UUID{}, err
 		}
 		if err := q.SetCerebroNoteTypeRunningDoc(ctx, cerebrodb.SetCerebroNoteTypeRunningDocParams{

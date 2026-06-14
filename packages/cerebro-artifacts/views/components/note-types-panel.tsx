@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Play, ArrowLeft, FileText } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -17,6 +18,8 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import {
   artifactFoldersOptions,
   useNoteTypes,
@@ -108,6 +111,8 @@ const NO_FOLDER = "__none__";
  */
 export function NoteTypesPanel() {
   const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const router = useNavigation();
   const { data: noteTypes, isLoading } = useNoteTypes();
   const { data: folders } = useQuery(artifactFoldersOptions(wsId));
   const create = useCreateNoteType();
@@ -116,6 +121,30 @@ export function NoteTypesPanel() {
   const run = useRunNoteType();
 
   const [draft, setDraft] = React.useState<DraftState | null>(null);
+
+  // "Start ny": materialise the note type now, tell the user what happened, and
+  // open the document. created=false means this period was already materialised
+  // (idempotent no-op) — we still open the existing document.
+  const handleRun = React.useCallback(
+    async (id: string) => {
+      try {
+        const result = await run.mutateAsync(id);
+        if (!result || !result.artifact_id) {
+          toast.error("Kunne ikke starte noten. Prøv igen.");
+          return;
+        }
+        toast.success(
+          result.created
+            ? "Ny note oprettet."
+            : "Findes allerede for denne periode — åbner den.",
+        );
+        router.push(wsPaths.documentDetail(result.artifact_id));
+      } catch {
+        toast.error("Kunne ikke starte noten. Prøv igen.");
+      }
+    },
+    [run, router, wsPaths],
+  );
 
   const folderName = React.useCallback(
     (id: string | null) => folders?.find((f) => f.id === id)?.name ?? null,
@@ -340,7 +369,7 @@ export function NoteTypesPanel() {
               variant="ghost"
               size="sm"
               title="Start ny nu"
-              onClick={() => run.mutate(nt.id)}
+              onClick={() => handleRun(nt.id)}
               disabled={run.isPending}
             >
               <Play className="size-4 sm:mr-1" />
