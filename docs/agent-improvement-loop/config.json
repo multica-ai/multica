@@ -1,0 +1,96 @@
+{
+  "loop_name": "agent-improvement-loop",
+  "schedule": {
+    "enabled": true,
+    "cron": "0 2 * * *",
+    "timezone": "UTC",
+    "autopilot_mode": "run_only",
+    "trigger_concurrency": "skip",
+    "stage3_in_same_workflow": true
+  },
+  "window": {
+    "enabled": true,
+    "retention_days": 30,
+    "group_by": [
+      "workspace_id",
+      "agent_id",
+      "failure_reason",
+      "loop_signature"
+    ]
+  },
+  "stage1": {
+    "enabled": true,
+    "events_path": "~/.multica/agent-improvement-loop/stage1-events.jsonl",
+    "emit_categories": [
+      "agent_event",
+      "attempt_event",
+      "failure_event"
+    ]
+  },
+  "signals": {
+    "retry_threshold_ratio": 0.25,
+    "attempts_threshold": 0.8,
+    "loop_min_count": 3,
+    "loop_window_seconds": 3600,
+    "stalled_seconds": 900
+  },
+  "promotion_gates": {
+    "min_evidence_count": 3,
+    "synthetic_pass_rate_min": 0.95,
+    "real_case_delta_min": 0.20,
+    "max_false_positive_risk": "low",
+    "max_tool_latency_ms": 2000,
+    "min_candidate_improvements_for_auto_recommendation": 1,
+    "alert_when_signal_without_recommendations": true
+  },
+  "candidate_status": {
+    "ready_for_candidate": "ready_for_candidate",
+    "ready_for_review": "ready_for_review",
+    "defer": "defer"
+  },
+  "stage5": {
+    "issue_risk_alert": true,
+    "issue_type": "dettool.none",
+    "emit_when": {
+      "situation_count_gt": 0,
+      "recommended_dettools_eq": 0
+    }
+  },
+  "stage6": {
+    "prospect_dir": "dettools/prospect",
+    "manifest_file": "dettools/prospect/manifest.json"
+  },
+  "stage7": {
+    "replay_filters": [
+      "event_ids",
+      "issue_ids",
+      "agent_ids",
+      "time_range",
+      "failure_reasons",
+      "loop_signatures"
+    ],
+    "diagnostics_file": "diagnostics/rerun-manifest.json"
+  },
+  "stage8": {
+    "skills_path": "skills/agent-improvement-loop",
+    "required_skill_files": [
+      "analyzer.md",
+      "evaluator.md",
+      "SETUP.md"
+    ],
+    "diagnostics_dir": "diagnostics",
+    "diagnostics_keep": "immutable",
+    "promotion_script": "scripts/stage8-promote.sh",
+    "promotion_diagnostics": "diagnostics/stage8-promotion.jsonl"
+  },
+  "inputs": {
+    "task_tables": ["agent_task_queue", "chat_message", "agent"],
+    "logs": ["daemon_log", "journal", "container_logs", "daemon_session_logs", "pi_jsonl"],
+    "dettools_envelope_fields": ["status", "error_code", "summary", "machine_data", "retryable", "artifacts"]
+  },
+  "wiring": {
+    "import_cmd": "multica dettool import-file dettools/<tool>.go --output table",
+    "agent_update": "update mcp_config for target agent skill set",
+    "telemetry": ["dettool.hit_rate", "tool_fail_rate", "retry_ratio_after_tool"]
+  }
+}

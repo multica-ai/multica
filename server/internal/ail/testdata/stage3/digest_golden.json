@@ -1,0 +1,58 @@
+{
+  "analyzed_at": "2026-01-15T12:00:00Z",
+  "window_start": "2026-01-14T12:00:00Z",
+  "window_end": "2026-01-15T12:00:00Z",
+  "window_duration": "24h0m0s",
+  "total_window_events": 5,
+  "top_pain_buckets": [
+    {
+      "key": "agent_error",
+      "failure_reason": "agent_error",
+      "count": 3,
+      "unique_agents": 2,
+      "unique_tasks": 3
+    },
+    {
+      "key": "runtime_offline",
+      "failure_reason": "runtime_offline",
+      "count": 2,
+      "unique_agents": 2,
+      "unique_tasks": 2
+    }
+  ],
+  "repeat_signatures": [
+    {
+      "key": "agent_error::E_TIMEOUT",
+      "failure_reason": "agent_error",
+      "error_signature": "E_TIMEOUT",
+      "count": 3,
+      "unique_tasks": 3,
+      "unique_agents": 2,
+      "first_seen": "2026-01-15T08:00:00Z",
+      "last_seen": "2026-01-15T10:00:00Z",
+      "example_task_id": "task1"
+    },
+    {
+      "key": "runtime_offline",
+      "failure_reason": "runtime_offline",
+      "count": 2,
+      "unique_tasks": 2,
+      "unique_agents": 2,
+      "first_seen": "2026-01-15T06:00:00Z",
+      "last_seen": "2026-01-15T07:00:00Z",
+      "example_task_id": "task4"
+    }
+  ],
+  "candidate_dettools": [
+    {
+      "suggested_name": "detect_agent_error_e_timeout",
+      "source_signature_key": "agent_error::E_TIMEOUT",
+      "expected_determinism_gain": 0.36,
+      "decision_hint": "ready_for_review"
+    }
+  ],
+  "by_failure_reason": {
+    "agent_error": 3,
+    "runtime_offline": 2
+  }
+}

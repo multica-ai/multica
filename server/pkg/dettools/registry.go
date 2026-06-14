@@ -52,6 +52,7 @@ func allTools() []Tool {
 		dotnetTestGateTool(),
 		diffSummarizeTool(),
 		artifactEmitTool(),
+		agentImprovementEvaluateTool(),
 	}
 }
 

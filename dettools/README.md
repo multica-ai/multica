@@ -3,6 +3,10 @@
 These files are workspace-authored deterministic tool sources. Import each `.go`
 file into Multica as a deterministic tool with the matching name below.
 
+Stable catalog tools live in this directory and are imported as shared production
+capabilities. Proposal candidates are staged in `dettools/prospect/` and are not
+auto-imported until Stage 8 promotion into `dettools/`.
+
 Each tool is pure input-to-output: it does not read files, call ADO, call
 Multica, post comments, update issues, or mutate repositories. The calling skill
 remains responsible for performing any approved external action.
@@ -25,6 +29,12 @@ tools with:
 ```bash
 for f in dettools/*.go; do
   multica dettool import-file "$f" --output table
+done
+
+# Optional: review prospect candidates by explicit path once promoted:
+for f in dettools/prospect/*.go; do
+  echo "skip candidate import: $f (not promoted yet)"
+  # multica dettool import-file "$f" --output table
 done
 ```
 

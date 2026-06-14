@@ -82,6 +82,7 @@ var DefaultDetToolsAllowed = []string{
 	"dotnet_test_gate",
 	"diff_summarize",
 	"artifact_emit",
+	"agent_improvement_evaluate",
 }
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as

@@ -32,7 +32,11 @@ type TaskService struct {
 	Bus       *events.Bus
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	// Stage1Telemetry receives compact, normalized lifecycle events for the
+	// agent-improvement loop pipeline. It must stay best-effort: telemetry
+	// write failures should never block task processing.
+	Stage1Telemetry Stage1EventSink
+	Wakeup          TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -112,7 +116,14 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	return &TaskService{
+		Queries:         q,
+		TxStarter:       tx,
+		Hub:             hub,
+		Bus:             bus,
+		Wakeup:          wakeup,
+		Stage1Telemetry: NewStage1EventSinkFromEnv(),
+	}
 }
 
 var trivialDoneMarkers = []string{
@@ -140,6 +151,7 @@ func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQu
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskEnqueued(source, runtimeMode)
 	}
+	s.emitTaskLifecycleEvent(ctx, "agent_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -147,6 +159,7 @@ func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTa
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskDispatched(util.UUIDToString(task.ID), source, runtimeMode, taskQueueWaitSeconds(task))
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) AnalyticsContextForTask(ctx context.Context, task db.AgentTaskQueue) analytics.TaskContext {
@@ -158,6 +171,7 @@ func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQ
 		source, runtimeMode, provider := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskStarted(source, runtimeMode, provider)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", "running", task, "", "")
 }
 
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
@@ -165,6 +179,7 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
@@ -174,6 +189,7 @@ func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQu
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 		s.Metrics.RecordTaskFailed(source, runtimeMode, failureReason)
 	}
+	s.emitTaskLifecycleEvent(ctx, "failure_event", task.Status, task, failureReason, task.Error.String)
 }
 
 func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTaskQueue) {
@@ -191,6 +207,7 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		slog.Warn("cancel task: failed to revoke task tokens",
 			"task_id", util.UUIDToString(task.ID), "error", err)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQueue, provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
