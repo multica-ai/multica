@@ -92,3 +92,17 @@ export interface DelegateRequest {
   to_id: string;
   note?: string;
 }
+
+// GrantLevel is the optional permission-chain layer an approver can escalate a
+// connection-tool approve to a permanent Allow at (TECH-3498). Empty/omitted =
+// no escalation, just the in-flight approve.
+export type GrantLevel = "agent" | "runtime" | "workspace";
+
+// ApproveRequest carries the optional "approve for a period" + "grant at a level"
+// controls. grant_for_seconds: 0/omitted = a one-shot approve, >0 = reusable for
+// that many seconds. grant_at_level escalates to a permanent Allow.
+export interface ApproveRequest {
+  note?: string;
+  grant_for_seconds?: number;
+  grant_at_level?: GrantLevel;
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
 // These tests are DB-backed and mirror the references package harness: they
@@ -155,7 +156,7 @@ func TestConcurrentApprove_OnlyOneWins(t *testing.T) {
 	for i := 0; i < racers; i++ {
 		go func() {
 			defer wg.Done()
-			_, err := svc.Approve(context.Background(), ask.ID, testWorkspace, testApprover, "", SurfaceUI)
+			_, err := svc.Approve(context.Background(), ask.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry())
 			mu.Lock()
 			defer mu.Unlock()
 			switch {
@@ -210,7 +211,7 @@ func TestApproveThenReject_SecondConflicts(t *testing.T) {
 	svc := newService()
 	ask := seedPending(t, svc, pgtype.Timestamptz{})
 
-	if _, err := svc.Approve(context.Background(), ask.ID, testWorkspace, testApprover, "ok", SurfaceUI); err != nil {
+	if _, err := svc.Approve(context.Background(), ask.ID, testWorkspace, testApprover, "ok", SurfaceUI, futureExpiry()); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	_, err := svc.Reject(context.Background(), ask.ID, testWorkspace, testApprover, "changed mind", SurfaceUI)
@@ -222,7 +223,7 @@ func TestApproveThenReject_SecondConflicts(t *testing.T) {
 // TestDecide_NotFound returns ErrNotFound for an unknown id.
 func TestDecide_NotFound(t *testing.T) {
 	svc := newService()
-	_, err := svc.Approve(context.Background(), randomUUID(t), testWorkspace, testApprover, "", SurfaceUI)
+	_, err := svc.Approve(context.Background(), randomUUID(t), testWorkspace, testApprover, "", SurfaceUI, futureExpiry())
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -255,7 +256,7 @@ func TestExpireDue(t *testing.T) {
 	}
 
 	// An expired ask can no longer be approved.
-	_, err = svc.Approve(context.Background(), stale.ID, testWorkspace, testApprover, "", SurfaceUI)
+	_, err = svc.Approve(context.Background(), stale.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry())
 	if !errors.Is(err, ErrAlreadyDecided) {
 		t.Fatalf("expected ErrAlreadyDecided on expired ask, got %v", err)
 	}
@@ -324,6 +325,103 @@ func randomUUID(t *testing.T) pgtype.UUID {
 	return id
 }
 
+// futureExpiry is the period-grant expiry the legacy tests pass to Approve so
+// the approved row stays reusable (FindReusable filters expires_at > now()).
+func futureExpiry() pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}
+}
+
+// TestApproveWithExpiry_FutureIsReusable proves the TECH-3498 "approve for a
+// period" contract end-to-end: an approve with a future expires_at makes the
+// row reusable (FindReusable returns it), while an approve with a now() expiry
+// (the one-shot default) is NOT reusable for a future call.
+func TestApproveWithExpiry_FutureIsReusable(t *testing.T) {
+	svc := newService()
+	agent := randomUUID(t)
+	const capName, res = "draft_reply", "draft_reply"
+	q := ReusableQuery{WorkspaceID: testWorkspace, Agent: agent, Capability: capName, Resource: res}
+
+	// Period grant: approve with a future expiry → reusable.
+	pending := seedAskFor(t, svc, agent, capName, res, pgtype.Timestamptz{})
+	if _, err := svc.Approve(context.Background(), pending.ID, testWorkspace, testApprover, "", SurfaceUI,
+		pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true}); err != nil {
+		t.Fatalf("approve (period): %v", err)
+	}
+	got, ok, err := svc.FindReusable(context.Background(), q)
+	if err != nil || !ok {
+		t.Fatalf("period grant: ok=%v err=%v, want reusable", ok, err)
+	}
+	if got.ID != pending.ID || got.Status != StatusApproved {
+		t.Fatalf("period grant: got id=%v status=%q, want approved id=%v", got.ID, got.Status, pending.ID)
+	}
+
+	// One-shot: a fresh ask approved with a now() expiry must NOT be reusable for
+	// a future call (the in-flight blocked call proceeds via Await, not expiry).
+	onceAgent := randomUUID(t)
+	once := seedAskFor(t, svc, onceAgent, capName, res, pgtype.Timestamptz{})
+	if _, err := svc.Approve(context.Background(), once.ID, testWorkspace, testApprover, "", SurfaceUI,
+		pgtype.Timestamptz{Time: time.Now(), Valid: true}); err != nil {
+		t.Fatalf("approve (once): %v", err)
+	}
+	if _, ok, _ := svc.FindReusable(context.Background(), ReusableQuery{WorkspaceID: testWorkspace, Agent: onceAgent, Capability: capName, Resource: res}); ok {
+		t.Fatal("one-shot approve (now() expiry) must not be reusable for a future call")
+	}
+}
+
+// TestGrantAtLevel_AgentWritesAllow proves the TECH-3498 "grant at a permission
+// level" contract: after a successful approve, escalating to the agent level
+// writes a permanent Allow into the tool-policy chain for that agent. Uses a
+// connection-tool approval row so the connection:<name> key + tool-name
+// resource_pattern derivation is exercised too.
+func TestGrantAtLevel_AgentWritesAllow(t *testing.T) {
+	svc := newService()
+	store := toolpolicy.NewStore(testPool)
+	h := NewHandler(svc).WithToolPolicy(store, nil)
+
+	agent := randomUUID(t)
+	const conn, tool = "customer-service", "draft_reply"
+	row, err := svc.Intake(context.Background(), IntakeParams{
+		WorkspaceID:   testWorkspace,
+		RequesterType: RequesterAgent,
+		RequesterID:   testRequester,
+		Agent:         agent,
+		Capability:    tool,
+		Resource:      tool,
+		Reason:        "connection tool requires approval",
+		Context:       map[string]any{"connection": conn, "connection_tool": true},
+	})
+	if err != nil {
+		t.Fatalf("intake: %v", err)
+	}
+	approved, err := svc.Approve(context.Background(), row.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry())
+	if err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+
+	if gErr := h.grantAtLevel(context.Background(), approved, "agent", testApprover); gErr != nil {
+		t.Fatalf("grantAtLevel: %v", gErr)
+	}
+
+	// A permanent Allow must now exist at the agent layer, keyed on the
+	// connection:<conn> tool with the tool name as the resource_pattern.
+	settings, err := store.ListForSubject(context.Background(), testWorkspace, toolpolicy.LayerAgent, agent)
+	if err != nil {
+		t.Fatalf("list for subject: %v", err)
+	}
+	var found bool
+	for _, st := range settings {
+		if st.ToolKey == "connection:"+conn && st.ResourcePattern == tool {
+			found = true
+			if st.Setting != toolpolicy.SettingAllow {
+				t.Fatalf("grant-at-level agent: setting = %q, want allow", st.Setting)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("grant-at-level agent: no Allow row written for connection:%s / %s; got %+v", conn, tool, settings)
+	}
+}
+
 // seedAskFor intakes a pending ask scoped to a specific agent/capability/resource
 // so the FindReusable matching can be exercised.
 func seedAskFor(t *testing.T, svc *Service, agent pgtype.UUID, capability, resource string, expires pgtype.Timestamptz) cerebrodb.CerebroApprovalRequest {
@@ -381,7 +479,7 @@ func TestFindReusable(t *testing.T) {
 
 	// Once approved, the ask is honoured (approved status returned) so a later
 	// retry proceeds instead of asking again.
-	if _, err := svc.Approve(context.Background(), pending.ID, testWorkspace, testApprover, "", SurfaceUI); err != nil {
+	if _, err := svc.Approve(context.Background(), pending.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry()); err != nil {
 		t.Fatalf("approve: %v", err)
 	}
 	got, ok, err = svc.FindReusable(context.Background(), q)

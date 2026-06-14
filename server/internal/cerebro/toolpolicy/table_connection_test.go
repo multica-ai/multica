@@ -474,24 +474,28 @@ func TestConnectionToolEffective(t *testing.T) {
 
 	var zero pgtype.UUID
 	cases := []struct {
-		name string
-		ag   pgtype.UUID
-		tool string
-		want Setting
+		name     string
+		ag       pgtype.UUID
+		tool     string
+		want     Setting
+		wantConn string // connName the deciding row reports; "" when ungated/empty
 	}{
-		{"ask tool for agent", agent, "draft_reply", SettingAsk},
-		{"deny tool for agent", agent, "lookup_order", SettingDeny},
-		{"unset tool for agent", agent, "search_knowledge", SettingAllow},
-		{"ask tool different agent", other, "draft_reply", SettingAllow},
-		{"empty tool", agent, "", SettingAllow},
+		{"ask tool for agent", agent, "draft_reply", SettingAsk, conn},
+		{"deny tool for agent", agent, "lookup_order", SettingDeny, conn},
+		{"unset tool for agent", agent, "search_knowledge", SettingAllow, ""},
+		{"ask tool different agent", other, "draft_reply", SettingAllow, ""},
+		{"empty tool", agent, "", SettingAllow, ""},
 	}
 	for _, c := range cases {
-		got, err := s.ConnectionToolEffective(ctx, tpTestWorkspaceID, zero, c.ag, zero, c.tool)
+		got, gotConn, err := s.ConnectionToolEffective(ctx, tpTestWorkspaceID, zero, c.ag, zero, c.tool)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
 		if got != c.want {
 			t.Fatalf("%s: got %s want %s", c.name, got, c.want)
+		}
+		if gotConn != c.wantConn {
+			t.Fatalf("%s: got connName %q want %q", c.name, gotConn, c.wantConn)
 		}
 	}
 }

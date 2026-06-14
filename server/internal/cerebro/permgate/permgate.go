@@ -293,6 +293,22 @@ func (g *Gate) GuardDecision(ctx context.Context, req Request, decision permissi
 	return res, werr
 }
 
+// GuardDecisionReusing is GuardDecision with the FindReusable dedup +
+// short-circuit: EvaluateDecisionReusing first, then Await if the result is
+// pending. A still-valid prior grant — an approved, unexpired row for the same
+// (agent, capability, resource) — short-circuits to OutcomeApproved with no new
+// ask, so a time-boxed "approve for a period" grant covers subsequent in-process
+// calls (TECH-3498). Like Guard it never returns OutcomePending.
+func (g *Gate) GuardDecisionReusing(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
+	res, err := g.EvaluateDecisionReusing(ctx, req, decision)
+	if err != nil || res.Outcome != OutcomePending {
+		return res, err
+	}
+	outcome, werr := g.Await(ctx, req.Permission.WorkspaceID, res.ApprovalID)
+	res.Outcome = outcome
+	return res, werr
+}
+
 // Await blocks until the approval row reaches a terminal status, the wait
 // budget elapses, or ctx is cancelled. It is process-independent: any decider
 // (a human in the inbox, the expiry sweeper) flips the row and Await observes

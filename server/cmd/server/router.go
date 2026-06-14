@@ -562,7 +562,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
 	cerebroSandboxProfileHandler := cerebrosandboxprofile.NewHandler()
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
-	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus))
+	// CEREBRO-PATCH(cerebro-approvals-routes): TECH-3498 wire tool-policy store + agent queries for the "grant at a permission level" approve seam.
+	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus)).WithToolPolicy(cerebrotoolpolicy.NewStore(pool), queries)
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.

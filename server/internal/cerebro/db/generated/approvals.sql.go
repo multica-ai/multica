@@ -105,6 +105,7 @@ SET
     decided_by_id = $4,
     decided_at    = now(),
     decision_note = $5,
+    expires_at    = $6,
     updated_at    = now()
 WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
 RETURNING
@@ -118,17 +119,21 @@ RETURNING
 `
 
 type DecideCerebroApprovalRequestParams struct {
-	ID           pgtype.UUID `json:"id"`
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Status       string      `json:"status"`
-	DecidedByID  pgtype.UUID `json:"decided_by_id"`
-	DecisionNote pgtype.Text `json:"decision_note"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Status       string             `json:"status"`
+	DecidedByID  pgtype.UUID        `json:"decided_by_id"`
+	DecisionNote pgtype.Text        `json:"decision_note"`
+	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
 }
 
 // Race-safe terminal decision: only a still-pending row transitions. Two
 // concurrent approvers contend on the row lock; the loser matches zero rows
 // and the query returns pgx.ErrNoRows, which the service maps to
-// ErrAlreadyDecided. $3 is the new status ('approved' | 'rejected').
+// ErrAlreadyDecided. $3 is the new status ('approved' | 'rejected'). $6 sets
+// expires_at so an approver can time-box a grant: NULL = never, now() = a
+// one-shot approve (not reusable for a future call), now()+duration = a period
+// grant that FindReusable honours until it lapses (TECH-3498).
 func (q *Queries) DecideCerebroApprovalRequest(ctx context.Context, arg DecideCerebroApprovalRequestParams) (CerebroApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, decideCerebroApprovalRequest,
 		arg.ID,
@@ -136,6 +141,7 @@ func (q *Queries) DecideCerebroApprovalRequest(ctx context.Context, arg DecideCe
 		arg.Status,
 		arg.DecidedByID,
 		arg.DecisionNote,
+		arg.ExpiresAt,
 	)
 	var i CerebroApprovalRequest
 	err := row.Scan(

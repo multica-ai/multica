@@ -7,11 +7,14 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -22,11 +25,27 @@ import (
 // Read operations (GET) require any workspace member.
 // Decisions (approve/reject/delegate) and the intake seam require admin/owner —
 // enforced on the router's admin group.
+//
+// ToolPolicy + Agents are the optional "grant at a permission level" seam
+// (TECH-3498): when an admin approves an ask with grant_at_level, the handler
+// writes a permanent Allow into the unified tool-policy chain. Both are nil-safe
+// — if either is unwired the approve still succeeds, only the level grant is
+// skipped (best-effort secondary write).
 type Handler struct {
-	Svc *Service
+	Svc        *Service
+	ToolPolicy *toolpolicy.Store
+	Agents     *db.Queries
 }
 
 func NewHandler(svc *Service) *Handler { return &Handler{Svc: svc} }
+
+// WithToolPolicy wires the tool-policy store + agent queries the "grant at a
+// permission level" path needs. Returns the handler for chaining.
+func (h *Handler) WithToolPolicy(store *toolpolicy.Store, agents *db.Queries) *Handler {
+	h.ToolPolicy = store
+	h.Agents = agents
+	return h
+}
 
 // --- response types ---------------------------------------------------------
 
@@ -69,6 +88,12 @@ type approvalAuditResponse struct {
 
 type decisionRequest struct {
 	Note string `json:"note"`
+	// GrantForSeconds time-boxes an approve (TECH-3498): >0 makes it reusable for
+	// that many seconds, 0 / omitted = a one-shot approve (now()).
+	GrantForSeconds int `json:"grant_for_seconds,omitempty"`
+	// GrantAtLevel optionally escalates the approve to a permanent Allow in the
+	// tool-policy chain: "agent" | "runtime" | "workspace". Empty = no escalation.
+	GrantAtLevel string `json:"grant_at_level,omitempty"`
 }
 
 type delegateRequest struct {
@@ -228,8 +253,52 @@ func (h *Handler) Audit(w http.ResponseWriter, r *http.Request) {
 }
 
 // Approve — POST /api/workspaces/{id}/approvals/{approvalId}/approve
+//
+// Body (all optional): { note, grant_for_seconds, grant_at_level }. The approver
+// can time-box the grant (grant_for_seconds) and/or escalate it to a permanent
+// Allow in the tool-policy chain (grant_at_level). The level write is best-effort
+// secondary: a failure logs a warning but the approve still succeeds (TECH-3498).
 func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
-	h.decide(w, r, h.Svc.Approve)
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	id, ok := h.parseApprovalID(w, r)
+	if !ok {
+		return
+	}
+	req := decisionRequest{}
+	_ = decodeOptional(r, &req)
+	if req.GrantAtLevel != "" && !validGrantLevel(req.GrantAtLevel) {
+		writeError(w, http.StatusBadRequest, "grant_at_level must be 'agent', 'runtime' or 'workspace'")
+		return
+	}
+
+	// Caller computes the expiry: a period grant (grant_for_seconds > 0) is
+	// reusable until it lapses; a one-shot approve expires immediately (now()) so
+	// only the in-flight blocked call proceeds, not a future one.
+	now := time.Now()
+	expiresAt := pgtype.Timestamptz{Time: now, Valid: true}
+	if req.GrantForSeconds > 0 {
+		expiresAt = pgtype.Timestamptz{Time: now.Add(time.Duration(req.GrantForSeconds) * time.Second), Valid: true}
+	}
+
+	row, err := h.Svc.Approve(r.Context(), id, workspaceID, member.UserID, req.Note, surfaceFromHeader(r.Header.Get("X-Cerebro-Surface")), expiresAt)
+	if err != nil {
+		h.writeDecisionError(w, r, "decide approval", err)
+		return
+	}
+
+	// Grant-at-level: best-effort permanent Allow. A failure must NOT fail the
+	// approve — the ask is already approved.
+	if req.GrantAtLevel != "" {
+		if grantErr := h.grantAtLevel(r.Context(), row, req.GrantAtLevel, member.UserID); grantErr != nil {
+			slog.Warn("approval grant-at-level write failed (approve still succeeded)",
+				append(logger.RequestAttrs(r), "approval_id", util.UUIDToString(row.ID), "level", req.GrantAtLevel, "error", grantErr)...)
+		}
+	}
+
+	writeJSON(w, http.StatusOK, requestToResponse(row))
 }
 
 // Reject — POST /api/workspaces/{id}/approvals/{approvalId}/reject
@@ -237,7 +306,8 @@ func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
 	h.decide(w, r, h.Svc.Reject)
 }
 
-// decideFn is the shared shape of Service.Approve / Service.Reject.
+// decideFn is the shared shape of Service.Reject (and any decision that takes no
+// expiry). Approve has its own handler because it threads expiry + level grant.
 type decideFn func(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string) (cerebrodb.CerebroApprovalRequest, error)
 
 func (h *Handler) decide(w http.ResponseWriter, r *http.Request, fn decideFn) {
@@ -258,6 +328,90 @@ func (h *Handler) decide(w http.ResponseWriter, r *http.Request, fn decideFn) {
 		return
 	}
 	writeJSON(w, http.StatusOK, requestToResponse(row))
+}
+
+// validGrantLevel reports whether a grant_at_level string is one of the three
+// chain layers an approver may escalate to.
+func validGrantLevel(level string) bool {
+	switch level {
+	case "agent", "runtime", "workspace":
+		return true
+	default:
+		return false
+	}
+}
+
+// grantAtLevel writes a permanent Allow into the unified tool-policy chain after
+// a successful approve, derived from the approval row (TECH-3498):
+//   - connection tool → ToolKey "connection:<conn>", ResourcePattern = the tool name.
+//   - other tool      → ToolKey claudehook.PolicyToolKey(capability), ResourcePattern "".
+//
+// Layer + subject: agent → LayerAgent + approval.agent_id; runtime → LayerRuntime
+// + the agent's runtime_id; workspace → LayerWorkspace + zero subject. Returns an
+// error so the caller can log it; the approve never fails on a grant error.
+func (h *Handler) grantAtLevel(ctx context.Context, row cerebrodb.CerebroApprovalRequest, level string, actorID pgtype.UUID) error {
+	if h.ToolPolicy == nil {
+		return errors.New("tool-policy store not wired")
+	}
+
+	conn, connTool := approvalConnection(row.Context)
+	toolKey := claudehook.PolicyToolKey(row.Capability)
+	resourcePattern := ""
+	if connTool && conn != "" {
+		toolKey = "connection:" + conn
+		resourcePattern = row.Capability
+	}
+
+	layer := toolpolicy.LayerAgent
+	subject := row.AgentID
+	switch level {
+	case "agent":
+		layer = toolpolicy.LayerAgent
+		subject = row.AgentID
+	case "runtime":
+		layer = toolpolicy.LayerRuntime
+		if h.Agents == nil {
+			return errors.New("agent queries not wired for runtime grant")
+		}
+		if !row.AgentID.Valid {
+			return errors.New("runtime grant needs an agent on the approval")
+		}
+		agent, err := h.Agents.GetAgent(ctx, row.AgentID)
+		if err != nil {
+			return err
+		}
+		subject = agent.RuntimeID
+	case "workspace":
+		layer = toolpolicy.LayerWorkspace
+		subject = pgtype.UUID{} // zero subject = the workspace-wide row
+	}
+
+	_, err := h.ToolPolicy.Set(ctx, toolpolicy.SetParams{
+		WorkspaceID:     row.WorkspaceID,
+		ToolKey:         toolKey,
+		Layer:           layer,
+		SubjectID:       subject,
+		ResourcePattern: resourcePattern,
+		Setting:         toolpolicy.SettingAllow,
+		UpdatedBy:       actorID,
+	})
+	return err
+}
+
+// approvalConnection pulls the connection name + connection_tool flag out of an
+// approval row's stored Context JSON. Both default to zero values when absent.
+func approvalConnection(raw []byte) (conn string, connTool bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var ctx struct {
+		Connection     string `json:"connection"`
+		ConnectionTool bool   `json:"connection_tool"`
+	}
+	if err := json.Unmarshal(raw, &ctx); err != nil {
+		return "", false
+	}
+	return ctx.Connection, ctx.ConnectionTool
 }
 
 // Delegate — POST /api/workspaces/{id}/approvals/{approvalId}/delegate
