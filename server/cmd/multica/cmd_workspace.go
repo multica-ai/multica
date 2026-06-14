@@ -56,7 +56,7 @@ var workspaceMemberInviteCmd = &cobra.Command{
 		"'workspace list'; if omitted the current default workspace is used " +
 		"(--workspace-id / MULTICA_WORKSPACE_ID / profile default).\n\n" +
 		"Role defaults to 'member'; pass '--role admin' to invite an admin. " +
-		"Owners cannot be invited.",
+		"Owners cannot be invited. Pass --name to set the invitee's display name.",
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runWorkspaceMemberInvite,
 }
@@ -99,6 +99,12 @@ func init() {
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
 	workspaceMemberInviteCmd.Flags().String("role", "member", "Member role to grant: member or admin (owner is not allowed)")
 	workspaceMemberInviteCmd.Flags().String("output", "table", "Output format: table or json")
+
+	workspaceMemberInviteCmd.Flags().String("email", "", "Invitee email address (required)")
+	workspaceMemberInviteCmd.Flags().String("role", "member", "Role to assign: member or admin")
+	workspaceMemberInviteCmd.Flags().String("name", "", "Display name for the invitee (optional; applied at registration time)")
+	workspaceMemberInviteCmd.Flags().String("output", "json", "Output format: table or json")
+	_ = workspaceMemberInviteCmd.MarkFlagRequired("email")
 
 	workspaceUpdateCmd.Flags().String("name", "", "New workspace name")
 	workspaceUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
@@ -511,12 +517,22 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid --role %q; expected member or admin", role)
 	}
 
+	name, _ := cmd.Flags().GetString("name")
+
 	wsID, err := resolveWorkspaceArg(cmd, args[1:])
 	if err != nil {
 		return err
 	}
 	if wsID == "" {
 		return fmt.Errorf("workspace ID is required: pass an id/slug/prefix as argument or set MULTICA_WORKSPACE_ID")
+	}
+
+	body := map[string]any{
+		"email": email,
+		"role":  role,
+	}
+	if n := strings.TrimSpace(name); n != "" {
+		body["invitee_name"] = n
 	}
 
 	client, err := newAPIClient(cmd)
@@ -527,7 +543,6 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	body := map[string]any{"email": email, "role": role}
 	var inv map[string]any
 	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &inv); err != nil {
 		return fmt.Errorf("invite member: %w", err)
@@ -538,7 +553,14 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, inv)
 	}
 
-	fmt.Fprintf(os.Stdout, "Invitation sent to %s (role: %s, status: %s)\n",
-		strVal(inv, "invitee_email"), strVal(inv, "role"), strVal(inv, "status"))
+	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+	defer w.Flush()
+	fmt.Fprintf(w, "ID\t%s\n", strVal(inv, "id"))
+	fmt.Fprintf(w, "Email\t%s\n", strVal(inv, "invitee_email"))
+	if n, ok := inv["invitee_name"].(string); ok && n != "" {
+		fmt.Fprintf(w, "Display name\t%s\n", n)
+	}
+	fmt.Fprintf(w, "Role\t%s\n", strVal(inv, "role"))
+	fmt.Fprintf(w, "Status\t%s\n", strVal(inv, "status"))
 	return nil
 }
