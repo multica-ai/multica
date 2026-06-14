@@ -10,7 +10,10 @@ import {
   ExternalLink,
   RotateCcw,
   Save,
+  Replace,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -30,6 +33,9 @@ import {
   useUpdateArtifact,
   parseOutline,
   countDocument,
+  countMatches,
+  replaceAll,
+  replaceFirst,
 } from "@multica/cerebro-artifacts/core";
 import { Input } from "@multica/ui/components/ui/input";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -195,24 +201,33 @@ type SaveStatus = "idle" | "saving" | "saved";
  */
 function MarkdownDocumentEditor({
   artifact,
+  value,
+  remountToken,
   onSave,
   onBodyChange,
 }: {
   artifact: Artifact;
+  // Seed content for the editor. Normally the saved body; after a find&replace
+  // it is the replaced body, paired with a bumped remountToken to re-seed the
+  // inline editor in place.
+  value: string;
+  remountToken: number;
   onSave: (body: string) => Promise<void>;
   onBodyChange?: (body: string) => void;
 }) {
-  const lastSavedRef = React.useRef(artifact.body);
+  const lastSavedRef = React.useRef(value);
   const savingRef = React.useRef(false);
   const pendingRef = React.useRef<string | null>(null);
   const [status, setStatus] = React.useState<SaveStatus>("idle");
 
-  // Re-baseline when the user navigates to a different document.
+  // Re-baseline when the document changes (id) or content is re-seeded by a
+  // replace (remountToken). The seed `value` is already persisted by the caller,
+  // so it counts as the last-saved baseline — no spurious save on remount.
   React.useEffect(() => {
-    lastSavedRef.current = artifact.body;
+    lastSavedRef.current = value;
     setStatus("idle");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [artifact.id]);
+  }, [artifact.id, remountToken]);
 
   const flush = React.useCallback(
     async (body: string) => {
@@ -269,8 +284,8 @@ function MarkdownDocumentEditor({
       </div>
       <div className="min-h-[65vh] bg-background px-4 py-4 md:px-6 md:py-5">
         <ContentEditor
-          key={artifact.id}
-          defaultValue={artifact.body}
+          key={`${artifact.id}:${remountToken}`}
+          defaultValue={value}
           onUpdate={handleUpdate}
           debounceMs={800}
           placeholder="Skriv noget…"
@@ -278,6 +293,103 @@ function MarkdownDocumentEditor({
         />
       </div>
     </section>
+  );
+}
+
+/**
+ * Inline find & replace bar for the open note. It works directly on the note's
+ * content (the document is inline-edited, so there is no separate edit field):
+ * the parent passes the current body, this bar computes matches and hands back
+ * the replaced body, which the parent writes into the inline editor + autosaves.
+ */
+function FindReplaceBar({
+  body,
+  onReplaceAll,
+  onReplaceFirst,
+  onClose,
+}: {
+  body: string;
+  onReplaceAll: (newBody: string) => void;
+  onReplaceFirst: (newBody: string) => void;
+  onClose: () => void;
+}) {
+  const [find, setFind] = React.useState("");
+  const [replacement, setReplacement] = React.useState("");
+  const matches = React.useMemo(() => countMatches(body, find), [body, find]);
+
+  const doReplaceAll = () => {
+    if (!find) return;
+    const { body: next, count } = replaceAll(body, find, replacement);
+    if (count === 0) {
+      toast.info("Ingen match at erstatte.");
+      return;
+    }
+    onReplaceAll(next);
+    toast.success(`Erstattede ${count} ${count === 1 ? "match" : "match"}.`);
+  };
+
+  const doReplaceFirst = () => {
+    if (!find) return;
+    const { body: next, replaced } = replaceFirst(body, find, replacement);
+    if (!replaced) {
+      toast.info("Ingen match at erstatte.");
+      return;
+    }
+    onReplaceFirst(next);
+  };
+
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
+      <div className="flex items-center gap-1.5">
+        <Input
+          autoFocus
+          value={find}
+          onChange={(e) => setFind(e.target.value)}
+          placeholder="Søg…"
+          className="h-8 w-40"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onClose();
+          }}
+        />
+        <span className="min-w-14 text-xs text-muted-foreground">
+          {find ? `${matches} fundet` : ""}
+        </span>
+      </div>
+      <Input
+        value={replacement}
+        onChange={(e) => setReplacement(e.target.value)}
+        placeholder="Erstat med…"
+        className="h-8 w-40"
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+        }}
+      />
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={doReplaceFirst}
+        disabled={matches === 0}
+      >
+        Erstat
+      </Button>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={doReplaceAll}
+        disabled={matches === 0}
+      >
+        Erstat alle
+      </Button>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="ml-auto"
+        title="Luk"
+        onClick={onClose}
+      >
+        <X className="size-4" />
+      </Button>
+    </div>
   );
 }
 
@@ -355,15 +467,34 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const [renaming, setRenaming] = React.useState(false);
   const [titleDraft, setTitleDraft] = React.useState("");
-  // Body used to drive the outline + word count. Seeded from the loaded doc and
-  // kept live by the editor's onBodyChange; only re-seeded when the doc changes
-  // (id), so autosave refetches never clobber what the user is typing.
+  // Body driving the outline, word count and find&replace. Seeded from the
+  // loaded doc and kept live by the editor's onBodyChange; only re-seeded when
+  // the doc changes (id), so autosave refetches never clobber what's being typed.
   const contentRef = React.useRef<HTMLDivElement>(null);
-  const [liveBody, setLiveBody] = React.useState("");
+  const [docBody, setDocBody] = React.useState("");
+  // Bumped on a find&replace so the inline editor re-seeds with the new content.
+  const [replaceToken, setReplaceToken] = React.useState(0);
+  const [findOpen, setFindOpen] = React.useState(false);
   React.useEffect(() => {
-    setLiveBody(artifact?.body ?? "");
+    setDocBody(artifact?.body ?? "");
+    setReplaceToken(0);
+    setFindOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [artifact?.id]);
+
+  // Cmd/Ctrl+F opens the inline find&replace bar for editable markdown notes.
+  const isEditableMarkdown = artifact?.format === "md";
+  React.useEffect(() => {
+    if (!isEditableMarkdown) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isEditableMarkdown]);
 
   if (isLoading) {
     return (
@@ -450,6 +581,14 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
     await update.mutateAsync({ id: artifact.id, data: { body } });
   };
 
+  // Apply a find&replace result: re-seed the inline editor with the new content
+  // (bump the remount token), update the tools body, and persist.
+  const applyReplacedBody = (newBody: string) => {
+    setDocBody(newBody);
+    setReplaceToken((t) => t + 1);
+    void handleSaveMarkdownBody(newBody);
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-7xl px-4 py-4 md:px-8 md:py-6">
@@ -492,6 +631,18 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
             )}
             {canEdit && (
               <>
+                {artifact.format === "md" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="max-sm:px-2"
+                    title="Søg & erstat"
+                    onClick={() => setFindOpen((v) => !v)}
+                  >
+                    <Replace className="size-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Søg &amp; erstat</span>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
@@ -587,20 +738,32 @@ export function DocumentViewPage({ artifactId }: { artifactId: string }) {
         </p>
 
         <div className="mt-6 flex gap-6">
-          <div ref={contentRef} className="min-w-0 flex-1">
-            {artifact.format === "md" && canEdit ? (
-              <MarkdownDocumentEditor
-                artifact={artifact}
-                onSave={handleSaveMarkdownBody}
-                onBodyChange={setLiveBody}
+          <div className="min-w-0 flex-1">
+            {artifact.format === "md" && canEdit && findOpen && (
+              <FindReplaceBar
+                body={docBody || artifact.body}
+                onReplaceAll={applyReplacedBody}
+                onReplaceFirst={applyReplacedBody}
+                onClose={() => setFindOpen(false)}
               />
-            ) : (
-              <ArtifactContent artifact={artifact} />
             )}
+            <div ref={contentRef}>
+              {artifact.format === "md" && canEdit ? (
+                <MarkdownDocumentEditor
+                  artifact={artifact}
+                  value={docBody || artifact.body}
+                  remountToken={replaceToken}
+                  onSave={handleSaveMarkdownBody}
+                  onBodyChange={setDocBody}
+                />
+              ) : (
+                <ArtifactContent artifact={artifact} />
+              )}
+            </div>
           </div>
           {artifact.format === "md" && (
             <DocumentToolsSidebar
-              body={liveBody || artifact.body}
+              body={docBody || artifact.body}
               contentRef={contentRef}
             />
           )}

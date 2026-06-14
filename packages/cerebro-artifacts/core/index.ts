@@ -40,3 +40,8 @@ export {
   type OutlineHeading,
   type DocumentCounts,
 } from "./document-outline";
+export {
+  countMatches,
+  replaceAll,
+  replaceFirst,
+} from "./document-find-replace";
