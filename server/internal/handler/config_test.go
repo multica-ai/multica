@@ -215,6 +215,49 @@ func TestURLHostEqualsCanonicalizesCommonHostForms(t *testing.T) {
 	}
 }
 
+func TestGetConfig_TOTPSupported(t *testing.T) {
+	// totp_supported reflects whether the TOTPService actually initialized
+	// at boot — NOT just env var presence. A malformed MULTICA_USER_TOTP_KEY
+	// would yield env-set + service-nil; advertising support in that case
+	// would have the UI offer setup that always 503s.
+	if testHandler == nil {
+		t.Skip("no DB available")
+	}
+
+	t.Run("nil service → false", func(t *testing.T) {
+		orig := testHandler.TOTPService
+		testHandler.TOTPService = nil
+		t.Cleanup(func() { testHandler.TOTPService = orig })
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		var resp AppConfig
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if resp.TOTPSupported {
+			t.Errorf("totp_supported should be false when service is nil")
+		}
+	})
+
+	t.Run("non-nil service → true", func(t *testing.T) {
+		// withRealTOTPService is defined in auth_totp_test.go in this package.
+		withRealTOTPService(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, req)
+		var resp AppConfig
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if !resp.TOTPSupported {
+			t.Errorf("totp_supported should be true when service is initialized")
+		}
+	})
+}
+
 // TestGetConfigExposesWorkspaceCreationDisabled verifies that the self-host
 // gate added by #3433 surfaces to the frontend through /api/config so the UI
 // can hide every "Create workspace" affordance.

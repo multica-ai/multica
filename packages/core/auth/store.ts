@@ -20,6 +20,7 @@ export interface AuthState {
   initialize: () => Promise<void>;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
+  verifyTOTPLogin: (email: string, code: string) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
@@ -80,6 +81,19 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     verifyCode: async (email: string, code: string) => {
       const { token, user } = await api.verifyCode(email, code);
+      if (!cookieAuth) {
+        // Token mode: persist for Electron / legacy.
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user });
+      return user;
+    },
+
+    verifyTOTPLogin: async (email: string, code: string) => {
+      const { token, user } = await api.loginWithTOTP(email, code);
       if (!cookieAuth) {
         // Token mode: persist for Electron / legacy.
         storage.setItem("multica_token", token);

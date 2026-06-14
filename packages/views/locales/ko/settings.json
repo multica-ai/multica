@@ -30,6 +30,7 @@
       "preferences": "환경설정",
       "notifications": "알림",
       "tokens": "API 토큰",
+      "security": "보안",
       "general": "일반",
       "repositories": "저장소",
       "github": "GitHub",
@@ -92,6 +93,32 @@
       "granted": "이 브라우저에서 알림 배너를 표시할 수 있습니다.",
       "denied": "브라우저에서 차단되었습니다. 브라우저 설정에서 이 사이트의 알림을 허용하세요.",
       "enabled_badge": "사용 중"
+    }
+  },
+  "security": {
+    "title": "보안",
+    "description": "계정 보안 설정을 관리합니다.",
+    "two_factor": {
+      "label": "이중 인증",
+      "hint_unavailable": "이 서버에서는 이중 인증을 사용할 수 없습니다.",
+      "hint_enabled": "인증 앱으로 계정이 보호되고 있습니다.",
+      "hint_disabled": "인증 앱의 코드를 요구하여 보안을 더 강화하세요.",
+      "unavailable_badge": "사용 불가",
+      "setup_button": "설정",
+      "disable_button": "비활성화",
+      "setup_title": "이중 인증 설정",
+      "setup_scan_qr": "인증 앱(Google Authenticator, Authy, 1Password 등)으로 이 QR 코드를 스캔하세요.",
+      "setup_manual": "또는 이 비밀키를 직접 입력하세요:",
+      "setup_next": "다음 — 코드 입력",
+      "setup_verify": "설정을 확인하려면 인증 앱의 6자리 코드를 입력하세요.",
+      "setup_success": "이중 인증이 활성화되었습니다.",
+      "setup_invalid": "유효하지 않은 코드입니다. 다시 시도하세요.",
+      "setup_init_error": "TOTP 설정을 시작하지 못했습니다. 다시 시도하세요.",
+      "disable_title": "이중 인증 비활성화",
+      "disable_prompt": "이중 인증을 비활성화하려면 인증 앱의 6자리 코드를 입력하세요.",
+      "disable_success": "이중 인증이 비활성화되었습니다.",
+      "disable_invalid": "유효하지 않은 코드입니다. 다시 시도하세요.",
+      "confirm": "확인"
     }
   },
   "tokens": {
@@ -300,6 +327,15 @@
         "label": "멤버",
         "description": "이슈 생성 및 작업"
       }
+    },
+    "totp_reset": {
+      "menu_item": "인증 앱 초기화",
+      "confirm_title": "{{name}}의 인증 앱을 초기화할까요?",
+      "confirm_description": "이 작업은 {{name}}의 Multica 계정 전체(이 워크스페이스뿐 아니라)에서 인증 앱 로그인을 비활성화합니다. {{name}}은 Settings → Security에서 다시 설정할 수 있습니다. 그 전까지는 이메일 코드로 로그인할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "인증 앱 초기화",
+      "success": "{{name}}의 인증 앱을 초기화했습니다",
+      "error": "인증 앱 초기화에 실패했습니다"
     }
   },
   "lark": {

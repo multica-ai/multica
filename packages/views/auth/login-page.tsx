@@ -19,9 +19,11 @@ import {
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
 import { useAuthStore } from "@multica/core/auth";
+import { configStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
+import { toast } from "sonner";
 import { useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ export function LoginPage({
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
-  const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
+  const [step, setStep] = useState<"email" | "choose-method" | "code" | "totp" | "cli_confirm">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -172,10 +174,16 @@ export function LoginPage({
       setLoading(true);
       setError("");
       try {
-        await useAuthStore.getState().sendCode(email);
-        setStep("code");
-        setCode("");
-        setCooldown(60);
+        const totpAvailable = configStore.getState().totpSupported;
+        if (totpAvailable) {
+          setStep("choose-method");
+          setCode("");
+        } else {
+          await useAuthStore.getState().sendCode(email);
+          setStep("code");
+          setCode("");
+          setCooldown(60);
+        }
       } catch (err) {
         setError(
           err instanceof Error
@@ -389,6 +397,179 @@ export function LoginPage({
               className="w-full"
               onClick={() => {
                 setStep("email");
+                setCode("");
+                setError("");
+              }}
+            >
+              {t(($) => $.common.back)}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Choose-method step (TOTP-enabled servers only)
+  // -------------------------------------------------------------------------
+
+  if (step === "choose-method") {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            <CardTitle className="text-2xl">
+              {t(($) => $.signin.title)}
+            </CardTitle>
+            <CardDescription>
+              {t(($) => $.totp.prompt_choose)}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={async () => {
+                setLoading(true);
+                setError("");
+                try {
+                  await useAuthStore.getState().sendCode(email);
+                  setStep("code");
+                  setCooldown(60);
+                } catch (err) {
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : `${t(($) => $.errors.send_failed)} ${t(($) => $.errors.server_unreachable)}`,
+                  );
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              disabled={loading}
+            >
+              {t(($) => $.totp.use_email)}
+            </Button>
+            <Button
+              className="w-full"
+              onClick={() => setStep("totp")}
+              disabled={loading}
+            >
+              {t(($) => $.totp.use_authenticator)}
+            </Button>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+          </CardContent>
+          <CardFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setStep("email");
+                setCode("");
+                setError("");
+              }}
+            >
+              {t(($) => $.common.back)}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // TOTP step (authenticator app)
+  // -------------------------------------------------------------------------
+
+  if (step === "totp") {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            <CardTitle className="text-2xl">
+              {t(($) => $.totp.title)}
+            </CardTitle>
+            <CardDescription>
+              {t(($) => $.totp.totp_prompt)}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col items-center gap-4">
+            <InputOTP
+              maxLength={6}
+              value={code}
+              onChange={setCode}
+              disabled={loading}
+            >
+              <InputOTPGroup>
+                <InputOTPSlot index={0} />
+                <InputOTPSlot index={1} />
+                <InputOTPSlot index={2} />
+                <InputOTPSlot index={3} />
+                <InputOTPSlot index={4} />
+                <InputOTPSlot index={5} />
+              </InputOTPGroup>
+            </InputOTP>
+            {error && (
+              <p className="text-sm text-destructive">{error}</p>
+            )}
+            <Button
+              className="w-full"
+              disabled={code.length !== 6 || loading}
+              onClick={async () => {
+                setLoading(true);
+                setError("");
+                try {
+                  await useAuthStore.getState().verifyTOTPLogin(email, code);
+                  const wsList = await api.listWorkspaces();
+                  qc.setQueryData(workspaceKeys.list(), wsList);
+                  onTokenObtained?.();
+                  onSuccess();
+                } catch {
+                  toast.error(t(($) => $.totp.totp_invalid));
+                  setCode("");
+                  setLoading(false);
+                }
+              }}
+            >
+              {t(($) => $.totp.verify)}
+            </Button>
+            <Button
+              variant="link"
+              className="w-full"
+              disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                setError("");
+                try {
+                  await useAuthStore.getState().sendCode(email);
+                  setStep("code");
+                  setCooldown(60);
+                } catch (err) {
+                  setError(
+                    err instanceof Error
+                      ? err.message
+                      : `${t(($) => $.errors.send_failed)} ${t(($) => $.errors.server_unreachable)}`,
+                  );
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            >
+              {t(($) => $.totp.use_email_instead)}
+            </Button>
+          </CardContent>
+          <CardFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setStep("choose-method");
                 setCode("");
                 setError("");
               }}
