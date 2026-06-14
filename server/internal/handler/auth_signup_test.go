@@ -71,7 +71,7 @@ func TestFindOrCreateUserGating(t *testing.T) {
 		h := newTestHandler(cfg)
 		h.Queries = db.New(&mockDB{getUserErr: pgx.ErrNoRows})
 
-		_, isNew, err := h.findOrCreateUser(context.Background(), "new@blocked.com")
+		_, isNew, _, err := h.findOrCreateUser(context.Background(), "new@blocked.com")
 		if err == nil {
 			t.Fatal("expected error for new user when signup disabled")
 		}
@@ -89,7 +89,7 @@ func TestFindOrCreateUserGating(t *testing.T) {
 		// mockDB returns nil error for Scan, simulating user found
 		h.Queries = db.New(&mockDB{getUserErr: nil})
 
-		_, isNew, err := h.findOrCreateUser(context.Background(), "existing@test.com")
+		_, isNew, _, err := h.findOrCreateUser(context.Background(), "existing@test.com")
 		if err != nil {
 			t.Fatalf("expected no error for existing user, got %v", err)
 		}
@@ -106,7 +106,7 @@ func TestFindOrCreateUserGating(t *testing.T) {
 		// This will pass checkSignupAllowed and move to CreateUser.
 		// Our mockDB Exec returns success, but Queries.CreateUser might expect QueryRow for RETURNING id.
 		// Let's see if it works.
-		_, _, err := h.findOrCreateUser(context.Background(), "whitelisted@test.com")
+		_, _, _, err := h.findOrCreateUser(context.Background(), "whitelisted@test.com")
 		if err != nil && strings.Contains(err.Error(), "registration is disabled") {
 			t.Fatalf("expected whitelisted user to pass signup check, but got %v", err)
 		}
