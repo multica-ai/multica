@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronUp, ChevronDown, ChevronRight, Settings2, X, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings2, X, Pencil, Filter } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -41,9 +41,6 @@ export interface DynamicInboxSectionProps {
   onArchive: (entry: DynInboxEntry) => void;
   onChange: (next: InboxSectionConfig) => void;
   onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
-  isFirst: boolean;
-  isLast: boolean;
 }
 
 function entryKey(entry: DynInboxEntry): string {
@@ -132,6 +129,12 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
 
   // TECH-3502 #4 — inline rename of the box header.
   const [editing, setEditing] = useState(false);
+  // TECH-3502 #6 — the filter builder is configuration UI, so it only shows
+  // while you're building/changing the box: open by default for a just-added
+  // (empty) filter box, otherwise revealed from the ⋯ menu's "Edit filter".
+  const [editFilter, setEditFilter] = useState(
+    section.kind === "filter" && sectionFilters(section).length === 0,
+  );
 
   const projectName =
     section.kind === "project"
@@ -203,24 +206,6 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           <span className="text-xs text-muted-foreground">{selected.length}</span>
         )}
         <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={props.isFirst}
-            onClick={() => props.onMove(-1)}
-            title="Move up"
-          >
-            <ChevronUp className="size-3.5" />
-          </button>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted disabled:opacity-30"
-            disabled={props.isLast}
-            onClick={() => props.onMove(1)}
-            title="Move down"
-          >
-            <ChevronDown className="size-3.5" />
-          </button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<button type="button" className="rounded p-1 hover:bg-muted" title="Section settings" />}
@@ -235,6 +220,11 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                 {section.title && (
                   <DropdownMenuItem onClick={() => props.onChange({ ...section, title: undefined })}>
                     Reset name
+                  </DropdownMenuItem>
+                )}
+                {section.kind === "filter" && (
+                  <DropdownMenuItem onClick={() => setEditFilter(true)}>
+                    <Filter className="mr-2 size-3.5" /> Edit filter
                   </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
@@ -332,13 +322,22 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
         </div>
       </header>
 
-      {!isCollapsed && section.kind === "filter" && (
+      {!isCollapsed && section.kind === "filter" && editFilter && (
         <div className="border-b border-border/60">
           <FilterBuilder
             filters={sectionFilters(section)}
             projects={projects}
             onChange={(filters) => props.onChange({ ...section, filters })}
           />
+          <div className="flex justify-end px-3 pb-2">
+            <button
+              type="button"
+              onClick={() => setEditFilter(false)}
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-brand hover:bg-accent"
+            >
+              Done
+            </button>
+          </div>
         </div>
       )}
 

@@ -44,6 +44,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
+import { NotesPage } from "@multica/cerebro-notes/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
@@ -296,6 +297,11 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Approvals" },
           },
           {
+            path: "notes",
+            element: <NotesRoute />,
+            handle: { title: "Noter" },
+          },
+          {
             path: "notifications",
             element: <NotificationsPage />,
             handle: { title: "Notifications" },
@@ -328,6 +334,11 @@ export function createTabRouter(initialPath: string) {
 function DocumentsRoute() {
   const [search] = useSearchParams();
   return <FileManagerPage initialFolderId={search.get("folder")} />;
+}
+
+function NotesRoute() {
+  const [search] = useSearchParams();
+  return <NotesPage initialNoteId={search.get("note")} />;
 }
 
 function DocumentNewRoute() {

@@ -23,7 +23,8 @@
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "isomorphic-dompurify": "^3.11.0",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"

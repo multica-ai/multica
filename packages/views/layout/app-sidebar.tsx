@@ -90,6 +90,8 @@ import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav
 // CEREBRO-PATCH(cerebro-access-sidebar): FIR-2284 Bite 3 — removed; the old grant-based Access page was retired so per-tool Permissions (Settings) is the single access surface.
 // CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 sidebar entry for cerebro agent-passes admin page
 import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-passes-nav-item";
+// CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 sidebar entry for the Notes page
+import { NotesNavItem } from "@multica/cerebro-notes/views/notes-nav-item";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -861,6 +863,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                {/* CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 Notes entry in workspace group */}
+                <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
                 {projectsEnabled && (
                 <Collapsible defaultOpen>

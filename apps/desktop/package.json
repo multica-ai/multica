@@ -49,6 +49,7 @@
     "@multica/cerebro-approvals": "workspace:*",
     "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-attachments": "workspace:*",
+    "@multica/cerebro-notes": "workspace:*",
     "@multica/cerebro-autopilot-pages": "workspace:*",
     "@multica/cerebro-budgets": "workspace:*",
     "@multica/cerebro-chat": "workspace:*",

@@ -30,6 +30,12 @@ func (f *gateFakeResolver) Can(_ context.Context, _ permissions.Request) (permis
 type gateFakeApprovals struct {
 	intakes int
 	status  string
+
+	// reusable, when set, is returned by FindReusable to model a still-valid
+	// prior grant — an approved, unexpired row that GuardDecisionReusing
+	// short-circuits to allow without a new ask (TECH-3498 period grant). Its
+	// expires_at gates whether it is honoured, mirroring the real SQL filter.
+	reusable *cerebrodb.CerebroApprovalRequest
 }
 
 func (f *gateFakeApprovals) Intake(_ context.Context, p approvals.IntakeParams) (cerebrodb.CerebroApprovalRequest, error) {
@@ -41,11 +47,18 @@ func (f *gateFakeApprovals) Get(_ context.Context, _, _ pgtype.UUID) (cerebrodb.
 	return cerebrodb.CerebroApprovalRequest{ID: gateTestUUID(2), Status: f.status}, nil
 }
 
-// FindReusable is unused by the blocking runtime tool gate (Guard/GuardDecision
-// hold a single Await), so the fake reports "no reusable ask" — a fresh ask is
-// always created, matching prior behaviour.
+// FindReusable models the real FindReusable SQL filter: a stored approved row is
+// reusable only while its expires_at is NULL or in the future. The blocking tool
+// gate (Guard/GuardDecision) never calls this, but GuardDecisionReusing does, so
+// the fake honours a configured period grant and otherwise reports "none".
 func (f *gateFakeApprovals) FindReusable(_ context.Context, _ approvals.ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error) {
-	return cerebrodb.CerebroApprovalRequest{}, false, nil
+	if f.reusable == nil {
+		return cerebrodb.CerebroApprovalRequest{}, false, nil
+	}
+	if f.reusable.ExpiresAt.Valid && !f.reusable.ExpiresAt.Time.After(time.Now()) {
+		return cerebrodb.CerebroApprovalRequest{}, false, nil
+	}
+	return *f.reusable, true, nil
 }
 
 func gateTestUUID(seed byte) pgtype.UUID {

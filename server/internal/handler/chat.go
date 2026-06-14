@@ -181,6 +181,11 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// CEREBRO-PATCH(chat-state-apply): TECH-3352 — per-user chat snooze overlay.
+	var chatMuted map[string]string
+	if h.ChatMute != nil {
+		chatMuted = h.ChatMute.ChatMutedForUser(r.Context(), userID, workspaceID)
+	}
 	resp := make([]ChatSessionResponse, len(rows))
 	for i, s := range rows {
 		resp[i] = ChatSessionResponse{
@@ -193,6 +198,9 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			HasUnread:   s.HasUnread,
 			CreatedAt:   timestampToString(s.CreatedAt),
 			UpdatedAt:   timestampToString(s.UpdatedAt),
+		}
+		if mu, ok := chatMuted[resp[i].ID]; ok { // CEREBRO-PATCH(chat-state-apply): TECH-3352
+			resp[i].MutedUntil = &mu
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -685,6 +693,11 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(chat-state-clear-on-read): TECH-3352 — reading clears snooze.
+	if h.ChatMute != nil {
+		h.ChatMute.ClearChatSessionMute(r.Context(), uuidToString(session.ID), userID)
+	}
+
 	resolvedSessionID := uuidToString(session.ID)
 	h.publishChat(protocol.EventChatSessionRead, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionReadPayload{
 		ChatSessionID: resolvedSessionID,
@@ -871,6 +884,8 @@ type ChatSessionResponse struct {
 	HasUnread bool   `json:"has_unread"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+	// CEREBRO-PATCH(chat-state-response): TECH-3352 — per-user snooze target.
+	MutedUntil *string `json:"muted_until"`
 }
 
 type ChatMessageResponse struct {

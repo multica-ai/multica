@@ -299,6 +299,31 @@ var catalog = []Capability{
 			"DELETE /api/attachments/{id}",
 		},
 	},
+	{
+		Key:         "manage_notes",
+		Title:       "Create / edit / delete notes",
+		Category:    CategoryArtifacts,
+		Description: "Create, edit, delete, pin, or change the visibility of notes (built on the Document feature).",
+		Ops: []string{
+			"POST /api/notes/",
+			"PUT /api/notes/{id}",
+			"DELETE /api/notes/{id}",
+			"PUT /api/notes/{id}/pin",
+			"PUT /api/notes/{id}/visibility",
+		},
+	},
+	{
+		Key:         "manage_note_types",
+		Title:       "Create / edit / delete note types",
+		Category:    CategoryArtifacts,
+		Description: "Create, edit, delete, or run note types — reusable note templates with recurrence (e.g. business reviews).",
+		Ops: []string{
+			"POST /api/cerebro/note-types/",
+			"PUT /api/cerebro/note-types/{id}",
+			"DELETE /api/cerebro/note-types/{id}",
+			"POST /api/cerebro/note-types/{id}/run",
+		},
+	},
 
 	// --- Agents (styring af agenter) -----------------------------------------
 	{
@@ -910,6 +935,9 @@ var excluded = map[string]string{
 	"POST /api/chat/sessions/{sessionId}/messages":         "personal-chat — caller's own AI chat session",
 	"POST /api/chat/sessions/{sessionId}/agent-message":    "personal-chat — agent-initiated reply in the caller's own chat session; agent auth enforced in handler", // CEREBRO-PATCH(chat-agent-reply): TECH-3183
 	"POST /api/chat/sessions/{sessionId}/read":             "personal-chat — caller's own AI chat session",
+	"POST /api/chat/sessions/{sessionId}/mute":             "personal-chat — caller snoozing their own AI chat session (TECH-3352)",
+	"DELETE /api/chat/sessions/{sessionId}/mute":           "personal-chat — caller un-snoozing their own AI chat session (TECH-3352)",
+	"POST /api/chat/sessions/{sessionId}/unread":           "personal-chat — caller marking their own AI chat session unread (TECH-3352)",
 	"POST /api/chat/sessions/{sessionId}/convert-to-issue": "personal-chat — reached through the caller's own chat; the resulting create is gated by create_issue. PHASE-2 REQUIREMENT: enforcement must verify convert-to-issue actually routes through the create_issue gate, else it is an ungated create-bypass",
 
 	// daemon-token — runtime daemon callbacks; the daemon token binds the call to

@@ -208,6 +208,9 @@ importers:
       '@multica/cerebro-members':
         specifier: workspace:*
         version: link:../../packages/cerebro-members
+      '@multica/cerebro-notes':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-notes
       '@multica/cerebro-notifications':
         specifier: workspace:*
         version: link:../../packages/cerebro-notifications
@@ -627,6 +630,9 @@ importers:
       '@multica/cerebro-members':
         specifier: workspace:*
         version: link:../../packages/cerebro-members
+      '@multica/cerebro-notes':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-notes
       '@multica/cerebro-notifications':
         specifier: workspace:*
         version: link:../../packages/cerebro-notifications
@@ -1247,6 +1253,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
@@ -1468,6 +1477,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-inbox':
+        specifier: workspace:*
+        version: link:../cerebro-inbox
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2173,6 +2185,9 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
+      '@multica/cerebro-chat':
+        specifier: workspace:*
+        version: link:../cerebro-chat
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -2182,6 +2197,9 @@ importers:
       '@multica/cerebro-inbox-slack-block':
         specifier: workspace:*
         version: link:../cerebro-inbox-slack-block
+      '@multica/cerebro-notes':
+        specifier: workspace:*
+        version: link:../cerebro-notes
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2344,6 +2362,46 @@ importers:
       jsdom:
         specifier: 'catalog:'
         version: 29.1.1(@noble/hashes@1.8.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+
+  packages/cerebro-notes:
+    dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
+      '@tanstack/react-query':
+        specifier: 'catalog:'
+        version: 5.100.14(react@19.2.3)
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.16.0(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
       typescript:
         specifier: 'catalog:'
         version: 5.9.3

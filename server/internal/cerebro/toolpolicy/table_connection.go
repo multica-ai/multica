@@ -302,9 +302,9 @@ func (s *Store) ConnectionToolDenied(ctx context.Context, workspaceID, runtimeID
 // name collision can never loosen a tighter rule. A tool with no matching
 // connection row resolves to SettingAllow (ungated): connection permissions only
 // ever tighten from an allow baseline.
-func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (Setting, error) {
+func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (Setting, string, error) {
 	if toolName == "" {
-		return SettingAllow, nil
+		return SettingAllow, "", nil
 	}
 	rows, err := s.Table(ctx, TableQuery{
 		WorkspaceID: workspaceID,
@@ -313,18 +313,28 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 		UserID:      userID,
 	})
 	if err != nil {
-		return SettingAllow, err
+		return SettingAllow, "", err
 	}
 	result := SettingAllow
+	connName := ""
 	for _, r := range rows {
 		if r.Source != connectionToolSource || r.ResourcePattern != toolName {
 			continue
 		}
 		// Fold colliding rows to the tighter verdict (Deny > Ask > Allow) so a
 		// same-named tool on a looser connection can never override a tighter rule.
-		result = MoreRestrictive(result, r.Effective.Setting)
+		// Track the connection name of the deciding row whenever the verdict
+		// tightens past the allow baseline, so callers can surface "which
+		// integration" in the approval context (TECH-3498) and target a
+		// permission-level grant at the right connection:<name> key. A tool left
+		// on the allow baseline is ungated and reports no connection name.
+		tightened := MoreRestrictive(result, r.Effective.Setting)
+		if tightened != result && tightened != SettingAllow {
+			connName = strings.TrimPrefix(r.ToolKey, connectionToolKeyPrefix)
+		}
+		result = tightened
 	}
-	return result, nil
+	return result, connName, nil
 }
 
 // DeniedConnectionTools resolves, for the given chain context, every MCP

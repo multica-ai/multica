@@ -23,3 +23,11 @@ matches what you are about to touch before you start.
   `cancel_wakeup` work, what constraints apply (15-min min interval,
   consecutive-postpone limit), and how the sweeper dispatches due wakeups. Read
   before touching `server/internal/cerebro/wakeup/` or any MCP wakeup tools.
+
+- [`inbox-message-types.md`](./inbox-message-types.md) — **What shows up in the
+  inbox.** The 3 row kinds (issue notifications, channels/DM, agent chat) plus
+  the richer `InboxItemType` notification taxonomy underneath (mentions,
+  reminders, agent activity, …), and how per-row actions stay identical across
+  kinds (desktop 3-dot menu + shared `MobileRowActions` swipe). Read before
+  touching the inbox list, a `Cerebro*RowActions` component, or adding a
+  notification type. Notes that note-mentions are not yet an inbox type.

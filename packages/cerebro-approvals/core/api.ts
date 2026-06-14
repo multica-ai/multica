@@ -7,6 +7,7 @@ import {
   type ApprovalAuditList,
   type ApprovalList,
   type ApprovalsFilter,
+  type ApproveRequest,
   type DelegateRequest,
 } from "./types";
 
@@ -68,12 +69,21 @@ export async function fetchApprovalAudit(
 export async function approveApproval(
   wsId: string,
   approvalId: string,
-  note?: string,
+  req: ApproveRequest = {},
 ): Promise<Approval | null> {
   const path = `/api/workspaces/${wsId}/approvals/${approvalId}/approve`;
+  // Only send the optional grant controls when set, so a plain approve keeps the
+  // exact prior body shape ({ note }).
+  const body: ApproveRequest = { note: req.note ?? "" };
+  if (req.grant_for_seconds && req.grant_for_seconds > 0) {
+    body.grant_for_seconds = req.grant_for_seconds;
+  }
+  if (req.grant_at_level) {
+    body.grant_at_level = req.grant_at_level;
+  }
   const raw = await api.cerebroRequest<unknown>(path, {
     method: "POST",
-    body: JSON.stringify({ note: note ?? "" }),
+    body: JSON.stringify(body),
   });
   return parseWithFallback(raw, approvalSchema, null, { endpoint: path });
 }

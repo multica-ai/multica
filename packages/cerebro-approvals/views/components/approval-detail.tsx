@@ -30,8 +30,65 @@ import {
   useDelegateApproval,
   useRejectApproval,
 } from "../../core/mutations";
-import type { Approval, DelegateTargetType } from "../../core/types";
+import type {
+  Approval,
+  DelegateTargetType,
+  GrantLevel,
+} from "../../core/types";
 import { StatusBadge } from "./status-badge";
+
+// Duration presets for "approve for a period" → grant_for_seconds (TECH-3498).
+const GRANT_DURATIONS: { label: string; seconds: number }[] = [
+  { label: "Once", seconds: 0 },
+  { label: "1 hour", seconds: 3600 },
+  { label: "24 hours", seconds: 86400 },
+  { label: "7 days", seconds: 604800 },
+];
+
+// Permission-level presets for "also allow at level" → grant_at_level. The empty
+// value means "no escalation" (the default).
+const GRANT_LEVELS: { label: string; value: "" | GrantLevel }[] = [
+  { label: "None", value: "" },
+  { label: "This agent", value: "agent" },
+  { label: "This runtime", value: "runtime" },
+  { label: "Whole workspace", value: "workspace" },
+];
+
+// approvalContext is the optional, untyped context map the backend attaches to an
+// ask. It crosses the API boundary, so every field is read defensively (see
+// CLAUDE.md API Response Compatibility): unknown shapes degrade to nothing.
+interface AskContext {
+  connection?: string;
+  purpose?: string;
+  task_id?: string;
+  args?: unknown;
+}
+
+function readAskContext(raw: unknown): AskContext {
+  if (!raw || typeof raw !== "object") return {};
+  const obj = raw as Record<string, unknown>;
+  return {
+    connection: typeof obj.connection === "string" ? obj.connection : undefined,
+    purpose: typeof obj.purpose === "string" ? obj.purpose : undefined,
+    task_id: typeof obj.task_id === "string" ? obj.task_id : undefined,
+    args: obj.args,
+  };
+}
+
+// compactArgs JSON-stringifies the args blob and truncates it so a large payload
+// does not blow out the sheet. Returns "" when there is nothing useful to show.
+function compactArgs(args: unknown): string {
+  if (args === undefined || args === null) return "";
+  let json: string;
+  try {
+    json = JSON.stringify(args);
+  } catch {
+    return "";
+  }
+  if (!json || json === "{}" || json === "null" || json === "[]") return "";
+  const max = 240;
+  return json.length > max ? `${json.slice(0, max)}…` : json;
+}
 
 interface ApprovalDetailProps {
   wsId: string;
@@ -84,6 +141,12 @@ function AskBody({
   const [delegateOpen, setDelegateOpen] = useState(false);
   const [toType, setToType] = useState<DelegateTargetType>("member");
   const [toId, setToId] = useState("");
+  // Approve controls: duration (grant_for_seconds) and optional level escalation.
+  const [grantSeconds, setGrantSeconds] = useState(0);
+  const [grantLevel, setGrantLevel] = useState<"" | GrantLevel>("");
+
+  const ctx = readAskContext(ask.context);
+  const argsPreview = compactArgs(ctx.args);
 
   const isPending = ask.status === "pending";
   const busy = approve.isPending || reject.isPending || delegate.isPending;
@@ -108,6 +171,24 @@ function AskBody({
       <Field label="Resource">
         <code className="text-xs">{ask.resource || "*"}</code>
       </Field>
+      {ctx.purpose && <Field label="Purpose">{ctx.purpose}</Field>}
+      {ctx.connection && (
+        <Field label="Connection">
+          <code className="text-xs">{ctx.connection}</code>
+        </Field>
+      )}
+      {ctx.task_id && (
+        <Field label="Task">
+          <code className="text-xs">{ctx.task_id}</code>
+        </Field>
+      )}
+      {argsPreview && (
+        <Field label="Arguments">
+          <code className="block whitespace-pre-wrap break-all text-xs">
+            {argsPreview}
+          </code>
+        </Field>
+      )}
       <Field label="Requester">
         {ask.requester_type} · {ask.requester_id || "—"}
         {ask.agent_id ? ` (agent ${ask.agent_id})` : ""}
@@ -139,13 +220,60 @@ function AskBody({
             placeholder="Note (optional) — shown in audit"
             rows={2}
           />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                Approve for
+              </span>
+              <Select
+                value={String(grantSeconds)}
+                onValueChange={(v) => setGrantSeconds(Number(v))}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GRANT_DURATIONS.map((d) => (
+                    <SelectItem key={d.seconds} value={String(d.seconds)}>
+                      {d.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                Also allow at level
+              </span>
+              <Select
+                value={grantLevel}
+                onValueChange={(v) => setGrantLevel(v as "" | GrantLevel)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {GRANT_LEVELS.map((l) => (
+                    <SelectItem key={l.value || "none"} value={l.value}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </label>
+          </div>
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
               disabled={busy}
               onClick={() =>
                 approve.mutate(
-                  { id: ask.id, note },
+                  {
+                    id: ask.id,
+                    note,
+                    grant_for_seconds: grantSeconds > 0 ? grantSeconds : undefined,
+                    grant_at_level: grantLevel || undefined,
+                  },
                   {
                     onSuccess: () => {
                       toast.success("Approved");

@@ -47,6 +47,7 @@ function workspaceScoped(slug: string) {
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
+    notes: () => `${ws}/notes`, // CEREBRO-PATCH(cerebro-notes-path): TECH-3421 Notes page path
     search: () => `${ws}/search`, // CEREBRO-PATCH(search-page-1326): JEH-1326 dedicated search page path
     notifications: () => `${ws}/notifications`,
     myIssues: () => `${ws}/my-issues`,

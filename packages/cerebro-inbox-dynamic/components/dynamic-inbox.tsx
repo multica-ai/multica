@@ -49,7 +49,6 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { useQueryClient } from "@tanstack/react-query";
 import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import {
@@ -57,11 +56,10 @@ import {
   useInboxActionGroupLabels,
   useSetInboxMode,
 } from "@multica/cerebro-inbox";
-import { api } from "@multica/core/api";
-import { chatKeys } from "@multica/core/chat/queries";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
+import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel } from "@multica/core/types";
@@ -78,6 +76,9 @@ import {
 import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
+// TECH-3421 — the Notes box renders its own data (recent notes), so it is
+// dispatched here instead of going through DynamicInboxSection.
+import { NotesInboxBox } from "@multica/cerebro-notes/views";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -140,6 +141,7 @@ function SortableSection({
 
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
+  const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
@@ -150,7 +152,6 @@ export function DynamicInbox() {
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
-  const qc = useQueryClient();
 
   const [activeTabId, setActiveTabId] = useState<string>(
     layout.activeTabId ?? layout.tabs[0]?.id ?? "",
@@ -174,6 +175,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  // JEH-901 — "new message" → picking an AGENT must open an agent chat, not a
+  // one-agent DM. Held in local state because no ChatSession exists yet (the
+  // session is created on first send); mirrors the classic inbox new-chat flow.
+  const [newChat, setNewChat] = useState<{ agentId: string; sessionId: string | null } | null>(null);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
@@ -191,24 +196,24 @@ export function DynamicInbox() {
   const clearSelection = useCallback(() => {
     setSelected(null);
     setSelectedSnapshot(null);
+    setNewChat(null);
   }, []);
 
   const onSelect = (entry: DynInboxEntry) => {
+    setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
     // TECH-3413 #7 — selecting never auto-advances to the next row; we only
     // ever set the row the user clicked.
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
+  // TECH-3489 — issues and channels still archive via their host mutations.
+  // Chat rows own archive/unarchive/delete inside CerebroChatSessionRowActions;
+  // for a chat entry this only clears the selection if that row was open (the
+  // row passes it as `onCleared`).
   const onArchive = (entry: DynInboxEntry) => {
     if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
-    else if (entry.kind === "chat") {
-      // Mirror the classic inbox: archive the session, then refresh the list.
-      void api
-        .updateChatSession(entry.session.id, { status: "archived" })
-        .then(() => qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) }));
-    }
     if (selected && selected.id === entry.id) clearSelection();
   };
 
@@ -253,6 +258,14 @@ export function DynamicInbox() {
     });
   };
   const selectedChannelId = selected?.kind === "channel" ? selected.channel.id : null;
+  // JEH-901 — picking an AGENT in "new message" starts an agent chat (the same
+  // conversation panel the classic inbox uses), not a DM channel. A MEMBER
+  // still flows through onCreated → onOpenChannel (a real DM channel).
+  const handleAgentChatStarted = (agentId: string) => {
+    setSelected(null);
+    setSelectedSnapshot(null);
+    setNewChat({ agentId, sessionId: null });
+  };
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
@@ -280,19 +293,6 @@ export function DynamicInbox() {
     updateActiveTab((t) => ({ ...t, sections: t.sections.filter((s) => s.id !== id) }));
   const changeSection = (next: InboxSectionConfig) =>
     updateActiveTab((t) => ({ ...t, sections: t.sections.map((s) => (s.id === next.id ? next : s)) }));
-  const moveSection = (id: string, dir: -1 | 1) =>
-    updateActiveTab((t) => {
-      const idx = t.sections.findIndex((s) => s.id === id);
-      const swap = idx + dir;
-      if (idx < 0 || swap < 0 || swap >= t.sections.length) return t;
-      const next = [...t.sections];
-      const a = next[idx];
-      const b = next[swap];
-      if (!a || !b) return t;
-      next[idx] = b;
-      next[swap] = a;
-      return { ...t, sections: next };
-    });
 
   const addTab = () => {
     const id = makeId("tab");
@@ -333,6 +333,23 @@ export function DynamicInbox() {
   };
 
   const detail = useMemo(() => {
+    // JEH-901 — a freshly started agent chat (from "new message"). No session
+    // exists until the first message is sent; InboxChatPanel owns that, then
+    // reports the id back so we keep showing the live session.
+    if (newChat) {
+      return (
+        <ErrorBoundary resetKeys={[newChat.sessionId ?? newChat.agentId]}>
+          <InboxChatPanel
+            key={newChat.sessionId ?? "new-chat"}
+            sessionId={newChat.sessionId}
+            initialAgentId={newChat.agentId}
+            onSessionCreated={(id) =>
+              setNewChat((c) => (c ? { ...c, sessionId: id } : c))
+            }
+          />
+        </ErrorBoundary>
+      );
+    }
     if (!selected) return null;
     if (selected.kind === "channel") {
       return (
@@ -376,12 +393,25 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection]);
+  }, [selected, clearSelection, newChat]);
+
+  const createMenuProps = {
+    onNewMessage: () => setShowNewMessage(true),
+    onNewIssue: () => openCreateIssueWithPreference(),
+    onNewReminder: () => setShowReminder(true),
+  };
 
   const listColumn = (
-    <>
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* tabs */}
       <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-2 pt-1">
+          {/* TECH-3502 — on mobile the dynamic inbox is full-screen with no app
+              chrome, so it needs its own hamburger to open the navigation menu
+              (the classic inbox gets this from PageHeader). md:hidden on desktop. */}
+          <MobileSidebarTrigger className="-mb-1 mr-1" />
+          {/* TECH-3494 — tabs scroll horizontally and tuck behind the fixed
+              create/⋯ buttons when there are more than fit. */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {layout.tabs.map((tab) =>
             editingTabId === tab.id ? (
               // TECH-3502 #2/#4 — inline rename of a tab.
@@ -401,7 +431,7 @@ export function DynamicInbox() {
                     setEditingTabId(null);
                   }
                 }}
-                className="-mb-px w-28 border-b-2 border-primary bg-transparent px-2 pb-2 pt-2 text-sm font-semibold text-foreground outline-none"
+                className="-mb-px w-28 shrink-0 border-b-2 border-primary bg-transparent px-2 pb-2 pt-2 text-sm font-semibold text-foreground outline-none"
                 aria-label="Tab name"
               />
             ) : (
@@ -411,7 +441,7 @@ export function DynamicInbox() {
                 onClick={() => setActiveTabId(tab.id)}
                 onDoubleClick={() => setEditingTabId(tab.id)}
                 title="Double-click to rename"
-                className={`-mb-px border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
+                className={`-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 pb-2 pt-2 text-sm font-semibold ${
                   tab.id === activeTab.id
                     ? "border-primary text-foreground"
                     : "border-transparent text-muted-foreground hover:text-foreground"
@@ -421,14 +451,11 @@ export function DynamicInbox() {
               </button>
             ),
           )}
+          </div>
           {/* create-menu (main) + ⋯ settings menu — tab add/rename/remove now
               lives in ⋯ (TECH-3502 #2) */}
-          <div className="ml-auto flex items-center gap-1 pb-1">
-            <DynamicInboxCreateMenu
-              onNewMessage={() => setShowNewMessage(true)}
-              onNewIssue={() => openCreateIssueWithPreference()}
-              onNewReminder={() => setShowReminder(true)}
-            />
+          <div className="flex shrink-0 items-center gap-1 pb-1">
+            <DynamicInboxCreateMenu {...createMenuProps} />
             <Dialog open={savePresetOpen} onOpenChange={setSavePresetOpen}>
               <DialogContent>
                 <form onSubmit={onSavePreset} className="space-y-4">
@@ -480,8 +507,12 @@ export function DynamicInbox() {
                 <DropdownMenuGroup>
                   <DropdownMenuLabel>Add section</DropdownMenuLabel>
                   {SECTION_CATALOG.filter(
+                    // TECH-3422 — Chat only when slack-block is on.
                     (c) => c.kind !== "team" || slackBlockEnabled,
-                  ).map((c) => (
+                  )
+                    // TECH-3421 — only offer the Notes box when Notes is enabled.
+                    .filter((c) => c.kind !== "notes" || notesEnabled)
+                    .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
                     </DropdownMenuItem>
@@ -569,24 +600,44 @@ export function DynamicInbox() {
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-3">
-                {activeTab.sections.map((section, i) => (
+                {activeTab.sections.map((section) => (
                   <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
-                      section.kind === "team" ? (
+                      // TECH-3421 — the Notes box renders its own data (recent
+                      // notes); dispatched here like the Chat block, not via
+                      // DynamicInboxSection.
+                      section.kind === "notes" ? (
+                        <NotesInboxBox
+                          title={section.title}
+                          dragHandle={handle}
+                          onRemove={() => removeSection(section.id)}
+                        />
+                      ) : section.kind === "team" ? (
                         <div className="relative">
                           <div className="absolute left-2 top-2.5 z-10">{handle}</div>
                           <SlackBlock
                             wsId={wsId}
                             selectedChannelId={selectedChannelId}
                             onOpenChannel={onOpenChannel}
-                            maxPeople={section.maxPeople}
-                            onSetMaxPeople={(n) => changeSection({ ...section, maxPeople: n })}
+                            limit={section.teamLimit}
+                            onSetLimit={(n) => changeSection({ ...section, teamLimit: n })}
                             sort={section.teamSort}
                             onSetSort={(s) => changeSection({ ...section, teamSort: s })}
+                            unreadFirst={section.teamUnreadFirst ?? true}
+                            onSetUnreadFirst={(v) =>
+                              changeSection({
+                                ...section,
+                                teamUnreadFirst: v,
+                                teamGroupBy:
+                                  section.teamGroupBy === "unread" ? "type" : section.teamGroupBy,
+                              })
+                            }
+                            groupBy={section.teamGroupBy === "unread" ? "type" : section.teamGroupBy}
+                            onSetGroupBy={(g) => changeSection({ ...section, teamGroupBy: g })}
+                            showAgents={section.showAgents}
+                            onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
+                            onOpenAgentChat={handleAgentChatStarted}
                             onRemove={() => removeSection(section.id)}
-                            onMove={(dir) => moveSection(section.id, dir)}
-                            isFirst={i === 0}
-                            isLast={i === activeTab.sections.length - 1}
                           />
                         </div>
                       ) : (
@@ -603,9 +654,6 @@ export function DynamicInbox() {
                           onArchive={onArchive}
                           onChange={changeSection}
                           onRemove={() => removeSection(section.id)}
-                          onMove={(dir) => moveSection(section.id, dir)}
-                          isFirst={i === 0}
-                          isLast={i === activeTab.sections.length - 1}
                         />
                       )
                     }
@@ -615,7 +663,12 @@ export function DynamicInbox() {
             </SortableContext>
           </DndContext>
         </div>
-    </>
+        <div className="pointer-events-none absolute bottom-4 right-4 z-30 md:hidden">
+          <div className="pointer-events-auto">
+            <DynamicInboxCreateMenu {...createMenuProps} variant="floating" />
+          </div>
+        </div>
+    </div>
   );
 
   // TECH-3413 (Jesper feedback): mobile/PWA has no room for the side-by-side
@@ -623,10 +676,11 @@ export function DynamicInbox() {
   // open) that message full-screen with a Back button — mirroring how the
   // classic inbox behaves on a phone.
   if (isMobile) {
-    if (selected) {
+    if (selected || newChat) {
       return (
         <div className="flex h-full flex-col min-h-0">
           <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+            <MobileSidebarTrigger className="mr-0" />
             <button
               type="button"
               onClick={clearSelection}
@@ -646,6 +700,7 @@ export function DynamicInbox() {
           open={showNewMessage}
           onClose={() => setShowNewMessage(false)}
           onCreated={onOpenChannel}
+          onAgentChatStarted={handleAgentChatStarted}
         />
         <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
       </div>
@@ -674,6 +729,7 @@ export function DynamicInbox() {
         open={showNewMessage}
         onClose={() => setShowNewMessage(false)}
         onCreated={onOpenChannel}
+        onAgentChatStarted={handleAgentChatStarted}
       />
       <GlobalInboxReminderDialog open={showReminder} onOpenChange={setShowReminder} />
     </>

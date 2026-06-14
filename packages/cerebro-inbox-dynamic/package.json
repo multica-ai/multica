@@ -14,9 +14,11 @@
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@multica/cerebro-chat": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-inbox": "workspace:*",
     "@multica/cerebro-inbox-slack-block": "workspace:*",
+    "@multica/cerebro-notes": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*"

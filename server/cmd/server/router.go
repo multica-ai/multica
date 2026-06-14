@@ -70,6 +70,7 @@ import (
 	cerebrogithubprheal "github.com/multica-ai/multica/server/internal/cerebro/githubprheal"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
 	cerebromentiongate "github.com/multica-ai/multica/server/internal/cerebro/mentiongate"
+	cerebronote "github.com/multica-ai/multica/server/internal/cerebro/note"                       // CEREBRO-PATCH(router-notes-import): TECH-3421 Notes feature.
 	cerebroprivateagentrun "github.com/multica-ai/multica/server/internal/cerebro/privateagentrun" // CEREBRO-PATCH(router-private-agent-run-request): FIR-2385.
 	// CEREBRO-PATCH(references-routes): JEH-837 issue references handler import.
 	cerebroreferences "github.com/multica-ai/multica/server/internal/cerebro/references"
@@ -95,6 +96,8 @@ import (
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
+	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
+	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox
 	cerebrofocuslist "github.com/multica-ai/multica/server/internal/cerebro/focus_list"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
@@ -520,6 +523,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// surface to a single line per cerebro inbox feature.
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
+	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries, bus) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes feature.
+	// CEREBRO-PATCH(handler-chat-mute-wire): TECH-3352 — chat-snooze seam.
+	h.ChatMute = cerebroInboxHandler
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
@@ -556,7 +562,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
 	cerebroSandboxProfileHandler := cerebrosandboxprofile.NewHandler()
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
-	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus))
+	// CEREBRO-PATCH(cerebro-approvals-routes): TECH-3498 wire tool-policy store + agent queries for the "grant at a permission level" approve seam.
+	cerebroApprovalsHandler := cerebroapprovals.NewHandler(cerebroapprovals.New(cerebroQueries, pool, bus)).WithToolPolicy(cerebrotoolpolicy.NewStore(pool), queries)
 	// CEREBRO-PATCH(router-group-permissions-seam): JEH-1009 wire capability gate into the upstream handler
 	h.GroupPermissions = cerebrogrouppermissions.NewHandlerSeam(cerebroGroupPermissionsHandler.Service)
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
@@ -668,6 +675,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
+	cerebroNoteTypesHandler := cerebronotetypes.NewHandler(cerebroQueries, pool)
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
 	cerebroFocusListHandler := cerebrofocuslist.New(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
@@ -1683,6 +1692,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/messages/page", h.ListChatMessagesPage)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Post("/read", h.MarkChatSessionRead)
+					// CEREBRO-PATCH(chat-state-routes): TECH-3352 — chat row inbox
+					// controls (snooze + mark-unread) aligned with issues/channels.
+					r.Post("/mute", cerebroInboxHandler.MuteChatSession)
+					r.Delete("/mute", cerebroInboxHandler.UnmuteChatSession)
+					r.Post("/unread", cerebroInboxHandler.MarkChatSessionUnread)
 					r.Get("/usage", h.GetChatSessionUsage)
 					// CEREBRO-PATCH(chat-message-cost-route): FIR-31 per-reply cost badge.
 					r.Get("/message-costs", h.GetChatSessionMessageCosts)
@@ -1708,6 +1722,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}", h.DeleteArtifactFolder)
 			})
 			r.Post("/api/artifact-uploads", h.UploadArtifactFile)
+
+			r.Route("/api/notes", cerebroNoteHandler.Routes) // CEREBRO-PATCH(cerebro-notes-routes): TECH-3421 Notes feature.
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
@@ -1814,6 +1830,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/regenerate-signing-secret", cerebroWorkflowsHandler.RegenerateInboundSigningSecret)
 				r.Post("/{id}/regenerate-outbound-secret", cerebroWorkflowsHandler.RegenerateOutboundSecret)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
+			})
+			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.
+			r.Route("/api/cerebro/note-types", func(r chi.Router) {
+				r.Get("/", cerebroNoteTypesHandler.ListNoteTypes)
+				r.Post("/", cerebroNoteTypesHandler.CreateNoteType)
+				r.Get("/{id}", cerebroNoteTypesHandler.GetNoteType)
+				r.Put("/{id}", cerebroNoteTypesHandler.UpdateNoteType)
+				r.Delete("/{id}", cerebroNoteTypesHandler.DeleteNoteType)
+				r.Post("/{id}/run", cerebroNoteTypesHandler.RunNow)
 			})
 			// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint REST surface.
 			r.Route("/api/cerebro/projects/{projectID}/sprint-settings", func(r chi.Router) {

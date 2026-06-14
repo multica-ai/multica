@@ -94,6 +94,45 @@ func TestGateConnectionTool_AskRoutesThroughInbox(t *testing.T) {
 	}
 }
 
+// TestGateConnectionTool_PeriodGrantSkipsSecondAsk is the TECH-3498 "approve for
+// a period" gateway proof: once a connection-tool Ask is approved with a future
+// expires_at, a SECOND guardToolCall for the same tool short-circuits to allowed
+// via FindReusable — no new inbox ask (intakes stays 1). It models the still-valid
+// grant by feeding the fake approvals an approved, unexpired row.
+func TestGateConnectionTool_PeriodGrantSkipsSecondAsk(t *testing.T) {
+	ap := &gateFakeApprovals{status: approvals.StatusApproved}
+	e, agentID := newToolPolicyGatedExecutor(t, ap)
+	e.connDeny = toolpolicy.NewStore(runtimeAccountTestPool)
+	seedConnectionAsk(t, agentID, toolpolicy.SettingAsk)
+	ctx := context.Background()
+
+	// First call: no reusable grant yet, so it raises one ask and is approved.
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, GatewayRequestMeta{})
+	if !allowed {
+		t.Fatal("approved connection Ask must let the first call continue")
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("first call must create exactly one inbox request, got %d", ap.intakes)
+	}
+
+	// Model the period grant: an approved row whose expires_at is in the future.
+	ap.reusable = &cerebrodb.CerebroApprovalRequest{
+		ID:        gateTestUUID(7),
+		Status:    approvals.StatusApproved,
+		ExpiresAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	}
+
+	// Second call for the same tool: the still-valid grant short-circuits to
+	// allowed with NO new ask.
+	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, GatewayRequestMeta{})
+	if !allowed {
+		t.Fatal("a still-valid period grant must let the second call continue")
+	}
+	if ap.intakes != 1 {
+		t.Fatalf("second call must reuse the grant, not create a new ask; intakes=%d", ap.intakes)
+	}
+}
+
 // TestGateConnectionTool_DenyBlocksAlwaysOn proves the TECH-3174 guarantee is
 // preserved through the TECH-3498 refactor: a connection-tool Deny blocks even
 // with the approval gate OFF (e.gate == nil) and never creates an inbox ask.

@@ -22,10 +22,12 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
+  | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
   | "cerebro_inbox_dynamic"
+  | "cerebro_notes"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -69,6 +71,8 @@ export type CerebroFlagKey =
   | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
+  // TECH-3511: note types — reusable note templates with recurrence (business reviews).
+  | "cerebro_note_types"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
@@ -159,10 +163,16 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
+  cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
   cerebro_inbox_dynamic: false,
+  // TECH-3421: OFF by default until the Notes UI ships + is QA'd on staging.
+  // Gates the Notes feature (private-by-default notes built on artifacts):
+  // the Notes nav entry, quick-capture, the notes list/editor surface, and the
+  // Notes box in the dynamic inbox.
+  cerebro_notes: false,
   cerebro_inbox_slack_block: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
@@ -230,6 +240,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
   cerebro_sprints: false,
+  // TECH-3511: OFF by default. Hides the Note types admin in Documents and
+  // skips the note-types sweeper until a workspace opts in.
+  cerebro_note_types: false,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -471,6 +484,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
+  },
+  {
+    key: "cerebro_chat_row_actions",
+    label: "Chat row actions",
+    group: "inbox",
+    description:
+      "Give agent chat sessions the same inbox row menu as notifications and channels: a 3-dot menu (and mobile swipe) to mark read, rename, convert to issue, archive, unarchive, and delete a chat — so an archived chat can be reopened and continued.",
   },
   {
     key: "cerebro_inbox_action_grouping",
@@ -738,6 +758,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_note_types",
+    label: "Note types",
+    group: "workspace",
+    description:
+      "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
   },
   {
     key: "cerebro_pdf_inline_render",
