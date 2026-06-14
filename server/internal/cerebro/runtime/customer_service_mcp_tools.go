@@ -300,10 +300,40 @@ func customerServiceMCPTools() []Tool {
 		},
 		{
 			name:        "search_products",
-			description: "Søg efter Selveo-produkter på navn.",
-			schema: objectSchema([]string{"searchTerm"}, map[string]any{
-				"searchTerm": stringProp("Søgeord (produktnavn)."),
-				"limit":      numberProp("Maks antal resultater (standard 10)."),
+			description: "Slå produkter op i varekataloget (alle webshops) — eksakt opslag med autoritativt lager og pris fra vores eget datavarehus. Brug search_products_relewise når kunden beskriver et behov frem for et navn.",
+			schema: objectSchema([]string{"query"}, map[string]any{
+				"query":   stringProp("Produktnavn eller søgeord."),
+				"brand":   stringProp("Filtrér på brand: helsebixen | jala | well | made4men."),
+				"inStock": map[string]any{"type": "boolean", "description": "Kun varer på lager."},
+				"limit":   numberProp("Maks antal resultater (standard 10)."),
+			}),
+		},
+		{
+			name:        "search_products_relewise",
+			description: "Semantisk produktsøgning via Relewise (samme søgemotor som webshoppen) — forstår betydning, ikke kun ord. Vises kun for webshops der har en Relewise-nøgle.",
+			schema: objectSchema([]string{"query"}, map[string]any{
+				"query":   stringProp("Produktnavn, søgeord eller spørgsmål."),
+				"brand":   stringProp("Filtrér på brand: helsebixen | jala | well | made4men."),
+				"inStock": map[string]any{"type": "boolean", "description": "Kun varer på lager."},
+				"limit":   numberProp("Maks antal resultater (standard 10)."),
+			}),
+		},
+		{
+			name:        "find_alternative_products",
+			description: "Find alternativer til et produkt (Relewise lignende-varer) — brug når en vare er udsolgt eller kunden vil se lignende. productId fås fra search_products (id: ...). Angiv brand (samme webshop som produktet) — hver webshop har sit eget datasæt.",
+			schema: objectSchema([]string{"productId"}, map[string]any{
+				"productId": stringProp("Produktets id fra search_products-output (id: ...)."),
+				"brand":     stringProp("Webshoppen produktet hører til: helsebixen | jala | well | made4men."),
+				"limit":     numberProp("Maks antal alternativer (standard 5)."),
+			}),
+		},
+		{
+			name:        "recommend_products",
+			description: "Anbefal produkter ud fra et spørgsmål/behov i fri tekst (fx \"noget mod ømme muskler\") via Relewise — samme motor som webshoppen. Uden brand søges på tværs af alle webshops.",
+			schema: objectSchema([]string{"query"}, map[string]any{
+				"query": stringProp("Kundens spørgsmål eller behov i fri tekst."),
+				"brand": stringProp("Begræns til én webshop: helsebixen | jala | well | made4men."),
+				"limit": numberProp("Maks antal anbefalinger (standard 5)."),
 			}),
 		},
 		{
