@@ -259,7 +259,13 @@ function section(kind: SectionKind, extra: Partial<InboxSectionConfig> = {}): In
   return { id: makeId(kind), kind, groupBy: "none", sort: "newest", showPriority: true, ...extra };
 }
 
-/** Initial dynamic inbox layout for users without a saved layout. */
+/**
+ * Initial dynamic inbox layout for users without a saved layout.
+ * TECH-3541 #2 — the default is a single "All messages" box grouped by action,
+ * so switching to the dynamic inbox is effectively the same as the classic
+ * inbox (which also defaults to action grouping). Users then add boxes / tabs
+ * on top of this baseline.
+ */
 export function operatorPreset(): InboxLayout {
   const tabId = makeId("tab");
   return {
@@ -269,11 +275,7 @@ export function operatorPreset(): InboxLayout {
       {
         id: tabId,
         title: "Inbox",
-        sections: [
-          section("act_now", { groupBy: "action" }),
-          section("running"),
-          section("reminders"),
-        ],
+        sections: [section("all", { groupBy: "action" })],
       },
     ],
   };

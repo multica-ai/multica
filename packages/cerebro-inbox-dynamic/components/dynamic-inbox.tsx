@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2 } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2, Archive } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -84,6 +84,7 @@ import {
 import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
+import { ArchivedInboxView } from "./archived-inbox-view";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox } from "@multica/cerebro-notes/views";
@@ -202,6 +203,9 @@ export function DynamicInbox() {
   const [showReminder, setShowReminder] = useState(false);
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
+  // TECH-3541 #3 — archived messages are a VIEW reached from the ⋯ menu, not a
+  // box. Toggling this swaps the section list for the archived list.
+  const [archivedOpen, setArchivedOpen] = useState(false);
   // TECH-3413 #6 — frozen copy of the selected entry, captured at selection
   // time. While a row is open we render it from this snapshot so marking it
   // read doesn't move it out of its group/section until you pick another row.
@@ -609,6 +613,9 @@ export function DynamicInbox() {
                   )}
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setArchivedOpen(true)}>
+                  <Archive className="mr-2 size-4" /> Show archived
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => void setMode("classic")}>
                   <LayoutList className="mr-2 size-4" /> Switch to classic inbox
                 </DropdownMenuItem>
@@ -728,6 +735,19 @@ export function DynamicInbox() {
     </div>
   );
 
+  // TECH-3541 #3 — when the archived view is open it replaces the section list
+  // in the left column (the detail panel keeps working for opened rows).
+  const leftColumn = archivedOpen ? (
+    <ArchivedInboxView
+      wsId={wsId}
+      selectedKey={selectedKey}
+      onSelect={onSelect}
+      onBack={() => setArchivedOpen(false)}
+    />
+  ) : (
+    listColumn
+  );
+
   // TECH-3413 (Jesper feedback): mobile/PWA has no room for the side-by-side
   // split. It renders a single column — the section list, or (when a row is
   // open) that message full-screen with a Back button — mirroring how the
@@ -743,7 +763,7 @@ export function DynamicInbox() {
     const detailOpen = Boolean(selected || newChat);
     return (
       <div className="relative flex h-full flex-col min-h-0">
-        {listColumn}
+        {leftColumn}
         {detailOpen && (
           <div className="absolute inset-0 z-40 flex flex-col min-h-0 bg-background">
             <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -774,7 +794,7 @@ export function DynamicInbox() {
     <>
       <ResizablePanelGroup orientation="horizontal">
         <ResizablePanel id="list" defaultSize={420} minSize={300} className="flex flex-col">
-          {listColumn}
+          {leftColumn}
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel id="detail" minSize="40%" className="flex flex-col">

@@ -391,6 +391,14 @@ describe("section-filter — classic parity (TECH-3541 #2)", () => {
     expect(groups.map((g) => g.label)).toEqual(["Alpha", "No project"]);
   });
 
+  it("default preset is a single 'All messages' box grouped by action", () => {
+    const preset = operatorPreset();
+    expect(preset.tabs).toHaveLength(1);
+    expect(preset.tabs[0]?.sections).toHaveLength(1);
+    expect(preset.tabs[0]?.sections[0]?.kind).toBe("all");
+    expect(preset.tabs[0]?.sections[0]?.groupBy).toBe("action");
+  });
+
   it("groups two levels deep with 'Then by'", () => {
     const gctx: SectionGroupContext = {
       projectMap: new Map([["p1", { title: "Alpha" } as never]]),
