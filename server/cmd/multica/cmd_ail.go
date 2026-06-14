@@ -38,10 +38,17 @@ var ailRunCmd = &cobra.Command{
 	RunE:  runAilRun,
 }
 
+var ailReplayCmd = &cobra.Command{
+	Use:   "replay",
+	Short: "Run Stage 7 one-off replay and evaluation against a Stage 2 index",
+	RunE:  runAilReplay,
+}
+
 func init() {
 	ailCmd.AddCommand(ailStage2Cmd)
 	ailCmd.AddCommand(ailStage3Cmd)
 	ailCmd.AddCommand(ailRunCmd)
+	ailCmd.AddCommand(ailReplayCmd)
 
 	ailStage2Cmd.Flags().String("config", "", "Path to optional Stage 2 config JSON file (contains stage1.events_path, stage1.emit_categories)")
 	ailStage2Cmd.Flags().String("events-path", "", "Path to Stage 1 events JSONL file (overrides config and default)")
@@ -68,6 +75,21 @@ func init() {
 	ailRunCmd.Flags().String("stage5-output-dir", "", "Directory for Stage 5 digest and watermark output (default: ~/diagnostics/stage5)")
 	ailRunCmd.Flags().String("digest-issue", "", "Issue ID to receive the Stage 5 human-readable digest (fallback: MULTICA_AIL_TUNING_ISSUE_ID)")
 	ailRunCmd.Flags().String("output", "json", "Output format: json or table")
+
+	ailReplayCmd.Flags().String("index-path", "", "Path to Stage 2 index JSONL file (default: <stage2 output-dir>/stage2_index.jsonl)")
+	ailReplayCmd.Flags().String("output-dir", "", "Directory for Stage 7 output files (default: ~/diagnostics/stage7)")
+	ailReplayCmd.Flags().StringArray("event-ids", nil, "Event IDs to replay; repeat or comma-separate values")
+	ailReplayCmd.Flags().StringArray("issue-ids", nil, "Issue IDs to replay; repeat or comma-separate values")
+	ailReplayCmd.Flags().StringArray("agent-ids", nil, "Agent IDs to replay; repeat or comma-separate values")
+	ailReplayCmd.Flags().String("time-start", "", "Inclusive UTC replay start time (RFC3339)")
+	ailReplayCmd.Flags().String("time-end", "", "Exclusive UTC replay end time (RFC3339)")
+	ailReplayCmd.Flags().StringArray("failure-reasons", nil, "Failure reasons to replay; repeat or comma-separate values")
+	ailReplayCmd.Flags().StringArray("loop-signatures", nil, "Loop signatures to replay; repeat or comma-separate values")
+	ailReplayCmd.Flags().StringArray("tool-args", nil, "Deterministic profile tool arg as key=value; repeat for multiple values")
+	ailReplayCmd.Flags().StringArray("env-keys", nil, "Environment keys to snapshot into the deterministic profile")
+	ailReplayCmd.Flags().String("git-revision", "", "Git revision to record in the deterministic profile")
+	ailReplayCmd.Flags().String("evaluation-results-path", "", "Optional evaluation results JSONL for metrics")
+	ailReplayCmd.Flags().String("output", "json", "Output format: json or table")
 }
 
 func runAilStage2(cmd *cobra.Command, _ []string) error {
@@ -180,6 +202,55 @@ func runAilRun(cmd *cobra.Command, _ []string) error {
 	return cli.PrintJSON(cmd.OutOrStdout(), combined)
 }
 
+func runAilReplay(cmd *cobra.Command, _ []string) error {
+	indexPath, _ := cmd.Flags().GetString("index-path")
+	outputDir, _ := cmd.Flags().GetString("output-dir")
+	eventIDs, _ := cmd.Flags().GetStringArray("event-ids")
+	issueIDs, _ := cmd.Flags().GetStringArray("issue-ids")
+	agentIDs, _ := cmd.Flags().GetStringArray("agent-ids")
+	timeStart, _ := cmd.Flags().GetString("time-start")
+	timeEnd, _ := cmd.Flags().GetString("time-end")
+	failureReasons, _ := cmd.Flags().GetStringArray("failure-reasons")
+	loopSignatures, _ := cmd.Flags().GetStringArray("loop-signatures")
+	toolArgPairs, _ := cmd.Flags().GetStringArray("tool-args")
+	envKeys, _ := cmd.Flags().GetStringArray("env-keys")
+	gitRevision, _ := cmd.Flags().GetString("git-revision")
+	evaluationResultsPath, _ := cmd.Flags().GetString("evaluation-results-path")
+
+	toolArgs, err := parseAilReplayToolArgs(toolArgPairs)
+	if err != nil {
+		return err
+	}
+
+	cfg := ail.Stage7ReplayConfig{
+		IndexPath:             indexPath,
+		OutputDir:             outputDir,
+		EventIDs:              eventIDs,
+		IssueIDs:              issueIDs,
+		AgentIDs:              agentIDs,
+		TimeStart:             timeStart,
+		TimeEnd:               timeEnd,
+		FailureReasons:        failureReasons,
+		LoopSignatures:        loopSignatures,
+		ToolArgs:              toolArgs,
+		EnvKeys:               envKeys,
+		GitRevision:           gitRevision,
+		EvaluationResultsPath: evaluationResultsPath,
+	}
+
+	result, err := ail.RunStage7Replay(cfg)
+	if err != nil {
+		return err
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		printAilReplayTable(cmd, cfg, result)
+		return nil
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), result)
+}
+
 func postAilStage5Digest(cmd *cobra.Command, issueID string, digest ail.Stage5Digest) (bool, error) {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -204,6 +275,31 @@ func postAilStage5Digest(cmd *cobra.Command, issueID string, digest ail.Stage5Di
 		return false, fmt.Errorf("add comment: %w", err)
 	}
 	return true, nil
+}
+
+func parseAilReplayToolArgs(raw []string) (map[string]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	toolArgs := map[string]string{}
+	for _, value := range raw {
+		for _, part := range strings.Split(value, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			key, val, ok := strings.Cut(part, "=")
+			key = strings.TrimSpace(key)
+			if !ok || key == "" {
+				return nil, fmt.Errorf("tool-args entries must use key=value, got %q", part)
+			}
+			toolArgs[key] = strings.TrimSpace(val)
+		}
+	}
+	if len(toolArgs) == 0 {
+		return nil, nil
+	}
+	return toolArgs, nil
 }
 
 func printAilStage2Table(cmd *cobra.Command, result ail.Stage2Result) {
@@ -254,4 +350,16 @@ func printAilRunTable(cmd *cobra.Command, s2 ail.Stage2Result, s3 ail.Stage3Resu
 		s3.AnalyzedAt, s3.TotalEvents, len(s3.CandidateDettools))
 	fmt.Fprintf(w, "stage5: marker=%s digest_posted=%t alerts=%d\n",
 		s5.Marker, stage5Posted, len(s5.Alerts))
+}
+
+func printAilReplayTable(cmd *cobra.Command, cfg ail.Stage7ReplayConfig, result ail.Stage7ReplayDecision) {
+	w := cmd.OutOrStdout()
+	fmt.Fprintf(w, "replay_id: %s  events: %d  decision: %s\n",
+		result.ReplayID, result.EventCount, cfg.Stage7DecisionPath())
+	fmt.Fprintf(w, "metrics: success_on_retry_delta=%.4f retry_reduction=%d precision=%.4f invocation_cost=%.4f evaluation_count=%d\n",
+		result.Metrics.SuccessOnRetryDelta,
+		result.Metrics.RetryReduction,
+		result.Metrics.Precision,
+		result.Metrics.InvocationCost,
+		result.Metrics.EvaluationCount)
 }

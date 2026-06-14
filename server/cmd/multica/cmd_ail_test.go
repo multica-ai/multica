@@ -312,6 +312,25 @@ func newAilRunTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newAilReplayTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "replay"}
+	cmd.Flags().String("index-path", "", "")
+	cmd.Flags().String("output-dir", "", "")
+	cmd.Flags().StringArray("event-ids", nil, "")
+	cmd.Flags().StringArray("issue-ids", nil, "")
+	cmd.Flags().StringArray("agent-ids", nil, "")
+	cmd.Flags().String("time-start", "", "")
+	cmd.Flags().String("time-end", "", "")
+	cmd.Flags().StringArray("failure-reasons", nil, "")
+	cmd.Flags().StringArray("loop-signatures", nil, "")
+	cmd.Flags().StringArray("tool-args", nil, "")
+	cmd.Flags().StringArray("env-keys", nil, "")
+	cmd.Flags().String("git-revision", "", "")
+	cmd.Flags().String("evaluation-results-path", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
 func writeTestAilIndex(t *testing.T, path string, events []ail.Stage2Event) {
 	t.Helper()
 	f, err := os.Create(path)
@@ -721,6 +740,37 @@ func TestRunAilRunErrorWhenStage3AnalyzeFails(t *testing.T) {
 	}
 }
 
+func TestRunAilRunErrorWhenStage5DigestFails(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	stage2Dir := filepath.Join(tmp, "stage2")
+	stage3Dir := filepath.Join(tmp, "stage3")
+	blockingFile := filepath.Join(tmp, "blocking_file")
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "t1", AgentID: "a1", Status: "failed", FailureReason: "err"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+	if err := os.WriteFile(blockingFile, []byte("block"), 0o644); err != nil {
+		t.Fatalf("create blocking file: %v", err)
+	}
+
+	cmd := newAilRunTestCmd()
+	setTestFlag(t, cmd, "events-path", eventsPath)
+	setTestFlag(t, cmd, "stage2-output-dir", stage2Dir)
+	setTestFlag(t, cmd, "stage3-output-dir", stage3Dir)
+	setTestFlag(t, cmd, "stage5-output-dir", filepath.Join(blockingFile, "subdir"))
+
+	err := runAilRun(cmd, nil)
+	if err == nil {
+		t.Fatal("expected error when stage5 output dir parent is a file, got nil")
+	}
+	if !strings.Contains(err.Error(), "stage5:") {
+		t.Fatalf("expected error to contain \"stage5:\", got: %v", err)
+	}
+}
+
 func TestRunAilRunPostsStage5DigestOnce(t *testing.T) {
 	now := time.Now().UTC()
 	tmp := t.TempDir()
@@ -1000,5 +1050,127 @@ func TestPostAilStage5DigestReturnsAddCommentError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "add comment") {
 		t.Fatalf("error = %v, want add comment context", err)
+	}
+}
+
+// --- replay (Stage 7) CLI tests ---
+
+func TestRunAilReplayWritesDecisionAndJSONStdout(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	outputDir := filepath.Join(tmp, "stage7")
+
+	events := []ail.Stage2Event{
+		{TS: "2026-01-15T08:00:00Z", EventType: "failure_event", TaskID: "task-1", IssueID: "issue-1", AgentID: "agent-1", Status: "failed", FailureReason: "agent_error", LoopSignature: "install_loop"},
+		{TS: "2026-01-15T09:00:00Z", EventType: "failure_event", TaskID: "task-2", IssueID: "issue-2", AgentID: "agent-2", Status: "failed", FailureReason: "runtime_offline", LoopSignature: "runtime_loop"},
+	}
+	writeTestAilIndex(t, indexPath, events)
+
+	selectedID := ail.Stage7EventID(events[0])
+	evalPath := filepath.Join(tmp, "eval.jsonl")
+	evalLine := `{"event_id":"` + selectedID + `","success_on_retry_before":false,"success_on_retry_after":true,"failed_retries_before":2,"failed_retries_after":0,"actionable":true,"invocation_cost":0.5}` + "\n"
+	if err := os.WriteFile(evalPath, []byte(evalLine), 0o644); err != nil {
+		t.Fatalf("write eval: %v", err)
+	}
+
+	t.Setenv("AIL_REPLAY_ENV", "env-value")
+	cmd := newAilReplayTestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	setTestFlag(t, cmd, "index-path", indexPath)
+	setTestFlag(t, cmd, "output-dir", outputDir)
+	setTestFlag(t, cmd, "event-ids", selectedID)
+	setTestFlag(t, cmd, "issue-ids", "issue-1")
+	setTestFlag(t, cmd, "agent-ids", "agent-1")
+	setTestFlag(t, cmd, "time-start", "2026-01-15T07:00:00Z")
+	setTestFlag(t, cmd, "time-end", "2026-01-15T09:00:00Z")
+	setTestFlag(t, cmd, "failure-reasons", "agent_error")
+	setTestFlag(t, cmd, "loop-signatures", "install_loop")
+	setTestFlag(t, cmd, "tool-args", "candidate=detect_timeout,mode=replay")
+	setTestFlag(t, cmd, "env-keys", "AIL_REPLAY_ENV")
+	setTestFlag(t, cmd, "git-revision", "abc123")
+	setTestFlag(t, cmd, "evaluation-results-path", evalPath)
+
+	if err := runAilReplay(cmd, nil); err != nil {
+		t.Fatalf("runAilReplay: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(outputDir, "stage7_decision.json")); err != nil {
+		t.Fatalf("stage7_decision.json not created: %v", err)
+	}
+
+	var result ail.Stage7ReplayDecision
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if result.EventCount != 1 {
+		t.Fatalf("event_count = %d, want 1", result.EventCount)
+	}
+	if result.Events[0].EventID != selectedID {
+		t.Fatalf("event_id = %q, want %q", result.Events[0].EventID, selectedID)
+	}
+	if result.DeterminismProfile.ToolArgs["candidate"] != "detect_timeout" {
+		t.Fatalf("tool args = %#v", result.DeterminismProfile.ToolArgs)
+	}
+	if result.DeterminismProfile.Env["AIL_REPLAY_ENV"] != "env-value" {
+		t.Fatalf("env profile = %#v", result.DeterminismProfile.Env)
+	}
+	if result.Metrics.RetryReduction != 2 {
+		t.Fatalf("retry_reduction = %d, want 2", result.Metrics.RetryReduction)
+	}
+}
+
+func TestRunAilReplayTableOutput(t *testing.T) {
+	tmp := t.TempDir()
+	indexPath := filepath.Join(tmp, "stage2_index.jsonl")
+	outputDir := filepath.Join(tmp, "stage7")
+	writeTestAilIndex(t, indexPath, []ail.Stage2Event{
+		{TS: "2026-01-15T08:00:00Z", EventType: "agent_event", TaskID: "task-1", IssueID: "issue-1", AgentID: "agent-1", Status: "completed"},
+	})
+
+	cmd := newAilReplayTestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	setTestFlag(t, cmd, "index-path", indexPath)
+	setTestFlag(t, cmd, "output-dir", outputDir)
+	setTestFlag(t, cmd, "output", "table")
+
+	if err := runAilReplay(cmd, nil); err != nil {
+		t.Fatalf("runAilReplay table: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "replay_id:") {
+		t.Fatalf("table output missing replay_id, got: %q", out)
+	}
+	if !strings.Contains(out, "metrics:") {
+		t.Fatalf("table output missing metrics, got: %q", out)
+	}
+}
+
+func TestRunAilReplayInvalidToolArgsReturnsError(t *testing.T) {
+	cmd := newAilReplayTestCmd()
+	setTestFlag(t, cmd, "tool-args", "missing-equals")
+
+	err := runAilReplay(cmd, nil)
+	if err == nil {
+		t.Fatal("expected invalid tool-args error, got nil")
+	}
+	if !strings.Contains(err.Error(), "key=value") {
+		t.Fatalf("error should mention key=value, got: %v", err)
+	}
+}
+
+func TestRunAilReplayReturnsStage7Error(t *testing.T) {
+	tmp := t.TempDir()
+	cmd := newAilReplayTestCmd()
+	setTestFlag(t, cmd, "index-path", filepath.Join(tmp, "missing.jsonl"))
+	setTestFlag(t, cmd, "tool-args", " , ")
+
+	err := runAilReplay(cmd, nil)
+	if err == nil {
+		t.Fatal("expected stage7 error, got nil")
+	}
+	if !strings.Contains(err.Error(), "read stage2 index") {
+		t.Fatalf("error should mention read stage2 index, got: %v", err)
 	}
 }

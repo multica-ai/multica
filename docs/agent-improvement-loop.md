@@ -10,7 +10,7 @@ agent workflow.
 
 ## Current status checkpoint
 
-_Last updated: 2026-06-14 (Stage 5 digest reporting implemented on branch ail-stage1-2-status-2026-06-14)_
+_Last updated: 2026-06-14 (Stage 7 replay/evaluation harness implemented on branch ail-stage1-2-status-2026-06-14)_
 
 ### Completed in repo
 
@@ -20,6 +20,7 @@ _Last updated: 2026-06-14 (Stage 5 digest reporting implemented on branch ail-st
 - **Stage 3 — Implemented in repo.** `server/internal/ail/stage3.go` (`RunStage3Analyze`, `Stage3Config`, `Stage3Result`) implements pain-bucket refinement, repeat-signature clustering by `(failure_reason, error_signature, loop_signature)`, and ranked candidate dettool generation. Artifacts: `diagnostics/stage3/stage3_digest.json`, `diagnostics/stage3/stage3_signatures.jsonl`, `diagnostics/stage3/stage3_watermark.json`. Output is deterministic (injected clock, sorted slices) and idempotent (watermark short-circuits re-runs with the same index SHA-256 and window). Tests in `stage3_test.go` including a committed golden-file test. `multica ail stage3` and `multica ail run` (Stage 2 → Stage 3 in one process, Option A) are wired in `cmd_ail.go`.
 - **Stage 4 — Implemented in repo.** `server/pkg/dettools/tool_agent_improvement_evaluate.go` provides the `agent_improvement_evaluate` deterministic tool with bounded `ready_for_candidate`, `ready_for_review`, and `defer` decisions. It is registered in the dettools catalog and covered by unit tests.
 - **Stage 5 — Implemented in repo.** `server/internal/ail/stage5.go` (`RunStage5Digest`, `BuildStage5Digest`, `RenderStage5Comment`) converts Stage 3 output into a tuning digest with top 5 pain signatures, suggested tool names/signatures, example IO contracts, and the `dettool.none` alert when `signal_count > 0` and no candidates are recommended. `multica ail run` writes `diagnostics/stage5/stage5_digest.json` and `diagnostics/stage5/stage5_watermark.json`; set `--digest-issue` or `MULTICA_AIL_TUNING_ISSUE_ID` to post at most one digest comment per window/signature payload.
+- **Stage 7 — Implemented in repo.** `server/internal/ail/stage7.go` (`RunStage7Replay`, `Stage7ReplayConfig`, `Stage7ReplayDecision`) filters a Stage 2 index by event IDs, issue IDs, agent IDs, `[time_start, time_end)`, failure reasons, and loop signatures. `multica ail replay` writes `diagnostics/stage7/stage7_decision.json` with a deterministic profile (`tool_args`, selected environment keys, git revision, selected-event input checksum), stable replay ID, selected events, and optional evaluation metrics from JSONL (`success_on_retry_delta`, retry reduction, precision, invocation cost). The decision payload intentionally has no wall-clock fields so identical filters/profile/input produce byte-identical JSON.
 - **Stage 8 promotion script — Implemented.** `scripts/stage8-promote.sh` moves prospect → production, updates `dettools/prospect/manifest.json`, runs `multica dettool import-file`, and appends `diagnostics/stage8-promotion.jsonl`.
 - **AIL skills and runbooks** — `skills/agent-improvement-loop/{analyzer.md,evaluator.md,SETUP.md}` present and updated.
 - **Architecture choice rules 1–3** — honored: Stage 1 always-on via TaskService; Stage 2 scheduled; Stage 3 runs immediately after Stage 2 in the same `multica ail run` invocation (Option A).
@@ -36,8 +37,7 @@ _Last updated: 2026-06-14 (Stage 5 digest reporting implemented on branch ail-st
 ### Outstanding (unimplemented gaps — one follow-up task each)
 
 1. **Stage 6** — No candidate scaffold generator; `dettools/prospect/manifest.json` is empty.
-2. **Stage 7** — No replay/evaluation harness; no determinism profile; no replay filters.
-3. **Stage 8 diagnostics** — Missing `diagnostics/stage-summary.jsonl`, `diagnostics/candidate-decision.json`, `diagnostics/rerun-manifest.json`; no baseline telemetry comparator; no 30-day re-evaluation trigger.
+2. **Stage 8 diagnostics** — Missing `diagnostics/stage-summary.jsonl`, `diagnostics/candidate-decision.json`, `diagnostics/rerun-manifest.json`; no baseline telemetry comparator; no 30-day re-evaluation trigger.
 
 ## Architecture choice (by stage)
 
@@ -251,6 +251,12 @@ Evaluation protocol:
      - `time_range`: `[start, end)` UTC window
      - `failure_reasons` + `loop_signature`
    - A failed evaluation can be rerun with the same filters and `determinism_profile` (tool args + env + git revision + input checksum) so the result is reproducible.
+
+Current wiring:
+- `multica ail replay --index-path <stage2_index.jsonl> --output-dir <dir>` writes `stage7_decision.json`.
+- Filters are available as `--event-ids`, `--issue-ids`, `--agent-ids`, `--time-start`, `--time-end`, `--failure-reasons`, and `--loop-signatures`.
+- Determinism profile inputs are available as repeated `--tool-args key=value`, repeated `--env-keys KEY`, and `--git-revision <sha>`.
+- Optional `--evaluation-results-path <jsonl>` computes metrics for selected events; missing evaluation results produce deterministic zero/default metrics.
 
 If pass thresholds → promote; if not, archive with reason.
 
