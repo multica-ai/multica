@@ -108,8 +108,11 @@ export interface InboxSectionConfig {
   /** TECH-3494 — sort order across all kinds in the "team" (Chat) section.
    *  Starred float to the top regardless. Default "recent". */
   teamSort?: "name" | "recent";
-  /** TECH-3494 — group the "team" (Chat) section: unread first, by kind, or
-   *  one flat list. Default "unread". */
+  /** TECH-3494 — keep unread "team" (Chat) rows first. Default true.
+   *  Backcompat: persisted `teamGroupBy: "unread"` means true. */
+  teamUnreadFirst?: boolean;
+  /** TECH-3494 — group the "team" (Chat) section by kind or one flat list.
+   *  Default "type". */
   teamGroupBy?: "unread" | "type" | "none";
   /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
    *  undefined / false = only people + channels. Opt-in via section settings. */

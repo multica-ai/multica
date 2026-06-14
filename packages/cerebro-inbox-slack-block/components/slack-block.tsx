@@ -49,7 +49,7 @@ import { useMemberPresence } from "../hooks/use-member-presence";
 import { useChannelTyping } from "../hooks/use-channel-typing";
 
 export type TeamSort = "name" | "recent";
-export type TeamGroupBy = "unread" | "type" | "none";
+export type TeamGroupBy = "type" | "none";
 
 export interface SlackBlockProps {
   wsId: string;
@@ -61,6 +61,9 @@ export interface SlackBlockProps {
   /** Sort order across all kinds. Starred float to the top. Default "recent". */
   sort?: TeamSort;
   onSetSort: (s: TeamSort) => void;
+  /** Keep unread conversations first inside the chosen grouping. Default true. */
+  unreadFirst?: boolean;
+  onSetUnreadFirst: (v: boolean) => void;
   /** Group the list by kind, or show one flat list. Default "type". */
   groupBy?: TeamGroupBy;
   onSetGroupBy: (g: TeamGroupBy) => void;
@@ -88,7 +91,6 @@ const SORT_OPTIONS: Array<{ label: string; value: TeamSort }> = [
 ];
 
 const GROUP_OPTIONS: Array<{ label: string; value: TeamGroupBy }> = [
-  { label: "Unread first", value: "unread" },
   { label: "By type", value: "type" },
   { label: "Flat list", value: "none" },
 ];
@@ -141,7 +143,9 @@ export function SlackBlock({
   onSetLimit,
   sort = "recent",
   onSetSort,
-  groupBy = "unread",
+  unreadFirst = true,
+  onSetUnreadFirst,
+  groupBy = "type",
   onSetGroupBy,
   showAgents = false,
   onSetShowAgents,
@@ -262,13 +266,16 @@ export function SlackBlock({
     onlineUserIds,
   ]);
 
-  // Search → sort (starred first, then by chosen order) → cap to the total limit.
+  // Search → sort (starred first, optional unread-first, then chosen order) → cap.
   const shownItems = useMemo(() => {
     const filtered = normalizedSearch
       ? allItems.filter((it) => it.name.toLowerCase().includes(normalizedSearch))
       : allItems;
     const sorted = filtered.slice().sort((a, b) => {
       if (a.starred !== b.starred) return a.starred ? -1 : 1;
+      if (unreadFirst && (a.unread > 0) !== (b.unread > 0)) {
+        return a.unread > 0 ? -1 : 1;
+      }
       if (sort === "recent") {
         const d = b.recency - a.recency;
         if (d !== 0) return d;
@@ -277,7 +284,7 @@ export function SlackBlock({
     });
     const effective = limit == null ? DEFAULT_LIMIT : limit;
     return effective > 0 ? sorted.slice(0, effective) : sorted;
-  }, [allItems, normalizedSearch, sort, limit]);
+  }, [allItems, normalizedSearch, unreadFirst, sort, limit]);
 
   const onlineCount = useMemo(
     () =>
@@ -389,11 +396,6 @@ export function SlackBlock({
       { label: "People", items: shownItems.filter((i) => i.kind === "person") },
       { label: "Agents", items: shownItems.filter((i) => i.kind === "agent") },
     ].filter((g) => g.items.length > 0);
-  } else if (groupBy === "unread") {
-    groups = [
-      { label: "Unread", items: shownItems.filter((i) => i.unread > 0) },
-      { label: "Read", items: shownItems.filter((i) => i.unread === 0) },
-    ].filter((g) => g.items.length > 0);
   } else {
     groups = [{ label: "", items: shownItems }];
   }
@@ -446,6 +448,10 @@ export function SlackBlock({
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Group by</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => onSetUnreadFirst(!unreadFirst)}>
+                  Unread first {unreadFirst ? "✓" : ""}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {GROUP_OPTIONS.map((opt) => (
                   <DropdownMenuItem key={opt.value} onClick={() => onSetGroupBy(opt.value)}>
                     {opt.label} {groupBy === opt.value ? "✓" : ""}

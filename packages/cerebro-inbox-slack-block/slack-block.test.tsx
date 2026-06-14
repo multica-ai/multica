@@ -235,6 +235,7 @@ function renderBlock(
     onOpenChannel: () => {},
     onSetLimit: () => {},
     onSetSort: () => {},
+    onSetUnreadFirst: () => {},
     onSetGroupBy: () => {},
     onSetShowAgents: () => {},
     onOpenAgentChat: () => {},
@@ -331,7 +332,7 @@ describe("SlackBlock", () => {
     expect(screen.getByText(/Recent conversation/)).toBeInTheDocument();
     expect(screen.getByText("Name")).toBeInTheDocument();
     expect(screen.getByText(/Unread first/)).toBeInTheDocument();
-    expect(screen.getByText("By type")).toBeInTheDocument();
+    expect(screen.getByText(/By type/)).toBeInTheDocument();
     expect(screen.getByText("Flat list")).toBeInTheDocument();
     // No Danish remnants.
     expect(screen.queryByText("Ulæste øverst")).not.toBeInTheDocument();
@@ -376,16 +377,17 @@ describe("SlackBlock", () => {
     expect(onSetShowAgents).toHaveBeenCalledWith(true);
   });
 
-  // TECH-3494 — "Unread first" is the default grouping.
-  it("defaults to unread-first grouping with an Unread group on top", async () => {
+  // TECH-3494 — "Unread first" is a default setting under Group by, not a
+  // mutually-exclusive group mode.
+  it("defaults to unread-first inside the type grouping", async () => {
     await act(async () => {
       renderBlock();
     });
-    const unreadHeader = screen.getByText("Unread");
-    expect(unreadHeader).toBeInTheDocument();
-    // Alice's DM is unread (count 2) → she sits under the Unread group.
-    const groupEl = unreadHeader.parentElement as HTMLElement;
-    expect(within(groupEl).getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Channels")).toBeInTheDocument();
+    expect(screen.getByText("People")).toBeInTheDocument();
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
+    expect(screen.getByText(/Unread first/)).toHaveTextContent("✓");
   });
 
   // TECH-3494 #3 — group by type shows headers; flat list shows none.
@@ -402,9 +404,25 @@ describe("SlackBlock", () => {
     });
     expect(screen.queryByText("Channels")).not.toBeInTheDocument();
     expect(screen.queryByText("People")).not.toBeInTheDocument();
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
     // Rows are still there, just ungrouped.
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("general")).toBeInTheDocument();
+  });
+
+  it("can combine unread-first with a flat list", async () => {
+    await act(async () => {
+      renderBlock({ groupBy: "none", unreadFirst: true, sort: "name" });
+    });
+
+    const rows = within(screen.getByTestId("chat-list"))
+      .getAllByRole("button", { name: /Alice|Bob|general/ })
+      .map((button) => button.textContent);
+    expect(rows).toEqual(expect.arrayContaining(["Alice", "general", "Bob"]));
+    expect(rows.indexOf("Alice")).toBeLessThan(rows.indexOf("Bob"));
+    expect(screen.queryByText("Unread")).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
   });
 
   // TECH-3494 #1/#4 — one total limit across all kinds, no per-group scroll.
@@ -490,5 +508,15 @@ describe("SlackBlock", () => {
     });
     await user.click(screen.getByText("Flat list"));
     expect(onSetGroupBy).toHaveBeenCalledWith("none");
+  });
+
+  it("toggling unread-first from settings calls onSetUnreadFirst", async () => {
+    const onSetUnreadFirst = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ unreadFirst: true, onSetUnreadFirst });
+    });
+    await user.click(screen.getByText(/Unread first/));
+    expect(onSetUnreadFirst).toHaveBeenCalledWith(false);
   });
 });

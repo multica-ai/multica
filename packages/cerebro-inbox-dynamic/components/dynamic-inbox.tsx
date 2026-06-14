@@ -623,7 +623,16 @@ export function DynamicInbox() {
                             onSetLimit={(n) => changeSection({ ...section, teamLimit: n })}
                             sort={section.teamSort}
                             onSetSort={(s) => changeSection({ ...section, teamSort: s })}
-                            groupBy={section.teamGroupBy}
+                            unreadFirst={section.teamUnreadFirst ?? true}
+                            onSetUnreadFirst={(v) =>
+                              changeSection({
+                                ...section,
+                                teamUnreadFirst: v,
+                                teamGroupBy:
+                                  section.teamGroupBy === "unread" ? "type" : section.teamGroupBy,
+                              })
+                            }
+                            groupBy={section.teamGroupBy === "unread" ? "type" : section.teamGroupBy}
                             onSetGroupBy={(g) => changeSection({ ...section, teamGroupBy: g })}
                             showAgents={section.showAgents}
                             onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
