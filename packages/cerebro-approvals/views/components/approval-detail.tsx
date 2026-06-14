@@ -30,12 +30,15 @@ import {
   useDelegateApproval,
   useRejectApproval,
 } from "../../core/mutations";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { AppLink } from "@multica/views/navigation";
 import type {
   Approval,
   DelegateTargetType,
   GrantLevel,
 } from "../../core/types";
 import { StatusBadge } from "./status-badge";
+import { requesterLabel, issueLabel } from "./labels";
 
 // Duration presets for "approve for a period" → grant_for_seconds (TECH-3498).
 const GRANT_DURATIONS: { label: string; seconds: number }[] = [
@@ -60,7 +63,6 @@ const GRANT_LEVELS: { label: string; value: "" | GrantLevel }[] = [
 interface AskContext {
   connection?: string;
   purpose?: string;
-  task_id?: string;
   args?: unknown;
 }
 
@@ -70,7 +72,6 @@ function readAskContext(raw: unknown): AskContext {
   return {
     connection: typeof obj.connection === "string" ? obj.connection : undefined,
     purpose: typeof obj.purpose === "string" ? obj.purpose : undefined,
-    task_id: typeof obj.task_id === "string" ? obj.task_id : undefined,
     args: obj.args,
   };
 }
@@ -132,6 +133,8 @@ function AskBody({
   ask: Approval;
   onClose: () => void;
 }) {
+  const workspace = useCurrentWorkspace();
+  const slug = workspace?.slug ?? "";
   const audit = useQuery(approvalAuditOptions(wsId, ask.id));
   const approve = useApproveApproval();
   const reject = useRejectApproval();
@@ -165,21 +168,20 @@ function AskBody({
       <Field label="Status">
         <StatusBadge status={ask.status} />
       </Field>
-      <Field label="Capability">
+      <Field label="Tool">
         <code className="text-xs">{ask.capability || "—"}</code>
       </Field>
-      <Field label="Resource">
-        <code className="text-xs">{ask.resource || "*"}</code>
-      </Field>
+      {ask.resource && ask.resource !== ask.capability && (
+        <Field label="Detail">
+          <code className="text-xs">{ask.resource}</code>
+        </Field>
+      )}
+      <Field label="Requester">{requesterLabel(ask)}</Field>
+      <IssueField ask={ask} slug={slug} />
       {ctx.purpose && <Field label="Purpose">{ctx.purpose}</Field>}
       {ctx.connection && (
         <Field label="Connection">
           <code className="text-xs">{ctx.connection}</code>
-        </Field>
-      )}
-      {ctx.task_id && (
-        <Field label="Task">
-          <code className="text-xs">{ctx.task_id}</code>
         </Field>
       )}
       {argsPreview && (
@@ -189,26 +191,18 @@ function AskBody({
           </code>
         </Field>
       )}
-      <Field label="Requester">
-        {ask.requester_type} · {ask.requester_id || "—"}
-        {ask.agent_id ? ` (agent ${ask.agent_id})` : ""}
-      </Field>
       {ask.reason && <Field label="Reason">{ask.reason}</Field>}
-      {ask.matched_grant_ids.length > 0 && (
-        <Field label="Matched grants">
-          {ask.matched_grant_ids.join(", ")}
-        </Field>
-      )}
       {ask.expires_at && <Field label="Expires">{ask.expires_at}</Field>}
-      {ask.decided_by_id && (
+      {(ask.decided_by_name || ask.decision_note) && (
         <Field label="Decided by">
-          {ask.decided_by_id}
+          {ask.decided_by_name || "—"}
           {ask.decision_note ? ` — “${ask.decision_note}”` : ""}
         </Field>
       )}
       {ask.delegated_to_id && (
         <Field label="Delegated to">
-          {ask.delegated_to_type} · {ask.delegated_to_id}
+          {ask.delegated_to_name ||
+            (ask.delegated_to_type === "group" ? "Group" : "Member")}
         </Field>
       )}
 
@@ -379,6 +373,31 @@ function AskBody({
         </ul>
       </div>
     </>
+  );
+}
+
+// IssueField shows WHICH ISSUE the request was made on (identifier + title),
+// linked to the issue when the slug + identifier are known. Renders nothing when
+// no issue context is attached.
+function IssueField({ ask, slug }: { ask: Approval; slug: string }) {
+  const identifier = ask.issue_identifier?.trim() ?? "";
+  const title = ask.issue_title?.trim() ?? "";
+  if (!identifier && !title) return null;
+
+  const label = issueLabel(ask);
+  return (
+    <Field label="Issue">
+      {slug && identifier ? (
+        <AppLink
+          href={`/${slug}/issues/${identifier}`}
+          className="text-foreground hover:underline"
+        >
+          {label}
+        </AppLink>
+      ) : (
+        label
+      )}
+    </Field>
   );
 }
 

@@ -36,6 +36,15 @@ export const approvalSchema = z
     expires_at: z.string().nullable().default(null),
     created_at: z.string().default(""),
     updated_at: z.string().default(""),
+    // Human-readable enrichment (TECH-3498): the UI shows NAMES, never raw UUIDs.
+    // All optional/nullable so an older backend that omits them degrades cleanly.
+    requester_name: z.string().nullable().default(null),
+    agent_name: z.string().nullable().default(null),
+    decided_by_name: z.string().nullable().default(null),
+    delegated_to_name: z.string().nullable().default(null),
+    issue_id: z.string().nullable().default(null),
+    issue_identifier: z.string().nullable().default(null),
+    issue_title: z.string().nullable().default(null),
   })
   .loose();
 

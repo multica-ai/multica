@@ -2,11 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Inbox } from "lucide-react";
-import { Badge } from "@multica/ui/components/ui/badge";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { AppLink } from "@multica/views/navigation";
 import { cn } from "@multica/ui/lib/utils";
 import { approvalsListOptions } from "../../core/queries";
 import type { Approval } from "../../core/types";
 import { StatusBadge } from "./status-badge";
+import { requesterLabel } from "./labels";
 
 interface ApprovalListProps {
   wsId: string;
@@ -23,6 +25,8 @@ export function ApprovalList({
   selectedId,
   onSelect,
 }: ApprovalListProps) {
+  const workspace = useCurrentWorkspace();
+  const slug = workspace?.slug ?? "";
   const query = useQuery(
     approvalsListOptions(wsId, { status, limit: 50, offset: 0 }),
   );
@@ -49,9 +53,9 @@ export function ApprovalList({
     <table className="w-full text-sm">
       <thead className="bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
         <tr>
-          <th className="px-4 py-2.5 text-left font-medium">Capability</th>
-          <th className="px-4 py-2.5 text-left font-medium">Resource</th>
+          <th className="px-4 py-2.5 text-left font-medium">Tool</th>
           <th className="px-4 py-2.5 text-left font-medium">Requester</th>
+          <th className="px-4 py-2.5 text-left font-medium">Issue</th>
           <th className="px-4 py-2.5 text-left font-medium">Status</th>
           <th className="px-4 py-2.5 text-left font-medium">Created</th>
         </tr>
@@ -66,12 +70,14 @@ export function ApprovalList({
               selectedId === a.id && "bg-muted/60",
             )}
           >
-            <td className="px-4 py-2.5 font-medium">{a.capability || "—"}</td>
-            <td className="px-4 py-2.5 text-muted-foreground">
-              {a.resource || "*"}
+            <td className="max-w-[180px] truncate px-4 py-2.5 font-medium">
+              {a.capability || "—"}
             </td>
-            <td className="px-4 py-2.5">
-              <Badge variant="outline">{a.requester_type}</Badge>
+            <td className="max-w-[160px] truncate px-4 py-2.5">
+              {requesterLabel(a)}
+            </td>
+            <td className="max-w-[220px] truncate px-4 py-2.5 text-muted-foreground">
+              <IssueCell approval={a} slug={slug} />
             </td>
             <td className="px-4 py-2.5">
               <StatusBadge status={a.status} />
@@ -84,6 +90,31 @@ export function ApprovalList({
       </tbody>
     </table>
   );
+}
+
+// IssueCell renders the issue an approval was requested on as "IDENTIFIER —
+// title", linked to the issue when the workspace slug + identifier are known. It
+// stops row-click propagation so the link navigates instead of opening the sheet.
+function IssueCell({ approval, slug }: { approval: Approval; slug: string }) {
+  const identifier = approval.issue_identifier?.trim() ?? "";
+  const title = approval.issue_title?.trim() ?? "";
+  if (!identifier && !title) return <>—</>;
+
+  const label = identifier && title ? `${identifier} — ${title}` : identifier || title;
+
+  if (slug && identifier) {
+    return (
+      <AppLink
+        href={`/${slug}/issues/${identifier}`}
+        className="truncate text-foreground hover:underline"
+        onClick={(e) => e.stopPropagation()}
+        title={label}
+      >
+        {label}
+      </AppLink>
+    );
+  }
+  return <span title={label}>{label}</span>;
 }
 
 function formatWhen(iso: string): string {
