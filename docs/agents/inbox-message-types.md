@@ -69,8 +69,8 @@ issue". The full union is `InboxItemType` in `packages/core/types/inbox.ts`
 `assignee_changed`, `status_changed`, `priority_changed`, `start_date_changed`,
 `due_date_changed`.
 
-**Conversation:** `new_comment`, `mentioned`, `reaction_added`,
-`review_requested`.
+**Conversation:** `new_comment`, `mentioned` (from a comment **or** a note — see
+"Mentions come from two sources" below), `reaction_added`, `review_requested`.
 
 **Agent activity:** `task_completed`, `task_failed`, `agent_blocked`,
 `agent_completed`, `quick_create_done`, `quick_create_failed`,
@@ -78,10 +78,8 @@ issue". The full union is `InboxItemType` in `packages/core/types/inbox.ts`
 (agent comments split by the tag they carry so monologues can be muted without
 losing hand-offs).
 
-**Reminders (a distinct family):** `reminder` (a user-created "remind me later"
-on any item), `due_date_reminder` and `start_date_reminder` (fired by the
-server-side sweepers `reminder_due_sweeper.go` / `issue_date_reminder_sweeper.go`
-when a date arrives).
+**Reminders (a distinct family — see the dedicated section below):** `reminder`,
+`due_date_reminder`, `start_date_reminder`.
 
 **Platform / governance:** `private_agent_run_request`,
 `skill_change_request_created`, `skill_change_request_reviewed`,
@@ -105,15 +103,51 @@ truth for emission + routing is `server/cmd/server/notification_listeners.go` an
 
 ---
 
-## Known gaps / not-yet types
+## Reminders (the reminder family)
 
-- **Note mentions.** The Notes feature (TECH-3421, `packages/cerebro-notes` +
-  `server/internal/cerebro/note/handler.go`) does CRUD + sharing but **emits no
-  inbox notification today** — there is no `note_mention` `InboxItemType` and no
-  listener for note events. If we want "you were mentioned in a note" to land in
-  the inbox, it needs a new `InboxItemType`, a server listener, a routing key,
-  and (optionally) an action-category mapping. This is the natural next message
-  type to add.
+Three `InboxItemType`s form the **reminders** family — they share the
+`reminders` action-category bucket (`REMINDER_TYPES` in
+`packages/cerebro-inbox/action-groups.ts`, ~line 34):
+
+- **`reminder`** — a **user-created** "remind me later". When you snooze any
+  inbox row (the "Remind me" / "Påmind mig" action on issue, channel, DM and
+  chat rows), the row is hidden until its time via `muted_until`
+  (`packages/core/types/inbox.ts`), then resurfaces — it does not spawn a new
+  row, it *is* the snoozed row coming back. The reminder picker is the shared
+  `ReminderSheet` from `@multica/cerebro-inbox`.
+- **`due_date_reminder`** / **`start_date_reminder`** — **system-generated** when
+  an issue's due/start date arrives. Fired by the server-side sweepers
+  `server/cmd/server/reminder_due_sweeper.go` and
+  `server/cmd/server/issue_date_reminder_sweeper.go`.
+
+So "a reminder" is genuinely its own message type (three of them), distinct from
+the issue-lifecycle and conversation types above.
+
+---
+
+## Mentions come from two sources (comment and note)
+
+`mentioned` is a single `InboxItemType`, but it is produced from **two** places —
+both reuse the same comment-mention engine and the per-user
+`"mentioned"` → `"comments"` notification setting:
+
+- **Comment mention** — `@`-tagging a member in an issue comment. The inbox item
+  is tied to the issue (`inbox_item.issue_id`) and deep-links to the issue.
+- **Note mention** (Notes feature, TECH-3421) — `@`-tagging a member in a note.
+  Implemented: saving a note publishes `EventNoteMentioned`
+  (`server/internal/cerebro/note/handler.go`), and the listener
+  `server/cmd/server/cerebro_note_mentions.go` (registered in
+  `event_listener_wiring.go`) creates a `mentioned` item with severity `info`.
+  Because a note is an **artifact, not an issue**, it cannot use
+  `inbox_item.issue_id`; the note reference rides in the item's **`details` JSON**
+  (`details.note_id`, `details.note_title`) and the inbox UI deep-links from
+  `details.note_id`. The listener also shares the note with the mentioned member
+  so the notification is openable.
+
+> Takeaway for agents: a note mention is **not** a separate type — it is a
+> `mentioned` notification whose `details.note_id` is set (issue-less). If you
+> add another mention source, follow the same pattern: reuse `mentioned`, carry
+> the target in `details`, don't invent a parallel type.
 
 ---
 
