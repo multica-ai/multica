@@ -472,6 +472,43 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestProjectContextRenderedBeforeAvailableCommands(t *testing.T) {
+	t.Parallel()
+	const projectContext = "Use table-driven tests and keep migrations reversible."
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:        "11111111-2222-3333-4444-555555555555",
+		ProjectID:      "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:   "Backend API",
+		ProjectContext: projectContext,
+	})
+
+	for _, want := range []string{
+		"## Project Context",
+		"This issue belongs to **Backend API**.",
+		projectContext,
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("brief missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	projectIdx := strings.Index(out, "## Project Context")
+	cmdsIdx := strings.Index(out, "## Available Commands")
+	if projectIdx == -1 || cmdsIdx == -1 || projectIdx > cmdsIdx {
+		t.Fatalf("Project Context must appear before Available Commands (project=%d cmds=%d)", projectIdx, cmdsIdx)
+	}
+}
+
+func TestProjectContextHeadingSkippedWhenEmptyAndNoProject(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:        "11111111-2222-3333-4444-555555555555",
+		ProjectContext: " \n\t ",
+	})
+	if strings.Contains(out, "## Project Context") {
+		t.Fatalf("empty project context without project/resources must not emit heading:\n%s", out)
+	}
+}
+
 func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

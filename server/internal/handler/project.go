@@ -22,6 +22,7 @@ type ProjectResponse struct {
 	WorkspaceID string  `json:"workspace_id"`
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
+	Context     *string `json:"context"`
 	Icon        *string `json:"icon"`
 	Status      string  `json:"status"`
 	Priority    string  `json:"priority"`
@@ -44,6 +45,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		WorkspaceID: uuidToString(p.WorkspaceID),
 		Title:       p.Title,
 		Description: textToPtr(p.Description),
+		Context:     textToPtr(p.Context),
 		Icon:        textToPtr(p.Icon),
 		Status:      p.Status,
 		Priority:    p.Priority,
@@ -73,6 +75,7 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 type CreateProjectRequest struct {
 	Title       string                                `json:"title"`
 	Description *string                               `json:"description"`
+	Context     *string                               `json:"context"`
 	Icon        *string                               `json:"icon"`
 	Status      string                                `json:"status"`
 	Priority    string                                `json:"priority"`
@@ -94,6 +97,7 @@ type CreateProjectResourceRequestPayload struct {
 type UpdateProjectRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
+	Context     *string `json:"context"`
 	Icon        *string `json:"icon"`
 	Status      *string `json:"status"`
 	Priority    *string `json:"priority"`
@@ -304,6 +308,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
+		Context:     ptrToText(req.Context),
 		Icon:        ptrToText(req.Icon),
 		Status:      status,
 		LeadType:    leadType,
@@ -437,6 +442,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	params := db.UpdateProjectParams{
 		ID:          prevProject.ID,
 		Description: prevProject.Description,
+		Context:     prevProject.Context,
 		Icon:        prevProject.Icon,
 		LeadType:    prevProject.LeadType,
 		LeadID:      prevProject.LeadID,
@@ -461,6 +467,13 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.Description = pgtype.Text{String: *req.Description, Valid: true}
 		} else {
 			params.Description = pgtype.Text{Valid: false}
+		}
+	}
+	if _, ok := rawFields["context"]; ok {
+		if req.Context != nil {
+			params.Context = pgtype.Text{String: *req.Context, Valid: true}
+		} else {
+			params.Context = pgtype.Text{Valid: false}
 		}
 	}
 	if _, ok := rawFields["icon"]; ok {

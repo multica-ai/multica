@@ -62,6 +62,62 @@ func TestCreateProjectValidStatusReturns201(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateProjectContext(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title":   "project context api",
+		"context": "Use table-driven tests for this project.",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for project with context, got %d: %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		req = withURLParam(req, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), req)
+	})
+	if project.Context == nil || *project.Context != "Use table-driven tests for this project." {
+		t.Fatalf("create context = %v", project.Context)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"context": "Prefer small PRs and update docs.",
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for context update, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode UpdateProject: %v", err)
+	}
+	if project.Context == nil || *project.Context != "Prefer small PRs and update docs." {
+		t.Fatalf("updated context = %v", project.Context)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"context": nil,
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.UpdateProject(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for context clear, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode clear UpdateProject: %v", err)
+	}
+	if project.Context != nil {
+		t.Fatalf("cleared context = %v, want nil", project.Context)
+	}
+}
+
 // Updating to an unknown status is a 400, not a 500.
 func TestUpdateProjectInvalidStatusReturns400(t *testing.T) {
 	// Seed a project to update.

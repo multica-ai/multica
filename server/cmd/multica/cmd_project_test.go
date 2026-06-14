@@ -26,6 +26,79 @@ func TestValidateProjectStatus(t *testing.T) {
 	}
 }
 
+func newProjectContextTestCmd() *cobra.Command {
+	c := &cobra.Command{Use: "project"}
+	c.Flags().String("context", "", "")
+	c.Flags().Bool("context-stdin", false, "")
+	return c
+}
+
+func TestAddProjectContextToBody(t *testing.T) {
+	t.Run("unchanged flag does not emit context", func(t *testing.T) {
+		cmd := newProjectContextTestCmd()
+		body := map[string]any{}
+
+		if err := addProjectContextToBody(cmd, body); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := body["context"]; ok {
+			t.Fatalf("context should not be emitted when flag is unchanged: %v", body)
+		}
+	})
+
+	t.Run("inline context decodes escapes", func(t *testing.T) {
+		cmd := newProjectContextTestCmd()
+		_ = cmd.Flags().Set("context", `line1\nline2`)
+		body := map[string]any{}
+
+		if err := addProjectContextToBody(cmd, body); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if body["context"] != "line1\nline2" {
+			t.Fatalf("context = %q, want decoded newline", body["context"])
+		}
+	})
+
+	t.Run("empty inline context clears", func(t *testing.T) {
+		cmd := newProjectContextTestCmd()
+		_ = cmd.Flags().Set("context", "")
+		body := map[string]any{}
+
+		if err := addProjectContextToBody(cmd, body); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if body["context"] != "" {
+			t.Fatalf("context = %q, want empty string", body["context"])
+		}
+	})
+
+	t.Run("stdin context is preserved verbatim", func(t *testing.T) {
+		cmd := newProjectContextTestCmd()
+		_ = cmd.Flags().Set("context-stdin", "true")
+		body := map[string]any{}
+
+		pipeStdin(t, "first\nliteral \\n\n", func() {
+			if err := addProjectContextToBody(cmd, body); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+		if body["context"] != "first\nliteral \\n" {
+			t.Fatalf("context = %q, want stdin body without trailing newline", body["context"])
+		}
+	})
+
+	t.Run("inline and stdin are mutually exclusive", func(t *testing.T) {
+		cmd := newProjectContextTestCmd()
+		_ = cmd.Flags().Set("context", "inline")
+		_ = cmd.Flags().Set("context-stdin", "true")
+
+		err := addProjectContextToBody(cmd, map[string]any{})
+		if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("expected mutually-exclusive error, got %v", err)
+		}
+	})
+}
+
 // newProjectResourceUpdateTestCmd mirrors the flag surface of
 // projectResourceUpdateCmd so unit tests can exercise the shortcut-flag plumbing
 // without spinning up a server.

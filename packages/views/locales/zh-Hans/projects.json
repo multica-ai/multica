@@ -58,6 +58,8 @@
     "section_progress": "进度",
     "section_description": "描述",
     "description_placeholder": "添加描述...",
+    "section_context": "上下文",
+    "context_placeholder": "给智能体的项目专属指令...",
     "empty_issues_title": "还没有关联的 issue",
     "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
     "empty_issues_new_button": "新建 issue",

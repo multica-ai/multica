@@ -467,6 +467,31 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Project Context block: project-scoped instructions set on the project.
+	// This mirrors Workspace Context but is narrower in scope. It is emitted
+	// before Available Commands so project rules are visible before the generic
+	// CLI workflow.
+	if ctx.ProjectID != "" || strings.TrimSpace(ctx.ProjectContext) != "" || len(ctx.ProjectResources) > 0 {
+		b.WriteString("## Project Context\n\n")
+		if ctx.ProjectTitle != "" {
+			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if ctxText := strings.TrimRight(ctx.ProjectContext, " \t\r\n"); ctxText != "" {
+			b.WriteString(ctxText)
+			b.WriteString("\n\n")
+		}
+		if len(ctx.ProjectResources) > 0 {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			for _, r := range ctx.ProjectResources {
+				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
+			}
+			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
+			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+		} else if strings.TrimSpace(ctx.ProjectContext) == "" {
+			b.WriteString("This project has no resources attached yet.\n\n")
+		}
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
 	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
@@ -533,26 +558,6 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			}
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
-	}
-
-	// Inject project-scoped context (resources attached to the issue's project).
-	// The full structured payload is also available at .multica/project/resources.json
-	// so skills can consume it programmatically.
-	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
-		b.WriteString("## Project Context\n\n")
-		if ctx.ProjectTitle != "" {
-			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
-		}
-		if len(ctx.ProjectResources) > 0 {
-			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
-			for _, r := range ctx.ProjectResources {
-				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
-			}
-			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
-		} else {
-			b.WriteString("This project has no resources attached yet.\n\n")
-		}
 	}
 
 	// Issue Metadata semantics — emitted only for tasks that operate on a real

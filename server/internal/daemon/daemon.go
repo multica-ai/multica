@@ -2662,6 +2662,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
+		ProjectContext:                   task.ProjectContext,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
