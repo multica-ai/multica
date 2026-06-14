@@ -3,6 +3,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
 
@@ -40,6 +41,10 @@ const editorProps = vi.hoisted(() => ({
   last: null as null | Record<string, unknown>,
 }));
 
+const authState = vi.hoisted(() => ({
+  user: { message_enter_key_behavior: "newline" as "send" | "newline" },
+}));
+
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
     dropHandlers.onDrop = onDrop;
@@ -50,18 +55,22 @@ vi.mock("../../editor", () => ({
     props: {
       defaultValue?: string;
       onUpdate?: (md: string) => void;
+      onSubmit?: () => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
       mentionMode?: string;
       mentionContextItems?: unknown[];
+      submitOnEnter?: boolean;
     },
     ref: React.Ref<unknown>,
   ) {
     const {
       defaultValue,
       onUpdate,
+      onSubmit,
       placeholder,
       onUploadFile,
+      submitOnEnter,
     } = props;
     editorProps.last = props as unknown as Record<string, unknown>;
     const valueRef = useRef<string>(defaultValue ?? "");
@@ -104,9 +113,29 @@ vi.mock("../../editor", () => ({
           valueRef.current = e.target.value;
           onUpdate?.(e.target.value);
         }}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter") return;
+          if (e.metaKey || e.ctrlKey) {
+            e.preventDefault();
+            onSubmit?.();
+            return;
+          }
+          if (!e.shiftKey && submitOnEnter) {
+            e.preventDefault();
+            onSubmit?.();
+            return;
+          }
+          valueRef.current += "\n";
+          onUpdate?.(valueRef.current);
+        }}
       />
     );
   }),
+}));
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector?: (s: typeof authState) => unknown) =>
+    selector ? selector(authState) : authState,
 }));
 
 // Mock chat store with an in-memory implementation that supports both
@@ -135,6 +164,7 @@ import { useChatStore } from "@multica/core/chat";
 beforeEach(() => {
   dropHandlers.onDrop = null;
   editorProps.last = null;
+  authState.user.message_enter_key_behavior = "newline";
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
@@ -178,6 +208,95 @@ describe("ChatInput @ context wiring", () => {
 });
 
 describe("ChatInput attachment wiring", () => {
+  it("shows the default send shortcut hint after content is entered", () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello" } });
+
+    expect(
+      screen.getByText(`${formatShortcut(modKey, enterKey)} to send`),
+    ).toBeTruthy();
+  });
+
+  it("shows Enter as the send shortcut hint when Enter-to-send is configured", () => {
+    authState.user.message_enter_key_behavior = "send";
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello" } });
+
+    expect(
+      screen.getByText(`${formatShortcut(enterKey)} to send`),
+    ).toBeTruthy();
+  });
+
+  it("sends the chat message when Enter-to-send is configured", async () => {
+    authState.user.message_enter_key_behavior = "send";
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello agent" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(onSend).toHaveBeenCalledWith("hello agent", undefined);
+  });
+
+  it("treats unknown Enter behavior values as newline mode", () => {
+    (
+      authState.user as { message_enter_key_behavior: string }
+    ).message_enter_key_behavior = "unknown";
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello agent" } });
+
+    expect(
+      screen.getByText(`${formatShortcut(modKey, enterKey)} to send`),
+    ).toBeTruthy();
+
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps Shift+Enter available for a newline without sending", () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello" } });
+    fireEvent.keyDown(editor, { key: "Enter", shiftKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("keeps Enter as a newline by default", () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello" } });
+    fireEvent.keyDown(editor, { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("sends with Ctrl+Enter when Enter inserts newlines", () => {
+    const onSend = vi.fn();
+    renderInput({ onSend });
+
+    const editor = screen.getByTestId("editor");
+    fireEvent.change(editor, { target: { value: "hello agent" } });
+    fireEvent.keyDown(editor, { key: "Enter", ctrlKey: true });
+
+    expect(onSend).toHaveBeenCalledWith("hello agent", undefined);
+  });
+
   it("routes dropped files through the editor's upload handler", async () => {
     const { onUploadFile } = renderInput();
     expect(dropHandlers.onDrop).not.toBeNull();

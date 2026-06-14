@@ -299,7 +299,8 @@
       "bar_authors_more_other": "{{names}} 他 {{count}} 名",
       "resolve_failed": "スレッドを解決できませんでした",
       "unresolve_failed": "スレッドの解決を取り消せませんでした"
-    }
+    },
+    "send_shortcut_hint": "{{shortcut}} で送信"
   },
   "reply": {
     "placeholder": "返信を残す..."

@@ -4,6 +4,7 @@ import { useRef, useState, useCallback, useEffect } from "react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { useAuthStore } from "@multica/core/auth";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
@@ -21,6 +22,13 @@ interface CommentInputProps {
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const { t } = useT("issues");
+  const messageEnterKeyBehavior = useAuthStore(
+    (s) => s.user?.message_enter_key_behavior ?? "newline",
+  );
+  const submitOnEnter = messageEnterKeyBehavior === "send";
+  const sendShortcut = submitOnEnter
+    ? formatShortcut(enterKey)
+    : formatShortcut(modKey, enterKey);
   const editorRef = useRef<ContentEditorRef>(null);
   // Read the persisted draft once on mount. ContentEditor only honors
   // `defaultValue` at mount time, so this snapshot drives both the editor's
@@ -138,6 +146,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             else clearDraft(draftKey);
           }}
           onSubmit={handleSubmit}
+          submitOnEnter={submitOnEnter}
           onUploadFile={handleUpload}
           debounceMs={100}
           currentIssueId={issueId}
@@ -159,11 +168,18 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           multiple
           onSelect={(file) => editorRef.current?.uploadFile(file)}
         />
+        {!isEmpty && (
+          <span className="mr-1 hidden text-[11px] text-muted-foreground sm:inline">
+            {t(($) => $.comment.send_shortcut_hint, {
+              shortcut: sendShortcut,
+            })}
+          </span>
+        )}
         <SubmitButton
           onClick={handleSubmit}
           disabled={isEmpty}
           loading={submitting}
-          tooltip={`${t(($) => $.comment.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+          tooltip={`${t(($) => $.comment.send_tooltip)} · ${sendShortcut}`}
         />
       </div>
       {isDragOver && <FileDropOverlay />}
