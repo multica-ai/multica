@@ -44,6 +44,7 @@ services:
       - "0.0.0.0:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      - ${HOME}/.multica:/root/.multica:Z
     environment:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set to your shared PostgreSQL connection string}
       PORT: "8080"
