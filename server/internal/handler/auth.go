@@ -167,34 +167,46 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // findOrCreateUser returns the existing user for an email, or creates one if
 // none exists. isNew reports whether this call created the user — the signup
 // event fires on that edge, covering both the verification-code and Google
-// OAuth entry points.
-func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+// OAuth entry points. hadInviteName is true when a pending workspace invitation
+// carried an explicit invitee_name that was used for the new user's display
+// name; callers (e.g. GoogleLogin) must check this flag before overriding the
+// name with the OAuth provider's value.
+func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, hadInviteName bool, err error) {
 	user, err = h.Queries.GetUserByEmail(ctx, email)
 	isNew = isNotFound(err)
 	if err != nil && !isNew {
-		return db.User{}, false, err
+		return db.User{}, false, false, err
 	}
 
 	if err := h.checkSignupAllowed(email, isNew); err != nil {
-		return db.User{}, false, err
+		return db.User{}, false, false, err
 	}
 
 	if !isNew {
-		return user, false, nil
+		return user, false, false, nil
 	}
 
+	// For new users, check if a non-expired pending invitation carries an
+	// explicit display name. The invitation name takes priority over both the
+	// email prefix and the OAuth provider name (see KTD5).
 	name := email
 	if at := strings.Index(email, "@"); at > 0 {
 		name = email[:at]
 	}
+	inviteNameResult, inviteErr := h.Queries.GetLatestPendingInvitationNameByEmail(ctx, email)
+	if inviteErr == nil && inviteNameResult.Valid && inviteNameResult.String != "" {
+		name = inviteNameResult.String
+		hadInviteName = true
+	}
+
 	created, err := h.Queries.CreateUser(ctx, db.CreateUserParams{
 		Name:  name,
 		Email: email,
 	})
 	if err != nil {
-		return db.User{}, false, err
+		return db.User{}, false, false, err
 	}
-	return created, true, nil
+	return created, true, hadInviteName, nil
 }
 
 // signupSourceFromRequest reads the attribution cookie the web frontend
@@ -384,7 +396,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, _, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
@@ -554,7 +566,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	email := strings.ToLower(strings.TrimSpace(gUser.Email))
 
-	user, isNew, err := h.findOrCreateUser(r.Context(), email)
+	user, isNew, hadInviteName, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
 		var signupErr SignupError
 		if errors.As(err, &signupErr) {
@@ -572,11 +584,14 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Update name and avatar from Google profile if the user was just created
 	// (default name is email prefix) or has no avatar yet.
+	// Skip the name override when findOrCreateUser already used an invitation-
+	// supplied name (hadInviteName=true): the admin-specified name takes
+	// priority over the OAuth provider name (KTD5).
 	needsUpdate := false
 	newName := user.Name
 	newAvatar := user.AvatarUrl
 
-	if gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
+	if !hadInviteName && gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
 		newName = gUser.Name
 		needsUpdate = true
 	}
