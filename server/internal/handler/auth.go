@@ -65,6 +65,10 @@ type UserResponse struct {
 	ProfileDescription      string          `json:"profile_description"`
 	CreatedAt               string          `json:"created_at"`
 	UpdatedAt               string          `json:"updated_at"`
+	// IsSuperAdmin is true when this user's email is in the server's
+	// SUPER_ADMIN_EMAILS list. Only populated in /api/me responses (requires
+	// authentication); never exposed in /api/config (unauthenticated).
+	IsSuperAdmin bool `json:"is_super_admin"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -432,7 +436,9 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, userToResponse(user))
+	resp := userToResponse(user)
+	resp.IsSuperAdmin = h.isSuperAdmin(user.Email)
+	writeJSON(w, http.StatusOK, resp)
 }
 
 type UpdateMeRequest struct {

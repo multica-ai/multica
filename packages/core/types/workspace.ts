@@ -61,6 +61,12 @@ export interface User {
   timezone: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * True when this user's email is in the server's SUPER_ADMIN_EMAILS list.
+   * Only populated in /api/me responses (requires authentication).
+   * Never present in /api/config (unauthenticated).
+   */
+  is_super_admin?: boolean;
 }
 
 export interface MemberWithUser {
