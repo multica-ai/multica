@@ -687,6 +687,19 @@ func TestCreateComment_SquadMentionLeaderClaimGetsBriefing(t *testing.T) {
 		t.Fatalf("queued leader task source = %q, want %q", taskContext.LeaderTaskSource, service.LeaderTaskSourceSquadMention)
 	}
 
+	// The handler-test runtime is shared suite-wide and ClaimTaskForRuntime
+	// returns the oldest claimable task for the runtime. Park any other
+	// in-flight queued/dispatched tasks (left by sibling tests that create
+	// agent-assigned issues on this runtime) so the leader claims our briefing
+	// task rather than an unrelated one.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched') AND issue_id <> $2`,
+		runtimeID, issueID,
+	); err != nil {
+		t.Fatalf("park stray runtime tasks: %v", err)
+	}
+
 	agent := claimAndDecodeAgent(t, runtimeID)
 	for _, want := range []string{
 		"## Squad Operating Protocol",

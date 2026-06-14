@@ -620,7 +620,11 @@ VALUES
 }
 
 func TestGetAttachmentPreviewURL_RequestsInlineDisposition(t *testing.T) {
-	store := &mockStorage{}
+	// No CDN domain configured → signedPreviewURL must fall through to the
+	// PresignedInlineGetURL path (private bucket). A plain mockStorage reports
+	// a CDN domain and would short-circuit to a raw remap, never exercising the
+	// inline-disposition presign this test asserts.
+	store := &mockStorageNoCdn{}
 	origStorage := testHandler.Storage
 	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = store
@@ -630,7 +634,7 @@ func TestGetAttachmentPreviewURL_RequestsInlineDisposition(t *testing.T) {
 		testHandler.LegacyLocalStorage = origLegacyLocalStorage
 	}()
 
-	id := seedPreviewAttachment(t, store, "manual.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
+	id := seedPreviewAttachment(t, &store.mockStorage, "manual.pdf", "manual.pdf", "application/pdf", []byte("%PDF-1.4\n"))
 
 	req, w := newPreviewURLRequest(t, id, testWorkspaceID)
 	testHandler.GetAttachmentPreviewURL(w, req)
@@ -1461,9 +1465,12 @@ func TestBuildMarkdownURL_PrivateBucketWithoutCdnDomainRoutesThroughAPIEndpoint(
 func TestBuildMarkdownURL_CloudFrontSignedModeNeverPersistsRawStorageURL(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
 	t.Cleanup(func() {
 		testHandler.cfg.PublicURL = origPublic
 		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
 	})
 	testHandler.cfg.PublicURL = "https://api.multica.test"
 	testHandler.CFSigner = testCloudFrontSigner(t)
@@ -1494,9 +1501,12 @@ func TestBuildMarkdownURL_CloudFrontSignedModeNeverPersistsRawStorageURL(t *test
 func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorageNoCdn{}
 	t.Cleanup(func() {
 		testHandler.cfg.PublicURL = origPublic
 		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
 	})
 	testHandler.cfg.PublicURL = "https://api.multica.test"
 	testHandler.CFSigner = nil
@@ -1521,9 +1531,12 @@ func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) 
 func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorageNoCdn{}
 	t.Cleanup(func() {
 		testHandler.cfg.PublicURL = origPublic
 		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
 	})
 	testHandler.cfg.PublicURL = ""
 	testHandler.CFSigner = nil
@@ -1547,9 +1560,12 @@ func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 func TestBuildMarkdownURL_StripsTrailingSlashOnPublicURL(t *testing.T) {
 	origPublic := testHandler.cfg.PublicURL
 	origSigner := testHandler.CFSigner
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorageNoCdn{}
 	t.Cleanup(func() {
 		testHandler.cfg.PublicURL = origPublic
 		testHandler.CFSigner = origSigner
+		testHandler.Storage = origStorage
 	})
 	testHandler.cfg.PublicURL = "https://api.multica.test/"
 	testHandler.CFSigner = nil

@@ -168,6 +168,7 @@ func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func newRequest(method, path string, body any) *http.Request {
+	body = withDefaultIssueProject(method, path, body)
 	var buf bytes.Buffer
 	if body != nil {
 		json.NewEncoder(&buf).Encode(body)
@@ -177,6 +178,40 @@ func newRequest(method, path string, body any) *http.Request {
 	req.Header.Set("X-User-ID", testUserID)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	return req
+}
+
+// withDefaultIssueProject back-fills project_id on CreateIssue bodies that omit
+// it. project_id is mandatory for top-level issues (OPE-1372), but the bulk of
+// handler tests build issues only to exercise unrelated behaviour and don't
+// care which project the issue lands in. Rather than thread testProjectID
+// through ~100 call sites, default it here at the single request-builder
+// chokepoint. Bodies that pin their own project_id (project-scoping tests) or
+// carry a parent_issue_id (sub-issues inherit the parent's project) are left
+// untouched, as are non-map bodies and any path other than the POST /api/issues
+// collection endpoint. Tests that deliberately assert the "project_id is
+// required" rejection must build their request without this helper.
+func withDefaultIssueProject(method, path string, body any) any {
+	if method != "POST" {
+		return body
+	}
+	if p, _, _ := strings.Cut(path, "?"); p != "/api/issues" {
+		return body
+	}
+	m, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	if _, hasProject := m["project_id"]; hasProject {
+		return body
+	}
+	if _, hasParent := m["parent_issue_id"]; hasParent {
+		return body
+	}
+	if testProjectID == "" {
+		return body
+	}
+	m["project_id"] = testProjectID
+	return m
 }
 
 func withURLParam(req *http.Request, key, value string) *http.Request {
@@ -744,9 +779,14 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 
 func TestCreateIssue_ProjectIDRequired(t *testing.T) {
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": "No project issue",
-	})
+	// Build the request directly (not via newRequest) so the test-fixture
+	// default-project injection does not mask the very rejection under test.
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]any{"title": "No project issue"})
+	req := httptest.NewRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
