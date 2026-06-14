@@ -354,6 +354,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
+
+	// Eidetix integration. Only wired when MULTICA_EIDETIX_SECRET_KEY is set
+	// (base64-encoded 32-byte key). Without it, per-project Eidetix tokens
+	// cannot be decrypted, so the claim handler fails open and no agent gets
+	// the eidetix MCP server. This is the platform-wide off switch.
+	if eidetixKey, err := secretbox.LoadKey("MULTICA_EIDETIX_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(eidetixKey)
+		if err != nil {
+			slog.Error("eidetix: secretbox.New failed; eidetix integration disabled", "error", err)
+		} else {
+			h.EidetixSecrets = box
+			slog.Info("eidetix integration enabled")
+		}
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}

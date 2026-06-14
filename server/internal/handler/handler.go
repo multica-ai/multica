@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -155,7 +156,12 @@ type Handler struct {
 	// process exit indefinitely if the pool is frozen — at worst the
 	// next replica waits the full TTL.
 	LarkHub *lark.Hub
-	cfg     Config
+	// EidetixSecrets decrypts per-project Eidetix tokens at claim time. nil
+	// when MULTICA_EIDETIX_SECRET_KEY is unset — in which case Eidetix is
+	// disabled platform-wide and the claim handler fails open (no eidetix
+	// server, no loop skill).
+	EidetixSecrets *secretbox.Box
+	cfg            Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
