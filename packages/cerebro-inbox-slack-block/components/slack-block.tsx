@@ -14,8 +14,16 @@
 // Styling: light-mode, Tailwind semantic tokens only (bg-card,
 // text-muted-foreground, bg-success for the online dot, etc.). No hardcoded
 // colors — see CLAUDE.md CSS Architecture.
-import { useMemo } from "react";
-import { Hash, Star, ChevronUp, ChevronDown, Settings2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  Hash,
+  Star,
+  ChevronUp,
+  ChevronDown,
+  Settings2,
+  X,
+  Search,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { channelListOptions, useCreateChannel } from "@multica/core/channels";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -35,6 +43,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { Input } from "@multica/ui/components/ui/input";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import type { Channel } from "@multica/core/types";
 import { useMemberPresence } from "../hooks/use-member-presence";
@@ -123,6 +132,8 @@ export function SlackBlock({
   // Watch typing for the currently selected conversation so a member's DM row
   // can surface "skriver…" when they type.
   const { typingUserIds } = useChannelTyping(selectedChannelId);
+  const [peopleSearchOpen, setPeopleSearchOpen] = useState(false);
+  const [peopleSearch, setPeopleSearch] = useState("");
 
   const createChannel = useCreateChannel();
 
@@ -157,9 +168,21 @@ export function SlackBlock({
       });
   }, [members, selfUserId, favorites, sort, channels]);
 
-  const visiblePeople =
-    maxPeople && maxPeople > 0 ? people.slice(0, maxPeople) : people;
-  const hiddenPeople = people.length - visiblePeople.length;
+  const normalizedPeopleSearch = peopleSearch.trim().toLowerCase();
+  const visiblePeople = useMemo(() => {
+    if (!normalizedPeopleSearch) return people;
+    return people.filter((m) => {
+      const name = m.name.toLowerCase();
+      const email = (m.email ?? "").toLowerCase();
+      return (
+        name.includes(normalizedPeopleSearch) ||
+        email.includes(normalizedPeopleSearch)
+      );
+    });
+  }, [people, normalizedPeopleSearch]);
+
+  const peopleListMaxHeight =
+    maxPeople && maxPeople > 0 ? `${maxPeople * 40}px` : undefined;
 
   const channelRooms = useMemo(() => {
     const isStarred = (id: string) => favorites.includes(channelKey(id));
@@ -231,6 +254,20 @@ export function SlackBlock({
           >
             <ChevronDown className="size-3.5" />
           </button>
+          <button
+            type="button"
+            className={`rounded p-1 hover:bg-muted ${
+              peopleSearchOpen ? "bg-muted text-foreground" : ""
+            }`}
+            onClick={() => {
+              setPeopleSearchOpen((open) => !open);
+              if (peopleSearchOpen) setPeopleSearch("");
+            }}
+            aria-label="Søg personer"
+            title="Søg personer"
+          >
+            <Search className="size-3.5" />
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -282,86 +319,123 @@ export function SlackBlock({
 
       <div className="flex flex-col gap-4 p-3">
         <div className="flex flex-col gap-1">
-          <h3 className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-            Direkte beskeder
-          </h3>
+          <div className="flex items-center gap-2 px-1">
+            <h3 className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+              Direkte beskeder
+            </h3>
+            {normalizedPeopleSearch && (
+              <span className="shrink-0 text-[10px] text-muted-foreground">
+                {visiblePeople.length}/{people.length}
+              </span>
+            )}
+          </div>
+          {peopleSearchOpen && (
+            <div className="relative px-1 pb-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={peopleSearch}
+                onChange={(event) => setPeopleSearch(event.target.value)}
+                placeholder="Søg personer..."
+                aria-label="Søg personer"
+                className="h-8 pl-8 pr-7 text-xs"
+              />
+              {peopleSearch && (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                  onClick={() => setPeopleSearch("")}
+                  aria-label="Ryd søgning"
+                  title="Ryd søgning"
+                >
+                  <X className="size-3.5" />
+                </button>
+              )}
+            </div>
+          )}
           {visiblePeople.length === 0 ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">
-              Ingen personer endnu.
+              {normalizedPeopleSearch
+                ? "Ingen personer matcher søgningen."
+                : "Ingen personer endnu."}
             </p>
           ) : (
-            visiblePeople.map((m) => {
-              const isOnline = onlineUserIds.has(m.user_id);
-              const dm = dmWithMember(channels, selfUserId, m.user_id);
-              const unread = dm?.unread_count ?? 0;
-              const isSelected = dm != null && dm.id === selectedChannelId;
-              const isTyping =
-                dm != null &&
-                dm.id === selectedChannelId &&
-                typingUserIds.has(m.user_id);
-              const favKey = actorKey("member", m.user_id);
-              const starred = favorites.includes(favKey);
-              return (
-                <div
-                  key={m.user_id}
-                  className={`group flex items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors ${
-                    isSelected ? "bg-accent" : "hover:bg-accent/50"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => void openMember(m.user_id)}
-                    className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
-                  >
-                    <span className="relative shrink-0">
-                      <ActorAvatar actorType="member" actorId={m.user_id} size={24} />
-                      <span
-                        data-testid={`presence-dot-${m.user_id}`}
-                        data-online={isOnline ? "true" : "false"}
-                        className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card ${
-                          isOnline ? "bg-success" : "bg-muted-foreground"
-                        }`}
-                        aria-label={isOnline ? "online" : "offline"}
-                      />
-                    </span>
-                    <span className="flex min-w-0 flex-1 items-center gap-1.5">
-                      <span className="truncate text-foreground">{m.name}</span>
-                      {isTyping && (
-                        <span className="shrink-0 text-xs italic text-brand">
-                          skriver…
-                        </span>
-                      )}
-                    </span>
-                  </button>
-                  {unread > 0 && (
-                    <span className="shrink-0 rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
-                      {unread}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    aria-label={starred ? "Fjern stjerne" : "Stjernemarkér"}
-                    aria-pressed={starred}
-                    onClick={() => toggleFavorite(favKey)}
-                    className={`shrink-0 rounded p-0.5 transition-opacity ${
-                      starred
-                        ? "text-warning opacity-100"
-                        : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+            <div
+              className="flex flex-col gap-1 overflow-y-auto pr-1"
+              data-testid="people-list"
+              style={{ maxHeight: peopleListMaxHeight }}
+            >
+              {visiblePeople.map((m) => {
+                const isOnline = onlineUserIds.has(m.user_id);
+                const dm = dmWithMember(channels, selfUserId, m.user_id);
+                const unread = dm?.unread_count ?? 0;
+                const isSelected = dm != null && dm.id === selectedChannelId;
+                const isTyping =
+                  dm != null &&
+                  dm.id === selectedChannelId &&
+                  typingUserIds.has(m.user_id);
+                const favKey = actorKey("member", m.user_id);
+                const starred = favorites.includes(favKey);
+                return (
+                  <div
+                    key={m.user_id}
+                    className={`group flex items-center gap-2.5 rounded-md px-1.5 py-1.5 transition-colors ${
+                      isSelected ? "bg-accent" : "hover:bg-accent/50"
                     }`}
                   >
-                    <Star
-                      className="size-3.5"
-                      fill={starred ? "currentColor" : "none"}
-                    />
-                  </button>
-                </div>
-              );
-            })
-          )}
-          {hiddenPeople > 0 && (
-            <p className="px-1.5 pt-0.5 text-[10px] text-muted-foreground">
-              +{hiddenPeople} flere skjult — skru op under Indstillinger.
-            </p>
+                    <button
+                      type="button"
+                      onClick={() => void openMember(m.user_id)}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                    >
+                      <span className="relative shrink-0">
+                        <ActorAvatar
+                          actorType="member"
+                          actorId={m.user_id}
+                          size={24}
+                        />
+                        <span
+                          data-testid={`presence-dot-${m.user_id}`}
+                          data-online={isOnline ? "true" : "false"}
+                          className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card ${
+                            isOnline ? "bg-success" : "bg-muted-foreground"
+                          }`}
+                          aria-label={isOnline ? "online" : "offline"}
+                        />
+                      </span>
+                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                        <span className="truncate text-foreground">{m.name}</span>
+                        {isTyping && (
+                          <span className="shrink-0 text-xs italic text-brand">
+                            skriver…
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    {unread > 0 && (
+                      <span className="shrink-0 rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-semibold text-warning-foreground">
+                        {unread}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      aria-label={starred ? "Fjern stjerne" : "Stjernemarkér"}
+                      aria-pressed={starred}
+                      onClick={() => toggleFavorite(favKey)}
+                      className={`shrink-0 rounded p-0.5 transition-opacity ${
+                        starred
+                          ? "text-warning opacity-100"
+                          : "text-muted-foreground opacity-0 hover:text-foreground group-hover:opacity-100"
+                      }`}
+                    >
+                      <Star
+                        className="size-3.5"
+                        fill={starred ? "currentColor" : "none"}
+                      />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
 

@@ -302,13 +302,16 @@ describe("SlackBlock", () => {
     expect(onRemove).toHaveBeenCalled();
   });
 
-  // #3 — max-people setting caps the list and surfaces the hidden count.
-  it("caps the people list at maxPeople and shows the hidden count", async () => {
+  // #3 — max-people setting caps the visible height while keeping the rest scrollable.
+  it("makes the people list scrollable at maxPeople instead of hiding people", async () => {
     await act(async () => {
       renderBlock({ maxPeople: 1 });
     });
-    // Two non-self people (Alice, Bob); cap to 1 → one hidden.
-    expect(screen.getByText(/1 flere skjult/)).toBeInTheDocument();
+
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.getByTestId("people-list")).toHaveStyle({ maxHeight: "40px" });
+    expect(screen.queryByText(/flere skjult/)).not.toBeInTheDocument();
   });
 
   it("picking a people limit from settings calls onSetMaxPeople", async () => {
@@ -319,6 +322,20 @@ describe("SlackBlock", () => {
     });
     await user.click(screen.getByText("10"));
     expect(onSetMaxPeople).toHaveBeenCalledWith(10);
+  });
+
+  it("filters people from the search icon", async () => {
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock();
+    });
+
+    await user.click(screen.getByTitle("Søg personer"));
+    await user.type(screen.getByPlaceholderText("Søg personer..."), "bob");
+
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.getByText("1/2")).toBeInTheDocument();
   });
 
   // #4 — starred people float to the top and the star toggles the favorite.
