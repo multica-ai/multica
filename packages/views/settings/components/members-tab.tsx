@@ -389,6 +389,7 @@ export function MembersTab() {
                   placeholder={t(($) => $.members.invite_name_placeholder)}
                   className="mt-1"
                 />
+              </div>
             </CardContent>
           </Card>
         )}

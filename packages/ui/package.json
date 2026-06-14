@@ -10,6 +10,8 @@
   "exports": {
     "./components/ui/*": "./components/ui/*.tsx",
     "./components/common/*": "./components/common/*.tsx",
+    "./input": "./components/ui/input.tsx",
+    "./button": "./components/ui/button.tsx",
     "./markdown": "./markdown/index.ts",
     "./markdown/*": "./markdown/*.tsx",
     "./markdown/linkify": "./markdown/linkify.ts",

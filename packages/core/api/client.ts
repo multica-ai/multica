@@ -86,6 +86,7 @@ import type {
   ReorderPinsRequest,
   Invitation,
   AdminUser,
+  Autopilot,
   AutopilotTrigger,
   AutopilotRun,
   CreateAutopilotRequest,
