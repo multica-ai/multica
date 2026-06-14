@@ -6,6 +6,17 @@ Cerebro feature that streams a running agent's output live to a browser-based te
 
 `cerebro_interactive_terminal` — defaults to `false`. Must be enabled per workspace before the toggle renders.
 
+## Default presentation mode
+
+Daemon-backed (local) runtimes default to `interactive`: a freshly-registered
+runtime is set to `interactive` at registration (`server/internal/handler/daemon.go`,
+`CEREBRO-PATCH(runtime-default-interactive)`), and the existing fleet was backfilled
+by migration `9075_cerebro_runtime_presentation_default_interactive` (only rows still
+on the original `headless` default were flipped, so an explicit opt-out is preserved).
+Cloud providers (`firtal-gateway`) can't stream and stay `headless`. The runtime-detail
+toggle is available to **every workspace member** (not just admins) — the server gates
+the PUT on workspace membership.
+
 ## How it works end-to-end
 
 ```

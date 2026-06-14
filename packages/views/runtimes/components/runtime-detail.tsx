@@ -560,9 +560,9 @@ function DiagnosticsCard({
           </div>
         )}
 
-        {/* CEREBRO-PATCH(runtime-detail-presentation-mode): mount interactive-terminal toggle. */}
+        {/* CEREBRO-PATCH(runtime-detail-presentation-mode): mount interactive-terminal toggle — open to every workspace member (server enforces membership on the PUT). */}
         <div className="border-t pt-3">
-          <PresentationModeToggle runtimeId={runtime.id} readOnly={!isAdmin} />
+          <PresentationModeToggle runtimeId={runtime.id} />
         </div>
 
         {canDelete && (

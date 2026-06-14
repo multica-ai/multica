@@ -451,6 +451,8 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if row.Inserted {
+			// CEREBRO-PATCH(runtime-default-interactive): new daemon runtimes default the live terminal ON; cloud providers can't stream so they stay headless.
+			_, _ = h.DB.Exec(r.Context(), `UPDATE agent_runtime SET presentation_mode = 'interactive', updated_at = now() WHERE id = $1 AND presentation_mode = 'headless' AND provider <> 'firtal-gateway'`, registered.ID)
 			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
