@@ -49,7 +49,14 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { useMarkInboxRead, useArchiveInbox } from "@multica/core/inbox/mutations";
+import {
+  useMarkInboxRead,
+  useArchiveInbox,
+  useMarkAllInboxRead,
+  useArchiveAllInbox,
+  useArchiveAllReadInbox,
+  useArchiveCompletedInbox,
+} from "@multica/core/inbox/mutations";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import {
   GlobalInboxReminderDialog,
@@ -59,6 +66,7 @@ import {
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
+import { useTypeLabels } from "@multica/views/inbox/components/inbox-detail-label";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
@@ -143,15 +151,26 @@ export function DynamicInbox() {
   const wsId = useWorkspaceId();
   const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
-  const { entries, filterContext, projects, loading } = useDynamicInboxData(wsId);
+  const { entries, filterContext, projects, projectMap, agentMap, loading } =
+    useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
+  const typeLabels = useTypeLabels();
   const setMode = useSetInboxMode();
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
+  // TECH-3541 #2 — same flags the classic inbox uses to gate its view options.
+  const channelsEnabled = useFeatureFlag("cerebro_channels");
+  const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
   const isMobile = useIsMobile();
 
   const markRead = useMarkInboxRead();
   const archiveInbox = useArchiveInbox();
   const archiveChannel = useArchiveChannel();
+  // TECH-3541 #2 — workspace-wide bulk maintenance, identical to the classic
+  // inbox ⋯ menu, surfaced on the "All messages" box.
+  const markAllRead = useMarkAllInboxRead();
+  const archiveAll = useArchiveAllInbox();
+  const archiveAllRead = useArchiveAllReadInbox();
+  const archiveCompleted = useArchiveCompletedInbox();
 
   const [activeTabId, setActiveTabId] = useState<string>(
     layout.activeTabId ?? layout.tabs[0]?.id ?? "",
@@ -216,6 +235,42 @@ export function DynamicInbox() {
     else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
     if (selected && selected.id === entry.id) clearSelection();
   };
+
+  // TECH-3541 #2 — lookup tables + classic-parity controls for the "All
+  // messages" box. groupContext feeds project/agent/type grouping; the controls
+  // (view options gating + bulk actions) are only wired to the "all" box.
+  const groupContext = useMemo(
+    () => ({ projectMap, agentMap, typeLabels }),
+    [projectMap, agentMap, typeLabels],
+  );
+  const classicControls = useMemo(
+    () => ({
+      channelsEnabled,
+      pinnedFilterEnabled,
+      onMarkAllRead: () => markAllRead.mutate(undefined),
+      onArchiveAll: () => {
+        clearSelection();
+        archiveAll.mutate(undefined);
+      },
+      onArchiveAllRead: () => {
+        clearSelection();
+        archiveAllRead.mutate(undefined);
+      },
+      onArchiveCompleted: () => {
+        clearSelection();
+        archiveCompleted.mutate(undefined);
+      },
+    }),
+    [
+      channelsEnabled,
+      pinnedFilterEnabled,
+      markAllRead,
+      archiveAll,
+      archiveAllRead,
+      archiveCompleted,
+      clearSelection,
+    ],
+  );
 
   // TECH-3413 #6 — substitute the frozen snapshot for its live row so the
   // section filter/sort sees the entry's selection-time state, not the
@@ -647,6 +702,8 @@ export function DynamicInbox() {
                           filterContext={filterContext}
                           actionLabels={actionLabels}
                           projects={projects}
+                          groupContext={groupContext}
+                          classicControls={section.kind === "all" ? classicControls : undefined}
                           selectedKey={selectedKey}
                           query={query}
                           dragHandle={handle}
@@ -675,27 +732,33 @@ export function DynamicInbox() {
   // split. It renders a single column — the section list, or (when a row is
   // open) that message full-screen with a Back button — mirroring how the
   // classic inbox behaves on a phone.
+  //
+  // TECH-3541 #1 — the list column stays MOUNTED while a message is open; the
+  // detail is rendered as an opaque overlay on top of it. Unmounting the list
+  // (the previous behaviour) discarded the scroll container, so pressing Back
+  // dropped the user at the top of the inbox instead of where they were. By
+  // keeping the same `sectionsScrollRef` element alive under the overlay, its
+  // scrollTop is preserved and Back returns to the exact previous position.
   if (isMobile) {
-    if (selected || newChat) {
-      return (
-        <div className="flex h-full flex-col min-h-0">
-          <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
-            <MobileSidebarTrigger className="mr-0" />
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
-            >
-              <ArrowLeft className="size-4" /> Back
-            </button>
-          </div>
-          <div className="flex flex-1 flex-col min-h-0">{detail}</div>
-        </div>
-      );
-    }
+    const detailOpen = Boolean(selected || newChat);
     return (
-      <div className="flex h-full flex-col min-h-0">
+      <div className="relative flex h-full flex-col min-h-0">
         {listColumn}
+        {detailOpen && (
+          <div className="absolute inset-0 z-40 flex flex-col min-h-0 bg-background">
+            <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
+              <MobileSidebarTrigger className="mr-0" />
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="flex shrink-0 items-center gap-1.5 rounded px-2 py-1 text-sm text-muted-foreground hover:bg-muted"
+              >
+                <ArrowLeft className="size-4" /> Back
+              </button>
+            </div>
+            <div className="flex flex-1 flex-col min-h-0">{detail}</div>
+          </div>
+        )}
         <NewMessageModal
           open={showNewMessage}
           onClose={() => setShowNewMessage(false)}

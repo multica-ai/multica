@@ -15,6 +15,7 @@ import {
 import { chatSessionsOptions, pendingChatTasksOptions } from "@multica/core/chat/queries";
 import { channelListOptions } from "@multica/core/channels";
 import { projectListOptions, projectTreeOptions } from "@multica/core/projects";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxWakeupStates, useInboxPinnedMatcher } from "@multica/cerebro-inbox";
@@ -34,6 +35,8 @@ export interface DynamicInboxData {
   filterContext: SectionFilterContext;
   projectMap: Map<string, Project>;
   projects: Project[];
+  /** TECH-3541 #2 — workspace agents, keyed by id, for agent-grouping. */
+  agentMap: Map<string, { name?: string }>;
   loading: boolean;
 }
 
@@ -95,6 +98,14 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const projectMap = useMemo(() => new Map(projects.map((p) => [p.id, p])), [projects]);
+
+  // TECH-3541 #2 — workspace agents for the "Group by → Agent" mode (mirrors
+  // the classic inbox's agentMap).
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentMap = useMemo(
+    () => new Map(agents.map((a) => [a.id, { name: a.name }])),
+    [agents],
+  );
 
   // TECH-3502 #3 — descendant ids per project (for the "include sub-projects"
   // filter option). Falls back to empty when the nested-projects tree is
@@ -162,6 +173,7 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     filterContext,
     projectMap,
     projects,
+    agentMap,
     loading: inboxQuery.isLoading,
   };
 }
