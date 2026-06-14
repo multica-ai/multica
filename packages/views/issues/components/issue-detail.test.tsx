@@ -129,7 +129,7 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -150,6 +150,7 @@ vi.mock("../../editor", () => ({
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
+        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
       />
     );
   }),
@@ -533,6 +534,19 @@ describe("IssueDetail (shared)", () => {
     });
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("opts the description editor into the unmount flush", async () => {
+    // Closing the issue modal must save the description the user last saw —
+    // ContentEditor drops pending debounced updates on unmount by default
+    // (so cancelled comment drafts aren't resurrected), and only this
+    // explicit opt-in keeps a paste-then-close from losing the image
+    // markdown and its attachment_ids bind (MUL-3254). The flush behavior
+    // itself is covered in content-editor.test.tsx; this pins the wiring.
+    renderIssueDetail();
+
+    const description = await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(description).toHaveAttribute("data-flush-on-unmount", "true");
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {

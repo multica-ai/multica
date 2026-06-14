@@ -12,6 +12,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -35,6 +36,7 @@ import {
   pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
+  isTaskMessageTaskId,
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
@@ -71,6 +73,106 @@ function seedChatMessagesPageCache(
         next_cursor: null,
       }],
       pageParams: [null],
+    },
+  );
+}
+
+function appendChatMessageToLatestPageCache(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  message: ChatMessage,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) {
+        return {
+          pages: [{
+            messages: [message],
+            limit: 50,
+            has_more: false,
+            next_cursor: null,
+          }],
+          pageParams: [null],
+        };
+      }
+      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
+        return old;
+      }
+      return {
+        ...old,
+        pages: old.pages.map((page, index) =>
+          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
+        ),
+      };
+    },
+  );
+}
+
+function removeChatMessageFromPageCache(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: page.messages.filter((m) => m.id !== messageId),
+        })),
+      };
+    },
+  );
+}
+
+function removeChatMessageFromCaches(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    (old) => old?.filter((m) => m.id !== messageId) ?? old,
+  );
+  removeChatMessageFromPageCache(qc, sessionId, messageId);
+}
+
+function replaceOptimisticChatMessageId(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  optimisticId: string,
+  messageId: string,
+  taskId: string,
+) {
+  const replace = (messages: ChatMessage[] | undefined) => {
+    if (!messages) return messages;
+    if (messages.some((m) => m.id === messageId)) {
+      return messages.filter((m) => m.id !== optimisticId);
+    }
+    return messages.map((m) =>
+      m.id === optimisticId ? { ...m, id: messageId, task_id: taskId } : m,
+    );
+  };
+
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    replace,
+  );
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: replace(page.messages) ?? page.messages,
+        })),
+      };
     },
   );
 }
@@ -123,6 +225,14 @@ export function ChatWindow() {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const stopRequestedBeforeTaskRef = useRef(false);
+  const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
+    id: string;
+    content: string;
+  } | null>(null);
+  const handleRestoreDraftConsumed = useCallback(() => {
+    setRestoreDraftRequest(null);
+  }, []);
 
   // Legacy archived sessions (the old soft-archive feature was removed but
   // pre-existing rows with status='archived' may still exist) are excluded
@@ -277,11 +387,58 @@ export function ChatWindow() {
     [ensureSession, uploadWithToast, qc, setActiveSession],
   );
 
+  const cancelChatTask = useCallback(
+    async (
+      taskId: string,
+      sessionId: string,
+      options: { restoreDraftToInput: boolean; source: string },
+    ) => {
+      apiLogger.info("cancelTask.start", {
+        taskId,
+        sessionId,
+        source: options.source,
+      });
+      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+
+      try {
+        const result = await api.cancelTaskById(taskId);
+        const restored = result.cancelled_chat_message;
+        if (restored?.restore_to_input) {
+          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
+          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
+            setRestoreDraftRequest({
+              id: restored.message_id,
+              content: restored.content,
+            });
+          }
+        }
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+        apiLogger.info("cancelTask.success", {
+          taskId,
+          sessionId,
+          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
+        });
+        return result;
+      } catch (err) {
+        apiLogger.warn("cancelTask.error (task may have already finished)", {
+          taskId,
+          sessionId,
+          err,
+        });
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+        return null;
+      }
+    },
+    [qc],
+  );
+
   const handleSend = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[]): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
-        return;
+        return false;
       }
 
       const finalContent = content;
@@ -296,10 +453,17 @@ export function ChatWindow() {
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
-      const sessionId = await ensureSession(finalContent);
+      let sessionId: string | null = null;
+      try {
+        sessionId = await ensureSession(finalContent);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.ensureSession.error", err);
+        toast.error(t(($) => $.input.send_failed_toast));
+        return false;
+      }
       if (!sessionId) {
         apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
-        return;
+        return false;
       }
 
       // Optimistic burst — everything that gives the user "I sent a message
@@ -322,7 +486,7 @@ export function ChatWindow() {
       // "new-chat first-message" white flash. Priming the cache first means
       // the very first read after activeSessionId flips hits data
       // synchronously and ChatMessageList mounts directly.
-      seedChatMessagesPageCache(qc, sessionId, [optimistic]);
+      appendChatMessageToLatestPageCache(qc, sessionId, optimistic);
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
         (old) => (old ? [...old, optimistic] : [optimistic]),
@@ -342,12 +506,23 @@ export function ChatWindow() {
       setActiveSession(sessionId);
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      const result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+      let result;
+      try {
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
+        stopRequestedBeforeTaskRef.current = false;
+        removeChatMessageFromCaches(qc, sessionId, optimistic.id);
+        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+        toast.error(t(($) => $.input.send_failed_toast));
+        return false;
+      }
       apiLogger.info("sendChatMessage.success", {
         sessionId,
         messageId: result.message_id,
         taskId: result.task_id,
       });
+      replaceOptimisticChatMessageId(qc, sessionId, optimistic.id, result.message_id, result.task_id);
       // Replace the temporary task_id with the server's real one (so the WS
       // task: handlers can match against it) and snap the anchor to the
       // server's created_at — keeping the elapsed-seconds reading stable.
@@ -356,15 +531,26 @@ export function ChatWindow() {
         status: "queued",
         created_at: result.created_at,
       });
+      if (stopRequestedBeforeTaskRef.current) {
+        stopRequestedBeforeTaskRef.current = false;
+        await cancelChatTask(result.task_id, sessionId, {
+          restoreDraftToInput: true,
+          source: "deferred-send",
+        });
+        return false;
+      }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
       qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+      return true;
     },
     [
       activeSessionId,
       activeAgent,
       ensureSession,
+      cancelChatTask,
       qc,
       setActiveSession,
+      t,
     ],
   );
 
@@ -373,27 +559,19 @@ export function ChatWindow() {
       apiLogger.debug("cancelTask skipped: no pending task");
       return;
     }
-    // Optimistic clear — pill disappears + input unlocks the moment the
-    // user clicks Stop, instead of after the HTTP roundtrip. WS
-    // task:cancelled will confirm later (no-op if cache is already empty);
-    // if the cancel POST fails because the task already finished, the
-    // assistant message arrives via task:completed → chat:done and renders
-    // normally. Either way the UI is in sync with reality without latency.
-    apiLogger.info("cancelTask.start", { taskId: pendingTaskId, sessionId: activeSessionId });
-    qc.setQueryData(chatKeys.pendingTask(activeSessionId), {});
-    qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
-    qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
-    // Fire-and-forget — UI is already in its post-cancel state. We log the
-    // outcome but never block on it.
-    api.cancelTaskById(pendingTaskId).then(
-      () => apiLogger.info("cancelTask.success", { taskId: pendingTaskId }),
-      (err) =>
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId: pendingTaskId,
-          err,
-        }),
-    );
-  }, [pendingTaskId, activeSessionId, qc]);
+    if (!isTaskMessageTaskId(pendingTaskId)) {
+      stopRequestedBeforeTaskRef.current = true;
+      apiLogger.info("cancelTask.deferred until server task id", {
+        taskId: pendingTaskId,
+        sessionId: activeSessionId,
+      });
+      return;
+    }
+    void cancelChatTask(pendingTaskId, activeSessionId, {
+      restoreDraftToInput: true,
+      source: "active-input",
+    });
+  }, [pendingTaskId, activeSessionId, cancelChatTask]);
 
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -590,6 +768,8 @@ export function ChatWindow() {
        *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
+        restoreDraftRequest={restoreDraftRequest}
+        onRestoreDraftConsumed={handleRestoreDraftConsumed}
         onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
@@ -914,7 +1094,13 @@ function SessionDropdown({
     queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(session.id) });
 
     api.cancelTaskById(task.task_id).then(
-      () => apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id }),
+      (result) => {
+        const restored = result.cancelled_chat_message;
+        if (restored?.restore_to_input) {
+          removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
+        }
+        apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id });
+      },
       (err) =>
         apiLogger.warn("cancelTask.error (history row; task may have already finished)", {
           taskId: task.task_id,

@@ -1671,11 +1671,12 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // keeping the sub-issue intent of the entry point regardless of whether
 // the user submits via manual or agent mode.
 type QuickCreateIssueRequest struct {
-	AgentID       string `json:"agent_id,omitempty"`
-	SquadID       string `json:"squad_id,omitempty"`
-	Prompt        string `json:"prompt"`
-	ProjectID     string `json:"project_id,omitempty"`
-	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	AgentID       string   `json:"agent_id,omitempty"`
+	SquadID       string   `json:"squad_id,omitempty"`
+	Prompt        string   `json:"prompt"`
+	ProjectID     string   `json:"project_id,omitempty"`
+	ParentIssueID string   `json:"parent_issue_id,omitempty"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -1791,14 +1792,20 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
 	// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
-	// handling, no-retry on partial failure). Older daemons either
-	// double-create issues on partial CLI failures or mishandle pasted
-	// screenshot URLs; fail closed before enqueuing rather than surface
-	// the breakage as an inbox failure twenty seconds later. Dev-built
+	// handling, quick-create attachment binding, no-retry on partial failure).
+	// Older daemons either double-create issues on partial CLI failures, drop
+	// attachment bindings, or mishandle pasted screenshot URLs; fail closed
+	// before enqueuing rather than surface the breakage as an inbox failure
+	// twenty seconds later. Dev-built
 	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
 	// so `make daemon` works without weakening staging or production.
 	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
 		writeJSON(w, status, payload)
+		return
+	}
+
+	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
 		return
 	}
 
@@ -1843,7 +1850,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1887,7 +1894,7 @@ func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bo
 //	422 {
 //	  "code": "daemon_version_unsupported",
 //	  "current_version": "0.2.18" | "",
-//	  "min_version":     "0.2.20",
+//	  "min_version":     "0.2.21",
 //	  "runtime_id":      "<uuid>"
 //	}
 func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {

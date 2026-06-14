@@ -26,7 +26,6 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -400,8 +399,6 @@ function CommentRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   return (
     <div className="py-1.5">
@@ -437,10 +434,6 @@ function CommentRow({
         )}
 
         <div className="ml-auto flex items-center gap-0.5">
-          <QuickEmojiPicker
-            onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-            align="end"
-          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -563,7 +556,6 @@ function CommentRow({
             currentUserId={currentUserId}
             onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
             getActorName={getActorName}
-            hideAddButton={!isLongContent}
             className="mt-1.5 pl-12 pr-4"
           />
         </>
@@ -612,8 +604,6 @@ function CommentCardImpl({
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -709,10 +699,6 @@ function CommentCardImpl({
 
             {open && (
               <div className="ml-auto flex items-center gap-0.5">
-                <QuickEmojiPicker
-                  onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-                  align="end"
-                />
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -844,7 +830,6 @@ function CommentCardImpl({
                   currentUserId={currentUserId}
                   onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
                   getActorName={getActorName}
-                  hideAddButton={!isLongContent}
                   className="mt-1.5 pl-10"
                 />
               </>

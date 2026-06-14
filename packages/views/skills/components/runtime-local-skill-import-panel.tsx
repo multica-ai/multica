@@ -28,6 +28,7 @@ import {
   resolveRuntimeLocalSkillImport,
 } from "@multica/core/runtimes";
 import {
+  memberListOptions,
   skillDetailOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
@@ -306,16 +307,20 @@ function ConflictResolutionPanel({
   conflicts,
   resolutions,
   onChange,
+  onResolveNow,
   onOverwriteAll,
   onSkipAll,
 }: {
   conflicts: BulkImportResult[];
   resolutions: Record<string, ConflictResolutionState>;
   onChange: (key: string, next: ConflictResolutionState) => void;
+  onResolveNow?: (key: string, next: ConflictResolutionState) => void;
   onOverwriteAll: () => void;
   onSkipAll: () => void;
 }) {
   const { t } = useT("skills");
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
   const single = conflicts.length === 1;
   const canOverwriteAny = conflicts.some((r) => r.conflict?.can_overwrite);
 
@@ -366,7 +371,10 @@ function ConflictResolutionPanel({
               action: r.conflict?.can_overwrite ? "overwrite" : "rename",
               renameName: defaultRenameName(r.name),
             } satisfies ConflictResolutionState);
-          const creator = r.conflict?.existing_created_by;
+          const creatorId = r.conflict?.existing_created_by;
+          const creatorName = creatorId
+            ? members.find((m) => m.user_id === creatorId)?.name
+            : undefined;
           return (
             <div key={r.key} className="rounded-lg border bg-card p-3">
               <div className="flex items-start gap-2">
@@ -378,9 +386,9 @@ function ConflictResolutionPanel({
                   )}
                   {!r.conflict?.can_overwrite && (
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {creator
+                      {creatorName
                         ? t(($) => $.runtime_import.conflict_locked_creator, {
-                            creator,
+                            creator: creatorName,
                           })
                         : t(($) => $.runtime_import.conflict_locked)}
                     </p>
@@ -395,12 +403,17 @@ function ConflictResolutionPanel({
                   variant={
                     resolution.action === "overwrite" ? "default" : "outline"
                   }
-                  onClick={() =>
-                    onChange(r.key, {
+                  onClick={() => {
+                    const next = {
                       action: "overwrite",
                       renameName: resolution.renameName,
-                    })
-                  }
+                    } satisfies ConflictResolutionState;
+                    if (single && r.conflict?.can_overwrite && onResolveNow) {
+                      onResolveNow(r.key, next);
+                    } else {
+                      onChange(r.key, next);
+                    }
+                  }}
                   disabled={!r.conflict?.can_overwrite}
                 >
                   <RefreshCw className="h-3 w-3" />
@@ -717,7 +730,9 @@ export function RuntimeLocalSkillImportPanel({
     }));
   };
 
-  const handleApplyConflictResolutions = async () => {
+  const handleApplyConflictResolutions = async (
+    resolutionOverrides: Record<string, ConflictResolutionState> = {},
+  ) => {
     if (!selectedRuntimeId || pendingConflicts.length === 0) return;
 
     const conflicts = [...pendingConflicts];
@@ -742,7 +757,8 @@ export function RuntimeLocalSkillImportPanel({
     }));
 
     for (const r of conflicts) {
-      const resolution = conflictResolutions[r.key];
+      const resolution =
+        resolutionOverrides[r.key] ?? conflictResolutions[r.key];
       if (!resolution) {
         applyResult(r.key, {
           status: "failed",
@@ -887,6 +903,10 @@ export function RuntimeLocalSkillImportPanel({
           conflicts={pendingConflicts}
           resolutions={conflictResolutions}
           onChange={setConflictResolution}
+          onResolveNow={(key, next) => {
+            setConflictResolution(key, next);
+            void handleApplyConflictResolutions({ [key]: next });
+          }}
           onOverwriteAll={() => {
             setConflictResolutions((prev) => {
               const next = { ...prev };
@@ -1137,7 +1157,7 @@ export function RuntimeLocalSkillImportPanel({
             <Button
               type="button"
               size="sm"
-              onClick={handleApplyConflictResolutions}
+              onClick={() => void handleApplyConflictResolutions()}
               disabled={!canApplyConflictResolutions}
             >
               {t(($) => $.runtime_import.conflict_apply_button)}

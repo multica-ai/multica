@@ -2224,11 +2224,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	)
 
 	// If the task targets a project_resource of type local_directory that
-	// is pinned to this daemon, acquire the path mutex BEFORE StartTask so
-	// the server-side state machine is dispatched → waiting_local_directory
-	// → running rather than backwards-transitioning from running into the
-	// wait state. The release is deferred so a panic or early return
-	// always frees the lock for the next waiter.
+	// is pinned to this daemon, acquire the path mutex before runner.run
+	// so the server-side state machine is dispatched →
+	// waiting_local_directory → running rather than backwards-transitioning
+	// from running into the wait state. The release is deferred so a panic
+	// or early return always frees the lock for the next waiter.
+	//
+	// StartTask itself now lives in runTask (see issue #3999 race A) and
+	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
+	// so consumers that read status==running can resolve the workdir path
+	// without racing the daemon's os.MkdirAll.
 	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
 	if abort {
 		return
@@ -2237,23 +2242,26 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		defer localRelease()
 	}
 
-	if err := d.client.StartTask(ctx, task.ID); err != nil {
-		taskLog.Error("start task failed", "error", err)
-		startErrMsg := fmt.Sprintf("start task failed: %s", err.Error())
-		// MUL-2946: classify the wrapper error so the failure_reason
-		// column lands in the canonical refined taxonomy rather than
-		// the legacy coarse "agent_error" bucket. A start-task failure
-		// most commonly surfaces as ReasonAgentUnknown (no rule
-		// matches "start task failed: <…>"), but a future provider /
-		// network blip in the wrapper layer would still classify
-		// correctly without us touching this site.
-		if failErr := d.client.FailTask(ctx, task.ID, startErrMsg, "", "", taskfailure.Classify(startErrMsg).String()); failErr != nil {
-			taskLog.Error("fail task after start error", "error", failErr)
-		}
-		return
+	// Hold a process-wide active-root guard for the rest of this task so
+	// the GC loop never sees a window where the env root has neither the
+	// in-process guard nor .gc_meta.json (issue #3999 race B). runTask
+	// installs its own ref-counted mark/unmark internally; without this
+	// outer guard the inner unmark fires when runTask returns, leaving
+	// the directory protected only by the 72h orphan TTL through
+	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
+	// is reference-counted, so the duplicate marks runTask installs are
+	// correctly nested within these.
+	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if predictedEnvRoot != "" {
+		d.markActiveEnvRoot(predictedEnvRoot)
+		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
 	}
-
-	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
+	if task.PriorWorkDir != "" {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+			d.markActiveEnvRoot(priorRoot)
+			defer d.unmarkActiveEnvRoot(priorRoot)
+		}
+	}
 
 	// Create a cancellable context so we can interrupt the running agent
 	// when the server signals the task should stop — either the task reached
@@ -2392,10 +2400,10 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
-	// per-task watcher only starts after StartTask. If the user cancels
-	// the issue or it gets reassigned during the wait, we need to notice
-	// promptly so the daemon slot isn't pinned by a phantom waiter. We
-	// spin up the cancellation watcher lazily inside onWait so the
+	// per-task watcher only starts after the lock is acquired. If the user
+	// cancels the issue or it gets reassigned during the wait, we need to
+	// notice promptly so the daemon slot isn't pinned by a phantom waiter.
+	// We spin up the cancellation watcher lazily inside onWait so the
 	// no-contention fast path still costs nothing.
 	waitCtx, waitCancel := context.WithCancel(ctx)
 	defer waitCancel()
@@ -2708,28 +2716,39 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 	}
+	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
+	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
+	// failures fail soft to local mode — a broken JSON blob must never block
+	// task dispatch.
+	var openclawMode string
+	var openclawGateway execenv.OpenclawGatewayPin
+	if task.Agent != nil && provider == "openclaw" {
+		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			McpConfig:    agentMcpConfig,
-			Task:         taskCtx,
+			WorkDir:         task.PriorWorkDir,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			McpConfig:      agentMcpConfig,
-			Task:           taskCtx,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          task.ID,
+			AgentName:       agentName,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -2745,6 +2764,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
+
+	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
+	// server-side state machine dispatched (or waiting_local_directory) →
+	// running. Calling StartTask before Prepare/Reuse let any consumer
+	// that read status==running and resolved
+	// /multica_workspaces/{ws}/{short-id}/workdir hit FileNotFoundError in
+	// the microsecond window before os.MkdirAll ran.
+	//
+	// On error we return early so handleTask's existing FailTask +
+	// taskfailure.Classify path records the failure with the same
+	// "start task failed: <…>" string and the same failure_reason
+	// taxonomy as before — see MUL-2946 for the classifier contract.
+	if err := d.client.StartTask(ctx, task.ID); err != nil {
+		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
+	}
+	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
 
@@ -2827,6 +2862,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// deterministically (see GetIssueByOrigin).
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
+		if len(task.QuickCreateAttachmentIDs) > 0 {
+			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
+				agentEnv["MULTICA_QUICK_CREATE_ATTACHMENT_IDS"] = string(raw)
+			} else {
+				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
+			}
+		}
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -2840,6 +2882,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Point Cursor at per-task project state when managed MCP is present.
+	// The workdir .cursor/mcp.json carries the managed server list, while
+	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
+	// persistent ~/.cursor/projects state.
+	if env.CursorDataDir != "" {
+		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
@@ -2958,6 +3007,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		OpenclawMode:              openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3731,7 +3781,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
@@ -3744,6 +3794,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.ClaudeArgs
 	case "codex":
 		args = cfg.CodexArgs
+	case "codebuddy":
+		args = cfg.CodebuddyArgs
 	default:
 		return nil
 	}

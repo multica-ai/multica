@@ -8,6 +8,7 @@ import {
   KeyRound,
   ListTodo,
   Plug,
+  Router,
   Terminal,
   Webhook,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
+import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -44,9 +46,10 @@ export type DetailTab =
   | "env"
   | "custom_args"
   | "mcp_config"
-  | "integrations";
+  | "integrations"
+  | "runtime_config";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp_config" | "integrations" | "runtime_config"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -55,6 +58,7 @@ const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "
   custom_args: "custom_args",
   mcp_config: "mcp_config",
   integrations: "integrations",
+  runtime_config: "runtime_config",
 };
 
 const detailTabs: {
@@ -69,6 +73,7 @@ const detailTabs: {
   { id: "custom_args", icon: Terminal },
   { id: "mcp_config", icon: Plug },
   { id: "integrations", icon: Webhook },
+  { id: "runtime_config", icon: Router },
 ];
 
 interface AgentOverviewPaneProps {
@@ -146,11 +151,18 @@ export function AgentOverviewPane({
   // (configured). Unlike MCP we default to HIDING while the listing loads:
   // deployments without Lark are the common case, so flashing the tab on
   // then off would be the worse flicker.
+  //
+  // The Runtime Config tab is openclaw-only today (gateway mode lives there,
+  // issue #3260). Other providers' runtime_config is freeform JSONB that no
+  // backend currently reads, so surfacing the tab would let users save values
+  // their runtime ignores — same anti-footgun rationale as the MCP gate.
   const visibleTabs = useMemo(() => {
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
+    const showRuntimeConfig = runtime ? runtime.provider === "openclaw" : false;
     return detailTabs.filter((tab) => {
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "integrations") return larkConfigured;
+      if (tab.id === "runtime_config") return showRuntimeConfig;
       return true;
     });
   }, [runtime, larkConfigured]);
@@ -269,6 +281,15 @@ export function AgentOverviewPane({
         {effectiveTab === "integrations" && (
           <TabContent>
             <IntegrationsTab agent={agent} />
+          </TabContent>
+        )}
+        {effectiveTab === "runtime_config" && (
+          <TabContent>
+            <RuntimeConfigTab
+              agent={agent}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
           </TabContent>
         )}
       </div>

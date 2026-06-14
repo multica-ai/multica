@@ -296,6 +296,7 @@ func init() {
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
+	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
 
 	// issue update
 	issueUpdateCmd.Flags().String("title", "", "New title")
@@ -624,6 +625,35 @@ func isHTTPURL(path string) bool {
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
 }
 
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(dst)+len(values))
+	out := make([]string, 0, len(dst)+len(values))
+	for _, v := range append(dst, values...) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	return out
+}
+
+func quickCreateAttachmentIDsFromEnv() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS"))
+	if raw == "" {
+		return nil, nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil, fmt.Errorf("parse MULTICA_QUICK_CREATE_ATTACHMENT_IDS: %w", err)
+	}
+	return appendUniqueStrings(nil, ids...), nil
+}
+
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
 	if title == "" {
@@ -700,6 +730,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
 		body["origin_type"] = "quick_create"
 		body["origin_id"] = taskID
+	}
+	attachmentIDs, _ := cmd.Flags().GetStringSlice("attachment-id")
+	envAttachmentIDs, err := quickCreateAttachmentIDsFromEnv()
+	if err != nil {
+		return err
+	}
+	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
+	if len(attachmentIDs) > 0 {
+		body["attachment_ids"] = attachmentIDs
 	}
 
 	// Pre-validate attachments BEFORE creating the issue so a bad path

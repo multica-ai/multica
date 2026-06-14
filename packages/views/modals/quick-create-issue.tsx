@@ -26,7 +26,7 @@ import {
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
-import type { Agent, Squad } from "@multica/core/types";
+import { contentReferencesAttachment, type Agent, type Attachment, type Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -257,15 +257,21 @@ export function AgentCreatePanel({
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
 
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
   // agent receives them as embedded markdown image URLs in the prompt.
   const { uploadWithToast, uploading } = useFileUpload(api);
-  const handleUploadFile = useCallback(
-    (file: File) => uploadWithToast(file),
-    [uploadWithToast],
-  );
+  const handleUploadFile = useCallback(async (file: File) => {
+    const result = await uploadWithToast(file);
+    if (result) {
+      setPendingAttachments((prev) =>
+        prev.some((a) => a.id === result.id) ? prev : [...prev, result],
+      );
+    }
+    return result;
+  }, [uploadWithToast]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -281,6 +287,9 @@ export function AgentCreatePanel({
   const submit = async () => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
+    const activeAttachmentIds = pendingAttachments
+      .filter((a) => contentReferencesAttachment(md, a))
+      .map((a) => a.id);
     setSubmitting(true);
     setError(null);
     try {
@@ -291,6 +300,7 @@ export function AgentCreatePanel({
         prompt: md,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
+        ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
       });
       setLastActor(actor.type, actor.id);
       setLastProjectId(projectId);
@@ -303,6 +313,7 @@ export function AgentCreatePanel({
         // Stay open for continuous creation — clear the editor so the
         // user can immediately type the next prompt.
         editorRef.current?.clearContent();
+        setPendingAttachments([]);
         setHasContent(false);
         setSentCount((c) => c + 1);
         setJustSent(true);
@@ -469,6 +480,7 @@ export function AgentCreatePanel({
               setPrompt(md);
             }}
             onUploadFile={handleUploadFile}
+            attachments={pendingAttachments}
             onSubmit={submit}
             debounceMs={150}
           />

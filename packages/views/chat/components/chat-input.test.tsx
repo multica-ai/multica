@@ -1,5 +1,5 @@
 import { forwardRef, useRef, useImperativeHandle } from "react";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -130,6 +130,24 @@ vi.mock("@multica/core/chat", () => {
 });
 
 import { ChatInput } from "./chat-input";
+import { useChatStore } from "@multica/core/chat";
+
+beforeEach(() => {
+  dropHandlers.onDrop = null;
+  editorProps.last = null;
+  const state = useChatStore.getState() as unknown as {
+    activeSessionId: string | null;
+    selectedAgentId: string;
+    inputDrafts: Record<string, string>;
+    setInputDraft: ReturnType<typeof vi.fn>;
+    clearInputDraft: ReturnType<typeof vi.fn>;
+  };
+  state.activeSessionId = null;
+  state.selectedAgentId = "agent-1";
+  state.inputDrafts = {};
+  state.setInputDraft.mockClear();
+  state.clearInputDraft.mockClear();
+});
 
 function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}) {
   const onSend = props.onSend ?? vi.fn();
@@ -311,5 +329,107 @@ describe("ChatInput attachment wiring", () => {
     // The agent picker may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.
     expect(buttons.length).toBe(1);
+  });
+});
+
+describe("ChatInput async send", () => {
+  it("restores a cancelled empty run draft into the editor", async () => {
+    const onRestoreDraftConsumed = vi.fn();
+    renderInput({
+      restoreDraftRequest: {
+        id: "msg-restored",
+        content: "bring this back",
+      },
+      onRestoreDraftConsumed,
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().setInputDraft).toHaveBeenCalledWith(
+        "__draft_new__:agent-1",
+        "bring this back",
+      );
+      expect(editorProps.last?.defaultValue).toBe("bring this back");
+      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("consumes a restore request even when an existing draft blocks restore", async () => {
+    const state = useChatStore.getState() as unknown as {
+      inputDrafts: Record<string, string>;
+      setInputDraft: ReturnType<typeof vi.fn>;
+    };
+    state.inputDrafts["__draft_new__:agent-1"] = "already typing";
+    const onRestoreDraftConsumed = vi.fn();
+
+    renderInput({
+      restoreDraftRequest: {
+        id: "msg-restored",
+        content: "bring this back",
+      },
+      onRestoreDraftConsumed,
+    });
+
+    await waitFor(() => {
+      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+    });
+    expect(state.setInputDraft).not.toHaveBeenCalledWith(
+      "__draft_new__:agent-1",
+      "bring this back",
+    );
+  });
+
+  it("keeps the draft while send is pending and clears after acceptance", async () => {
+    let resolveSend: (accepted: boolean) => void;
+    const sendPromise = new Promise<boolean>((res) => {
+      resolveSend = res;
+    });
+    const onSend = vi.fn(() => sendPromise);
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "slow network" } });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+
+    fireEvent.click(sendButton!);
+
+    expect(onSend).toHaveBeenCalledWith("slow network", undefined);
+    expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
+    await waitFor(() => expect(sendButton!).toBeDisabled());
+
+    await act(async () => {
+      resolveSend!(true);
+      await sendPromise;
+    });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().clearInputDraft).toHaveBeenCalledWith("__draft_new__:agent-1");
+    });
+  });
+
+  it("keeps the draft when send is rejected by the owner", async () => {
+    const onSend = vi.fn(async () => false);
+    renderInput({ onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "retry me" } });
+
+    let sendButton: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendButton = buttons[buttons.length - 1]!;
+      expect(sendButton).not.toBeDisabled();
+    });
+
+    await act(async () => {
+      fireEvent.click(sendButton!);
+      await Promise.resolve();
+    });
+
+    expect(onSend).toHaveBeenCalledWith("retry me", undefined);
+    expect(useChatStore.getState().clearInputDraft).not.toHaveBeenCalled();
   });
 });

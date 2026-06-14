@@ -89,6 +89,14 @@ const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
 
+export function invalidateChatMessageQueries(
+  qc: QueryClient,
+  sessionId: string,
+) {
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+}
+
 export function applyChatDoneToCache(
   qc: QueryClient,
   payload: ChatDonePayload,
@@ -125,8 +133,7 @@ export function applyChatDoneToCache(
   qc.setQueryData(chatKeys.pendingTask(sessionId), {});
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
-  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
-  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+  invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
@@ -835,7 +842,7 @@ export function useRealtimeSync(
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:message (global)", { chat_session_id: payload.chat_session_id });
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -949,6 +956,9 @@ export function useRealtimeSync(
     //   2. another tab / admin / system cancels — this is the only path that
     //      drops the pending pill in those cases. Without it the pill spins
     //      forever in the second-tab scenario.
+    // CancelTask also persists a best-effort assistant snapshot when the
+    // stopped chat task had already streamed transcript rows, so refresh the
+    // message page along with clearing pending.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       if (!payload.chat_session_id) return;
@@ -957,6 +967,7 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -990,7 +1001,7 @@ export function useRealtimeSync(
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
