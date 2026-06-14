@@ -220,6 +220,7 @@ export interface UpdateMeRequest {
 export interface CreateMemberRequest {
   email: string;
   role?: MemberRole;
+  invitee_name?: string;
 }
 
 export interface UpdateMemberRequest {

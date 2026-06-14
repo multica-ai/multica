@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,6 +17,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// MaxInviteeNameLen caps the invitee_name field on workspace invitations.
+// Matches the practical upper bound for a human display name while guarding
+// against response-amplification via an unbounded TEXT column.
+const MaxInviteeNameLen = 200
+
 // InvitationResponse is the JSON shape returned for a workspace invitation.
 type InvitationResponse struct {
 	ID            string  `json:"id"`
@@ -23,6 +29,7 @@ type InvitationResponse struct {
 	InviterID     string  `json:"inviter_id"`
 	InviteeEmail  string  `json:"invitee_email"`
 	InviteeUserID *string `json:"invitee_user_id"`
+	InviteeName   *string `json:"invitee_name,omitempty"`
 	Role          string  `json:"role"`
 	Status        string  `json:"status"`
 	CreatedAt     string  `json:"created_at"`
@@ -41,6 +48,7 @@ func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 		InviterID:     uuidToString(inv.InviterID),
 		InviteeEmail:  inv.InviteeEmail,
 		InviteeUserID: uuidToPtr(inv.InviteeUserID),
+		InviteeName:   textToPtr(inv.InviteeName),
 		Role:          inv.Role,
 		Status:        inv.Status,
 		CreatedAt:     timestampToString(inv.CreatedAt),
@@ -80,6 +88,12 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	if role == "owner" {
 		writeError(w, http.StatusBadRequest, "cannot invite as owner")
+		return
+	}
+
+	inviteeName := strings.TrimSpace(req.InviteeName)
+	if utf8.RuneCountInString(inviteeName) > MaxInviteeNameLen {
+		writeError(w, http.StatusBadRequest, "invitee_name exceeds 200 characters")
 		return
 	}
 
@@ -130,6 +144,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		InviteeEmail:  email,
 		InviteeUserID: inviteeUserID,
 		Role:          role,
+		InviteeName:   inviteeName,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
