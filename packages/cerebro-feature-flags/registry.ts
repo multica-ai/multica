@@ -26,6 +26,9 @@ export type CerebroFlagKey =
   | "cerebro_inbox_action_grouping"
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
+  // TECH-3535: after archiving the open message, return to the inbox list
+  // instead of auto-advancing to the next message. Per-user preference.
+  | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
   | "cerebro_notes"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
@@ -167,6 +170,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
+  // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
+  cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
   // TECH-3421: OFF by default until the Notes UI ships + is QA'd on staging.
   // Gates the Notes feature (private-by-default notes built on artifacts):
@@ -526,6 +531,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a \"Pinned\" option to the inbox view dropdown that shows only items tied to something you pinned — the item's own issue, that issue's parent, or its project, plus pinned channels and DMs. Off removes the option from the dropdown.",
+  },
+  {
+    key: "cerebro_inbox_archive_to_list",
+    label: "Archive returns to the inbox",
+    group: "inbox",
+    description:
+      "When you archive the message you're reading, go back to the inbox list instead of automatically opening the next message. Off (default) keeps auto-advancing to the next message. Applies to archiving from the row menu, swipe, the `e` shortcut, and the open message's toolbar.",
   },
   {
     key: "cerebro_voice_dictation_enabled",
