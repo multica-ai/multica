@@ -80,6 +80,103 @@ func TestRunAilStage2WritesOutputFilesAndJSONStdout(t *testing.T) {
 	}
 }
 
+func TestRunAilStage2UsesConfigFileForInputAndEmitCategories(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	configPath := filepath.Join(tmp, "stage2.json")
+	outputDir := filepath.Join(tmp, "out")
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "agent_event", TaskID: "t1", AgentID: "a1", Status: "completed"},
+		{TS: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "t2", AgentID: "a2", Status: "failed", FailureReason: "agent_error"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+	config := `{"stage1":{"events_path":` + strconv.Quote(eventsPath) + `,"emit_categories":["failure_event"]}}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := newAilStage2TestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	_ = cmd.Flags().Set("config", configPath)
+	_ = cmd.Flags().Set("output-dir", outputDir)
+
+	if err := runAilStage2(cmd, nil); err != nil {
+		t.Fatalf("runAilStage2 with config: %v", err)
+	}
+
+	var result ail.Stage2Result
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if result.TotalInput != 2 {
+		t.Fatalf("total_input_events = %d, want 2", result.TotalInput)
+	}
+	if result.TotalWindow != 1 {
+		t.Fatalf("total_window_events = %d, want 1", result.TotalWindow)
+	}
+	if result.ByEventType["failure_event"] != 1 {
+		t.Fatalf("failure_event count = %d, want 1", result.ByEventType["failure_event"])
+	}
+	if _, ok := result.ByEventType["agent_event"]; ok {
+		t.Fatalf("agent_event should be filtered by config emit categories: %#v", result.ByEventType)
+	}
+}
+
+func TestRunAilStage2FlagsOverrideConfigAndWindowHours(t *testing.T) {
+	now := time.Now().UTC()
+	tmp := t.TempDir()
+	eventsPath := filepath.Join(tmp, "events.jsonl")
+	configPath := filepath.Join(tmp, "stage2.json")
+	outputDir := filepath.Join(tmp, "out")
+
+	events := []ail.Stage2Event{
+		{TS: now.Add(-2 * time.Hour).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "old", AgentID: "a1", Status: "failed", FailureReason: "old_error"},
+		{TS: now.Add(-5 * time.Minute).Format(time.RFC3339Nano), EventType: "attempt_event", TaskID: "recent", AgentID: "a2", Status: "running"},
+		{TS: now.Add(-3 * time.Minute).Format(time.RFC3339Nano), EventType: "failure_event", TaskID: "recent-failure", AgentID: "a3", Status: "failed", FailureReason: "recent_error"},
+	}
+	writeTestAilEvents(t, eventsPath, events)
+	config := `{"stage1":{"events_path":` + strconv.Quote(filepath.Join(tmp, "missing.jsonl")) + `,"emit_categories":["failure_event"]}}`
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cmd := newAilStage2TestCmd()
+	var buf bytes.Buffer
+	cmd.SetOut(&buf)
+	_ = cmd.Flags().Set("config", configPath)
+	_ = cmd.Flags().Set("events-path", eventsPath)
+	_ = cmd.Flags().Set("output-dir", outputDir)
+	_ = cmd.Flags().Set("emit-categories", "attempt_event")
+	_ = cmd.Flags().Set("window-hours", "1")
+
+	if err := runAilStage2(cmd, nil); err != nil {
+		t.Fatalf("runAilStage2 with overrides: %v", err)
+	}
+
+	var result ail.Stage2Result
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if result.WindowDuration != "1h0m0s" {
+		t.Fatalf("window_duration = %q, want 1h0m0s", result.WindowDuration)
+	}
+	if result.TotalInput != 3 {
+		t.Fatalf("total_input_events = %d, want 3", result.TotalInput)
+	}
+	if result.TotalWindow != 1 {
+		t.Fatalf("total_window_events = %d, want 1", result.TotalWindow)
+	}
+	if result.ByEventType["attempt_event"] != 1 {
+		t.Fatalf("attempt_event count = %d, want 1", result.ByEventType["attempt_event"])
+	}
+	if _, ok := result.ByEventType["failure_event"]; ok {
+		t.Fatalf("failure_event should be filtered by emit-categories flag: %#v", result.ByEventType)
+	}
+}
+
 func TestRunAilStage2TableOutputNoPainBuckets(t *testing.T) {
 	now := time.Now().UTC()
 	tmp := t.TempDir()
