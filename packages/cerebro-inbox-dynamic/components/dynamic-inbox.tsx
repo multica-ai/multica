@@ -85,6 +85,7 @@ import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
 import { ArchivedInboxView } from "./archived-inbox-view";
+import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox } from "@multica/cerebro-notes/views";
@@ -158,6 +159,7 @@ export function DynamicInbox() {
   const typeLabels = useTypeLabels();
   const setMode = useSetInboxMode();
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
+  const secretaryEnabled = useFeatureFlag("cerebro_inbox_secretary");
   // TECH-3541 #2 — same flags the classic inbox uses to gate its view options.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
@@ -179,6 +181,10 @@ export function DynamicInbox() {
   const activeTab =
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
+  const activeSections = useMemo(
+    () => activeTab.sections.filter((section) => section.kind !== "secretary" || secretaryEnabled),
+    [activeTab.sections, secretaryEnabled],
+  );
 
   // TECH-3502 #2 — inline rename of the active tab (also reachable from ⋯).
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -195,6 +201,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  const [secretarySelectedKey, setSecretarySelectedKey] = useState<string | null>(null);
+  const [secretaryCompletedKeys, setSecretaryCompletedKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   // JEH-901 — "new message" → picking an AGENT must open an agent chat, not a
   // one-agent DM. Held in local state because no ChatSession exists yet (the
   // session is created on first send); mirrors the classic inbox new-chat flow.
@@ -217,17 +227,34 @@ export function DynamicInbox() {
     : null;
 
   const clearSelection = useCallback(() => {
+    if (secretarySelectedKey) {
+      setSecretaryCompletedKeys((keys) => {
+        if (keys.has(secretarySelectedKey)) return keys;
+        const next = new Set(keys);
+        next.add(secretarySelectedKey);
+        return next;
+      });
+    }
+    setSecretarySelectedKey(null);
     setSelected(null);
     setSelectedSnapshot(null);
     setNewChat(null);
-  }, []);
+  }, [secretarySelectedKey]);
 
   const onSelect = (entry: DynInboxEntry) => {
+    setSecretarySelectedKey(null);
     setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
     // TECH-3413 #7 — selecting never auto-advances to the next row; we only
     // ever set the row the user clicked.
+    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+  };
+  const onSecretarySelect = (entry: DynInboxEntry) => {
+    setSecretarySelectedKey(secretaryEntryKey(entry));
+    setNewChat(null);
+    setSelected(entry);
+    setSelectedSnapshot(entry);
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
   // TECH-3489 — issues and channels still archive via their host mutations.
@@ -312,6 +339,7 @@ export function DynamicInbox() {
   };
   // TECH-3422 — the Slack-block opens a channel/DM into the same detail panel.
   const onOpenChannel = (channel: Channel) => {
+    setSecretarySelectedKey(null);
     setSelected({
       kind: "channel",
       id: channel.id,
@@ -615,6 +643,8 @@ export function DynamicInbox() {
                   )
                     // TECH-3421 — only offer the Notes box when Notes is enabled.
                     .filter((c) => c.kind !== "notes" || notesEnabled)
+                    // TECH-3557 — only offer Secretary when its flag is enabled.
+                    .filter((c) => c.kind !== "secretary" || secretaryEnabled)
                     .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
@@ -678,18 +708,18 @@ export function DynamicInbox() {
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
-          {activeTab.sections.length === 0 && !loading && (
+          {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
               Empty tab — add a section from the ⋯ menu.
             </p>
           )}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
             <SortableContext
-              items={activeTab.sections.map((s) => s.id)}
+              items={activeSections.map((s) => s.id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-3">
-                {activeTab.sections.map((section) => (
+                {activeSections.map((section) => (
                   <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
                       // TECH-3421 — the Notes box renders its own data (recent
@@ -729,6 +759,18 @@ export function DynamicInbox() {
                             onRemove={() => removeSection(section.id)}
                           />
                         </div>
+                      ) : section.kind === "secretary" && secretaryEnabled ? (
+                        <SecretarySection
+                          dragHandle={handle}
+                          entries={displayEntries}
+                          filterContext={filterContext}
+                          selectedKey={selectedKey}
+                          completedKeys={secretaryCompletedKeys}
+                          query={query}
+                          onSelect={onSecretarySelect}
+                          onArchive={onArchive}
+                          onResetCompleted={() => setSecretaryCompletedKeys(new Set())}
+                        />
                       ) : (
                         <DynamicInboxSection
                           section={section}

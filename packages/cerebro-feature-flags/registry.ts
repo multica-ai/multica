@@ -45,6 +45,9 @@ export type CerebroFlagKey =
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
   | "cerebro_inbox_slack_block"
+  // TECH-3557: Secretary block in the dynamic inbox. Default off until QA has
+  // verified desktop/mobile flows against the approved mockup.
+  | "cerebro_inbox_secretary"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -193,6 +196,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_versions: false,
   cerebro_note_lock: false,
   cerebro_inbox_slack_block: false,
+  cerebro_inbox_secretary: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -531,6 +535,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a Slack-style block to the dynamic inbox: a list of people with live online dots, your direct messages and channels, and a \"is typing…\" indicator — open a conversation right inside the inbox. Offered in the dynamic inbox's \"Add section\" menu when on. Requires the Dynamic inbox.",
+  },
+  {
+    key: "cerebro_inbox_secretary",
+    label: "Inbox Secretary",
+    group: "inbox",
+    description:
+      "Add a focused Secretary block to the dynamic inbox. Users pick a batch size, let the app choose unread/oldest messages or select rows manually, then work through that small list in the existing message detail view. Default off until QA signs off.",
   },
   {
     key: "cerebro_inbox_wakeup_running",
