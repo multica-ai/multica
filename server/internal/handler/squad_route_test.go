@@ -120,6 +120,7 @@ func TestLatinExactMatch(t *testing.T) {
 	}
 
 	score, matched := matchScore(tokens, cap)
+	t.Logf("Latin underscore keyword (known limitation): score=%d matched=%v", score, matched)
 	// "strategic_decision" is not in tokenSet as-is (it has underscore),
 	// but tokenize produces ["strategic", "decision", "analysis"]
 	// "strategic_decision" → tokenize → ["strategic_decision"] (no CJK, just one token)
