@@ -447,12 +447,19 @@ ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
 
 -- name: GetLastChannelTaskSession :one
--- Resume channel-origin mentions by (agent_id, channel_id). Different
--- messages in the same channel should continue the agent conversation when
--- the runtime matches, while failures known to poison session history are
--- excluded just like issue/chat resume.
+-- Resume channel-origin mentions scoped to a single context lane:
+-- (agent_id, channel_id, channel_thread_id). The channel main timeline
+-- (channel_thread_id IS NULL) is the parent lane; every thread is its own
+-- child lane. Scoping the resume key this way keeps each thread's
+-- conversation/workdir isolated, so two unrelated threads in the same
+-- channel never inherit each other's session — the channel analog of
+-- per-issue isolation. Cross-lane context stays reachable on demand via
+-- `multica channel context`, so no session inheritance across lanes is
+-- needed. Failures known to poison session history are excluded just like
+-- issue/chat resume.
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND channel_id = $2
+  AND channel_thread_id IS NOT DISTINCT FROM sqlc.narg('channel_thread_id')
   AND (
     status = 'completed'
     OR (

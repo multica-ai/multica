@@ -1616,6 +1616,7 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 const getLastChannelTaskSession = `-- name: GetLastChannelTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND channel_id = $2
+  AND channel_thread_id IS NOT DISTINCT FROM $3
   AND (
     status = 'completed'
     OR (
@@ -1630,8 +1631,9 @@ LIMIT 1
 `
 
 type GetLastChannelTaskSessionParams struct {
-	AgentID   pgtype.UUID `json:"agent_id"`
-	ChannelID pgtype.UUID `json:"channel_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	ChannelID       pgtype.UUID `json:"channel_id"`
+	ChannelThreadID pgtype.UUID `json:"channel_thread_id"`
 }
 
 type GetLastChannelTaskSessionRow struct {
@@ -1640,12 +1642,18 @@ type GetLastChannelTaskSessionRow struct {
 	RuntimeID pgtype.UUID `json:"runtime_id"`
 }
 
-// Resume channel-origin mentions by (agent_id, channel_id). Different
-// messages in the same channel should continue the agent conversation when
-// the runtime matches, while failures known to poison session history are
-// excluded just like issue/chat resume.
+// Resume channel-origin mentions scoped to a single context lane:
+// (agent_id, channel_id, channel_thread_id). The channel main timeline
+// (channel_thread_id IS NULL) is the parent lane; every thread is its own
+// child lane. Scoping the resume key this way keeps each thread's
+// conversation/workdir isolated, so two unrelated threads in the same
+// channel never inherit each other's session — the channel analog of
+// per-issue isolation. Cross-lane context stays reachable on demand via
+// `multica channel context`, so no session inheritance across lanes is
+// needed. Failures known to poison session history are excluded just like
+// issue/chat resume.
 func (q *Queries) GetLastChannelTaskSession(ctx context.Context, arg GetLastChannelTaskSessionParams) (GetLastChannelTaskSessionRow, error) {
-	row := q.db.QueryRow(ctx, getLastChannelTaskSession, arg.AgentID, arg.ChannelID)
+	row := q.db.QueryRow(ctx, getLastChannelTaskSession, arg.AgentID, arg.ChannelID, arg.ChannelThreadID)
 	var i GetLastChannelTaskSessionRow
 	err := row.Scan(&i.SessionID, &i.WorkDir, &i.RuntimeID)
 	return i, err

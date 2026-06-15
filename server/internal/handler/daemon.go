@@ -1519,9 +1519,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !task.ForceFreshSession {
+			// Scope resume to the message's context lane: the channel main
+			// timeline (ChannelThreadID invalid → NULL) is the parent lane,
+			// each thread its own child lane. Two unrelated threads never
+			// inherit each other's session/workdir.
 			if prior, err := h.Queries.GetLastChannelTaskSession(r.Context(), db.GetLastChannelTaskSessionParams{
-				AgentID:   task.AgentID,
-				ChannelID: task.ChannelID,
+				AgentID:         task.AgentID,
+				ChannelID:       task.ChannelID,
+				ChannelThreadID: task.ChannelThreadID,
 			}); err == nil && prior.SessionID.Valid {
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
