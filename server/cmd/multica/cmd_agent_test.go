@@ -108,6 +108,87 @@ func TestResolveWorkspaceID_AgentContextSkipsConfig(t *testing.T) {
 	})
 }
 
+func TestResolveToken_AgentContextSkipsConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	if err := cli.SaveCLIConfig(cli.CLIConfig{Token: "mul_profile_token"}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+
+	t.Run("outside agent context falls back to config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "mul_profile_token" {
+			t.Fatalf("resolveToken() = %q, want profile token", got)
+		}
+	})
+
+	t.Run("agent context without env never reads config", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "agent-123")
+		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_TOKEN", "")
+
+		if got := resolveToken(testCmd()); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty in agent context without MULTICA_TOKEN", got)
+		}
+	})
+
+	t.Run("agent context uses explicit task token env", func(t *testing.T) {
+		t.Setenv("MULTICA_AGENT_ID", "agent-123")
+		t.Setenv("MULTICA_TASK_ID", "task-456")
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+
+		if got := resolveToken(testCmd()); got != "mat_task_token" {
+			t.Fatalf("resolveToken() = %q, want MULTICA_TOKEN", got)
+		}
+	})
+}
+
+func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+
+	t.Run("missing token fails closed", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "")
+
+		_, err := newAPIClient(testCmd())
+		if err == nil {
+			t.Fatal("newAPIClient(): expected error without task token")
+		}
+		if !strings.Contains(err.Error(), "mat_ token") {
+			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		}
+	})
+
+	t.Run("member token fails closed", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+		_, err := newAPIClient(testCmd())
+		if err == nil {
+			t.Fatal("newAPIClient(): expected error with member token")
+		}
+		if !strings.Contains(err.Error(), "mat_ token") {
+			t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+		}
+	})
+
+	t.Run("task token succeeds", func(t *testing.T) {
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+
+		client, err := newAPIClient(testCmd())
+		if err != nil {
+			t.Fatalf("newAPIClient(): %v", err)
+		}
+		if client.Token != "mat_task_token" {
+			t.Fatalf("client token = %q, want task token", client.Token)
+		}
+	})
+}
+
 // TestParseCustomEnv covers the --custom-env flag parser used by
 // `agent create` and `agent env set`. The flag accepts a JSON object
 // of string keys and values; the only clear signal is the explicit

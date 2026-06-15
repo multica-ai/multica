@@ -58,10 +58,12 @@ function useDebouncedSignature(signature: string) {
 export function useCommentTriggerPreview({
   issueId,
   parentId,
+  editingCommentId,
   content,
 }: {
   issueId: string;
   parentId?: string;
+  editingCommentId?: string;
   content: string;
 }): UseCommentTriggerPreviewResult {
   const signature = useMemo(() => commentTriggerPreviewSignature(content), [content]);
@@ -73,8 +75,8 @@ export function useCommentTriggerPreview({
   }, [content]);
 
   const previewQuery = useQuery({
-    queryKey: [...issueKeys.commentTriggerPreview(issueId), parentId ?? "", debouncedSignature],
-    queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId),
+    queryKey: [...issueKeys.commentTriggerPreview(issueId), parentId ?? "", editingCommentId ?? "", debouncedSignature],
+    queryFn: () => api.previewCommentTriggers(issueId, contentRef.current, parentId, editingCommentId),
     enabled: signature !== "empty" && debouncedSignature !== "empty",
     retry: false,
     // The answer depends on live queue state (pending-task dedup), not just

@@ -1671,6 +1671,30 @@ func (q *Queries) HasPendingTaskForIssueAndAgent(ctx context.Context, arg HasPen
 	return has_pending, err
 }
 
+const hasPendingTaskForIssueAndAgentExcludingTriggerComment = `-- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched')
+  AND trigger_comment_id IS DISTINCT FROM $3::uuid
+`
+
+type HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams struct {
+	IssueID                 pgtype.UUID `json:"issue_id"`
+	AgentID                 pgtype.UUID `json:"agent_id"`
+	ExcludeTriggerCommentID pgtype.UUID `json:"exclude_trigger_comment_id"`
+}
+
+// Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
+// current comment being edited. Edit preview needs this because save cancels
+// that comment's old queued/dispatched tasks before re-computing triggers.
+func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx context.Context, arg HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingTaskForIssueAndAgentExcludingTriggerComment, arg.IssueID, arg.AgentID, arg.ExcludeTriggerCommentID)
+	var has_pending bool
+	err := row.Scan(&has_pending)
+	return has_pending, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2

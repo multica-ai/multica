@@ -33,6 +33,17 @@ const (
 	taskSlotCapacityBackoff = 5 * time.Second
 )
 
+func taskScopedAuthToken(task Task) (string, error) {
+	token := strings.TrimSpace(task.AuthToken)
+	if token == "" {
+		return "", errors.New("server did not provide task-scoped auth token")
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return "", errors.New("server provided non-task-scoped auth token")
+	}
+	return token, nil
+}
+
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
 // agent processes, while keeping test scaffolding out of the production struct.
@@ -2820,24 +2831,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task, provider)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
+	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
-	// MULTICA_TOKEN is the credential the agent process will use to call the
-	// Multica API. Prefer the task-scoped token the server minted at claim
-	// time — that token is bound to (agent, task) and the auth middleware
-	// rejects it on owner-only endpoints (e.g. `/api/agents/{id}/env`), so
-	// the agent cannot use it to read another agent's secrets. Falls back
-	// to the daemon's own credential only when the server returned no
-	// auth_token (older server, or cloud / system runtime with no owner) —
-	// in that legacy mode lateral-movement protection relies on the
-	// runtime not handing the daemon a workspace-owner PAT in the first
-	// place. See MUL-2600.
-	agentToken := task.AuthToken
-	if agentToken == "" {
-		agentToken = d.client.Token()
+	// MULTICA_TOKEN is bound to (agent, task) by the server. Never fall back
+	// to the daemon's own credential here: doing so lets agent CLI writes land
+	// as the runtime owner's member actor and can retrigger the same agent.
+	agentToken, err := taskScopedAuthToken(task)
+	if err != nil {
+		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
+		return TaskResult{}, err
 	}
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        agentToken,

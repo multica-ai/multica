@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "Mine",
-    "all": "All"
+    "all": "All",
+    "archived": "Archived"
   },
   "sort": {
     "label_recent": "Recent activity",
@@ -66,7 +67,11 @@
     "workload": "Workload",
     "runtime": "Runtime",
     "activity_7d": "Activity (7d)",
-    "runs": "Runs"
+    "runs": "Runs",
+    "last_active": "Last active",
+    "model": "Model",
+    "created": "Created",
+    "owner": "Owner"
   },
   "row": {
     "you": "You",
@@ -74,7 +79,9 @@
     "no_description": "No description",
     "fallback_runtime_cloud": "Cloud",
     "fallback_runtime_local": "Local",
-    "actions_aria": "Row actions"
+    "actions_aria": "Row actions",
+    "task_count_one": "{{count}} task",
+    "task_count_other": "{{count}} tasks"
   },
   "activity_tooltip": {
     "created_today": "Created today",
@@ -465,5 +472,32 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "last_active": {
+    "today": "Today",
+    "days_ago_one": "{{count}} day ago",
+    "days_ago_other": "{{count}} days ago",
+    "none": "No activity (30d)"
+  },
+  "toolbar": {
+    "result_count_title": "Matching agents / agents in scope",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_availability": "Availability",
+    "section_runtime": "Runtime",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "section_owner": "Owner",
+    "section_model": "Model"
+  },
+  "actions": {
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection"
   }
 }

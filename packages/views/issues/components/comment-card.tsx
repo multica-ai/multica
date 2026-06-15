@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
@@ -35,6 +35,8 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
+import { CommentTriggerChips } from "./comment-trigger-chips";
+import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
@@ -102,7 +104,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
@@ -253,15 +255,23 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
 function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
-  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>,
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>,
 ) {
   const { t } = useT("issues");
   const { uploadWithToast } = useFileUpload(api);
   const [editing, setEditing] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
+  const [content, setContent] = useState(entry.content ?? "");
+  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
+  const triggerPreview = useCommentTriggerPreview({
+    issueId,
+    parentId: entry.parent_id ?? undefined,
+    editingCommentId: entry.id,
+    content: editing ? content : "",
+  });
 
   const editorAttachments = pendingAttachments.length > 0
     ? [...(entry.attachments ?? []), ...pendingAttachments]
@@ -287,12 +297,31 @@ function useEditAttachmentState(
     ? (getDraft(draftKey) ?? entry.content ?? "")
     : (entry.content ?? "");
 
+  useEffect(() => {
+    const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
+    setSuppressedAgentIds((prev) => {
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [triggerPreview.agents]);
+
+  const toggleSuppressedAgent = useCallback((agentId: string) => {
+    setSuppressedAgentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(agentId)) next.delete(agentId);
+      else next.add(agentId);
+      return next;
+    });
+  }, []);
+
   const standaloneEditAttachments = (entry.attachments ?? []).filter((a) =>
     retainedStandaloneIds?.has(a.id),
   );
 
   const resetState = () => {
     setEditing(false);
+    setContent(entry.content ?? "");
+    setSuppressedAgentIds(new Set());
     setPendingAttachments([]);
     setRetainedStandaloneIds(null);
     clearDraft(draftKey);
@@ -300,6 +329,7 @@ function useEditAttachmentState(
 
   const startEdit = () => {
     cancelledRef.current = false;
+    setContent(getDraft(draftKey) ?? entry.content ?? "");
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
@@ -326,8 +356,16 @@ function useEditAttachmentState(
       resetState();
       return;
     }
+    const suppressAgentIds = triggerPreview.agents
+      .filter((agent) => suppressedAgentIds.has(agent.id))
+      .map((agent) => agent.id);
     try {
-      await onEdit(entry.id, trimmed, activeIds);
+      await onEdit(
+        entry.id,
+        trimmed,
+        activeIds,
+        suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+      );
       resetState();
     } catch (err) {
       toast.error(
@@ -345,8 +383,12 @@ function useEditAttachmentState(
     handleUpload,
     isDragOver,
     dropZoneProps,
+    triggerPreview,
+    suppressedAgentIds,
+    toggleSuppressedAgent,
     draftKey,
     setDraft,
+    setContent,
     clearDraft,
     initialValue,
     standaloneEditAttachments,
@@ -382,7 +424,7 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
@@ -507,6 +549,7 @@ function CommentRow({
               defaultValue={edit.initialValue}
               placeholder={t(($) => $.comment.edit_placeholder)}
               onUpdate={(md) => {
+                edit.setContent(md);
                 if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
                 else edit.clearDraft(edit.draftKey);
               }}
@@ -530,8 +573,13 @@ function CommentRow({
                       return next;
                     })
                   }
-                />
-              )}
+                  />
+                )}
+              <CommentTriggerChips
+                agents={edit.triggerPreview.agents}
+                suppressedAgentIds={edit.suppressedAgentIds}
+                onToggle={edit.toggleSuppressedAgent}
+              />
               <FileUploadButton
                 size="sm"
                 multiple
@@ -781,6 +829,7 @@ function CommentCardImpl({
                     defaultValue={edit.initialValue}
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
+                      edit.setContent(md);
                       if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
                       else edit.clearDraft(edit.draftKey);
                     }}
@@ -804,8 +853,13 @@ function CommentCardImpl({
                             return next;
                           })
                         }
-                      />
-                    )}
+                        />
+                      )}
+                    <CommentTriggerChips
+                      agents={edit.triggerPreview.agents}
+                      suppressedAgentIds={edit.suppressedAgentIds}
+                      onToggle={edit.toggleSuppressedAgent}
+                    />
                     <FileUploadButton
                       size="sm"
                       multiple

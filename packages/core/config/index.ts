@@ -3,6 +3,10 @@ import { useStore } from "zustand";
 
 interface ConfigState {
   cdnDomain: string;
+  // True when cdnDomain serves private content via time-bounded signed URLs
+  // (CloudFront signing enabled server-side). Renderers must not treat a raw
+  // storage URL on that domain as a loadable media source (MUL-3254).
+  cdnSigned: boolean;
   allowSignup: boolean;
   googleClientId: string;
   daemonServerUrl: string;
@@ -14,7 +18,7 @@ interface ConfigState {
   // TOTP 2FA support flag. Defaults to false so older servers that don't
   // advertise this field degrade gracefully (no TOTP UI shown).
   totpSupported: boolean;
-  setCdnDomain: (domain: string) => void;
+  setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
@@ -29,13 +33,14 @@ interface ConfigState {
 
 export const configStore = createStore<ConfigState>((set) => ({
   cdnDomain: "",
+  cdnSigned: false,
   allowSignup: true,
   googleClientId: "",
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
   totpSupported: false,
-  setCdnDomain: (domain) => set({ cdnDomain: domain }),
+  setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false, totpSupported = false }) =>
     set({ allowSignup, googleClientId, workspaceCreationDisabled, totpSupported }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>

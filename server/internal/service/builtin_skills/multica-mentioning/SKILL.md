@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the four mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run), the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases (a name where a UUID belongs, a bad/unknown UUID, an already-pending task, an archived agent, a private agent you cannot access). WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the four mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run), comment create/edit preview and suppression, the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases (a name where a UUID belongs, a bad/unknown UUID, an already-pending task, an archived agent, a private agent you cannot access). WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -73,15 +73,22 @@ contract above: only `agent` and `squad` mentions enqueue work.
 ## Preview and per-comment suppression
 
 Newer clients can call `POST /api/issues/{id}/comments/trigger-preview` before
-submitting a comment. The preview endpoint uses the same
-`computeCommentAgentTriggers` function as `CreateComment`, so the displayed
-agent chips come from backend rules, not from a client-side reimplementation.
+creating or editing a comment. The preview endpoint uses the same
+`computeCommentAgentTriggers` function as create and edit re-triggering, so the
+displayed agent chips come from backend rules, not from a client-side
+reimplementation.
 
-When creating a comment, clients may send an optional `suppress_agent_ids`
-array. The server still computes the full trigger set first, then removes those
-agent IDs as a post-filter. A missing or empty field preserves the old behavior.
-A valid UUID that is not in the computed trigger set is a no-op; a malformed
-UUID is rejected at the request boundary.
+When previewing an edit, clients may send `editing_comment_id`. The server
+validates that the comment belongs to the same workspace and issue, derives or
+checks the edit's parent comment context, and excludes only pending tasks whose
+`trigger_comment_id` is that same comment. Pending tasks from any other comment
+on the issue still dedupe the preview.
+
+When creating or editing a comment, clients may send an optional
+`suppress_agent_ids` array. The server still computes the full trigger set
+first, then removes those agent IDs as a post-filter. A missing or empty field
+preserves the old behavior. A valid UUID that is not in the computed trigger set
+is a no-op; a malformed UUID is rejected at the request boundary.
 
 ## @all is the broadcast type
 
@@ -109,8 +116,10 @@ These are all silent no-ops — no error, no run:
   mechanism is the lookup miss, not a parse failure.
 - **An already-pending task.** Even a correct `@agent`/`@squad` is skipped when
   the target already has a pending task on this issue
-  (`HasPendingTaskForIssueAndAgent` → `continue`). This is the loop guard — do
-  not retry.
+  (`HasPendingTaskForIssueAndAgent` → `continue`). Edit preview is the only
+  exception: `editing_comment_id` ignores pending tasks from the same comment
+  being edited, because save cancels those old tasks before it re-computes
+  triggers. It is still comment-scoped, not an agent-wide bypass.
 - **An archived agent**, or a squad whose leader is archived: skipped
   (`RuntimeID` invalid or `ArchivedAt` set).
 - **A private agent you cannot access:** skipped — the mention path gates on

@@ -247,6 +247,9 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
+	if inAgentExecutionContext() && !strings.HasPrefix(token, "mat_") {
+		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
 	// When running inside a daemon task, attribute actions to the agent.

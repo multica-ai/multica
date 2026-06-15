@@ -100,8 +100,8 @@ type Task struct {
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
-	// Empty when the server-side runtime has no owning user — the daemon
-	// then falls back to its own token. See MUL-2600.
+	// Empty or non-task-scoped values are fatal for writable agent tasks; the
+	// daemon must not fall back to its own token. See MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
 }
 

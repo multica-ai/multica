@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "自分のもの",
-    "all": "すべて"
+    "all": "すべて",
+    "archived": "アーカイブ済み"
   },
   "sort": {
     "label_recent": "最近のアクティビティ",
@@ -57,7 +58,11 @@
     "workload": "作業量",
     "runtime": "ランタイム",
     "activity_7d": "アクティビティ（7日）",
-    "runs": "実行"
+    "runs": "実行",
+    "last_active": "最終アクティブ",
+    "model": "モデル",
+    "created": "作成日時",
+    "owner": "オーナー"
   },
   "row": {
     "you": "あなた",
@@ -65,7 +70,9 @@
     "no_description": "説明なし",
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
-    "actions_aria": "行の操作"
+    "actions_aria": "行の操作",
+    "task_count_one": "{{count}} 件のタスク",
+    "task_count_other": "{{count}} 件のタスク"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -453,5 +460,32 @@
     "section_cloud": "クラウド",
     "agent_count_other": "エージェント {{count}} 件",
     "empty": "まだマシンがありません"
+  },
+  "last_active": {
+    "today": "今日",
+    "days_ago_one": "{{count}} 日前",
+    "days_ago_other": "{{count}} 日前",
+    "none": "30 日間アクティビティなし"
+  },
+  "toolbar": {
+    "result_count_title": "該当エージェント / スコープ内全体",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_availability": "可用性",
+    "section_runtime": "ランタイム",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "section_owner": "オーナー",
+    "section_model": "モデル"
+  },
+  "actions": {
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除"
   }
 }

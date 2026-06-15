@@ -1,6 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
+import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -45,6 +46,8 @@ interface DesktopAPI {
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Report the renderer's memory-router path for recovery diagnostics. */
+  setRendererRouteContext: (context: RendererRouteContextInput) => void;
   /** Open the OS folder picker and return the chosen absolute path.
    *  Used by the Project settings "Add local directory" flow. */
   pickDirectory: (
@@ -71,6 +74,11 @@ interface DesktopAPI {
       | "error";
     error?: string;
   }>;
+  /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
+   *  Returns an unsubscribe function. */
+  onCloseActiveTab: (callback: () => void) => () => void;
+  /** Ask the main process to close the window. */
+  closeWindow: () => void;
 }
 
 interface DaemonStatus {

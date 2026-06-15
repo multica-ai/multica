@@ -320,9 +320,9 @@ type AgentTaskResponse struct {
 	// this (agent_id, task_id) pair at claim time and treats any request
 	// authenticated with it as actor=agent, regardless of headers — so the
 	// agent process cannot use it to read another agent's secrets via the
-	// env-management endpoint. Empty when the runtime has no owning user
-	// (cloud / system runtimes that pre-date per-task tokens); in that case
-	// the daemon falls back to its own credential. See MUL-2600.
+	// env-management endpoint. Claim fails closed when the runtime has no
+	// owning user; the daemon must not fall back to its own credential. See
+	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
 }
 

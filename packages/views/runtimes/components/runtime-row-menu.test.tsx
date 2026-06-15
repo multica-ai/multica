@@ -76,8 +76,7 @@ vi.mock("./shared", () => ({
   useHealthLabel: () => () => "Online",
 }));
 
-import { createRuntimeColumns, type RuntimeRow } from "./runtime-columns";
-import { useT } from "../../i18n";
+import { CliCell, RuntimeRowMenu, type RuntimeRow } from "./runtime-list";
 
 function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
   return {
@@ -109,39 +108,19 @@ function makeRow(runtime: AgentRuntime, canDelete = true): RuntimeRow {
   };
 }
 
-// The row menu lives inside the "actions" column cell. To exercise it
-// without rendering the entire DataTable, we resolve the cell renderer from
-// createRuntimeColumns and render its output directly inside a minimal table
-// row (the cell expects React table context, but our shape — `row.original`
-// — is the only field RowMenu reads, so a hand-built shim suffices).
+// The row menu is a plain exported component on the ListGrid version of the
+// list — render it directly with the row fields it reads.
 function renderActionsCell(row: RuntimeRow) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  function Harness() {
-    const { t } = useT("runtimes");
-    const columns = createRuntimeColumns({
-      showOwner: false,
-      wsId: "ws-1",
-      now: Date.now(),
-      t,
-    });
-    const actions = columns.find((c) => c.id === "actions");
-    if (!actions || typeof actions.cell !== "function") {
-      throw new Error("actions column missing or has no cell renderer");
-    }
-    // The cell renderer only reads `row.original`. Casting through unknown
-    // keeps us honest about not implementing the full tanstack-table cell
-    // context.
-    const cell = actions.cell({
-      row: { original: row },
-    } as unknown as Parameters<typeof actions.cell>[0]);
-    return <>{cell}</>;
-  }
 
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <Harness />
+        <RuntimeRowMenu
+          runtime={row.runtime}
+          wsId="ws-1"
+          canDelete={row.canDelete}
+        />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -187,33 +166,15 @@ describe("runtime list row menu", () => {
   });
 });
 
-// The CLI column lives in its own cell renderer; resolve it from
-// createRuntimeColumns and render it in isolation, mirroring renderActionsCell.
+// The CLI cell is a plain exported component — render it in isolation,
+// mirroring renderActionsCell.
 function renderCliCell(row: RuntimeRow) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-
-  function Harness() {
-    const { t } = useT("runtimes");
-    const columns = createRuntimeColumns({
-      showOwner: false,
-      wsId: "ws-1",
-      now: Date.now(),
-      t,
-    });
-    const cli = columns.find((c) => c.id === "cli");
-    if (!cli || typeof cli.cell !== "function") {
-      throw new Error("cli column missing or has no cell renderer");
-    }
-    const cell = cli.cell({
-      row: { original: row },
-    } as unknown as Parameters<typeof cli.cell>[0]);
-    return <>{cell}</>;
-  }
 
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <Harness />
+        <CliCell runtime={row.runtime} />
       </QueryClientProvider>
     </I18nProvider>,
   );
