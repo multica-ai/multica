@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
+import { MemberPresenceProvider } from "@multica/core/presence";
 import {
   workspaceBySlugOptions,
   workspaceListOptions,
@@ -100,11 +101,15 @@ export function WorkspaceRouteLayout() {
 
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
-      <WorkspacePresencePrefetch />
-      <CerebroWorkspaceDockIcon />
-      <CerebroWorkspaceTitle />
-      <CerebroWorkspaceSidebarColor />
-      <Outlet />
+      {/* CEREBRO-PATCH(member-presence-dot): TECH-3583 — workspace-wide human
+          presence so member avatars in pickers/@-mentions show a red/green
+          online dot, matching web. One heartbeat per active workspace tab. */}
+      <MemberPresenceProvider wsId={workspace.id}>
+        <WorkspacePresencePrefetch />
+        <CerebroWorkspaceDockIcon />
+        <CerebroWorkspaceTitle />
+        <CerebroWorkspaceSidebarColor />
+        <Outlet />
       {/* Reads the welcome-store transient signal parked by
        *  OnboardingFlow.handleRuntimeNext. Suppressed while a WindowOverlay
        *  (onboarding / accept-invite / new-workspace) is open so the modal
@@ -120,6 +125,7 @@ export function WorkspaceRouteLayout() {
        *  a portal-rendered Dialog at z-50 would otherwise sit above an
        *  active pre-workspace overlay. */}
       {!overlayActive && <SourceBackfillModal />}
+      </MemberPresenceProvider>
     </WorkspaceSlugProvider>
   );
 }

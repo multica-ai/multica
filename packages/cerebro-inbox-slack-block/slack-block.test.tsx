@@ -202,8 +202,14 @@ vi.mock("@multica/core/realtime", () => ({
   },
 }));
 
-// Presence/typing REST calls — return the seeded online set, no network.
-vi.mock("./api/presence-api", () => ({
+// Member presence + typing — the backbone moved to @multica/core/presence
+// (TECH-3583); the slack-block hook/api files now re-export from it. Mock the
+// hook to return the seeded online set (no network) and stub the typing POST.
+vi.mock("@multica/core/presence", () => ({
+  useMemberPresence: () => ({ onlineUserIds: presenceState.online }),
+  useMemberOnline: (userId: string) => presenceState.online.has(userId),
+  MemberPresenceProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
   fetchPresenceSnapshot: async () => ({
     online_user_ids: Array.from(presenceState.online),
   }),

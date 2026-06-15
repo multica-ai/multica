@@ -9,6 +9,7 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useAgentPresenceDetail } from "@multica/core/agents";
+import { useMemberOnline } from "@multica/core/presence";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
@@ -93,15 +94,24 @@ export function ActorAvatar({
     />
   );
 
-  // Optional presence dot overlay. Only meaningful for agents — members have
-  // no presence backbone. Wrapping unconditionally with relative inline-flex
-  // would create extra DOM for every avatar; we only wrap when a dot is asked
-  // for.
-  const wrapDot = showStatusDot && actorType === "agent";
-  const dotted = wrapDot ? (
+  // Optional presence dot overlay. Wrapping unconditionally with relative
+  // inline-flex would create extra DOM for every avatar; we only wrap when a
+  // dot is asked for, and only for actor types that have a presence backbone.
+  // CEREBRO-PATCH(member-presence-dot): TECH-3583 — members now get a red/green
+  // online/offline dot too (was agent-only). Humans read presence from the
+  // workspace-wide MemberPresenceProvider via useMemberOnline; squads/system
+  // still have no presence signal and render no dot.
+  const wrapAgentDot = showStatusDot && actorType === "agent";
+  const wrapMemberDot = showStatusDot && actorType === "member";
+  const dotted = wrapAgentDot ? (
     <span className="relative inline-flex">
       {avatar}
       <AgentStatusDot agentId={actorId} size={size} />
+    </span>
+  ) : wrapMemberDot ? (
+    <span className="relative inline-flex">
+      {avatar}
+      <MemberStatusDot userId={actorId} size={size} />
     </span>
   ) : (
     avatar
@@ -199,6 +209,29 @@ function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
   if (detail === "loading") return null;
 
   const { dotClass, label } = availabilityConfig[detail.availability];
+  const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
+
+  return (
+    <span
+      aria-label={`Status: ${label}`}
+      title={label}
+      className={`absolute bottom-0 right-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
+    />
+  );
+}
+
+// CEREBRO-PATCH(member-presence-dot): TECH-3583 — human presence dot, mirroring
+// AgentStatusDot. Green = online, red = offline, matching the agent
+// availabilityConfig red/green convention so the binary read ("green = here,
+// red = not") is identical across people and agents. Renders nothing while
+// presence is unknown (no MemberPresenceProvider mounted, e.g. isolated tests)
+// rather than misreporting an offline dot.
+function MemberStatusDot({ userId, size }: { userId: string; size?: number }) {
+  const online = useMemberOnline(userId);
+  if (online === null) return null;
+
+  const dotClass = online ? "bg-success" : "bg-destructive";
+  const label = online ? "Online" : "Offline";
   const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
