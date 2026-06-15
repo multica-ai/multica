@@ -177,6 +177,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/notes/{id}/comments/{commentId}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/notes/{id}/lock",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/notes/{id}/references/{refId}",
       "gate": "workspace_member"
     },
@@ -949,7 +957,31 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/comments",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/comments/{commentId}/resolve",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/comments/{commentId}/suggestion",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/lock",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/references",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/versions",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/notes/{id}/versions/{versionId}/restore",
       "gate": "workspace_member"
     },
     {
@@ -1338,6 +1370,10 @@
     },
     {
       "id": "PUT /api/notes/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/notes/{id}/comments/{commentId}",
       "gate": "workspace_member"
     },
     {

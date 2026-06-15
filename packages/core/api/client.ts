@@ -4179,4 +4179,89 @@ export class ApiClient {
       method: "DELETE",
     });
   }
+
+  // CEREBRO-PATCH(cerebro-notes-client): TECH-3556 Wave 3 — comments +
+  // suggestions, version history, and the interim edit lock on a note. Bodies
+  // are generic so @multica/cerebro-notes owns the zod schema.
+  async listNoteComments<T = unknown>(noteId: string): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/comments`);
+  }
+  async createNoteComment<T = unknown>(
+    noteId: string,
+    payload: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/comments`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+  async updateNoteComment<T = unknown>(
+    noteId: string,
+    commentId: string,
+    payload: unknown,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/comments/${commentId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    });
+  }
+  async deleteNoteComment(noteId: string, commentId: string): Promise<void> {
+    await this.fetch<void>(`/api/notes/${noteId}/comments/${commentId}`, {
+      method: "DELETE",
+    });
+  }
+  async resolveNoteComment<T = unknown>(
+    noteId: string,
+    commentId: string,
+    resolved: boolean,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/comments/${commentId}/resolve`, {
+      method: "POST",
+      body: JSON.stringify({ resolved }),
+    });
+  }
+  async decideNoteSuggestion<T = unknown>(
+    noteId: string,
+    commentId: string,
+    state: "accepted" | "rejected",
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/notes/${noteId}/comments/${commentId}/suggestion`,
+      { method: "POST", body: JSON.stringify({ state }) },
+    );
+  }
+  async listNoteVersions<T = unknown>(noteId: string): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/versions`);
+  }
+  async saveNoteVersion<T = unknown>(
+    noteId: string,
+    label?: string,
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/versions`, {
+      method: "POST",
+      body: JSON.stringify({ label }),
+    });
+  }
+  async restoreNoteVersion<T = unknown>(
+    noteId: string,
+    versionId: string,
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/notes/${noteId}/versions/${versionId}/restore`,
+      { method: "POST" },
+    );
+  }
+  async getNoteLock<T = unknown>(noteId: string): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/lock`);
+  }
+  async acquireNoteLock<T = unknown>(
+    noteId: string,
+    force?: boolean,
+  ): Promise<T> {
+    const qs = force ? "?force=true" : "";
+    return this.fetch<T>(`/api/notes/${noteId}/lock${qs}`, { method: "POST" });
+  }
+  async releaseNoteLock(noteId: string): Promise<void> {
+    await this.fetch<void>(`/api/notes/${noteId}/lock`, { method: "DELETE" });
+  }
 }

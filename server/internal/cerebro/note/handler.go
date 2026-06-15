@@ -145,6 +145,24 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/{id}/references", h.ListReferences)
 	r.Post("/{id}/references", h.CreateReference)
 	r.Delete("/{id}/references/{refId}", h.DeleteReference)
+
+	// Wave 3 / G1 — comments + suggestions on a note. See comments.go.
+	r.Get("/{id}/comments", h.ListComments)
+	r.Post("/{id}/comments", h.CreateComment)
+	r.Put("/{id}/comments/{commentId}", h.UpdateComment)
+	r.Delete("/{id}/comments/{commentId}", h.DeleteComment)
+	r.Post("/{id}/comments/{commentId}/resolve", h.ResolveComment)
+	r.Post("/{id}/comments/{commentId}/suggestion", h.DecideSuggestion)
+
+	// Wave 3 / G2 — version history. See versions.go.
+	r.Get("/{id}/versions", h.ListVersions)
+	r.Post("/{id}/versions", h.SaveVersion)
+	r.Post("/{id}/versions/{versionId}/restore", h.RestoreVersion)
+
+	// Wave 3 / G3 — interim edit lock. See lock.go.
+	r.Get("/{id}/lock", h.GetLock)
+	r.Post("/{id}/lock", h.AcquireLock)
+	r.Delete("/{id}/lock", h.ReleaseLock)
 }
 
 // --- request / response shapes ---
@@ -478,6 +496,13 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 
 	// Notify only people newly tagged by this edit (diff vs. the old body).
 	h.notifyNoteMentions(r.Context(), wsUUID, noteID, ownerUUID, updated.Title, artifact.Body, updated.Body, noteRow.Visibility)
+
+	// Wave 3 / G2 — snapshot a version for the history. Coalesced: a burst of
+	// edits by the same author becomes one entry (see snapshotVersion). Only
+	// snapshot when something actually changed.
+	if updated.Title != artifact.Title || updated.Body != artifact.Body {
+		h.snapshotVersion(r.Context(), noteID, ownerUUID, updated.Title, updated.Body, "edit", "", true)
+	}
 
 	writeJSON(w, http.StatusOK, NoteResponse{
 		ID:          uuidStr(updated.ID),
