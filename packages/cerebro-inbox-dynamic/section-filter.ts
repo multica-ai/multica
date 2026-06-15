@@ -319,12 +319,16 @@ export function selectSectionEntries(
   ctx: SectionFilterContext,
   opts: SelectOptions = {},
 ): DynInboxEntry[] {
+  // TECH-3541 (Jesper) — muted / snoozed ("remind me later") rows are hidden
+  // from EVERY view; only the explicit "Muted" view surfaces them again. This
+  // is a global rule now, so the old per-box `excludeMuted` toggle is redundant.
+  const showsMuted = section.viewFilter === "muted";
   const filtered = entries.filter(
     (e) =>
       entryMatchesSection(e, section, ctx) &&
       // TECH-3541 #2 — the classic view switch, applied on top of the box kind.
       (!section.viewFilter || matchesViewFilter(e, section.viewFilter, ctx)) &&
-      (!section.excludeMuted || !entryIsMuted(e)) &&
+      (showsMuted || !entryIsMuted(e)) &&
       entryMatchesQuery(e, opts.query ?? ""),
   );
   const sorted = sortEntries(filtered, section, ctx.action.userId);

@@ -115,7 +115,9 @@ export interface InboxSectionConfig {
   countStyle?: "plain" | "circle";
   /** #6: semantic colour for the circle count badge. Default "brand". */
   badgeColor?: SectionBadgeColor;
-  /** #4 (partial): hide muted rows in this box (e.g. reminders without muted). */
+  /** #4 (partial): hide muted rows in this box. TECH-3541 (Jesper) — muted /
+   *  snoozed rows are now hidden from every view globally, so this per-box flag
+   *  is a no-op; kept only so older persisted layouts still parse. */
   excludeMuted?: boolean;
   // --- TECH-3413 #4: composable filter for kind === "filter" (AND of the
   // enabled predicates; projectId is reused as the optional project narrow). ---

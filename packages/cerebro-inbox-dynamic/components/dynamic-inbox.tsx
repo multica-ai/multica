@@ -352,7 +352,13 @@ export function DynamicInbox() {
     );
   };
   const removeSection = (id: string) =>
-    updateActiveTab((t) => ({ ...t, sections: t.sections.filter((s) => s.id !== id) }));
+    // TECH-3541 (Jesper) — the permanent inbox block (first "all" box in the
+    // tab) cannot be removed.
+    updateActiveTab((t) => {
+      const inboxId = t.sections.find((s) => s.kind === "all")?.id ?? null;
+      if (id === inboxId) return t;
+      return { ...t, sections: t.sections.filter((s) => s.id !== id) };
+    });
   const changeSection = (next: InboxSectionConfig) =>
     updateActiveTab((t) => ({ ...t, sections: t.sections.map((s) => (s.id === next.id ? next : s)) }));
 
@@ -468,6 +474,35 @@ export function DynamicInbox() {
     onNewIssue: () => openCreateIssueWithPreference(),
     onNewReminder: () => setShowReminder(true),
   };
+
+  // TECH-3541 (Jesper) — the permanent inbox block is the first "All messages"
+  // box in the active tab. The search bar is rendered as part of it, and it
+  // cannot be removed. When a custom tab has no "all" box, the search falls back
+  // to a standalone bar at the top so search is never lost.
+  const inboxBlockId = activeTab.sections.find((s) => s.kind === "all")?.id ?? null;
+
+  const searchBar = (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+      <Search className="size-3.5 flex-none text-muted-foreground" />
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search inbox…"
+        className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+      />
+      {query && (
+        <button
+          type="button"
+          className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
+          onClick={() => setQuery("")}
+          title="Clear search"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
 
   const listColumn = (
     <div className="relative flex h-full min-h-0 flex-col">
@@ -633,29 +668,12 @@ export function DynamicInbox() {
           </div>
         </div>
 
-        {/* search (TECH-3413 #9) */}
-        <div className="border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
-            <Search className="size-3.5 flex-none text-muted-foreground" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search inbox…"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            {query && (
-              <button
-                type="button"
-                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
-                onClick={() => setQuery("")}
-                title="Clear search"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
+        {/* search (TECH-3413 #9) — TECH-3541 (Jesper): when the active tab has a
+            permanent inbox block the search lives inside it; this top bar is a
+            fallback for custom tabs without an "All messages" box. */}
+        {!inboxBlockId && (
+          <div className="border-b border-border px-3 py-2">{searchBar}</div>
+        )}
 
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
@@ -723,6 +741,12 @@ export function DynamicInbox() {
                           selectedKey={selectedKey}
                           query={query}
                           dragHandle={handle}
+                          searchSlot={
+                            section.id === inboxBlockId ? (
+                              <div className="border-b border-border px-3 py-2">{searchBar}</div>
+                            ) : undefined
+                          }
+                          removable={section.id !== inboxBlockId}
                           onSelect={onSelect}
                           onArchive={onArchive}
                           onChange={changeSection}
