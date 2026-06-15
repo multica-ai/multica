@@ -13,7 +13,7 @@ import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
 import { Star } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ChatSession } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 
@@ -102,18 +102,31 @@ export function DynamicInboxRow({
   );
 }
 
+/** TECH-3579 — how long the armed star stays before flipping back to the avatar. */
+const ARMED_FLIP_BACK_MS = 5000;
+
 /**
  * TECH-3579 — two-step favorite affordance over the row avatar:
  *  1. Default shows the avatar (the overlay's front face is transparent).
  *  2. Clicking the avatar flips the overlay to reveal a star ("armed").
- *  3. Clicking the star sets the favorite; the gold star then stays at rest.
- * A click on the avatar never selects/opens the row (it only flips), and an
- * armed-but-not-favorited star flips back to the avatar on pointer-leave so a
- * mis-click doesn't get stuck on the star face.
+ *  3. Clicking the star — anywhere in the circle — sets the favorite; the gold
+ *     star then stays at rest.
+ * A click on the avatar never selects/opens the row (it only flips). Once armed,
+ * the whole circle is the favorite target, and the star stays put for 5 seconds
+ * (Jesper feedback: flip-back-on-pointer-leave made the star almost impossible
+ * to hit). If the user doesn't favorite within 5s, it flips back to the avatar.
  */
 function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   const [armed, setArmed] = useState(false);
   const showStar = active || armed;
+
+  // Armed but not yet favorited → give the user a full 5s to click, then flip
+  // back to the avatar. Re-arming resets the timer (effect re-runs on `armed`).
+  useEffect(() => {
+    if (!armed || active) return;
+    const t = setTimeout(() => setArmed(false), ARMED_FLIP_BACK_MS);
+    return () => clearTimeout(t);
+  }, [armed, active]);
 
   return (
     <button
@@ -130,13 +143,9 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
           setArmed(true);
           return;
         }
-        // Star is showing: this click commits or clears the favorite.
+        // Star is showing: a click anywhere in the circle commits or clears it.
         onToggle();
         if (active) setArmed(false); // removed → flip back to the avatar
-      }}
-      onPointerLeave={() => {
-        // Flipped to the star but didn't favorite → flip back to the avatar.
-        if (!active) setArmed(false);
       }}
       className="absolute left-4 top-1/2 z-10 size-7 -translate-y-1/2 [perspective:600px]"
     >
@@ -148,13 +157,13 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
         {/* Front face — transparent so the real avatar underneath stays visible;
             this is just the click target that flips to the star. */}
         <span className="absolute inset-0 rounded-full [backface-visibility:hidden]" aria-hidden />
-        {/* Back face — the star the user clicks to (un)favorite. Opaque so it
-            masks the avatar once flipped. */}
+        {/* Back face — the whole circle is the click target; the star fills it so
+            it reads as one big button. Opaque so it masks the avatar once flipped. */}
         <span
           className="absolute inset-0 flex items-center justify-center rounded-full bg-card [backface-visibility:hidden] [transform:rotateY(180deg)]"
           aria-hidden
         >
-          <Star className={`size-4 ${active ? "fill-warning text-warning" : "text-muted-foreground"}`} />
+          <Star className={`size-5 ${active ? "fill-warning text-warning" : "text-muted-foreground"}`} />
         </span>
       </span>
     </button>
