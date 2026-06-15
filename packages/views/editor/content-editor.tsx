@@ -99,6 +99,7 @@ interface ContentEditorProps {
   debounceMs?: number;
   onSubmit?: () => void;
   onBlur?: () => void;
+  onFocus?: () => void;
   onExternalSyncAccepted?: (markdown: string) => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
@@ -181,6 +182,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       debounceMs = 300,
       onSubmit,
       onBlur,
+      onFocus,
       onExternalSyncAccepted,
       onUploadFile,
       showBubbleMenu = true,
@@ -200,6 +202,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onFocusRef = useRef(onFocus);
     const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
     const onUploadFileRef = useRef(onUploadFile);
     const mentionScopeRef = useRef(mentionScope);
@@ -222,6 +225,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onFocusRef.current = onFocus;
     onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
     onUploadFileRef.current = onUploadFile;
     mentionScopeRef.current = mentionScope;
@@ -293,6 +297,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           suppressSyncRef.current = true;
           onUpdateRef.current?.(md);
         }, debounceMs);
+      },
+      onFocus: () => {
+        onFocusRef.current?.();
       },
       onBlur: () => {
         onBlurRef.current?.();

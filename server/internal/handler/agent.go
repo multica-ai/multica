@@ -468,23 +468,29 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 // rendered in transcripts that frequently end up in screen shares,
 // screenshots, and recordings, so this function is the only guard.
 //
-//   - For standard tasks (work_dir laid out as `<workspacesRoot>/<wsUUID>/
-//     <taskShort>/workdir` by execenv.Prepare), it strips everything up to and
-//     including the workspaces root, returning `<wsUUID>/<taskShort>/workdir`.
-//   - For local_directory tasks the absolute path lives outside the envRoot
-//     layout. We try to recognise common home-directory prefixes
-//     (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`) and strip
-//     them, returning the remainder (e.g. `repos/foo`). When the prefix
-//     can't be recognised — unusual home layouts, network mounts, paths
-//     under `/opt`, `/srv`, etc. — we fall back to the basename so we never
-//     accidentally render a path component that happens to be a username.
+// To give managed and local_directory tasks a single, consistent shape, the
+// home-relative form is preferred: a recognised home prefix
+// (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`) is replaced
+// with `~/` and the full remainder is kept. Both task layouts live under the
+// user's home by default, so this yields:
 //
-// Returns empty when work_dir is empty, or when stripping leaves nothing
-// (i.e. work_dir was exactly the user's home — rendering nothing is
-// preferable to a chip that says `<name>`). shortTaskID() must stay in
+//   - managed task:         `~/multica_workspaces/<wsUUID>/<taskShort>/workdir`
+//   - local_directory task: `~/Desktop/harness/multica`
+//
+// Both start with `~/`, expose the real path structure, and never leak the
+// username (the `~` hides it).
+//
+// When the path is NOT under a recognised home layout — e.g. workspacesRoot
+// configured under `/opt`, `/srv`, or a network mount — we fall back to the
+// envRoot suffix (`<wsUUID>/<taskShort>/workdir`) for managed tasks so the
+// chip still shows the stable tail, and otherwise to the basename so we never
+// render a path component that happens to be a username.
+//
+// Returns empty when work_dir is empty, and `~` when work_dir is exactly the
+// user's home (rendering `~` leaks nothing). shortTaskID() must stay in
 // lock-step with server/internal/daemon/execenv/git.go:shortID — both
-// consume the same task UUID; if that helper changes, this one must too
-// or the envRoot match silently degrades to the local_directory fallback.
+// consume the same task UUID; if that helper changes, this one must too or
+// the non-home envRoot fallback silently degrades to a bare basename.
 func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	if workDir == "" {
 		return ""
@@ -493,15 +499,22 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	// reasons about forward slashes.
 	normalized := strings.ReplaceAll(workDir, "\\", "/")
 
+	// Prefer the home-relative form — this is the unified shape both task
+	// types share. work_dir == home yields an empty remainder; render `~`.
+	if rest, ok := stripHomePrefix(normalized); ok {
+		if rest == "" {
+			return "~"
+		}
+		return "~/" + rest
+	}
+
+	// Non-home path: managed tasks whose workspacesRoot lives outside a
+	// recognised home layout still expose a stable envRoot tail.
 	if workspaceID != "" && taskID != "" {
 		envRootSuffix := workspaceID + "/" + shortTaskID(taskID)
 		if idx := strings.Index(normalized, envRootSuffix); idx >= 0 {
 			return normalized[idx:]
 		}
-	}
-
-	if stripped, ok := stripHomePrefix(normalized); ok {
-		return stripped
 	}
 
 	return basename(normalized)
