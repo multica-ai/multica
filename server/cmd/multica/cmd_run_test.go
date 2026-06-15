@@ -1187,6 +1187,7 @@ func TestClaudeTranscriptTrackerTotalActiveMs(t *testing.T) {
 	reporter := newLocalRunReporter(poster, "run-1")
 	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
 	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+	tracker.Start()
 
 	writeClaudeJSONLLines(t, sessionPath, []string{
 		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"hello"}}`,
