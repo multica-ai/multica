@@ -557,8 +557,13 @@ func TestListAttachmentsOnlyReturnsIssueLevelAttachments(t *testing.T) {
 	ctx := context.Background()
 
 	origStorage := testHandler.Storage
+	origLegacyLocalStorage := testHandler.LegacyLocalStorage
 	testHandler.Storage = &mockStorage{}
-	defer func() { testHandler.Storage = origStorage }()
+	testHandler.LegacyLocalStorage = nil
+	defer func() {
+		testHandler.Storage = origStorage
+		testHandler.LegacyLocalStorage = origLegacyLocalStorage
+	}()
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `

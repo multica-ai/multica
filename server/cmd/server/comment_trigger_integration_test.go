@@ -176,8 +176,9 @@ func createIssueAssignedToAgent(t *testing.T, title, agentID string) string {
 func createIssue(t *testing.T, title string) string {
 	t.Helper()
 	resp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  title,
-		"status": "todo",
+		"title":      title,
+		"status":     "todo",
+		"project_id": testProjectID,
 	})
 	if resp.StatusCode != 201 {
 		body, _ := io.ReadAll(resp.Body)

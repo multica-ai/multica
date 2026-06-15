@@ -98,11 +98,11 @@ func TestUpdateAutopilotTriggerPreservesConcurrentAdvance(t *testing.T) {
 		AssigneeID:         mustUUID(t, agentID),
 		Status:             "active",
 		ExecutionMode:      "run_only",
+		ManualOptions:      []string{},
 		CreatedByType:      "member",
 		CreatedByID:        mustUUID(t, userID),
 		Description:        pgtype.Text{String: "regression test", Valid: true},
 		IssueTitleTemplate: pgtype.Text{},
-		ManualOptions:      []string{},
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilot: %v", err)

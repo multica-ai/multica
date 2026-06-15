@@ -1126,6 +1126,7 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1206,6 +1207,7 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1278,6 +1280,7 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1379,6 +1382,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
 		"project_id":           projectID,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1450,6 +1454,7 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 		"title":          "Project update autopilot",
 		"assignee_id":    agentID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1687,6 +1692,7 @@ func TestTriggerAutopilotRejectsPayloadWithoutManualOptions(t *testing.T) {
 		"title":          "Manual trigger no options",
 		"assignee_id":    agentID,
 		"execution_mode": "run_only",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -2312,6 +2318,7 @@ func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
 		"title":          "Malformed assignee autopilot",
 		"assignee_id":    "not-a-uuid",
 		"execution_mode": "run_only",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusBadRequest {

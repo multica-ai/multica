@@ -2437,9 +2437,9 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
+			created_by_type, created_by_id, manual_options
 		)
-		VALUES ($1, 'run_only fixture', $2, 'run_only', 'member', $3)
+		VALUES ($1, 'run_only fixture', $2, 'run_only', 'member', $3, '{}')
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
@@ -2703,9 +2703,9 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
+			created_by_type, created_by_id, manual_options
 		)
-		VALUES ($1, 'claim workspace fixture', $2, 'run_only', 'member', $3)
+		VALUES ($1, 'claim workspace fixture', $2, 'run_only', 'member', $3, '{}')
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)
@@ -4147,9 +4147,9 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
+			created_by_type, created_by_id, manual_options
 		)
-		VALUES ($1, 'gc-check autopilot', $2, 'run_only', 'member', $3)
+		VALUES ($1, 'gc-check autopilot', $2, 'run_only', 'member', $3, '{}')
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("setup: create autopilot: %v", err)

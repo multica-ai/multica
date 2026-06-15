@@ -38,11 +38,9 @@ func seedAutopilot(t *testing.T, queries *db.Queries, title, creatorType string,
 		AssigneeID:    agentID,
 		Status:        "active",
 		ExecutionMode: "run_only",
+		ManualOptions: []string{},
 		CreatedByType: creatorType,
 		CreatedByID:   creatorID,
-		// manual_options is NOT NULL; the CreateAutopilot query forces the arg
-		// (bypassing the column DEFAULT), so a nil slice would marshal to NULL.
-		ManualOptions: []string{},
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilot: %v", err)

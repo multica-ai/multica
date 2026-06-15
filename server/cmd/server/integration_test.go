@@ -60,7 +60,7 @@ func TestMain(m *testing.M) {
 	}
 
 	testPool = pool
-	testUserID, testWorkspaceID, err = setupIntegrationTestFixture(ctx, pool)
+	testUserID, testWorkspaceID, testProjectID, err = setupIntegrationTestFixture(ctx, pool)
 	if err != nil {
 		fmt.Printf("Failed to set up integration test fixture: %v\n", err)
 		pool.Close()
@@ -97,9 +97,9 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, error) {
+func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, string, error) {
 	if err := cleanupIntegrationTestFixture(ctx, pool); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	var userID string
@@ -108,7 +108,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		VALUES ($1, $2)
 		RETURNING id
 	`, integrationTestName, integrationTestEmail).Scan(&userID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	var workspaceID string
@@ -117,14 +117,23 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		VALUES ($1, $2, $3)
 		RETURNING id
 	`, "Integration Tests", integrationTestWorkspaceSlug, "Temporary workspace for router integration tests").Scan(&workspaceID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
 		VALUES ($1, $2, 'owner')
 	`, workspaceID, userID); err != nil {
-		return "", "", err
+		return "", "", "", err
+	}
+
+	var projectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, status)
+		VALUES ($1, $2, 'planned')
+		RETURNING id
+	`, workspaceID, "Integration Test Project").Scan(&projectID); err != nil {
+		return "", "", "", err
 	}
 
 	var runtimeID string
@@ -135,7 +144,7 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
 		RETURNING id
 	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime").Scan(&runtimeID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	if _, err := pool.Exec(ctx, `
@@ -145,18 +154,10 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
 	`, workspaceID, "Integration Test Agent", runtimeID, userID); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
-		RETURNING id
-	`, workspaceID, "Integration Test Project").Scan(&testProjectID); err != nil {
-		return "", "", err
-	}
-
-	return userID, workspaceID, nil
+	return userID, workspaceID, projectID, nil
 }
 
 func cleanupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
@@ -519,9 +520,10 @@ func TestInvalidJWT(t *testing.T) {
 func TestIssuesCRUDThroughRouter(t *testing.T) {
 	// Create
 	resp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":    "Integration test issue",
-		"status":   "todo",
-		"priority": "high",
+		"title":      "Integration test issue",
+		"status":     "todo",
+		"priority":   "high",
+		"project_id": testProjectID,
 	})
 	if resp.StatusCode != 201 {
 		body, _ := io.ReadAll(resp.Body)
@@ -611,7 +613,8 @@ func TestIssuesCRUDThroughRouter(t *testing.T) {
 func TestCommentsThroughRouter(t *testing.T) {
 	// Create issue
 	resp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": "Comment integration test",
+		"title":      "Comment integration test",
+		"project_id": testProjectID,
 	})
 	var issue map[string]any
 	readJSON(t, resp, &issue)
@@ -908,8 +911,9 @@ func TestWebSocketIntegration(t *testing.T) {
 
 	// Create an issue — this should trigger a WebSocket broadcast
 	resp := authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":  "WebSocket test issue",
-		"status": "todo",
+		"title":      "WebSocket test issue",
+		"status":     "todo",
+		"project_id": testProjectID,
 	})
 	var issue map[string]any
 	readJSON(t, resp, &issue)

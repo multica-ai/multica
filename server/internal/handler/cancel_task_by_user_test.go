@@ -45,8 +45,8 @@ func createAutopilotRunOnlyTask(t *testing.T, agentID string) string {
 
 	var autopilotID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'cancel-runonly-ap', $2, 'run_only', 'member', $3)
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id, manual_options)
+		VALUES ($1, 'cancel-runonly-ap', $2, 'run_only', 'member', $3, '{}')
 		RETURNING id
 	`, workspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
 		t.Fatalf("create autopilot: %v", err)
