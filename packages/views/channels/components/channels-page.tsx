@@ -57,7 +57,9 @@ import {
   channelMessagesOptions,
   channelMembersOptions,
   messageThreadOptions,
+  useMarkChannelRead,
 } from "@multica/core/channels";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import type {
   ChannelMessage,
@@ -222,6 +224,18 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   const threadQuery = useQuery(
     messageThreadOptions(wsId, channelId ?? null, replyMessageId),
   );
+
+  // Auto mark-as-read whenever the user is viewing a channel that carries
+  // unread activity. has_unread comes from the list query; WS handlers
+  // invalidate it when a new message lands, so a message arriving while the
+  // user watches re-fires this effect and is instantly cleared.
+  const markRead = useMarkChannelRead();
+  const activeHasUnread = activeChannel?.has_unread ?? false;
+  useEffect(() => {
+    if (!channelId || !activeHasUnread) return;
+    markRead.mutate(channelId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
+  }, [channelId, activeHasUnread]);
 
   const closeSidePanel = useCallback(() => {
     setSidePanel(null);
@@ -905,8 +919,12 @@ function SortableChannelItem({
         ) : (
           <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 truncate">{channel.name}</span>
-        {channel.has_unread && <span className="h-2 w-2 shrink-0 rounded-full bg-primary" />}
+        <span className={cn("min-w-0 flex-1 truncate", channel.has_unread && !isActive && "font-medium")}>
+          {channel.name}
+        </span>
+        {channel.has_unread && !isActive && (
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand/60" />
+        )}
       </button>
     </div>
   );
@@ -1082,7 +1100,6 @@ function MessageList({
               onSubmit={handleSend}
               onUploadFile={(file) => uploadWithToast(file)}
               debounceMs={100}
-              submitOnEnter
               showBubbleMenu={false}
               mentionScope={{ memberIds }}
             />
@@ -1094,18 +1111,27 @@ function MessageList({
               onSelect={(file) => editorRef.current?.uploadFile(file)}
               onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
             />
-            <Button
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleSend}
-              disabled={isEmpty || sendMutation.isPending}
-            >
-              {sendMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleSend}
+                    disabled={isEmpty || sendMutation.isPending}
+                  >
+                    {sendMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent side="top">
+                发送 · {formatShortcut(modKey, enterKey)}
+              </TooltipContent>
+            </Tooltip>
           </div>
           {isDragOver && <FileDropOverlay />}
         </div>
@@ -1326,7 +1352,6 @@ function RepliesPanel({
               onSubmit={handleReply}
               onUploadFile={(file) => uploadWithToast(file)}
               debounceMs={100}
-              submitOnEnter
               showBubbleMenu={false}
               mentionScope={{ memberIds }}
             />
@@ -1338,18 +1363,27 @@ function RepliesPanel({
               onSelect={(file) => editorRef.current?.uploadFile(file)}
               onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
             />
-            <Button
-              size="icon"
-              className="h-7 w-7"
-              onClick={handleReply}
-              disabled={isEmpty || replyMutation.isPending}
-            >
-              {replyMutation.isPending ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={handleReply}
+                    disabled={isEmpty || replyMutation.isPending}
+                  >
+                    {replyMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Send className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent side="top">
+                {`发送 · ${formatShortcut(modKey, enterKey)}`}
+              </TooltipContent>
+            </Tooltip>
           </div>
           {isDragOver && <FileDropOverlay />}
         </div>
