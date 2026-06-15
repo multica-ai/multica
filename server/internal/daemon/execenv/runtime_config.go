@@ -467,6 +467,24 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
+	// Codex on Windows: upstream codex-cli has a known bug where shell command
+	// stdout/stderr is empty and exit code is always 0, even though commands
+	// execute successfully (openai/codex#20874). The agent runs "blind" — it
+	// cannot see command output, which makes it unable to verify its actions
+	// or read task context. Warn the agent so it doesn't misinterpret blank
+	// output as a broken environment and improvise.
+	if provider == "codex" && runtimeGOOS == "windows" {
+		b.WriteString("## Important: Known Codex Limitation on Windows\n\n")
+		b.WriteString("**Codex CLI on Windows has a known upstream bug (openai/codex#20874): shell command stdout/stderr may be empty and exit codes may always be 0**, even when the command actually runs and side effects persist. ")
+		b.WriteString("This is NOT a broken environment — your commands ARE executing. ")
+		b.WriteString("However, you will not be able to see command output to verify results.\n\n")
+		b.WriteString("**What to do:**\n")
+		b.WriteString("- Assume your tool calls succeed and report what you intended to do rather than what you observed.\n")
+		b.WriteString("- For `multica` CLI commands (issue get, comment list, etc.), use `--output json` and redirect to a file, then read the file: `multica issue get <id> --output json > result.json`.\n")
+		b.WriteString("- If possible, run the Codex CLI under WSL2/Linux on the same host to avoid this issue entirely.\n")
+		b.WriteString("- Codex runtimes on macOS and Linux are unaffected.\n\n")
+	}
+
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
 	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")

@@ -1292,3 +1292,52 @@ func TestWriteRuntimeConfigFileAlwaysInsertsFixedManagedSeparator(t *testing.T) 
 		})
 	}
 }
+
+func TestCodexWindowsWarningInBrief(t *testing.T) {
+	// runtimeGOOS is a package-level var; save and restore it so this test is
+	// deterministic regardless of the host it runs on.
+	origGOOS := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = origGOOS })
+
+	issueCtx := TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}
+
+	// Codex on Windows: warning must be present.
+	runtimeGOOS = "windows"
+	out := buildMetaSkillContent("codex", issueCtx)
+	if !strings.Contains(out, "Known Codex Limitation on Windows") {
+		t.Error("codex on windows: expected Known Codex Limitation warning, but it was missing")
+	}
+	if !strings.Contains(out, "openai/codex#20874") {
+		t.Error("codex on windows: expected upstream issue reference openai/codex#20874")
+	}
+	if !strings.Contains(out, "WSL2") {
+		t.Error("codex on windows: expected WSL2 workaround mention")
+	}
+
+	// Codex on macOS: warning must NOT be present.
+	runtimeGOOS = "darwin"
+	out = buildMetaSkillContent("codex", issueCtx)
+	if strings.Contains(out, "Known Codex Limitation on Windows") {
+		t.Error("codex on darwin: Known Codex Limitation warning should not appear")
+	}
+
+	// Codex on Linux: warning must NOT be present.
+	runtimeGOOS = "linux"
+	out = buildMetaSkillContent("codex", issueCtx)
+	if strings.Contains(out, "Known Codex Limitation on Windows") {
+		t.Error("codex on linux: Known Codex Limitation warning should not appear")
+	}
+
+	// Claude on Windows: warning must NOT be present (only applies to codex).
+	runtimeGOOS = "windows"
+	out = buildMetaSkillContent("claude", issueCtx)
+	if strings.Contains(out, "Known Codex Limitation on Windows") {
+		t.Error("claude on windows: Known Codex Limitation warning should not appear (codex only)")
+	}
+
+	// OpenCode on Windows: warning must NOT be present.
+	out = buildMetaSkillContent("opencode", issueCtx)
+	if strings.Contains(out, "Known Codex Limitation on Windows") {
+		t.Error("opencode on windows: Known Codex Limitation warning should not appear (codex only)")
+	}
+}

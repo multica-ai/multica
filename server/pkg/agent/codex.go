@@ -846,6 +846,19 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		finalOutput := output.String()
 		outputMu.Unlock()
 
+		// Warn when every shell command returned empty output — the agent ran
+		// blind. This is a known upstream codex-cli bug on Windows
+		// (openai/codex#20874): commands execute but stdout and exit codes
+		// are never surfaced to the model.
+		if c.isBlindRun() && b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("codex blind run detected: all shell commands returned empty output",
+				"exec_commands", c.execCommands,
+				"empty_exec_commands", c.emptyExecCommands,
+				"thread_id", threadID,
+				"pid", cmd.Process.Pid,
+			)
+		}
+
 		// Build usage map from accumulated codex usage.
 		// First check JSON-RPC notifications (often empty for Codex).
 		var usageMap map[string]TokenUsage
@@ -1171,6 +1184,13 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+
+	// Blind-run detection: track shell command results to detect when the codex
+	// runtime is returning empty output for every command (upstream Windows bug,
+	// openai/codex#20874). When execCommands > 0 and emptyExecCommands == execCommands,
+	// the agent ran blind — it could not see any command output.
+	execCommands      int
+	emptyExecCommands int
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -1188,6 +1208,25 @@ func (c *codexClient) getTurnError() string {
 	c.turnErrorMu.Lock()
 	defer c.turnErrorMu.Unlock()
 	return c.turnError
+}
+
+// trackExecCommandResult records a shell command result for blind-run detection.
+// When all shell commands return empty output on a platform affected by
+// openai/codex#20874 (Windows), the agent is running blind — it cannot read
+// command results to verify its actions or consume task input.
+func (c *codexClient) trackExecCommandResult(output string) {
+	c.execCommands++
+	if strings.TrimSpace(output) == "" {
+		c.emptyExecCommands++
+	}
+}
+
+// isBlindRun reports whether every shell command executed during this turn
+// returned empty output, which means the agent ran blind. At least 3 commands
+// must have executed to avoid false positives from runs that simply didn't
+// use shell tools.
+func (c *codexClient) isBlindRun() bool {
+	return c.execCommands >= 3 && c.emptyExecCommands == c.execCommands
 }
 
 type pendingRPC struct {
@@ -1436,6 +1475,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	case "exec_command_end":
 		callID, _ := msg["call_id"].(string)
 		output, _ := msg["output"].(string)
+		c.trackExecCommandResult(output)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
@@ -1602,6 +1642,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 
 	case method == "item/completed" && itemType == "commandExecution":
 		output, _ := item["aggregatedOutput"].(string)
+		c.trackExecCommandResult(output)
 		if c.onMessage != nil {
 			c.onMessage(Message{
 				Type:   MessageToolResult,
