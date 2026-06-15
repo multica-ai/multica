@@ -1,10 +1,88 @@
 package service
 
 import (
+	"errors"
+	"net/smtp"
+	"net/textproto"
 	"os"
 	"strings"
 	"testing"
 )
+
+type fakeSMTPAuthClient struct {
+	authErrs   []error
+	authCalls  []smtp.Auth
+	authLine   string
+	textClient *textproto.Conn
+}
+
+func (f *fakeSMTPAuthClient) Auth(auth smtp.Auth) error {
+	f.authCalls = append(f.authCalls, auth)
+	if len(f.authErrs) == 0 {
+		return nil
+	}
+	err := f.authErrs[0]
+	f.authErrs = f.authErrs[1:]
+	return err
+}
+
+func (f *fakeSMTPAuthClient) Text() *textproto.Conn {
+	return f.textClient
+}
+
+func (f *fakeSMTPAuthClient) Extension(name string) (bool, string) {
+	if strings.EqualFold(name, "AUTH") && f.authLine != "" {
+		return true, f.authLine
+	}
+	return false, ""
+}
+
+func TestSMTPAuthWithFallback_UsesPlainWhenAccepted(t *testing.T) {
+	client := &fakeSMTPAuthClient{}
+	if err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass"); err != nil {
+		t.Fatalf("smtpAuthWithFallback returned error: %v", err)
+	}
+	if len(client.authCalls) != 1 {
+		t.Fatalf("expected 1 auth call, got %d", len(client.authCalls))
+	}
+	if _, ok := client.authCalls[0].(*loginAuth); ok {
+		t.Fatalf("expected first auth to be PLAIN, got LOGIN")
+	}
+}
+
+func TestSMTPAuthWithFallback_FallsBackToLoginOnOffice365Style504(t *testing.T) {
+	client := &fakeSMTPAuthClient{
+		authErrs: []error{
+			errors.New("504 5.7.4 Unrecognized authentication type"),
+			nil,
+		},
+		authLine: "XOAUTH2 LOGIN",
+	}
+	if err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass"); err != nil {
+		t.Fatalf("smtpAuthWithFallback returned error: %v", err)
+	}
+	if len(client.authCalls) != 2 {
+		t.Fatalf("expected 2 auth calls, got %d", len(client.authCalls))
+	}
+	if _, ok := client.authCalls[1].(*loginAuth); !ok {
+		t.Fatalf("expected second auth to be LOGIN fallback")
+	}
+}
+
+func TestSMTPAuthWithFallback_DoesNotFallbackWithoutLoginSupport(t *testing.T) {
+	wantErr := errors.New("504 5.7.4 Unrecognized authentication type")
+	client := &fakeSMTPAuthClient{
+		authErrs: []error{wantErr},
+		authLine: "XOAUTH2",
+	}
+	err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected original error, got %v", err)
+	}
+	if len(client.authCalls) != 1 {
+		t.Fatalf("expected 1 auth call, got %d", len(client.authCalls))
+	}
+}
 
 func TestSanitizeSubjectField(t *testing.T) {
 	long := strings.Repeat("a", 100)
