@@ -68,3 +68,7 @@ server/server
 data/
 .kilo
 .idea
+.gstack/
+
+# Eidetix eval run artifacts (may contain agent outputs)
+evals/eidetix/results/
