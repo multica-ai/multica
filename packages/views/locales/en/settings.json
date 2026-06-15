@@ -33,6 +33,7 @@
       "general": "General",
       "repositories": "Repositories",
       "github": "GitHub",
+      "curator": "Curator",
       "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members"
@@ -178,6 +179,33 @@
     "section_title": "Integrations",
     "gitee_title": "Gitee PR Integration",
     "manage_hint": "Only admins and owners can manage integrations."
+  },
+  "curator": {
+    "page_description": "Configure the workspace-level Knowledge Curator service that turns accepted issue candidates into reviewed draft knowledge.",
+    "enabled_label": "Enable Knowledge Curator",
+    "enabled_description": "When enabled and an engine is configured, accepted candidates can generate draft knowledge items. It remains a system service, not an assignable agent.",
+    "provider_label": "Provider",
+    "provider_placeholder": "openai, anthropic, custom",
+    "runtime_mode_label": "Runtime mode",
+    "runtime_modes": {
+      "external": "External endpoint",
+      "cloud": "Cloud runtime",
+      "local": "Local runtime"
+    },
+    "model_label": "Draft model",
+    "model_placeholder": "Model used to write drafts",
+    "embedding_model_label": "Embedding model",
+    "embedding_model_placeholder": "Model used for knowledge embeddings",
+    "base_url_label": "Base URL",
+    "base_url_placeholder": "https://api.example.com/v1",
+    "secret_ref_label": "Secret reference",
+    "secret_ref_placeholder": "secret://workspace/knowledge-curator",
+    "secret_ref_hint": "Store a reference to a server-side secret, not the secret value itself.",
+    "save": "Save",
+    "saving": "Saving...",
+    "manage_hint": "Only admins and owners can update Curator settings.",
+    "toast_saved": "Curator settings saved",
+    "toast_save_failed": "Failed to save Curator settings"
   },
   "github": {
     "page_description": "Connect a GitHub App, control how Pull Requests show up inside Multica, and decide what your agents leave behind in commit history.",

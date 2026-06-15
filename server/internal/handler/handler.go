@@ -104,6 +104,7 @@ type Handler struct {
 	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
 	KnowledgeService      *service.KnowledgeService
+	KnowledgeCurator      *service.KnowledgeCuratorService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
@@ -188,6 +189,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	knowledgeSvc := service.NewKnowledgeService(queries, txStarter)
+	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, service.MissingCuratorEngine{})
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Knowledge = knowledgeSvc
@@ -202,6 +204,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		KnowledgeService:      knowledgeSvc,
+		KnowledgeCurator:      knowledgeCurator,
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),

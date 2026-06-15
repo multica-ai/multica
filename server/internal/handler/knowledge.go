@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -168,6 +169,14 @@ type evaluateKnowledgeCandidateRequest struct {
 	SourceID      string `json:"source_id"`
 	TriggerReason string `json:"trigger_reason"`
 	Manual        *bool  `json:"manual"`
+}
+
+type createKnowledgeDraftFromIssueRequest struct {
+	IssueID string `json:"issue_id"`
+}
+
+type createKnowledgeDraftFromCandidateRequest struct {
+	Regenerate bool `json:"regenerate"`
 }
 
 func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -482,6 +491,71 @@ func (h *Handler) EvaluateKnowledgeCandidate(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, knowledgeCandidateToResponse(candidate))
 }
 
+func (h *Handler) CreateKnowledgeDraftFromIssue(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	var req createKnowledgeDraftFromIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	issueID, ok := parseUUIDOrBadRequest(w, req.IssueID, "issue_id")
+	if !ok {
+		return
+	}
+	detail, err := h.KnowledgeCurator.GenerateDraftFromIssue(r.Context(), service.CuratorIssueDraftParams{
+		WorkspaceID: wsUUID,
+		IssueID:     issueID,
+		CreatedBy:   member.ID,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
+		return
+	}
+	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) CreateKnowledgeDraftFromCandidate(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	candidateID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "candidate id")
+	if !ok {
+		return
+	}
+	var req createKnowledgeDraftFromCandidateRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			if !errors.Is(err, io.EOF) {
+				writeError(w, http.StatusBadRequest, "invalid request body")
+				return
+			}
+		}
+	}
+	detail, err := h.KnowledgeCurator.GenerateDraftFromCandidate(r.Context(), service.CuratorCandidateDraftParams{
+		WorkspaceID: wsUUID,
+		CandidateID: candidateID,
+		CreatedBy:   member.ID,
+		Regenerate:  req.Regenerate,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
+		return
+	}
+	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
+}
+
 func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request) {
 	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
 	if !ok {
@@ -537,6 +611,10 @@ func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback
 	}
 	if errors.Is(err, service.ErrKnowledgeNotFound) {
 		writeError(w, http.StatusNotFound, "knowledge not found")
+		return
+	}
+	if errors.Is(err, service.ErrCuratorEngineUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallback)

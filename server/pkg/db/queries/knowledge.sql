@@ -250,6 +250,14 @@ SELECT *
 FROM knowledge_candidate
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id');
 
+-- name: UpdateKnowledgeCandidateDraftState :one
+UPDATE knowledge_candidate SET
+    status = COALESCE(sqlc.narg('status'), status),
+    metadata = COALESCE(sqlc.narg('metadata'), metadata),
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
 -- name: CountIssueTaskOutcomesForKnowledgeCandidate :one
 SELECT
     COUNT(*)::bigint AS task_count,
@@ -267,4 +275,22 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   AND issue_id = sqlc.arg('issue_id')
   AND deleted_at IS NULL
 ORDER BY created_at ASC
+LIMIT sqlc.arg('limit');
+
+-- name: ListIssueCommentsForKnowledgeDraft :many
+SELECT *
+FROM comment
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND issue_id = sqlc.arg('issue_id')
+  AND deleted_at IS NULL
+ORDER BY created_at ASC
+LIMIT sqlc.arg('limit');
+
+-- name: ListIssueAgentTasksForKnowledgeDraft :many
+SELECT atq.*
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = sqlc.arg('workspace_id')
+  AND atq.issue_id = sqlc.arg('issue_id')
+ORDER BY atq.created_at ASC
 LIMIT sqlc.arg('limit');

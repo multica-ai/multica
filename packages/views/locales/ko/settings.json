@@ -33,6 +33,7 @@
       "general": "일반",
       "repositories": "저장소",
       "github": "GitHub",
+      "curator": "Curator",
       "integrations": "연동",
       "labs": "실험실",
       "members": "멤버"
@@ -173,6 +174,33 @@
     "section_placeholder_title": "아직 실험 기능이 없습니다",
     "section_placeholder_description": "실험적 설정은 출시되는 대로 여기에 표시됩니다. 현재 이 탭은 의도적으로 비어 있습니다.",
     "toast_failed": "설정을 업데이트하지 못했습니다"
+  },
+  "curator": {
+    "page_description": "승인된 이슈 후보를 검토 가능한 지식 초안으로 바꾸는 워크스페이스 수준의 Knowledge Curator 서비스를 설정합니다.",
+    "enabled_label": "Knowledge Curator 사용",
+    "enabled_description": "사용 설정되고 엔진이 구성되어 있으면 승인된 후보가 지식 초안을 생성할 수 있습니다. 이는 시스템 서비스이며 할당 가능한 일반 에이전트가 아닙니다.",
+    "provider_label": "Provider",
+    "provider_placeholder": "openai, anthropic, custom",
+    "runtime_mode_label": "실행 모드",
+    "runtime_modes": {
+      "external": "외부 엔드포인트",
+      "cloud": "클라우드 runtime",
+      "local": "로컬 runtime"
+    },
+    "model_label": "초안 모델",
+    "model_placeholder": "초안 생성에 사용할 모델",
+    "embedding_model_label": "Embedding 모델",
+    "embedding_model_placeholder": "지식 embedding에 사용할 모델",
+    "base_url_label": "Base URL",
+    "base_url_placeholder": "https://api.example.com/v1",
+    "secret_ref_label": "Secret 참조",
+    "secret_ref_placeholder": "secret://workspace/knowledge-curator",
+    "secret_ref_hint": "Secret 값 자체가 아니라 서버 측 secret 참조를 저장합니다.",
+    "save": "저장",
+    "saving": "저장하는 중...",
+    "manage_hint": "관리자와 소유자만 Curator 설정을 업데이트할 수 있습니다.",
+    "toast_saved": "Curator 설정을 저장했습니다",
+    "toast_save_failed": "Curator 설정을 저장하지 못했습니다"
   },
   "github": {
     "page_description": "GitHub App을 연결하고, Pull request가 Multica 안에서 표시되는 방식을 제어하며, 에이전트가 커밋 기록에 남기는 정보를 설정합니다.",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestKnowledgeCreateRequiresSource(t *testing.T) {
@@ -356,6 +357,155 @@ func TestKnowledgeCandidateRetryFollowUpSuccessStrong(t *testing.T) {
 	}
 }
 
+func TestKnowledgeDraftFromIssueCreatesDraftWithSources(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge draft from issue", "done", "high")
+	withStaticCuratorEngine(t, service.CuratorDraft{
+		Title:               "Workspace token mismatch",
+		Type:                "lesson",
+		DomainLabels:        []string{"runtime", "workspace"},
+		ProblemPattern:      "Agent task fails because the workspace token points at the wrong workspace.",
+		TriggerConditions:   "A local run is healthy but task API calls return workspace-specific errors.",
+		DiagnosticSteps:     "Check the active workspace id and token before debugging the runtime.",
+		RecommendedPractice: "Refresh the CLI profile and rerun the task after confirming the workspace id.",
+		AntiPatterns:        "Do not assume localhost health means the CLI profile is correct.",
+		Applicability:       "Use when a task failure mentions workspace or token mismatch.",
+		ConfidenceStatus:    "medium",
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/drafts/from-issue", map[string]any{"issue_id": issueID})
+	testHandler.CreateKnowledgeDraftFromIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateKnowledgeDraftFromIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode draft: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
+	})
+	if resp.Item.LifecycleStatus != "draft" || resp.Item.Title != "Workspace token mismatch" {
+		t.Fatalf("draft item = %#v", resp.Item)
+	}
+	if len(resp.Sources) == 0 || resp.Sources[0].SourceType != "issue" || resp.Sources[0].SourceID == nil || *resp.Sources[0].SourceID != issueID {
+		t.Fatalf("draft sources = %#v", resp.Sources)
+	}
+}
+
+func TestKnowledgeDraftFromCandidateFailureRecordsRetryState(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge draft invalid schema", "done", "medium")
+	candidate := evaluateManualKnowledgeCandidate(t, issueID)
+	withStaticCuratorEngine(t, service.CuratorDraft{
+		Title:             "Invalid draft",
+		Type:              "lesson",
+		ProblemPattern:    "Missing required fields.",
+		ConfidenceStatus:  "medium",
+		Applicability:     "Tests",
+		DiagnosticSteps:   "Look at the response.",
+		TriggerConditions: "A malformed engine response.",
+	})
+
+	before := countKnowledgeItems(t)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/candidates/"+candidate.ID+"/draft", map[string]any{})
+	req = withURLParam(req, "id", candidate.ID)
+	testHandler.CreateKnowledgeDraftFromCandidate(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("CreateKnowledgeDraftFromCandidate invalid: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if after := countKnowledgeItems(t); after != before {
+		t.Fatalf("knowledge items after invalid draft = %d, want %d", after, before)
+	}
+	stored := loadKnowledgeCandidateResponse(t, candidate.ID)
+	if stored.Status != "accepted" {
+		t.Fatalf("candidate status after failure = %q, want accepted", stored.Status)
+	}
+	meta := stored.Metadata.(map[string]any)
+	if meta["draft_error"] == nil {
+		t.Fatalf("candidate metadata missing draft_error: %#v", meta)
+	}
+}
+
+func TestKnowledgeDraftFromCandidateRetrySucceeds(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge draft retry", "done", "medium")
+	candidate := evaluateManualKnowledgeCandidate(t, issueID)
+	withStaticCuratorEngine(t, service.CuratorDraft{
+		Title:               "Retry succeeds",
+		Type:                "invalid",
+		ProblemPattern:      "Invalid enum.",
+		TriggerConditions:   "The engine returns an invalid type.",
+		DiagnosticSteps:     "Validate schema.",
+		RecommendedPractice: "Return a valid knowledge type.",
+		Applicability:       "Tests",
+		ConfidenceStatus:    "medium",
+	})
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/candidates/"+candidate.ID+"/draft", map[string]any{})
+	req = withURLParam(req, "id", candidate.ID)
+	testHandler.CreateKnowledgeDraftFromCandidate(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("first draft attempt: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	withStaticCuratorEngine(t, service.CuratorDraft{
+		Title:               "Retry succeeds",
+		Type:                "lesson",
+		ProblemPattern:      "The first curator response can be invalid.",
+		TriggerConditions:   "A retry is requested after draft_error is recorded.",
+		DiagnosticSteps:     "Inspect candidate metadata and rerun generation.",
+		RecommendedPractice: "Keep the candidate accepted and allow another draft attempt.",
+		AntiPatterns:        "Do not mark failed generation as drafted.",
+		Applicability:       "Knowledge candidate draft retries.",
+		ConfidenceStatus:    "high",
+	})
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/knowledge/candidates/"+candidate.ID+"/draft", map[string]any{})
+	req = withURLParam(req, "id", candidate.ID)
+	testHandler.CreateKnowledgeDraftFromCandidate(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("retry draft attempt: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode retry draft: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
+	})
+	stored := loadKnowledgeCandidateResponse(t, candidate.ID)
+	if stored.Status != "drafted" {
+		t.Fatalf("candidate status after retry = %q, want drafted", stored.Status)
+	}
+	meta := stored.Metadata.(map[string]any)
+	if meta["knowledge_item_id"] != resp.Item.ID || meta["draft_error"] != nil {
+		t.Fatalf("candidate metadata after retry = %#v, draft id %s", meta, resp.Item.ID)
+	}
+}
+
+func TestKnowledgeDraftFromCandidateMissingEngineIsDiagnostic(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge draft missing engine", "done", "medium")
+	candidate := evaluateManualKnowledgeCandidate(t, issueID)
+	testHandler.KnowledgeCurator.Engine = service.MissingCuratorEngine{}
+	before := countKnowledgeItems(t)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/candidates/"+candidate.ID+"/draft", map[string]any{})
+	req = withURLParam(req, "id", candidate.ID)
+	testHandler.CreateKnowledgeDraftFromCandidate(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("missing curator engine: expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	if after := countKnowledgeItems(t); after != before {
+		t.Fatalf("knowledge items after missing engine = %d, want %d", after, before)
+	}
+	stored := loadKnowledgeCandidateResponse(t, candidate.ID)
+	meta := stored.Metadata.(map[string]any)
+	if meta["draft_error"] == nil {
+		t.Fatalf("candidate metadata missing draft_error: %#v", meta)
+	}
+}
+
 func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailResponse {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -372,6 +522,58 @@ func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailRe
 		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
 	})
 	return resp
+}
+
+func withStaticCuratorEngine(t *testing.T, draft service.CuratorDraft) {
+	t.Helper()
+	previous := testHandler.KnowledgeCurator.Engine
+	testHandler.KnowledgeCurator.Engine = service.StaticCuratorEngine{
+		Draft:   draft,
+		Summary: "Curator test summary",
+		Engine:  service.CuratorEngineInfo{Provider: "test", Model: "unit"},
+	}
+	t.Cleanup(func() {
+		testHandler.KnowledgeCurator.Engine = previous
+	})
+}
+
+func evaluateManualKnowledgeCandidate(t *testing.T, issueID string) KnowledgeCandidateResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/candidates/evaluate", map[string]any{
+		"source_type": "issue",
+		"source_id":   issueID,
+	})
+	testHandler.EvaluateKnowledgeCandidate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("EvaluateKnowledgeCandidate: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeCandidateResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode candidate: %v", err)
+	}
+	return resp
+}
+
+func loadKnowledgeCandidateResponse(t *testing.T, id string) KnowledgeCandidateResponse {
+	t.Helper()
+	candidate, err := testHandler.Queries.GetKnowledgeCandidate(context.Background(), db.GetKnowledgeCandidateParams{
+		ID:          parseUUID(id),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load candidate: %v", err)
+	}
+	return knowledgeCandidateToResponse(candidate)
+}
+
+func countKnowledgeItems(t *testing.T) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM knowledge_item WHERE workspace_id = $1`, testWorkspaceID).Scan(&count); err != nil {
+		t.Fatalf("count knowledge items: %v", err)
+	}
+	return count
 }
 
 func createKnowledgeCandidateTestIssue(t *testing.T, title, status, priority string) string {

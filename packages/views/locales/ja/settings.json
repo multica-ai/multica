@@ -33,6 +33,7 @@
       "general": "一般",
       "repositories": "リポジトリ",
       "github": "GitHub",
+      "curator": "Curator",
       "integrations": "連携",
       "labs": "ラボ",
       "members": "メンバー"
@@ -173,6 +174,33 @@
     "section_placeholder_title": "まだ実験機能はありません",
     "section_placeholder_description": "実験的な設定はリリースされ次第ここに表示されます。現在このタブは意図的に空にしてあります。",
     "toast_failed": "設定を更新できませんでした"
+  },
+  "curator": {
+    "page_description": "承認済みのイシュー候補からレビュー可能なナレッジ下書きを作成する、ワークスペース単位の Knowledge Curator サービスを設定します。",
+    "enabled_label": "Knowledge Curator を有効化",
+    "enabled_description": "有効化され、エンジンが設定されている場合、承認済み候補からナレッジ下書きを生成できます。これはシステムサービスであり、割り当て可能な通常のエージェントではありません。",
+    "provider_label": "Provider",
+    "provider_placeholder": "openai、anthropic、custom",
+    "runtime_mode_label": "実行モード",
+    "runtime_modes": {
+      "external": "外部エンドポイント",
+      "cloud": "クラウド runtime",
+      "local": "ローカル runtime"
+    },
+    "model_label": "下書きモデル",
+    "model_placeholder": "下書き生成に使うモデル",
+    "embedding_model_label": "Embedding モデル",
+    "embedding_model_placeholder": "ナレッジ embedding に使うモデル",
+    "base_url_label": "Base URL",
+    "base_url_placeholder": "https://api.example.com/v1",
+    "secret_ref_label": "Secret 参照",
+    "secret_ref_placeholder": "secret://workspace/knowledge-curator",
+    "secret_ref_hint": "Secret 値そのものではなく、サーバー側 secret への参照を保存します。",
+    "save": "保存",
+    "saving": "保存中...",
+    "manage_hint": "Curator 設定を更新できるのは admin と owner のみです。",
+    "toast_saved": "Curator 設定を保存しました",
+    "toast_save_failed": "Curator 設定を保存できませんでした"
   },
   "github": {
     "page_description": "GitHub App を接続し、Pull request が Multica 内でどう表示されるかを制御し、エージェントがコミット履歴に残す情報を設定します。",

@@ -33,6 +33,7 @@
       "general": "通用",
       "repositories": "代码仓库",
       "github": "GitHub",
+      "curator": "Curator",
       "integrations": "集成",
       "labs": "实验室",
       "members": "成员"
@@ -178,6 +179,33 @@
     "section_title": "集成",
     "gitee_title": "Gitee PR 集成",
     "manage_hint": "只有管理员和所有者可以管理集成。"
+  },
+  "curator": {
+    "page_description": "配置工作区级 Knowledge Curator 服务，用于把已接受的 issue 候选生成可审核的知识草稿。",
+    "enabled_label": "启用 Knowledge Curator",
+    "enabled_description": "启用且配置 engine 后，已接受的候选可以生成知识草稿。它是系统服务，不是可分配的普通智能体。",
+    "provider_label": "Provider",
+    "provider_placeholder": "openai、anthropic、custom",
+    "runtime_mode_label": "运行模式",
+    "runtime_modes": {
+      "external": "外部端点",
+      "cloud": "云端 runtime",
+      "local": "本地 runtime"
+    },
+    "model_label": "草稿模型",
+    "model_placeholder": "用于生成草稿的模型",
+    "embedding_model_label": "Embedding 模型",
+    "embedding_model_placeholder": "用于知识向量的模型",
+    "base_url_label": "Base URL",
+    "base_url_placeholder": "https://api.example.com/v1",
+    "secret_ref_label": "Secret 引用",
+    "secret_ref_placeholder": "secret://workspace/knowledge-curator",
+    "secret_ref_hint": "这里保存服务端 secret 的引用，不保存密钥明文。",
+    "save": "保存",
+    "saving": "保存中...",
+    "manage_hint": "只有管理员和所有者可以更新 Curator 设置。",
+    "toast_saved": "已保存 Curator 设置",
+    "toast_save_failed": "保存 Curator 设置失败"
   },
   "github": {
     "page_description": "连接 GitHub App、控制 Pull Request 如何出现在 Multica 中，并决定智能体在 commit 记录里留下哪些痕迹。",

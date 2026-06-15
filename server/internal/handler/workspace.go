@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -86,6 +87,58 @@ func settingsIncludesAgentDefaults(settings any) bool {
 	}
 	_, ok = settingsMap["agent_defaults"]
 	return ok
+}
+
+func settingsIncludesKnowledgeCurator(settings any) bool {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = settingsMap["knowledge_curator"]
+	return ok
+}
+
+func validateKnowledgeCuratorSettings(settings any) error {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := settingsMap["knowledge_curator"]
+	if !ok || raw == nil {
+		return nil
+	}
+	curator, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("knowledge_curator must be an object")
+	}
+	if v, ok := curator["enabled"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("knowledge_curator.enabled must be a boolean")
+		}
+	}
+	stringFields := []string{"provider", "model", "embedding_model", "runtime_mode", "base_url", "secret_ref"}
+	for _, field := range stringFields {
+		if v, ok := curator[field]; ok && v != nil {
+			value, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("knowledge_curator.%s must be a string", field)
+			}
+			if len(value) > 500 {
+				return fmt.Errorf("knowledge_curator.%s is too long", field)
+			}
+		}
+	}
+	if v, ok := curator["runtime_mode"].(string); ok && strings.TrimSpace(v) != "" {
+		switch v {
+		case "local", "cloud", "external":
+		default:
+			return fmt.Errorf("knowledge_curator.runtime_mode is invalid")
+		}
+	}
+	if v, ok := curator["provider"].(string); ok && strings.TrimSpace(v) == "" {
+		return fmt.Errorf("knowledge_curator.provider cannot be empty")
+	}
+	return nil
 }
 
 func instructionsFromSettingsJSON(raw []byte) (string, bool) {
@@ -306,15 +359,25 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	var agentDefaultsActor db.Member
 	trackAgentDefaultsInstructions := false
 
-	// When settings includes agent_defaults, require owner/admin role.
+	// Sensitive workspace-level runtime settings require owner/admin role.
 	if req.Settings != nil {
-		if settingsIncludesAgentDefaults(req.Settings) {
-			var ok bool
-			agentDefaultsActor, ok = h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin")
+		includesAgentDefaults := settingsIncludesAgentDefaults(req.Settings)
+		includesKnowledgeCurator := settingsIncludesKnowledgeCurator(req.Settings)
+		if includesAgentDefaults || includesKnowledgeCurator {
+			actor, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin")
 			if !ok {
 				return
 			}
-			_, trackAgentDefaultsInstructions = instructionsFromSettingsAny(req.Settings)
+			if includesAgentDefaults {
+				agentDefaultsActor = actor
+				_, trackAgentDefaultsInstructions = instructionsFromSettingsAny(req.Settings)
+			}
+		}
+		if includesKnowledgeCurator {
+			if err := validateKnowledgeCuratorSettings(req.Settings); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
 		}
 	}
 

@@ -431,6 +431,69 @@ func (q *Queries) GetKnowledgeItem(ctx context.Context, arg GetKnowledgeItemPara
 	return i, err
 }
 
+const listIssueAgentTasksForKnowledgeDraft = `-- name: ListIssueAgentTasksForKnowledgeDraft :many
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND atq.issue_id = $2
+ORDER BY atq.created_at ASC
+LIMIT $3
+`
+
+type ListIssueAgentTasksForKnowledgeDraftParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListIssueAgentTasksForKnowledgeDraft(ctx context.Context, arg ListIssueAgentTasksForKnowledgeDraftParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listIssueAgentTasksForKnowledgeDraft, arg.WorkspaceID, arg.IssueID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueCommentsForKnowledgeCandidate = `-- name: ListIssueCommentsForKnowledgeCandidate :many
 SELECT id, author_type, content
 FROM comment
@@ -463,6 +526,57 @@ func (q *Queries) ListIssueCommentsForKnowledgeCandidate(ctx context.Context, ar
 	for rows.Next() {
 		var i ListIssueCommentsForKnowledgeCandidateRow
 		if err := rows.Scan(&i.ID, &i.AuthorType, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueCommentsForKnowledgeDraft = `-- name: ListIssueCommentsForKnowledgeDraft :many
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, deleted_at, resolved_at, resolved_by_type, resolved_by_id
+FROM comment
+WHERE workspace_id = $1
+  AND issue_id = $2
+  AND deleted_at IS NULL
+ORDER BY created_at ASC
+LIMIT $3
+`
+
+type ListIssueCommentsForKnowledgeDraftParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListIssueCommentsForKnowledgeDraft(ctx context.Context, arg ListIssueCommentsForKnowledgeDraftParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listIssueCommentsForKnowledgeDraft, arg.WorkspaceID, arg.IssueID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.DeletedAt,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -962,6 +1076,53 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateKnowledgeCandidateDraftState = `-- name: UpdateKnowledgeCandidateDraftState :one
+UPDATE knowledge_candidate SET
+    status = COALESCE($1, status),
+    metadata = COALESCE($2, metadata),
+    updated_at = now()
+WHERE id = $3 AND workspace_id = $4
+RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+`
+
+type UpdateKnowledgeCandidateDraftStateParams struct {
+	Status      pgtype.Text `json:"status"`
+	Metadata    []byte      `json:"metadata"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) UpdateKnowledgeCandidateDraftState(ctx context.Context, arg UpdateKnowledgeCandidateDraftStateParams) (KnowledgeCandidate, error) {
+	row := q.db.QueryRow(ctx, updateKnowledgeCandidateDraftState,
+		arg.Status,
+		arg.Metadata,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeCandidate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.AgentTaskID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.TriggerReason,
+		&i.SignalStrength,
+		&i.Signals,
+		&i.Score,
+		&i.Status,
+		&i.DedupeKey,
+		&i.CreatedBy,
+		&i.Metadata,
+		&i.EvaluatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateKnowledgeItem = `-- name: UpdateKnowledgeItem :one
