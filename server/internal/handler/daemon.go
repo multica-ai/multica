@@ -1652,11 +1652,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// recognized server-side as actor=agent, closing the lateral-movement
 	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
 	//
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes installed before this PR) — the response carries no
-	// `auth_token`, and the daemon falls back to its existing credential.
-	// Token expires after the queue/runtime upper bound (24h) so it survives
-	// long-running tasks but cannot outlive a forgotten one.
+	// Owner local runtimes must get this token. If an owner runtime claim
+	// response lacks it, the daemon refuses to spawn instead of falling back to
+	// its member/daemon credential. Token expires after the queue/runtime upper
+	// bound (24h) so it survives long-running tasks but cannot outlive a
+	// forgotten one. Ownerless legacy runtimes omit auth_token.
 	if runtime.OwnerID.Valid {
 		tokenStr, terr := auth.GenerateAgentTaskToken()
 		if terr != nil {
