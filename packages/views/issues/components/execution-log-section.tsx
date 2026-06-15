@@ -466,7 +466,7 @@ function RowStatus({
   return (
     <div
       title={title}
-      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs group-hover/execution-log-row:hidden"
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-xs [@media(hover:hover)]:group-hover/execution-log-row:hidden"
     >
       {children}
     </div>
@@ -486,12 +486,11 @@ function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
   }
 }
 
-// Action slot — hidden by default, replaces the status column in place on
-// hover. No absolute/gradient needed: the status is removed (not covered),
-// so nothing shows through underneath.
+// Action slot — visible by default for touch devices. On hover-capable
+// surfaces, it replaces the status column in place on row hover.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
-    <div className="hidden h-7 items-center gap-0.5 group-hover/execution-log-row:flex">
+    <div className="flex h-7 items-center gap-0.5 [@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover/execution-log-row:flex">
       {children}
     </div>
   );
