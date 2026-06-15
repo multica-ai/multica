@@ -541,6 +541,10 @@ type GorillaDialer struct {
 	// (e.g. for custom proxy auth or a fixed proxy URL). To disable proxy
 	// entirely, pass a func that returns (nil, nil).
 	Proxy func(*http.Request) (*url.URL, error)
+
+	// ProxyURL is an optional fixed HTTP CONNECT proxy URL for the
+	// WebSocket handshake. When set, it takes precedence over Proxy.
+	ProxyURL string
 }
 
 func NewGorillaDialer() *GorillaDialer {
@@ -558,7 +562,13 @@ func (g *GorillaDialer) DialContext(ctx context.Context, urlStr string, requestH
 	}
 	// Shallow copy so we don't mutate the shared dialer's Proxy field.
 	dd := *d
-	if g.Proxy != nil {
+	if g.ProxyURL != "" {
+		proxyURL, err := url.Parse(g.ProxyURL)
+		if err != nil {
+			return nil, nil, fmt.Errorf("lark ws dialer: parse proxy url %q: %w", g.ProxyURL, err)
+		}
+		dd.Proxy = http.ProxyURL(proxyURL)
+	} else if g.Proxy != nil {
 		dd.Proxy = g.Proxy
 	}
 	if dd.Proxy == nil {

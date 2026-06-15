@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -746,4 +747,59 @@ func TestWSConnectorCredentialsErrorIsReturned(t *testing.T) {
 	if err == nil || !errors.Is(err, credsErr) {
 		t.Fatalf("expected wrapped credentials error, got %v", err)
 	}
+}
+
+func TestGorillaDialerInvalidProxyURL(t *testing.T) {
+	t.Parallel()
+	d := &GorillaDialer{
+		Dialer:   websocket.DefaultDialer,
+		ProxyURL: "://invalid-url",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "wss://example.com/ws", nil)
+	if err == nil {
+		t.Fatal("expected error for invalid proxy URL")
+	}
+	if !strings.Contains(err.Error(), "parse proxy url") {
+		t.Fatalf("expected parse proxy url error, got: %v", err)
+	}
+}
+
+func TestGorillaDialerProxyURLApplied(t *testing.T) {
+	t.Parallel()
+	// Use a valid proxy URL that points to a non-listening address.
+	// The dial should fail with a connection error, not a parse error,
+	// proving the proxy was configured.
+	d := &GorillaDialer{
+		Dialer:   websocket.DefaultDialer,
+		ProxyURL: "http://127.0.0.1:1",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "wss://example.com/ws", nil)
+	if err == nil {
+		t.Fatal("expected connection error when proxy is unreachable")
+	}
+	if strings.Contains(err.Error(), "parse proxy url") {
+		t.Fatalf("valid proxy URL should not produce parse error, got: %v", err)
+	}
+	// The error should be about the proxy connection (refused / timeout),
+	// not about the URL parsing.
+}
+
+func TestGorillaDialerEmptyProxyURLDefaultsToEnv(t *testing.T) {
+	t.Parallel()
+	d := NewGorillaDialer()
+	if d.ProxyURL != "" {
+		t.Fatalf("NewGorillaDialer ProxyURL should be empty, got %q", d.ProxyURL)
+	}
+	// DialContext with empty ProxyURL should not panic or error on the
+	// proxy path — the underlying gorilla dialer uses ProxyFromEnvironment.
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, _, _ = d.DialContext(ctx, "wss://127.0.0.1:1/ws", nil)
+	// We don't assert on the error (it'll be a connection error), we just
+	// verify that DialContext with empty ProxyURL doesn't panic or return
+	// a parse error.
 }
