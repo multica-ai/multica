@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -29,6 +29,7 @@ import {
   PRIORITY_CONFIG,
 } from "@multica/core/issues/config";
 import { issueKeys } from "@multica/core/issues/queries";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon } from "../components/status-icon";
 import { PriorityIcon } from "../components/priority-icon";
 import {
@@ -127,22 +128,26 @@ export function IssueActionsMenuItems({
     staleTime: 30_000,
   });
 
+  const { getAgentName } = useActorName();
+
+  // One sub-item per task that has a workdir, newest first — mirrors the old
+  // "latest" semantics (latest sits at the top) while exposing every agent's
+  // path instead of collapsing to a single one.
+  const workdirTasks = useMemo(() => workdirTasksDesc(tasks), [tasks]);
+
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
   // navigator.clipboard.writeText() reject from the menu when the cache
-  // was cold. We now read straight from the cached query result and write
-  // to the clipboard inside the same task as the click.
-  const handleCopyWorkdirPath = useCallback(() => {
-    const latestWorkDir = pickLatestWorkDir(tasks);
-    if (!latestWorkDir) {
-      toast.error(t(($) => $.detail.workdir_path_unavailable));
-      return;
-    }
-    void copyText(latestWorkDir).then((ok) => {
-      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
-      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
-    });
-  }, [tasks, t]);
+  // was cold. We copy the cached path inside the same task as the click.
+  const handleCopyWorkdir = useCallback(
+    (workDir: string) => {
+      void copyText(workDir).then((ok) => {
+        if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
+        else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+      });
+    },
+    [t],
+  );
 
   return (
     <>
@@ -266,10 +271,37 @@ export function IssueActionsMenuItems({
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
       </P.Item>
-      <P.Item onClick={handleCopyWorkdirPath}>
-        <FolderOpen className="h-3.5 w-3.5" />
-        {t(($) => $.actions.copy_workdir_path)}
-      </P.Item>
+      <P.Sub>
+        <P.SubTrigger>
+          <FolderOpen className="h-3.5 w-3.5" />
+          {t(($) => $.actions.copy_workdir_path)}
+        </P.SubTrigger>
+        <P.SubContent>
+          {workdirTasks.length === 0 ? (
+            <P.Item disabled>
+              {t(($) => $.detail.workdir_path_unavailable)}
+            </P.Item>
+          ) : (
+            workdirTasks.map((task) => (
+              <P.Item
+                key={task.id}
+                onClick={() => handleCopyWorkdir(task.work_dir as string)}
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm">
+                    {getAgentName(task.agent_id)}
+                  </span>
+                  {task.relative_work_dir && (
+                    <span className="truncate text-xs text-muted-foreground">
+                      {task.relative_work_dir}
+                    </span>
+                  )}
+                </div>
+              </P.Item>
+            ))
+          )}
+        </P.SubContent>
+      </P.Sub>
       <P.Item onClick={openCreateIssueFromCurrent}>
         <CopyPlus className="h-3.5 w-3.5" />
         {t(($) => $.actions.create_from_issue)}
@@ -329,14 +361,12 @@ export function IssueActionsMenuItems({
   );
 }
 
-function pickLatestWorkDir(tasks: AgentTask[] | undefined): string | undefined {
-  if (!tasks?.length) return undefined;
-  let latest: AgentTask | undefined;
-  for (const task of tasks) {
-    if (!task.work_dir) continue;
-    if (!latest || task.created_at > latest.created_at) {
-      latest = task;
-    }
-  }
-  return latest?.work_dir;
+// Tasks that actually have a workdir, newest first. Tasks without a work_dir
+// (queued but never dispatched, or older backends) are dropped — there is
+// nothing to copy for them.
+function workdirTasksDesc(tasks: AgentTask[] | undefined): AgentTask[] {
+  if (!tasks?.length) return [];
+  return tasks
+    .filter((task) => !!task.work_dir)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
 }
