@@ -234,11 +234,14 @@ export function DynamicInbox() {
   // Chat rows own archive/unarchive/delete inside CerebroChatSessionRowActions;
   // for a chat entry this only clears the selection if that row was open (the
   // row passes it as `onCleared`).
-  const onArchive = (entry: DynInboxEntry) => {
-    if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
-    else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
-    if (selected && selected.id === entry.id) clearSelection();
-  };
+  const onArchive = useCallback(
+    (entry: DynInboxEntry) => {
+      if (entry.kind === "notif") archiveInbox.mutate(entry.item.id);
+      else if (entry.kind === "channel") archiveChannel.mutate(entry.channel.id);
+      if (selected && selected.id === entry.id) clearSelection();
+    },
+    [archiveInbox, archiveChannel, selected, clearSelection],
+  );
 
   // TECH-3541 #2 — lookup tables + classic-parity controls for the "All
   // messages" box. groupContext feeds project/agent/type grouping; the controls
@@ -433,6 +436,12 @@ export function DynamicInbox() {
             layoutId="multica_inbox_dynamic_issue_detail_layout"
             linkSelfInBreadcrumb
             onDelete={clearSelection}
+            // TECH-3549 — reuse the classic inbox's mark-done/archive toolbar
+            // button: wiring onDone makes IssueDetail render the same
+            // checkmark (active → done + archive) / Archive (already done)
+            // affordance the classic inbox shows, so opening an issue from the
+            // dynamic inbox can archive it from the open page too.
+            onDone={() => onArchive(selected)}
           />
         </ErrorBoundary>
       );
@@ -452,7 +461,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection, newChat]);
+  }, [selected, clearSelection, newChat, onArchive]);
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
