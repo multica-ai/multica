@@ -164,6 +164,12 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	// zdotdirOnce guards lazy setup of the managed ZDOTDIR (see
+	// agent_shell_env.go). zdotdirPath is the resulting directory, or "" when
+	// setup is unsupported (Windows) or failed.
+	zdotdirOnce sync.Once
+	zdotdirPath string
 }
 
 // New creates a new Daemon instance.
@@ -2952,6 +2958,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
+	// PATH ordering in the inherited env is not enough: coding agents run their
+	// shell tool-calls through a login zsh, which re-sources the user's
+	// ~/.zprofile and re-prepends Homebrew's bin (shadowing our binDir with a
+	// stale brew-installed multica). Point zsh at a daemon-managed ZDOTDIR that
+	// sources the user's real rc files and then re-prepends binDir last, so the
+	// daemon's own multica always wins. No-op for non-zsh / Windows.
+	if zdotdir := d.managedZdotdir(); zdotdir != "" {
+		agentEnv["ZDOTDIR"] = zdotdir
+	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
@@ -3964,7 +3979,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME",
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "ZDOTDIR", "CODEX_HOME",
 		"OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS",
 		"OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_GATEWAY_PORT":
 		return true
