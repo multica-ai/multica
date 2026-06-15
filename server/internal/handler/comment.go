@@ -1032,19 +1032,27 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// the user is talking to someone else, not requesting work from the assignee.
 	// Also skip when replying in a member-started thread without mentioning the
 	// assignee — the user is continuing a member-to-member conversation.
-	if authorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue, authorType, authorID) &&
+	if authorType == "member" &&
 		!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 		!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-		// Always use the current comment as the trigger so the agent reads
-		// the actual new reply, not the thread root. Reply placement (flat
-		// thread grouping) is handled downstream by createAgentComment,
-		// which resolves parent_id to the thread root before posting. This
-		// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
-		if delegationErr != nil {
-			slog.Warn("enqueue agent task on comment blocked by delegation policy", "issue_id", issueID, "error", delegationErr)
-			// CEREBRO-PATCH(new-thread-fresh-session): new top-level threads start a fresh agent session; replies resume.
-		} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
-			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
+		// CEREBRO-PATCH(private-agent-run-request-on-comment): TECH-3252 — when the
+		// assignee is a private agent the commenter cannot trigger, the on_comment
+		// gate returns false and the comment was silently dropped; route that case
+		// to a run-request to the agent owner instead of enqueuing nothing.
+		if h.shouldEnqueueOnComment(r.Context(), issue, authorType, authorID) {
+			// Always use the current comment as the trigger so the agent reads
+			// the actual new reply, not the thread root. Reply placement (flat
+			// thread grouping) is handled downstream by createAgentComment,
+			// which resolves parent_id to the thread root before posting. This
+			// mirrors the mention path's behavior (see enqueueMentionedAgentTasks).
+			if delegationErr != nil {
+				slog.Warn("enqueue agent task on comment blocked by delegation policy", "issue_id", issueID, "error", delegationErr)
+				// new top-level threads start a fresh agent session; replies resume.
+			} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
+				slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
+			}
+		} else {
+			h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, authorType, authorID)
 		}
 	}
 
@@ -1200,6 +1208,39 @@ func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment,
 		}
 	}
 	return true // Reply to member thread without agent participation — suppress
+}
+
+// requestPrivateAssigneeRunOnComment handles the on_comment path where a member
+// comments on an issue already assigned to a private agent they cannot access:
+// shouldEnqueueOnComment returns false, so instead of silently dropping the
+// comment we send a run-request to the agent's owner. Mirrors the mention-path
+// hook (FIR-2385) for the plain assigned-agent case (TECH-3252).
+//
+// CEREBRO-PATCH(private-agent-run-request-on-comment): TECH-3252 — net-new
+// helper for the assigned-private-agent on_comment path.
+func (h *Handler) requestPrivateAssigneeRunOnComment(ctx context.Context, issue db.Issue, comment db.Comment, authorType, authorID string) {
+	if authorType != "member" || h.PrivateAgentRunRequester == nil {
+		return
+	}
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
+		return
+	}
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return
+	}
+	// Only the genuine "private agent the member cannot access" case becomes a
+	// run-request; a member who can access the agent reaches the normal enqueue
+	// path, so the gate must have failed for another reason (e.g. pending task).
+	if h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
+		return
+	}
+	if err := h.PrivateAgentRunRequester.RequestPrivateAgentRun(ctx, uuidToString(issue.WorkspaceID), agent.ID, agent.OwnerID, issue.ID, comment.ID, parseUUID(authorID), agent.Name); err != nil {
+		slog.Warn("private-agent assignee run-request on comment failed", "issue_id", uuidToString(issue.ID), "agent_id", uuidToString(agent.ID), "error", err)
+	}
 }
 
 // shouldInheritParentMentions decides whether a reply with no explicit
@@ -1571,14 +1612,22 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			mentionDelegation, mentionDelegationErr := h.TaskService.CommentDelegationContext(r.Context(), actorType, actorID, r.Header.Get("X-Task-ID"), "mention")
 			privateAutopilotOwnerID, privateAutopilotComment := h.privateAutopilotTaskOwner(r.Context(), issue, r.Header.Get("X-Task-ID"), actorType)
 
-			if actorType == "member" && h.shouldEnqueueOnComment(r.Context(), issue, actorType, actorID) &&
+			if actorType == "member" &&
 				!h.commentMentionsOthersButNotAssignee(comment.Content, issue) &&
 				!h.isReplyToMemberThread(r.Context(), parentComment, comment.Content, issue) {
-				if delegationErr != nil {
-					slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
-					// CEREBRO-PATCH(new-thread-fresh-session): edited top-level comments also start fresh sessions.
-				} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
-					slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
+				// CEREBRO-PATCH(private-agent-run-request-on-comment-edit): TECH-3252 —
+				// mirror the create-comment path: an edited member comment on an issue
+				// assigned to a private agent the actor cannot trigger becomes a
+				// run-request to the owner instead of being silently dropped.
+				if h.shouldEnqueueOnComment(r.Context(), issue, actorType, actorID) {
+					if delegationErr != nil {
+						slog.Warn("enqueue agent task on comment-edit blocked by delegation policy", "issue_id", uuidToString(issue.ID), "error", delegationErr)
+						// edited top-level comments also start fresh sessions.
+					} else if _, err := h.TaskService.EnqueueTaskForIssueFromComment(r.Context(), issue, comment.ID, commentDelegation, parentComment == nil); err != nil {
+						slog.Warn("enqueue agent task on comment-edit failed", "issue_id", uuidToString(issue.ID), "error", err)
+					}
+				} else {
+					h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, actorType, actorID)
 				}
 			}
 
