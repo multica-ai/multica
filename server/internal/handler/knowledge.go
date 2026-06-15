@@ -66,6 +66,27 @@ type KnowledgeFeedbackSummaryResponse struct {
 	Count int64  `json:"count"`
 }
 
+type KnowledgeCandidateResponse struct {
+	ID             string   `json:"id"`
+	WorkspaceID    string   `json:"workspace_id"`
+	IssueID        string   `json:"issue_id"`
+	CommentID      *string  `json:"comment_id"`
+	AgentTaskID    *string  `json:"agent_task_id"`
+	SourceType     string   `json:"source_type"`
+	SourceID       string   `json:"source_id"`
+	TriggerReason  string   `json:"trigger_reason"`
+	SignalStrength string   `json:"signal_strength"`
+	Signals        []string `json:"signals"`
+	Score          int32    `json:"score"`
+	Status         string   `json:"status"`
+	DedupeKey      string   `json:"dedupe_key"`
+	CreatedBy      *string  `json:"created_by"`
+	Metadata       any      `json:"metadata"`
+	EvaluatedAt    string   `json:"evaluated_at"`
+	CreatedAt      string   `json:"created_at"`
+	UpdatedAt      string   `json:"updated_at"`
+}
+
 type KnowledgeDetailResponse struct {
 	Item            KnowledgeItemResponse                `json:"item"`
 	Sources         []KnowledgeSourceResponse            `json:"sources"`
@@ -140,6 +161,13 @@ type searchKnowledgeFilters struct {
 type createKnowledgeFeedbackRequest struct {
 	Value string  `json:"value"`
 	Note  *string `json:"note"`
+}
+
+type evaluateKnowledgeCandidateRequest struct {
+	SourceType    string `json:"source_type"`
+	SourceID      string `json:"source_id"`
+	TriggerReason string `json:"trigger_reason"`
+	Manual        *bool  `json:"manual"`
 }
 
 func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -379,6 +407,81 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"results": resp, "total": len(resp)})
 }
 
+func (h *Handler) ListKnowledgeCandidates(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	limit, ok := parseLimitQuery(w, q.Get("limit"), 50, 100)
+	if !ok {
+		return
+	}
+	offset, ok := parseOffsetQuery(w, q.Get("offset"))
+	if !ok {
+		return
+	}
+	issueID, ok := parseOptionalUUIDQuery(w, q.Get("issue_id"), "issue_id")
+	if !ok {
+		return
+	}
+	candidates, err := h.KnowledgeService.ListCandidates(r.Context(), db.ListKnowledgeCandidatesParams{
+		WorkspaceID: wsUUID,
+		Status:      textFromString(q.Get("status")),
+		SourceType:  textFromString(q.Get("source_type")),
+		IssueID:     issueID,
+		Limit:       limit,
+		Offset:      offset,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to list knowledge candidates")
+		return
+	}
+	resp := make([]KnowledgeCandidateResponse, len(candidates))
+	for i, candidate := range candidates {
+		resp[i] = knowledgeCandidateToResponse(candidate)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"candidates": resp, "total": len(resp)})
+}
+
+func (h *Handler) EvaluateKnowledgeCandidate(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	var req evaluateKnowledgeCandidateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	sourceID, ok := parseUUIDOrBadRequest(w, req.SourceID, "source_id")
+	if !ok {
+		return
+	}
+	manual := true
+	if req.Manual != nil {
+		manual = *req.Manual
+	}
+	candidate, err := h.KnowledgeService.EvaluateCandidate(r.Context(), service.KnowledgeCandidateEvaluateParams{
+		WorkspaceID:    wsUUID,
+		SourceType:     req.SourceType,
+		SourceID:       sourceID,
+		TriggerReason:  req.TriggerReason,
+		Manual:         manual,
+		CreatedBy:      member.ID,
+		AdditionalMeta: map[string]any{"entrypoint": "api"},
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to evaluate knowledge candidate")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeCandidateToResponse(candidate))
+}
+
 func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request) {
 	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
 	if !ok {
@@ -511,6 +614,35 @@ func knowledgeEmbeddingMetadataToResponse(embedding db.ListKnowledgeEmbeddingMet
 		ContentHash:     embedding.ContentHash,
 		EmbeddedAt:      timestampToString(embedding.EmbeddedAt),
 		CreatedAt:       timestampToString(embedding.CreatedAt),
+	}
+}
+
+func knowledgeCandidateToResponse(candidate db.KnowledgeCandidate) KnowledgeCandidateResponse {
+	var metadata any = map[string]any{}
+	if len(candidate.Metadata) > 0 {
+		if err := json.Unmarshal(candidate.Metadata, &metadata); err != nil {
+			metadata = map[string]any{}
+		}
+	}
+	return KnowledgeCandidateResponse{
+		ID:             uuidToString(candidate.ID),
+		WorkspaceID:    uuidToString(candidate.WorkspaceID),
+		IssueID:        uuidToString(candidate.IssueID),
+		CommentID:      uuidToPtr(candidate.CommentID),
+		AgentTaskID:    uuidToPtr(candidate.AgentTaskID),
+		SourceType:     candidate.SourceType,
+		SourceID:       uuidToString(candidate.SourceID),
+		TriggerReason:  candidate.TriggerReason,
+		SignalStrength: candidate.SignalStrength,
+		Signals:        candidate.Signals,
+		Score:          candidate.Score,
+		Status:         candidate.Status,
+		DedupeKey:      candidate.DedupeKey,
+		CreatedBy:      uuidToPtr(candidate.CreatedBy),
+		Metadata:       metadata,
+		EvaluatedAt:    timestampToString(candidate.EvaluatedAt),
+		CreatedAt:      timestampToString(candidate.CreatedAt),
+		UpdatedAt:      timestampToString(candidate.UpdatedAt),
 	}
 }
 

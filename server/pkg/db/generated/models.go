@@ -503,6 +503,27 @@ type IssueToLabel struct {
 	LabelID pgtype.UUID `json:"label_id"`
 }
 
+type KnowledgeCandidate struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	CommentID      pgtype.UUID        `json:"comment_id"`
+	AgentTaskID    pgtype.UUID        `json:"agent_task_id"`
+	SourceType     string             `json:"source_type"`
+	SourceID       pgtype.UUID        `json:"source_id"`
+	TriggerReason  string             `json:"trigger_reason"`
+	SignalStrength string             `json:"signal_strength"`
+	Signals        []string           `json:"signals"`
+	Score          int32              `json:"score"`
+	Status         string             `json:"status"`
+	DedupeKey      string             `json:"dedupe_key"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	Metadata       []byte             `json:"metadata"`
+	EvaluatedAt    pgtype.Timestamptz `json:"evaluated_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type KnowledgeEmbedding struct {
 	ID              pgtype.UUID        `json:"id"`
 	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`

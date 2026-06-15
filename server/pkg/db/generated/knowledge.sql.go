@@ -56,6 +56,38 @@ func (q *Queries) ArchiveKnowledgeItem(ctx context.Context, arg ArchiveKnowledge
 	return i, err
 }
 
+const countIssueTaskOutcomesForKnowledgeCandidate = `-- name: CountIssueTaskOutcomesForKnowledgeCandidate :one
+SELECT
+    COUNT(*)::bigint AS task_count,
+    COUNT(*) FILTER (WHERE status = 'completed')::bigint AS completed_count,
+    COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed_count,
+    COUNT(*) FILTER (WHERE trigger_comment_id IS NOT NULL)::bigint AS comment_triggered_count,
+    COALESCE(MAX(attempt), 0)::int AS max_attempt
+FROM agent_task_queue
+WHERE issue_id = $1
+`
+
+type CountIssueTaskOutcomesForKnowledgeCandidateRow struct {
+	TaskCount             int64 `json:"task_count"`
+	CompletedCount        int64 `json:"completed_count"`
+	FailedCount           int64 `json:"failed_count"`
+	CommentTriggeredCount int64 `json:"comment_triggered_count"`
+	MaxAttempt            int32 `json:"max_attempt"`
+}
+
+func (q *Queries) CountIssueTaskOutcomesForKnowledgeCandidate(ctx context.Context, issueID pgtype.UUID) (CountIssueTaskOutcomesForKnowledgeCandidateRow, error) {
+	row := q.db.QueryRow(ctx, countIssueTaskOutcomesForKnowledgeCandidate, issueID)
+	var i CountIssueTaskOutcomesForKnowledgeCandidateRow
+	err := row.Scan(
+		&i.TaskCount,
+		&i.CompletedCount,
+		&i.FailedCount,
+		&i.CommentTriggeredCount,
+		&i.MaxAttempt,
+	)
+	return i, err
+}
+
 const countKnowledgeSources = `-- name: CountKnowledgeSources :one
 SELECT count(*)
 FROM knowledge_source
@@ -282,6 +314,43 @@ func (q *Queries) CreateKnowledgeSource(ctx context.Context, arg CreateKnowledge
 	return i, err
 }
 
+const getKnowledgeCandidate = `-- name: GetKnowledgeCandidate :one
+SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+FROM knowledge_candidate
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetKnowledgeCandidateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetKnowledgeCandidate(ctx context.Context, arg GetKnowledgeCandidateParams) (KnowledgeCandidate, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeCandidate, arg.ID, arg.WorkspaceID)
+	var i KnowledgeCandidate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.AgentTaskID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.TriggerReason,
+		&i.SignalStrength,
+		&i.Signals,
+		&i.Score,
+		&i.Status,
+		&i.DedupeKey,
+		&i.CreatedBy,
+		&i.Metadata,
+		&i.EvaluatedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getKnowledgeFeedbackSummary = `-- name: GetKnowledgeFeedbackSummary :many
 SELECT value, count(*)::bigint AS count
 FROM knowledge_feedback
@@ -360,6 +429,114 @@ func (q *Queries) GetKnowledgeItem(ctx context.Context, arg GetKnowledgeItemPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listIssueCommentsForKnowledgeCandidate = `-- name: ListIssueCommentsForKnowledgeCandidate :many
+SELECT id, author_type, content
+FROM comment
+WHERE workspace_id = $1
+  AND issue_id = $2
+  AND deleted_at IS NULL
+ORDER BY created_at ASC
+LIMIT $3
+`
+
+type ListIssueCommentsForKnowledgeCandidateParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Limit       int32       `json:"limit"`
+}
+
+type ListIssueCommentsForKnowledgeCandidateRow struct {
+	ID         pgtype.UUID `json:"id"`
+	AuthorType string      `json:"author_type"`
+	Content    string      `json:"content"`
+}
+
+func (q *Queries) ListIssueCommentsForKnowledgeCandidate(ctx context.Context, arg ListIssueCommentsForKnowledgeCandidateParams) ([]ListIssueCommentsForKnowledgeCandidateRow, error) {
+	rows, err := q.db.Query(ctx, listIssueCommentsForKnowledgeCandidate, arg.WorkspaceID, arg.IssueID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueCommentsForKnowledgeCandidateRow{}
+	for rows.Next() {
+		var i ListIssueCommentsForKnowledgeCandidateRow
+		if err := rows.Scan(&i.ID, &i.AuthorType, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeCandidates = `-- name: ListKnowledgeCandidates :many
+SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+FROM knowledge_candidate
+WHERE workspace_id = $1
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR source_type = $3)
+  AND ($4::uuid IS NULL OR issue_id = $4)
+ORDER BY score DESC, updated_at DESC
+LIMIT $6 OFFSET $5
+`
+
+type ListKnowledgeCandidatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      pgtype.Text `json:"status"`
+	SourceType  pgtype.Text `json:"source_type"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	Offset      int32       `json:"offset"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListKnowledgeCandidates(ctx context.Context, arg ListKnowledgeCandidatesParams) ([]KnowledgeCandidate, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeCandidates,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.SourceType,
+		arg.IssueID,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeCandidate{}
+	for rows.Next() {
+		var i KnowledgeCandidate
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.AgentTaskID,
+			&i.SourceType,
+			&i.SourceID,
+			&i.TriggerReason,
+			&i.SignalStrength,
+			&i.Signals,
+			&i.Score,
+			&i.Status,
+			&i.DedupeKey,
+			&i.CreatedBy,
+			&i.Metadata,
+			&i.EvaluatedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listKnowledgeEmbeddingMetadata = `-- name: ListKnowledgeEmbeddingMetadata :many
@@ -880,6 +1057,99 @@ func (q *Queries) UpdateKnowledgeItem(ctx context.Context, arg UpdateKnowledgeIt
 		&i.ReviewedAt,
 		&i.PublishedAt,
 		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeCandidate = `-- name: UpsertKnowledgeCandidate :one
+INSERT INTO knowledge_candidate (
+    workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id,
+    trigger_reason, signal_strength, signals, score, status, dedupe_key,
+    created_by, metadata, evaluated_at
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    $7, $8,
+    COALESCE($9::text[], '{}'), $10, $11,
+    $12, $13,
+    COALESCE($14, '{}'::jsonb), now()
+)
+ON CONFLICT (workspace_id, dedupe_key)
+DO UPDATE SET
+    issue_id = EXCLUDED.issue_id,
+    comment_id = EXCLUDED.comment_id,
+    agent_task_id = EXCLUDED.agent_task_id,
+    source_type = EXCLUDED.source_type,
+    source_id = EXCLUDED.source_id,
+    trigger_reason = EXCLUDED.trigger_reason,
+    signal_strength = EXCLUDED.signal_strength,
+    signals = EXCLUDED.signals,
+    score = EXCLUDED.score,
+    status = CASE
+        WHEN knowledge_candidate.status = 'drafted' THEN knowledge_candidate.status
+        ELSE EXCLUDED.status
+    END,
+    created_by = COALESCE(EXCLUDED.created_by, knowledge_candidate.created_by),
+    metadata = EXCLUDED.metadata,
+    evaluated_at = now(),
+    updated_at = now()
+RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+`
+
+type UpsertKnowledgeCandidateParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	CommentID      pgtype.UUID `json:"comment_id"`
+	AgentTaskID    pgtype.UUID `json:"agent_task_id"`
+	SourceType     string      `json:"source_type"`
+	SourceID       pgtype.UUID `json:"source_id"`
+	TriggerReason  string      `json:"trigger_reason"`
+	SignalStrength string      `json:"signal_strength"`
+	Signals        []string    `json:"signals"`
+	Score          int32       `json:"score"`
+	Status         string      `json:"status"`
+	DedupeKey      string      `json:"dedupe_key"`
+	CreatedBy      pgtype.UUID `json:"created_by"`
+	Metadata       interface{} `json:"metadata"`
+}
+
+func (q *Queries) UpsertKnowledgeCandidate(ctx context.Context, arg UpsertKnowledgeCandidateParams) (KnowledgeCandidate, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeCandidate,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.CommentID,
+		arg.AgentTaskID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.TriggerReason,
+		arg.SignalStrength,
+		arg.Signals,
+		arg.Score,
+		arg.Status,
+		arg.DedupeKey,
+		arg.CreatedBy,
+		arg.Metadata,
+	)
+	var i KnowledgeCandidate
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.CommentID,
+		&i.AgentTaskID,
+		&i.SourceType,
+		&i.SourceID,
+		&i.TriggerReason,
+		&i.SignalStrength,
+		&i.Signals,
+		&i.Score,
+		&i.Status,
+		&i.DedupeKey,
+		&i.CreatedBy,
+		&i.Metadata,
+		&i.EvaluatedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

@@ -200,3 +200,71 @@ INSERT INTO knowledge_retrieval_event (
     COALESCE(sqlc.narg('filters'), '{}'::jsonb), sqlc.arg('result_count'), COALESCE(sqlc.narg('top_knowledge_item_ids')::uuid[], '{}')
 )
 RETURNING *;
+
+-- name: UpsertKnowledgeCandidate :one
+INSERT INTO knowledge_candidate (
+    workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id,
+    trigger_reason, signal_strength, signals, score, status, dedupe_key,
+    created_by, metadata, evaluated_at
+) VALUES (
+    sqlc.arg('workspace_id'), sqlc.arg('issue_id'), sqlc.narg('comment_id'),
+    sqlc.narg('agent_task_id'), sqlc.arg('source_type'), sqlc.arg('source_id'),
+    sqlc.arg('trigger_reason'), sqlc.arg('signal_strength'),
+    COALESCE(sqlc.narg('signals')::text[], '{}'), sqlc.arg('score'), sqlc.arg('status'),
+    sqlc.arg('dedupe_key'), sqlc.narg('created_by'),
+    COALESCE(sqlc.narg('metadata'), '{}'::jsonb), now()
+)
+ON CONFLICT (workspace_id, dedupe_key)
+DO UPDATE SET
+    issue_id = EXCLUDED.issue_id,
+    comment_id = EXCLUDED.comment_id,
+    agent_task_id = EXCLUDED.agent_task_id,
+    source_type = EXCLUDED.source_type,
+    source_id = EXCLUDED.source_id,
+    trigger_reason = EXCLUDED.trigger_reason,
+    signal_strength = EXCLUDED.signal_strength,
+    signals = EXCLUDED.signals,
+    score = EXCLUDED.score,
+    status = CASE
+        WHEN knowledge_candidate.status = 'drafted' THEN knowledge_candidate.status
+        ELSE EXCLUDED.status
+    END,
+    created_by = COALESCE(EXCLUDED.created_by, knowledge_candidate.created_by),
+    metadata = EXCLUDED.metadata,
+    evaluated_at = now(),
+    updated_at = now()
+RETURNING *;
+
+-- name: ListKnowledgeCandidates :many
+SELECT *
+FROM knowledge_candidate
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('source_type')::text IS NULL OR source_type = sqlc.narg('source_type'))
+  AND (sqlc.narg('issue_id')::uuid IS NULL OR issue_id = sqlc.narg('issue_id'))
+ORDER BY score DESC, updated_at DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+
+-- name: GetKnowledgeCandidate :one
+SELECT *
+FROM knowledge_candidate
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: CountIssueTaskOutcomesForKnowledgeCandidate :one
+SELECT
+    COUNT(*)::bigint AS task_count,
+    COUNT(*) FILTER (WHERE status = 'completed')::bigint AS completed_count,
+    COUNT(*) FILTER (WHERE status = 'failed')::bigint AS failed_count,
+    COUNT(*) FILTER (WHERE trigger_comment_id IS NOT NULL)::bigint AS comment_triggered_count,
+    COALESCE(MAX(attempt), 0)::int AS max_attempt
+FROM agent_task_queue
+WHERE issue_id = sqlc.arg('issue_id');
+
+-- name: ListIssueCommentsForKnowledgeCandidate :many
+SELECT id, author_type, content
+FROM comment
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND issue_id = sqlc.arg('issue_id')
+  AND deleted_at IS NULL
+ORDER BY created_at ASC
+LIMIT sqlc.arg('limit');

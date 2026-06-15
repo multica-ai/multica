@@ -232,6 +232,130 @@ func TestKnowledgeVectorSearchOrdersByCosineSimilarity(t *testing.T) {
 	}
 }
 
+func TestKnowledgeCandidateManualEvaluateAcceptedAndDeduped(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge candidate manual", "todo", "medium")
+
+	evaluate := func() KnowledgeCandidateResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/knowledge/candidates/evaluate", map[string]any{
+			"source_type": "issue",
+			"source_id":   issueID,
+		})
+		testHandler.EvaluateKnowledgeCandidate(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("EvaluateKnowledgeCandidate: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp KnowledgeCandidateResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode candidate: %v", err)
+		}
+		return resp
+	}
+
+	first := evaluate()
+	second := evaluate()
+	if first.ID != second.ID {
+		t.Fatalf("manual candidate duplicated: first=%s second=%s", first.ID, second.ID)
+	}
+	if first.Status != "accepted" || first.SignalStrength != "manual" || first.Score != 100 {
+		t.Fatalf("manual candidate = status %q strength %q score %d", first.Status, first.SignalStrength, first.Score)
+	}
+}
+
+func TestKnowledgeCandidateIssueDoneWithoutAgentTaskRejected(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge candidate no agent task", "todo", "low")
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/issues/"+issueID, map[string]any{
+		"status": "done",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/knowledge/candidates?issue_id="+issueID, nil)
+	testHandler.ListKnowledgeCandidates(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListKnowledgeCandidates: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Candidates []KnowledgeCandidateResponse `json:"candidates"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode candidates: %v", err)
+	}
+	if len(resp.Candidates) != 1 {
+		t.Fatalf("candidate count = %d, want 1", len(resp.Candidates))
+	}
+	candidate := resp.Candidates[0]
+	if candidate.Status != "rejected" || candidate.SignalStrength != "none" {
+		t.Fatalf("done-without-task candidate = status %q strength %q", candidate.Status, candidate.SignalStrength)
+	}
+}
+
+func TestKnowledgeCandidateRetryFollowUpSuccessStrong(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge candidate retry success", "in_progress", "high")
+	agentID := createHandlerTestAgent(t, "knowledge-candidate-agent", nil)
+
+	var commentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, '还是失败，正确应该是先检查 workspace token')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
+		t.Fatalf("insert trigger comment: %v", err)
+	}
+
+	var parentTaskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, error, failure_reason
+		)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '10 minutes', now() - interval '9 minutes', 'runtime failed', 'timeout')
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t), issueID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+			started_at, completed_at, result, attempt, parent_task_id
+		)
+		VALUES (
+			$1, $2, $3, 'completed', 0, $4,
+			now() - interval '8 minutes', now(), $5::jsonb, 2, $6
+		)
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t), issueID, commentID, `{"output":"Root cause: workspace token mismatch. Fix: refresh config and rerun test command."}`, parentTaskID).Scan(&taskID); err != nil {
+		t.Fatalf("insert completed retry task: %v", err)
+	}
+
+	task, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(taskID))
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	candidate, err := testHandler.KnowledgeService.EvaluateTaskCompletedCandidate(context.Background(), task, task.Result)
+	if err != nil {
+		t.Fatalf("EvaluateTaskCompletedCandidate: %v", err)
+	}
+	if candidate.Status != "accepted" || candidate.SignalStrength != "strong" || candidate.Score < 80 {
+		t.Fatalf("candidate = status %q strength %q score %d", candidate.Status, candidate.SignalStrength, candidate.Score)
+	}
+	wantSignals := map[string]bool{"retry_success": true, "follow_up_task_success": true, "user_correction": true}
+	for _, signal := range candidate.Signals {
+		delete(wantSignals, signal)
+	}
+	if len(wantSignals) != 0 {
+		t.Fatalf("candidate missing signals: %#v; got %#v", wantSignals, candidate.Signals)
+	}
+}
+
 func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailResponse {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -248,6 +372,37 @@ func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailRe
 		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
 	})
 	return resp
+}
+
+func createKnowledgeCandidateTestIssue(t *testing.T, title, status, priority string) string {
+	t.Helper()
+	var projectID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, title+" project").Scan(&projectID); err != nil {
+		t.Fatalf("insert knowledge candidate project: %v", err)
+	}
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (
+			workspace_id, project_id, title, status, priority, creator_type, creator_id, number, position
+		)
+		VALUES (
+			$1, $2, $3, $4, $5, 'member', $6,
+			COALESCE((SELECT MAX(number) + 1 FROM issue WHERE workspace_id = $1), 1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, projectID, title, status, priority, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert knowledge candidate issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+	return issueID
 }
 
 func searchKnowledgeAndExpectFirst(t *testing.T, query string, itemID string) {

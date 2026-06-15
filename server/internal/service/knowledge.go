@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -116,6 +117,26 @@ type KnowledgeFeedbackParams struct {
 	MemberID        pgtype.UUID
 	Value           string
 	Note            pgtype.Text
+}
+
+type KnowledgeCandidateEvaluateParams struct {
+	WorkspaceID    pgtype.UUID
+	SourceType     string
+	SourceID       pgtype.UUID
+	TriggerReason  string
+	Manual         bool
+	CreatedBy      pgtype.UUID
+	AgentTask      *db.AgentTaskQueue
+	TaskResult     []byte
+	Issue          *db.Issue
+	Comment        *db.Comment
+	AdditionalMeta map[string]any
+}
+
+type candidateSource struct {
+	Issue       db.Issue
+	CommentID   pgtype.UUID
+	AgentTaskID pgtype.UUID
 }
 
 func (s *KnowledgeService) List(ctx context.Context, arg db.ListKnowledgeItemsParams) ([]db.KnowledgeItem, error) {
@@ -443,6 +464,268 @@ func (s *KnowledgeService) AddFeedback(ctx context.Context, p KnowledgeFeedbackP
 	})
 }
 
+func (s *KnowledgeService) ListCandidates(ctx context.Context, arg db.ListKnowledgeCandidatesParams) ([]db.KnowledgeCandidate, error) {
+	if arg.Limit <= 0 {
+		arg.Limit = 50
+	}
+	if arg.Limit > 100 {
+		arg.Limit = 100
+	}
+	if arg.Status.Valid && !validKnowledgeCandidateStatus(arg.Status.String) {
+		return nil, validationError("invalid status")
+	}
+	if arg.SourceType.Valid && !validKnowledgeCandidateSourceType(arg.SourceType.String) {
+		return nil, validationError("invalid source_type")
+	}
+	return s.Queries.ListKnowledgeCandidates(ctx, arg)
+}
+
+func (s *KnowledgeService) EvaluateCandidate(ctx context.Context, p KnowledgeCandidateEvaluateParams) (db.KnowledgeCandidate, error) {
+	p.SourceType = strings.TrimSpace(p.SourceType)
+	p.TriggerReason = strings.TrimSpace(p.TriggerReason)
+	if p.Manual && p.TriggerReason == "" {
+		p.TriggerReason = "manual"
+	}
+	if p.TriggerReason == "" {
+		switch p.SourceType {
+		case "issue":
+			p.TriggerReason = "issue_done"
+		case "agent_task":
+			p.TriggerReason = "task_completed"
+		case "comment":
+			p.TriggerReason = "comment_signal"
+		}
+	}
+	if !validKnowledgeCandidateSourceType(p.SourceType) {
+		return db.KnowledgeCandidate{}, validationError("invalid source_type")
+	}
+	if !p.SourceID.Valid {
+		return db.KnowledgeCandidate{}, validationError("source_id is required")
+	}
+
+	src, err := s.resolveCandidateSource(ctx, p)
+	if err != nil {
+		return db.KnowledgeCandidate{}, err
+	}
+
+	signals, score, strength, status := s.scoreCandidate(ctx, p, src)
+	meta := map[string]any{
+		"manual":       p.Manual,
+		"source_type":  p.SourceType,
+		"source_id":    util.UUIDToString(p.SourceID),
+		"issue_id":     util.UUIDToString(src.Issue.ID),
+		"trigger":      p.TriggerReason,
+		"signal_count": len(signals),
+	}
+	for k, v := range p.AdditionalMeta {
+		meta[k] = v
+	}
+	metadata, err := json.Marshal(meta)
+	if err != nil {
+		return db.KnowledgeCandidate{}, err
+	}
+
+	return s.Queries.UpsertKnowledgeCandidate(ctx, db.UpsertKnowledgeCandidateParams{
+		WorkspaceID:    p.WorkspaceID,
+		IssueID:        src.Issue.ID,
+		CommentID:      src.CommentID,
+		AgentTaskID:    src.AgentTaskID,
+		SourceType:     p.SourceType,
+		SourceID:       p.SourceID,
+		TriggerReason:  p.TriggerReason,
+		SignalStrength: strength,
+		Signals:        signals,
+		Score:          score,
+		Status:         status,
+		DedupeKey:      knowledgeCandidateDedupeKey(p.SourceType, p.SourceID, p.TriggerReason),
+		CreatedBy:      p.CreatedBy,
+		Metadata:       metadata,
+	})
+}
+
+func (s *KnowledgeService) EvaluateIssueDoneCandidate(ctx context.Context, issue db.Issue) (db.KnowledgeCandidate, error) {
+	if issue.Status != "done" {
+		return db.KnowledgeCandidate{}, validationError("issue is not done")
+	}
+	return s.EvaluateCandidate(ctx, KnowledgeCandidateEvaluateParams{
+		WorkspaceID:   issue.WorkspaceID,
+		SourceType:    "issue",
+		SourceID:      issue.ID,
+		TriggerReason: "issue_done",
+		Issue:         &issue,
+	})
+}
+
+func (s *KnowledgeService) EvaluateTaskCompletedCandidate(ctx context.Context, task db.AgentTaskQueue, result []byte) (db.KnowledgeCandidate, error) {
+	if task.Status != "completed" || !task.IssueID.Valid {
+		return db.KnowledgeCandidate{}, validationError("task is not a completed issue task")
+	}
+	workspaceID, err := s.taskWorkspaceID(ctx, task)
+	if err != nil {
+		return db.KnowledgeCandidate{}, err
+	}
+	return s.EvaluateCandidate(ctx, KnowledgeCandidateEvaluateParams{
+		WorkspaceID:   workspaceID,
+		SourceType:    "agent_task",
+		SourceID:      task.ID,
+		TriggerReason: "task_completed",
+		AgentTask:     &task,
+		TaskResult:    result,
+	})
+}
+
+func (s *KnowledgeService) resolveCandidateSource(ctx context.Context, p KnowledgeCandidateEvaluateParams) (candidateSource, error) {
+	switch p.SourceType {
+	case "issue":
+		issue := db.Issue{}
+		if p.Issue != nil {
+			issue = *p.Issue
+		} else {
+			var err error
+			issue, err = s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: p.SourceID, WorkspaceID: p.WorkspaceID})
+			if err != nil {
+				return candidateSource{}, sourceLookupErr(err)
+			}
+		}
+		return candidateSource{Issue: issue}, nil
+	case "comment":
+		comment := db.Comment{}
+		if p.Comment != nil {
+			comment = *p.Comment
+		} else {
+			var err error
+			comment, err = s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{ID: p.SourceID, WorkspaceID: p.WorkspaceID})
+			if err != nil {
+				return candidateSource{}, sourceLookupErr(err)
+			}
+		}
+		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: comment.IssueID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			return candidateSource{}, sourceLookupErr(err)
+		}
+		return candidateSource{Issue: issue, CommentID: comment.ID}, nil
+	case "agent_task":
+		task := db.AgentTaskQueue{}
+		if p.AgentTask != nil {
+			task = *p.AgentTask
+		} else {
+			var err error
+			task, err = s.Queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: p.SourceID, WorkspaceID: p.WorkspaceID})
+			if err != nil {
+				return candidateSource{}, sourceLookupErr(err)
+			}
+		}
+		if !task.IssueID.Valid {
+			return candidateSource{}, validationError("agent_task source must be linked to an issue")
+		}
+		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: task.IssueID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			return candidateSource{}, sourceLookupErr(err)
+		}
+		return candidateSource{Issue: issue, CommentID: task.TriggerCommentID, AgentTaskID: task.ID}, nil
+	default:
+		return candidateSource{}, validationError("invalid source_type")
+	}
+}
+
+func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandidateEvaluateParams, src candidateSource) ([]string, int32, string, string) {
+	signals := []string{}
+	score := int32(0)
+	if p.Manual || p.TriggerReason == "manual" {
+		return []string{"manual_mark"}, 100, "manual", "accepted"
+	}
+
+	text := src.Issue.Title
+	if src.Issue.Description.Valid {
+		text += "\n" + src.Issue.Description.String
+	}
+	if p.AgentTask != nil {
+		text += "\n" + extractTaskOutput(p.TaskResult, p.AgentTask.Result)
+		if p.AgentTask.ParentTaskID.Valid || p.AgentTask.Attempt > 1 {
+			signals = append(signals, "retry_success")
+			score += 75
+		}
+		if p.AgentTask.TriggerCommentID.Valid {
+			signals = append(signals, "follow_up_task_success")
+			score += 45
+			if comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{ID: p.AgentTask.TriggerCommentID, WorkspaceID: p.WorkspaceID}); err == nil {
+				text += "\n" + comment.Content
+				if looksLikeUserCorrection(comment.Content) {
+					signals = append(signals, "user_correction")
+					score += 45
+				}
+			}
+		}
+		if p.AgentTask.StartedAt.Valid && p.AgentTask.CompletedAt.Valid && p.AgentTask.CompletedAt.Time.Sub(p.AgentTask.StartedAt.Time) >= 15*time.Minute {
+			signals = append(signals, "long_running_task")
+			score += 15
+		}
+	}
+
+	if p.SourceType == "issue" {
+		outcomes, err := s.Queries.CountIssueTaskOutcomesForKnowledgeCandidate(ctx, src.Issue.ID)
+		if err == nil {
+			if outcomes.TaskCount == 0 {
+				return []string{"no_agent_task"}, 0, "none", "rejected"
+			}
+			if outcomes.FailedCount > 0 && outcomes.CompletedCount > 0 {
+				signals = append(signals, "failed_then_completed")
+				score += 75
+			}
+			if outcomes.CommentTriggeredCount > 0 {
+				signals = append(signals, "comment_triggered_task")
+				score += 25
+			}
+			if outcomes.MaxAttempt > 1 {
+				signals = append(signals, "retry_success")
+				score += 45
+			}
+		}
+		comments, err := s.Queries.ListIssueCommentsForKnowledgeCandidate(ctx, db.ListIssueCommentsForKnowledgeCandidateParams{
+			WorkspaceID: p.WorkspaceID,
+			IssueID:     src.Issue.ID,
+			Limit:       100,
+		})
+		if err == nil {
+			for _, comment := range comments {
+				text += "\n" + comment.Content
+				if comment.AuthorType == "member" && looksLikeUserCorrection(comment.Content) {
+					signals = append(signals, "user_correction")
+					score += 35
+					break
+				}
+			}
+		}
+	}
+
+	if looksReusableKnowledge(text) {
+		signals = append(signals, "reusable_debug_context")
+		score += 30
+	}
+	signals = uniqueSignals(signals)
+	if score > 100 {
+		score = 100
+	}
+	if score >= 80 {
+		return signals, score, "strong", "accepted"
+	}
+	if score >= 50 {
+		return signals, score, "weak", "pending"
+	}
+	if len(signals) == 0 {
+		signals = []string{"no_reusable_signal"}
+	}
+	return signals, score, "none", "rejected"
+}
+
+func (s *KnowledgeService) taskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
+	agent, err := s.Queries.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return agent.WorkspaceID, nil
+}
+
 func (s *KnowledgeService) recordRetrieval(ctx context.Context, p KnowledgeSearchParams, query string, results []KnowledgeSearchResult) (db.KnowledgeRetrievalEvent, error) {
 	mode := "text"
 	if query == "" {
@@ -622,6 +905,88 @@ func validKnowledgeFeedbackValue(v string) bool {
 	default:
 		return false
 	}
+}
+
+func validKnowledgeCandidateSourceType(v string) bool {
+	switch v {
+	case "issue", "comment", "agent_task":
+		return true
+	default:
+		return false
+	}
+}
+
+func validKnowledgeCandidateStatus(v string) bool {
+	switch v {
+	case "pending", "accepted", "rejected", "drafted":
+		return true
+	default:
+		return false
+	}
+}
+
+func knowledgeCandidateDedupeKey(sourceType string, sourceID pgtype.UUID, reason string) string {
+	return sourceType + ":" + util.UUIDToString(sourceID) + ":" + reason
+}
+
+func extractTaskOutput(result []byte, fallback []byte) string {
+	if len(result) == 0 {
+		result = fallback
+	}
+	var payload struct {
+		Output string `json:"output"`
+		Error  string `json:"error"`
+	}
+	if err := json.Unmarshal(result, &payload); err == nil {
+		return strings.TrimSpace(payload.Output + "\n" + payload.Error)
+	}
+	return string(result)
+}
+
+func looksReusableKnowledge(text string) bool {
+	lower := strings.ToLower(text)
+	keywords := []string{
+		"root cause", "根因", "原因", "fix", "fixed", "修复", "解决", "debug", "诊断",
+		"error", "failed", "failure", "报错", "失败", "migration", "config", "permission",
+		"token", "workspace", "runtime", "adb", "sql", "query", "test", "command",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(lower, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeUserCorrection(text string) bool {
+	lower := strings.ToLower(text)
+	keywords := []string{
+		"不对", "不是", "还是失败", "仍然失败", "漏了", "正确应该", "应该是", "没生效",
+		"wrong", "incorrect", "still fails", "still failing", "missing", "should be",
+		"doesn't work", "not working", "regression",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(lower, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueSignals(signals []string) []string {
+	if len(signals) <= 1 {
+		return signals
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		if signal == "" || seen[signal] {
+			continue
+		}
+		seen[signal] = true
+		out = append(out, signal)
+	}
+	return out
 }
 
 func knowledgeItemFromTextRow(row db.SearchKnowledgeTextRow) db.KnowledgeItem {

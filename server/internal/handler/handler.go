@@ -187,8 +187,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		daemonHub = daemonHubs[0]
 	}
 
+	knowledgeSvc := service.NewKnowledgeService(queries, txStarter)
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.Knowledge = knowledgeSvc
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
@@ -199,7 +201,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:           taskSvc,
 		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		KnowledgeService:      service.NewKnowledgeService(queries, txStarter),
+		KnowledgeService:      knowledgeSvc,
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),

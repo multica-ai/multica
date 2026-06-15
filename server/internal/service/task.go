@@ -35,6 +35,7 @@ type TaskService struct {
 	Bus       *events.Bus
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
+	Knowledge *KnowledgeService
 	Wakeup    TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
@@ -1250,6 +1251,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.evaluateKnowledgeCandidateForCompletedTask(ctx, task, result)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1357,6 +1359,19 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
 	return &task, nil
+}
+
+func (s *TaskService) evaluateKnowledgeCandidateForCompletedTask(ctx context.Context, task db.AgentTaskQueue, result []byte) {
+	if s.Knowledge == nil || !task.IssueID.Valid {
+		return
+	}
+	if _, err := s.Knowledge.EvaluateTaskCompletedCandidate(ctx, task, result); err != nil && !errors.Is(err, ErrKnowledgeValidation) {
+		slog.Warn("knowledge candidate task evaluation failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+	}
 }
 
 // FailTask marks a task as failed. If the task belongs to an issue, the
