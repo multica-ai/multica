@@ -44,6 +44,8 @@ describe("approvals api compatibility", () => {
     expect(row.requester_name).toBeNull();
     expect(row.issue_identifier).toBeNull();
     expect(row.issue_title).toBeNull();
+    expect(row.triggered_by_name).toBeNull();
+    expect(row.triggered_by_id).toBeNull();
   });
 
   it("surfaces the enrichment fields (names + issue) when present", async () => {
@@ -59,6 +61,8 @@ describe("approvals api compatibility", () => {
           issue_id: "22222222-2222-2222-2222-222222222222",
           issue_identifier: "TECH-3498",
           issue_title: "Human-readable approvals inbox",
+          triggered_by_id: "33333333-3333-3333-3333-333333333333",
+          triggered_by_name: "Jesper Hvejsel",
         },
       ],
       total: 1,
@@ -69,6 +73,7 @@ describe("approvals api compatibility", () => {
     expect(row.requester_name).toBe("Sara CTO Bot");
     expect(row.issue_identifier).toBe("TECH-3498");
     expect(row.issue_title).toBe("Human-readable approvals inbox");
+    expect(row.triggered_by_name).toBe("Jesper Hvejsel");
   });
 
   it("returns null when a single approval response is null", async () => {

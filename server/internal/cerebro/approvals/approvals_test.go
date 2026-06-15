@@ -428,6 +428,138 @@ func TestEnrich_NamesAndIssue(t *testing.T) {
 	})
 }
 
+// TestEnrich_TriggeredBy proves the TECH-3498 "requested by <member>" contract:
+// enrich resolves the human who triggered the run, both from the stored
+// trigger_user_id/trigger_user_name context and — when no trigger context is
+// present — from the task's OriginalUserID. Neither path may leak a raw UUID.
+func TestEnrich_TriggeredBy(t *testing.T) {
+	ctx := context.Background()
+	svc := newService()
+	h := NewHandler(svc).WithToolPolicy(toolpolicy.NewStore(testPool), db.New(testPool))
+
+	// Seed a runtime + agent the asks belong to.
+	var runtimeID, agentID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
+		VALUES ($1, 'TriggeredBy Runtime', 'cloud', 'test') RETURNING id`,
+		testWorkspace).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
+		VALUES ($1, 'TriggeredBy Bot', 'cloud', $2, $3) RETURNING id`,
+		testWorkspace, runtimeID, testApprover).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// The triggering human is the requester fixture user ("Approvals Requester").
+	const wantName = "Approvals Requester"
+
+	t.Run("from trigger_user_id/name in context", func(t *testing.T) {
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "web_fetch",
+			Resource:      "web_fetch",
+			Reason:        "external network requires approval",
+			Context: map[string]any{
+				"tool_name":         "web_fetch",
+				"trigger_user_id":   uuidStr(t, testRequester),
+				"trigger_user_name": wantName,
+			},
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		assertTriggeredBy(t, got, wantName, testRequester)
+	})
+
+	t.Run("name resolved from trigger_user_id alone", func(t *testing.T) {
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "web_fetch",
+			Resource:      "web_fetch",
+			Reason:        "external network requires approval",
+			Context: map[string]any{
+				"tool_name":       "web_fetch",
+				"trigger_user_id": uuidStr(t, testRequester),
+			},
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		assertTriggeredBy(t, got, wantName, testRequester)
+	})
+
+	t.Run("fallback to task OriginalUserID", func(t *testing.T) {
+		// A task carrying the human origin, but NO trigger_user_* in context.
+		var taskID pgtype.UUID
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, original_user_id)
+			VALUES ($1, $2, $3) RETURNING id`,
+			agentID, runtimeID, testRequester).Scan(&taskID); err != nil {
+			t.Fatalf("create agent task: %v", err)
+		}
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "credential_list",
+			Resource:      "*",
+			Reason:        "requires approval",
+			Context:       map[string]any{"task_id": uuidStr(t, taskID), "tool_name": "credential_list"},
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		assertTriggeredBy(t, got, wantName, testRequester)
+	})
+
+	t.Run("no trigger context yields nil, never a uuid", func(t *testing.T) {
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "credential_list",
+			Resource:      "*",
+			Reason:        "requires approval",
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		if got.TriggeredByName != nil {
+			t.Fatalf("expected nil triggered_by_name without context, got %q", *got.TriggeredByName)
+		}
+		if got.TriggeredByID != nil {
+			t.Fatalf("expected nil triggered_by_id without context, got %q", *got.TriggeredByID)
+		}
+	})
+}
+
+func assertTriggeredBy(t *testing.T, got approvalResponse, wantName string, userID pgtype.UUID) {
+	t.Helper()
+	if got.TriggeredByName == nil || *got.TriggeredByName != wantName {
+		t.Fatalf("triggered_by_name = %v, want %q", got.TriggeredByName, wantName)
+	}
+	if got.TriggeredByName != nil && *got.TriggeredByName == uuidStr(t, userID) {
+		t.Fatalf("triggered_by_name leaked a raw UUID: %q", *got.TriggeredByName)
+	}
+	if got.TriggeredByID == nil || *got.TriggeredByID == "" {
+		t.Fatal("triggered_by_id must be set when the triggering member resolves")
+	}
+}
+
 func assertEnriched(t *testing.T, got approvalResponse, wantAgentName, wantIdentifier, wantTitle string, agentID pgtype.UUID) {
 	t.Helper()
 	if got.RequesterName != wantAgentName {

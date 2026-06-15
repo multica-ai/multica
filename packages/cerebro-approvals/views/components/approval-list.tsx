@@ -73,8 +73,8 @@ export function ApprovalList({
             <td className="max-w-[180px] truncate px-4 py-2.5 font-medium">
               {a.capability || "—"}
             </td>
-            <td className="max-w-[160px] truncate px-4 py-2.5">
-              {requesterLabel(a)}
+            <td className="max-w-[160px] px-4 py-2.5">
+              <RequesterCell approval={a} />
             </td>
             <td className="max-w-[220px] truncate px-4 py-2.5 text-muted-foreground">
               <IssueCell approval={a} slug={slug} />
@@ -92,6 +92,23 @@ export function ApprovalList({
   );
 }
 
+// RequesterCell shows the agent that requested the tool, with the human who
+// triggered the run on a muted second line ("for <member>") when known — so the
+// inbox answers "who asked the agent to do this", not just "which agent".
+function RequesterCell({ approval }: { approval: Approval }) {
+  const triggeredBy = approval.triggered_by_name?.trim() ?? "";
+  return (
+    <div className="min-w-0">
+      <div className="truncate">{requesterLabel(approval)}</div>
+      {triggeredBy && (
+        <div className="truncate text-xs text-muted-foreground" title={triggeredBy}>
+          for {triggeredBy}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // IssueCell renders the issue an approval was requested on as "IDENTIFIER —
 // title", linked to the issue when the workspace slug + identifier are known. It
 // stops row-click propagation so the link navigates instead of opening the sheet.
@@ -106,7 +123,7 @@ function IssueCell({ approval, slug }: { approval: Approval; slug: string }) {
     return (
       <AppLink
         href={`/${slug}/issues/${identifier}`}
-        className="truncate text-foreground hover:underline"
+        className="truncate text-primary underline underline-offset-2 hover:text-primary/80"
         onClick={(e) => e.stopPropagation()}
         title={label}
       >

@@ -82,6 +82,12 @@ type approvalResponse struct {
 	IssueID         *string `json:"issue_id,omitempty"`
 	IssueIdentifier *string `json:"issue_identifier,omitempty"`
 	IssueTitle      *string `json:"issue_title,omitempty"`
+
+	// TriggeredBy names the human (member) whose message/task started the agent
+	// run that hit this approval, so the inbox can show "requested by <member>".
+	// Best-effort: empty/nil when no trigger context is available.
+	TriggeredByID   *string `json:"triggered_by_id,omitempty"`
+	TriggeredByName *string `json:"triggered_by_name,omitempty"`
 }
 
 type approvalAuditResponse struct {
@@ -453,6 +459,23 @@ func approvalIssueContext(raw []byte) (issueID, taskID string) {
 	return ctx.IssueID, ctx.TaskID
 }
 
+// approvalTriggerContext pulls the triggering human (trigger_user_id +
+// trigger_user_name) out of an approval row's stored Context JSON. Both default
+// to "" when absent — the gateway populates them from the run's meta (TECH-3498).
+func approvalTriggerContext(raw []byte) (userID, userName string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var ctx struct {
+		TriggerUserID   string `json:"trigger_user_id"`
+		TriggerUserName string `json:"trigger_user_name"`
+	}
+	if err := json.Unmarshal(raw, &ctx); err != nil {
+		return "", ""
+	}
+	return ctx.TriggerUserID, ctx.TriggerUserName
+}
+
 // enrich fills the human-readable name/issue fields on a response from the row.
 // Best-effort: any lookup error leaves that field empty/nil and is logged at
 // warn — it NEVER fails the request. requester_name always carries at least a
@@ -517,7 +540,62 @@ func (h *Handler) enrich(ctx context.Context, resp approvalResponse, row cerebro
 		}
 	}
 
+	// Triggering human: the member whose message/task started the run. Prefer the
+	// trigger_user_* fields the gateway stored; fall back to the task's original
+	// human principal. Best-effort — never fails the request, never leaks a UUID.
+	if id, name := h.resolveTriggeredBy(ctx, row.Context, cache); name != "" {
+		resp.TriggeredByName = &name
+		if id != "" {
+			resp.TriggeredByID = &id
+		}
+	}
+
 	return resp
+}
+
+// resolveTriggeredBy returns the (id, name) of the human who triggered the run
+// behind an approval. It prefers context.trigger_user_name / trigger_user_id
+// (set by the gateway); when no name is in context it resolves the name from
+// trigger_user_id, and when no trigger context exists at all it falls back to the
+// task's OriginalUserID (the task's human origin). Best-effort: any miss yields
+// "" and is logged at warn — it never returns a raw UUID as a name.
+func (h *Handler) resolveTriggeredBy(ctx context.Context, rawContext []byte, cache *enrichCache) (id, name string) {
+	if h.Agents == nil {
+		return "", ""
+	}
+	triggerID, triggerName := approvalTriggerContext(rawContext)
+	if triggerName != "" || triggerID != "" {
+		if uid, err := util.ParseUUID(triggerID); err == nil && uid.Valid {
+			id = util.UUIDToString(uid)
+			if triggerName == "" {
+				triggerName = h.userName(ctx, uid, cache)
+			}
+		}
+		return id, triggerName
+	}
+
+	// Fallback: resolve the task's original human principal.
+	_, taskRaw := approvalIssueContext(rawContext)
+	if taskRaw == "" {
+		return "", ""
+	}
+	taskID, err := util.ParseUUID(taskRaw)
+	if err != nil || !taskID.Valid {
+		return "", ""
+	}
+	task, err := h.Agents.GetAgentTask(ctx, taskID)
+	if err != nil {
+		slog.Warn("approval enrich: triggered-by task lookup failed", "task_id", taskRaw, "error", err)
+		return "", ""
+	}
+	if !task.OriginalUserID.Valid {
+		return "", ""
+	}
+	name = h.userName(ctx, task.OriginalUserID, cache)
+	if name == "" {
+		return "", ""
+	}
+	return util.UUIDToString(task.OriginalUserID), name
 }
 
 func (h *Handler) agentName(ctx context.Context, id pgtype.UUID, cache *enrichCache) string {

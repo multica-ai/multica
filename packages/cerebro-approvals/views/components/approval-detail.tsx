@@ -177,6 +177,9 @@ function AskBody({
         </Field>
       )}
       <Field label="Requester">{requesterLabel(ask)}</Field>
+      {ask.triggered_by_name?.trim() && (
+        <Field label="Requested by">{ask.triggered_by_name}</Field>
+      )}
       <IssueField ask={ask} slug={slug} />
       {ctx.purpose && <Field label="Purpose">{ctx.purpose}</Field>}
       {ctx.connection && (
@@ -390,7 +393,7 @@ function IssueField({ ask, slug }: { ask: Approval; slug: string }) {
       {slug && identifier ? (
         <AppLink
           href={`/${slug}/issues/${identifier}`}
-          className="text-foreground hover:underline"
+          className="text-primary underline underline-offset-2 hover:text-primary/80"
         >
           {label}
         </AppLink>
