@@ -508,7 +508,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					// Sprints
+					r.Get("/sprints", h.ListSprints)
+					r.Post("/sprints", h.CreateSprint)
+					r.Get("/backlog", h.ListBacklog)
+					r.Get("/velocity", h.GetProjectVelocity)
 				})
+			})
+
+			// Sprint routes
+			r.Route("/api/sprints/{sprint_id}", func(r chi.Router) {
+				r.Get("/", h.GetSprint)
+				r.Patch("/", h.UpdateSprint)
+				r.Post("/start", h.StartSprint)
+				r.Post("/complete", h.CompleteSprint)
+				r.Get("/issues", h.ListSprintIssues)
+				r.Post("/tickets/{ticket_id}", h.AddTicketToSprint)
+				r.Delete("/tickets/{ticket_id}", h.RemoveTicketFromSprint)
+				r.Get("/velocity", h.GetSprintVelocity)
+				r.Get("/burndown", h.GetSprintBurndown)
 			})
 
 			// Squads
