@@ -24,6 +24,6 @@ patches:
       name: agentfarm-backend
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
-    newTag: "dadaecaa"
+    newTag: "8c52d2b8"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "dadaecaa"
