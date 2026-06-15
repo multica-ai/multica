@@ -393,6 +393,13 @@ function TimelineSkeleton() {
 // activities" line that expands in place.
 const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
 
+// Highlighted inbox/comment deep-links need a real DOM node before the landing
+// effect can center and flash the target. Rendering a short timeline flat keeps
+// that precise landing behavior, but doing it for long agent threads remounts
+// every CommentCard and reruns Markdown/code highlighting on tab restore. Above
+// this limit we keep Virtuoso active and ask it to start near the target row.
+const HIGHLIGHT_FLAT_RENDER_ITEM_LIMIT = 80;
+
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
 // priority / assignee churn; the trailing block stays expanded because it
@@ -1011,6 +1018,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return items.findIndex((it) => it.id === rootId);
   }, [items, highlightCommentId, replyToRoot]);
 
+  const shouldRenderFlatHighlightTimeline =
+    !!highlightCommentId && items.length <= HIGHLIGHT_FLAT_RENDER_ITEM_LIMIT;
+  const highlightInitialTopMostItemIndex =
+    highlightCommentId && !shouldRenderFlatHighlightTimeline && targetIdx >= 0
+      ? ({ index: targetIdx, align: "center" } as const)
+      : undefined;
+
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
@@ -1083,10 +1097,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const loading = issueLoading;
 
   // Deep-link landing. Semantically equivalent to navigating to
-  // `#comment-${id}`: find the element with that id, scrollIntoView it.
-  // When `highlightCommentId` is set the timeline below renders flat (no
-  // virtualization), so every comment id is in the DOM by the time this
-  // effect runs after commit.
+  // `#comment-${id}`: find the element with that id, center it inside the
+  // timeline scroll container, then briefly highlight it. Short highlighted
+  // timelines render flat so every comment id exists on first commit. Long
+  // highlighted timelines stay virtualized; `initialTopMostItemIndex` asks
+  // Virtuoso to mount the target neighborhood before this effect runs.
   //
   // For a reply inside a folded resolved thread, the reply is not in items
   // (only the resolved-bar root is). Auto-expand the thread first; the
@@ -2062,22 +2077,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
               // Two render modes:
-              //   - `highlightCommentId` set (came from inbox deep-link) →
-              //     render flat. Every comment mounts, every height is real,
-              //     the target id is in the DOM the instant the useEffect
-              //     above runs `scrollIntoView`. No virtualization estimate
-              //     errors, no spacer reflow drift. Pays cold-mount cost
-              //     proportional to items.length (markdown + lowlight per
-              //     comment), which is acceptable in the deep-link case —
-              //     the user has explicit intent to land on a specific item.
-              //   - otherwise → Virtuoso. Browsing mode, virtualization
-              //     wins on first-paint perf for long timelines.
+              //   - short `highlightCommentId` timelines (inbox/comment
+              //     deep-links) render flat. Every comment mounts, every
+              //     height is real, and the target id is in the DOM for an
+              //     exact landing without estimate drift.
+              //   - long highlighted timelines and normal browsing timelines
+              //     use Virtuoso. Inbox tabs can be restored repeatedly, so a
+              //     long deep-link must not pay O(N) Markdown + lowlight mount
+              //     cost every time the desktop tab becomes active again.
               //
-              // The split is deliberate: virtualization and "land precisely
-              // on a target" have fundamentally opposed contracts (estimated
-              // heights vs real heights). Trying to satisfy both in one
-              // path is what produced the bug history this PR closes.
-              !highlightCommentId ? (
+              // The split is deliberate: exact target landing and virtualized
+              // estimated heights still trade precision for performance, but
+              // the tradeoff is bounded so long agent threads keep the desktop
+              // renderer responsive.
+              !shouldRenderFlatHighlightTimeline ? (
                 !scrollContainerEl ? (
                   // Skeleton while the callback ref populates so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't
@@ -2089,6 +2102,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       key={`${wsId}:${id}`}
                       customScrollParent={scrollContainerEl}
                       data={items}
+                      initialTopMostItemIndex={highlightInitialTopMostItemIndex}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver
