@@ -1568,7 +1568,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// blocking the FailTask handler: the backoff can be minutes long and
 	// we don't want to hold the HTTP handler goroutine open.
 	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) {
-		backoff := rateLimitBackoff(parent.Attempt)
+		backoff := rateLimitBackoff(parent.Attempt + 1)
 		slog.Info("task rate-limited, scheduling retry with backoff",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
