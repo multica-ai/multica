@@ -167,9 +167,10 @@ export function DashboardPage() {
     if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
   };
 
-  // The user can save model prices from the runtimes page; re-render when
-  // they do so the dashboard reflects the new rates.
-  useCustomPricingStore((s) => s.pricings);
+  // The user can save model prices from the runtimes page or this dashboard;
+  // include the store slice in cost memo deps so saved rates immediately
+  // re-price KPI, chart, and leaderboard totals for the same usage rows.
+  const pricings = useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -249,14 +250,16 @@ export function DashboardPage() {
     runTimeDailyRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
-  const totals = useMemo(
-    () => computeDailyTotals(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
-  const dailyCost = useMemo(
-    () => aggregateDailyCost(dailyUsageInWindow),
-    [dailyUsageInWindow],
-  );
+  const totals = useMemo(() => {
+    // computeDailyTotals calls estimateCost(), which reads custom prices
+    // through a vanilla store accessor; this marks the real React dependency.
+    void pricings;
+    return computeDailyTotals(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
+  const dailyCost = useMemo(() => {
+    void pricings;
+    return aggregateDailyCost(dailyUsageInWindow);
+  }, [dailyUsageInWindow, pricings]);
   const dailyTokens = useMemo(
     () => aggregateDailyTokens(dailyUsageInWindow),
     [dailyUsageInWindow],
@@ -276,10 +279,10 @@ export function DashboardPage() {
   // pre-zeroed inside the helpers, so sparse weeks render as empty bars
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
-  const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
-  );
+  const weekly = useMemo(() => {
+    void pricings;
+    return aggregateByWeek(dailyUsage, viewTZ, weekCount);
+  }, [dailyUsage, viewTZ, weekCount, pricings]);
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
   const weeklyTime = useMemo(
@@ -290,10 +293,10 @@ export function DashboardPage() {
     () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
     [runTimeDailyRows, viewTZ, weekCount],
   );
-  const agentTokenRows = useMemo(
-    () => aggregateAgentTokens(byAgentUsage),
-    [byAgentUsage],
-  );
+  const agentTokenRows = useMemo(() => {
+    void pricings;
+    return aggregateAgentTokens(byAgentUsage);
+  }, [byAgentUsage, pricings]);
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.
   const runTimeTotals = useMemo(() => {

@@ -14,6 +14,12 @@ const queryState = vi.hoisted(() => ({
   loading: true,
   dailyRows: [] as unknown[],
 }));
+const pricingState = vi.hoisted(() => ({
+  pricings: {} as Record<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >,
+}));
 
 vi.mock("@tanstack/react-query", async () => {
   const actual =
@@ -54,13 +60,15 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const state = () => ({ pricings: {} });
   const useCustomPricingStore = Object.assign(
-    (sel?: (s: ReturnType<typeof state>) => unknown) =>
-      sel ? sel(state()) : state(),
-    { getState: state },
+    (sel?: (s: typeof pricingState) => unknown) =>
+      sel ? sel(pricingState) : pricingState,
+    { getState: () => pricingState },
   );
-  return { useCustomPricingStore, getCustomPricing: () => undefined };
+  return {
+    useCustomPricingStore,
+    getCustomPricing: (model: string) => pricingState.pricings[model],
+  };
 });
 
 vi.mock("../../runtimes/components/charts", () => ({
@@ -94,6 +102,7 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     queryKeys.length = 0;
     queryState.loading = true;
     queryState.dailyRows = [];
+    pricingState.pricings = {};
     cleanup();
   });
 
@@ -160,5 +169,38 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     expect(
       screen.getByRole("button", { name: "Set custom prices" }),
     ).toBeInTheDocument();
+  });
+
+  it("re-prices dashboard cost totals when custom pricing changes", () => {
+    tzRef.current = "UTC";
+    queryState.loading = false;
+    queryState.dailyRows = [
+      {
+        date: "2026-06-15",
+        model: "self-hosted-model-x",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 1,
+      },
+    ];
+
+    const { rerender } = renderWithI18n(<DashboardPage />);
+    expect(screen.getByText("$0.00")).toBeInTheDocument();
+
+    pricingState.pricings = {
+      "self-hosted-model-x": {
+        input: 2,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+      },
+    };
+
+    rerender(<DashboardPage />);
+
+    expect(screen.getByText("$2.00")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
