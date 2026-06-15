@@ -52,6 +52,11 @@
     "title": "暂无消耗数据",
     "body": "当智能体在这里开始执行任务后，它们的 token 消耗和运行时长将出现在此处。"
   },
+  "pricing": {
+    "unmapped_notice_one": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
+    "unmapped_notice_other": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
+    "open_button": "设置自定义价格"
+  },
   "duration": {
     "less_than_minute": "<1分钟"
   }

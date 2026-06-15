@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { AlertCircle, BarChart3, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -39,9 +40,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import {
   addDaysIso,
   aggregateByWeek,
+  collectUnmappedModels,
   formatTokens,
   todayIso,
 } from "../../runtimes/utils";
+import { CustomPricingDialog } from "../../runtimes/components/custom-pricing-dialog";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
@@ -353,6 +356,8 @@ export function DashboardPage() {
             <DashboardEmpty />
           ) : (
             <>
+              <UnmappedPricingNotice usage={dailyUsageInWindow} />
+
               {/* KPI row — same 3-divide-x card grid the runtime usage
                   section uses, expanded to four tiles. */}
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
@@ -419,6 +424,47 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function UnmappedPricingNotice({
+  usage,
+}: {
+  usage: import("@multica/core/types").DashboardUsageDaily[];
+}) {
+  const { t } = useT("usage");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const unmapped = collectUnmappedModels(usage);
+  if (unmapped.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-foreground">
+          {t(($) => $.pricing.unmapped_notice, { count: unmapped.length })}
+        </p>
+        <p className="truncate font-mono text-[11px] text-muted-foreground">
+          {unmapped.join(", ")}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setDialogOpen(true)}
+      >
+        {t(($) => $.pricing.open_button)}
+      </Button>
+      <CustomPricingDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        unmappedModels={unmapped}
+      />
     </div>
   );
 }
