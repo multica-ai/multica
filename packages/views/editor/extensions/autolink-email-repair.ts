@@ -10,8 +10,8 @@
  * Fix: an `appendTransaction` plugin that runs after every doc change. It scans
  * for `mailto:` link marks that are immediately followed by plain text. If the
  * combined string (link text + trailing text) forms a valid email according to
- * linkifyjs, the plugin extends the link mark to cover the full address and
- * updates the href.
+ * the shared link detector, the plugin extends the link mark to cover the full
+ * address and updates the href.
  *
  * Only `mailto:` links are affected — regular URL links are left untouched.
  */
