@@ -28,6 +28,18 @@ describe("paths.workspace(slug)", () => {
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
   });
+
+  it("appends ?comment= when a commentId is provided", () => {
+    expect(ws.issueDetail("abc-123", { commentId: "c1" })).toBe(
+      "/acme/issues/abc-123?comment=c1",
+    );
+    // commentId is URL-encoded too
+    expect(ws.issueDetail("abc-123", { commentId: "c 1" })).toBe(
+      "/acme/issues/abc-123?comment=c%201",
+    );
+    // empty opts falls back to the plain path
+    expect(ws.issueDetail("abc-123", {})).toBe("/acme/issues/abc-123");
+  });
 });
 
 describe("paths (global)", () => {

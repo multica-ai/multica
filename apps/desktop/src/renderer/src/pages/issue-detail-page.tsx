@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { IssueDetail } from "@multica/views/issues/components";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -7,6 +7,8 @@ import { useDocumentTitle } from "@/hooks/use-document-title";
 
 export function IssueDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const commentId = searchParams.get("comment") ?? undefined;
   const wsId = useWorkspaceId();
   const { data: issue } = useQuery(issueDetailOptions(wsId, id!));
 
@@ -16,5 +18,5 @@ export function IssueDetailPage() {
   // Render errors bubble to the root route errorElement (DesktopRouteErrorPage),
   // which contains the crash inside the tab content pane. No page-level boundary
   // here — a whole-page wrapper duplicates the route-level error UI.
-  return <IssueDetail issueId={id} />;
+  return <IssueDetail issueId={id} highlightCommentId={commentId} />;
 }
