@@ -14,13 +14,14 @@ function makeWc(initialLevel = 0) {
 
 function key(
   k: string,
-  mods: Partial<Pick<ShortcutInput, "control" | "meta">> = {},
+  mods: Partial<Pick<ShortcutInput, "control" | "meta" | "shift">> = {},
 ): ShortcutInput {
   return {
     type: "keyDown",
     key: k,
     control: false,
     meta: false,
+    shift: false,
     ...mods,
   };
 }
@@ -171,5 +172,15 @@ describe("handleAppShortcut — close tab (Cmd/Ctrl+W)", () => {
   it("does not trigger without Cmd/Ctrl modifier", () => {
     const wc = makeWc();
     expect(handleAppShortcut(key("w"), wc, "darwin")).toBe(false);
+  });
+
+  it("does not trigger on Cmd+Shift+W (reserved for close-window)", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { meta: true, shift: true }), wc, "darwin")).toBe(false);
+  });
+
+  it("does not trigger on Ctrl+Shift+W (reserved for close-window)", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { control: true, shift: true }), wc, "linux")).toBe(false);
   });
 });

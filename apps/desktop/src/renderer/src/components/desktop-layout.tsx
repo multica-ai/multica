@@ -71,32 +71,6 @@ function useNativeNavigationGestures() {
   }, [goBack, goForward]);
 }
 
-/**
- * Cmd/Ctrl+W: close the active tab. When the last real tab is closed
- * (tab-store reseeds a default), close the window instead.
- */
-function useCmdWCloseTab() {
-  useEffect(() => {
-    return window.desktopAPI.onCloseActiveTab(() => {
-      const store = useTabStore.getState();
-      const { activeWorkspaceSlug, byWorkspace } = store;
-      if (!activeWorkspaceSlug) {
-        // No workspace — nothing to close, dismiss the window.
-        window.desktopAPI.closeWindow();
-        return;
-      }
-      const group = byWorkspace[activeWorkspaceSlug];
-      if (!group || group.tabs.length <= 1) {
-        // Last tab (or no tabs) — close the window.
-        window.desktopAPI.closeWindow();
-        return;
-      }
-      // Multiple tabs — close the active one.
-      store.closeActiveTab();
-    });
-  }, []);
-}
-
 // The main area's top bar doubles as a window drag region. When the sidebar
 // is not occupying main-flow width — either user-collapsed (offcanvas) or
 // auto-hidden in mobile mode (<768px, becomes a sheet drawer) — we pad the
@@ -188,7 +162,6 @@ export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
   useNativeNavigationGestures();
-  useCmdWCloseTab();
 
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab

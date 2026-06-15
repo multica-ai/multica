@@ -8,6 +8,7 @@ export type ShortcutInput = {
   key: string;
   control: boolean;
   meta: boolean;
+  shift: boolean;
 };
 
 // Subset of WebContents the zoom handler needs. Keeps the test mock tiny.
@@ -79,8 +80,9 @@ export function handleAppShortcut(
   }
 
   // Cmd/Ctrl + W → close active tab (or window if last tab).
+  // Cmd/Ctrl + Shift + W is reserved for "close window" — do not intercept.
   // Return a signal so the caller can send IPC to the renderer.
-  if (input.key.toLowerCase() === "w") {
+  if (input.key.toLowerCase() === "w" && !input.shift) {
     return "close-tab";
   }
 
