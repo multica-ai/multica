@@ -70,13 +70,15 @@ const upsertEidetixProjectConfig = `-- name: UpsertEidetixProjectConfig :one
 INSERT INTO eidetix_project_config (
     project_id, enabled, endpoint_url, token_encrypted, graph_label
 ) VALUES (
-    $1, $2, $3, $4, $5
+    $1, $2,
+    COALESCE($3::text, 'https://eidetix.nodeops.xyz/mcp/sse'),
+    $4, $5
 )
 ON CONFLICT (project_id) DO UPDATE SET
     enabled         = EXCLUDED.enabled,
-    endpoint_url    = EXCLUDED.endpoint_url,
+    endpoint_url    = COALESCE($3::text, eidetix_project_config.endpoint_url),
     token_encrypted = EXCLUDED.token_encrypted,
-    graph_label     = EXCLUDED.graph_label,
+    graph_label     = COALESCE($5, eidetix_project_config.graph_label),
     updated_at      = now()
 RETURNING project_id, enabled, endpoint_url, token_encrypted, graph_label, created_at, updated_at
 `
@@ -84,11 +86,15 @@ RETURNING project_id, enabled, endpoint_url, token_encrypted, graph_label, creat
 type UpsertEidetixProjectConfigParams struct {
 	ProjectID      pgtype.UUID `json:"project_id"`
 	Enabled        bool        `json:"enabled"`
-	EndpointUrl    string      `json:"endpoint_url"`
+	EndpointUrl    pgtype.Text `json:"endpoint_url"`
 	TokenEncrypted []byte      `json:"token_encrypted"`
 	GraphLabel     pgtype.Text `json:"graph_label"`
 }
 
+// endpoint_url and graph_label are nullable inputs: on a re-set (e.g. rotating
+// the token) where they are not supplied, the existing values are preserved
+// rather than reset. This matches the table's soft-config philosophy — you can
+// rotate the token without losing the endpoint/label.
 func (q *Queries) UpsertEidetixProjectConfig(ctx context.Context, arg UpsertEidetixProjectConfigParams) (EidetixProjectConfig, error) {
 	row := q.db.QueryRow(ctx, upsertEidetixProjectConfig,
 		arg.ProjectID,

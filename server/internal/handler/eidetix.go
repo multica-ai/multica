@@ -12,8 +12,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const defaultEidetixEndpoint = "https://eidetix.nodeops.xyz/mcp/sse"
-
 // authorizeEidetixConfig resolves the project from the URL and enforces
 // workspace owner/admin. Mirrors the owner/admin write gate used elsewhere.
 func (h *Handler) authorizeEidetixConfig(w http.ResponseWriter, r *http.Request) (db.Project, db.Member, bool) {
@@ -71,9 +69,13 @@ func (h *Handler) SetEidetixConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	endpoint := strings.TrimSpace(req.EndpointURL)
-	if endpoint == "" {
-		endpoint = defaultEidetixEndpoint
+	// endpoint_url and graph_label are left NULL when the caller doesn't
+	// supply them: the upsert preserves the existing values on a re-set (e.g.
+	// rotating the token) and falls back to the partner default only on first
+	// insert. So omitting them never silently wipes prior config.
+	endpoint := pgtype.Text{}
+	if v := strings.TrimSpace(req.EndpointURL); v != "" {
+		endpoint = pgtype.Text{String: v, Valid: true}
 	}
 	enabled := true
 	if req.Enabled != nil {

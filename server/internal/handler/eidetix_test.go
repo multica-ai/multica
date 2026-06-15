@@ -355,3 +355,48 @@ func TestClaim_DecryptFailure_FailsOpen(t *testing.T) {
 		t.Errorf("garbage token must not append the loop skill")
 	}
 }
+
+// TestSetEidetixConfig_TokenRotationPreservesLabelAndEndpoint pins the
+// sticky-config behavior: re-running `set` with only a token (the rotation
+// case) must NOT wipe a previously-configured graph_label or custom endpoint.
+func TestSetEidetixConfig_TokenRotationPreservesLabelAndEndpoint(t *testing.T) {
+	prev := testHandler.EidetixSecrets
+	testHandler.EidetixSecrets = newTestEidetixBox(t)
+	t.Cleanup(func() { testHandler.EidetixSecrets = prev })
+
+	projectID := insertTestProject(t, "Eidetix Rotate")
+
+	// Initial set with a custom endpoint + label.
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPut, "/api/projects/"+projectID+"/eidetix", map[string]any{
+		"token":        "fake-token-1",
+		"endpoint_url": "https://custom.example/mcp/sse",
+		"graph_label":  "Marketing",
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.SetEidetixConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("initial set: %d %s", w.Code, w.Body.String())
+	}
+
+	// Rotate the token only — no endpoint, no label supplied.
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPut, "/api/projects/"+projectID+"/eidetix", map[string]any{
+		"token": "fake-token-2",
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.SetEidetixConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("rotate set: %d %s", w.Code, w.Body.String())
+	}
+	var show map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &show); err != nil {
+		t.Fatalf("decode rotate response: %v", err)
+	}
+	if show["graph_label"] != "Marketing" {
+		t.Errorf("after token rotation, graph_label = %v, want Marketing (must be sticky)", show["graph_label"])
+	}
+	if show["endpoint_url"] != "https://custom.example/mcp/sse" {
+		t.Errorf("after token rotation, endpoint_url = %v, want the custom endpoint (must be sticky)", show["endpoint_url"])
+	}
+}
