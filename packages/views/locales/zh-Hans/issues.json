@@ -233,6 +233,8 @@
       "next": "下一个",
       "close": "关闭查找"
     },
+    "prev_issue_tooltip": "上一个 issue",
+    "next_issue_tooltip": "下一个 issue",
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",

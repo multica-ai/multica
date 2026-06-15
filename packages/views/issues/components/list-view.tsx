@@ -25,6 +25,8 @@ import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { useRegisterIssueNavigation } from "../hooks";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -84,6 +86,7 @@ export function ListView({
   );
   const sortBy = useViewStore((s) => s.sortBy);
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
 
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortLabel = sortBy !== "position"
@@ -116,6 +119,15 @@ export function ListView({
     () => new Map(groups.map((g) => [g.id, g])),
     [groups],
   );
+
+  // Publish the resting column order for the issue detail's previous/next
+  // navigation. Derived from props rather than the drag-mutated `columns`
+  // state below so an in-progress drag never leaks into navigation.
+  const navColumns = useMemo(
+    () => buildColumns(issues, groups, "status"),
+    [issues, groups],
+  );
+  useRegisterIssueNavigation(wsId, navColumns);
 
   // --- Drag state ---
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);

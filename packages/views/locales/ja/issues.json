@@ -233,6 +233,8 @@
       "next": "次の一致",
       "close": "検索を閉じる"
     },
+    "prev_issue_tooltip": "前のイシュー",
+    "next_issue_tooltip": "次のイシュー",
     "update_failed": "イシューを更新できませんでした",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
