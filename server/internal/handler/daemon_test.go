@@ -1251,10 +1251,11 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
-// TestListTasksByIssue_FiltersRunsByOwner verifies that the task-runs list
-// only returns agent tasks whose agent is owned by the requesting user (or has
-// no owner) and local CLI runs owned by the requesting user.
-func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
+// TestListTasksByIssue_ReturnsExecutionHistoryAcrossOwners verifies that the
+// issue execution log is issue-scoped, not owner-scoped. Dashboard run lists
+// keep owner filtering; /api/issues/{id}/task-runs must show the full issue
+// history across agent owners and local CLI run owners.
+func TestListTasksByIssue_ReturnsExecutionHistoryAcrossOwners(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -1269,11 +1270,11 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 
 	// -- Agent tasks --
 
-	// 1. Agent owned by testUserID → should appear.
+	// 1. Agent owned by testUserID -> should appear.
 	ownedAgentID := createHandlerTestAgent(t, "owned-agent", nil)
 	ownedTaskID := createHandlerTestTaskForAgentOnIssue(t, ownedAgentID, issue.ID)
 
-	// 2. Agent owned by otherUserID → should NOT appear.
+	// 2. Agent owned by otherUserID -> should also appear.
 	var otherAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
@@ -1296,7 +1297,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID) })
 
-	// 3. Agent with NULL owner_id (workspace agent) → should appear.
+	// 3. Agent with NULL owner_id (workspace agent) -> should appear.
 	var wsAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
@@ -1313,7 +1314,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 
 	// -- Local CLI runs --
 
-	// 4. local_cli_run owned by testUserID → should appear.
+	// 4. local_cli_run owned by testUserID -> should appear.
 	var ownedRunID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
@@ -1324,7 +1325,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, ownedRunID) })
 
-	// 5. local_cli_run owned by otherUserID → should NOT appear.
+	// 5. local_cli_run owned by otherUserID -> should also appear.
 	var otherRunID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
@@ -1357,17 +1358,10 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 		}
 	}
 
-	// Should include: owned task, workspace agent task, owned local run
-	for _, id := range []string{ownedTaskID, wsTaskID, ownedRunID} {
+	// Should include all same-issue execution history, regardless of owner.
+	for _, id := range []string{ownedTaskID, otherTaskID, wsTaskID, ownedRunID, otherRunID} {
 		if !gotIDs[id] {
 			t.Errorf("expected id %s in response, not found", id)
-		}
-	}
-
-	// Should NOT include: other-owner task, other-owner local run
-	for _, id := range []string{otherTaskID, otherRunID} {
-		if gotIDs[id] {
-			t.Errorf("unexpected id %s in response (should be filtered)", id)
 		}
 	}
 }

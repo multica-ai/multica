@@ -494,15 +494,15 @@ func (h *Handler) loadLocalCLIRunBySource(ctx context.Context, workspaceID pgtyp
 	return localCLIRun{}, false, err
 }
 
-func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue, ownerID pgtype.UUID) ([]localCLIRun, error) {
+func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue) ([]localCLIRun, error) {
 	rows, err := h.DB.Query(r.Context(), `
 		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
 			started_at, completed_at, exit_code, work_dir, context_dir,
 			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
 		FROM local_cli_run
-		WHERE issue_id = $1 AND workspace_id = $2 AND owner_id = $3
+		WHERE issue_id = $1 AND workspace_id = $2
 		ORDER BY created_at DESC
-	`, issue.ID, issue.WorkspaceID, ownerID)
+	`, issue.ID, issue.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
