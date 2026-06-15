@@ -15,10 +15,9 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Button } from "@multica/ui/components/ui/button";
 import { MicButton } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): mount push-to-talk dictation button (JEH-729).
-// CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle imports
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-// CEREBRO-PATCH(chat-input-expand): JEH-887 — Maximize2/Minimize2 for the toggle button
-import { Maximize2, Minimize2, Square } from "lucide-react";
+// CEREBRO-PATCH(composer-height-cap): TECH-3536 — unify chat expand with the comment/channel/DM composer (shared pill + height behavior).
+import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
+import { Square } from "lucide-react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceId } from "@multica/core/hooks"; // CEREBRO-PATCH(chat-input-dictation-streaming): workspace-scoped dictation stream URL (JEH-729).
@@ -94,9 +93,9 @@ export function ChatInput({
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
-  // CEREBRO-PATCH(chat-input-expand): JEH-887 — toggle to expand the input
-  // to 70vh, mirroring the issue comment-input expand button.
-  const [isExpanded, setIsExpanded] = useState(false);
+  // CEREBRO-PATCH(composer-height-cap): TECH-3536 — shared height cap + expand
+  // state, identical to the issue comment / channel / DM composer.
+  const composerHeight = useComposerHeight();
 
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = useCallback(
@@ -175,10 +174,10 @@ export function ChatInput({
       <div
         {...dropZoneProps}
         className={cn(
-          // CEREBRO-PATCH(chat-input-expand): JEH-887 — height becomes
-          // conditional so the expand toggle can grow the input to 70vh.
+          // CEREBRO-PATCH(composer-height-cap): TECH-3536 — height is driven by
+          // the shared scroll container style, not a fixed card height, so the
+          // expand behavior matches the comment/channel/DM composer.
           "relative mx-auto flex min-h-16 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand",
-          isExpanded ? "h-[70vh]" : "max-h-40",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -190,7 +189,20 @@ export function ChatInput({
         aria-disabled={noAgent || undefined}
       >
         {topSlot}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
+        {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — same translucent expand pill as the comment/channel/DM composer, floating above the field. */}
+        {composerHeight.showExpandToggle && (
+          <ComposerExpandToggle
+            isExpanded={composerHeight.isExpanded}
+            onToggle={() => {
+              composerHeight.toggleExpanded();
+              editorRef.current?.focus();
+            }}
+            expandLabel={t(($) => $.input.expand_tooltip)}
+            collapseLabel={t(($) => $.input.collapse_tooltip)}
+          />
+        )}
+        {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={composerHeight.containerStyle}>
           <ContentEditor
             // Remount the editor when the active session changes so its
             // uncontrolled defaultValue picks up the new session's draft.
@@ -246,29 +258,6 @@ export function ChatInput({
             onError={handleDictationError}
           />
           {rightAdornment}
-          {/* CEREBRO-PATCH(chat-input-expand): JEH-887 — expand toggle.
-              Mirrors the issue comment-input button: same icons, same
-              tooltip pattern, same focus-restore behaviour. */}
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsExpanded((v) => !v);
-                    editorRef.current?.focus();
-                  }}
-                  aria-label={isExpanded ? "Collapse" : "Expand"}
-                  className="rounded-sm p-1.5 text-muted-foreground opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-                >
-                  {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-                </button>
-              }
-            />
-            <TooltipContent side="top">
-              {isExpanded ? t(($) => $.input.collapse_tooltip) : t(($) => $.input.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
           {isRunning && onStop && (
             <Button
               size="icon-sm"

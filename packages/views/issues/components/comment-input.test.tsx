@@ -197,30 +197,38 @@ describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
     });
   });
 
-  it("caps the editor at 50% of the viewport and expands to 80% on toggle", () => {
+  it("caps the editor at 50% of the viewport and grows to 80% on toggle", () => {
     setViewport(400, 800); // mobile width, 800px of space above the keyboard
     const { getByTestId, getByRole } = renderWithI18n(
       <CommentInput issueId="c1" onSubmit={vi.fn()} />,
     );
 
     const scrollContainer = getByTestId("content-editor").parentElement!;
+    // Collapsed: a maxHeight cap so the field auto-grows up to 50%.
     expect(scrollContainer.style.maxHeight).toBe("400px"); // 50% of 800
+    expect(scrollContainer.style.height).toBe("");
 
+    // Expanded: a concrete height so the field visibly jumps even when empty.
     fireEvent.click(getByRole("button", { name: "Expand" }));
-    expect(scrollContainer.style.maxHeight).toBe("640px"); // 80% of 800
+    expect(scrollContainer.style.height).toBe("640px"); // 80% of 800
+    expect(scrollContainer.style.maxHeight).toBe("");
 
     fireEvent.click(getByRole("button", { name: "Collapse" }));
     expect(scrollContainer.style.maxHeight).toBe("400px");
+    expect(scrollContainer.style.height).toBe("");
   });
 
-  it("applies no cap and hides the pill on desktop", () => {
+  it("caps at 240px on desktop and still shows the unified pill", () => {
     setViewport(1280, 900); // desktop width
-    const { getByTestId, queryByRole } = renderWithI18n(
+    const { getByTestId, getByRole } = renderWithI18n(
       <CommentInput issueId="c1" onSubmit={vi.fn()} />,
     );
 
     const scrollContainer = getByTestId("content-editor").parentElement!;
-    expect(scrollContainer.style.maxHeight).toBe("");
-    expect(queryByRole("button", { name: "Expand" })).toBeNull();
+    expect(scrollContainer.style.maxHeight).toBe("240px");
+
+    // The expand control is identical on every surface now (mobile + desktop).
+    fireEvent.click(getByRole("button", { name: "Expand" }));
+    expect(scrollContainer.style.height).toBe("630px"); // 70% of 900
   });
 });

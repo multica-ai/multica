@@ -204,7 +204,7 @@ function ReplyInput({
                 "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
               )}
             >
-              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, mobile only. */}
+              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, floats above the field on every surface. */}
               {composerHeight.showExpandToggle && (
                 <ComposerExpandToggle
                   isExpanded={composerHeight.isExpanded}
@@ -213,8 +213,8 @@ function ReplyInput({
                   collapseLabel={t(($) => $.reply.collapse_tooltip)}
                 />
               )}
-              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — maxHeight caps growth above the keyboard. */}
-              <div className="flex-1 min-h-0 overflow-y-auto" style={{ maxHeight: composerHeight.maxHeight }}>
+              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
+              <div className="flex-1 min-h-0 overflow-y-auto" style={composerHeight.containerStyle}>
                 <div ref={measureRef}>
                   <ContentEditor
                     ref={editorRef}

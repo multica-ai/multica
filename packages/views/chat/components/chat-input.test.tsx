@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle, type Ref } from "react";
+import { renderWithI18n } from "../../test/i18n";
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks. ContentEditor is replaced by a stub that exposes a fixed
@@ -240,34 +241,35 @@ describe("ChatInput — JEH-756 autofocus prop wiring", () => {
   });
 });
 
-describe("ChatInput — JEH-887 expand toggle", () => {
-  // The card div is the second child after the outer wrapper. We grab it via
-  // its rounded-lg + bg-card classes so we don't depend on test-id additions
-  // to the upstream-zone JSX.
-  const findCard = (container: HTMLElement) =>
-    container.querySelector(".rounded-lg.bg-card") as HTMLElement;
+describe("ChatInput — TECH-3536 unified expand toggle", () => {
+  // The scroll container carries the shared height style (same as the
+  // comment/channel/DM composer). Grab it by its overflow class so we don't
+  // depend on test-id additions to the upstream-zone JSX. Defaults in jsdom
+  // are desktop width (1024) + 768px height → 240px collapsed cap.
+  const findScroll = (container: HTMLElement) =>
+    container.querySelector(".overflow-y-auto") as HTMLElement;
 
-  it("starts collapsed (max-h-40, no h-[70vh])", () => {
-    const { container } = render(<ChatInput onSend={vi.fn()} />);
-    const card = findCard(container);
-    expect(card.className).toContain("max-h-40");
-    expect(card.className).not.toContain("h-[70vh]");
+  it("starts collapsed with a height cap, no fixed height", () => {
+    const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
+    const scroll = findScroll(container);
+    expect(scroll.style.maxHeight).toBe("240px");
+    expect(scroll.style.height).toBe("");
   });
 
-  it("expands to 70vh when the toggle is clicked, and collapses again on second click", async () => {
+  it("grows to a fixed height on toggle and collapses again on second click", async () => {
     const user = userEvent.setup();
-    const { container } = render(<ChatInput onSend={vi.fn()} />);
+    const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
     const expandBtn = screen.getByRole("button", { name: /expand|collapse/i });
 
     await user.click(expandBtn);
-    let card = findCard(container);
-    expect(card.className).toContain("h-[70vh]");
-    expect(card.className).not.toContain("max-h-40");
+    let scroll = findScroll(container);
+    expect(scroll.style.height).toBe("538px"); // 70% of 768
+    expect(scroll.style.maxHeight).toBe("");
     expect(editorFocus).toHaveBeenCalled();
 
     await user.click(expandBtn);
-    card = findCard(container);
-    expect(card.className).toContain("max-h-40");
-    expect(card.className).not.toContain("h-[70vh]");
+    scroll = findScroll(container);
+    expect(scroll.style.maxHeight).toBe("240px");
+    expect(scroll.style.height).toBe("");
   });
 });
