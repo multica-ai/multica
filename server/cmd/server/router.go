@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/email"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -123,6 +124,30 @@ type RouterOptions struct {
 func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	emailSvc := service.NewEmailService()
+
+	// Email notification channel — strictly downstream of inbox.
+	// Deep-link base is FRONTEND_ORIGIN (where issue pages live), matching
+	// the convention SendInvitationEmail already uses. MULTICA_PUBLIC_URL is
+	// the API host and would 404 on issue links in split self-host setups.
+	//
+	// Gated on emailSvc.Configured(): with no transport configured the DEV
+	// stdout fallback would leak notification bodies (recipient + rendered
+	// HTML) to server logs on every inbox row. /api/config already reports
+	// email as unavailable in that case; matching here keeps the two
+	// behaviors consistent.
+	if emailSvc.Configured() {
+		frontendOrigin := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
+		emailNotifier := email.NewNotifier(
+			emailNotifierQueries{q: queries},
+			emailSvc,
+			email.NotifierConfig{
+				Renderer: email.NewRenderer(frontendOrigin),
+				Logger:   slog.Default(),
+			},
+		)
+		emailNotifier.Register(bus)
+	}
+
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
 		daemonHub = daemonws.NewHub()
