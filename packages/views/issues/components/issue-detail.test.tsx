@@ -374,7 +374,6 @@ vi.mock("@multica/core/issues/stores", () => ({
       isCollapsed: (issueId: string, commentId: string) =>
         state.collapsedByIssue[issueId]?.includes(commentId) ?? false,
       toggle: () => {},
-      setIssueCommentsCollapsed: () => {},
     };
     return Object.assign(
       (selector?: any) => (selector ? selector(state) : state),

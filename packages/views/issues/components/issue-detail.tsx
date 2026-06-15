@@ -367,7 +367,6 @@ function mergeAttachments(
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
-const EMPTY_STRING_ARRAY: string[] = [];
 
 // ---------------------------------------------------------------------------
 // Issue-level attachment list. These are explicit issue attachments, so keep
@@ -1600,7 +1599,6 @@ export function IssueDetail({
   const subIssuesCollapsed = useIssueDetailCollapseStore((s) =>
     s.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed)
   );
-  const collapsedCommentIds = useCommentCollapseStore((s) => s.collapsedByIssue[resolvedId] ?? EMPTY_STRING_ARRAY);
   const setSubIssuesCollapsed = useCallback((collapsed: boolean | ((prev: boolean) => boolean)) => {
     const store = useIssueDetailCollapseStore.getState();
     const current = store.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed);
@@ -1608,59 +1606,12 @@ export function IssueDetail({
     store.setSubIssuesCollapsed(resolvedId, next);
   }, [resolvedId, defaultSubIssuesCollapsed]);
 
-  const commentRootIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const group of timelineView.groups) {
-      if (group.type !== "comment") continue;
-      const entry = group.entries[0];
-      if (entry) ids.push(entry.id);
-    }
-    return ids;
-  }, [timelineView.groups]);
-
-  const resolvedCommentIds = useMemo(() => {
-    const ids: string[] = [];
-    for (const group of timelineView.groups) {
-      if (group.type !== "comment") continue;
-      const entry = group.entries[0];
-      if (entry?.resolved_at) ids.push(entry.id);
-    }
-    return ids;
-  }, [timelineView.groups]);
-
-  const allCommentsCollapsed = useMemo(() => {
-    if (commentRootIds.length === 0) return true;
-    return commentRootIds.every((id) => {
-      const entry = timelineView.commentById.get(id);
-      if (entry?.resolved_at && !expandedResolved.has(id)) return true;
-      return collapsedCommentIds.includes(id);
-    });
-  }, [collapsedCommentIds, commentRootIds, expandedResolved, timelineView.commentById]);
-
-  const isAllSectionsCollapsed = isDescriptionCollapsedState && subIssuesCollapsed && allCommentsCollapsed;
+  const isIssueCollapsed = isDescriptionCollapsedState && subIssuesCollapsed;
 
   const handleToggleAllSections = useCallback(() => {
-    const nextCollapsed = !isAllSectionsCollapsed;
-    
+    const nextCollapsed = !isIssueCollapsed;
     useIssueDetailCollapseStore.getState().toggleAllSections(resolvedId, nextCollapsed);
-    useCommentCollapseStore.getState().setIssueCommentsCollapsed(
-      resolvedId,
-      commentRootIds,
-      nextCollapsed,
-    );
-
-    if (nextCollapsed) {
-      setExpandedResolved(new Set());
-    } else {
-      setExpandedResolved(new Set(resolvedCommentIds));
-    }
-  }, [
-    commentRootIds,
-    isAllSectionsCollapsed,
-    resolvedCommentIds,
-    resolvedId,
-    setExpandedResolved,
-  ]);
+  }, [isIssueCollapsed, resolvedId]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
@@ -2622,7 +2573,7 @@ export function IssueDetail({
                     className="text-muted-foreground"
                     onClick={handleToggleAllSections}
                   >
-                    {isAllSectionsCollapsed ? (
+                    {isIssueCollapsed ? (
                       <UnfoldVertical className="h-4 w-4" />
                     ) : (
                       <FoldVertical className="h-4 w-4" />
@@ -2631,9 +2582,9 @@ export function IssueDetail({
                 }
               />
               <TooltipContent side="bottom">
-                {isAllSectionsCollapsed
-                  ? t(($) => $.detail.expand_all)
-                  : t(($) => $.detail.collapse_all)}
+                {isIssueCollapsed
+                  ? t(($) => $.detail.expand_issue)
+                  : t(($) => $.detail.collapse_issue)}
               </TooltipContent>
             </Tooltip>
             <Tooltip>
