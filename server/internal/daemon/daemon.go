@@ -33,6 +33,17 @@ const (
 	taskSlotCapacityBackoff = 5 * time.Second
 )
 
+func taskScopedAuthToken(task Task) (string, error) {
+	token := strings.TrimSpace(task.AuthToken)
+	if token == "" {
+		return "", errors.New("server did not provide task-scoped auth token")
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return "", errors.New("server provided non-task-scoped auth token")
+	}
+	return token, nil
+}
+
 // taskRunner executes a single agent task and returns the result.
 // Extracted as an interface so tests can inject a fake without spawning real
 // agent processes, while keeping test scaffolding out of the production struct.
@@ -2715,28 +2726,39 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 	}
+	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
+	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
+	// failures fail soft to local mode — a broken JSON blob must never block
+	// task dispatch.
+	var openclawMode string
+	var openclawGateway execenv.OpenclawGatewayPin
+	if task.Agent != nil && provider == "openclaw" {
+		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			McpConfig:    agentMcpConfig,
-			Task:         taskCtx,
+			WorkDir:         task.PriorWorkDir,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			McpConfig:      agentMcpConfig,
-			Task:           taskCtx,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			WorkspaceID:     task.WorkspaceID,
+			TaskID:          task.ID,
+			AgentName:       agentName,
+			Provider:        provider,
+			CodexVersion:    codexVersion,
+			OpenclawBin:     openclawBin,
+			McpConfig:       agentMcpConfig,
+			OpenclawGateway: openclawGateway,
+			Task:            taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -2809,24 +2831,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	prompt := BuildPrompt(task, provider)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
+	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
-	// MULTICA_TOKEN is the credential the agent process will use to call the
-	// Multica API. Prefer the task-scoped token the server minted at claim
-	// time — that token is bound to (agent, task) and the auth middleware
-	// rejects it on owner-only endpoints (e.g. `/api/agents/{id}/env`), so
-	// the agent cannot use it to read another agent's secrets. Falls back
-	// to the daemon's own credential only when the server returned no
-	// auth_token (older server, or cloud / system runtime with no owner) —
-	// in that legacy mode lateral-movement protection relies on the
-	// runtime not handing the daemon a workspace-owner PAT in the first
-	// place. See MUL-2600.
-	agentToken := task.AuthToken
-	if agentToken == "" {
-		agentToken = d.client.Token()
+	// MULTICA_TOKEN is bound to (agent, task) by the server. Never fall back
+	// to the daemon's own credential here: doing so lets agent CLI writes land
+	// as the runtime owner's member actor and can retrigger the same agent.
+	agentToken, err := taskScopedAuthToken(task)
+	if err != nil {
+		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
+		return TaskResult{}, err
 	}
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        agentToken,
@@ -2870,6 +2886,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	// Point Cursor at per-task project state when managed MCP is present.
+	// The workdir .cursor/mcp.json carries the managed server list, while
+	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
+	// persistent ~/.cursor/projects state.
+	if env.CursorDataDir != "" {
+		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
@@ -2988,6 +3011,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
 		ThinkingLevel:             thinkingLevel,
+		OpenclawMode:              openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -3761,7 +3785,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME", "CURSOR_DATA_DIR", "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false

@@ -9,13 +9,20 @@
       "created_by": "Created by",
       "mode": "Mode",
       "status": "Status",
-      "last_run": "Last run"
+      "last_run": "Last run",
+      "assignee": "Assignee",
+      "trigger": "Trigger",
+      "next_run": "Next run",
+      "created": "Created"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "No autopilots yet",
       "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
-    }
+    },
+    "scope_all": "All",
+    "no_matches": "No automations match",
+    "retry": "Retry"
   },
   "status": {
     "active": "Active",
@@ -97,8 +104,7 @@
     "running": "Running",
     "skipped": "Skipped",
     "completed": "Completed",
-    "failed": "Failed",
-    "skipped": "Skipped"
+    "failed": "Failed"
   },
   "run_source": {
     "schedule": "Schedule",
@@ -348,5 +354,39 @@
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."
+  },
+  "toolbar": {
+    "result_count_title": "Matching automations / all automations",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_assignee": "Assignee",
+    "section_mode": "Mode",
+    "section_trigger": "Trigger",
+    "section_creator": "Created by",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns"
+  },
+  "actions": {
+    "row_menu": "Automation actions",
+    "pause": "Pause",
+    "resume": "Resume",
+    "delete": "Delete",
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection",
+    "delete_dialog": {
+      "title": "Delete automation?",
+      "description_one": "This will permanently delete \"{{name}}\" and its run history.",
+      "description_other": "This will permanently delete {{count}} automations and their run history.",
+      "warning": "This action cannot be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete permanently",
+      "deleting": "Deleting…"
+    }
   }
 }

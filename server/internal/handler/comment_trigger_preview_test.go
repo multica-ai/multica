@@ -67,7 +67,7 @@ func previewCommentTriggersForTest(t *testing.T, issueID string, body map[string
 	return resp
 }
 
-func postCommentForTriggerPreviewTest(t *testing.T, issueID string, body map[string]any) {
+func postCommentForTriggerPreviewTest(t *testing.T, issueID string, body map[string]any) string {
 	t.Helper()
 
 	w := httptest.NewRecorder()
@@ -76,6 +76,24 @@ func postCommentForTriggerPreviewTest(t *testing.T, issueID string, body map[str
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode created comment: %v", err)
+	}
+	return resp.ID
+}
+
+func updateCommentForTriggerPreviewTest(t *testing.T, commentID string, body map[string]any) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	r := newRequest(http.MethodPut, "/api/comments/"+commentID, body)
+	r = withURLParam(r, "commentId", commentID)
+	testHandler.UpdateComment(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -90,6 +108,39 @@ func countQueuedCommentTriggerTasks(t *testing.T, issueID, agentID string) int {
 		t.Fatalf("count queued tasks: %v", err)
 	}
 	return n
+}
+
+func createCommentTriggerPreviewSquad(t *testing.T, name, leaderID string) string {
+	t.Helper()
+
+	var squadID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, name, leaderID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+	return squadID
+}
+
+func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, wantIDs ...string) {
+	t.Helper()
+	if len(preview.Agents) != len(wantIDs) {
+		t.Fatalf("preview agents = %+v, want ids %v", preview.Agents, wantIDs)
+	}
+	got := make(map[string]struct{}, len(preview.Agents))
+	for _, agent := range preview.Agents {
+		got[agent.ID] = struct{}{}
+	}
+	for _, want := range wantIDs {
+		if _, ok := got[want]; !ok {
+			t.Fatalf("preview agents = %+v, missing id %s", preview.Agents, want)
+		}
+	}
 }
 
 func TestPreviewCommentTriggers_ReturnsMentionedAgentsAndSuppressFiltersCreate(t *testing.T) {
@@ -122,6 +173,145 @@ func TestPreviewCommentTriggers_ReturnsMentionedAgentsAndSuppressFiltersCreate(t
 	}
 	if got := countQueuedCommentTriggerTasks(t, issueID, agentB); got != 0 {
 		t.Fatalf("suppressed mentioned agent queued tasks = %d, want 0", got)
+	}
+}
+
+func TestPreviewCommentTriggers_EditExcludesSameCommentPendingTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Edit Preview Exclude Agent", nil)
+
+	t.Run("agent assignee on-comment", func(t *testing.T) {
+		issueID := createCommentTriggerPreviewIssue(t, "edit preview assignee", "agent", agentID)
+		commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+			"content": "please start here",
+		})
+		if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+			t.Fatalf("queued tasks before edit preview = %d, want 1", got)
+		}
+
+		preview := previewCommentTriggersForTest(t, issueID, map[string]any{
+			"content":            "actually start over here",
+			"editing_comment_id": commentID,
+		})
+		requirePreviewAgents(t, preview, agentID)
+		if preview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+			t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceIssueAssignee)
+		}
+	})
+
+	t.Run("squad assignee on-comment", func(t *testing.T) {
+		squadID := createCommentTriggerPreviewSquad(t, "Edit Preview Assignee Squad", agentID)
+		issueID := createCommentTriggerPreviewIssue(t, "edit preview squad assignee", "squad", squadID)
+		commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+			"content": "please coordinate this",
+		})
+		if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+			t.Fatalf("queued tasks before edit preview = %d, want 1", got)
+		}
+
+		preview := previewCommentTriggersForTest(t, issueID, map[string]any{
+			"content":            "actually coordinate this instead",
+			"editing_comment_id": commentID,
+		})
+		requirePreviewAgents(t, preview, agentID)
+		if preview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+			t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceIssueAssignee)
+		}
+	})
+
+	t.Run("direct agent mention", func(t *testing.T) {
+		issueID := createCommentTriggerPreviewIssue(t, "edit preview agent mention", "", "")
+		content := fmt.Sprintf("[@Agent](mention://agent/%s) inspect this", agentID)
+		commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+			"content": content,
+		})
+		if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+			t.Fatalf("queued tasks before edit preview = %d, want 1", got)
+		}
+
+		preview := previewCommentTriggersForTest(t, issueID, map[string]any{
+			"content":            content + " again",
+			"editing_comment_id": commentID,
+		})
+		requirePreviewAgents(t, preview, agentID)
+		if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+			t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
+		}
+	})
+
+	t.Run("squad mention leader", func(t *testing.T) {
+		squadID := createCommentTriggerPreviewSquad(t, "Edit Preview Mention Squad", agentID)
+		issueID := createCommentTriggerPreviewIssue(t, "edit preview squad mention", "", "")
+		content := fmt.Sprintf("[@Squad](mention://squad/%s) inspect this", squadID)
+		commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+			"content": content,
+		})
+		if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+			t.Fatalf("queued tasks before edit preview = %d, want 1", got)
+		}
+
+		preview := previewCommentTriggersForTest(t, issueID, map[string]any{
+			"content":            content + " again",
+			"editing_comment_id": commentID,
+		})
+		requirePreviewAgents(t, preview, agentID)
+		if preview.Agents[0].Source != string(commentTriggerSourceMentionSquadLeader) {
+			t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionSquadLeader)
+		}
+	})
+}
+
+func TestPreviewCommentTriggers_EditExclusionDoesNotIgnoreOtherCommentPendingTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Edit Preview Other Pending Agent", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "edit preview other pending", "", "")
+	content := fmt.Sprintf("[@Agent](mention://agent/%s) inspect this", agentID)
+	_ = postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content": content,
+	})
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("queued tasks before edit preview = %d, want 1", got)
+	}
+	editingCommentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content": "plain follow-up with no mention",
+	})
+
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{
+		"content":            content,
+		"editing_comment_id": editingCommentID,
+	})
+	requirePreviewAgents(t, preview)
+}
+
+func TestUpdateComment_SuppressAgentIDsFiltersEditRetrigger(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentA := createHandlerTestAgent(t, "Edit Suppress A", nil)
+	agentB := createHandlerTestAgent(t, "Edit Suppress B", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "edit suppress agent ids", "", "")
+	commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
+		"content": "plain comment",
+	})
+	content := fmt.Sprintf("[@A](mention://agent/%s) [@B](mention://agent/%s) inspect this", agentA, agentB)
+
+	updateCommentForTriggerPreviewTest(t, commentID, map[string]any{
+		"content":            content,
+		"suppress_agent_ids": []string{agentB},
+	})
+
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentA); got != 1 {
+		t.Fatalf("unsuppressed agent queued tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentB); got != 0 {
+		t.Fatalf("suppressed agent queued tasks = %d, want 0", got)
 	}
 }
 

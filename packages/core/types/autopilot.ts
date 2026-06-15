@@ -39,6 +39,13 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  // List-endpoint-only derived fields; absent on detail/create/update
+  // responses and on older servers. Enabled triggers only. `trigger_kinds`
+  // and `last_run_status` are server-driven strings — render unknown values
+  // through a generic fallback, never an exhaustive switch.
+  trigger_kinds?: string[];
+  next_run_at?: string | null;
+  last_run_status?: string | null;
 }
 
 export interface WebhookEventFilter {

@@ -92,7 +92,7 @@ describe("ReadonlyContent math rendering", () => {
     const { container } = render(
       <ReadonlyContent
         content={[
-          "Inline math: $E = mc^2$",
+          "Inline math: $$E = mc^2$$",
           "",
           "$$",
           "\\int_0^1 x^2 \\, dx",
@@ -469,6 +469,31 @@ describe("ReadonlyContent file-card → AttachmentBlock HTML routing", () => {
     // AttachmentCard chrome surfaces the filename as visible text in a
     // <p class="truncate"> row. HtmlAttachmentPreview replaces it entirely.
     expect(queryByText("report.html")).toBeNull();
+  });
+
+  it("renders a stable attachment download URL as file-card chrome", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    const attachment = {
+      id,
+      url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+      markdown_url: href,
+      download_url: href,
+    } as any;
+
+    const { container, getByText } = renderWithQuery(
+      <ReadonlyContent
+        content={`!file[report.pdf](${href})`}
+        attachments={[attachment]}
+      />,
+    );
+
+    expect(getByText("report.pdf")).toBeTruthy();
+    expect(container.querySelector("iframe")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
   });
 });
 

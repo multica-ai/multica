@@ -86,6 +86,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 
 function SubscriberPopoverContent({
   members,
@@ -1198,17 +1199,29 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // `attachment_ids` on the next description save. Drives editor previews
   // so text/code attachments show an Eye before the bind round-trips.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descPendingAttachmentsRef = useRef<Attachment[]>([]);
   const descEditorAttachments = descPendingAttachments.length > 0
     ? [...(issueAttachments ?? []), ...descPendingAttachments]
     : issueAttachments;
   const handleDescriptionUpload = useCallback(
     async (file: File) => {
       const result = await uploadWithToast(file);
-      if (result) setDescPendingAttachments((prev) => [...prev, result]);
+      if (result) {
+        descPendingAttachmentsRef.current = [
+          ...descPendingAttachmentsRef.current,
+          result,
+        ];
+        setDescPendingAttachments(descPendingAttachmentsRef.current);
+      }
       return result;
     },
     [uploadWithToast],
   );
+
+  useEffect(() => {
+    descPendingAttachmentsRef.current = [];
+    setDescPendingAttachments([]);
+  }, [id]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -1286,6 +1299,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (panel.isCollapsed()) panel.expand();
     else panel.collapse();
   }, [isMobile, sidebarRef]);
+
+  useIssueDetailScrollRestore({
+    restoreKey: `${wsId}:${id}`,
+    scrollContainerEl,
+    ready: !!issue && !loading && !timelineLoading,
+    disabled: !!highlightCommentId,
+  });
 
   if (loading) {
     return (
@@ -1862,13 +1882,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // webview) — while still working on web via the cookie/proxy.
                 // This mirrors the comment/reply/chat composers, which already
                 // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
-                const ids = descPendingAttachments
+                const ids = descPendingAttachmentsRef.current
                   .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);
                 handleUpdateField({ description: md, attachment_ids: ids.length > 0 ? ids : undefined });
               }}
               onUploadFile={handleDescriptionUpload}
               debounceMs={1500}
+              // Closing the issue modal must save what the user last saw —
+              // without the flush, a paste followed by a quick close loses
+              // the image markdown and its attachment_ids bind (MUL-3254).
+              flushPendingOnUnmount
               currentIssueId={id}
               attachments={descEditorAttachments}
             />

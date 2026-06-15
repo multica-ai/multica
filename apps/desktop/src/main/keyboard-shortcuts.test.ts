@@ -14,13 +14,14 @@ function makeWc(initialLevel = 0) {
 
 function key(
   k: string,
-  mods: Partial<Pick<ShortcutInput, "control" | "meta">> = {},
+  mods: Partial<Pick<ShortcutInput, "control" | "meta" | "shift">> = {},
 ): ShortcutInput {
   return {
     type: "keyDown",
     key: k,
     control: false,
     meta: false,
+    shift: false,
     ...mods,
   };
 }
@@ -148,5 +149,38 @@ describe("handleAppShortcut — unrelated keys pass through", () => {
     const wc = makeWc();
     expect(handleAppShortcut(key("a", { meta: true }), wc, "darwin")).toBe(false);
     expect(handleAppShortcut(key("k", { meta: true }), wc, "darwin")).toBe(false);
+  });
+});
+
+describe("handleAppShortcut — close tab (Cmd/Ctrl+W)", () => {
+  it('returns "close-tab" on Cmd+W (macOS)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w", { meta: true }), wc, "darwin")).toBe("close-tab");
+  });
+
+  it('returns "close-tab" on Cmd+W uppercase', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { meta: true }), wc, "darwin")).toBe("close-tab");
+  });
+
+  it('returns "close-tab" on Ctrl+W (Linux/Windows)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w", { control: true }), wc, "linux")).toBe("close-tab");
+    expect(handleAppShortcut(key("w", { control: true }), wc, "win32")).toBe("close-tab");
+  });
+
+  it("does not trigger without Cmd/Ctrl modifier", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("w"), wc, "darwin")).toBe(false);
+  });
+
+  it("does not trigger on Cmd+Shift+W (reserved for close-window)", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { meta: true, shift: true }), wc, "darwin")).toBe(false);
+  });
+
+  it("does not trigger on Ctrl+Shift+W (reserved for close-window)", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key("W", { control: true, shift: true }), wc, "linux")).toBe(false);
   });
 });

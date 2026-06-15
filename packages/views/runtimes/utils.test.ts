@@ -263,6 +263,39 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("prices Cursor Composer rows at the published rates without cache-write spend", () => {
+    const costWithAllTokenTypes = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+
+    expect(costWithAllTokenTypes("auto")).toBeCloseTo(1.25 + 6 + 0.25, 5);
+    expect(costWithAllTokenTypes("composer-2.5-fast")).toBeCloseTo(
+      3 + 15 + 0.5,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2.5")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-2-fast")).toBeCloseTo(
+      1.5 + 7.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-1.5")).toBeCloseTo(
+      3.5 + 17.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-1")).toBeCloseTo(
+      1.25 + 10 + 0.125,
+      5,
+    );
+    expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
   // The Chinese-model rates below are spot-checked against the literal
   // numbers on the three official price sheets cited in MODEL_PRICING's
   // header comment. Pinning them in tests is what catches a future edit

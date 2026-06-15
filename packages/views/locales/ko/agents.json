@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "내 것",
-    "all": "전체"
+    "all": "전체",
+    "archived": "보관됨"
   },
   "sort": {
     "label_recent": "최근 활동",
@@ -66,7 +67,11 @@
     "workload": "작업량",
     "runtime": "런타임",
     "activity_7d": "활동(7일)",
-    "runs": "실행"
+    "runs": "실행",
+    "last_active": "최근 활동",
+    "model": "모델",
+    "created": "생성일",
+    "owner": "소유자"
   },
   "row": {
     "you": "나",
@@ -74,7 +79,9 @@
     "no_description": "설명 없음",
     "fallback_runtime_cloud": "클라우드",
     "fallback_runtime_local": "로컬",
-    "actions_aria": "행 작업"
+    "actions_aria": "행 작업",
+    "task_count_one": "태스크 {{count}}개",
+    "task_count_other": "태스크 {{count}}개"
   },
   "activity_tooltip": {
     "created_today": "오늘 생성됨",
@@ -210,6 +217,7 @@
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",
     "integrations": "연동",
+    "runtime_config": "라우팅",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
     "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
@@ -320,6 +328,26 @@
       "save_failed_toast": "MCP config를 저장하지 못했습니다",
       "redacted_title": "설정됨 - 현재 보기에서는 숨김",
       "redacted_hint": "에이전트 소유자 또는 워크스페이스 관리자만 이 config를 읽을 수 있습니다."
+    },
+    "runtime_config": {
+      "intro": "OpenClaw 런타임이 이 에이전트의 각 턴을 어떻게 실행할지 선택하세요. Local 모드는 에이전트를 daemon 프로세스 내부에서 실행합니다. Gateway 모드는 각 턴을 OpenClaw Gateway로 전달합니다 — daemon 호스트가 가벼운 조율기 역할을 하고 실제 작업은 더 강력한 머신에서 돌리고 싶을 때 유용합니다.",
+      "mode_label": "라우팅 모드",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "기본값. daemon이 `openclaw agent --local …`을 실행하고 에이전트 루프가 이 호스트에서 동작합니다.",
+      "mode_gateway_hint": "daemon이 OpenClaw Gateway에 다이얼합니다. 엔드포인트 필드를 비워두면 daemon 호스트의 `~/.openclaw/openclaw.json`에서 상속받습니다.",
+      "gateway_legend": "Gateway 엔드포인트",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "포트",
+      "port_invalid": "포트는 양의 정수여야 합니다.",
+      "token_label": "인증 토큰",
+      "token_placeholder": "Gateway가 발급한 bearer 토큰",
+      "token_masked_placeholder": "저장됨 — 회전하려면 새 값을 입력. 비워두면 유지됩니다",
+      "tls_label": "TLS 사용",
+      "tls_hint": "http:// 대신 https://로 다이얼",
+      "saved_toast": "라우팅 설정이 저장되었습니다",
+      "save_failed_toast": "라우팅 설정 저장 실패"
     },
     "skills": {
       "intro": "이 에이전트에 할당된 워크스페이스 스킬입니다. 로컬 런타임 스킬은 항상 자동으로 사용할 수 있습니다.",
@@ -444,5 +472,32 @@
     "runtime_offline": "데몬 오프라인",
     "runtime_recovery": "데몬 재시작됨",
     "manual": "사용자가 취소함"
+  },
+  "last_active": {
+    "today": "오늘",
+    "days_ago_one": "{{count}}일 전",
+    "days_ago_other": "{{count}}일 전",
+    "none": "30일간 활동 없음"
+  },
+  "toolbar": {
+    "result_count_title": "일치하는 에이전트 / 범위 내 전체",
+    "filter_label": "필터",
+    "filter_active_count_one": "필터 {{count}}개",
+    "filter_active_count_other": "필터 {{count}}개",
+    "clear_filters": "필터 지우기",
+    "section_availability": "가용성",
+    "section_runtime": "런타임",
+    "display": "표시",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "section_owner": "소유자",
+    "section_model": "모델"
+  },
+  "actions": {
+    "selected_one": "{{count}}개 선택됨",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제"
   }
 }

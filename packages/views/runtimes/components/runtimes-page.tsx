@@ -204,7 +204,7 @@ export function RuntimesPage({
           <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
         </div>
       ) : isMobile ? (
-        <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
+        <div className="flex min-h-0 flex-1 flex-col bg-background">
           <MachineSidebar
             machines={filteredMachines}
             totalMachines={machines.length}
@@ -227,7 +227,7 @@ export function RuntimesPage({
           />
         </div>
       ) : (
-        <div className="min-h-0 flex-1 border-t bg-background">
+        <div className="min-h-0 flex-1 bg-background">
           <ResizablePanelGroup
             orientation="horizontal"
             className="min-h-0 flex-1"
@@ -320,9 +320,20 @@ function PageHeaderBar({
             {t(($) => $.cloud_runtime.action)}
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
+        {/* Quiet chrome button (outline, icon-only below md) — primary is
+            reserved for the empty state's CTA. */}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.connect_remote)}
+          onClick={onConnectRemote}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">
+            {t(($) => $.page.connect_remote)}
+          </span>
         </Button>
       </div>
     </PageHeader>
@@ -733,7 +744,7 @@ function RuntimesPageSkeleton() {
       <PageHeader className="justify-between px-5">
         <Skeleton className="h-4 w-24" />
       </PageHeader>
-      <div className="flex min-h-0 flex-1 border-t">
+      <div className="flex min-h-0 flex-1">
         <div className="hidden w-[300px] shrink-0 border-r p-3 md:block">
           <Skeleton className="h-9 w-full rounded-md" />
           <div className="mt-3 flex gap-2">

@@ -293,6 +293,50 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.22",
+        date: "2026-06-15",
+        title: "Faster Lists, Easier Runtime Setup, and Safer Issue Editing",
+        changes: [],
+        features: [
+          "Agents, autopilots, projects, runtimes, skills, and squads now use a faster, more consistent list experience with clearer rows, filters, selections, and actions",
+          "The command line can now manage workspace repositories, so local agents can pick up project repo context more easily",
+          "Cursor and OpenClaw are easier to set up: Cursor connection settings can be managed for you, and OpenClaw can connect through an existing gateway",
+          "When editing a comment, you can preview and control which agents or squads will run before saving",
+        ],
+        improvements: [
+          "Desktop recovery prompts now include more page context, making stuck-window reports easier to understand",
+          "Long Issues and inbox views now keep their scroll position and comment anchors more reliably when you navigate away and return",
+          "Cursor usage and billing details are clearer for Composer, cached inputs, and newer Cursor agent output",
+        ],
+        fixes: [
+          "Issue attachments, inline images, and file cards are more reliable across web, desktop, mobile, and shared token links",
+          "The editor and read-only Issue content now handle dollar amounts and email links more predictably",
+          "Desktop Cmd+W now closes the active tab first, then the window when no tab can be closed",
+          "Self-hosted Docker Compose uploads and default settings fail less often, with missing values caught earlier",
+          "Agent tasks now stop safely when their run credentials are invalid",
+        ],
+      },
+      {
+        version: "0.3.21",
+        date: "2026-06-12",
+        title: "CodeBuddy Runtime",
+        changes: [],
+        features: [
+          "CodeBuddy can now run local Multica agents, with its available model and effort choices shown automatically",
+          "Quick-created Issues now keep uploaded files attached from the first draft through the final Issue",
+        ],
+        improvements: [
+          "Skill import conflicts are clearer: locked skills show a person's name instead of an internal ID, and a single overwrite now completes in one click",
+          "Desktop recovery prompts now explain what happened first and give clearer details to include when reporting a stuck window",
+          "Views that sort or filter people by signup time can now load faster",
+        ],
+        fixes: [
+          "Chat now keeps messages and drafts in sync when sending, stopping, or recovering from a failed send",
+          "Lark account binding now works reliably for users who are already signed in, and sign-in returns to the binding page",
+          "Local agent runs no longer announce that work has started before the task folder is ready",
+        ],
+      },
+      {
         version: "0.3.20",
         date: "2026-06-11",
         title: "Skill Imports, Cleaner Run History, and Resilient Agents",

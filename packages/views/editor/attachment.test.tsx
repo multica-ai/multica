@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 
 const {
   getAttachmentTextContentMock,
+  getAttachmentMock,
   getBaseUrlMock,
   downloadMock,
   openExternalMock,
   openByUrlMock,
 } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
+  getAttachmentMock: vi.fn(),
   // Default: empty base URL so existing tests render site-relative URLs
   // through the proxy (i.e. exactly the way the web app behaves). The
   // absolutize-specific suite below overrides this to simulate Desktop /
@@ -25,6 +27,7 @@ const {
 vi.mock("@multica/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
+    getAttachment: getAttachmentMock,
     getBaseUrl: getBaseUrlMock,
   },
   PreviewTooLargeError: class extends Error {},
@@ -154,7 +157,7 @@ function renderWithQuery(ui: ReactElement) {
 beforeEach(() => {
   vi.clearAllMocks();
   resolverState.attachments = [];
-  configStore.setState({ cdnDomain: "" });
+  configStore.setState({ cdnDomain: "", cdnSigned: false });
   // Default to "no proxy override" — site-relative URLs stay as-is, mirroring
   // the web app's same-origin proxy. Tests that simulate Desktop / mobile
   // webview override per-case via getBaseUrlMock.mockReturnValue(...).
@@ -257,6 +260,173 @@ describe("Attachment — image dispatch", () => {
     expect(img?.getAttribute("src")).toBe(
       "https://cdn.example.test/uploads/ws/shot.png",
     );
+  });
+
+  it("opens preview with the same resolved media URL when a reopened draft record has no download_url", () => {
+    configStore.setState({ cdnDomain: "cdn.example.test" });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const mediaUrl = "https://cdn.example.test/uploads/ws/shot.png";
+    const att = makeRecord({
+      id,
+      url: mediaUrl,
+      markdown_url: markdownUrl,
+      download_url: "",
+    });
+    resolverState.attachments = [att];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle("View"));
+
+    const imageSrcs = [...document.querySelectorAll("img")].map((img) =>
+      img.getAttribute("src"),
+    );
+    expect(imageSrcs).toEqual([mediaUrl, mediaUrl]);
+    expect(imageSrcs).not.toContain("");
+  });
+
+  it("does not pick the raw CDN url when the server reports cdn_signed (MUL-3254)", () => {
+    // CloudFront signed-URL mode: the CDN domain serves PRIVATE content and
+    // a raw (unsigned) storage URL is a guaranteed 403. The pick must fall
+    // through to the durable markdown_url instead.
+    configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const att = makeRecord({
+      id,
+      url: "https://cdn.example.test/uploads/ws/shot.png",
+      markdown_url: markdownUrl,
+      download_url: "",
+    });
+    resolverState.attachments = [att];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(markdownUrl);
+    // Web (same-origin proxy / same-site cookie): the API endpoint loads
+    // natively, so no metadata re-fetch is needed.
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+  });
+
+  it("re-signs the inline media URL through getAttachment on token-mode clients (MUL-3254)", async () => {
+    // Desktop / mobile webview: file:// document origin, Bearer-token auth.
+    // The auth-gated /api/attachments/<id>/download endpoint 401s as a
+    // native <img> fetch, so the renderer must swap in a freshly signed URL
+    // from authenticated attachment metadata — the reopened-draft case where
+    // the persisted record deliberately strips the expired download_url.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const signed =
+      "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
+    const att = makeRecord({
+      id,
+      url: "https://cdn.example.test/uploads/ws/shot.png",
+      markdown_url: markdownUrl,
+      download_url: "",
+    });
+    resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signed);
+    });
+    expect(getAttachmentMock).toHaveBeenCalledWith(id);
+  });
+
+  it("re-signs URL-only inline media when no resolver record is available (MUL-3254)", async () => {
+    // If the markdown parser has only the durable API URL, the attachment id
+    // is still recoverable from the URL itself. Token-mode clients must not
+    // depend on the context resolver having a hydrated record before they can
+    // fetch fresh signed metadata.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    configStore.setState({ cdnDomain: "cdn.example.test", cdnSigned: true });
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const signed =
+      "https://cdn.example.test/uploads/ws/shot.png?Signature=fresh&Key-Pair-Id=K";
+    getAttachmentMock.mockResolvedValue(makeRecord({ id, download_url: signed }));
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(signed);
+    });
+    expect(getAttachmentMock).toHaveBeenCalledWith(id);
+  });
+
+  it("keeps the picked URL when fresh metadata has no signed download_url (MUL-3254)", async () => {
+    // Non-CloudFront deployments return the API path again as download_url —
+    // swapping to it gains nothing, so the original pick must stay.
+    getBaseUrlMock.mockReturnValue("https://multica-api.copilothub.ai");
+    const id = "11111111-2222-3333-4444-555555555555";
+    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${id}/download`;
+    const att = makeRecord({
+      id,
+      url: "https://cdn.example.test/uploads/ws/shot.png",
+      markdown_url: markdownUrl,
+      download_url: "",
+    });
+    configStore.setState({ cdnDomain: "", cdnSigned: false });
+    resolverState.attachments = [att];
+    getAttachmentMock.mockResolvedValue(
+      makeRecord({ id, download_url: `/api/attachments/${id}/download` }),
+    );
+
+    renderWithQuery(
+      <Attachment
+        attachment={{
+          kind: "url",
+          url: markdownUrl,
+          filename: "shot.png",
+          forceKind: "image",
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(id));
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(markdownUrl);
   });
 
   it("forceKind=image renders as image even when filename is empty (markdown ![](url) regression)", () => {
@@ -392,6 +562,31 @@ describe("Attachment — file-card dispatch", () => {
     expect(screen.getByText("manual.pdf")).toBeTruthy();
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("url-only stable attachment download file-card resolves to record and downloads by id", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    resolverState.attachments = [
+      makeRecord({
+        id,
+        filename: "manual.pdf",
+        content_type: "application/pdf",
+        url: "/uploads/manual.pdf",
+        markdown_url: href,
+        download_url: href,
+      }),
+    ];
+
+    renderWithQuery(
+      <Attachment
+        attachment={{ kind: "url", url: href, filename: "manual.pdf" }}
+      />,
+    );
+
+    expect(screen.getByText("manual.pdf")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByTitle("Download"));
+    expect(downloadMock).toHaveBeenCalledWith(id);
   });
 
   it("uploading file-card surfaces the uploading template, no Preview/Download", () => {

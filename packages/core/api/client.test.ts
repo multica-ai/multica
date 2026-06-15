@@ -177,11 +177,29 @@ describe("ApiClient", () => {
           status: 201,
           headers: { "Content-Type": "application/json" },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          id: "comment-1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "user-1",
+          content: "updated",
+          type: "comment",
+          parent_id: null,
+          reactions: [],
+          attachments: [],
+          created_at: "2026-06-05T00:00:00Z",
+          updated_at: "2026-06-05T00:01:00Z",
+        }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
       );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.previewCommentTriggers("issue-1", "hello", "parent-1");
+    await client.previewCommentTriggers("issue-1", "hello", "parent-1", "comment-1");
     await client.createComment(
       "issue-1",
       "hello",
@@ -190,6 +208,7 @@ describe("ApiClient", () => {
       ["attachment-1"],
       ["agent-1"],
     );
+    await client.updateComment("comment-1", "updated", ["attachment-1"], ["agent-1"]);
 
     expect(fetchMock.mock.calls.map(([url, init]) => ({
       url,
@@ -199,7 +218,7 @@ describe("ApiClient", () => {
       {
         url: "https://api.example.test/api/issues/issue-1/comments/trigger-preview",
         method: "POST",
-        body: JSON.stringify({ content: "hello", parent_id: "parent-1" }),
+        body: JSON.stringify({ content: "hello", parent_id: "parent-1", editing_comment_id: "comment-1" }),
       },
       {
         url: "https://api.example.test/api/issues/issue-1/comments",
@@ -208,6 +227,15 @@ describe("ApiClient", () => {
           content: "hello",
           type: "comment",
           parent_id: "parent-1",
+          attachment_ids: ["attachment-1"],
+          suppress_agent_ids: ["agent-1"],
+        }),
+      },
+      {
+        url: "https://api.example.test/api/comments/comment-1",
+        method: "PUT",
+        body: JSON.stringify({
+          content: "updated",
           attachment_ids: ["attachment-1"],
           suppress_agent_ids: ["agent-1"],
         }),

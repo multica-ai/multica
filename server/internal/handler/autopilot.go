@@ -45,6 +45,13 @@ type AutopilotResponse struct {
 	LastRunAt          *string `json:"last_run_at"`
 	CreatedAt          string  `json:"created_at"`
 	UpdatedAt          string  `json:"updated_at"`
+
+	// List-endpoint-only derived fields (absent on the detail/create/update
+	// responses and on older servers — clients must treat them as optional).
+	// Enabled triggers only; last_run_status is the most recent run's status.
+	TriggerKinds  []string `json:"trigger_kinds,omitempty"`
+	NextRunAt     *string  `json:"next_run_at,omitempty"`
+	LastRunStatus *string  `json:"last_run_status,omitempty"`
 }
 
 type AutopilotTriggerResponse struct {
@@ -326,8 +333,17 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AutopilotResponse, len(autopilots))
-	for i, a := range autopilots {
-		resp[i] = autopilotToResponse(a)
+	for i, row := range autopilots {
+		r := autopilotToResponse(row.Autopilot)
+		r.TriggerKinds = row.TriggerKinds
+		if row.NextRunAt.Valid {
+			r.NextRunAt = timestampToPtr(row.NextRunAt)
+		}
+		if row.LastRunStatus != "" {
+			s := row.LastRunStatus
+			r.LastRunStatus = &s
+		}
+		resp[i] = r
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"autopilots": resp, "total": len(resp)})
 }

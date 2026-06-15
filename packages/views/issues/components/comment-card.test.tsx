@@ -86,3 +86,27 @@ describe("AttachmentList — standalone HTML attachment routes through Attachmen
     expect(screen.queryByText("report.html")).toBeNull();
   });
 });
+
+describe("AttachmentList — inline attachment filtering", () => {
+  it("does not render a bottom attachment row when the body already has the stable file-card URL", () => {
+    const id = "11111111-2222-3333-4444-555555555555";
+    const href = `/api/attachments/${id}/download`;
+    const attachment = {
+      id,
+      url: "/uploads/report.pdf",
+      filename: "report.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+    } as any;
+
+    const { container } = renderWithQuery(
+      <AttachmentList
+        attachments={[attachment]}
+        content={`!file[report.pdf](${href})`}
+      />,
+    );
+
+    expect(screen.queryByText("report.pdf")).toBeNull();
+    expect(container.firstChild).toBeNull();
+  });
+});
