@@ -38,6 +38,11 @@ const (
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
 	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
+	// blindRunThreshold is the minimum number of shell commands that must have
+	// executed before a blind-run warning is logged. Fewer than this means the
+	// agent simply didn't use shell tools enough to draw a conclusion about
+	// output capture. See openai/codex#20874.
+	blindRunThreshold = 3
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -1187,10 +1192,15 @@ type codexClient struct {
 
 	// Blind-run detection: track shell command results to detect when the codex
 	// runtime is returning empty output for every command (upstream Windows bug,
-	// openai/codex#20874). When execCommands > 0 and emptyExecCommands == execCommands,
-	// the agent ran blind — it could not see any command output.
-	execCommands      int
-	emptyExecCommands int
+	// openai/codex#20874). Counters are per-turn and reset on each new turn so a
+	// single productive command clears the blind-run flag for the rest of the turn.
+	//
+	// Concurrency: these are written by the reader goroutine (trackExecCommandResult
+	// in handleLine) and read by the lifecycle goroutine (isBlindRun). atomic.Int64
+	// provides the necessary happens-before edges without taking codexClient.mu,
+	// which is scoped to pending RPC bookkeeping.
+	execCommands      atomic.Int64
+	emptyExecCommands atomic.Int64
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -1211,22 +1221,31 @@ func (c *codexClient) getTurnError() string {
 }
 
 // trackExecCommandResult records a shell command result for blind-run detection.
-// When all shell commands return empty output on a platform affected by
-// openai/codex#20874 (Windows), the agent is running blind — it cannot read
-// command results to verify its actions or consume task input.
+// Only commandExecution tool results are tracked (not fileChange or agentMessage).
+// output is trimmed before the empty check — a whitespace-only or missing
+// aggregatedOutput field both count as empty. Uses atomic counters so the
+// reader goroutine and the lifecycle goroutine can both call this safely.
 func (c *codexClient) trackExecCommandResult(output string) {
-	c.execCommands++
+	c.execCommands.Add(1)
 	if strings.TrimSpace(output) == "" {
-		c.emptyExecCommands++
+		c.emptyExecCommands.Add(1)
 	}
 }
 
+// resetBlindRunCounters clears per-turn shell command counters. Called at the
+// start of each new turn so a previous turn's blind run doesn't carry over.
+func (c *codexClient) resetBlindRunCounters() {
+	c.execCommands.Store(0)
+	c.emptyExecCommands.Store(0)
+}
+
 // isBlindRun reports whether every shell command executed during this turn
-// returned empty output, which means the agent ran blind. At least 3 commands
-// must have executed to avoid false positives from runs that simply didn't
-// use shell tools.
+// returned empty output, which means the agent ran blind. At least
+// blindRunThreshold commands must have executed to avoid false positives from
+// runs that simply didn't use shell tools.
 func (c *codexClient) isBlindRun() bool {
-	return c.execCommands >= 3 && c.emptyExecCommands == c.execCommands
+	ec := c.execCommands.Load()
+	return ec >= blindRunThreshold && c.emptyExecCommands.Load() == ec
 }
 
 type pendingRPC struct {

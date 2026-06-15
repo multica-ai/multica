@@ -2124,7 +2124,8 @@ func TestCodexTrackExecCommandResult(t *testing.T) {
 		t.Fatalf("after whitespace: execCommands=%d emptyExecCommands=%d, want 3,2", c.execCommands.Load(), c.emptyExecCommands.Load())
 	}
 
-	// Missing/nil aggregatedOutput — empty string passed, counts as empty.
+	// Map missing aggregatedOutput key — item["aggregatedOutput"].(string)
+	// returns "", which counts as empty (same as whitespace-only output).
 	c.trackExecCommandResult("")
 	if c.execCommands.Load() != 4 || c.emptyExecCommands.Load() != 3 {
 		t.Fatalf("after nil output: execCommands=%d emptyExecCommands=%d, want 4,3", c.execCommands.Load(), c.emptyExecCommands.Load())
