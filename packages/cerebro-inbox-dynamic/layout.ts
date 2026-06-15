@@ -54,7 +54,10 @@ export type SectionKind =
   | "team"
   // TECH-3557 — Secretary: a focused local batch over existing inbox rows.
   // Rendered by a dedicated component so it can manage its start/selection flow.
-  | "secretary";
+  | "secretary"
+  // TECH-3579 — Favorites: only the conversations the user has starred. The
+  // same predicate also floats favorites to the top of the "All messages" box.
+  | "favorites";
 
 /** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
  *  widened to the full classic-inbox set (project / agent / type) so the "All
@@ -150,6 +153,11 @@ export interface InboxSectionConfig {
   /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
    *  undefined / false = only people + channels. Opt-in via section settings. */
   showAgents?: boolean;
+  // TECH-3579 — "All messages" box only: float starred conversations into a
+  // "Favorites" sub-section at the very top. Default on; when false, favorites
+  // stay in their normal position (and can still be starred). No effect on
+  // other box kinds (the standalone "favorites" box is all-favorites already).
+  showFavoritesSection?: boolean;
 }
 
 export interface InboxTabConfig {
@@ -187,6 +195,9 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },
+  // TECH-3579 — only surfaced in the Add-section menu when the
+  // cerebro_inbox_favorites flag is on (filtered in DynamicInbox).
+  { kind: "favorites", label: "Favorites" },
   { kind: "filter", label: "Custom filter…" },
   // TECH-3422 — only surfaced in the Add-section menu when the
   // cerebro_inbox_slack_block flag is on (filtered in DynamicInbox).

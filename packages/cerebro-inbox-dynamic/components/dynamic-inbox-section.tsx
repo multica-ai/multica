@@ -2,7 +2,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, Settings2, X, Pencil, Filter } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings2, X, Pencil, Filter, Star } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -96,8 +96,12 @@ export interface DynamicInboxSectionProps {
   /** TECH-3541 (Jesper) — the permanent inbox block cannot be removed; its X
    *  affordance is hidden. Defaults to removable. */
   removable?: boolean;
+  /** TECH-3579 — show the favorite star on rows + the favorites-on-top section. */
+  favoritesEnabled?: boolean;
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
+  /** TECH-3579 — star / unstar a conversation. */
+  onToggleFavorite?: (entry: DynInboxEntry) => void;
   onChange: (next: InboxSectionConfig) => void;
   onRemove: () => void;
 }
@@ -175,9 +179,27 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
     () => selectSectionEntries(entries, section, filterContext, { query }),
     [entries, section, filterContext, query],
   );
+
+  // TECH-3579 — "All messages" box only: pull starred conversations out of the
+  // normal list and show them in a "Favorites" sub-section at the very top.
+  // Default on; turn it off (per box) to keep favorites in their normal spot.
+  // The standalone "favorites" box is all-favorites already, so it never splits.
+  const favoritesOnTop =
+    !!props.favoritesEnabled &&
+    section.kind === "all" &&
+    section.showFavoritesSection !== false;
+  const favoriteEntries = useMemo(
+    () => (favoritesOnTop ? selected.filter((e) => filterContext.isFavorite?.(e)) : []),
+    [favoritesOnTop, selected, filterContext],
+  );
+  const restEntries = useMemo(
+    () => (favoritesOnTop ? selected.filter((e) => !filterContext.isFavorite?.(e)) : selected),
+    [favoritesOnTop, selected, filterContext],
+  );
+
   const groups = useMemo(
-    () => groupSectionEntries(selected, section, filterContext, actionLabels, props.groupContext),
-    [selected, section, filterContext, actionLabels, props.groupContext],
+    () => groupSectionEntries(restEntries, section, filterContext, actionLabels, props.groupContext),
+    [restEntries, section, filterContext, actionLabels, props.groupContext],
   );
 
   // #2: foldable boxes. Collapsible unless explicitly turned off; initial fold
@@ -242,6 +264,9 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
         entry.kind === "channel" && filterContext.action.mentionedChannels.has(entry.channel.id)
       }
       agentRunState={runStateFor(entry, filterContext)}
+      favoritesEnabled={props.favoritesEnabled}
+      isFavorite={filterContext.isFavorite?.(entry) ?? false}
+      onToggleFavorite={props.onToggleFavorite}
       onSelect={props.onSelect}
       onArchive={props.onArchive}
     />
@@ -433,6 +458,22 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Display</DropdownMenuLabel>
+                {/* TECH-3579 — toggle the top Favorites sub-section on the "All
+                    messages" box. Off keeps favorites in their normal position
+                    (they can still be starred). */}
+                {isAllBox && props.favoritesEnabled && (
+                  <DropdownMenuItem
+                    onClick={() =>
+                      props.onChange({
+                        ...section,
+                        showFavoritesSection: section.showFavoritesSection === false,
+                      })
+                    }
+                  >
+                    <Star className="mr-2 size-3.5" /> Favorites on top{" "}
+                    {section.showFavoritesSection !== false ? "✓" : ""}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   onClick={() => props.onChange({ ...section, collapsible: section.collapsible === false })}
                 >
@@ -553,7 +594,19 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           {selected.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>
           ) : (
-            groups.map((group) => renderGroup(group, 0))
+            <>
+              {/* TECH-3579 — starred conversations float to the top of the
+                  "All messages" box in their own Favorites sub-section. */}
+              {favoritesOnTop && favoriteEntries.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-1 px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-warning">
+                    <Star className="size-3 fill-warning" /> Favorites
+                  </div>
+                  {favoriteEntries.map(renderEntry)}
+                </div>
+              )}
+              {groups.map((group) => renderGroup(group, 0))}
+            </>
           )}
         </div>
       )}

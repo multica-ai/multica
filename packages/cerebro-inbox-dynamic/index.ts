@@ -36,3 +36,10 @@ export {
   type DynInboxEntry,
   type SectionFilterContext,
 } from "./section-filter";
+export {
+  useInboxFavorites,
+  favoriteKeyForEntry,
+  readFavorites,
+  toggleFavoriteKey,
+  INBOX_FAVORITES_KEY,
+} from "./use-favorites";

@@ -100,6 +100,19 @@ describe("section-filter", () => {
     expect(entryMatchesSection(e, { id: "s", kind: "pinned" }, ctx)).toBe(true);
   });
 
+  it("TECH-3579 — 'favorites' kind uses the isFavorite predicate (and never matches without one)", () => {
+    const fav = notifEntry(1, { issue_id: "fav-iss" });
+    const other = notifEntry(1, { issue_id: "other-iss" });
+    const favCtx: SectionFilterContext = {
+      ...ctx,
+      isFavorite: (e) => e.kind === "notif" && e.item.issue_id === "fav-iss",
+    };
+    expect(entryMatchesSection(fav, { id: "s", kind: "favorites" }, favCtx)).toBe(true);
+    expect(entryMatchesSection(other, { id: "s", kind: "favorites" }, favCtx)).toBe(false);
+    // No predicate supplied (e.g. favorites flag off) → nothing matches.
+    expect(entryMatchesSection(fav, { id: "s", kind: "favorites" }, ctx)).toBe(false);
+  });
+
   it("sorts newest-first by default and respects maxRows", () => {
     const entries = [notifEntry(1), notifEntry(3), notifEntry(2)];
     const out = selectSectionEntries(entries, { id: "s", kind: "all", maxRows: 2 }, ctx);
