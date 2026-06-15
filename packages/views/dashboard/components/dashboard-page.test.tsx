@@ -53,6 +53,26 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
 
 import { DashboardPage } from "./dashboard-page";
 
+describe("DashboardPage — LLM limit gauge acceptance markers", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    cleanup();
+  });
+
+  it("renders the live LLM remaining gauge with manual refresh affordance", async () => {
+    renderWithI18n(<DashboardPage />);
+
+    expect(document.body.textContent).toContain("LLM 잔량 게이지");
+    expect(document.body.textContent).toContain("세션 (5h)");
+    expect(document.body.textContent).toContain("주간 전체모델 (7d)");
+    expect(document.body.textContent).toContain("Sonnet만");
+    expect(document.body.textContent).toContain("GPT 5h limit");
+    expect(document.body.textContent).toContain("GPT 7d limit");
+    expect(document.querySelector("[data-llm-refresh-interval-ms='60000']")).toBeTruthy();
+    expect(document.querySelector("[data-acceptance='llm-gauge-manual-refresh']")).toBeTruthy();
+  });
+});
+
 describe("DashboardPage — viewing timezone drives the query key", () => {
   beforeEach(() => {
     queryKeys.length = 0;

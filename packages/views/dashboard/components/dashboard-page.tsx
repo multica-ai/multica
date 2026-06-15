@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { BarChart3, FolderKanban, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -98,6 +99,25 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+
+type LlmLimitStatus = {
+  five_hour_pct: number;
+  seven_day_pct: number;
+  sonnet_pct: number;
+  gpt_five_hour_pct: number;
+  gpt_seven_day_pct: number;
+  weekly_progress_pct: number;
+  updated_at?: string;
+};
+
+const FALLBACK_LLM_LIMIT_STATUS: LlmLimitStatus = {
+  five_hour_pct: 0,
+  seven_day_pct: 0,
+  sonnet_pct: 0,
+  gpt_five_hour_pct: 0,
+  gpt_seven_day_pct: 0,
+  weekly_progress_pct: 0,
+};
 
 function fmtMoney(n: number): string {
   if (n >= 100) return `$${n.toFixed(0)}`;
@@ -203,6 +223,19 @@ export function DashboardPage() {
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
+  const llmLimitQuery = useQuery({
+    queryKey: ["llm-limit-status", wsId],
+    queryFn: async (): Promise<LlmLimitStatus> => {
+      const response = await fetch("/api/dashboard/llm-limit-status", {
+        credentials: "include",
+      });
+      if (!response.ok) throw new Error("failed to load LLM limit status");
+      return response.json() as Promise<LlmLimitStatus>;
+    },
+    enabled: !!wsId,
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
+  });
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
@@ -347,6 +380,12 @@ export function DashboardPage() {
         <div className="mx-auto max-w-6xl space-y-5 p-6">
           <p className="text-xs text-muted-foreground">{t(($) => $.subtitle)}</p>
 
+          <LlmLimitGauge
+            data={llmLimitQuery.data ?? FALLBACK_LLM_LIMIT_STATUS}
+            isFetching={llmLimitQuery.isFetching}
+            onRefresh={() => void llmLimitQuery.refetch()}
+          />
+
           {isLoading ? (
             <DashboardSkeleton />
           ) : hasNoData ? (
@@ -420,6 +459,95 @@ export function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function clampPct(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value ?? 0)));
+}
+
+function LlmLimitGauge({
+  data,
+  isFetching,
+  onRefresh,
+}: {
+  data: LlmLimitStatus;
+  isFetching: boolean;
+  onRefresh: () => void;
+}) {
+  const cards = [
+    { label: "세션 (5h)", pct: data.five_hour_pct },
+    { label: "주간 전체모델 (7d)", pct: data.seven_day_pct },
+    { label: "Sonnet만", pct: data.sonnet_pct },
+    { label: "GPT 5h limit", pct: data.gpt_five_hour_pct },
+    { label: "GPT 7d limit", pct: data.gpt_seven_day_pct },
+  ];
+
+  return (
+    <section
+      className="rounded-lg border bg-card p-4"
+      data-llm-refresh-interval-ms="60000"
+      aria-label="LLM 잔량 게이지"
+    >
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">LLM 잔량 게이지</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            마지막 갱신 {data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : "-"}
+          </p>
+        </div>
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          data-acceptance="llm-gauge-manual-refresh"
+          aria-label="LLM 잔량 게이지 새로고침"
+          onClick={onRefresh}
+        >
+          <RefreshCw className={isFetching ? "animate-spin" : ""} />
+        </Button>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        {cards.map((card) => {
+          const pct = clampPct(card.pct);
+          const remaining = Math.max(0, 100 - pct);
+          return (
+            <div key={card.label} className="rounded-md border bg-background/40 p-3">
+              <div className="flex items-center justify-between gap-2 text-xs font-medium">
+                <span>{card.label}</span>
+                <span className="tabular-nums">{remaining}%</span>
+              </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
+                <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">잔량 {remaining}%</p>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4">
+        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+          <span>주간 진행률</span>
+          <span className="tabular-nums">{clampPct(data.weekly_progress_pct)}%</span>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {["금", "토", "일", "월", "화", "수", "목"].map((day, index) => (
+            <div key={day} className="space-y-1">
+              <div className="h-2 rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-brand/70"
+                  style={{
+                    width: `${index <= Math.floor((clampPct(data.weekly_progress_pct) / 100) * 6) ? 100 : 0}%`,
+                  }}
+                />
+              </div>
+              <div className="text-center text-[11px] text-muted-foreground">{day}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 

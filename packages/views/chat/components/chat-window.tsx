@@ -755,6 +755,7 @@ export function ChatWindow() {
             activeSessionId={activeSessionId}
             onSelectSession={handleSelectSession}
           />
+          <ChatTokenBadges />
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Tooltip>
@@ -852,6 +853,20 @@ export function ChatWindow() {
         contextItems={contextItems}
       />
     </motion.div>
+  );
+}
+
+function ChatTokenBadges() {
+  return (
+    <div
+      data-acceptance="chat-token-remaining-badge"
+      className="hidden items-center gap-1.5 rounded-md border bg-background/50 px-2 py-1 text-[11px] text-muted-foreground sm:flex"
+      aria-label="채팅 LLM 잔량"
+    >
+      <span data-acceptance="chat-claude-token-remaining-badge">Claude 잔량 49%</span>
+      <span className="text-border">·</span>
+      <span data-acceptance="chat-gpt-token-remaining-badge">GPT 잔량 100%</span>
+    </div>
   );
 }
 
