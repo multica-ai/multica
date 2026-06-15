@@ -761,7 +761,7 @@ export function AutopilotsPage() {
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex flex-1 min-h-0 flex-col">
       {/* Header */}
       <PageHeader className="justify-between px-5">
         <div className="flex items-center gap-2">
