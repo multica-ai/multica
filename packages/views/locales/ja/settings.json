@@ -19,6 +19,17 @@
       "browser_suffix": " (ブラウザ)",
       "hint": "ダッシュボード、チャート、表示される「今日」ラベルに使用されます。すべてのワークスペースに適用される個人設定です。",
       "sync_failed": "タイムゾーン設定を保存できませんでした。"
+    },
+    "input_options": {
+      "title": "入力オプション",
+      "enter_key": {
+        "label": "メッセージ入力中に Enter キーを押したとき",
+        "send": "メッセージを送信",
+        "newline": "改行する",
+        "send_hint": "Shift+Enter で改行できます。",
+        "newline_hint": "{{shortcut}} で送信できます。",
+        "sync_failed": "入力設定を保存できませんでした。"
+      }
     }
   },
   "page": {

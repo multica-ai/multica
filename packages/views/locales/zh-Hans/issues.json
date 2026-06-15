@@ -304,7 +304,8 @@
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"
-    }
+    },
+    "send_shortcut_hint": "使用 {{shortcut}} 发送"
   },
   "reply": {
     "placeholder": "回复..."

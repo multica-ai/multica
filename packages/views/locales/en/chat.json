@@ -12,7 +12,8 @@
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
     "stop_tooltip": "Stop",
-    "send_failed_toast": "Failed to send message"
+    "send_failed_toast": "Failed to send message",
+    "send_shortcut_hint": "{{shortcut}} to send"
   },
   "message_list": {
     "show_details": "Show details",

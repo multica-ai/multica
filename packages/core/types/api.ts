@@ -1,5 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
-import type { MemberRole } from "./workspace";
+import type { MemberRole, MessageEnterKeyBehavior } from "./workspace";
 import type { Project } from "./project";
 
 // Issue API
@@ -165,6 +165,8 @@ export interface UpdateMeRequest {
   profile_description?: string;
   /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
   timezone?: string;
+  /** Enter key behavior in chat/comment composers. */
+  message_enter_key_behavior?: MessageEnterKeyBehavior;
 }
 
 export interface CreateMemberRequest {

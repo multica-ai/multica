@@ -440,6 +440,10 @@ export const UserSchema: z.ZodType<User> = z.object({
   timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  message_enter_key_behavior: z
+    .enum(["send", "newline"])
+    .default("newline")
+    .catch("newline"),
 }).loose();
 
 // `id: ""` is the sentinel for "drifted / unauthenticated"; downstream code
@@ -458,6 +462,7 @@ export const EMPTY_USER: User = {
   timezone: null,
   created_at: "",
   updated_at: "",
+  message_enter_key_behavior: "newline",
 };
 
 export const WorkspaceSchema: z.ZodType<Workspace> = z.object({

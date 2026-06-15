@@ -58,7 +58,9 @@ type UserResponse struct {
 	AvatarURL *string `json:"avatar_url"`
 	Language  *string `json:"language"`
 	// Pinned IANA tz; nil = no preference (use browser-detected tz).
-	Timezone                *string         `json:"timezone"`
+	Timezone *string `json:"timezone"`
+	// Controls Enter behavior in chat/comment composers: "send" or "newline"
+	MessageEnterKeyBehavior string          `json:"message_enter_key_behavior"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
@@ -88,6 +90,7 @@ func userToResponse(u db.User) UserResponse {
 		AvatarURL:               textToPtr(u.AvatarUrl),
 		Language:                textToPtr(u.Language),
 		Timezone:                textToPtr(u.Timezone),
+		MessageEnterKeyBehavior: u.MessageEnterKeyBehavior,
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
@@ -436,10 +439,11 @@ func (h *Handler) GetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateMeRequest struct {
-	Name               *string `json:"name"`
-	AvatarURL          *string `json:"avatar_url"`
-	Language           *string `json:"language"`
-	ProfileDescription *string `json:"profile_description"`
+	Name                    *string `json:"name"`
+	AvatarURL               *string `json:"avatar_url"`
+	Language                *string `json:"language"`
+	ProfileDescription      *string `json:"profile_description"`
+	MessageEnterKeyBehavior *string `json:"message_enter_key_behavior"`
 	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
 	Timezone *string `json:"timezone"`
 }
@@ -710,6 +714,15 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		params.Timezone = pgtype.Text{String: tz, Valid: true}
+	}
+
+	if req.MessageEnterKeyBehavior != nil {
+		behavior := strings.TrimSpace(*req.MessageEnterKeyBehavior)
+		if behavior != "send" && behavior != "newline" {
+			writeError(w, http.StatusBadRequest, "invalid message_enter_key_behavior")
+			return
+		}
+		params.MessageEnterKeyBehavior = pgtype.Text{String: behavior, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)

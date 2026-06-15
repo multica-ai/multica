@@ -21,6 +21,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import type { MessageEnterKeyBehavior } from "@multica/core/types";
 
 const LIGHT_COLORS = {
   titleBar: "#e8e8e8",
@@ -241,6 +243,8 @@ export function PreferencesTab() {
         </div>
       </section>
 
+      <InputOptionsSection />
+
       <TimezoneSection />
     </div>
   );
@@ -316,6 +320,86 @@ function TimezoneSection() {
       <p className="text-[11px] leading-snug text-muted-foreground">
         {t(($) => $.preferences.timezone.hint)}
       </p>
+    </section>
+  );
+}
+
+function InputOptionsSection() {
+  const { t } = useT("settings");
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  const value: MessageEnterKeyBehavior = user?.message_enter_key_behavior ?? "newline";
+
+  const options: {
+    value: MessageEnterKeyBehavior;
+    label: string;
+  }[] = [
+    {
+      value: "newline",
+      label: t(($) => $.preferences.input_options.enter_key.newline),
+    },
+    {
+      value: "send",
+      label: t(($) => $.preferences.input_options.enter_key.send),
+    },
+  ];
+
+  const handleChange = async (next: MessageEnterKeyBehavior) => {
+    if (next === value) return;
+    try {
+      const updated = await api.updateMe({
+        message_enter_key_behavior: next,
+      });
+      setUser(updated);
+    } catch {
+      toast.error(
+        t(($) => $.preferences.input_options.enter_key.sync_failed),
+      );
+    }
+  };
+
+  const activeHint =
+    value === "newline"
+      ? t(($) => $.preferences.input_options.enter_key.newline_hint, {
+          shortcut: formatShortcut(modKey, enterKey),
+        })
+      : t(($) => $.preferences.input_options.enter_key.send_hint);
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold">
+        {t(($) => $.preferences.input_options.title)}
+      </h2>
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">
+          {t(($) => $.preferences.input_options.enter_key.label)}
+        </p>
+        <div className="flex gap-3" role="radiogroup">
+          {options.map((opt) => {
+            const active = value === opt.value;
+            return (
+              <button
+                type="button"
+                key={opt.value}
+                role="radio"
+                aria-checked={active}
+                onClick={() => handleChange(opt.value)}
+                className={cn(
+                  "rounded-md border px-4 py-2 text-sm transition-colors",
+                  active
+                    ? "border-brand bg-brand/10 font-medium text-foreground"
+                    : "border-border text-muted-foreground hover:border-foreground/30",
+                )}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          {activeHint}
+        </p>
+      </div>
     </section>
   );
 }

@@ -19,6 +19,17 @@
       "browser_suffix": " (브라우저)",
       "hint": "대시보드, 차트, 사용자에게 표시되는 '오늘' 레이블에 사용됩니다. 모든 워크스페이스에 적용되는 개인 설정입니다.",
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
+    },
+    "input_options": {
+      "title": "입력 옵션",
+      "enter_key": {
+        "label": "메시지를 작성할 때 Enter 키를 눌러",
+        "send": "메시지 보내기",
+        "newline": "새 줄 시작",
+        "send_hint": "Shift+Enter로 새 줄을 추가합니다.",
+        "newline_hint": "{{shortcut}}로 보냅니다.",
+        "sync_failed": "입력 설정을 저장하지 못했습니다."
+      }
     }
   },
   "page": {

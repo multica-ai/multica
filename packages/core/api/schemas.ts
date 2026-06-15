@@ -768,6 +768,14 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
 // breaking older backends that don't return the column yet.
 // ---------------------------------------------------------------------------
 
+const MessageEnterKeyBehaviorSchema = z
+  .string()
+  .default("newline")
+  .catch("newline")
+  .transform((value) =>
+    value === "newline" || value === "send" ? value : "newline",
+  );
+
 export const UserSchema = z.object({
   id: z.string(),
   name: z.string().default(""),
@@ -781,6 +789,7 @@ export const UserSchema = z.object({
   timezone: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  message_enter_key_behavior: MessageEnterKeyBehaviorSchema,
 }).loose();
 
 export const EMPTY_USER: User = {
@@ -796,6 +805,7 @@ export const EMPTY_USER: User = {
   timezone: null,
   created_at: "",
   updated_at: "",
+  message_enter_key_behavior: "newline",
 };
 
 // ---------------------------------------------------------------------------

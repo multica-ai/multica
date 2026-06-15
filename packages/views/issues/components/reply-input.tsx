@@ -5,6 +5,7 @@ import { ArrowUp, Loader2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useAuthStore } from "@multica/core/auth";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
@@ -14,6 +15,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +50,13 @@ function ReplyInput({
   draftKey,
 }: ReplyInputProps) {
   const { t } = useT("issues");
+  const messageEnterKeyBehavior = useAuthStore(
+    (s) => s.user?.message_enter_key_behavior ?? "newline",
+  );
+  const submitOnEnter = messageEnterKeyBehavior === "send";
+  const sendShortcut = submitOnEnter
+    ? formatShortcut(enterKey)
+    : formatShortcut(modKey, enterKey);
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
@@ -172,6 +181,7 @@ function ReplyInput({
               }
             }}
             onSubmit={handleSubmit}
+            submitOnEnter={submitOnEnter}
             onUploadFile={handleUpload}
             debounceMs={100}
             currentIssueId={issueId}
@@ -193,6 +203,13 @@ function ReplyInput({
             multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
+          {!isEmpty && (
+            <span className="hidden text-[11px] text-muted-foreground sm:inline">
+              {t(($) => $.comment.send_shortcut_hint, {
+                shortcut: sendShortcut,
+              })}
+            </span>
+          )}
           <button
             type="button"
             disabled={isEmpty || submitting}

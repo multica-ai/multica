@@ -11,6 +11,11 @@ const editorState = vi.hoisted(() => ({
   isDestroyed: false,
   markdown: "",
 }));
+const lastExtensionsOptions = vi.hoisted(() => ({
+  current: null as null | {
+    submitOnEnterRef?: { current: boolean };
+  },
+}));
 
 // Records the attachments[] prop the provider received on its most recent
 // render. Content-editor merges its `attachments` prop with in-session
@@ -27,7 +32,12 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("./extensions", () => ({
-  createEditorExtensions: () => [],
+  createEditorExtensions: (options: {
+    submitOnEnterRef?: { current: boolean };
+  }) => {
+    lastExtensionsOptions.current = options;
+    return [];
+  },
 }));
 
 vi.mock("./extensions/file-upload", () => ({
@@ -113,6 +123,7 @@ describe("ContentEditor", () => {
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
+    lastExtensionsOptions.current = null;
   });
 
   afterEach(() => {
@@ -313,6 +324,18 @@ describe("ContentEditor", () => {
     unmount();
 
     expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps submitOnEnterRef current with the latest prop without replacing the ref", () => {
+    const { rerender } = render(<ContentEditor submitOnEnter />);
+
+    const firstRef = lastExtensionsOptions.current?.submitOnEnterRef;
+    expect(firstRef?.current).toBe(true);
+
+    rerender(<ContentEditor submitOnEnter={false} />);
+
+    expect(lastExtensionsOptions.current?.submitOnEnterRef).toBe(firstRef);
+    expect(firstRef?.current).toBe(false);
   });
 });
 

@@ -192,6 +192,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+    const submitOnEnterRef = useRef(submitOnEnter);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -267,6 +268,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUploadFileRef.current = wrappedOnUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
+    submitOnEnterRef.current = submitOnEnter;
 
     const queryClient = useQueryClient();
 
@@ -312,7 +314,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         queryClient,
         onSubmitRef,
         onUploadFileRef,
-        submitOnEnter,
+        submitOnEnterRef,
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,

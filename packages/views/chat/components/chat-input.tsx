@@ -11,6 +11,7 @@ import {
 } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
+import { useAuthStore } from "@multica/core/auth";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
@@ -60,6 +61,13 @@ export function ChatInput({
   contextItems,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const messageEnterKeyBehavior = useAuthStore(
+    (s) => s.user?.message_enter_key_behavior ?? "newline",
+  );
+  const submitOnEnter = messageEnterKeyBehavior === "send";
+  const sendShortcut = submitOnEnter
+    ? formatShortcut(enterKey)
+    : formatShortcut(modKey, enterKey);
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -184,7 +192,7 @@ export function ChatInput({
     // resolves later) and the attachment would only end up bound to the
     // session, not the message — the agent then can't `multica attachment
     // download <id>` the file. The SubmitButton is also disabled in this
-    // state via `uploading`, but Mod+Enter bypasses the button so we
+    // state via `uploading`, but keyboard submit bypasses the button so we
     // still gate here.
     if (editorRef.current?.hasActiveUploads()) {
       logger.debug("input.send skipped: uploads in flight");
@@ -278,6 +286,7 @@ export function ChatInput({
               setInputDraft(draftKey, md);
             }}
             onSubmit={handleSend}
+            submitOnEnter={submitOnEnter}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             debounceMs={100}
             mentionMode={contextItems ? "context" : "default"}
@@ -286,11 +295,8 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Chat intentionally leaves submitOnEnter at its default false:
-            // Mod+Enter submits, while bare Enter falls through to Tiptap's
-            // default behavior for lists, quotes, and paragraph breaks.
-            // Without this, Enter-as-send would steal the only key that
-            // continues a bullet list, leaving users stuck after one item.
+            // Submit shortcut follows the user's input preference while
+            // preserving the editor's newline/hard-break behavior.
           />
         </div>
         {leftAdornment && (
@@ -305,12 +311,19 @@ export function ChatInput({
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
           )}
+          {!isEmpty && (
+            <span className="mr-1 hidden text-[11px] text-muted-foreground sm:inline">
+              {t(($) => $.input.send_shortcut_hint, {
+                shortcut: sendShortcut,
+              })}
+            </span>
+          )}
           <SubmitButton
             onClick={handleSend}
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
-            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            tooltip={`${t(($) => $.input.send_tooltip)} · ${sendShortcut}`}
             stopTooltip={t(($) => $.input.stop_tooltip)}
           />
         </div>

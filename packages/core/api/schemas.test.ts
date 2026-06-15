@@ -212,6 +212,49 @@ describe("SquadListSchema member preview drift", () => {
   });
 });
 
+// `message_enter_key_behavior` is a user preference added after the original
+// `/api/me` contract. Older backends omit it, and future enum drift should
+// degrade only this field rather than falling back the whole user object.
+describe("UserSchema message enter key behavior drift", () => {
+  const base = {
+    id: "11111111-1111-1111-1111-111111111111",
+    name: "Ada",
+    email: "ada@example.com",
+  };
+
+  it("defaults to newline when the field is absent", () => {
+    const parsed = UserSchema.parse(base);
+    expect(parsed.message_enter_key_behavior).toBe("newline");
+  });
+
+  it("preserves newline when explicitly returned by the server", () => {
+    const parsed = UserSchema.parse({
+      ...base,
+      message_enter_key_behavior: "newline",
+    });
+    expect(parsed.message_enter_key_behavior).toBe("newline");
+  });
+
+  it("downgrades an unknown string to newline", () => {
+    const parsed = UserSchema.parse({
+      ...base,
+      message_enter_key_behavior: "future-mode",
+    });
+    expect(parsed.message_enter_key_behavior).toBe("newline");
+  });
+
+  it("downgrades a wrong-type value to newline without dropping the user", () => {
+    const parsed = parseWithFallback(
+      { ...base, message_enter_key_behavior: 42 },
+      UserSchema,
+      EMPTY_USER,
+      { endpoint: "GET /api/me" },
+    );
+    expect(parsed.id).toBe(base.id);
+    expect(parsed.message_enter_key_behavior).toBe("newline");
+  });
+});
+
 // The workspace dashboard and runtime-detail pages were re-pointed at the
 // unified `task_usage_hourly` rollup. Every numeric field drives chart /
 // KPI math, and string keys (date / agent_id / model) bucket the series.

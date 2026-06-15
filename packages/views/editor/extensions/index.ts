@@ -122,8 +122,8 @@ export interface EditorExtensionsOptions {
   onUploadFileRef?: RefObject<
     ((file: File) => Promise<UploadResult | null>) | undefined
   >;
-  /** When true, bare Enter also submits (chat-style). Default false. */
-  submitOnEnter?: boolean;
+  /** Ref controlling Enter behavior. When current is true, bare Enter submits. Default false. */
+  submitOnEnterRef?: RefObject<boolean>;
   /**
    * When true, the `@` suggestion picker is not attached. The mention node
    * type is still registered in the schema so any mention pasted in from
@@ -226,7 +226,7 @@ export function createEditorExtensions(
         fn();
         return true;
       },
-      { submitOnEnter: options.submitOnEnter ?? false },
+      { submitOnEnterRef: options.submitOnEnterRef ?? { current: false } },
     ),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!),

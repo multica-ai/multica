@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
@@ -14,7 +15,7 @@ const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
-  current: null as { id: string; timezone?: string | null } | null,
+  current: null as { id: string; timezone?: string | null; message_enter_key_behavior?: "send" | "newline"; } | null,
 }));
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
@@ -249,4 +250,89 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
   }, 20000);
+});
+
+describe("PreferencesTab — Input options", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders newline as the default Enter behavior", () => {
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("radio", { name: /Start a new line/i }),
+    ).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("shows the send shortcut hint for the default newline behavior", () => {
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByText(`Use ${formatShortcut(modKey, enterKey)} to send.`),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the newline shortcut hint when Enter-to-send is selected", () => {
+    userRef.current = {
+      id: "user-1",
+      message_enter_key_behavior: "send",
+    };
+
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByText("Use Shift+Enter to add a new line."),
+    ).toBeInTheDocument();
+  });
+
+  it("saving newline PATCHes /api/me and updates the auth store", async () => {
+    userRef.current = {
+      id: "user-1",
+      message_enter_key_behavior: "send",
+    };
+    const updatedUser = {
+      id: "user-1",
+      message_enter_key_behavior: "newline",
+    };
+    mockUpdateMe.mockResolvedValueOnce(updatedUser);
+    const user = userEvent.setup();
+
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("radio", { name: /Start a new line/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateMe).toHaveBeenCalledWith({
+        message_enter_key_behavior: "newline",
+      });
+      expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
+    });
+  });
+
+  it("surfaces a toast when saving the Enter behavior fails", async () => {
+    userRef.current = {
+      id: "user-1",
+      message_enter_key_behavior: "send",
+    };
+    mockUpdateMe.mockRejectedValueOnce(new Error("network"));
+    const user = userEvent.setup();
+
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("radio", { name: /Start a new line/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateMe).toHaveBeenCalledWith({
+        message_enter_key_behavior: "newline",
+      });
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+    });
+    expect(mockSetUser).not.toHaveBeenCalled();
+  });
 });
