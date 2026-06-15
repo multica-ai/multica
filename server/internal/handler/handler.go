@@ -103,6 +103,7 @@ type Handler struct {
 	TaskService           *service.TaskService
 	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
+	KnowledgeService      *service.KnowledgeService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
@@ -198,6 +199,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:           taskSvc,
 		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		KnowledgeService:      service.NewKnowledgeService(queries, txStarter),
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),
