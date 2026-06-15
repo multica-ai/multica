@@ -19,7 +19,10 @@ import (
 // fanout and suppressing duplicate subscriber pushes when a mention wins.
 type mobilePushNotifier interface {
 	Enabled() bool
-	SendToUser(ctx context.Context, userID string, p service.Payload)
+	// CEREBRO-PATCH(push-device-split): TECH-3548 — target only the recipient's
+	// devices of the given class (service.DeviceClassMobile / DeviceClassDesktop)
+	// so the mobile and desktop push channels fire independently.
+	SendToUserForClass(ctx context.Context, userID, class string, p service.Payload)
 }
 
 // pushNotifier is set once at register time. Used by notify* helpers to fan
@@ -58,28 +61,24 @@ func truncateForPush(s string, max int) string {
 	return string(runes[:max-1]) + "…"
 }
 
-// pushItemToMember sends a Web Push to recipientID's subscribed devices
-// describing the just-created inbox item. Only members get pushes — agents
-// don't have devices.
+// pushItemToMember sends a Web Push to the recipient's subscribed devices of
+// the given class (service.DeviceClassMobile / DeviceClassDesktop), describing
+// the just-created inbox item. Only members get pushes — agents don't have
+// devices. Badge/Silent come from the matching channel's transport prefs
+// (notifications.channels.<channel>.{badge,sound}) so the mobile and desktop
+// channels stay independent. `channel` is channelMobile or channelDesktop.
 //
-// Badge and Silent are derived from the recipient's mobile-channel transport
-// preferences (notifications.channels.mobile.{badge,sound}) so the icon
-// counter and notification sound respect the per-user "Visning" toggles.
-//
-// CEREBRO-PATCH(push-deep-link): URL is built as `/<slug>/inbox?issue=<id>`
-// when the workspace lookup succeeds, so tapping the notification opens the
-// inbox with the right item selected. JEH-737. Falls back to `/?issue=…`
-// if the lookup fails — that path doesn't deep-link (the landing-page
-// redirect drops query params) but is no worse than the previous behaviour.
-func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, recipientID, workspaceID, issueID, notifType, title, body string) {
+// The deep-link URL is built as `/<slug>/inbox?issue=<id>` (see pushDeepLinkURL,
+// CEREBRO-PATCH(push-deep-link)) so a tap opens the inbox row. JEH-737.
+func pushItemToMember(ctx context.Context, queries *db.Queries, recipientType, recipientID, workspaceID, issueID, notifType, title, body, deviceClass, channel string) {
 	if pushNotifier == nil || !pushNotifier.Enabled() {
 		return
 	}
 	if recipientType != "member" || recipientID == "" {
 		return
 	}
-	transport := resolveChannelTransport(ctx, queries, recipientType, recipientID, channelMobile)
-	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
+	transport := resolveChannelTransport(ctx, queries, recipientType, recipientID, channel)
+	pushNotifier.SendToUserForClass(ctx, recipientID, deviceClass, service.Payload{
 		Title:   truncateForPush(title, pushTitleMaxRunes),
 		Body:    truncateForPush(stripMentionMarkdownForPush(body), pushBodyMaxRunes),
 		URL:     pushDeepLinkURL(ctx, queries, workspaceID, issueID),
@@ -172,15 +171,17 @@ func dispatchToMember(
 
 	// Mobile push fires only when something landed in the user's inbox or
 	// notifications page — push is a bell-ring on top of an existing item,
-	// not a standalone notification.
+	// not a standalone notification. Targets the user's phone-class devices.
 	if created && !d.SuppressMobilePush && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
-		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body)
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body, service.DeviceClassMobile, channelMobile)
 	}
 
-	// Desktop banner fires under the same "must have a real item to open"
-	// rule as mobile. It rides the WS hub via EventDesktopNotify and is
-	// scoped to the recipient by listeners.go.
+	// Desktop channel fires under the same "must have a real item to open"
+	// rule. It delivers two ways: a Web Push to the user's computer-class
+	// browsers (so it works with the tab closed) AND the in-app banner that
+	// rides the WS hub via EventDesktopNotify for the Electron desktop app.
 	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) {
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body, service.DeviceClassDesktop, channelDesktop)
 		bus.Publish(events.Event{
 			Type:        protocol.EventDesktopNotify,
 			WorkspaceID: d.WorkspaceID,

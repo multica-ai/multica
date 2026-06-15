@@ -28,7 +28,7 @@ import {
   type RoutingKey,
   type AutoSubscribeReason,
 } from "@multica/cerebro-notifications/core";
-import { PushNotificationsSection } from "./push-notifications-section";
+import { PushNotificationsSection, currentDeviceClass } from "./push-notifications-section";
 // CEREBRO-PATCH(web-push-flag-gate): hide Mobile (Web Push) channel row when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
@@ -234,14 +234,14 @@ const CHANNEL_META: ChannelMeta[] = [
   {
     channel: "mobile",
     title: "Mobile",
-    subtitle: "Web push to your phone or installed PWA",
+    subtitle: "Push to your phone or installed PWA",
     icon: <Smartphone className="h-4 w-4 text-muted-foreground" />,
     transportFields: ["badge", "sound"],
   },
   {
     channel: "desktop",
     title: "Desktop",
-    subtitle: "In-app banner inside the Multica desktop app",
+    subtitle: "Push to your browser on a computer, plus the desktop app",
     icon: <Monitor className="h-4 w-4 text-muted-foreground" />,
     transportFields: ["badge", "banner", "sound"],
   },
@@ -290,6 +290,9 @@ export function NotificationsTab() {
   const [savingNotifyAllMobile, setSavingNotifyAllMobile] = useState(false);
   // CEREBRO-PATCH(web-push-flag-gate): drop the Mobile (Web Push) channel row when disabled
   const webPushEnabled = useFeatureFlag("cerebro_web_push");
+  // The "Turn on" subscribe controls the device you're on right now, so it
+  // renders under the channel that matches this device (TECH-3548 push split).
+  const deviceClass = currentDeviceClass();
   const channelMeta = webPushEnabled
     ? CHANNEL_META
     : CHANNEL_META.filter((m) => m.channel !== "mobile");
@@ -462,8 +465,18 @@ export function NotificationsTab() {
                   saving={savingChannelKey === "mobile:reminder"}
                   onChange={handleReminderMobileToggle}
                 />
-                <PushNotificationsSection />
+                {deviceClass === "mobile" ? (
+                  <PushNotificationsSection />
+                ) : (
+                  <OtherDeviceHint target="mobile" />
+                )}
               </>
+            ) : meta.channel === "desktop" && webPushEnabled ? (
+              deviceClass === "desktop" ? (
+                <PushNotificationsSection />
+              ) : (
+                <OtherDeviceHint target="desktop" />
+              )
             ) : null
           }
         />
@@ -550,6 +563,27 @@ function NotifyAllMobileInboxCard({
             onCheckedChange={(next) => void onChange(next)}
           />
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// Shown in the channel that does NOT match the current device, so the user
+// understands the "Turn on" subscribe is per-device and where to enable it for
+// the other device type (TECH-3548).
+function OtherDeviceHint({ target }: { target: "mobile" | "desktop" }) {
+  const label =
+    target === "mobile"
+      ? "Open Multica on your phone to turn it on there."
+      : "Open Multica in a browser on a computer to turn it on there.";
+  return (
+    <Card>
+      <CardContent className="px-4 py-3">
+        <p className="text-xs text-muted-foreground">
+          The &ldquo;Turn on&rdquo; button enables push for the device you&rsquo;re
+          using right now. {label} Your per-notification choices above apply to
+          all of your {target} devices.
+        </p>
       </CardContent>
     </Card>
   );

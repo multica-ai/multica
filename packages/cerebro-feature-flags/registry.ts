@@ -19,6 +19,7 @@ export type CerebroFlagKey =
   // already shown in the sidebar without double-counting.
   | "cerebro_comment_cost"
   | "cerebro_web_push"
+  | "cerebro_browser_push_prompt"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
@@ -176,6 +177,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
   cerebro_web_push: true,
+  cerebro_browser_push_prompt: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
@@ -486,6 +488,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Enable browser/PWA push notifications for new inbox items, comments, and mentions.",
+  },
+  {
+    key: "cerebro_browser_push_prompt",
+    label: "Browser push prompt",
+    group: "inbox",
+    description:
+      "Show a dismissible banner in the browser inviting the user to turn on push notifications (asks for permission, links to notification settings). Only appears in a browser, never in the desktop app.",
   },
   {
     key: "cerebro_dashboard",
