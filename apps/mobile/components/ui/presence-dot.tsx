@@ -28,12 +28,14 @@ interface Props {
 
 const DOT_CLASS: Record<AgentAvailability, string> = {
   online: "bg-success",
-  paused: "bg-brand",
+  // Inactive states (paused/offline/archived) read red, not brand/grey, so
+  // online (green) vs not-online (red) is unmistakable. Mirrors web's
+  // availabilityConfig in packages/views/agents/presence.ts.
+  paused: "bg-destructive",
   unstable: "bg-warning",
-  offline: "bg-muted-foreground/40",
-  // Retired agent (agent.archived_at set) — gray, mirrors web's archived dot
-  // in packages/views/agents/presence.ts.
-  archived: "bg-muted-foreground/40",
+  offline: "bg-destructive",
+  // Retired agent (agent.archived_at set) — red, mirrors web's archived dot.
+  archived: "bg-destructive",
 };
 
 export function PresenceDot({ availability, size = 8 }: Props) {

@@ -80,7 +80,7 @@ export function RuntimePicker({
         {selected && (
           <span
             className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-              isOnline ? "bg-success" : "bg-muted-foreground/40"
+              isOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
             }`}
           />
         )}
@@ -132,7 +132,7 @@ export function RuntimePicker({
           {selected && (
             <span
               className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-                isOnline ? "bg-success" : "bg-muted-foreground/40"
+                isOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
               }`}
             />
           )}
@@ -231,7 +231,7 @@ export function RuntimePicker({
               </div>
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                  rtOnline ? "bg-success" : "bg-muted-foreground/40"
+                  rtOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
                 }`}
                 aria-label={rtOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline)}
               />

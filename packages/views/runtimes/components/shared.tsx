@@ -36,9 +36,11 @@ export function ProviderChip({ provider }: { provider: string }) {
 // state, not an anomaly — visually distinct from amber 'recently_lost'.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },
-  paused: { dot: "bg-brand", tone: "bg-brand/10 text-brand" },
+  // CEREBRO-PATCH(status-red-green): paused/offline read red, not brand/grey,
+  // so online (green) vs not-online (red) is unmistakable.
+  paused: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
   recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
-  offline: { dot: "bg-muted-foreground/40", tone: "bg-muted text-muted-foreground" },
+  offline: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
   about_to_gc: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
 };
 

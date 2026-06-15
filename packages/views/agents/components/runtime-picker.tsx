@@ -217,7 +217,8 @@ export function RuntimePicker({
                   className={`h-2 w-2 shrink-0 rounded-full ${
                     device.status === "online"
                       ? "bg-success"
-                      : "bg-muted-foreground/40"
+                      // CEREBRO-PATCH(status-red-green): offline red, not grey
+                      : "bg-destructive"
                   }`}
                 />
               </button>

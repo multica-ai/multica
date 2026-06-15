@@ -683,7 +683,7 @@ const runtimeStatusConfig = {
   idle: { label: "Idle", color: "text-muted-foreground", dot: "bg-muted-foreground" },
   working: { label: "Working", color: "text-success", dot: "bg-success" },
   error: { label: "Error", color: "text-destructive", dot: "bg-destructive" },
-  offline: { label: "Offline", color: "text-muted-foreground/50", dot: "bg-muted-foreground/40" },
+  offline: { label: "Offline", color: "text-destructive", dot: "bg-destructive" },
 };
 
 const mockRuntimeList = [
@@ -839,7 +839,7 @@ function RuntimesVisual() {
                     <span className="truncate text-xs font-medium">{rt.name}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <span className={cn("h-1.5 w-1.5 rounded-full", rt.status === "online" ? "bg-success" : "bg-muted-foreground/40")} />
+                    <span className={cn("h-1.5 w-1.5 rounded-full", rt.status === "online" ? "bg-success" : "bg-destructive")} />
                     <span className="text-[10px] text-muted-foreground">{rt.status}</span>
                   </div>
                 </div>
@@ -861,7 +861,7 @@ function RuntimesVisual() {
             </div>
             <span className="text-sm font-semibold">{mockRuntimeList[selectedRuntime]?.name}</span>
             <div className="flex items-center gap-1.5">
-              <span className={cn("h-1.5 w-1.5 rounded-full", mockRuntimeList[selectedRuntime]?.status === "online" ? "bg-success" : "bg-muted-foreground/40")} />
+              <span className={cn("h-1.5 w-1.5 rounded-full", mockRuntimeList[selectedRuntime]?.status === "online" ? "bg-success" : "bg-destructive")} />
               <span className="text-xs text-muted-foreground">{mockRuntimeList[selectedRuntime]?.status}</span>
             </div>
             <span className="text-xs text-muted-foreground">{mockRuntimeList[selectedRuntime]?.device}</span>

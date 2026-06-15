@@ -352,7 +352,7 @@ export function SlackBlock({
                 data-testid={`presence-dot-${it.userId}`}
                 data-online={it.online ? "true" : "false"}
                 className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card ${
-                  it.online ? "bg-success" : "bg-muted-foreground"
+                  it.online ? "bg-success" : "bg-destructive"
                 }`}
                 aria-label={it.online ? "online" : "offline"}
               />
