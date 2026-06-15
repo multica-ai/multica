@@ -1507,10 +1507,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
+	"runtime_offline":                            true,
+	"runtime_recovery":                           true,
+	"timeout":                                    true,
+	"codex_semantic_inactivity":                  true,
+	"agent_error.provider_capacity_or_rate_limit": true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -1561,6 +1562,49 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		return nil, nil
 	}
 
+	// Rate-limit failures get exponential backoff before the retry is
+	// enqueued so the daemon doesn't immediately claim the child and hit
+	// the same upstream throttle. We spawn a goroutine rather than
+	// blocking the FailTask handler: the backoff can be minutes long and
+	// we don't want to hold the HTTP handler goroutine open.
+	if reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) {
+		backoff := rateLimitBackoff(parent.Attempt)
+		slog.Info("task rate-limited, scheduling retry with backoff",
+			"task_id", util.UUIDToString(parent.ID),
+			"attempt", parent.Attempt,
+			"backoff", backoff,
+		)
+		bgCtx := context.WithoutCancel(ctx)
+		qs := s.Queries
+		broadcast := s.broadcastTaskEvent
+		notify := s.NotifyTaskEnqueued
+		go func() {
+			timer := time.NewTimer(backoff)
+			defer timer.Stop()
+			select {
+			case <-bgCtx.Done():
+				return
+			case <-timer.C:
+			}
+			child, err := qs.CreateRetryTask(bgCtx, parent.ID)
+			if err != nil {
+				slog.Warn("rate-limit retry failed",
+					"parent_task_id", util.UUIDToString(parent.ID),
+					"error", err,
+				)
+				return
+			}
+			slog.Info("rate-limit retry enqueued",
+				"parent_task_id", util.UUIDToString(parent.ID),
+				"child_task_id", util.UUIDToString(child.ID),
+				"attempt", child.Attempt,
+			)
+			broadcast(bgCtx, protocol.EventTaskQueued, child)
+			notify(bgCtx, child)
+		}()
+		return nil, nil
+	}
+
 	child, err := s.Queries.CreateRetryTask(ctx, parent.ID)
 	if err != nil {
 		slog.Warn("task auto-retry failed",
@@ -1583,6 +1627,23 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
 	s.NotifyTaskEnqueued(ctx, child)
 	return &child, nil
+}
+
+// rateLimitBackoff returns the delay before a rate-limited retry can be
+// enqueued. Exponential: 60s → 180s → 540s → capped at 30 min.
+func rateLimitBackoff(attempt int32) time.Duration {
+	const (
+		base    = 60
+		capSecs = 1800
+	)
+	secs := base
+	for i := int32(1); i < attempt && secs < capSecs; i++ {
+		secs *= 3
+	}
+	if secs > capSecs {
+		secs = capSecs
+	}
+	return time.Duration(secs) * time.Second
 }
 
 // RerunIssue creates a fresh queued task for an agent on the issue. Used by
