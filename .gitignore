@@ -84,3 +84,4 @@ data/
 testcase/report/
 .antigravitycli/
 apps/mobile/credentials.json
+*.iml
