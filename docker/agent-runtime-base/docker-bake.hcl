@@ -49,11 +49,10 @@ variable "HERMES_COMMIT"       { default = "498bfc7bc12a937621b4215312049b100072
 // ships at build time; pin for stricter reproducibility once a known-good
 // version is identified.
 variable "GH_CLI_VERSION"      { default = "" }
-// acli apt version pin. Required (not empty) — agents call JIRA via this and
-// a silent upstream downgrade should fail the build, not ship. Format mirrors
-// the package version advertised at acli.atlassian.com/linux/deb (semver with
-// a `~stable` suffix, e.g. `1.3.18~stable`). Bump per the README.
-variable "ACLI_VERSION"        { default = "1.3.18~stable" }
+// acli apt version pin. Empty = whatever acli.atlassian.com/linux/deb ships
+// at build time; pin (e.g. `1.3.18~stable`) for stricter reproducibility
+// once a known-good version is identified.
+variable "ACLI_VERSION"        { default = "" }
 variable "UID"                 { default = "1000" }
 variable "GID"                 { default = "1000" }
 

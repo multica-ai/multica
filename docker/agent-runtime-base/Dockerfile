@@ -81,13 +81,10 @@ ARG HERMES_COMMIT=498bfc7bc12a937621b4215312049b1000726df3
 # at build time. Empty means "no version constraint" (apt picks the available
 # candidate); the cache-from in the bake file plus the smoke test bound risk.
 ARG GH_CLI_VERSION=
-# Pin acli via apt. Unlike GH_CLI_VERSION (which may be empty), this MUST be
-# pinned to a specific apt package version — agents call into JIRA from the
-# shell, so an upstream regression silently downgrading capability would be
-# hard to spot. Format matches what `acli.atlassian.com/linux/deb`'s Packages
-# index advertises: `<semver>~stable` (e.g. `1.3.18~stable`). Bump in
-# lockstep with the upstream release calendar; see README's "Bump procedure".
-ARG ACLI_VERSION=1.3.18~stable
+# Pin acli via apt. Empty means "no version constraint" (installs the latest
+# release from acli.atlassian.com/linux/deb). Pass a specific version at
+# build time only when you need to lock to a known-good release.
+ARG ACLI_VERSION=
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -129,7 +126,7 @@ RUN apt-get update \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       gh${GH_CLI_VERSION:+=${GH_CLI_VERSION}} \
-      acli=${ACLI_VERSION} \
+      acli${ACLI_VERSION:+=${ACLI_VERSION}} \
  && rm -rf /var/lib/apt/lists/*
 
 # Pin each npm-distributed agent CLI. `latest` is acceptable as a build-arg

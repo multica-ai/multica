@@ -60,14 +60,13 @@ jobs:
       - name: Set short git commit SHA
         id: sha
         env:
-          # Keep dev.yml in sync with publish.yml: derive SHORT_SHA from the
-          # workflow-trigger SHA instead of checking out main + running
-          # `git rev-parse HEAD`. dev.yml has no commit-to-gitops jobs, so
-          # there is no live race here today, but the workflow-SHA pattern
-          # is the canonical one for manifest stitching.
-          WORKFLOW_SHA: ${{ github.sha }}
+          # Use the PR branch HEAD SHA so it matches what the per-arch
+          # bake jobs compute (those fetch the branch by name and resolve
+          # its HEAD, not the merge-commit SHA that github.sha carries for
+          # PR events). github.event.pull_request.head.sha is the branch tip.
+          BRANCH_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          echo "short_sha=${WORKFLOW_SHA:0:8}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${BRANCH_SHA:0:8}" >> "$GITHUB_OUTPUT"
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
