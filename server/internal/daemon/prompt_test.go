@@ -337,6 +337,11 @@ func TestBuildPromptWakeupUsesWakeupPromptAndOriginalReplyParent(t *testing.T) {
 	if !strings.Contains(out, "post NOTHING and exit silently") {
 		t.Fatalf("scheduled wakeup prompt must carry the silent-exit guard, got:\n%s", out)
 	}
+	// CEREBRO-PATCH(wakeup-task-mandate): TECH-3548 — the wakeup note is a real task;
+	// the prompt must forbid dismissing it as a stale re-fire without re-verifying.
+	if !strings.Contains(out, "REAL task") || !strings.Contains(out, "stale re-fire") {
+		t.Fatalf("scheduled wakeup prompt must carry the real-task mandate, got:\n%s", out)
+	}
 }
 
 // CEREBRO-PATCH(approval-system-activity): proves owner-approved run-requests are
@@ -365,6 +370,11 @@ func TestBuildPromptApprovalSystemActivityFraming(t *testing.T) {
 	// carries real work, so it must NOT inherit "post nothing and exit".
 	if strings.Contains(out, "post NOTHING and exit silently") {
 		t.Fatalf("approval prompt must not carry the scheduled-wakeup silent-exit guard, got:\n%s", out)
+	}
+	// The real-task mandate is scoped to the scheduled-wakeup branch; the approval
+	// branch carries its own framing and must not inherit it.
+	if strings.Contains(out, "stale re-fire") {
+		t.Fatalf("approval prompt must not carry the scheduled-wakeup real-task mandate, got:\n%s", out)
 	}
 }
 

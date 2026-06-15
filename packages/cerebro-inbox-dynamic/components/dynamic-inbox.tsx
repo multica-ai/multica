@@ -153,13 +153,14 @@ export function DynamicInbox() {
   const wsId = useWorkspaceId();
   const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
-  const { entries, filterContext, projects, projectMap, agentMap, loading } =
+  const { entries, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
     useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const typeLabels = useTypeLabels();
   const setMode = useSetInboxMode();
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
   const secretaryEnabled = useFeatureFlag("cerebro_inbox_secretary");
+  const favoritesEnabled = useFeatureFlag("cerebro_inbox_favorites");
   // TECH-3541 #2 — same flags the classic inbox uses to gate its view options.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
@@ -182,8 +183,15 @@ export function DynamicInbox() {
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
   const activeSections = useMemo(
-    () => activeTab.sections.filter((section) => section.kind !== "secretary" || secretaryEnabled),
-    [activeTab.sections, secretaryEnabled],
+    () =>
+      activeTab.sections.filter(
+        (section) =>
+          (section.kind !== "secretary" || secretaryEnabled) &&
+          // TECH-3579 — hide a persisted standalone Favorites box when the flag
+          // is off, mirroring how Secretary/Chat boxes are gated.
+          (section.kind !== "favorites" || favoritesEnabled),
+      ),
+    [activeTab.sections, secretaryEnabled, favoritesEnabled],
   );
 
   // TECH-3502 #2 — inline rename of the active tab (also reachable from ⋯).
@@ -645,6 +653,8 @@ export function DynamicInbox() {
                     .filter((c) => c.kind !== "notes" || notesEnabled)
                     // TECH-3557 — only offer Secretary when its flag is enabled.
                     .filter((c) => c.kind !== "secretary" || secretaryEnabled)
+                    // TECH-3579 — only offer the Favorites box when its flag is on.
+                    .filter((c) => c.kind !== "favorites" || favoritesEnabled)
                     .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
@@ -789,8 +799,10 @@ export function DynamicInbox() {
                             ) : undefined
                           }
                           removable={section.id !== inboxBlockId}
+                          favoritesEnabled={favoritesEnabled}
                           onSelect={onSelect}
                           onArchive={onArchive}
+                          onToggleFavorite={toggleFavorite}
                           onChange={changeSection}
                           onRemove={() => removeSection(section.id)}
                         />

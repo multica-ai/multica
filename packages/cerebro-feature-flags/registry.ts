@@ -49,6 +49,10 @@ export type CerebroFlagKey =
   // TECH-3557: Secretary block in the dynamic inbox. Default off until QA has
   // verified desktop/mobile flows against the approved mockup.
   | "cerebro_inbox_secretary"
+  // TECH-3579: Favorite conversations in the dynamic inbox — star a row to
+  // float it to the top of the "All messages" box, plus a standalone Favorites
+  // block. The star toggle replaces the row avatar on hover.
+  | "cerebro_inbox_favorites"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -199,6 +203,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_lock: false,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
+  cerebro_inbox_favorites: true,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -551,6 +556,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a focused Secretary block to the dynamic inbox. Users pick a batch size, let the app choose unread/oldest messages or select rows manually, then work through that small list in the existing message detail view. Default off until QA signs off.",
+  },
+  {
+    key: "cerebro_inbox_favorites",
+    label: "Inbox favorites",
+    group: "inbox",
+    description:
+      "Star a conversation in the dynamic inbox to make it a favorite and float it to the top of the \"All messages\" box, in its own Favorites section. Each row's avatar turns into a star on hover so you can toggle it in place. The top Favorites section can be switched off per box (favorites then stay in their normal position but can still be starred), and a standalone Favorites block can be added from the \"Add section\" menu. Favorites are saved per user and follow you across devices. Requires the Dynamic inbox.",
   },
   {
     key: "cerebro_inbox_wakeup_running",

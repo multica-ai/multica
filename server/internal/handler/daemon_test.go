@@ -20,6 +20,7 @@ import (
 	// CEREBRO-PATCH(daemon-test): persona integration additions.
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -3362,6 +3363,82 @@ func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
 	}
 	if task.PriorWorkDir != "" {
 		t.Fatalf("force fresh chat: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
+	}
+}
+
+// CEREBRO-PATCH(wakeup-fresh-session): TECH-3487 — a wakeup task must be enqueued
+// with force_fresh_session=TRUE so the woken agent starts in a clean session
+// instead of resuming a stale prior session/work_dir from the same issue.
+func TestEnqueueWakeupTaskForcesFreshSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'wakeup fresh session fixture', 'in_progress', 'none', $2, 'member',
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var triggerCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_id, author_type, content, type)
+		VALUES ($1, $2, $3, 'member', 'original thread', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
+		t.Fatalf("setup: create trigger comment: %v", err)
+	}
+
+	// A prior completed task on the same issue/agent that would otherwise be a
+	// candidate for session resume on the next claim.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at, completed_at,
+			session_id, work_dir
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-wakeup-session', '/tmp/old-wakeup-workdir')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("setup: create prior task: %v", err)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("setup: load issue: %v", err)
+	}
+
+	queued, err := testHandler.TaskService.EnqueueWakeupTask(
+		ctx,
+		issue,
+		parseUUID(agentID),
+		parseUUID(triggerCommentID),
+		"wake-test",
+		"time",
+		"continue PR verification",
+		service.TaskDelegationContext{},
+	)
+	if err != nil {
+		t.Fatalf("enqueue wakeup task: %v", err)
+	}
+	if !queued.ForceFreshSession {
+		t.Fatalf("wakeup task must force a fresh session, got %+v", queued.ForceFreshSession)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("wakeup task must not inherit old session, got %q", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "" {
+		t.Fatalf("wakeup task must not inherit old workdir, got %q", task.PriorWorkDir)
 	}
 }
 

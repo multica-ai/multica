@@ -22,6 +22,7 @@ import { useInboxWakeupStates, useInboxPinnedMatcher } from "@multica/cerebro-in
 import type { InboxActionContext } from "@multica/cerebro-inbox";
 import type { Channel, Project, ProjectTreeItem } from "@multica/core/types";
 import type { DynInboxEntry, SectionFilterContext } from "./section-filter";
+import { useInboxFavorites } from "./use-favorites";
 
 // Trivial mirror of views/common/agent-run-pip's taskStatusToRunState (not
 // exported across the package boundary): queued stays queued, anything else is
@@ -37,6 +38,8 @@ export interface DynamicInboxData {
   projects: Project[];
   /** TECH-3541 #2 — workspace agents, keyed by id, for agent-grouping. */
   agentMap: Map<string, { name?: string }>;
+  /** TECH-3579 — star / unstar a conversation (optimistic, server-synced). */
+  toggleFavorite: (entry: DynInboxEntry) => void;
   loading: boolean;
 }
 
@@ -137,6 +140,7 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
   }, [items, channelMap]);
 
   const matchesPins = useInboxPinnedMatcher(wsId, userId);
+  const { isFavorite, toggleFavorite } = useInboxFavorites();
 
   // Build the merged entry list — channels swallow their own notifications
   // (a notif whose issue_id is a channel is folded into the channel row).
@@ -165,8 +169,13 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
       mentionedChannels,
       wakeupIssueIds,
     };
-    return { action, matchesPins: (entry) => matchesPins(entry), subProjectIds };
-  }, [userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds, matchesPins, subProjectIds]);
+    return {
+      action,
+      matchesPins: (entry) => matchesPins(entry),
+      isFavorite,
+      subProjectIds,
+    };
+  }, [userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds, matchesPins, isFavorite, subProjectIds]);
 
   return {
     entries,
@@ -174,6 +183,7 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     projectMap,
     projects,
     agentMap,
+    toggleFavorite,
     loading: inboxQuery.isLoading,
   };
 }

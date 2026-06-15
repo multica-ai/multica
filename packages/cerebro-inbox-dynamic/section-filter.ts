@@ -23,6 +23,9 @@ export interface SectionFilterContext {
   action: InboxActionContext;
   /** Pinned-view predicate (from useInboxPinnedMatcher). */
   matchesPins: (entry: DynInboxEntry) => boolean;
+  /** TECH-3579 — favorite predicate (from useInboxFavorites). Defaults to
+   *  "never" so unit tests and callers that don't supply it still parse. */
+  isFavorite?: (entry: DynInboxEntry) => boolean;
   /**
    * TECH-3502 #3 — descendant project ids per project (NOT including the
    * project itself), used by a "project" filter condition with
@@ -101,6 +104,8 @@ export function entryMatchesSection(
       return entryIsUnread(entry);
     case "pinned":
       return ctx.matchesPins(entry);
+    case "favorites":
+      return ctx.isFavorite?.(entry) ?? false;
     case "project":
       return !!section.projectId && entryProjectId(entry) === section.projectId;
     case "filter":

@@ -57,6 +57,30 @@ read / snooze ("Remind me") / archive actions are the same everywhere.
 > `MobileRowActions` + a hover dropdown so it stays identical across kinds —
 > don't reimplement a one-off mobile gesture.
 
+### Favorite star — dynamic inbox only (TECH-3579)
+
+The dynamic inbox adds one affordance that is **not** part of the shared
+row-action menu above: a **favorite star** overlaid on the leading avatar of
+every row. It is intentionally an overlay (in `DynamicInboxRow`,
+`packages/cerebro-inbox-dynamic/components/dynamic-inbox-row.tsx`), not a
+`MobileRowActions` / dropdown item, because the product requirement is a
+direct "click the avatar → it turns into a star" toggle in place. It therefore
+does not touch the upstream row components (`InboxListItem` /
+`ChannelListItem`) — the star is absolutely positioned over the size-7 avatar
+all three kinds render at `px-4`.
+
+- State lives in `useInboxFavorites` (`packages/cerebro-inbox-dynamic/use-favorites.ts`),
+  persisted per user in the `cerebro_inbox_favorites` preferences key (no DB
+  table) — the same blob the inbox layout uses, so favorites follow the user
+  across devices. A conversation's key is `issue:<id>` / `chat:<id>` /
+  `channel:<id>`.
+- Starred rows float into a "Favorites" sub-section at the top of the
+  **"All messages"** box (toggleable per box via `showFavoritesSection`), and
+  feed a standalone **Favorites** section kind. Both read the same
+  `isFavorite` predicate on `SectionFilterContext`.
+- Gated by the `cerebro_inbox_favorites` flag (default on). The classic inbox
+  has no favorite affordance.
+
 ---
 
 ## Axis 2 — Notification types (what happened, on a `notif` row)

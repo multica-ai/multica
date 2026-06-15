@@ -17,9 +17,14 @@ export interface ComposerHeight {
   /** Inline style to spread onto the editor's scroll container. Collapsed
    *  sets a `maxHeight` cap so the field auto-grows with content up to the
    *  cap; expanded sets a concrete `height` so the field visibly jumps to
-   *  the larger size even when the draft is short. Undefined before the
-   *  viewport is known (SSR / first paint). */
-  containerStyle: { maxHeight?: number; height?: number } | undefined;
+   *  the larger size even when the draft is short. `flexBasis` mirrors the
+   *  expanded `height` because the scroll container is a `flex-1` item
+   *  (`flex-basis: 0%`), which would otherwise win over `height` and leave
+   *  the field at its collapsed size — i.e. expand would do nothing.
+   *  Undefined before the viewport is known (SSR / first paint). */
+  containerStyle:
+    | { maxHeight?: number; height?: number; flexBasis?: number }
+    | undefined;
   isExpanded: boolean;
   toggleExpanded: () => void;
   /** True once a height is known — the expand toggle has a target to grow
@@ -64,16 +69,24 @@ export function useComposerHeight(): ComposerHeight {
 
   const known = viewportHeight != null;
 
-  let containerStyle: { maxHeight?: number; height?: number } | undefined;
+  let containerStyle:
+    | { maxHeight?: number; height?: number; flexBasis?: number }
+    | undefined;
   if (known) {
-    if (isMobile) {
-      containerStyle = isExpanded
-        ? { height: Math.round(viewportHeight * EXPANDED_FRACTION) }
-        : { maxHeight: Math.round(viewportHeight * DEFAULT_FRACTION) };
+    if (isExpanded) {
+      const expandedHeight = Math.round(
+        viewportHeight * (isMobile ? EXPANDED_FRACTION : DESKTOP_EXPANDED_FRACTION),
+      );
+      // flexBasis must match height: the scroll container is `flex-1`
+      // (flex-basis: 0%), which overrides a bare `height` on a flex item.
+      // Pinning flexBasis makes the field actually grow on expand.
+      containerStyle = { height: expandedHeight, flexBasis: expandedHeight };
     } else {
-      containerStyle = isExpanded
-        ? { height: Math.round(viewportHeight * DESKTOP_EXPANDED_FRACTION) }
-        : { maxHeight: DESKTOP_COLLAPSED_MAX };
+      containerStyle = {
+        maxHeight: isMobile
+          ? Math.round(viewportHeight * DEFAULT_FRACTION)
+          : DESKTOP_COLLAPSED_MAX,
+      };
     }
   }
 

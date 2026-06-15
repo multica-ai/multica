@@ -12,6 +12,7 @@ import {
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
+import { Star } from "lucide-react";
 import type { ChatSession } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 
@@ -22,6 +23,12 @@ export interface DynamicInboxRowProps {
   agentRunState?: AgentRunState;
   /** TECH-3541 #3 — archived view: rows offer "unarchive" instead of archive. */
   isArchivedView?: boolean;
+  /** TECH-3579 — show the favorite star overlay on the row avatar. */
+  favoritesEnabled?: boolean;
+  /** TECH-3579 — is this row's conversation currently a favorite? */
+  isFavorite?: boolean;
+  /** TECH-3579 — star / unstar this row's conversation. */
+  onToggleFavorite?: (entry: DynInboxEntry) => void;
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
   /** TECH-3541 #3 — required when isArchivedView; brings the row back. */
@@ -34,12 +41,16 @@ export function DynamicInboxRow({
   mentioned,
   agentRunState,
   isArchivedView,
+  favoritesEnabled,
+  isFavorite,
+  onToggleFavorite,
   onSelect,
   onArchive,
   onUnarchive,
 }: DynamicInboxRowProps) {
+  let row: React.ReactNode;
   if (entry.kind === "notif") {
-    return (
+    row = (
       <InboxListItem
         item={entry.item}
         isSelected={isSelected}
@@ -49,9 +60,8 @@ export function DynamicInboxRow({
         onUnarchive={isArchivedView && onUnarchive ? () => onUnarchive(entry) : undefined}
       />
     );
-  }
-  if (entry.kind === "channel") {
-    return (
+  } else if (entry.kind === "channel") {
+    row = (
       <ChannelListItem
         channel={entry.channel}
         mentioned={mentioned}
@@ -61,19 +71,57 @@ export function DynamicInboxRow({
         onUnarchive={isArchivedView && onUnarchive ? () => onUnarchive(entry) : undefined}
       />
     );
+  } else {
+    // Agent chat session — same row chrome as the classic inbox chat row
+    // (brand-blue unread stripe, agent avatar, title + relative time, run pip,
+    // swipe-archive) so it reads as the same kind of message as before.
+    row = (
+      <ChatSessionRow
+        session={entry.session}
+        agentRunState={agentRunState}
+        isSelected={isSelected}
+        isArchivedView={isArchivedView}
+        onSelect={() => onSelect(entry)}
+        onArchive={() => onArchive(entry)}
+      />
+    );
   }
-  // Agent chat session — same row chrome as the classic inbox chat row
-  // (brand-blue unread stripe, agent avatar, title + relative time, run pip,
-  // swipe-archive) so it reads as the same kind of message as before.
+
+  // TECH-3579 — the favorite toggle. Rather than touch the shared upstream row
+  // components, the star sits as an overlay over the leading avatar (all three
+  // row kinds put a size-7 avatar at `px-4`, vertically centred). It is hidden
+  // until the row is hovered/focused, so the avatar shows normally; a starred
+  // row keeps the gold star visible in place of the avatar.
+  if (!favoritesEnabled || isArchivedView) return row;
   return (
-    <ChatSessionRow
-      session={entry.session}
-      agentRunState={agentRunState}
-      isSelected={isSelected}
-      isArchivedView={isArchivedView}
-      onSelect={() => onSelect(entry)}
-      onArchive={() => onArchive(entry)}
-    />
+    <div className="group/fav relative">
+      {row}
+      <FavoriteStar active={!!isFavorite} onToggle={() => onToggleFavorite?.(entry)} />
+    </div>
+  );
+}
+
+function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={active ? "Remove from favorites" : "Add to favorites"}
+      aria-pressed={active}
+      title={active ? "Remove from favorites" : "Add to favorites"}
+      onClick={(e) => {
+        // Don't let the star toggle bubble up into the row's select handler.
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle();
+      }}
+      className={`absolute left-4 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
+        active
+          ? "bg-warning/15 opacity-100"
+          : "bg-background/90 opacity-0 group-hover/fav:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+      }`}
+    >
+      <Star className={`size-4 ${active ? "fill-warning text-warning" : "text-muted-foreground"}`} />
+    </button>
   );
 }
 
