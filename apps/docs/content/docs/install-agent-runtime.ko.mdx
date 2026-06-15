@@ -48,7 +48,7 @@ multica daemon restart
 
 ### Codex (OpenAI)
 
-더 세분화된 승인 게이트를 갖춘 JSON-RPC 2.0 전송 방식입니다. MCP 구성은 작업별 `$CODEX_HOME/config.toml`에 기록됩니다. **세션 재개 코드는 존재하지만 현재 도달할 수 없습니다** — 재개가 필요하다면 Claude Code 또는 ACP 계열 중 하나를 선택하세요.
+더 세분화된 승인 게이트를 갖춘 JSON-RPC 2.0 전송 방식입니다. MCP 구성은 작업별 `$CODEX_HOME/config.toml`에 기록됩니다. **세션 재개가 동작합니다** — Multica는 Codex app-server의 `thread/resume`으로 재개하며, 오래되었거나 없는 thread는 새 thread로 폴백합니다.
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ multica daemon restart
 
 ### Cursor (Anysphere)
 
-Cursor 에디터에 대응하는 CLI입니다. **세션 재개가 작동하지 않습니다** — Cursor의 CLI가 세션 id를 반환하지 않으므로 재개 시 전달하는 값은 항상 유효하지 않습니다.
+Cursor 에디터에 대응하는 CLI입니다. **세션 재개가 동작합니다** — 현재 Cursor Agent는 stream-json 이벤트에서 `session_id`를 반환하고, Multica는 다음 실행 때 이를 `--resume <id>`로 전달합니다.
 
 | | |
 |---|---|
