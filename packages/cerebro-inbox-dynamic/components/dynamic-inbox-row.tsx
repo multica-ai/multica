@@ -13,6 +13,7 @@ import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
 import { Star } from "lucide-react";
+import { useState } from "react";
 import type { ChatSession } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 
@@ -88,39 +89,74 @@ export function DynamicInboxRow({
   }
 
   // TECH-3579 — the favorite toggle. Rather than touch the shared upstream row
-  // components, the star sits as an overlay over the leading avatar (all three
-  // row kinds put a size-7 avatar at `px-4`, vertically centred). It is hidden
-  // until the row is hovered/focused, so the avatar shows normally; a starred
-  // row keeps the gold star visible in place of the avatar.
+  // components, it sits as an overlay over the leading avatar (all three row
+  // kinds put a size-7 avatar at `px-4`, vertically centred). The avatar shows
+  // by default; clicking it flips (rotates) to reveal a star, and clicking the
+  // star sets/clears the favorite. A starred row shows the gold star at rest.
   if (!favoritesEnabled || isArchivedView) return row;
   return (
-    <div className="group/fav relative">
+    <div className="relative">
       {row}
       <FavoriteStar active={!!isFavorite} onToggle={() => onToggleFavorite?.(entry)} />
     </div>
   );
 }
 
+/**
+ * TECH-3579 — two-step favorite affordance over the row avatar:
+ *  1. Default shows the avatar (the overlay's front face is transparent).
+ *  2. Clicking the avatar flips the overlay to reveal a star ("armed").
+ *  3. Clicking the star sets the favorite; the gold star then stays at rest.
+ * A click on the avatar never selects/opens the row (it only flips), and an
+ * armed-but-not-favorited star flips back to the avatar on pointer-leave so a
+ * mis-click doesn't get stuck on the star face.
+ */
 function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  const [armed, setArmed] = useState(false);
+  const showStar = active || armed;
+
   return (
     <button
       type="button"
-      aria-label={active ? "Remove from favorites" : "Add to favorites"}
+      aria-label={active ? "Remove from favorites" : showStar ? "Set as favorite" : "Favorite this conversation"}
       aria-pressed={active}
-      title={active ? "Remove from favorites" : "Add to favorites"}
+      title={active ? "Remove from favorites" : showStar ? "Click the star to favorite" : "Click to favorite"}
       onClick={(e) => {
-        // Don't let the star toggle bubble up into the row's select handler.
+        // The avatar/star overlay must never bubble into the row's open handler.
         e.preventDefault();
         e.stopPropagation();
+        if (!showStar) {
+          // First click on the avatar: flip to the star — don't favorite yet.
+          setArmed(true);
+          return;
+        }
+        // Star is showing: this click commits or clears the favorite.
         onToggle();
+        if (active) setArmed(false); // removed → flip back to the avatar
       }}
-      className={`absolute left-4 top-1/2 z-10 flex size-7 -translate-y-1/2 items-center justify-center rounded-full transition-opacity ${
-        active
-          ? "bg-warning/15 opacity-100"
-          : "bg-background/90 opacity-0 group-hover/fav:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-      }`}
+      onPointerLeave={() => {
+        // Flipped to the star but didn't favorite → flip back to the avatar.
+        if (!active) setArmed(false);
+      }}
+      className="absolute left-4 top-1/2 z-10 size-7 -translate-y-1/2 [perspective:600px]"
     >
-      <Star className={`size-4 ${active ? "fill-warning text-warning" : "text-muted-foreground"}`} />
+      <span
+        className={`relative block size-7 transition-transform duration-300 [transform-style:preserve-3d] ${
+          showStar ? "[transform:rotateY(180deg)]" : ""
+        }`}
+      >
+        {/* Front face — transparent so the real avatar underneath stays visible;
+            this is just the click target that flips to the star. */}
+        <span className="absolute inset-0 rounded-full [backface-visibility:hidden]" aria-hidden />
+        {/* Back face — the star the user clicks to (un)favorite. Opaque so it
+            masks the avatar once flipped. */}
+        <span
+          className="absolute inset-0 flex items-center justify-center rounded-full bg-card [backface-visibility:hidden] [transform:rotateY(180deg)]"
+          aria-hidden
+        >
+          <Star className={`size-4 ${active ? "fill-warning text-warning" : "text-muted-foreground"}`} />
+        </span>
+      </span>
     </button>
   );
 }

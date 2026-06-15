@@ -60,14 +60,21 @@ read / snooze ("Remind me") / archive actions are the same everywhere.
 ### Favorite star — dynamic inbox only (TECH-3579)
 
 The dynamic inbox adds one affordance that is **not** part of the shared
-row-action menu above: a **favorite star** overlaid on the leading avatar of
+row-action menu above: a **favorite toggle** overlaid on the leading avatar of
 every row. It is intentionally an overlay (in `DynamicInboxRow`,
 `packages/cerebro-inbox-dynamic/components/dynamic-inbox-row.tsx`), not a
 `MobileRowActions` / dropdown item, because the product requirement is a
-direct "click the avatar → it turns into a star" toggle in place. It therefore
-does not touch the upstream row components (`InboxListItem` /
-`ChannelListItem`) — the star is absolutely positioned over the size-7 avatar
-all three kinds render at `px-4`.
+direct, in-place toggle on the avatar. It therefore does not touch the upstream
+row components (`InboxListItem` / `ChannelListItem`) — the overlay is absolutely
+positioned over the size-7 avatar all three kinds render at `px-4`.
+
+The interaction is **two-step with a flip** (per Jesper, TECH-3579): the avatar
+shows by default; clicking it rotates the overlay (`rotateY` flip) to reveal a
+star; clicking the star sets the favorite. A favorited row shows the gold star
+at rest; clicking it removes the favorite and flips back to the avatar. Clicking
+the avatar only flips — it never opens/selects the row. This is `FavoriteStar`'s
+local `armed` state; it works the same on touch (tap to flip, tap to favorite),
+so there is no hover dependency.
 
 - State lives in `useInboxFavorites` (`packages/cerebro-inbox-dynamic/use-favorites.ts`),
   persisted per user in the `cerebro_inbox_favorites` preferences key (no DB
