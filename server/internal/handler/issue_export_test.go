@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -71,6 +74,48 @@ func TestExportIssue_PDF(t *testing.T) {
 	contentType := wExport.Header().Get("Content-Type")
 	if !strings.Contains(contentType, "application/pdf") {
 		t.Errorf("expected Content-Type application/pdf, got %q", contentType)
+	}
+}
+
+// TestRenderPDF_CJKWithoutCharset is a DB-free regression test for OPE-2905.
+// It feeds RenderPDF an HTML document that contains CJK text but no
+// <meta charset> (exactly the shape processHTMLImages produces for the
+// export-html path), then extracts the text back with pdftotext and asserts
+// the Chinese survives instead of becoming latin-1 mojibake. Without the
+// "--encoding utf-8" flag on weasyprint this output is garbled.
+func TestRenderPDF_CJKWithoutCharset(t *testing.T) {
+	if _, err := exec.LookPath("weasyprint"); err != nil {
+		t.Skip("weasyprint not found in PATH, skipping")
+	}
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext not found in PATH, skipping")
+	}
+
+	const cjk = "中文测试黑客松赞助方案"
+	// Note: no <meta charset> — mirrors the real export-html path where
+	// processHTMLImages wraps the fragment in <html> but never adds charset.
+	htmlContent := "<html><head></head><body><p>" + cjk + "</p></body></html>"
+
+	pdfBytes, err := RenderPDF(context.Background(), htmlContent)
+	if err != nil {
+		t.Fatalf("RenderPDF: %v", err)
+	}
+	if len(pdfBytes) == 0 {
+		t.Fatal("RenderPDF returned empty output")
+	}
+
+	dir := t.TempDir()
+	pdfPath := filepath.Join(dir, "out.pdf")
+	if err := os.WriteFile(pdfPath, pdfBytes, 0o600); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+
+	out, err := exec.Command("pdftotext", pdfPath, "-").Output()
+	if err != nil {
+		t.Fatalf("pdftotext: %v", err)
+	}
+	if !strings.Contains(string(out), cjk) {
+		t.Errorf("CJK text not preserved in PDF; got %q, want it to contain %q (charset/encoding regression)", string(out), cjk)
 	}
 }
 

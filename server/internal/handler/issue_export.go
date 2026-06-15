@@ -39,7 +39,11 @@ func RenderPDF(ctx context.Context, htmlContent string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "weasyprint", "-", "-")
+	// Force UTF-8 input decoding. The HTML we feed weasyprint may lack a
+	// <meta charset> (e.g. processHTMLImages re-renders fragments into a bare
+	// <html> document without one), and weasyprint would otherwise fall back
+	// to latin-1 and mojibake any non-ASCII text.
+	cmd := exec.CommandContext(ctx, "weasyprint", "--encoding", "utf-8", "-", "-")
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -477,8 +481,22 @@ func (h *Handler) ExportIssueHTML(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Process images: replace private attachment URLs with base64 data URIs
+	// Process images: replace private attachment URLs with base64 data URIs.
+	// Note: processHTMLImages runs html.Parse/Render, which always wraps fragments
+	// into a full <html> document without injecting <meta charset>. The guard below
+	// then sees "<html" and skips wrapHTMLForPrint, so charset is never added — the
+	// PDF charset is forced via WeasyPrint's --encoding flag in RenderPDF instead.
+	slog.Info("export-html charset probe",
+		"stage", "before_process",
+		"len", len(htmlContent),
+		"has_html", strings.Contains(htmlContent, "<html"),
+		"has_charset", strings.Contains(htmlContent, "<meta charset"))
 	htmlContent = h.processHTMLImages(r.Context(), issue.WorkspaceID, htmlContent)
+	slog.Info("export-html charset probe",
+		"stage", "after_process",
+		"len", len(htmlContent),
+		"has_html", strings.Contains(htmlContent, "<html"),
+		"has_charset", strings.Contains(htmlContent, "<meta charset"))
 
 	// Wrap in a minimal HTML document with print-optimized CSS if not already a full document
 	if !strings.Contains(htmlContent, "<html") {
