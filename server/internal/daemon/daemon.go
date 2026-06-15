@@ -2979,15 +2979,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
-	}
-	// For external runtime extensions, also inject config using the
-	// manifest-declared config file (e.g. "AGENTS.md").
-	if entry.ConfigFile != "" {
-		if _, err := execenv.InjectRuntimeConfigForEntry(env.WorkDir, entry.ConfigFile, taskCtx); err != nil {
-			d.logger.Warn("execenv: inject external runtime config failed (non-fatal)", "error", err)
+	var runtimeBrief string
+	if entry.IsExternal {
+		nativeSkills := entry.HasCapability("local_skills")
+		runtimeBrief = execenv.BuildRuntimeBriefForEntry(provider, nativeSkills, taskCtx)
+		if entry.ConfigFile != "" {
+			if _, err := execenv.InjectRuntimeConfigForEntry(env.WorkDir, provider, entry.ConfigFile, nativeSkills, taskCtx); err != nil {
+				d.logger.Warn("execenv: inject external runtime config failed (non-fatal)", "error", err)
+			}
+		}
+	} else {
+		var err error
+		runtimeBrief, err = execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if err != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 		}
 	}
 	// Workdir is preserved for reuse by future tasks on the same (agent,
@@ -3004,12 +3009,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// marker block on the way out instead.
 	if env.LocalDirectory {
 		defer func() {
-			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
-				d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
-			}
-			if entry.ConfigFile != "" {
-				if cerr := execenv.CleanupRuntimeConfigForEntry(env.WorkDir, entry.ConfigFile); cerr != nil {
-					d.logger.Warn("execenv: cleanup external runtime config failed (non-fatal)", "error", cerr)
+			if entry.IsExternal {
+				if entry.ConfigFile != "" {
+					if cerr := execenv.CleanupRuntimeConfigForEntry(env.WorkDir, entry.ConfigFile); cerr != nil {
+						d.logger.Warn("execenv: cleanup external runtime config failed (non-fatal)", "error", cerr)
+					}
+				}
+			} else {
+				if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
+					d.logger.Warn("execenv: cleanup runtime config failed (non-fatal)", "error", cerr)
 				}
 			}
 			// Excise the sidecar tree (.agent_context/, .multica/,

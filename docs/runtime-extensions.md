@@ -101,7 +101,7 @@ forwarding path.
 | `session_resume`       | ACP: `params.sessionId`. stream-json: `--resume <id>`.                   |
 | `max_turns`            | ACP: `params.maxTurns`. stream-json: `--max-turns N`.                    |
 | `model_selection`      | ACP: `params.model`. stream-json: `--model <id>`.                        |
-| `local_skills`         | UI shows the "skills" tab; daemon exports `MULTICA_AGENT_SKILLS_ROOT`.   |
+| `local_skills`         | UI shows the "skills" tab; daemon exports `MULTICA_AGENT_SKILLS_ROOT`; runtime brief uses native skill-discovery wording instead of `.agent_context/skills/` fallback. |
 | `slash_commands`       | UI shows the "slash commands" affordance.                                |
 | `tool_calls`           | UI surfaces tool-use messages from the CLI.                              |
 | `attachments`          | UI exposes the per-task attachment dropzone.                             |

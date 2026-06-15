@@ -971,7 +971,7 @@ func TestCleanupRuntimeConfigForEntryRemovesExternalRuntimeBrief(t *testing.T) {
 	if err := os.WriteFile(path, []byte("user instructions"), 0o644); err != nil {
 		t.Fatalf("seed AGENTS.md: %v", err)
 	}
-	if _, err := InjectRuntimeConfigForEntry(dir, "AGENTS.md", TaskContextForEnv{IssueID: "issue-1"}); err != nil {
+	if _, err := InjectRuntimeConfigForEntry(dir, "custom-runtime", "AGENTS.md", false, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
 		t.Fatalf("InjectRuntimeConfigForEntry: %v", err)
 	}
 	withBrief, err := os.ReadFile(path)
@@ -1002,6 +1002,44 @@ func TestCleanupRuntimeConfigForEntryRemovesExternalRuntimeBrief(t *testing.T) {
 	}
 	if string(cleaned) != "user instructions" {
 		t.Fatalf("cleanup left stale external runtime content: %q", cleaned)
+	}
+}
+
+func TestInjectRuntimeConfigForEntryUsesExternalRuntimeCapabilities(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	ctx := TaskContextForEnv{
+		IssueID: "issue-1",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Coding", Description: "Write code", Content: "Use tests."},
+		},
+	}
+
+	if _, err := InjectRuntimeConfigForEntry(dir, "custom-native", "AGENTS.md", true, ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfigForEntry native: %v", err)
+	}
+	nativeBrief, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read native brief: %v", err)
+	}
+	if !strings.Contains(string(nativeBrief), "discovered automatically") {
+		t.Fatalf("external runtime with local_skills capability should get native-skill wording:\n%s", nativeBrief)
+	}
+	if strings.Contains(string(nativeBrief), "Detailed skill instructions are in `.agent_context/skills/`") {
+		t.Fatalf("external runtime with local_skills capability should not get fallback skill wording:\n%s", nativeBrief)
+	}
+
+	fallbackDir := t.TempDir()
+	if _, err := InjectRuntimeConfigForEntry(fallbackDir, "custom-fallback", "AGENTS.md", false, ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfigForEntry fallback: %v", err)
+	}
+	fallbackBrief, err := os.ReadFile(filepath.Join(fallbackDir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read fallback brief: %v", err)
+	}
+	if !strings.Contains(string(fallbackBrief), "Detailed skill instructions are in `.agent_context/skills/`") {
+		t.Fatalf("external runtime without local_skills capability should get fallback skill wording:\n%s", fallbackBrief)
 	}
 }
 

@@ -170,14 +170,23 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	return content, writeRuntimeConfigFile(path, content)
 }
 
+// BuildRuntimeBriefForEntry generates the runtime brief for an external
+// runtime manifest entry without assuming a built-in provider config path.
+func BuildRuntimeBriefForEntry(provider string, nativeSkills bool, ctx TaskContextForEnv) string {
+	return buildMetaSkillContentWithOptions(runtimeBriefOptions{
+		provider:     provider,
+		nativeSkills: nativeSkills,
+	}, ctx)
+}
+
 // InjectRuntimeConfigForEntry is like InjectRuntimeConfig but accepts a
-// config file name from an external runtime manifest instead of deriving
-// it from the built-in provider name.
-func InjectRuntimeConfigForEntry(workDir, configFile string, ctx TaskContextForEnv) (string, error) {
+// provider/capability pair plus a config file name from an external runtime
+// manifest instead of deriving everything from a built-in provider name.
+func InjectRuntimeConfigForEntry(workDir, provider, configFile string, nativeSkills bool, ctx TaskContextForEnv) (string, error) {
 	if configFile == "" {
 		return "", nil
 	}
-	content := buildMetaSkillContent("runtime-extension", ctx)
+	content := BuildRuntimeBriefForEntry(provider, nativeSkills, ctx)
 	path := runtimeConfigPathForEntry(workDir, configFile)
 	return content, writeRuntimeConfigFile(path, content)
 }
@@ -401,6 +410,28 @@ func cleanupRuntimeConfigPath(path string) error {
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
+	return buildMetaSkillContentWithOptions(runtimeBriefOptions{
+		provider:     provider,
+		nativeSkills: providerUsesNativeSkills(provider),
+	}, ctx)
+}
+
+type runtimeBriefOptions struct {
+	provider     string
+	nativeSkills bool
+}
+
+func providerUsesNativeSkills(provider string) bool {
+	switch provider {
+	case "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity":
+		return true
+	default:
+		return false
+	}
+}
+
+func buildMetaSkillContentWithOptions(opts runtimeBriefOptions, ctx TaskContextForEnv) string {
+	provider := opts.provider
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
@@ -728,25 +759,23 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Skills\n\n")
-		switch provider {
-		case "claude", "codebuddy":
-			// Claude/CodeBuddy discovers skills natively from .claude/skills/ — just list names.
-			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and
-			// Antigravity discover skills natively from their respective paths.
+		if opts.nativeSkills {
+			// Claude, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor,
+			// Kimi, Kiro, and Antigravity discover skills natively from their
+			// respective paths.
 			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
 			// (exported via OPENCLAW_CONFIG_PATH) that pins agents.defaults.workspace
 			// to the task workdir so the CLI's scanner picks up {workDir}/skills/.
 			// Antigravity inherits Gemini CLI's workspace skill layout —
 			// {workDir}/.agents/skills/ — see resolveSkillsDir.
+			// External runtime extensions can opt into the same wording through
+			// capabilities.local_skills when their CLI consumes the manifest skills
+			// root natively.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini", "hermes":
+		} else {
 			// Gemini reads GEMINI.md directly. Hermes has no native skill
 			// discovery path wired up in resolveSkillsDir; both fall back to
 			// referencing the files explicitly under .agent_context/skills/.
-			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
-		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		}
 		for _, skill := range ctx.AgentSkills {
