@@ -13,12 +13,13 @@ interface ComposerExpandToggleProps {
 }
 
 /**
- * A small translucent pill that floats over the top edge of a mobile compose
- * field. Tapping it grows the field from the default height cap (half the
- * space above the keyboard) to 80%, and back. TECH-3536.
+ * A small translucent pill that floats just ABOVE the top edge of a compose
+ * field. Tapping it grows the field to the larger size and back. TECH-3536.
  *
- * The parent must be `position: relative`. Sits top-right so it never covers
- * the caret, which starts at the top-left.
+ * The parent must be `position: relative`. `bottom-full` anchors the pill's
+ * bottom to the parent's top edge so it sits in the gap above the field and
+ * never covers the text inside it (Jesper's feedback on TECH-3536). Centered
+ * horizontally so it reads as attached to the field on every surface.
  */
 export function ComposerExpandToggle({
   isExpanded,
@@ -35,10 +36,10 @@ export function ComposerExpandToggle({
       aria-label={label}
       title={label}
       className={cn(
-        "absolute right-2 top-1.5 z-10 flex items-center gap-1 rounded-full",
-        "bg-background/55 px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
-        "ring-1 ring-border/50 backdrop-blur-sm transition-colors",
-        "hover:bg-background/80 active:bg-background/90",
+        "absolute bottom-full left-1/2 z-20 mb-1 -translate-x-1/2 flex items-center gap-1 rounded-full",
+        "bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
+        "ring-1 ring-border/60 backdrop-blur-sm transition-colors",
+        "hover:bg-background/90 active:bg-background",
         className,
       )}
     >

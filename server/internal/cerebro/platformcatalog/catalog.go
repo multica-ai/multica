@@ -303,7 +303,7 @@ var catalog = []Capability{
 		Key:         "manage_notes",
 		Title:       "Create / edit / delete notes",
 		Category:    CategoryArtifacts,
-		Description: "Create, edit, delete, pin, change the visibility of, or manage references on notes (built on the Document feature).",
+		Description: "Create, edit, delete, pin, change the visibility of, manage references on, comment/suggest on, version, or lock notes (built on the Document feature).",
 		Ops: []string{
 			"POST /api/notes/",
 			"PUT /api/notes/{id}",
@@ -312,6 +312,16 @@ var catalog = []Capability{
 			"PUT /api/notes/{id}/visibility",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
+			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
+			"POST /api/notes/{id}/comments",
+			"PUT /api/notes/{id}/comments/{commentId}",
+			"DELETE /api/notes/{id}/comments/{commentId}",
+			"POST /api/notes/{id}/comments/{commentId}/resolve",
+			"POST /api/notes/{id}/comments/{commentId}/suggestion",
+			"POST /api/notes/{id}/versions",
+			"POST /api/notes/{id}/versions/{versionId}/restore",
+			"POST /api/notes/{id}/lock",
+			"DELETE /api/notes/{id}/lock",
 		},
 	},
 	{

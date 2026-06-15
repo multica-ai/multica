@@ -27,11 +27,18 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { History, MessageSquare } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
+import {
+  ContentEditor,
+  type ContentEditorRef,
+  ReadonlyContent,
+} from "@multica/views/editor";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   notesListOptions,
   useCreateNote,
@@ -39,11 +46,15 @@ import {
   useDeleteNote,
   useSetNotePin,
   useSetNoteVisibility,
+  useNoteEditLock,
   firstLineTitle,
   VISIBILITY_LABELS,
 } from "../core";
 import type { Note, NoteVisibility } from "../core";
 import { NoteReferences } from "./note-references";
+import { NoteLockBanner } from "./note-lock-banner";
+import { NoteCommentsPanel } from "./note-comments-panel";
+import { NoteVersionsDialog } from "./note-versions-dialog";
 
 const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
   private: <Lock className="size-3" />,
@@ -231,9 +242,25 @@ function NoteEditor({
   const setPin = useSetNotePin();
   const setVisibility = useSetNoteVisibility();
 
+  // Wave 3 (TECH-3556): each surface is independently feature-flagged.
+  const lockEnabled = useFeatureFlag("cerebro_note_lock");
+  const commentsEnabled = useFeatureFlag("cerebro_note_comments");
+  const versionsEnabled = useFeatureFlag("cerebro_note_versions");
+
   const [title, setTitle] = React.useState(note.title);
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
+  const [showComments, setShowComments] = React.useState(false);
+  const [showHistory, setShowHistory] = React.useState(false);
   const editorRef = React.useRef<ContentEditorRef>(null);
+  const editorContainerRef = React.useRef<HTMLDivElement>(null);
+
+  const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
+  const isOwner = note.owner_id === myId;
+
+  // Edit lock: while this note is open and the flag is on, hold the lock and
+  // heartbeat. If someone else holds it live, drop to read-only + offer takeover.
+  const editLock = useNoteEditLock(note.id, lockEnabled);
+  const readOnly = lockEnabled && editLock.blockedByOther;
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
 
@@ -271,6 +298,13 @@ function NoteEditor({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
+      {readOnly && editLock.lock && (
+        <NoteLockBanner
+          lock={editLock.lock}
+          acquiring={editLock.acquiring}
+          onTakeOver={editLock.takeOver}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
@@ -337,6 +371,28 @@ function NoteEditor({
           </span>
         </Button>
 
+        {versionsEnabled && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowHistory(true)}
+          >
+            <History className="size-4" />
+            <span className="hidden sm:inline">History</span>
+          </Button>
+        )}
+
+        {commentsEnabled && (
+          <Button
+            size="sm"
+            variant={showComments ? "secondary" : "ghost"}
+            onClick={() => setShowComments((v) => !v)}
+          >
+            <MessageSquare className="size-4" />
+            <span className="hidden sm:inline">Comments</span>
+          </Button>
+        )}
+
         <Button
           size="sm"
           variant="ghost"
@@ -348,28 +404,58 @@ function NoteEditor({
         </Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onBlur={saveTitle}
-          placeholder="Title (optional — first line becomes the title)"
-          className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50"
-        />
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={saveTitle}
+            disabled={readOnly}
+            placeholder="Title (optional — first line becomes the title)"
+            className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50 disabled:opacity-70"
+          />
 
-        <NoteReferences noteId={note.id} />
+          <NoteReferences noteId={note.id} />
 
-        {/* Body uses the SAME rich editor as issue comments + descriptions, so
-            "@" behaves identically (people, agents, issues, …) inline. */}
-        <ContentEditor
-          ref={editorRef}
-          defaultValue={note.body}
-          onUpdate={saveBody}
-          onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
-          placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
-          className="min-h-[50vh] flex-1"
-        />
+          {/* Body uses the SAME rich editor as issue comments + descriptions, so
+              "@" behaves identically (people, agents, issues, …) inline. When
+              the note is locked by someone else we render it read-only instead. */}
+          {readOnly ? (
+            <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
+          ) : (
+            <div ref={editorContainerRef} className="flex min-h-0 flex-1 flex-col">
+              <ContentEditor
+                ref={editorRef}
+                defaultValue={note.body}
+                onUpdate={saveBody}
+                onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
+                placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
+                className="min-h-[50vh] flex-1"
+              />
+            </div>
+          )}
+        </div>
+
+        {commentsEnabled && showComments && (
+          <div className="hidden w-80 shrink-0 border-l sm:block">
+            <NoteCommentsPanel
+              noteId={note.id}
+              noteBody={note.body}
+              isOwner={isOwner}
+              editorContainerRef={editorContainerRef}
+              onClose={() => setShowComments(false)}
+            />
+          </div>
+        )}
       </div>
+
+      {versionsEnabled && (
+        <NoteVersionsDialog
+          noteId={note.id}
+          open={showHistory}
+          onOpenChange={setShowHistory}
+        />
+      )}
     </div>
   );
 }

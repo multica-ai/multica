@@ -69,9 +69,19 @@ FROM cerebro_note
 WHERE artifact_id = $1
 `
 
-func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (CerebroNote, error) {
+type GetNoteRow struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	OwnerID    pgtype.UUID        `json:"owner_id"`
+	Visibility string             `json:"visibility"`
+	Pinned     bool               `json:"pinned"`
+	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (GetNoteRow, error) {
 	row := q.db.QueryRow(ctx, getNote, artifactID)
-	var i CerebroNote
+	var i GetNoteRow
 	err := row.Scan(
 		&i.ArtifactID,
 		&i.OwnerID,
@@ -427,6 +437,16 @@ type UpsertNoteParams struct {
 	Pinned     bool        `json:"pinned"`
 }
 
+type UpsertNoteRow struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	OwnerID    pgtype.UUID        `json:"owner_id"`
+	Visibility string             `json:"visibility"`
+	Pinned     bool               `json:"pinned"`
+	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 // Notes feature (TECH-3421). A Note is an artifact (kind='note') that also has
 // a cerebro_note row carrying owner + visibility + pin state. See migration
 // 9073_cerebro_note. Visibility access rule, applied everywhere a note is read:
@@ -435,14 +455,14 @@ type UpsertNoteParams struct {
 //	(visibility='shared' AND a share row exists for me).
 //
 // Marks an artifact as a Notes-feature note (or updates its note state).
-func (q *Queries) UpsertNote(ctx context.Context, arg UpsertNoteParams) (CerebroNote, error) {
+func (q *Queries) UpsertNote(ctx context.Context, arg UpsertNoteParams) (UpsertNoteRow, error) {
 	row := q.db.QueryRow(ctx, upsertNote,
 		arg.ArtifactID,
 		arg.OwnerID,
 		arg.Visibility,
 		arg.Pinned,
 	)
-	var i CerebroNote
+	var i UpsertNoteRow
 	err := row.Scan(
 		&i.ArtifactID,
 		&i.OwnerID,

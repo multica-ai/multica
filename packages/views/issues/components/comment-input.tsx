@@ -173,7 +173,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
             isPinned && "ring-emerald-500/40 shadow-lg",
           )}
         >
-          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, mobile only. */}
+          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, floats above the field on every surface. */}
           {composerHeight.showExpandToggle && (
             <ComposerExpandToggle
               isExpanded={composerHeight.isExpanded}
@@ -182,8 +182,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
               collapseLabel={t(($) => $.comment.collapse_tooltip)}
             />
           )}
-          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — maxHeight caps growth above the keyboard. */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={{ maxHeight: composerHeight.maxHeight }}>
+          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
+          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={composerHeight.containerStyle}>
             <ContentEditor
               // CEREBRO-PATCH(input-autofocus): JEH-756 — remount on
               // channel/DM switch so ContentEditor re-evaluates `autoFocus`

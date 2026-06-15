@@ -1,0 +1,100 @@
+---
+title: "Multica v1.6.0"
+description: "79 release bullets: 38 new, 37 fixed, 1 improved, plus 3 more."
+date: 2026-06-15
+---
+
+**Release summary:** 79 release bullets: 38 new, 37 fixed, 1 improved, plus 3 more.
+
+Changes since [v1.5.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.5.0...v1.6.0) — bump: **minor**
+
+## New
+
+- Inline find & replace in the note (TECH-3529, bølge 2 G5) [#1269](https://github.com/firtal-group/firtal-cerebro/pull/1269)
+- Bølge 2 — free periods, numbering, outline & word count (TECH-3529) [#1268](https://github.com/firtal-group/firtal-cerebro/pull/1268)
+- Default to All-messages box + archived as a view (TECH-3541) [#1264](https://github.com/firtal-group/firtal-cerebro/pull/1264)
+- Render interrupted runs as amber "Interrupted", not red "Failed" [#1260](https://github.com/firtal-group/firtal-cerebro/pull/1260)
+- Mobile back keeps scroll + All-messages box classic parity (TECH-3541) [#1259](https://github.com/firtal-group/firtal-cerebro/pull/1259)
+- Expose Relewise product tools to CS agent (TECH-3442) [#1194](https://github.com/firtal-group/firtal-cerebro/pull/1194)
+- Open interactive-terminal toggle to all members and default it on for daemon runtimes [#1258](https://github.com/firtal-group/firtal-cerebro/pull/1258)
+- Close pre-prod gaps from Review 1 (TECH-3529) [#1257](https://github.com/firtal-group/firtal-cerebro/pull/1257)
+- Inject current time into agent brief [#1214](https://github.com/firtal-group/firtal-cerebro/pull/1214)
+- Gate connection admin on manage_connections capability (TECH-3513 slice 1) [#1253](https://github.com/firtal-group/firtal-cerebro/pull/1253)
+- Add "archive returns to inbox" per-user setting [#1252](https://github.com/firtal-group/firtal-cerebro/pull/1252)
+- Note body uses shared @-editor + Link→references (TECH-3421) [#1251](https://github.com/firtal-group/firtal-cerebro/pull/1251)
+- Cap mobile compose height at 50% with expand-to-80% pill [#1247](https://github.com/firtal-group/firtal-cerebro/pull/1247)
+- Add "Unread first" grouping as the default (TECH-3494) [#1243](https://github.com/firtal-group/firtal-cerebro/pull/1243)
+- Unified Chat block — total limit, recent-first sort, group-by, English (TECH-3494) [#1242](https://github.com/firtal-group/firtal-cerebro/pull/1242)
+- Dynamic-inbox polish — create button, scrollable tabs, agents in chat (TECH-3494) [#1241](https://github.com/firtal-group/firtal-cerebro/pull/1241)
+- Approve-for-period, grant-at-level, richer context for connection Ask (TECH-3498) [#1239](https://github.com/firtal-group/firtal-cerebro/pull/1239)
+- Tag people in a note → routed notification (TECH-3421) [#1232](https://github.com/firtal-group/firtal-cerebro/pull/1232)
+- Full mobile parity for chat rows + inbox message-types doc (TECH-3352) [#1238](https://github.com/firtal-group/firtal-cerebro/pull/1238)
+- Business reviews + Google-Docs inline editing (TECH-3511) [#1231](https://github.com/firtal-group/firtal-cerebro/pull/1231)
+- Add snooze ("remind me") + mark-unread to chat inbox rows (TECH-3352) [#1233](https://github.com/firtal-group/firtal-cerebro/pull/1233)
+- Polish create-menu design (TECH-3494) [#1229](https://github.com/firtal-group/firtal-cerebro/pull/1229)
+- Show the filter builder only in edit mode (TECH-3413 #5 / TECH-3502 #6) [#1227](https://github.com/firtal-group/firtal-cerebro/pull/1227)
+- Notes feature — private-by-default notes on Documents (TECH-3421) [#1170](https://github.com/firtal-group/firtal-cerebro/pull/1170)
+- Chat row 3-dot menu + unarchive (TECH-3489) [#1207](https://github.com/firtal-group/firtal-cerebro/pull/1207)
+- Gem egne presets (TECH-3495)
+- Create_file — chat agents produce files from inline content (TECH-3416 Fase 2a) [#1197](https://github.com/firtal-group/firtal-cerebro/pull/1197)
+- Enforce Ask on workspace-connection MCP tools (TECH-3498) [#1200](https://github.com/firtal-group/firtal-cerebro/pull/1200)
+- Enforce Ask on workspace-connection MCP tools (TECH-3498) [#1199](https://github.com/firtal-group/firtal-cerebro/pull/1199)
+- Tilføj plus-menu i dynamisk inbox (TECH-3494)
+- Vælg farve på blok-badge
+- Add `multica chat session messages` to read full chat threads [#1191](https://github.com/firtal-group/firtal-cerebro/pull/1191)
+- Persist unsent comment/channel/DM/reply text (TECH-3491) [#1186](https://github.com/firtal-group/firtal-cerebro/pull/1186)
+- Filter builder — stack conditions for the Custom filter box (TECH-3413 #5 / TECH-3496) [#1184](https://github.com/firtal-group/firtal-cerebro/pull/1184)
+- Align issue + channel row actions — "..." on desktop, swipe on mobile (TECH-3352) [#1180](https://github.com/firtal-group/firtal-cerebro/pull/1180)
+- Rename Slack-block to "Chat" + add sort options (TECH-3422) [#1179](https://github.com/firtal-group/firtal-cerebro/pull/1179)
+- Move the Classic→Dynamic switch into the ⋯ settings menu (TECH-3413) [#1178](https://github.com/firtal-group/firtal-cerebro/pull/1178)
+- System Activity Phase 1 — consecutive postpones, task cleanup, no recurring (TECH-3038) [#972](https://github.com/firtal-group/firtal-cerebro/pull/972)
+
+## Fixed
+
+- De-duplicate note-reference ops in manage_notes [#1271](https://github.com/firtal-group/firtal-cerebro/pull/1271)
+- Restore archive/done action when opening an issue from the dynamic inbox (TECH-3549) [#1270](https://github.com/firtal-group/firtal-cerebro/pull/1270)
+- Human-readable inbox — names not IDs, requester + issue (TECH-3498) [#1249](https://github.com/firtal-group/firtal-cerebro/pull/1249)
+- Wire pushService into handler so Web Push can be enabled (TECH-3548) [#1263](https://github.com/firtal-group/firtal-cerebro/pull/1263)
+- Green up frontend OOM + backend catalog gate for deploy 9ada49f [#1262](https://github.com/firtal-group/firtal-cerebro/pull/1262)
+- Artifact sheet fills viewport on mobile (TECH-3542) [#1256](https://github.com/firtal-group/firtal-cerebro/pull/1256)
+- Inventory the note-reference routes (TECH-3421) [#1254](https://github.com/firtal-group/firtal-cerebro/pull/1254)
+- Render image attachments inline in the viewer (TECH-3537) [#1248](https://github.com/firtal-group/firtal-cerebro/pull/1248)
+- Gør unread first til separat chat-setting (TECH-3494) [#1244](https://github.com/firtal-group/firtal-cerebro/pull/1244)
+- Trigger owner-approved private-agent runs via System Activity [#1240](https://github.com/firtal-group/firtal-cerebro/pull/1240)
+- Gør chat-personlisten søgbar og scrollbar (TECH-3525) [#1225](https://github.com/firtal-group/firtal-cerebro/pull/1225)
+- Wrap create-menu label in a group (TECH-3494) [#1235](https://github.com/firtal-group/firtal-cerebro/pull/1235)
+- Remove duplicate CerebroAgentvaultAgentAccess struct (unbreak main build) [#1230](https://github.com/firtal-group/firtal-cerebro/pull/1230)
+- Start an agent chat, not a DM, from "new message" [#1226](https://github.com/firtal-group/firtal-cerebro/pull/1226)
+- Add navigation menu trigger to dynamic inbox on mobile (TECH-3502) [#1224](https://github.com/firtal-group/firtal-cerebro/pull/1224)
+- Lock create_file target to server-set surface (TECH-3416 Fase 2a) [#1212](https://github.com/firtal-group/firtal-cerebro/pull/1212)
+- Ret visning af planlagte wakeups (TECH-3521)
+- Tving download for vedhæftninger (TECH-3512)
+- Gør create-menu mobilvenlig (TECH-3494) [#1217](https://github.com/firtal-group/firtal-cerebro/pull/1217)
+- Fjern standard presets fra menuen [#1215](https://github.com/firtal-group/firtal-cerebro/pull/1215)
+- Vis planlagte wakeups
+- Væk agent uden skjult kommentar
+- Remove create_file from MulticaMCPToolMatrix [#1210](https://github.com/firtal-group/firtal-cerebro/pull/1210)
+- Register create_file as MCP CLI tool (TECH-3416 Fase 2a)
+- Flyt create_file ud af mcp-inventory
+- Remove create_file from mcp surface inventory [#1209](https://github.com/firtal-group/firtal-cerebro/pull/1209)
+- Bevar mennesketråd for vækninger
+- Dynamic inbox review-2 fixes — tab switching, settings, custom filter, box rename, top-insert (TECH-3502) [#1203](https://github.com/firtal-group/firtal-cerebro/pull/1203)
+- Isoler comment composer-tests (TECH-3494)
+- Read flag from store, not query hook (TECH-3491) [#1202](https://github.com/firtal-group/firtal-cerebro/pull/1202)
+- DM/channel message column never overflows on mobile (TECH-3490) [#1195](https://github.com/firtal-group/firtal-cerebro/pull/1195)
+- Let agents fan out when origin traces to a human on the issue [#1193](https://github.com/firtal-group/firtal-cerebro/pull/1193)
+- Single decision pill per endpoint in connection config sheet [#1185](https://github.com/firtal-group/firtal-cerebro/pull/1185)
+- Thread fired wakeup back into the original conversation (TECH-3487) [#1182](https://github.com/firtal-group/firtal-cerebro/pull/1182)
+- Break long URLs/tokens on every markdown surface (TECH-3490) [#1183](https://github.com/firtal-group/firtal-cerebro/pull/1183)
+- Make the Dynamic-inbox toggle work on mobile/PWA (TECH-3413) [#1177](https://github.com/firtal-group/firtal-cerebro/pull/1177)
+- Dynamic inbox default OFF — opt-in, not on for everyone (TECH-3454) [#1176](https://github.com/firtal-group/firtal-cerebro/pull/1176)
+
+## Improved
+
+- Document reminder family + note @-mentions in inbox-message-types (TECH-3352) [#1246](https://github.com/firtal-group/firtal-cerebro/pull/1246)
+
+## Other changes
+
+- Fix TECH-3512 downloads from comment file cards [#1250](https://github.com/firtal-group/firtal-cerebro/pull/1250)
+- Gør registry datakildeadgang tydelig [#1220](https://github.com/firtal-group/firtal-cerebro/pull/1220)
+- Fjern create_file MCP-registrering igen

@@ -633,13 +633,38 @@ type CerebroIssueStatus struct {
 }
 
 type CerebroNote struct {
-	ArtifactID pgtype.UUID        `json:"artifact_id"`
-	OwnerID    pgtype.UUID        `json:"owner_id"`
-	Visibility string             `json:"visibility"`
-	Pinned     bool               `json:"pinned"`
-	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ArtifactID      pgtype.UUID        `json:"artifact_id"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	Visibility      string             `json:"visibility"`
+	Pinned          bool               `json:"pinned"`
+	PinnedAt        pgtype.Timestamptz `json:"pinned_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LockedBy        pgtype.UUID        `json:"locked_by"`
+	LockedAt        pgtype.Timestamptz `json:"locked_at"`
+	LockHeartbeatAt pgtype.Timestamptz `json:"lock_heartbeat_at"`
+}
+
+type CerebroNoteComment struct {
+	ID              pgtype.UUID        `json:"id"`
+	NoteID          pgtype.UUID        `json:"note_id"`
+	ThreadRootID    pgtype.UUID        `json:"thread_root_id"`
+	Kind            string             `json:"kind"`
+	Body            string             `json:"body"`
+	AnchorQuote     pgtype.Text        `json:"anchor_quote"`
+	AnchorPrefix    pgtype.Text        `json:"anchor_prefix"`
+	AnchorSuffix    pgtype.Text        `json:"anchor_suffix"`
+	AnchorStart     pgtype.Int4        `json:"anchor_start"`
+	AnchorEnd       pgtype.Int4        `json:"anchor_end"`
+	SuggestionText  pgtype.Text        `json:"suggestion_text"`
+	SuggestionState string             `json:"suggestion_state"`
+	Resolved        bool               `json:"resolved"`
+	ResolvedBy      pgtype.UUID        `json:"resolved_by"`
+	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroNoteReference struct {
@@ -681,6 +706,21 @@ type CerebroNoteType struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	NumberingEnabled     bool               `json:"numbering_enabled"`
 	NextNumber           int32              `json:"next_number"`
+}
+
+type CerebroNoteVersion struct {
+	ID         pgtype.UUID        `json:"id"`
+	NoteID     pgtype.UUID        `json:"note_id"`
+	VersionNo  int32              `json:"version_no"`
+	Title      string             `json:"title"`
+	Body       string             `json:"body"`
+	ByteSize   int32              `json:"byte_size"`
+	Reason     string             `json:"reason"`
+	Label      pgtype.Text        `json:"label"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroPersonaMaskAudit struct {

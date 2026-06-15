@@ -31,6 +31,16 @@ export type CerebroFlagKey =
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
   | "cerebro_notes"
+  // TECH-3556 (Wave 3): the heavy Google-Docs note features, each independently
+  // flagged so they can ship + be QA'd one at a time on staging.
+  //   - comments + suggestions on a span of a note (margin comments, replies,
+  //     accept/reject a proposed edit),
+  | "cerebro_note_comments"
+  //   - version history (see who changed what, restore an earlier version),
+  | "cerebro_note_versions"
+  //   - interim single-writer edit lock (stops two people overwriting each
+  //     other until full live co-editing lands).
+  | "cerebro_note_lock"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -178,6 +188,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the Notes nav entry, quick-capture, the notes list/editor surface, and the
   // Notes box in the dynamic inbox.
   cerebro_notes: false,
+  // TECH-3556 (Wave 3): OFF until each surface ships + is QA'd on staging.
+  cerebro_note_comments: false,
+  cerebro_note_versions: false,
+  cerebro_note_lock: false,
   cerebro_inbox_slack_block: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
