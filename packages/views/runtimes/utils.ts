@@ -129,6 +129,7 @@ export function formatTokens(n: number): string {
 //
 //   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
 //   OpenAI:    https://openai.com/api/pricing
+//   Google:    https://ai.google.dev/gemini-api/docs/pricing
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
 //   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
@@ -194,6 +195,14 @@ const MODEL_PRICING: Record<
   // -- OpenAI: GPT-4o family (legacy, kept for runtimes still configured against it) --
   "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
   "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
+
+  // -- Google Gemini (ai.google.dev/gemini-api/docs/pricing). Preview
+  //    suffixes are emitted by local runtimes; price them at the published
+  //    family tier so dashboard cost does not drop these rows. --
+  "gemini-3.1-pro":         { input: 2.00, output: 12.00, cacheRead: 0.20, cacheWrite: 2.00 },
+  "gemini-3.1-pro-preview": { input: 2.00, output: 12.00, cacheRead: 0.20, cacheWrite: 2.00 },
+  "gemini-3-flash":         { input: 0.50, output: 3.00,  cacheRead: 0.05, cacheWrite: 0.50 },
+  "gemini-3-flash-preview": { input: 0.50, output: 3.00,  cacheRead: 0.05, cacheWrite: 0.50 },
 
   // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
   //    The official catalog lists exactly two current SKUs; `deepseek-chat`

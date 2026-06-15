@@ -224,6 +224,30 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
+  it("prices Gemini preview IDs emitted by local runtimes", () => {
+    expect(isModelPriced("gemini-3.1-pro-preview")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-3.1-pro-preview",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2 + 12 + 0.2, 5);
+
+    expect(isModelPriced("gemini-3-flash-preview")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-3-flash-preview",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.5 + 3 + 0.05, 5);
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
