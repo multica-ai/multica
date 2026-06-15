@@ -52,7 +52,7 @@ func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 
 func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	origStorage := testHandler.Storage
-	testHandler.Storage = &mockStorage{}
+	testHandler.Storage = &mockStorage{cdnDomain: "cdn.example.com"}
 	defer func() { testHandler.Storage = origStorage }()
 
 	t.Setenv("ALLOW_SIGNUP", "false")
