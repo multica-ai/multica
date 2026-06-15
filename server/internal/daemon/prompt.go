@@ -58,6 +58,8 @@ func buildWakeupPrompt(task Task, provider string) string {
 		b.WriteString("[APPROVAL] An owner approved a request for you to act on this issue. This is a system trigger, not a new user comment. Carry out the approved request from the note below and post your result in the original thread.\n\n")
 	} else {
 		b.WriteString("[WAKEUP] The platform re-invoked you from a scheduled wakeup. This is NOT a new user comment and no wakeup comment was created.\n\n")
+		// CEREBRO-PATCH(wakeup-task-mandate): TECH-3548 a scheduled wakeup note is a real task — execute it; never classify it as a stale re-fire without re-checking live state.
+		b.WriteString("✅ The wakeup note below is a REAL task you (or an owner) scheduled for this exact moment. Your job is to EXECUTE it now. Do NOT classify it as a stale re-fire, duplicate trigger, or already-handled based on reading the thread — actively re-verify the current live state (open the actual site, run the command, check the deploy) BEFORE concluding the work is done. Misreading a real verify/deploy task as 'nothing to do' is the failure this prevents.\n\n")
 		// CEREBRO-PATCH(wakeup-silent-exit): TECH-3540 no-op wakeups must exit silently, never post a "nothing to do" comment.
 		b.WriteString("⚠️ If the work in the wakeup note is already done or there is nothing new to do, post NOTHING and exit silently. Do NOT post a comment saying you already handled it, that no reply is needed, or that you are exiting — that comment is itself the noise this prevents. Only post a comment if you have a genuine new result or answer to deliver.\n\n")
 	}
