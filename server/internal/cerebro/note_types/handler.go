@@ -39,14 +39,16 @@ func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool) *Handler {
 // ---------------------------------------------------------------------------
 
 type noteTypeRequest struct {
-	Name           string  `json:"name"`
-	Icon           string  `json:"icon"`
-	TemplateBody   string  `json:"template_body"`
-	RecurrenceMode string  `json:"recurrence_mode"`
-	CadenceUnit    string  `json:"cadence_unit"`
-	CadenceCount   *int32  `json:"cadence_count"`
-	TargetFolderID *string `json:"target_folder_id"`
-	Enabled        *bool   `json:"enabled"`
+	Name             string  `json:"name"`
+	Icon             string  `json:"icon"`
+	TemplateBody     string  `json:"template_body"`
+	RecurrenceMode   string  `json:"recurrence_mode"`
+	CadenceUnit      string  `json:"cadence_unit"`
+	CadenceCount     *int32  `json:"cadence_count"`
+	TargetFolderID   *string `json:"target_folder_id"`
+	Enabled          *bool   `json:"enabled"`
+	NumberingEnabled *bool   `json:"numbering_enabled"`
+	NextNumber       *int32  `json:"next_number"`
 }
 
 type noteTypeResponse struct {
@@ -61,23 +63,27 @@ type noteTypeResponse struct {
 	TargetFolderID       *string `json:"target_folder_id"`
 	RunningDocArtifactID *string `json:"running_doc_artifact_id"`
 	Enabled              bool    `json:"enabled"`
+	NumberingEnabled     bool    `json:"numbering_enabled"`
+	NextNumber           int32   `json:"next_number"`
 	CreatedAt            string  `json:"created_at"`
 	UpdatedAt            string  `json:"updated_at"`
 }
 
 func toResponse(nt cerebrodb.CerebroNoteType) noteTypeResponse {
 	resp := noteTypeResponse{
-		ID:             util.UUIDToString(nt.ID),
-		WorkspaceID:    util.UUIDToString(nt.WorkspaceID),
-		Name:           nt.Name,
-		Icon:           nt.Icon,
-		TemplateBody:   nt.TemplateBody,
-		RecurrenceMode: nt.RecurrenceMode,
-		CadenceUnit:    nt.CadenceUnit,
-		CadenceCount:   nt.CadenceCount,
-		Enabled:        nt.Enabled,
-		CreatedAt:      tsString(nt.CreatedAt),
-		UpdatedAt:      tsString(nt.UpdatedAt),
+		ID:               util.UUIDToString(nt.ID),
+		WorkspaceID:      util.UUIDToString(nt.WorkspaceID),
+		Name:             nt.Name,
+		Icon:             nt.Icon,
+		TemplateBody:     nt.TemplateBody,
+		RecurrenceMode:   nt.RecurrenceMode,
+		CadenceUnit:      nt.CadenceUnit,
+		CadenceCount:     nt.CadenceCount,
+		Enabled:          nt.Enabled,
+		NumberingEnabled: nt.NumberingEnabled,
+		NextNumber:       nt.NextNumber,
+		CreatedAt:        tsString(nt.CreatedAt),
+		UpdatedAt:        tsString(nt.UpdatedAt),
 	}
 	if nt.TargetFolderID.Valid {
 		s := util.UUIDToString(nt.TargetFolderID)
@@ -160,7 +166,9 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	mode, cadence, count, folder, problem := h.normalize(req, ModeRunningDoc, CadenceManual, 1, w, r)
+	norm, problem := h.normalize(req, normalizeDefaults{
+		mode: ModeRunningDoc, cadence: CadenceManual, count: 1, numbering: false, nextNumber: 1,
+	}, w, r)
 	if problem {
 		return
 	}
@@ -174,16 +182,18 @@ func (h *Handler) CreateNoteType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nt, err := h.Cerebro.CreateCerebroNoteType(r.Context(), cerebrodb.CreateCerebroNoteTypeParams{
-		WorkspaceID:    wsUUID,
-		Name:           strings.TrimSpace(req.Name),
-		Icon:           req.Icon,
-		TemplateBody:   req.TemplateBody,
-		RecurrenceMode: mode,
-		CadenceUnit:    cadence,
-		CadenceCount:   count,
-		Enabled:        enabled,
-		CreatedBy:      createdBy,
-		TargetFolderID: folder,
+		WorkspaceID:      wsUUID,
+		Name:             strings.TrimSpace(req.Name),
+		Icon:             req.Icon,
+		TemplateBody:     req.TemplateBody,
+		RecurrenceMode:   norm.mode,
+		CadenceUnit:      norm.cadence,
+		CadenceCount:     norm.count,
+		Enabled:          enabled,
+		CreatedBy:        createdBy,
+		TargetFolderID:   norm.folder,
+		NumberingEnabled: norm.numbering,
+		NextNumber:       norm.nextNumber,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create note type failed")
@@ -219,7 +229,13 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	mode, cadence, count, folder, problem := h.normalize(req, existing.RecurrenceMode, existing.CadenceUnit, existing.CadenceCount, w, r)
+	norm, problem := h.normalize(req, normalizeDefaults{
+		mode:       existing.RecurrenceMode,
+		cadence:    existing.CadenceUnit,
+		count:      existing.CadenceCount,
+		numbering:  existing.NumberingEnabled,
+		nextNumber: existing.NextNumber,
+	}, w, r)
 	if problem {
 		return
 	}
@@ -233,15 +249,17 @@ func (h *Handler) UpdateNoteType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nt, err := h.Cerebro.UpdateCerebroNoteType(r.Context(), cerebrodb.UpdateCerebroNoteTypeParams{
-		ID:             id,
-		Name:           name,
-		Icon:           req.Icon,
-		TemplateBody:   req.TemplateBody,
-		RecurrenceMode: mode,
-		CadenceUnit:    cadence,
-		CadenceCount:   count,
-		Enabled:        enabled,
-		TargetFolderID: folder,
+		ID:               id,
+		Name:             name,
+		Icon:             req.Icon,
+		TemplateBody:     req.TemplateBody,
+		RecurrenceMode:   norm.mode,
+		CadenceUnit:      norm.cadence,
+		CadenceCount:     norm.count,
+		Enabled:          enabled,
+		TargetFolderID:   norm.folder,
+		NumberingEnabled: norm.numbering,
+		NextNumber:       norm.nextNumber,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update note type failed")
@@ -326,39 +344,68 @@ func (h *Handler) RunNow(w http.ResponseWriter, r *http.Request) {
 // normalize validates + resolves the mutable fields shared by create/update,
 // falling back to the supplied defaults when a field is omitted. Returns
 // problem=true (after writing the 4xx) when validation fails.
-func (h *Handler) normalize(req noteTypeRequest, defMode, defCadence string, defCount int32, w http.ResponseWriter, r *http.Request) (mode, cadence string, count int32, folder pgtype.UUID, problem bool) {
-	mode = req.RecurrenceMode
-	if mode == "" {
-		mode = defMode
+type normalized struct {
+	mode       string
+	cadence    string
+	count      int32
+	folder     pgtype.UUID
+	numbering  bool
+	nextNumber int32
+}
+
+func (h *Handler) normalize(req noteTypeRequest, def normalizeDefaults, w http.ResponseWriter, r *http.Request) (normalized, bool) {
+	out := normalized{}
+	out.mode = req.RecurrenceMode
+	if out.mode == "" {
+		out.mode = def.mode
 	}
-	if err := ValidateMode(mode); err != nil {
+	if err := ValidateMode(out.mode); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", 0, pgtype.UUID{}, true
+		return normalized{}, true
 	}
-	cadence = req.CadenceUnit
-	if cadence == "" {
-		cadence = defCadence
+	out.cadence = req.CadenceUnit
+	if out.cadence == "" {
+		out.cadence = def.cadence
 	}
-	if err := ValidateCadence(cadence); err != nil {
+	if err := ValidateCadence(out.cadence); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", 0, pgtype.UUID{}, true
+		return normalized{}, true
 	}
-	count = defCount
+	out.count = def.count
 	if req.CadenceCount != nil {
-		count = *req.CadenceCount
+		out.count = *req.CadenceCount
 	}
-	if count <= 0 {
-		count = 1
+	if out.count <= 0 {
+		out.count = 1
+	}
+	out.numbering = def.numbering
+	if req.NumberingEnabled != nil {
+		out.numbering = *req.NumberingEnabled
+	}
+	out.nextNumber = def.nextNumber
+	if req.NextNumber != nil {
+		out.nextNumber = *req.NextNumber
+	}
+	if out.nextNumber < 1 {
+		out.nextNumber = 1
 	}
 	if req.TargetFolderID != nil && strings.TrimSpace(*req.TargetFolderID) != "" {
 		f, err := util.ParseUUID(strings.TrimSpace(*req.TargetFolderID))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid target_folder_id")
-			return "", "", 0, pgtype.UUID{}, true
+			return normalized{}, true
 		}
-		folder = f
+		out.folder = f
 	}
-	return mode, cadence, count, folder, false
+	return out, false
+}
+
+type normalizeDefaults struct {
+	mode       string
+	cadence    string
+	count      int32
+	numbering  bool
+	nextNumber int32
 }
 
 // ---------------------------------------------------------------------------

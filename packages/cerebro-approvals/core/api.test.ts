@@ -40,6 +40,35 @@ describe("approvals api compatibility", () => {
     expect(row.status).toBe("pending");
     expect(row.matched_grant_ids).toEqual([]);
     expect(row.agent_id).toBeNull();
+    // Human-readable enrichment fields default to null when the backend omits them.
+    expect(row.requester_name).toBeNull();
+    expect(row.issue_identifier).toBeNull();
+    expect(row.issue_title).toBeNull();
+  });
+
+  it("surfaces the enrichment fields (names + issue) when present", async () => {
+    mockCerebroRequest.mockResolvedValueOnce({
+      approvals: [
+        {
+          id: "a1",
+          capability: "draft_reply",
+          requester_type: "agent",
+          requester_id: "11111111-1111-1111-1111-111111111111",
+          requester_name: "Sara CTO Bot",
+          agent_name: "Sara CTO Bot",
+          issue_id: "22222222-2222-2222-2222-222222222222",
+          issue_identifier: "TECH-3498",
+          issue_title: "Human-readable approvals inbox",
+        },
+      ],
+      total: 1,
+      pending: 1,
+    });
+    const res = await fetchApprovals("ws", { status: "pending", limit: 50, offset: 0 });
+    const row = res.approvals[0]!;
+    expect(row.requester_name).toBe("Sara CTO Bot");
+    expect(row.issue_identifier).toBe("TECH-3498");
+    expect(row.issue_title).toBe("Human-readable approvals inbox");
   });
 
   it("returns null when a single approval response is null", async () => {

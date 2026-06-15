@@ -53,11 +53,30 @@ export type SectionKind =
   // and typing. Rendered by a dedicated component, not the entry-list filter.
   | "team";
 
-/** How rows inside a section are grouped under sub-headers. */
-export type SectionGroupBy = "none" | "action" | "project";
+/** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
+ *  widened to the full classic-inbox set (project / agent / type) so the "All
+ *  messages" box can group exactly like the classic inbox. */
+export type SectionGroupBy = "none" | "action" | "project" | "agent" | "type";
 
-/** How rows inside a section are ordered. */
+/** How rows inside a section are ordered (direction). */
 export type SectionSort = "newest" | "oldest";
+
+/** TECH-3541 #2 — sort method, mirroring the classic inbox's sort picker.
+ *  "last_message" is the default (= plain newest/oldest by activity time). */
+export type SectionSortMethod = "last_message" | "last_other" | "last_me";
+
+/** TECH-3541 #2 — quick view filter on a box, mirroring the classic inbox's
+ *  "All ▾" view switch. "all" shows everything (the box's own kind still
+ *  applies first). */
+export type SectionViewFilter =
+  | "all"
+  | "unread"
+  | "mentioned"
+  | "issues"
+  | "channels"
+  | "dms"
+  | "muted"
+  | "pinned";
 
 /** Semantic colour token for a circle count badge. */
 export type SectionBadgeColor = "brand" | "warning" | "success" | "destructive" | "muted";
@@ -71,7 +90,16 @@ export interface InboxSectionConfig {
   /** Required when kind === "project". */
   projectId?: string;
   groupBy?: SectionGroupBy;
+  /** TECH-3541 #2 — second-level grouping ("Then by"), like the classic inbox.
+   *  Only applies when groupBy is a multi-level mode (not none/action). */
+  groupBySecondary?: SectionGroupBy;
   sort?: SectionSort;
+  /** TECH-3541 #2 — sort method (last message / last from another / last from
+   *  me). Combined with `sort` (direction). Defaults to "last_message". */
+  sortMethod?: SectionSortMethod;
+  /** TECH-3541 #2 — quick view filter applied on top of the box's kind.
+   *  Defaults to "all". Mirrors the classic inbox's view switch. */
+  viewFilter?: SectionViewFilter;
   /** Show the priority chip on rows. */
   showPriority?: boolean;
   /** Compact (denser) rows. */
@@ -231,7 +259,13 @@ function section(kind: SectionKind, extra: Partial<InboxSectionConfig> = {}): In
   return { id: makeId(kind), kind, groupBy: "none", sort: "newest", showPriority: true, ...extra };
 }
 
-/** Initial dynamic inbox layout for users without a saved layout. */
+/**
+ * Initial dynamic inbox layout for users without a saved layout.
+ * TECH-3541 #2 — the default is a single "All messages" box grouped by action,
+ * so switching to the dynamic inbox is effectively the same as the classic
+ * inbox (which also defaults to action grouping). Users then add boxes / tabs
+ * on top of this baseline.
+ */
 export function operatorPreset(): InboxLayout {
   const tabId = makeId("tab");
   return {
@@ -241,11 +275,7 @@ export function operatorPreset(): InboxLayout {
       {
         id: tabId,
         title: "Inbox",
-        sections: [
-          section("act_now", { groupBy: "action" }),
-          section("running"),
-          section("reminders"),
-        ],
+        sections: [section("all", { groupBy: "action" })],
       },
     ],
   };

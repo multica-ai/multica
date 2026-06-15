@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -69,6 +70,18 @@ type approvalResponse struct {
 	ExpiresAt       *string  `json:"expires_at"`
 	CreatedAt       string   `json:"created_at"`
 	UpdatedAt       string   `json:"updated_at"`
+
+	// Human-readable enrichment (TECH-3498). The UI shows NAMES, not raw UUIDs.
+	// All best-effort: a lookup failure leaves the field empty/nil and never
+	// fails the request. RequesterName always carries at least a humanized label
+	// (never a raw UUID).
+	RequesterName   string  `json:"requester_name"`
+	AgentName       *string `json:"agent_name,omitempty"`
+	DecidedByName   *string `json:"decided_by_name,omitempty"`
+	DelegatedToName *string `json:"delegated_to_name,omitempty"`
+	IssueID         *string `json:"issue_id,omitempty"`
+	IssueIdentifier *string `json:"issue_identifier,omitempty"`
+	IssueTitle      *string `json:"issue_title,omitempty"`
 }
 
 type approvalAuditResponse struct {
@@ -157,11 +170,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	items := make([]approvalResponse, len(rows))
 	total := int32(0)
+	cache := newEnrichCache()
 	for i, row := range rows {
 		if row.Total > total {
 			total = row.Total
 		}
-		items[i] = listRowToResponse(row)
+		base := listRowToRequest(row)
+		items[i] = h.enrich(r.Context(), requestToResponse(base), base, cache)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"approvals": items,
@@ -191,7 +206,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, "get approval", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, requestToResponse(row))
+	writeJSON(w, http.StatusOK, h.enrich(r.Context(), requestToResponse(row), row, nil))
 }
 
 // Audit — GET /api/workspaces/{id}/approvals/audit?approval_id=&limit=&offset=
@@ -298,7 +313,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, requestToResponse(row))
+	writeJSON(w, http.StatusOK, h.enrich(r.Context(), requestToResponse(row), row, nil))
 }
 
 // Reject — POST /api/workspaces/{id}/approvals/{approvalId}/reject
@@ -327,7 +342,7 @@ func (h *Handler) decide(w http.ResponseWriter, r *http.Request, fn decideFn) {
 		h.writeDecisionError(w, r, "decide approval", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, requestToResponse(row))
+	writeJSON(w, http.StatusOK, h.enrich(r.Context(), requestToResponse(row), row, nil))
 }
 
 // validGrantLevel reports whether a grant_at_level string is one of the three
@@ -398,6 +413,259 @@ func (h *Handler) grantAtLevel(ctx context.Context, row cerebrodb.CerebroApprova
 	return err
 }
 
+// --- human-readable enrichment (TECH-3498) ----------------------------------
+
+// enrichCache memoizes name/issue lookups for the span of a single List call so
+// an inbox of N rows that share an agent or an issue does the lookup once. A nil
+// cache is valid (Get/decision endpoints enrich a single row, no reuse).
+type enrichCache struct {
+	agents map[pgtype.UUID]string // agent_id → name ("" = looked up, not found)
+	users  map[pgtype.UUID]string // user_id  → name
+	issues map[pgtype.UUID]issueRef
+}
+
+type issueRef struct {
+	identifier string
+	title      string
+}
+
+func newEnrichCache() *enrichCache {
+	return &enrichCache{
+		agents: map[pgtype.UUID]string{},
+		users:  map[pgtype.UUID]string{},
+		issues: map[pgtype.UUID]issueRef{},
+	}
+}
+
+// approvalIssueContext pulls issue_id (preferred) and task_id (fallback) out of
+// an approval row's stored Context JSON. Both default to "" when absent.
+func approvalIssueContext(raw []byte) (issueID, taskID string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var ctx struct {
+		IssueID string `json:"issue_id"`
+		TaskID  string `json:"task_id"`
+	}
+	if err := json.Unmarshal(raw, &ctx); err != nil {
+		return "", ""
+	}
+	return ctx.IssueID, ctx.TaskID
+}
+
+// enrich fills the human-readable name/issue fields on a response from the row.
+// Best-effort: any lookup error leaves that field empty/nil and is logged at
+// warn — it NEVER fails the request. requester_name always carries at least a
+// humanized type label so the UI never has to fall back to a raw UUID.
+//
+// cache may be nil (single-row enrich); pass one across a List to dedupe lookups.
+func (h *Handler) enrich(ctx context.Context, resp approvalResponse, row cerebrodb.CerebroApprovalRequest, cache *enrichCache) approvalResponse {
+	// Requester + agent names.
+	if row.AgentID.Valid {
+		if name := h.agentName(ctx, row.AgentID, cache); name != "" {
+			resp.AgentName = &name
+			resp.RequesterName = name
+		}
+	}
+	if resp.RequesterName == "" {
+		switch row.RequesterType {
+		case RequesterMember:
+			if name := h.userName(ctx, row.RequesterID, cache); name != "" {
+				resp.RequesterName = name
+			}
+		case RequesterAgent:
+			if name := h.agentName(ctx, row.RequesterID, cache); name != "" {
+				resp.RequesterName = name
+			}
+		}
+	}
+	if resp.RequesterName == "" {
+		resp.RequesterName = humanizeRequesterType(row.RequesterType)
+	}
+
+	// Decided-by name (members decide approvals).
+	if row.DecidedByID.Valid {
+		if name := h.userName(ctx, row.DecidedByID, cache); name != "" {
+			resp.DecidedByName = &name
+		}
+	}
+
+	// Delegated-to name: member resolves to a user name; group leaves the
+	// type label (no group-name query in the upstream query set).
+	if row.DelegatedToID.Valid && row.DelegatedToType.Valid {
+		switch row.DelegatedToType.String {
+		case DelegateToMember:
+			if name := h.userName(ctx, row.DelegatedToID, cache); name != "" {
+				resp.DelegatedToName = &name
+			}
+		}
+	}
+
+	// Issue: context.issue_id (preferred) → context.task_id → GetAgentTask.IssueID.
+	issueID := h.resolveIssueID(ctx, row.Context, cache)
+	if issueID.Valid {
+		ref := h.issueRef(ctx, row.WorkspaceID, issueID, cache)
+		if ref.identifier != "" || ref.title != "" {
+			s := util.UUIDToString(issueID)
+			resp.IssueID = &s
+			if ref.identifier != "" {
+				resp.IssueIdentifier = &ref.identifier
+			}
+			if ref.title != "" {
+				resp.IssueTitle = &ref.title
+			}
+		}
+	}
+
+	return resp
+}
+
+func (h *Handler) agentName(ctx context.Context, id pgtype.UUID, cache *enrichCache) string {
+	if h.Agents == nil || !id.Valid {
+		return ""
+	}
+	if cache != nil {
+		if v, ok := cache.agents[id]; ok {
+			return v
+		}
+	}
+	agent, err := h.Agents.GetAgent(ctx, id)
+	name := ""
+	if err != nil {
+		slog.Warn("approval enrich: agent lookup failed", "agent_id", util.UUIDToString(id), "error", err)
+	} else {
+		name = agent.Name
+	}
+	if cache != nil {
+		cache.agents[id] = name
+	}
+	return name
+}
+
+func (h *Handler) userName(ctx context.Context, id pgtype.UUID, cache *enrichCache) string {
+	if h.Agents == nil || !id.Valid {
+		return ""
+	}
+	if cache != nil {
+		if v, ok := cache.users[id]; ok {
+			return v
+		}
+	}
+	user, err := h.Agents.GetUser(ctx, id)
+	name := ""
+	if err != nil {
+		slog.Warn("approval enrich: user lookup failed", "user_id", util.UUIDToString(id), "error", err)
+	} else {
+		name = user.Name
+	}
+	if cache != nil {
+		cache.users[id] = name
+	}
+	return name
+}
+
+// resolveIssueID prefers context.issue_id; falls back to context.task_id →
+// GetAgentTask.IssueID. Returns an invalid UUID when neither resolves.
+func (h *Handler) resolveIssueID(ctx context.Context, rawContext []byte, cache *enrichCache) pgtype.UUID {
+	issueRaw, taskRaw := approvalIssueContext(rawContext)
+	if issueRaw != "" {
+		if id, err := util.ParseUUID(issueRaw); err == nil && id.Valid {
+			return id
+		}
+	}
+	if h.Agents == nil || taskRaw == "" {
+		return pgtype.UUID{}
+	}
+	taskID, err := util.ParseUUID(taskRaw)
+	if err != nil || !taskID.Valid {
+		return pgtype.UUID{}
+	}
+	task, err := h.Agents.GetAgentTask(ctx, taskID)
+	if err != nil {
+		slog.Warn("approval enrich: task lookup failed", "task_id", taskRaw, "error", err)
+		return pgtype.UUID{}
+	}
+	return task.IssueID
+}
+
+func (h *Handler) issueRef(ctx context.Context, workspaceID, issueID pgtype.UUID, cache *enrichCache) issueRef {
+	if h.Agents == nil || !issueID.Valid {
+		return issueRef{}
+	}
+	if cache != nil {
+		if v, ok := cache.issues[issueID]; ok {
+			return v
+		}
+	}
+	ref := issueRef{}
+	issue, err := h.Agents.GetIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("approval enrich: issue lookup failed", "issue_id", util.UUIDToString(issueID), "error", err)
+	} else {
+		ref.title = issue.Title
+		prefix := h.issuePrefix(ctx, workspaceID)
+		if prefix != "" {
+			ref.identifier = prefix + "-" + strconv.Itoa(int(issue.Number))
+		} else {
+			ref.identifier = "#" + strconv.Itoa(int(issue.Number))
+		}
+	}
+	if cache != nil {
+		cache.issues[issueID] = ref
+	}
+	return ref
+}
+
+// issuePrefix returns the workspace's issue-key prefix (e.g. "TECH") used to
+// build a human-readable issue identifier. Mirrors handler.getIssuePrefix:
+// prefer the stored prefix, else derive a short uppercase token from the name.
+func (h *Handler) issuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
+	if h.Agents == nil || !workspaceID.Valid {
+		return ""
+	}
+	ws, err := h.Agents.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("approval enrich: workspace lookup failed", "workspace_id", util.UUIDToString(workspaceID), "error", err)
+		return ""
+	}
+	if ws.IssuePrefix != "" {
+		return ws.IssuePrefix
+	}
+	return deriveIssuePrefix(ws.Name)
+}
+
+// deriveIssuePrefix is the fallback used when a workspace has no stored prefix —
+// the first up-to-3 alphabetic characters of the name, uppercased ("WS" when the
+// name has no letters). Kept in sync with handler.generateIssuePrefix.
+func deriveIssuePrefix(name string) string {
+	letters := make([]rune, 0, 3)
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			letters = append(letters, r)
+			if len(letters) == 3 {
+				break
+			}
+		}
+	}
+	if len(letters) == 0 {
+		return "WS"
+	}
+	return strings.ToUpper(string(letters))
+}
+
+// humanizeRequesterType maps a requester_type to a plain label so the UI never
+// shows a raw UUID even when the name lookup fails.
+func humanizeRequesterType(t string) string {
+	switch t {
+	case RequesterAgent:
+		return "Agent"
+	case RequesterMember:
+		return "Member"
+	default:
+		return "Unknown"
+	}
+}
+
 // approvalConnection pulls the connection name + connection_tool flag out of an
 // approval row's stored Context JSON. Both default to zero values when absent.
 func approvalConnection(raw []byte) (conn string, connTool bool) {
@@ -444,7 +712,7 @@ func (h *Handler) Delegate(w http.ResponseWriter, r *http.Request) {
 		h.writeDecisionError(w, r, "delegate approval", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, requestToResponse(row))
+	writeJSON(w, http.StatusOK, h.enrich(r.Context(), requestToResponse(row), row, nil))
 }
 
 // Intake — POST /api/workspaces/{id}/approvals/intake (admin/owner).
@@ -518,7 +786,7 @@ func (h *Handler) Intake(w http.ResponseWriter, r *http.Request) {
 		h.serverError(w, r, "intake approval", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, requestToResponse(row))
+	writeJSON(w, http.StatusCreated, h.enrich(r.Context(), requestToResponse(row), row, nil))
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -612,8 +880,10 @@ func requestToResponse(a cerebrodb.CerebroApprovalRequest) approvalResponse {
 	}
 }
 
-func listRowToResponse(a cerebrodb.ListCerebroApprovalRequestsRow) approvalResponse {
-	return requestToResponse(cerebrodb.CerebroApprovalRequest{
+// listRowToRequest projects a list row back into the canonical row struct so the
+// shared requestToResponse + enrich pipeline can run over it.
+func listRowToRequest(a cerebrodb.ListCerebroApprovalRequestsRow) cerebrodb.CerebroApprovalRequest {
+	return cerebrodb.CerebroApprovalRequest{
 		ID:              a.ID,
 		WorkspaceID:     a.WorkspaceID,
 		RequesterType:   a.RequesterType,
@@ -633,7 +903,7 @@ func listRowToResponse(a cerebrodb.ListCerebroApprovalRequestsRow) approvalRespo
 		ExpiresAt:       a.ExpiresAt,
 		CreatedAt:       a.CreatedAt,
 		UpdatedAt:       a.UpdatedAt,
-	})
+	}
 }
 
 func auditRowToResponse(row cerebrodb.ListCerebroApprovalAuditRow) approvalAuditResponse {

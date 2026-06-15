@@ -3,11 +3,13 @@
 -- name: CreateCerebroNoteType :one
 INSERT INTO cerebro_note_type (
     workspace_id, name, icon, template_body, recurrence_mode,
-    cadence_unit, cadence_count, target_folder_id, enabled, created_by
+    cadence_unit, cadence_count, target_folder_id, enabled, created_by,
+    numbering_enabled, next_number
 )
 VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, sqlc.narg(target_folder_id), $8, $9
+    $6, $7, sqlc.narg(target_folder_id), $8, $9,
+    $10, $11
 )
 RETURNING *;
 
@@ -29,9 +31,19 @@ SET name = $2,
     cadence_count = $7,
     target_folder_id = sqlc.narg(target_folder_id),
     enabled = $8,
+    numbering_enabled = $9,
+    next_number = $10,
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: BumpCerebroNoteTypeNumber :one
+-- Atomically assigns the current number to a materialised note and advances the
+-- counter. Returns the number that was assigned (the value before the bump).
+UPDATE cerebro_note_type
+SET next_number = next_number + 1, updated_at = now()
+WHERE id = $1
+RETURNING next_number - 1 AS assigned_number;
 
 -- name: DeleteCerebroNoteType :exec
 DELETE FROM cerebro_note_type WHERE id = $1;

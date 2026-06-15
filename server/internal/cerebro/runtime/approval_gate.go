@@ -75,9 +75,12 @@ func decodeToolArgs(raw string) map[string]any {
 
 // askContext builds the verbatim Context map attached to an approval ask so the
 // human reviewer sees what the agent is trying to do: the tool, which connection
-// it targets (empty for non-connection tools), the originating task, the raw
-// args, a connection_tool flag, and a plain-language purpose string (TECH-3498).
-func askContext(toolName, connName, taskID string, args map[string]any, connectionTool bool) map[string]any {
+// it targets (empty for non-connection tools), the originating task, the issue
+// the run is working on, the raw args, a connection_tool flag, and a
+// plain-language purpose string (TECH-3498). issue_id is the robust source the
+// approvals handler uses to resolve a human-readable issue identifier + title,
+// independent of task_id.
+func askContext(toolName, connName, taskID, issueID string, args map[string]any, connectionTool bool) map[string]any {
 	var purpose string
 	if connectionTool && connName != "" {
 		purpose = fmt.Sprintf("Agent wants to use tool %q on connection %q", toolName, connName)
@@ -88,6 +91,7 @@ func askContext(toolName, connName, taskID string, args map[string]any, connecti
 		"tool_name":       toolName,
 		"connection":      connName,
 		"task_id":         taskID,
+		"issue_id":        issueID,
 		"args":            args,
 		"connection_tool": connectionTool,
 		"purpose":         purpose,
@@ -154,7 +158,7 @@ func (e *FirtalGatewayExecutor) guardConnectionAsk(
 		RequesterType: approvals.RequesterAgent,
 		RequesterID:   agentID,
 		Surface:       approvals.SurfaceSystem,
-		Context: askContext(toolName, connName, meta.TaskID, args, true),
+		Context: askContext(toolName, connName, meta.TaskID, meta.IssueID, args, true),
 	}
 	decision := permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "connection tool requires approval"}
 	// GuardDecisionReusing: a still-valid period-grant (an approved row with a
@@ -262,6 +266,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		Context: map[string]any{
 			"tool_name": toolName,
 			"task_id":   meta.TaskID,
+			"issue_id":  meta.IssueID,
 			"args":      args,
 		},
 	}
@@ -356,6 +361,7 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 		Context: map[string]any{
 			"tool_name": toolName,
 			"task_id":   meta.TaskID,
+			"issue_id":  meta.IssueID,
 			"args":      args,
 			"effective": string(eff.Setting),
 			"reason":    eff.Reason,

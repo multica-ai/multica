@@ -14,6 +14,7 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // These tests are DB-backed and mirror the references package harness: they
@@ -314,6 +315,148 @@ func TestDelegate_InvalidTarget(t *testing.T) {
 	if _, err := svc.Delegate(context.Background(), ask.ID, testWorkspace, testApprover, DelegateToMember, pgtype.UUID{}, "", SurfaceUI); err == nil {
 		t.Fatal("expected error for missing delegate id")
 	}
+}
+
+// TestEnrich_NamesAndIssue proves the TECH-3498 human-readable contract: the
+// approvals list/get responses carry the requester's NAME (not a raw UUID) and
+// the issue identifier + title, resolved from the stored context. Two rows are
+// seeded: one carrying context.task_id (resolved via the agent task → issue) and
+// one carrying context.issue_id directly. Neither requester_name may be a UUID.
+func TestEnrich_NamesAndIssue(t *testing.T) {
+	ctx := context.Background()
+	svc := newService()
+	h := NewHandler(svc).WithToolPolicy(toolpolicy.NewStore(testPool), db.New(testPool))
+
+	// Seed a runtime + agent so the requester resolves to the agent's name.
+	var runtimeID, agentID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider)
+		VALUES ($1, 'Enrich Runtime', 'cloud', 'test') RETURNING id`,
+		testWorkspace).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	const agentName = "Sara CTO Bot"
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
+		VALUES ($1, $2, 'cloud', $3, $4) RETURNING id`,
+		testWorkspace, agentName, runtimeID, testApprover).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	// Seed an issue (number 4321) the agent is working on.
+	const issueTitle = "Make the approvals inbox human-readable"
+	const issueNumber = 4321
+	var issueID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, number, creator_type, creator_id)
+		VALUES ($1, $2, $3, 'agent', $4) RETURNING id`,
+		testWorkspace, issueTitle, issueNumber, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	// Seed an agent task linking the agent to the issue (the task_id → issue path).
+	var taskID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id)
+		VALUES ($1, $2, $3) RETURNING id`,
+		agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("create agent task: %v", err)
+	}
+
+	// The workspace fixture uses issue_prefix "APR", so the identifier is APR-4321.
+	wantIdentifier := "APR-" + fmt.Sprintf("%d", issueNumber)
+
+	t.Run("via task_id", func(t *testing.T) {
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "draft_reply",
+			Resource:      "draft_reply",
+			Reason:        "connection tool requires approval",
+			Context:       map[string]any{"task_id": uuidStr(t, taskID), "tool_name": "draft_reply"},
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		assertEnriched(t, got, agentName, wantIdentifier, issueTitle, agentID)
+	})
+
+	t.Run("via issue_id", func(t *testing.T) {
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   agentID,
+			Agent:         agentID,
+			Capability:    "web_fetch",
+			Resource:      "web_fetch",
+			Reason:        "external network requires approval",
+			Context:       map[string]any{"issue_id": uuidStr(t, issueID), "tool_name": "web_fetch"},
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		assertEnriched(t, got, agentName, wantIdentifier, issueTitle, agentID)
+	})
+
+	t.Run("missing context yields humanized label, never a uuid", func(t *testing.T) {
+		// No agent_id and no context → requester_name falls back to "Agent".
+		row, err := svc.Intake(ctx, IntakeParams{
+			WorkspaceID:   testWorkspace,
+			RequesterType: RequesterAgent,
+			RequesterID:   testRequester,
+			Capability:    "credential_list",
+			Resource:      "*",
+			Reason:        "no enrichable context",
+		})
+		if err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+		got := h.enrich(ctx, requestToResponse(row), row, nil)
+		if got.RequesterName == "" {
+			t.Fatal("requester_name must never be empty")
+		}
+		if got.RequesterName == uuidStr(t, testRequester) || got.RequesterName == uuidStr(t, agentID) {
+			t.Fatalf("requester_name leaked a raw UUID: %q", got.RequesterName)
+		}
+		if got.IssueIdentifier != nil {
+			t.Fatalf("expected no issue identifier without context, got %q", *got.IssueIdentifier)
+		}
+	})
+}
+
+func assertEnriched(t *testing.T, got approvalResponse, wantAgentName, wantIdentifier, wantTitle string, agentID pgtype.UUID) {
+	t.Helper()
+	if got.RequesterName != wantAgentName {
+		t.Fatalf("requester_name = %q, want %q", got.RequesterName, wantAgentName)
+	}
+	if got.RequesterName == uuidStr(t, agentID) {
+		t.Fatalf("requester_name leaked a raw UUID: %q", got.RequesterName)
+	}
+	if got.AgentName == nil || *got.AgentName != wantAgentName {
+		t.Fatalf("agent_name = %v, want %q", got.AgentName, wantAgentName)
+	}
+	if got.IssueIdentifier == nil || *got.IssueIdentifier != wantIdentifier {
+		t.Fatalf("issue_identifier = %v, want %q", got.IssueIdentifier, wantIdentifier)
+	}
+	if got.IssueTitle == nil || *got.IssueTitle != wantTitle {
+		t.Fatalf("issue_title = %v, want %q", got.IssueTitle, wantTitle)
+	}
+	if got.IssueID == nil || *got.IssueID == "" {
+		t.Fatal("issue_id must be set when the issue resolves")
+	}
+}
+
+func uuidStr(t *testing.T, id pgtype.UUID) string {
+	t.Helper()
+	var s pgtype.Text
+	if err := testPool.QueryRow(context.Background(), `SELECT $1::uuid::text`, id).Scan(&s); err != nil {
+		t.Fatalf("uuid to string: %v", err)
+	}
+	return s.String
 }
 
 func randomUUID(t *testing.T) pgtype.UUID {

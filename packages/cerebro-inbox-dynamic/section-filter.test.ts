@@ -9,9 +9,15 @@ import {
   entryMatchesSection,
   selectSectionEntries,
   sectionFilters,
+  sortEntries,
+  matchesViewFilter,
+  entryIsMuted,
+  groupSectionEntries,
   type DynInboxEntry,
   type SectionFilterContext,
+  type SectionGroupContext,
 } from "./section-filter";
+import type { InboxActionCategory } from "@multica/cerebro-inbox";
 import {
   deleteUserInboxPreset,
   dedupeLayoutIds,
@@ -303,5 +309,114 @@ describe("layout", () => {
     expect(saved[0]?.id).toBe("new");
     expect(saved[0]?.layout.activeTabId).toBe("replacement");
     expect(deleteUserInboxPreset(saved, "new")).toEqual([]);
+  });
+});
+
+// TECH-3541 #2 — classic-inbox parity on the "All messages" box.
+function chatEntry(time: number, over: Record<string, unknown> = {}): DynInboxEntry {
+  const session = { id: makeId("ch"), agent_id: "ag1", has_unread: false, ...over };
+  return { kind: "chat", id: session.id as string, time, session: session as never };
+}
+
+const noLabels = {} as Record<InboxActionCategory, string>;
+
+describe("section-filter — classic parity (TECH-3541 #2)", () => {
+  it("detects muted across notif, channel and chat", () => {
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const past = new Date(Date.now() - 60_000).toISOString();
+    expect(entryIsMuted(notifEntry(1, { muted_until: future }))).toBe(true);
+    expect(entryIsMuted(notifEntry(1, { muted_until: past }))).toBe(false);
+    expect(entryIsMuted(channelEntry(1, { muted_until: future } as never))).toBe(true);
+    expect(entryIsMuted(chatEntry(1, { muted_until: future }))).toBe(true);
+    expect(entryIsMuted(chatEntry(1))).toBe(false);
+  });
+
+  it("view filter mirrors the classic view switch (hides muted off-view)", () => {
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const unread = notifEntry(1, { read: false });
+    const mentioned = notifEntry(1, { type: "mentioned", read: false });
+    const muted = notifEntry(1, { muted_until: future, read: false });
+    const pinned = notifEntry(1, { issue_id: "pinned-iss", read: true });
+
+    expect(matchesViewFilter(unread, "unread", ctx)).toBe(true);
+    expect(matchesViewFilter(notifEntry(1, { read: true }), "unread", ctx)).toBe(false);
+    expect(matchesViewFilter(mentioned, "mentioned", ctx)).toBe(true);
+    expect(matchesViewFilter(pinned, "pinned", ctx)).toBe(true);
+    // muted rows hidden everywhere except the "muted" view
+    expect(matchesViewFilter(muted, "all", ctx)).toBe(false);
+    expect(matchesViewFilter(muted, "muted", ctx)).toBe(true);
+    // chat + dm channels both land in the "dms" view
+    expect(matchesViewFilter(chatEntry(1), "dms", ctx)).toBe(true);
+    expect(matchesViewFilter(channelEntry(1, { kind: "dm" } as never), "dms", ctx)).toBe(true);
+    expect(matchesViewFilter(channelEntry(1, { kind: "channel" } as never), "channels", ctx)).toBe(true);
+  });
+
+  it("selectSectionEntries applies the box view filter", () => {
+    const entries = [
+      notifEntry(3, { read: false }),
+      notifEntry(2, { read: true }),
+      notifEntry(1, { read: false }),
+    ];
+    const out = selectSectionEntries(entries, { id: "s", kind: "all", viewFilter: "unread" }, ctx);
+    expect(out.map((e) => e.time)).toEqual([3, 1]);
+  });
+
+  it("sorts by actor: last_me keeps my rows, sinks others", () => {
+    const mine = notifEntry(1, { actor_type: "member", actor_id: "me" });
+    const theirs = notifEntry(3, { actor_type: "agent", actor_id: "a1" });
+    const out = sortEntries(
+      [theirs, mine],
+      { id: "s", kind: "all", sortMethod: "last_me" },
+      "me",
+    );
+    // mine has a finite last_me signal, theirs is -Infinity → mine first
+    expect(out[0]).toBe(mine);
+  });
+
+  it("groups by project with a 'No project' fallback bucket last", () => {
+    const gctx: SectionGroupContext = {
+      projectMap: new Map([["p1", { title: "Alpha" } as never]]),
+    };
+    const entries = [
+      notifEntry(1, { project_id: "p1" }),
+      notifEntry(2, { project_id: null }),
+    ];
+    const groups = groupSectionEntries(
+      entries,
+      { id: "s", kind: "all", groupBy: "project" },
+      ctx,
+      noLabels,
+      gctx,
+    );
+    expect(groups.map((g) => g.label)).toEqual(["Alpha", "No project"]);
+  });
+
+  it("default preset is a single 'All messages' box grouped by action", () => {
+    const preset = operatorPreset();
+    expect(preset.tabs).toHaveLength(1);
+    expect(preset.tabs[0]?.sections).toHaveLength(1);
+    expect(preset.tabs[0]?.sections[0]?.kind).toBe("all");
+    expect(preset.tabs[0]?.sections[0]?.groupBy).toBe("action");
+  });
+
+  it("groups two levels deep with 'Then by'", () => {
+    const gctx: SectionGroupContext = {
+      projectMap: new Map([["p1", { title: "Alpha" } as never]]),
+    };
+    const entries = [
+      notifEntry(1, { project_id: "p1", type: "new_comment" }),
+      notifEntry(2, { project_id: "p1", type: "mentioned" }),
+    ];
+    const groups = groupSectionEntries(
+      entries,
+      { id: "s", kind: "all", groupBy: "project", groupBySecondary: "type" },
+      ctx,
+      noLabels,
+      gctx,
+    );
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.label).toBe("Alpha");
+    expect(groups[0]?.entries).toEqual([]);
+    expect(groups[0]?.children).toHaveLength(2);
   });
 });

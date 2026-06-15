@@ -19,12 +19,60 @@ import {
   selectSectionEntries,
   groupSectionEntries,
   type DynInboxEntry,
+  type SectionGroup,
+  type SectionGroupContext,
   sectionFilters,
   type SectionFilterContext,
 } from "../section-filter";
 import { FilterBuilder } from "./filter-builder";
-import { sectionLabel, type InboxSectionConfig, type SectionBadgeColor } from "../layout";
+import {
+  sectionLabel,
+  type InboxSectionConfig,
+  type SectionBadgeColor,
+  type SectionGroupBy,
+  type SectionSortMethod,
+  type SectionViewFilter,
+} from "../layout";
 import { DynamicInboxRow } from "./dynamic-inbox-row";
+
+// TECH-3541 #2 — classic-inbox parity controls for the "All messages" box:
+// the same group-by / sort / view-filter options and bulk actions the classic
+// inbox ⋯ menu offers (minus the priorities panel).
+const GROUP_BY_OPTIONS: { value: SectionGroupBy; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "action", label: "Action" },
+  { value: "project", label: "Project" },
+  { value: "agent", label: "Agent" },
+  { value: "type", label: "Type" },
+];
+
+const SORT_METHOD_OPTIONS: { value: SectionSortMethod; label: string }[] = [
+  { value: "last_message", label: "Last message" },
+  { value: "last_other", label: "Last from another actor" },
+  { value: "last_me", label: "Last from me" },
+];
+
+const VIEW_FILTER_OPTIONS: { value: SectionViewFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "unread", label: "Unread" },
+  { value: "mentioned", label: "Mentioned" },
+  { value: "issues", label: "Issues only" },
+  { value: "channels", label: "Channels only" },
+  { value: "dms", label: "DMs only" },
+  { value: "muted", label: "Muted" },
+  { value: "pinned", label: "Pinned" },
+];
+
+/** TECH-3541 #2 — handlers + flags supplied to the "All messages" box so it
+ *  exposes the classic inbox's view options and bulk maintenance actions. */
+export interface SectionClassicControls {
+  channelsEnabled: boolean;
+  pinnedFilterEnabled: boolean;
+  onMarkAllRead: () => void;
+  onArchiveAll: () => void;
+  onArchiveAllRead: () => void;
+  onArchiveCompleted: () => void;
+}
 
 export interface DynamicInboxSectionProps {
   section: InboxSectionConfig;
@@ -32,6 +80,11 @@ export interface DynamicInboxSectionProps {
   filterContext: SectionFilterContext;
   actionLabels: Record<InboxActionCategory, string>;
   projects: Project[];
+  /** TECH-3541 #2 — lookup tables for project/agent/type grouping. */
+  groupContext?: SectionGroupContext;
+  /** TECH-3541 #2 — present only for the "All messages" box; enables the full
+   *  classic-inbox settings + bulk actions in the ⋯ menu. */
+  classicControls?: SectionClassicControls;
   selectedKey: string | null;
   /** Free-text search from the inbox top bar (TECH-3413 #9). */
   query?: string;
@@ -117,8 +170,8 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
     [entries, section, filterContext, query],
   );
   const groups = useMemo(
-    () => groupSectionEntries(selected, section, filterContext, actionLabels),
-    [selected, section, filterContext, actionLabels],
+    () => groupSectionEntries(selected, section, filterContext, actionLabels, props.groupContext),
+    [selected, section, filterContext, actionLabels, props.groupContext],
   );
 
   // #2: foldable boxes. Collapsible unless explicitly turned off; initial fold
@@ -158,6 +211,52 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
   const countCircle = section.countStyle === "circle";
   const badgeColor = section.badgeColor ?? "brand";
   const badgeClassName = badgeColorClassName(badgeColor);
+
+  // TECH-3541 #2 — the "All messages" box gets the full classic-inbox settings.
+  const isAllBox = section.kind === "all";
+  const controls = props.classicControls;
+  const viewFilter = section.viewFilter ?? "all";
+  const sortMethod = section.sortMethod ?? "last_message";
+  const groupPrimary = section.groupBy ?? "none";
+  const groupSecondary = section.groupBySecondary ?? "none";
+  // "Then by" only applies to the multi-level modes (not none/action).
+  const showThenBy = groupPrimary === "project" || groupPrimary === "agent" || groupPrimary === "type";
+  const viewFilterOptions = VIEW_FILTER_OPTIONS.filter(
+    (o) =>
+      (controls?.channelsEnabled || (o.value !== "channels" && o.value !== "dms")) &&
+      (controls?.pinnedFilterEnabled || o.value !== "pinned"),
+  );
+
+  const renderEntry = (entry: DynInboxEntry) => (
+    <DynamicInboxRow
+      key={entry.id}
+      entry={entry}
+      isSelected={entryKey(entry) === selectedKey}
+      mentioned={
+        entry.kind === "channel" && filterContext.action.mentionedChannels.has(entry.channel.id)
+      }
+      agentRunState={runStateFor(entry, filterContext)}
+      onSelect={props.onSelect}
+      onArchive={props.onArchive}
+    />
+  );
+
+  // Render one group; nests one level when the group carries "Then by" children.
+  const renderGroup = (group: SectionGroup, depth: number): React.ReactNode => (
+    <div key={group.key}>
+      {group.label && (
+        <div
+          className="px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/80"
+          style={depth > 0 ? { paddingLeft: 12 + depth * 12 } : undefined}
+        >
+          {group.label}
+        </div>
+      )}
+      {group.children
+        ? group.children.map((child) => renderGroup(child, depth + 1))
+        : group.entries.map(renderEntry)}
+    </div>
+  );
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
@@ -228,19 +327,96 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                   </DropdownMenuItem>
                 )}
               </DropdownMenuGroup>
+              {/* TECH-3541 #2 — the "All messages" box mirrors the classic
+                  inbox's view switch (All / Unread / Mentioned / …). */}
+              {isAllBox && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>View</DropdownMenuLabel>
+                    {viewFilterOptions.map((opt) => (
+                      <DropdownMenuItem
+                        key={`view-${opt.value}`}
+                        onClick={() => props.onChange({ ...section, viewFilter: opt.value })}
+                      >
+                        {opt.label} {viewFilter === opt.value ? "✓" : ""}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Group by</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => props.onChange({ ...section, groupBy: "none" })}>
-                  None {section.groupBy !== "action" ? "✓" : ""}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => props.onChange({ ...section, groupBy: "action" })}>
-                  Action {section.groupBy === "action" ? "✓" : ""}
-                </DropdownMenuItem>
+                {isAllBox ? (
+                  GROUP_BY_OPTIONS.map((opt) => (
+                    <DropdownMenuItem
+                      key={`group-${opt.value}`}
+                      onClick={() =>
+                        props.onChange({
+                          ...section,
+                          groupBy: opt.value,
+                          // Drop "Then by" when the new primary takes no
+                          // sub-grouping (none/action) or equals the secondary.
+                          groupBySecondary:
+                            opt.value === "none" ||
+                            opt.value === "action" ||
+                            groupSecondary === opt.value
+                              ? "none"
+                              : groupSecondary,
+                        })
+                      }
+                    >
+                      {opt.label} {groupPrimary === opt.value ? "✓" : ""}
+                    </DropdownMenuItem>
+                  ))
+                ) : (
+                  <>
+                    <DropdownMenuItem onClick={() => props.onChange({ ...section, groupBy: "none" })}>
+                      None {section.groupBy !== "action" ? "✓" : ""}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => props.onChange({ ...section, groupBy: "action" })}>
+                      Action {section.groupBy === "action" ? "✓" : ""}
+                    </DropdownMenuItem>
+                  </>
+                )}
               </DropdownMenuGroup>
+              {isAllBox && showThenBy && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Then by</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      onClick={() => props.onChange({ ...section, groupBySecondary: "none" })}
+                    >
+                      None {groupSecondary === "none" ? "✓" : ""}
+                    </DropdownMenuItem>
+                    {GROUP_BY_OPTIONS.filter(
+                      (opt) => opt.value !== "none" && opt.value !== "action" && opt.value !== groupPrimary,
+                    ).map((opt) => (
+                      <DropdownMenuItem
+                        key={`thenby-${opt.value}`}
+                        onClick={() => props.onChange({ ...section, groupBySecondary: opt.value })}
+                      >
+                        {opt.label} {groupSecondary === opt.value ? "✓" : ""}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Sort</DropdownMenuLabel>
+                {isAllBox &&
+                  SORT_METHOD_OPTIONS.map((opt) => (
+                    <DropdownMenuItem
+                      key={`sortm-${opt.value}`}
+                      onClick={() => props.onChange({ ...section, sortMethod: opt.value })}
+                    >
+                      {opt.label} {sortMethod === opt.value ? "✓" : ""}
+                    </DropdownMenuItem>
+                  ))}
+                {isAllBox && <DropdownMenuLabel>Direction</DropdownMenuLabel>}
                 <DropdownMenuItem onClick={() => props.onChange({ ...section, sort: "newest" })}>
                   Newest {section.sort !== "oldest" ? "✓" : ""}
                 </DropdownMenuItem>
@@ -291,6 +467,29 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                   Hide muted {section.excludeMuted ? "✓" : ""}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
+              {/* TECH-3541 #2 — classic inbox bulk maintenance actions, on the
+                  "All messages" box only. These operate on the whole inbox,
+                  exactly like the classic ⋯ menu. */}
+              {isAllBox && controls && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={controls.onMarkAllRead}>
+                      Mark all as read
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={controls.onArchiveAll}>
+                      Archive all
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={controls.onArchiveAllRead}>
+                      Archive all read
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={controls.onArchiveCompleted}>
+                      Archive completed
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </>
+              )}
               {/* TECH-3413 #5 — the "filter" kind is configured by the inline
                   FilterBuilder (chips) in the section body, not here. */}
               {section.kind === "project" && projects.length > 0 && (
@@ -346,28 +545,7 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
           {selected.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>
           ) : (
-            groups.map((group) => (
-              <div key={group.key}>
-                {group.label && (
-                  <div className="px-3 pt-2 text-[10px] font-bold uppercase tracking-wide text-muted-foreground/80">
-                    {group.label}
-                  </div>
-                )}
-                {group.entries.map((entry) => (
-                  <DynamicInboxRow
-                    key={entry.id}
-                    entry={entry}
-                    isSelected={entryKey(entry) === selectedKey}
-                    mentioned={
-                      entry.kind === "channel" && filterContext.action.mentionedChannels.has(entry.channel.id)
-                    }
-                    agentRunState={runStateFor(entry, filterContext)}
-                    onSelect={props.onSelect}
-                    onArchive={props.onArchive}
-                  />
-                ))}
-              </div>
-            ))
+            groups.map((group) => renderGroup(group, 0))
           )}
         </div>
       )}

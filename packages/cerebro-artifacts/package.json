@@ -24,6 +24,7 @@
     "@tanstack/react-query": "catalog:",
     "isomorphic-dompurify": "^3.11.0",
     "lucide-react": "catalog:",
+    "sonner": "^2.0.7",
     "zod": "catalog:"
   },
   "peerDependencies": {

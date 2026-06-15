@@ -160,7 +160,7 @@ export function ArtifactSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         className="w-auto sm:max-w-none"
-        style={{ width: sheetWidth, maxWidth: "none" }}
+        style={{ width: sheetWidth, maxWidth: "100vw" }}
       >
         {/* Drag-to-resize handle on the left edge */}
         <div

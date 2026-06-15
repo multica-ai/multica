@@ -20,11 +20,24 @@ export interface DynamicInboxRowProps {
   isSelected: boolean;
   mentioned?: boolean;
   agentRunState?: AgentRunState;
+  /** TECH-3541 #3 — archived view: rows offer "unarchive" instead of archive. */
+  isArchivedView?: boolean;
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
+  /** TECH-3541 #3 — required when isArchivedView; brings the row back. */
+  onUnarchive?: (entry: DynInboxEntry) => void;
 }
 
-export function DynamicInboxRow({ entry, isSelected, mentioned, agentRunState, onSelect, onArchive }: DynamicInboxRowProps) {
+export function DynamicInboxRow({
+  entry,
+  isSelected,
+  mentioned,
+  agentRunState,
+  isArchivedView,
+  onSelect,
+  onArchive,
+  onUnarchive,
+}: DynamicInboxRowProps) {
   if (entry.kind === "notif") {
     return (
       <InboxListItem
@@ -33,6 +46,7 @@ export function DynamicInboxRow({ entry, isSelected, mentioned, agentRunState, o
         agentRunState={agentRunState}
         onClick={() => onSelect(entry)}
         onArchive={() => onArchive(entry)}
+        onUnarchive={isArchivedView && onUnarchive ? () => onUnarchive(entry) : undefined}
       />
     );
   }
@@ -44,6 +58,7 @@ export function DynamicInboxRow({ entry, isSelected, mentioned, agentRunState, o
         isSelected={isSelected}
         onClick={() => onSelect(entry)}
         onArchive={() => onArchive(entry)}
+        onUnarchive={isArchivedView && onUnarchive ? () => onUnarchive(entry) : undefined}
       />
     );
   }
@@ -55,6 +70,7 @@ export function DynamicInboxRow({ entry, isSelected, mentioned, agentRunState, o
       session={entry.session}
       agentRunState={agentRunState}
       isSelected={isSelected}
+      isArchivedView={isArchivedView}
       onSelect={() => onSelect(entry)}
       onArchive={() => onArchive(entry)}
     />
@@ -65,12 +81,14 @@ function ChatSessionRow({
   session,
   agentRunState,
   isSelected,
+  isArchivedView,
   onSelect,
   onArchive,
 }: {
   session: ChatSession;
   agentRunState?: AgentRunState;
   isSelected: boolean;
+  isArchivedView?: boolean;
   onSelect: () => void;
   onArchive: () => void;
 }) {
@@ -117,7 +135,11 @@ function ChatSessionRow({
       {/* TECH-3489 — full 3-dot menu (mark read / rename / convert / archive /
           delete) + mobile swipe, matching issue and channel rows. The dynamic
           inbox only lists active chats, so this is always the archive variant. */}
-      <CerebroChatSessionRowActions session={session} onCleared={onArchive} />
+      <CerebroChatSessionRowActions
+        session={session}
+        isArchivedView={isArchivedView}
+        onCleared={onArchive}
+      />
     </div>
   );
 }

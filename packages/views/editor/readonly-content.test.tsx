@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 
-const { getAttachmentTextContentMock } = vi.hoisted(() => ({
-  getAttachmentTextContentMock: vi.fn(),
-}));
+const { getAttachmentTextContentMock, downloadAttachmentMock } = vi.hoisted(
+  () => ({
+    getAttachmentTextContentMock: vi.fn(),
+    downloadAttachmentMock: vi.fn(),
+  }),
+);
 
 vi.mock("@multica/core/api", () => ({
   api: { getAttachmentTextContent: getAttachmentTextContentMock },
@@ -58,6 +61,10 @@ vi.mock("./link-hover-card", () => ({
 vi.mock("./utils/link-handler", () => ({
   openLink: vi.fn(),
   isMentionHref: (href?: string) => Boolean(href?.startsWith("mention://")),
+}));
+
+vi.mock("./use-download-attachment", () => ({
+  useDownloadAttachment: () => downloadAttachmentMock,
 }));
 
 vi.mock("mermaid", () => ({
@@ -509,5 +516,52 @@ describe("ReadonlyContent slash command rendering", () => {
 
     expect(container.querySelector(".slash-command")).toBeNull();
     expect(container.querySelector("a")).not.toBeNull();
+  });
+});
+
+describe("ReadonlyContent file-card downloads", () => {
+  it("uses the forced attachment download path for file cards with an attachment id", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    const { getByLabelText } = render(
+      <ReadonlyContent
+        content={[
+          '<div data-type="fileCard"',
+          'data-href="/api/attachments/att-1/download"',
+          'data-filename="invoice.png"',
+          'data-attachment-id="att-1"></div>',
+        ].join(" ")}
+      />,
+    );
+
+    fireEvent.click(getByLabelText("Download"));
+
+    await waitFor(() => {
+      expect(downloadAttachmentMock).toHaveBeenCalledWith("att-1");
+    });
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to opening the file URL when a file card has no attachment id", () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    const { getByLabelText } = render(
+      <ReadonlyContent
+        content={[
+          '<div data-type="fileCard"',
+          'data-href="/uploads/file.txt"',
+          'data-filename="file.txt"></div>',
+        ].join(" ")}
+      />,
+    );
+
+    fireEvent.click(getByLabelText("Download"));
+
+    expect(downloadAttachmentMock).not.toHaveBeenCalled();
+    expect(openSpy).toHaveBeenCalledWith(
+      "/uploads/file.txt",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 });
