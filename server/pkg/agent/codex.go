@@ -1050,8 +1050,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// are never surfaced to the model.
 		if c.isBlindRun() && b.cfg.Logger != nil {
 			b.cfg.Logger.Warn("codex blind run detected: all shell commands returned empty output",
-				"exec_commands", c.execCommands,
-				"empty_exec_commands", c.emptyExecCommands,
+				"exec_commands", c.execCommands.Load(),
+				"empty_exec_commands", c.emptyExecCommands.Load(),
 				"thread_id", threadID,
 				"pid", cmd.Process.Pid,
 			)
@@ -1766,6 +1766,7 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	switch msgType {
 	case "task_started":
 		c.turnStarted = true
+		c.resetBlindRunCounters()
 		if c.onMessage != nil {
 			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.threadID})
 		}
@@ -1845,6 +1846,7 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 	switch method {
 	case "turn/started":
 		c.turnStarted = true
+		c.resetBlindRunCounters()
 		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
 			c.turnID = turnID
 		}
