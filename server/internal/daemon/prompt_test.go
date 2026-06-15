@@ -308,6 +308,39 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 	}
 }
 
+// When the triggering message lives in a thread (e.g. the user @-mentioned the
+// agent from the replies panel), the prompt must steer the agent to reply back
+// into that same thread via the thread root message, NOT default to a top-level
+// channel message. Otherwise the agent's answer lands in the main channel feed
+// instead of the reply thread the user was reading.
+func TestBuildChannelMentionPromptThreadReplyTargetsThreadRoot(t *testing.T) {
+	out := BuildPromptWithRunMode(Task{
+		WorkspaceID:            "ws-1",
+		ChannelID:              "channel-1",
+		ChannelName:            "release",
+		ChannelMessageID:       "message-1",
+		ChannelTriggerContent:  "please inspect this",
+		ChannelMentionType:     "agent",
+		ChannelThreadID:        "thread-1",
+		ChannelThreadRootMsgID: "root-msg-1",
+		ChannelReplyToID:       "message-1",
+	}, "normal")
+
+	mustContain := []string{
+		"Thread root message ID: root-msg-1",
+		"reply in the same thread: `multica channel message reply channel-1 root-msg-1",
+		"Do NOT reply to the triggering message directly",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("thread-reply channel prompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	if strings.Contains(out, "default to a top-level channel message") {
+		t.Errorf("thread-reply channel prompt must NOT default to a top-level message\n--- output ---\n%s", out)
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
