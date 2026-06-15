@@ -14,6 +14,11 @@ import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  sanitizeRendererRouteContext,
+  type RendererRouteContext,
+} from "../shared/renderer-route-context";
+import {
   createElectronReloadPrompt,
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
@@ -62,6 +67,7 @@ if (process.platform !== "win32") {
 const PROTOCOL = "multica";
 
 let mainWindow: BrowserWindow | null = null;
+let latestRendererRouteContext: RendererRouteContext | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -166,9 +172,13 @@ function createWindow(): void {
     },
   });
   const window = mainWindow;
+  latestRendererRouteContext = null;
 
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow === window) {
+      mainWindow = null;
+      latestRendererRouteContext = null;
+    }
   });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
@@ -259,6 +269,12 @@ function createWindow(): void {
     showReloadPrompt: createElectronReloadPrompt((options) =>
       dialog.showMessageBox(window, options),
     ),
+    getDiagnosticContext: () => ({
+      windowUrl: window.webContents.getURL(),
+      ...(latestRendererRouteContext
+        ? { desktopRoute: latestRendererRouteContext }
+        : {}),
+    }),
   });
 
   installContextMenu(window.webContents);
@@ -402,6 +418,13 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      const sanitized = sanitizeRendererRouteContext(context);
+      if (!sanitized) return;
+      latestRendererRouteContext = sanitized;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

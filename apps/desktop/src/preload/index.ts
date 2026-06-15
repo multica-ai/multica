@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  type RendererRouteContextInput,
+} from "../shared/renderer-route-context";
+import {
   isNavigationGesture,
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
@@ -156,6 +160,9 @@ const desktopAPI = {
       ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
     };
   },
+  /** Report the renderer's memory-router path for recovery diagnostics. */
+  setRendererRouteContext: (context: RendererRouteContextInput) =>
+    ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
   /** Open the OS folder picker and return the chosen absolute path. */
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),
