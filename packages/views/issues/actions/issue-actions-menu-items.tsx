@@ -361,12 +361,23 @@ export function IssueActionsMenuItems({
   );
 }
 
-// Tasks that actually have a workdir, newest first. Tasks without a work_dir
-// (queued but never dispatched, or older backends) are dropped — there is
-// nothing to copy for them.
+// Tasks that actually have a workdir, newest first, deduplicated by
+// (agent_id, work_dir). A single agent reuses the same working copy across
+// every run on one issue, so its repeated tasks all report an identical
+// work_dir — collapsing them keeps one row per distinct agent+path instead
+// of listing the same copy-target N times. Tasks without a work_dir (queued
+// but never dispatched, or older backends) are dropped — there is nothing to
+// copy for them.
 function workdirTasksDesc(tasks: AgentTask[] | undefined): AgentTask[] {
   if (!tasks?.length) return [];
-  return tasks
+  const sorted = tasks
     .filter((task) => !!task.work_dir)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const seen = new Set<string>();
+  return sorted.filter((task) => {
+    const key = `${task.agent_id} ${task.work_dir}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

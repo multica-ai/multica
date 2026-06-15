@@ -346,6 +346,63 @@ describe("IssueActionsMenuItems", () => {
     expect(mockCopyText).toHaveBeenCalledWith("/abs/dev-wd");
   });
 
+  it("collapses repeated runs of the same agent+workdir into one row", async () => {
+    // Same agent reuses one working copy across runs on an issue, so its
+    // tasks all report an identical work_dir. We want one row, not three.
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "run-1",
+        agent_id: "dev",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+      {
+        id: "run-2",
+        agent_id: "dev",
+        created_at: "2026-01-02T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+      {
+        id: "run-3",
+        agent_id: "dev",
+        created_at: "2026-01-03T00:00:00Z",
+        work_dir: "/abs/dev-wd",
+        relative_work_dir: "dev/workdir",
+      },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    await screen.findByText("agent-dev");
+    expect(screen.getAllByText("agent-dev")).toHaveLength(1);
+  });
+
+  it("keeps separate rows when the same agent has distinct workdirs", async () => {
+    mockListTasksByIssue.mockResolvedValue([
+      {
+        id: "t1",
+        agent_id: "dev",
+        created_at: "2026-01-01T00:00:00Z",
+        work_dir: "/abs/wd-a",
+        relative_work_dir: "wd-a",
+      },
+      {
+        id: "t2",
+        agent_id: "dev",
+        created_at: "2026-01-02T00:00:00Z",
+        work_dir: "/abs/wd-b",
+        relative_work_dir: "wd-b",
+      },
+    ] as AgentTask[]);
+
+    renderMenu();
+
+    const rows = await screen.findAllByText("agent-dev");
+    expect(rows).toHaveLength(2);
+  });
+
   it("drops tasks without a workdir and shows the unavailable label when none remain", async () => {
     mockListTasksByIssue.mockResolvedValue([
       { id: "t1", agent_id: "a", created_at: "2026-01-01T00:00:00Z" },
