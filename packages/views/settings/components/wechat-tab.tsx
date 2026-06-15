@@ -4,9 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { wechatInstallationsOptions } from "@multica/core/wechat";
+import { useT } from "../../i18n";
 
 export function WechatTab() {
   const wsId = useWorkspaceId();
+  const { t } = useT("settings");
 
   const { data, isLoading } = useQuery({
     ...wechatInstallationsOptions(wsId),
@@ -20,7 +22,9 @@ export function WechatTab() {
     return (
       <Card>
         <CardContent>
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">
+            {t(($) => $.wechat.loading)}
+          </p>
         </CardContent>
       </Card>
     );
@@ -30,13 +34,15 @@ export function WechatTab() {
     return (
       <Card>
         <CardContent className="space-y-2">
-          <p className="text-sm font-medium">未启用企微集成</p>
+          <p className="text-sm font-medium">
+            {t(($) => $.wechat.not_configured_title)}
+          </p>
           <p className="text-xs text-muted-foreground">
-            需要在服务器上设置{" "}
+            {t(($) => $.wechat.not_configured_description_prefix)}{" "}
             <code className="rounded bg-muted px-1 py-0.5 text-[10px]">
               MULTICA_WECHAT_SECRET_KEY
             </code>{" "}
-            才能启用企业微信 Bot 绑定。
+            {t(($) => $.wechat.not_configured_description_suffix)}
           </p>
         </CardContent>
       </Card>
@@ -46,11 +52,13 @@ export function WechatTab() {
   return (
     <Card>
       <CardContent className="space-y-2">
-        <p className="text-sm font-medium">已启用</p>
+        <p className="text-sm font-medium">
+          {t(($) => $.wechat.enabled)}
+        </p>
         <p className="text-xs text-muted-foreground">
           {activeCount === 0
-            ? "暂无机器人连接。前往智能体的「集成」选项卡绑定企业微信机器人。"
-            : `${activeCount} 个机器人已连接。在各智能体的「集成」选项卡中管理绑定。`}
+            ? t(($) => $.wechat.no_bots)
+            : t(($) => $.wechat.bots_connected, { count: activeCount })}
         </p>
       </CardContent>
     </Card>

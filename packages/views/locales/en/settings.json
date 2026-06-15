@@ -376,5 +376,36 @@
         "description": "Create and work on issues"
       }
     }
+  },
+  "wechat": {
+    "section_title": "WeChat Work",
+    "page_description": "Bind Multica agents to WeChat Work AI Bot. Members can chat with agents in WeChat Work private or group chats, and agents reply with streaming messages.",
+    "not_configured_title": "Not configured",
+    "not_configured_description_prefix": "Set",
+    "not_configured_description_suffix": "to enable the WeChat Work integration.",
+    "enabled": "Enabled",
+    "no_bots": "No bots connected yet. Go to an agent's Integrations tab to bind a WeChat Work bot.",
+    "bots_connected": "{{count}} bot(s) connected. Manage bindings in each agent's Integrations tab.",
+    "agent_section_title": "WeChat Work",
+    "agent_section_description": "Bind a WeChat Work intelligent bot to this agent. Messages sent to the bot will be handled by this agent.",
+    "no_manage_permission": "Only workspace owners and admins can manage bot bindings.",
+    "connected": "Connected",
+    "bot_id_label": "Bot ID",
+    "secret_label": "Secret",
+    "bot_id_placeholder": "WeChat Work intelligent bot ID",
+    "secret_placeholder": "Bot secret from WeChat Work admin console",
+    "connect_bot": "Connect Bot",
+    "connecting": "Connecting...",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting...",
+    "disconnect_confirm_title": "Disconnect Bot?",
+    "disconnect_confirm_description": "This will stop the bot from receiving messages. You can reconnect it later.",
+    "disconnect_confirm_cancel": "Cancel",
+    "toast_connected": "Bot connected",
+    "toast_disconnected": "Bot disconnected",
+    "toast_connect_failed": "Failed to connect bot",
+    "toast_disconnect_failed": "Failed to disconnect",
+    "toast_fields_required": "Bot ID and Secret are required",
+    "loading": "Loading..."
   }
 }

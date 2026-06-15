@@ -376,5 +376,36 @@
         "description": "イシューの作成と作業"
       }
     }
+  },
+  "wechat": {
+    "section_title": "WeChat Work",
+    "page_description": "Multica エージェントを WeChat Work AI Bot にバインドします。メンバーは WeChat Work のプライベートチャットやグループチャットでエージェントと会話でき、ストリーミングメッセージでリアルタイムに返信します。",
+    "not_configured_title": "未設定",
+    "not_configured_description_prefix": "",
+    "not_configured_description_suffix": "を設定して WeChat Work 連携を有効にしてください。",
+    "enabled": "有効",
+    "no_bots": "ボットが接続されていません。エージェントの「連携」タブで WeChat Work ボットをバインドしてください。",
+    "bots_connected": "{{count}} 個のボットが接続されています。各エージェントの「連携」タブでバインドを管理してください。",
+    "agent_section_title": "WeChat Work",
+    "agent_section_description": "WeChat Work インテリジェントボットをこのエージェントにバインドします。ボットに送信されたメッセージはこのエージェントが処理します。",
+    "no_manage_permission": "ワークスペースのオーナーと管理者のみがボットバインドを管理できます。",
+    "connected": "接続済み",
+    "bot_id_label": "Bot ID",
+    "secret_label": "Secret",
+    "bot_id_placeholder": "WeChat Work インテリジェントボット ID",
+    "secret_placeholder": "WeChat Work 管理コンソールのボットシークレット",
+    "connect_bot": "ボットを接続",
+    "connecting": "接続中...",
+    "disconnect": "切断",
+    "disconnecting": "切断中...",
+    "disconnect_confirm_title": "ボットを切断しますか？",
+    "disconnect_confirm_description": "ボットはメッセージを受信しなくなります。後で再接続できます。",
+    "disconnect_confirm_cancel": "キャンセル",
+    "toast_connected": "ボットが接続されました",
+    "toast_disconnected": "ボットが切断されました",
+    "toast_connect_failed": "ボットの接続に失敗しました",
+    "toast_disconnect_failed": "切断に失敗しました",
+    "toast_fields_required": "Bot ID と Secret は必須です",
+    "loading": "読み込み中…"
   }
 }

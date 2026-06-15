@@ -21,6 +21,7 @@ import type { Agent } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { wechatInstallationsOptions, wechatKeys } from "@multica/core/wechat";
 import { api } from "@multica/core/api";
+import { useT } from "../../../i18n";
 
 export function WechatAgentBindSection({
   agent,
@@ -31,6 +32,7 @@ export function WechatAgentBindSection({
 }) {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
+  const { t } = useT("settings");
 
   const { data } = useQuery({
     ...wechatInstallationsOptions(wsId),
@@ -48,16 +50,18 @@ export function WechatAgentBindSection({
           <MessageSquare className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="text-sm font-medium">企业微信</h3>
+          <h3 className="text-sm font-medium">
+            {t(($) => $.wechat.agent_section_title)}
+          </h3>
           <p className="text-xs leading-relaxed text-muted-foreground">
-            将企业微信智能机器人绑定到此智能体。发送给该机器人的消息将由此智能体处理。
+            {t(($) => $.wechat.agent_section_description)}
           </p>
         </div>
       </div>
       <div className="border-t px-4 py-3">
         {!canManage ? (
           <p className="text-xs text-muted-foreground">
-            仅工作区所有者和管理员可管理机器人绑定。
+            {t(($) => $.wechat.no_manage_permission)}
           </p>
         ) : binding ? (
           <BoundState
@@ -95,19 +99,24 @@ function BoundState({
 }) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  const { t } = useT("settings");
 
   async function handleDisconnect() {
     setDisconnecting(true);
     try {
       await api.deleteWechatInstallation(wsId, installationId);
-      toast.success("机器人已断开");
+      toast.success(t(($) => $.wechat.toast_disconnected));
       onDisconnected();
     } catch (e: any) {
       if (e?.status === 404 || e?.message?.includes("404")) {
-        toast.success("机器人已断开");
+        toast.success(t(($) => $.wechat.toast_disconnected));
         onDisconnected();
       } else {
-        toast.error(e instanceof Error ? e.message : "断开连接失败");
+        toast.error(
+          e instanceof Error
+            ? e.message
+            : t(($) => $.wechat.toast_disconnect_failed),
+        );
       }
     } finally {
       setDisconnecting(false);
@@ -119,9 +128,12 @@ function BoundState({
     <>
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
-          <p className="text-sm font-medium text-green-600">已连接</p>
+          <p className="text-sm font-medium text-green-600">
+            {t(($) => $.wechat.connected)}
+          </p>
           <p className="text-xs text-muted-foreground">
-            Bot ID: <code className="rounded bg-muted px-1 py-0.5">{botId}</code>
+            {"Bot ID: "}
+            <code className="rounded bg-muted px-1 py-0.5">{botId}</code>
           </p>
         </div>
         <Button
@@ -131,26 +143,32 @@ function BoundState({
           onClick={() => setShowConfirm(true)}
         >
           <Trash2 className="mr-1 h-3.5 w-3.5" />
-          断开连接
+          {t(($) => $.wechat.disconnect)}
         </Button>
       </div>
 
       <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>断开机器人连接？</AlertDialogTitle>
+            <AlertDialogTitle>
+              {t(($) => $.wechat.disconnect_confirm_title)}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              断开后机器人将不再接收消息。你可以稍后重新连接。
+              {t(($) => $.wechat.disconnect_confirm_description)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={disconnecting}>取消</AlertDialogCancel>
+            <AlertDialogCancel disabled={disconnecting}>
+              {t(($) => $.wechat.disconnect_confirm_cancel)}
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDisconnect}
               disabled={disconnecting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {disconnecting ? "断开中..." : "断开连接"}
+              {disconnecting
+                ? t(($) => $.wechat.disconnecting)
+                : t(($) => $.wechat.disconnect)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -171,22 +189,27 @@ function BindForm({
   const [botId, setBotId] = useState("");
   const [secret, setSecret] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const { t } = useT("settings");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!botId.trim() || !secret.trim()) {
-      toast.error("Bot ID 和 Secret 不能为空");
+      toast.error(t(($) => $.wechat.toast_fields_required));
       return;
     }
     setSubmitting(true);
     try {
       await api.createWechatInstallation(wsId, agentId, botId.trim(), secret.trim());
-      toast.success("机器人已连接");
+      toast.success(t(($) => $.wechat.toast_connected));
       setBotId("");
       setSecret("");
       onBound();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "连接机器人失败");
+      toast.error(
+        e instanceof Error
+          ? e.message
+          : t(($) => $.wechat.toast_connect_failed),
+      );
     } finally {
       setSubmitting(false);
     }
@@ -196,11 +219,11 @@ function BindForm({
     <form onSubmit={handleSubmit} className="space-y-3">
       <div className="space-y-1.5">
         <Label htmlFor="wechat-bot-id" className="text-xs">
-          Bot ID
+          {t(($) => $.wechat.bot_id_label)}
         </Label>
         <Input
           id="wechat-bot-id"
-          placeholder="企业微信智能机器人 Bot ID"
+          placeholder={t(($) => $.wechat.bot_id_placeholder)}
           value={botId}
           onChange={(e) => setBotId(e.target.value)}
           className="h-8 text-sm"
@@ -208,19 +231,21 @@ function BindForm({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="wechat-secret" className="text-xs">
-          Secret
+          {t(($) => $.wechat.secret_label)}
         </Label>
         <Input
           id="wechat-secret"
           type="password"
-          placeholder="企业微信管理后台的机器人 Secret"
+          placeholder={t(($) => $.wechat.secret_placeholder)}
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           className="h-8 text-sm"
         />
       </div>
       <Button type="submit" size="sm" disabled={submitting}>
-        {submitting ? "连接中..." : "连接机器人"}
+        {submitting
+          ? t(($) => $.wechat.connecting)
+          : t(($) => $.wechat.connect_bot)}
       </Button>
     </form>
   );
