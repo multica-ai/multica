@@ -263,14 +263,15 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 		evt := &cursorStreamEvent{
 			Model: "gpt-5.3",
 			Usage: &cursorUsage{
-				InputTokens:          200,
-				OutputTokens:         100,
-				CacheReadInputTokens: 50,
+				InputTokens:           200,
+				OutputTokens:          100,
+				CacheReadInputTokens:  50,
+				CacheWriteInputTokens: 25,
 			},
 		}
 		b.accumulateResultUsage(usage, evt)
 		u := usage["gpt-5.3"]
-		if u.InputTokens != 200 || u.OutputTokens != 100 || u.CacheReadTokens != 50 {
+		if u.InputTokens != 200 || u.OutputTokens != 100 || u.CacheReadTokens != 50 || u.CacheWriteTokens != 25 {
 			t.Fatalf("unexpected usage: %+v", u)
 		}
 	})
@@ -281,14 +282,16 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 	t.Run("top_level_camelcase", func(t *testing.T) {
 		usage := make(map[string]TokenUsage)
 		evt := &cursorStreamEvent{
-			Model:        "gpt-5.3",
-			InputTokens:  300,
-			OutputTokens: 150,
+			Model:            "gpt-5.3",
+			InputTokens:      300,
+			OutputTokens:     150,
+			CacheReadTokens:  75,
+			CacheWriteTokens: 25,
 		}
 		b.accumulateResultUsage(usage, evt)
 		u := usage["gpt-5.3"]
-		if u.InputTokens != 300 || u.OutputTokens != 150 {
-			t.Fatalf("unexpected usage: %+v (want input=300 output=150)", u)
+		if u.InputTokens != 300 || u.OutputTokens != 150 || u.CacheReadTokens != 75 || u.CacheWriteTokens != 25 {
+			t.Fatalf("unexpected usage: %+v (want input=300 output=150 cache_read=75 cache_write=25)", u)
 		}
 	})
 
@@ -443,36 +446,44 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 				"gpt-5": {InputTokens: 100, OutputTokens: 50, CacheReadTokens: 10},
 			},
 		},
-
-			{
-				name: "camelcase_result — top-level inputTokens/outputTokens (v0.46+)",
-				lines: []string{
-					`{"type":"result","model":"gpt-5","inputTokens":1000,"outputTokens":500}`,
-				},
-				want: map[string]TokenUsage{
-					"gpt-5": {InputTokens: 1000, OutputTokens: 500},
-				},
+		{
+			name: "camelcase_result — top-level inputTokens/outputTokens (v0.46+)",
+			lines: []string{
+				`{"type":"result","model":"gpt-5","inputTokens":1000,"outputTokens":500,"cacheReadTokens":250,"cacheWriteTokens":50}`,
 			},
-			{
-				name: "camelcase_result_wins_over_step_finish — no double count",
-				lines: []string{
-					`{"type":"step_finish","model":"gpt-5","part":{"tokens":{"input":300,"output":100,"cache":{"read":50}}}}`,
-					`{"type":"step_finish","model":"gpt-5","part":{"tokens":{"input":200,"output":80,"cache":{"read":30}}}}`,
-					`{"type":"result","model":"gpt-5","inputTokens":500,"outputTokens":180}`,
-				},
-				want: map[string]TokenUsage{
-					"gpt-5": {InputTokens: 500, OutputTokens: 180},
-				},
+			want: map[string]TokenUsage{
+				"gpt-5": {InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 250, CacheWriteTokens: 50},
 			},
-			{
-				name: "camelcase_default_model — no model field defaults to cursor",
-				lines: []string{
-					`{"type":"result","inputTokens":400,"outputTokens":200}`,
-				},
-				want: map[string]TokenUsage{
-					"cursor": {InputTokens: 400, OutputTokens: 200},
-				},
+		},
+		{
+			name: "nested_camelcase_result — actual cursor-agent stream-json shape",
+			lines: []string{
+				`{"type":"result","subtype":"success","duration_ms":10606,"duration_api_ms":10606,"is_error":false,"result":"pong","session_id":"b729a81b-9825-471d-812d-377c547b91e4","request_id":"4126abbe-dbc7-4ea4-a83e-7fab284c559c","usage":{"inputTokens":26640,"outputTokens":40,"cacheReadTokens":467,"cacheWriteTokens":12}}`,
 			},
+			want: map[string]TokenUsage{
+				"cursor": {InputTokens: 26640, OutputTokens: 40, CacheReadTokens: 467, CacheWriteTokens: 12},
+			},
+		},
+		{
+			name: "camelcase_result_wins_over_step_finish — no double count",
+			lines: []string{
+				`{"type":"step_finish","model":"gpt-5","part":{"tokens":{"input":300,"output":100,"cache":{"read":50}}}}`,
+				`{"type":"step_finish","model":"gpt-5","part":{"tokens":{"input":200,"output":80,"cache":{"read":30}}}}`,
+				`{"type":"result","model":"gpt-5","inputTokens":500,"outputTokens":180}`,
+			},
+			want: map[string]TokenUsage{
+				"gpt-5": {InputTokens: 500, OutputTokens: 180},
+			},
+		},
+		{
+			name: "camelcase_default_model — no model field defaults to cursor",
+			lines: []string{
+				`{"type":"result","inputTokens":400,"outputTokens":200}`,
+			},
+			want: map[string]TokenUsage{
+				"cursor": {InputTokens: 400, OutputTokens: 200},
+			},
+		},
 	}
 
 	for _, tc := range tests {
@@ -492,7 +503,7 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 				switch evt.Type {
 				case "result":
 					b.accumulateResultUsage(resultUsage, &evt)
-					if evt.Usage != nil || evt.InputTokens != 0 || evt.OutputTokens != 0 {
+					if evt.hasResultUsage() {
 						hasResultUsage = true
 					}
 				case "step_finish":
@@ -529,15 +540,13 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 	}
 }
 
-// TestCursorStreamEventUnmarshalCamelCase verifies that the cursorStreamEvent
-// struct correctly deserializes cursor-agent CLI v0.46+ result events where
-// token usage fields (inputTokens, outputTokens) are top-level camelCase keys
-// rather than nested inside a snake_case "usage" object.
-func TestCursorStreamEventUnmarshalCamelCase(t *testing.T) {
+// TestCursorStreamEventUnmarshalTopLevelCamelCase verifies that the
+// cursorStreamEvent struct correctly deserializes result events where token
+// usage fields are top-level camelCase keys.
+func TestCursorStreamEventUnmarshalTopLevelCamelCase(t *testing.T) {
 	t.Parallel()
 
-	// Real cursor-agent v0.46+ result event shape.
-	raw := `{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","model":"gpt-5.3","inputTokens":1500,"outputTokens":300,"duration_ms":5234,"duration_api_ms":5100}`
+	raw := `{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"abc-123","model":"gpt-5.3","inputTokens":1500,"outputTokens":300,"cacheReadTokens":75,"cacheWriteTokens":25,"duration_ms":5234,"duration_api_ms":5100}`
 
 	var evt cursorStreamEvent
 	if err := json.Unmarshal([]byte(raw), &evt); err != nil {
@@ -558,8 +567,14 @@ func TestCursorStreamEventUnmarshalCamelCase(t *testing.T) {
 	if evt.OutputTokens != 300 {
 		t.Errorf("outputTokens = %d, want 300", evt.OutputTokens)
 	}
+	if evt.CacheReadTokens != 75 {
+		t.Errorf("cacheReadTokens = %d, want 75", evt.CacheReadTokens)
+	}
+	if evt.CacheWriteTokens != 25 {
+		t.Errorf("cacheWriteTokens = %d, want 25", evt.CacheWriteTokens)
+	}
 	if evt.Usage != nil {
-		t.Errorf("usage = %+v, want nil (top-level fields are the v0.46+ shape)", evt.Usage)
+		t.Errorf("usage = %+v, want nil", evt.Usage)
 	}
 
 	// Verify accumulateResultUsage processes the new shape.
@@ -567,8 +582,35 @@ func TestCursorStreamEventUnmarshalCamelCase(t *testing.T) {
 	usage := make(map[string]TokenUsage)
 	b.accumulateResultUsage(usage, &evt)
 	u := usage["gpt-5.3"]
-	if u.InputTokens != 1500 || u.OutputTokens != 300 {
-		t.Fatalf("accumulated usage = %+v, want input=1500 output=300", u)
+	if u.InputTokens != 1500 || u.OutputTokens != 300 || u.CacheReadTokens != 75 || u.CacheWriteTokens != 25 {
+		t.Fatalf("accumulated usage = %+v, want input=1500 output=300 cache_read=75 cache_write=25", u)
+	}
+}
+
+// TestCursorStreamEventUnmarshalNestedCamelCase verifies the stream-json shape
+// emitted by the locally installed cursor-agent version.
+func TestCursorStreamEventUnmarshalNestedCamelCase(t *testing.T) {
+	t.Parallel()
+
+	raw := `{"type":"result","subtype":"success","duration_ms":10606,"duration_api_ms":10606,"is_error":false,"result":"pong","session_id":"b729a81b-9825-471d-812d-377c547b91e4","request_id":"4126abbe-dbc7-4ea4-a83e-7fab284c559c","usage":{"inputTokens":26640,"outputTokens":40,"cacheReadTokens":467,"cacheWriteTokens":12}}`
+
+	var evt cursorStreamEvent
+	if err := json.Unmarshal([]byte(raw), &evt); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if evt.Usage == nil {
+		t.Fatal("usage should be non-nil")
+	}
+	if evt.Usage.InputTokens != 26640 || evt.Usage.OutputTokens != 40 || evt.Usage.CacheReadInputTokens != 467 || evt.Usage.CacheWriteInputTokens != 12 {
+		t.Fatalf("usage = %+v, want input=26640 output=40 cache_read=467 cache_write=12", evt.Usage)
+	}
+
+	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
+	usage := make(map[string]TokenUsage)
+	b.accumulateResultUsage(usage, &evt)
+	u := usage["cursor"]
+	if u.InputTokens != 26640 || u.OutputTokens != 40 || u.CacheReadTokens != 467 || u.CacheWriteTokens != 12 {
+		t.Fatalf("accumulated usage = %+v, want input=26640 output=40 cache_read=467 cache_write=12", u)
 	}
 }
 
@@ -577,7 +619,7 @@ func TestCursorStreamEventUnmarshalCamelCase(t *testing.T) {
 func TestCursorStreamEventUnmarshalLegacyUsage(t *testing.T) {
 	t.Parallel()
 
-	raw := `{"type":"result","model":"gpt-5","usage":{"input_tokens":800,"output_tokens":400,"cached_input_tokens":200}}`
+	raw := `{"type":"result","model":"gpt-5","usage":{"input_tokens":800,"output_tokens":400,"cached_input_tokens":200,"cache_creation_input_tokens":100}}`
 
 	var evt cursorStreamEvent
 	if err := json.Unmarshal([]byte(raw), &evt); err != nil {
@@ -589,15 +631,15 @@ func TestCursorStreamEventUnmarshalLegacyUsage(t *testing.T) {
 	if evt.Usage == nil {
 		t.Fatal("usage should be non-nil for nested-usage shape")
 	}
-	if evt.Usage.InputTokens != 800 || evt.Usage.OutputTokens != 400 || evt.Usage.CacheReadInputTokens != 200 {
-		t.Fatalf("nested usage = %+v, want input=800 output=400 cache=200", evt.Usage)
+	if evt.Usage.InputTokens != 800 || evt.Usage.OutputTokens != 400 || evt.Usage.CacheReadInputTokens != 200 || evt.Usage.CacheWriteInputTokens != 100 {
+		t.Fatalf("nested usage = %+v, want input=800 output=400 cache_read=200 cache_write=100", evt.Usage)
 	}
 
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	usage := make(map[string]TokenUsage)
 	b.accumulateResultUsage(usage, &evt)
 	u := usage["gpt-5"]
-	if u.InputTokens != 800 || u.OutputTokens != 400 || u.CacheReadTokens != 200 {
-		t.Fatalf("accumulated usage = %+v, want input=800 output=400 cache=200", u)
+	if u.InputTokens != 800 || u.OutputTokens != 400 || u.CacheReadTokens != 200 || u.CacheWriteTokens != 100 {
+		t.Fatalf("accumulated usage = %+v, want input=800 output=400 cache_read=200 cache_write=100", u)
 	}
 }
