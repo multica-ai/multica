@@ -780,6 +780,7 @@ export function DynamicInbox() {
                           onSelect={onSecretarySelect}
                           onArchive={onArchive}
                           onResetCompleted={() => setSecretaryCompletedKeys(new Set())}
+                          onRemove={() => removeSection(section.id)}
                         />
                       ) : (
                         <DynamicInboxSection

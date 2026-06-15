@@ -14,6 +14,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import { WakeupLimitsSettings } from "@multica/cerebro-wakeup";
 import { CEREBRO_FLAG_GROUPS, flagsForGroup, type CerebroFlagKey } from "./registry";
+import { SecretaryCriteriaSettings } from "./secretary-criteria-settings";
 import {
   useFeatureFlag,
   useFeatureFlagsQuery,
@@ -28,6 +29,7 @@ import { useFlagLocked, useWorkspaceFlagValue } from "./store";
 // flag; the row renders it whenever the feature is enabled. TECH-3298.
 const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
   cerebro_wakeup_time: WakeupLimitsSettings,
+  cerebro_inbox_secretary: SecretaryCriteriaSettings,
 };
 
 function FlagRow({

@@ -2,15 +2,31 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Minus, PartyPopper, Play, Plus, RotateCcw, Sparkles, X } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Minus,
+  PartyPopper,
+  Play,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
+  entryIsMuted,
   entryIsUnread,
   entryMatchesQuery,
   type DynInboxEntry,
   type SectionFilterContext,
 } from "../section-filter";
+import {
+  useSecretaryCriteria,
+  type SecretaryCriteria,
+} from "@multica/cerebro-feature-flags";
 import { DynamicInboxRow } from "./dynamic-inbox-row";
 
 const QUICK_COUNTS = [3, 5, 10, 15] as const;
@@ -37,6 +53,26 @@ export function chooseSecretaryEntries(entries: DynInboxEntry[], count: number):
     .slice(0, count);
 }
 
+/**
+ * TECH-3557 follow-up — is this entry eligible for the Secretary batch?
+ * Muted rows are NEVER picked (Jesper #1), and the user's criteria decide which
+ * kinds / read-states may be included (Jesper #2).
+ */
+export function isSecretaryCandidate(entry: DynInboxEntry, criteria: SecretaryCriteria): boolean {
+  if (entryIsMuted(entry)) return false;
+  if (criteria.unreadOnly && !entryIsUnread(entry)) return false;
+  switch (entry.kind) {
+    case "notif":
+      return criteria.includeIssues;
+    case "channel":
+      return criteria.includeChannels;
+    case "chat":
+      return criteria.includeChats;
+    default:
+      return true;
+  }
+}
+
 interface SecretarySectionProps {
   entries: DynInboxEntry[];
   filterContext: SectionFilterContext;
@@ -47,6 +83,8 @@ interface SecretarySectionProps {
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
   onResetCompleted: () => void;
+  /** Remove the whole Secretary block from the tab (Jesper follow-up). */
+  onRemove?: () => void;
 }
 
 export function SecretarySection({
@@ -58,8 +96,14 @@ export function SecretarySection({
   onSelect,
   onArchive,
   onResetCompleted,
+  onRemove,
 }: SecretarySectionProps) {
+  const criteria = useSecretaryCriteria();
   const [phase, setPhase] = useState<SecretaryPhase>("setup");
+  // TECH-3557 follow-up — the setup controls start collapsed by default so the
+  // block stays minimal (Jesper: "fyld minimalt"); you unfold it to start. The
+  // "Start collapsed" criteria toggle lets the user opt into starting expanded.
+  const [setupExpanded, setSetupExpanded] = useState(() => !criteria.startFolded);
   const [count, setCount] = useState(5);
   const [roundKeys, setRoundKeys] = useState<string[]>([]);
   const [manualKeys, setManualKeys] = useState<Set<string>>(() => new Set());
@@ -70,11 +114,12 @@ export function SecretarySection({
         entries.filter(
           (entry) =>
             !completedKeys.has(secretaryEntryKey(entry)) &&
-            entryMatchesQuery(entry, query ?? ""),
+            entryMatchesQuery(entry, query ?? "") &&
+            isSecretaryCandidate(entry, criteria),
         ),
         MAX_COUNT,
       ),
-    [entries, completedKeys, query],
+    [entries, completedKeys, query, criteria],
   );
   const entryMap = useMemo(
     () => new Map(entries.map((entry) => [secretaryEntryKey(entry), entry])),
@@ -128,6 +173,9 @@ export function SecretarySection({
     setManualKeys(new Set());
     onResetCompleted();
     setPhase("setup");
+    // Return to the user's preferred resting state (collapsed by default so the
+    // block doesn't reclaim space; expanded if they turned "Start collapsed" off).
+    setSetupExpanded(!criteria.startFolded);
   };
 
   const toggleManual = (entry: DynInboxEntry) => {
@@ -147,36 +195,74 @@ export function SecretarySection({
     <section className="overflow-hidden rounded-xl border border-border bg-card">
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         {dragHandle}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Sparkles className="size-3.5" />
+        {phase === "setup" ? (
+          <button
+            type="button"
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            onClick={() => setSetupExpanded((value) => !value)}
+            aria-expanded={setupExpanded}
+          >
+            <div className="flex size-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Sparkles className="size-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Secretary
+              </h2>
+              <p className="truncate text-[11px] text-muted-foreground/80">
+                {setupExpanded ? "Focused inbox batch" : "Tap to start a focused batch"}
+              </p>
+            </div>
+            {setupExpanded ? (
+              <ChevronUp className="size-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+            )}
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="flex size-7 items-center justify-center rounded-md bg-primary/10 text-primary">
+              <Sparkles className="size-3.5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="truncate text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Secretary
+              </h2>
+              <p className="truncate text-[11px] text-muted-foreground/80">
+                {phase === "active"
+                  ? `${remaining} left`
+                  : phase === "manual"
+                    ? `${manualSelectionCount}/${count} selected`
+                    : "Focused inbox batch"}
+              </p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h2 className="truncate text-xs font-bold uppercase tracking-wide text-muted-foreground">
-              Secretary
-            </h2>
-            <p className="truncate text-[11px] text-muted-foreground/80">
-              {phase === "active"
-                ? `${remaining} left`
-                : phase === "manual"
-                  ? `${manualSelectionCount}/${count} selected`
-                  : "Focused inbox batch"}
-            </p>
-          </div>
-        </div>
+        )}
         {phase !== "setup" && (
           <button
             type="button"
             className="rounded p-1 text-muted-foreground hover:bg-muted"
             onClick={resetRound}
-            title="Reset Secretary"
+            title="Reset Secretary round"
+            aria-label="Reset Secretary round"
+          >
+            <RotateCcw className="size-3.5" />
+          </button>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            className="rounded p-1 text-muted-foreground hover:bg-muted"
+            onClick={onRemove}
+            title="Remove Secretary block"
+            aria-label="Remove Secretary block"
           >
             <X className="size-3.5" />
           </button>
         )}
       </header>
 
-      {phase === "setup" && (
+      {phase === "setup" && setupExpanded && (
         <div className="space-y-3 p-3">
           <div className="flex items-center gap-2">
             <Button

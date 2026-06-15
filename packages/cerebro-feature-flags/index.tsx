@@ -24,3 +24,11 @@ export type {
 } from "./registry";
 export { CerebroFeatureFlagsTab } from "./settings-tab";
 export { cerebroFeatureFlagTabs } from "./settings-tabs";
+export {
+  useSecretaryCriteria,
+  useSetSecretaryCriteria,
+  readSecretaryCriteria,
+  DEFAULT_SECRETARY_CRITERIA,
+  SECRETARY_CRITERIA_KEY,
+} from "./secretary-criteria";
+export type { SecretaryCriteria } from "./secretary-criteria";
