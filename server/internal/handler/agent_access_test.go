@@ -643,3 +643,106 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 		})
 	}
 }
+
+// CEREBRO-PATCH(private-agent-run-request-on-comment): TECH-3252 — covers the
+// on_comment path where a member comments on an issue already assigned to a
+// private agent they cannot trigger, so the owner gets a run-request instead of
+// a silent no-op. The owner commenting on their own agent gets no run-request.
+type recordedPrivateAgentRunRequest struct {
+	workspaceID string
+	agentID     pgtype.UUID
+	ownerID     pgtype.UUID
+	issueID     pgtype.UUID
+	commentID   pgtype.UUID
+	requesterID pgtype.UUID
+	agentName   string
+}
+
+type recordingPrivateAgentRunRequester struct {
+	calls []recordedPrivateAgentRunRequest
+}
+
+func (r *recordingPrivateAgentRunRequester) RequestPrivateAgentRun(ctx context.Context, workspaceID string, agentID, ownerID, issueID, commentID, requesterID pgtype.UUID, agentName string) error {
+	r.calls = append(r.calls, recordedPrivateAgentRunRequest{
+		workspaceID: workspaceID,
+		agentID:     agentID,
+		ownerID:     ownerID,
+		issueID:     issueID,
+		commentID:   commentID,
+		requesterID: requesterID,
+		agentName:   agentName,
+	})
+	return nil
+}
+
+func TestRequestPrivateAssigneeRunOnComment(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
+		                   assignee_type, assignee_id, number)
+		VALUES ($1, 'private assignee run-request test', 'todo', 'medium', 'member', $2,
+		        'agent', $3,
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue assigned to private agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	comment := db.Comment{
+		ID:      util.MustParseUUID("11111111-1111-1111-1111-111111111111"),
+		IssueID: issue.ID,
+		Content: "please look at this",
+	}
+
+	recorder := &recordingPrivateAgentRunRequester{}
+	prev := testHandler.PrivateAgentRunRequester
+	testHandler.PrivateAgentRunRequester = recorder
+	t.Cleanup(func() { testHandler.PrivateAgentRunRequester = prev })
+
+	// A member who cannot access the private agent → run-request to the owner.
+	testHandler.requestPrivateAssigneeRunOnComment(ctx, issue, comment, "member", memberID)
+
+	if len(recorder.calls) != 1 {
+		t.Fatalf("run-request calls = %d; want 1", len(recorder.calls))
+	}
+	call := recorder.calls[0]
+	if call.workspaceID != testWorkspaceID {
+		t.Fatalf("workspaceID = %s; want %s", call.workspaceID, testWorkspaceID)
+	}
+	if got := util.UUIDToString(call.agentID); got != agentID {
+		t.Fatalf("agentID = %s; want %s", got, agentID)
+	}
+	if got := util.UUIDToString(call.ownerID); got != ownerID {
+		t.Fatalf("ownerID = %s; want %s", got, ownerID)
+	}
+	if got := util.UUIDToString(call.issueID); got != issueID {
+		t.Fatalf("issueID = %s; want %s", got, issueID)
+	}
+	if got := util.UUIDToString(call.commentID); got != util.UUIDToString(comment.ID) {
+		t.Fatalf("commentID = %s; want %s", got, util.UUIDToString(comment.ID))
+	}
+	if got := util.UUIDToString(call.requesterID); got != memberID {
+		t.Fatalf("requesterID = %s; want %s", got, memberID)
+	}
+
+	// The owner commenting on their own agent → no run-request (they can access).
+	recorder.calls = nil
+	testHandler.requestPrivateAssigneeRunOnComment(ctx, issue, comment, "member", ownerID)
+	if len(recorder.calls) != 0 {
+		t.Fatalf("owner comment created run-request calls = %d; want 0", len(recorder.calls))
+	}
+}
