@@ -1,0 +1,49 @@
+{
+  "page": {
+    "title": "Epics",
+    "new_epic": "新建 Epic",
+    "empty": "还没有 Epic",
+    "create_first": "创建第一个 Epic",
+    "search_placeholder": "搜索 Epic...",
+    "no_search_results": "未找到匹配的 Epic"
+  },
+  "table": {
+    "name": "名称",
+    "status": "状态",
+    "progress": "进度",
+    "created": "创建时间",
+    "issues": "issues"
+  },
+  "picker": {
+    "no_epic": "无 Epic",
+    "remove_epic": "移除 Epic",
+    "no_epics": "此工作区没有 Epic"
+  },
+  "status": {
+    "open": "进行中",
+    "closed": "已关闭"
+  },
+  "detail": {
+    "not_found": "Epic 未找到",
+    "breadcrumb_fallback": "Epics",
+    "title_placeholder": "Epic 标题",
+    "copy_link": "复制链接",
+    "delete_action": "删除 Epic",
+    "section_properties": "属性",
+    "section_description": "描述",
+    "description_placeholder": "添加描述...",
+    "no_issues_yet": "暂无 Issue",
+    "delete_confirm_title": "删除 Epic",
+    "delete_confirm_description": "确定要删除此 Epic 吗？分配给它的 Issue 不会被删除。"
+  },
+  "create": {
+    "title": "创建 Epic",
+    "label_title": "标题",
+    "title_placeholder": "Epic 标题",
+    "label_description": "描述",
+    "description_placeholder": "添加描述...",
+    "color": "颜色",
+    "submit": "创建 Epic",
+    "cancel": "取消"
+  }
+}

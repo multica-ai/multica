@@ -12,11 +12,11 @@ import { defaultStorage } from "../../platform/storage";
 export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
-export type SwimlaneGrouping = "parent" | "project" | "assignee";
+export type SwimlaneGrouping = "parent" | "epic" | "project" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
-export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
+export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "epic", "project", "assignee"];
 
 export interface CardProperties {
   priority: boolean;
@@ -70,6 +70,10 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  epicFilters: string[];
+  includeNoEpic: boolean;
+  sprintFilters: string[];
+  includeNoSprint: boolean;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -103,6 +107,10 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  toggleEpicFilter: (epicId: string) => void;
+  toggleNoEpic: () => void;
+  toggleSprintFilter: (sprintId: string) => void;
+  toggleNoSprint: () => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
@@ -129,6 +137,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  epicFilters: [],
+  includeNoEpic: false,
+  sprintFilters: [],
+  includeNoSprint: false,
   agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
@@ -146,8 +158,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   ganttZoom: "week",
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
-  swimlaneOrders: { parent: [], project: [], assignee: [] },
-  collapsedSwimlanes: { parent: [], project: [], assignee: [] },
+  swimlaneOrders: { parent: [], epic: [], project: [], assignee: [] },
+  collapsedSwimlanes: { parent: [], epic: [], project: [], assignee: [] },
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
@@ -208,6 +220,22 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  toggleEpicFilter: (epicId) =>
+    set((state) => ({
+      epicFilters: state.epicFilters.includes(epicId)
+        ? state.epicFilters.filter((id) => id !== epicId)
+        : [...state.epicFilters, epicId],
+    })),
+  toggleNoEpic: () =>
+    set((state) => ({ includeNoEpic: !state.includeNoEpic })),
+  toggleSprintFilter: (sprintId) =>
+    set((state) => ({
+      sprintFilters: state.sprintFilters.includes(sprintId)
+        ? state.sprintFilters.filter((id) => id !== sprintId)
+        : [...state.sprintFilters, sprintId],
+    })),
+  toggleNoSprint: () =>
+    set((state) => ({ includeNoSprint: !state.includeNoSprint })),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
@@ -236,6 +264,10 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      epicFilters: [],
+      includeNoEpic: false,
+      sprintFilters: [],
+      includeNoSprint: false,
       agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
@@ -289,6 +321,10 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    epicFilters: state.epicFilters,
+    includeNoEpic: state.includeNoEpic,
+    sprintFilters: state.sprintFilters,
+    includeNoSprint: state.includeNoSprint,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

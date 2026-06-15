@@ -43,6 +43,12 @@
     "section_creator": "생성자",
     "section_project": "프로젝트",
     "section_label": "라벨",
+    "section_epic": "에픽",
+    "section_sprint": "스프린트",
+    "epic": "에픽",
+    "no_epic": "에픽 없음",
+    "sprint": "스프린트",
+    "no_sprint": "스프린트 없음",
     "members_group": "멤버",
     "agents_group": "에이전트",
     "squads_group": "스쿼드",
@@ -63,6 +69,7 @@
     "group_assignee": "담당자",
     "group_parent": "상위 이슈",
     "group_project": "프로젝트",
+    "group_epic": "에픽",
     "sort_manual": "수동",
     "sort_priority": "우선순위",
     "sort_start_date": "시작일",
@@ -480,5 +487,20 @@
     "dont_show_again": "다시 보지 않기",
     "keep_in_backlog": "백로그에 두기",
     "move_to_todo": "할 일로 이동"
+  },
+  "epic_picker": {
+    "none": "에픽 없음",
+    "remove": "에픽 제거",
+    "empty": "이 워크스페이스에 에픽이 없습니다"
+  },
+  "sprint_picker": {
+    "none": "스프린트 없음",
+    "remove": "스프린트 제거",
+    "empty": "이 워크스페이스에 스프린트가 없습니다"
+  },
+  "sections": {
+    "properties": "속성",
+    "planning": "계획",
+    "dates": "날짜"
   }
 }

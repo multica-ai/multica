@@ -662,6 +662,8 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   creator_id: "",
   parent_issue_id: null,
   project_id: null,
+  epic_id: null,
+  sprint_id: null,
   position: 0,
   start_date: null,
   due_date: null,

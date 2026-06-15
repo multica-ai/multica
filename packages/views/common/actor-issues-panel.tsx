@@ -105,6 +105,10 @@ export function ActorIssuesPanel({
         projectFilters,
         includeNoProject,
         labelFilters,
+        epicFilters: [],
+        includeNoEpic: false,
+        sprintFilters: [],
+        includeNoSprint: false,
       }),
     [
       actorIssues,

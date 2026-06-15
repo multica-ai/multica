@@ -19,6 +19,8 @@
     "./issues/utils/sort": "./issues/utils/sort.ts",
     "./common/task-transcript": "./common/task-transcript/index.ts",
     "./projects/components": "./projects/components/index.ts",
+    "./epics/components": "./epics/components/index.ts",
+    "./sprints/components": "./sprints/components/index.ts",
     "./autopilots/components": "./autopilots/components/index.ts",
     "./modals/registry": "./modals/registry.tsx",
     "./modals/create-issue": "./modals/create-issue.tsx",

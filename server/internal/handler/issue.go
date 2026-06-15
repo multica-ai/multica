@@ -41,6 +41,8 @@ type IssueResponse struct {
 	CreatorID     string  `json:"creator_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
 	ProjectID     *string `json:"project_id"`
+	EpicID        *string `json:"epic_id"`
+	SprintID      *string `json:"sprint_id"`
 	Position      float64 `json:"position"`
 	StartDate     *string `json:"start_date"`
 	DueDate       *string `json:"due_date"`
@@ -78,6 +80,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
+		EpicID:        uuidToPtr(i.EpicID),
+		SprintID:      uuidToPtr(i.SprintID),
 		Position:      i.Position,
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
@@ -105,6 +109,8 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
+		EpicID:        uuidToPtr(i.EpicID),
+		SprintID:      uuidToPtr(i.SprintID),
 		Position:      i.Position,
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
@@ -162,6 +168,8 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
+		EpicID:        uuidToPtr(i.EpicID),
+		SprintID:      uuidToPtr(i.SprintID),
 		Position:      i.Position,
 		StartDate:     dateToPtr(i.StartDate),
 		DueDate:       dateToPtr(i.DueDate),
@@ -748,6 +756,22 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		projectFilter = id
 	}
+	var epicFilter pgtype.UUID
+	if e := r.URL.Query().Get("epic_id"); e != "" {
+		id, ok := parseUUIDOrBadRequest(w, e, "epic_id")
+		if !ok {
+			return
+		}
+		epicFilter = id
+	}
+	var sprintFilter pgtype.UUID
+	if s := r.URL.Query().Get("sprint_id"); s != "" {
+		id, ok := parseUUIDOrBadRequest(w, s, "sprint_id")
+		if !ok {
+			return
+		}
+		sprintFilter = id
+	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
 	// to / lead / have an agent inside). Direct member-assignment is excluded
@@ -893,6 +917,12 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if projectFilter.Valid {
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
 	}
+	if epicFilter.Valid {
+		where = append(where, fmt.Sprintf("i.epic_id = %s::uuid", addArg(epicFilter)))
+	}
+	if sprintFilter.Valid {
+		where = append(where, fmt.Sprintf("i.sprint_id = %s::uuid", addArg(sprintFilter)))
+	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
@@ -952,7 +982,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata,
+       i.epic_id, i.sprint_id
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -989,6 +1020,8 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.EpicID,
+			&row.SprintID,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1957,6 +1990,8 @@ type CreateIssueRequest struct {
 	AssigneeID    *string  `json:"assignee_id"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	EpicID        *string  `json:"epic_id"`
+	SprintID      *string  `json:"sprint_id"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -2041,6 +2076,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		parentIssueID = id
+	}
+	var epicID pgtype.UUID
+	if req.EpicID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.EpicID, "epic_id")
+		if !ok {
+			return
+		}
+		epicID = id
+	}
+	var sprintID pgtype.UUID
+	if req.SprintID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.SprintID, "sprint_id")
+		if !ok {
+			return
+		}
+		sprintID = id
 	}
 	// Cross-workspace parent / project existence is enforced inside
 	// IssueService.Create (atomically with the create), so every entry
@@ -2139,6 +2190,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		CreatorID:      parseUUID(actualCreatorID),
 		ParentIssueID:  parentIssueID,
 		ProjectID:      projectID,
+		EpicID:         epicID,
+		SprintID:       sprintID,
 		StartDate:      startDate,
 		DueDate:        dueDate,
 		OriginType:     originType,
@@ -2200,6 +2253,8 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
+	EpicID        *string  `json:"epic_id"`
+	SprintID      *string  `json:"sprint_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2242,6 +2297,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
+		EpicID:        prevIssue.EpicID,
+		SprintID:      prevIssue.SprintID,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -2351,6 +2408,28 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["epic_id"]; ok {
+		if req.EpicID != nil {
+			epicUUID, ok := parseUUIDOrBadRequest(w, *req.EpicID, "epic_id")
+			if !ok {
+				return
+			}
+			params.EpicID = epicUUID
+		} else {
+			params.EpicID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["sprint_id"]; ok {
+		if req.SprintID != nil {
+			sprintUUID, ok := parseUUIDOrBadRequest(w, *req.SprintID, "sprint_id")
+			if !ok {
+				return
+			}
+			params.SprintID = sprintUUID
+		} else {
+			params.SprintID = pgtype.UUID{Valid: false}
 		}
 	}
 

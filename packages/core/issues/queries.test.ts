@@ -32,6 +32,8 @@ function makeIssue(idx: number): Issue {
     creator_id: "user-1",
     parent_issue_id: null,
     project_id: PROJECT_ID,
+    epic_id: null,
+    sprint_id: null,
     position: idx,
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,

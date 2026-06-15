@@ -47,6 +47,8 @@ export interface Issue {
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
+  epic_id: string | null;
+  sprint_id: string | null;
   position: number;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`

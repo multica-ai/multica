@@ -4,6 +4,8 @@
     "my_issues": "내 이슈",
     "issues": "이슈",
     "projects": "프로젝트",
+    "epics": "Epics",
+    "sprints": "Sprints",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
     "squads": "스쿼드",

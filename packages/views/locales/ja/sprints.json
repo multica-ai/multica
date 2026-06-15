@@ -1,0 +1,54 @@
+{
+  "page": {
+    "title": "Sprints",
+    "new_sprint": "新しいSprint",
+    "empty": "まだSprintがありません",
+    "create_first": "最初のSprintを作成",
+    "search_placeholder": "Sprintを検索...",
+    "no_search_results": "検索結果がありません"
+  },
+  "table": {
+    "name": "名前",
+    "status": "ステータス",
+    "dates": "日付",
+    "progress": "進捗",
+    "created": "作成日",
+    "issues": "issues"
+  },
+  "status": {
+    "planned": "予定",
+    "active": "進行中",
+    "completed": "完了",
+    "cancelled": "キャンセル"
+  },
+  "detail": {
+    "not_found": "Sprintが見つかりません",
+    "breadcrumb_fallback": "Sprints",
+    "title_placeholder": "Sprint名",
+    "copy_link": "リンクをコピー",
+    "delete_action": "Sprintを削除",
+    "section_properties": "プロパティ",
+    "section_description": "説明",
+    "description_placeholder": "Sprintの目標を追加...",
+    "no_issues_yet": "まだイシューがありません",
+    "delete_confirm_title": "Sprintを削除",
+    "delete_confirm_description": "このSprintを削除してもよろしいですか？割り当てられたイシューは削除されません。",
+    "date_range": "{{start}} — {{end}}"
+  },
+  "picker": {
+    "no_sprint": "Sprintなし",
+    "remove_sprint": "Sprintを削除",
+    "no_sprints": "このワークスペースにSprintがありません"
+  },
+  "create": {
+    "title": "Sprintを作成",
+    "label_name": "名前",
+    "name_placeholder": "Sprint名",
+    "label_goal": "目標",
+    "goal_placeholder": "Sprintの目標を追加...",
+    "start_date": "開始日",
+    "end_date": "終了日",
+    "submit": "Sprintを作成",
+    "cancel": "キャンセル"
+  }
+}

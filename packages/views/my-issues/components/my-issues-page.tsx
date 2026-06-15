@@ -38,6 +38,10 @@ export function MyIssuesPage() {
   const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
   const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
   const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
+  const epicFilters = useStore(myIssuesViewStore, (s) => s.epicFilters);
+  const includeNoEpic = useStore(myIssuesViewStore, (s) => s.includeNoEpic);
+  const sprintFilters = useStore(myIssuesViewStore, (s) => s.sprintFilters);
+  const includeNoSprint = useStore(myIssuesViewStore, (s) => s.includeNoSprint);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const sort = useMemo(
@@ -138,10 +142,14 @@ export function MyIssuesPage() {
         projectFilters: [],
         includeNoProject: false,
         labelFilters: [],
+        epicFilters,
+        includeNoEpic,
+        sprintFilters,
+        includeNoSprint,
         agentRunningFilter,
         runningIssueIds,
       }),
-    [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
+    [myIssues, statusFilters, priorityFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane.
@@ -156,10 +164,14 @@ export function MyIssuesPage() {
         projectFilters: [],
         includeNoProject: false,
         labelFilters: [],
+        epicFilters,
+        includeNoEpic,
+        sprintFilters,
+        includeNoSprint,
         agentRunningFilter,
         runningIssueIds,
       }),
-    [myIssues, priorityFilters, agentRunningFilter, runningIssueIds],
+    [myIssues, priorityFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter, runningIssueIds],
   );
 
   const activeFilters = useMemo(() => ({
@@ -170,8 +182,12 @@ export function MyIssuesPage() {
     projectFilters: [],
     includeNoProject: false,
     labelFilters: [],
+    epicFilters,
+    includeNoEpic,
+    sprintFilters,
+    includeNoSprint,
     agentRunningFilter,
-  }), [priorityFilters, agentRunningFilter]);
+  }), [priorityFilters, epicFilters, includeNoEpic, sprintFilters, includeNoSprint, agentRunningFilter]);
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 

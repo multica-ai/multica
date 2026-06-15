@@ -258,6 +258,17 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Epic struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	Color       string             `json:"color"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -358,6 +369,8 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	EpicID             pgtype.UUID        `json:"epic_id"`
+	SprintID           pgtype.UUID        `json:"sprint_id"`
 }
 
 type IssueDependency struct {
@@ -569,6 +582,18 @@ type SkillFile struct {
 	Content   string             `json:"content"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Sprint struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Goal        pgtype.Text        `json:"goal"`
+	StartDate   pgtype.Date        `json:"start_date"`
+	EndDate     pgtype.Date        `json:"end_date"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Squad struct {

@@ -506,6 +506,10 @@ export function SwimLaneView({
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
     labelFilters: activeFiltersProp?.labelFilters ?? [],
+    epicFilters: activeFiltersProp?.epicFilters ?? [],
+    includeNoEpic: activeFiltersProp?.includeNoEpic ?? false,
+    sprintFilters: activeFiltersProp?.sprintFilters ?? [],
+    includeNoSprint: activeFiltersProp?.includeNoSprint ?? false,
     agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
     runningIssueIds,
   }), [activeFiltersProp, runningIssueIds]);

@@ -52,6 +52,11 @@ import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { SidebarSection } from "./sidebar-section";
+import { EpicPicker } from "./epic-picker";
+import { SprintPicker } from "./sprint-picker";
+import { epicListOptions } from "@multica/core/epics/queries";
+import { sprintListOptions } from "@multica/core/sprints/queries";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -667,6 +672,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: epics = [] } = useQuery({ ...epicListOptions(wsId), enabled: !!wsId });
+  const { data: sprints = [] } = useQuery({ ...sprintListOptions(wsId), enabled: !!wsId });
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -1383,12 +1390,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
-              projectId={issue.project_id}
-              onUpdate={handleUpdateField}
-            />
-          </PropRow>
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
@@ -1400,24 +1401,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 onUpdate={handleUpdateField}
                 align="start"
                 defaultOpen={autoOpenProp === "priority"}
-              />
-            </PropRow>
-          )}
-          {visibleOptionalProps.has("start_date") && (
-            <PropRow label={t(($) => $.detail.prop_start_date)}>
-              <StartDatePicker
-                startDate={issue.start_date}
-                onUpdate={handleUpdateField}
-                defaultOpen={autoOpenProp === "start_date"}
-              />
-            </PropRow>
-          )}
-          {visibleOptionalProps.has("due_date") && (
-            <PropRow label={t(($) => $.detail.prop_due_date)}>
-              <DueDatePicker
-                dueDate={issue.due_date}
-                onUpdate={handleUpdateField}
-                defaultOpen={autoOpenProp === "due_date"}
               />
             </PropRow>
           )}
@@ -1433,7 +1416,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
           {/* "+ Add property" — opens a Popover listing optional fields
               not yet displayed. Hidden once every optional field is on
-              screen. Sits inside the same grid as a full-row, with its
+              the screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
           {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) && (
             <div className="col-span-2 mt-1">
@@ -1481,6 +1464,52 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           )}
         </div>}
+
+        {/* Planning section */}
+        <SidebarSection title="Planning">
+          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+            <PropRow label={t(($) => $.detail.prop_project)}>
+              <ProjectPicker
+                projectId={issue.project_id}
+                onUpdate={handleUpdateField}
+              />
+            </PropRow>
+            {epics.length > 0 && (
+              <PropRow label="Epic">
+                <EpicPicker epicId={issue.epic_id} onUpdate={handleUpdateField} />
+              </PropRow>
+            )}
+            {sprints.length > 0 && (
+              <PropRow label="Sprint">
+                <SprintPicker sprintId={issue.sprint_id} onUpdate={handleUpdateField} />
+              </PropRow>
+            )}
+          </div>
+        </SidebarSection>
+
+        {/* Dates section */}
+        <SidebarSection title="Dates">
+          <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+            {visibleOptionalProps.has("start_date") && (
+              <PropRow label={t(($) => $.detail.prop_start_date)}>
+                <StartDatePicker
+                  startDate={issue.start_date}
+                  onUpdate={handleUpdateField}
+                  defaultOpen={autoOpenProp === "start_date"}
+                />
+              </PropRow>
+            )}
+            {visibleOptionalProps.has("due_date") && (
+              <PropRow label={t(($) => $.detail.prop_due_date)}>
+                <DueDatePicker
+                  dueDate={issue.due_date}
+                  onUpdate={handleUpdateField}
+                  defaultOpen={autoOpenProp === "due_date"}
+                />
+              </PropRow>
+            )}
+          </div>
+        </SidebarSection>
       </div>
 
       {/* Parent issue — standalone section, only when the issue has a
