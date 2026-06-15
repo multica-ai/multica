@@ -263,6 +263,25 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("prices composer-2.5 and the legacy cursor fallback bucket", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "composer-2.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.5 + 2.5, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "cursor",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+    expect(isModelPriced("composer-2.5-fast")).toBe(true);
+  });
+
   // The Chinese-model rates below are spot-checked against the literal
   // numbers on the three official price sheets cited in MODEL_PRICING's
   // header comment. Pinning them in tests is what catches a future edit

@@ -228,6 +228,20 @@ const MODEL_PRICING: Record<
   "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
   "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
   "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+
+  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing).
+  //    Cursor result events often omit `model`, so the daemon falls back to
+  //    the configured runtime model or the legacy key `cursor`.
+  "auto":               { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 1.25 },
+  "composer-2.5-fast":  { input: 3,    output: 15,   cacheRead: 0.25,   cacheWrite: 3 },
+  "composer-2.5":       { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0.5 },
+  "composer-2-fast":    { input: 3,    output: 15,   cacheRead: 0.25,   cacheWrite: 3 },
+  "composer-2":         { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0.5 },
+  "composer-1.5":       { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 3.5 },
+  "composer-1":         { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 1.25 },
+  // Legacy fallback bucket when neither the result event nor the runtime
+  // model is known — price at the current Composer 2.5 Fast default.
+  "cursor":             { input: 3,    output: 15,   cacheRead: 0.25,   cacheWrite: 3 },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four

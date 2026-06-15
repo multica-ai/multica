@@ -251,6 +251,49 @@ func TestCursorErrorText(t *testing.T) {
 	}
 }
 
+func TestCursorUsageModelFallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name             string
+		evtModel         string
+		configuredModel  string
+		want             string
+	}{
+		{"event model wins", "gpt-5.3-codex", "composer-2.5", "gpt-5.3-codex"},
+		{"configured model fallback", "", "composer-2.5", "composer-2.5"},
+		{"default cursor", "", "", "cursor"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := cursorUsageModel(tc.evtModel, tc.configuredModel)
+			if got != tc.want {
+				t.Fatalf("cursorUsageModel(%q, %q) = %q, want %q", tc.evtModel, tc.configuredModel, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCursorAccumulateResultUsageUsesConfiguredModel(t *testing.T) {
+	t.Parallel()
+
+	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
+	usage := make(map[string]TokenUsage)
+	evt := &cursorStreamEvent{
+		InputTokens:  400,
+		OutputTokens: 200,
+	}
+	b.accumulateResultUsage(usage, evt, "composer-2.5")
+	u := usage["composer-2.5"]
+	if u.InputTokens != 400 || u.OutputTokens != 200 {
+		t.Fatalf("unexpected usage: %+v", u)
+	}
+	if _, ok := usage["cursor"]; ok {
+		t.Fatalf("expected configured model key, got cursor fallback: %+v", usage)
+	}
+}
+
 func TestCursorAccumulateResultUsage(t *testing.T) {
 	t.Parallel()
 
@@ -269,7 +312,7 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 				CacheWriteInputTokens: 25,
 			},
 		}
-		b.accumulateResultUsage(usage, evt)
+		b.accumulateResultUsage(usage, evt, "")
 		u := usage["gpt-5.3"]
 		if u.InputTokens != 200 || u.OutputTokens != 100 || u.CacheReadTokens != 50 || u.CacheWriteTokens != 25 {
 			t.Fatalf("unexpected usage: %+v", u)
@@ -288,7 +331,7 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 			CacheReadTokens:  75,
 			CacheWriteTokens: 25,
 		}
-		b.accumulateResultUsage(usage, evt)
+		b.accumulateResultUsage(usage, evt, "")
 		u := usage["gpt-5.3"]
 		if u.InputTokens != 300 || u.OutputTokens != 150 || u.CacheReadTokens != 75 || u.CacheWriteTokens != 25 {
 			t.Fatalf("unexpected usage: %+v (want input=300 output=150 cache_read=75 cache_write=25)", u)
@@ -309,7 +352,7 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 				CacheReadInputTokens: 777,
 			},
 		}
-		b.accumulateResultUsage(usage, evt)
+		b.accumulateResultUsage(usage, evt, "")
 		u := usage["gpt-5.3"]
 		if u.InputTokens != 300 || u.OutputTokens != 150 || u.CacheReadTokens != 0 {
 			t.Fatalf("unexpected usage: %+v (want input=300 output=150 cache=0)", u)
@@ -322,7 +365,7 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 		evt := &cursorStreamEvent{
 			Model: "gpt-5.3",
 		}
-		b.accumulateResultUsage(usage, evt)
+		b.accumulateResultUsage(usage, evt, "")
 		if _, ok := usage["gpt-5.3"]; ok {
 			t.Fatalf("expected no entry, got %+v", usage["gpt-5.3"])
 		}
@@ -335,7 +378,7 @@ func TestCursorAccumulateResultUsage(t *testing.T) {
 			InputTokens:  50,
 			OutputTokens: 25,
 		}
-		b.accumulateResultUsage(usage, evt)
+		b.accumulateResultUsage(usage, evt, "")
 		u := usage["cursor"]
 		if u.InputTokens != 50 || u.OutputTokens != 25 {
 			t.Fatalf("unexpected usage: %+v (want input=50 output=25)", u)
@@ -502,7 +545,7 @@ func TestCursorUsageNoDoubleCount(t *testing.T) {
 
 				switch evt.Type {
 				case "result":
-					b.accumulateResultUsage(resultUsage, &evt)
+					b.accumulateResultUsage(resultUsage, &evt, "")
 					if evt.hasResultUsage() {
 						hasResultUsage = true
 					}
@@ -580,7 +623,7 @@ func TestCursorStreamEventUnmarshalTopLevelCamelCase(t *testing.T) {
 	// Verify accumulateResultUsage processes the new shape.
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	usage := make(map[string]TokenUsage)
-	b.accumulateResultUsage(usage, &evt)
+	b.accumulateResultUsage(usage, &evt, "")
 	u := usage["gpt-5.3"]
 	if u.InputTokens != 1500 || u.OutputTokens != 300 || u.CacheReadTokens != 75 || u.CacheWriteTokens != 25 {
 		t.Fatalf("accumulated usage = %+v, want input=1500 output=300 cache_read=75 cache_write=25", u)
@@ -607,7 +650,7 @@ func TestCursorStreamEventUnmarshalNestedCamelCase(t *testing.T) {
 
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	usage := make(map[string]TokenUsage)
-	b.accumulateResultUsage(usage, &evt)
+	b.accumulateResultUsage(usage, &evt, "")
 	u := usage["cursor"]
 	if u.InputTokens != 26640 || u.OutputTokens != 40 || u.CacheReadTokens != 467 || u.CacheWriteTokens != 12 {
 		t.Fatalf("accumulated usage = %+v, want input=26640 output=40 cache_read=467 cache_write=12", u)
@@ -637,7 +680,7 @@ func TestCursorStreamEventUnmarshalLegacyUsage(t *testing.T) {
 
 	b := &cursorBackend{cfg: Config{Logger: slog.Default()}}
 	usage := make(map[string]TokenUsage)
-	b.accumulateResultUsage(usage, &evt)
+	b.accumulateResultUsage(usage, &evt, "")
 	u := usage["gpt-5"]
 	if u.InputTokens != 800 || u.OutputTokens != 400 || u.CacheReadTokens != 200 || u.CacheWriteTokens != 100 {
 		t.Fatalf("accumulated usage = %+v, want input=800 output=400 cache_read=200 cache_write=100", u)

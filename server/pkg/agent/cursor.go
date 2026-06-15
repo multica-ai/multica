@@ -74,6 +74,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}()
 
 		startTime := time.Now()
+		configuredModel := strings.TrimSpace(opts.Model)
 		var output strings.Builder
 		var sessionID string
 		finalStatus := "completed"
@@ -149,7 +150,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
 				}
-				b.accumulateResultUsage(resultUsage, &evt)
+				b.accumulateResultUsage(resultUsage, &evt, configuredModel)
 				if evt.hasResultUsage() {
 					hasResultUsage = true
 				}
@@ -179,10 +180,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Part != nil {
 					var part cursorStepFinishPart
 					_ = json.Unmarshal(evt.Part, &part)
-					model := evt.Model
-					if model == "" {
-						model = "cursor"
-					}
+					model := cursorUsageModel(evt.Model, configuredModel)
 					u := stepUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
 					u.OutputTokens += int64(part.Tokens.Output)
@@ -267,11 +265,18 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 	}
 }
 
-func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *cursorStreamEvent) {
-	model := evt.Model
-	if model == "" {
-		model = "cursor"
+func cursorUsageModel(evtModel, configuredModel string) string {
+	if model := strings.TrimSpace(evtModel); model != "" {
+		return model
 	}
+	if model := strings.TrimSpace(configuredModel); model != "" {
+		return model
+	}
+	return "cursor"
+}
+
+func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *cursorStreamEvent, configuredModel string) {
+	model := cursorUsageModel(evt.Model, configuredModel)
 	u := usage[model]
 
 	// Cursor agent has emitted token usage in multiple shapes: top-level
