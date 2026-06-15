@@ -39,8 +39,12 @@ func (f *fakeSMTPAuthClient) Extension(name string) (bool, string) {
 
 func TestSMTPAuthWithFallback_UsesPlainWhenAccepted(t *testing.T) {
 	client := &fakeSMTPAuthClient{}
-	if err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass"); err != nil {
+	fallback, err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
+	if err != nil {
 		t.Fatalf("smtpAuthWithFallback returned error: %v", err)
+	}
+	if fallback {
+		t.Fatalf("expected no fallback when PLAIN auth succeeds")
 	}
 	if len(client.authCalls) != 1 {
 		t.Fatalf("expected 1 auth call, got %d", len(client.authCalls))
@@ -58,14 +62,18 @@ func TestSMTPAuthWithFallback_FallsBackToLoginOnOffice365Style504(t *testing.T) 
 		},
 		authLine: "XOAUTH2 LOGIN",
 	}
-	if err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass"); err != nil {
-		t.Fatalf("smtpAuthWithFallback returned error: %v", err)
+	fallback, err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
+	if !fallback {
+		t.Fatalf("expected fallback signal when Office 365 rejects PLAIN auth")
 	}
-	if len(client.authCalls) != 2 {
-		t.Fatalf("expected 2 auth calls, got %d", len(client.authCalls))
+	if err == nil {
+		t.Fatalf("expected original PLAIN auth error to be returned for reconnect path")
 	}
-	if _, ok := client.authCalls[1].(*loginAuth); !ok {
-		t.Fatalf("expected second auth to be LOGIN fallback")
+	if len(client.authCalls) != 1 {
+		t.Fatalf("expected 1 auth call before reconnect, got %d", len(client.authCalls))
+	}
+	if _, ok := client.authCalls[0].(*loginAuth); ok {
+		t.Fatalf("expected first auth attempt to remain PLAIN")
 	}
 }
 
@@ -75,7 +83,10 @@ func TestSMTPAuthWithFallback_DoesNotFallbackWithoutLoginSupport(t *testing.T) {
 		authErrs: []error{wantErr},
 		authLine: "XOAUTH2",
 	}
-	err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
+	fallback, err := smtpAuthWithFallback(client, "smtp.office365.com", "user", "pass")
+	if fallback {
+		t.Fatalf("did not expect fallback when server does not advertise LOGIN")
+	}
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected original error, got %v", err)
 	}
