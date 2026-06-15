@@ -99,7 +99,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -982,7 +982,6 @@ export function IssueDetail({
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1155,16 +1154,8 @@ export function IssueDetail({
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
-  // Issue data from TQ — uses detail query, seeded from list cache if available.
-  // Only seed when description is present; list API omits it, and ContentEditor
-  // reads defaultValue on mount only — seeding null description shows an empty editor.
-  const { data: issue = null, isLoading: issueLoading } = useQuery({
-    ...issueDetailOptions(wsId, id),
-    initialData: () => {
-      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
-      return cached?.description != null ? cached : undefined;
-    },
-  });
+  // Issue data from TQ — single detail fetch (no full-list pull).
+  const { data: issue = null, isLoading: issueLoading } = useQuery(issueDetailOptions(wsId, id));
   const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
   const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
   useEffect(() => {
@@ -1543,7 +1534,6 @@ export function IssueDetail({
   const { data: parentIssue = null } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
-    initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
   // Project segment in the breadcrumb. The issue's project_id is the source of

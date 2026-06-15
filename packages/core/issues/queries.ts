@@ -309,6 +309,7 @@ export function issueAssigneeGroupsOptions(
         ...sort,
         ...filter,
       }),
+    staleTime: 30_000,
   });
 }
 
@@ -335,6 +336,7 @@ export function myIssueListOptions(
         : fetchFirstPages(filter, sort),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
+    staleTime: 30_000,
   });
 }
 
@@ -388,6 +390,7 @@ export function projectGanttIssuesOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: issueKeys.projectGantt(wsId, projectId),
     queryFn: () => fetchProjectGanttIssues(projectId),
+    staleTime: 60_000,
   });
 }
 
@@ -412,6 +415,7 @@ export function myIssueAssigneeGroupsOptions(
             ...sort,
             ...filter,
           }),
+    staleTime: 30_000,
   });
 }
 
