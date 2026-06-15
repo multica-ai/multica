@@ -360,6 +360,9 @@ func main() {
 	if h.LarkHub != nil {
 		go h.LarkHub.Run(sweepCtx)
 	}
+	if h.WechatHub != nil {
+		go h.WechatHub.Run(sweepCtx)
+	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
 	// `sys_cron_executions` table into the distributed lease + audit
@@ -437,6 +440,13 @@ func main() {
 		if !h.LarkHub.WaitWithTimeout(h.LarkHub.ShutdownTimeout()) {
 			slog.Warn("lark hub: supervisors did not exit within shutdown timeout; proceeding",
 				"timeout", h.LarkHub.ShutdownTimeout().String(),
+			)
+		}
+	}
+	if h.WechatHub != nil {
+		if !h.WechatHub.WaitWithTimeout(h.WechatHub.ShutdownTimeout()) {
+			slog.Warn("wechat hub: supervisors did not exit within shutdown timeout; proceeding",
+				"timeout", h.WechatHub.ShutdownTimeout().String(),
 			)
 		}
 	}

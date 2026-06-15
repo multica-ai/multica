@@ -106,6 +106,8 @@ import type {
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
+  ListWechatInstallationsResponse,
+  WechatInstallation,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2151,6 +2153,29 @@ export class ApiClient {
     return this.fetch(`/api/lark/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
+    });
+  }
+
+  // WeChat Work integration
+  async listWechatInstallations(workspaceId: string): Promise<ListWechatInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wechat/installations`);
+  }
+
+  async createWechatInstallation(
+    workspaceId: string,
+    agentId: string,
+    botId: string,
+    secret: string,
+  ): Promise<WechatInstallation> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wechat/installations`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId, bot_id: botId, secret }),
+    });
+  }
+
+  async deleteWechatInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wechat/installations/${installationId}`, {
+      method: "DELETE",
     });
   }
 }

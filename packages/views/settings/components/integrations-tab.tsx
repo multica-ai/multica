@@ -1,6 +1,7 @@
 "use client";
 
 import { LarkTab } from "./lark-tab";
+import { WechatTab } from "./wechat-tab";
 import { useT } from "../../i18n";
 
 // Integrations is the umbrella tab for third-party platform connections.
@@ -16,6 +17,13 @@ export function IntegrationsTab() {
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
         <LarkTab />
+      </section>
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">企业微信</h2>
+        <p className="text-sm text-muted-foreground">
+          将 Multica 智能体绑定到企业微信 AI Bot。成员可在企微私聊或群聊中 @Bot 发起对话，智能体会以流式消息实时回复。
+        </p>
+        <WechatTab />
       </section>
     </div>
   );

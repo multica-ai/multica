@@ -761,6 +761,58 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 }
 
+type WechatChatSessionBinding struct {
+	ID                pgtype.UUID        `json:"id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	InstallationID    pgtype.UUID        `json:"installation_id"`
+	WechatChatID      string             `json:"wechat_chat_id"`
+	WechatChatType    string             `json:"wechat_chat_type"`
+	LastCallbackReqID string             `json:"last_callback_req_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type WechatInboundAudit struct {
+	ID              pgtype.UUID        `json:"id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	WechatChatID    pgtype.Text        `json:"wechat_chat_id"`
+	EventType       string             `json:"event_type"`
+	WechatMessageID pgtype.Text        `json:"wechat_message_id"`
+	DropReason      string             `json:"drop_reason"`
+	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
+}
+
+type WechatInboundMessageDedup struct {
+	MessageID      string             `json:"message_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	ClaimToken     pgtype.UUID        `json:"claim_token"`
+}
+
+type WechatInstallation struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	BotID            string             `json:"bot_id"`
+	SecretEncrypted  []byte             `json:"secret_encrypted"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WechatUserBinding struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	MulticaUserID  pgtype.UUID        `json:"multica_user_id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WechatUserid   string             `json:"wechat_userid"`
+	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
 type WorkspaceInvitation struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/wechat"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -354,6 +355,51 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		slog.Info("lark integration disabled (MULTICA_LARK_SECRET_KEY not set)")
 	}
+
+	// WeChat Work integration. Gated on MULTICA_WECHAT_SECRET_KEY.
+	if wechatKey, err := secretbox.LoadKey("MULTICA_WECHAT_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(wechatKey)
+		if err != nil {
+			slog.Error("wechat: secretbox.New failed; wechat integration disabled", "error", err)
+		} else {
+			installSvc, err := wechat.NewInstallationService(queries, box)
+			if err != nil {
+				slog.Error("wechat: InstallationService init failed; wechat integration disabled", "error", err)
+			} else {
+				h.WechatInstallations = installSvc
+				slog.Info("wechat integration enabled")
+
+				auditLogger := wechat.NewAuditLogger(queries)
+				chatSvc := wechat.NewChatSessionService(queries, pool)
+				dispatcher := &wechat.Dispatcher{
+					Queries:     queries,
+					Chat:        chatSvc,
+					Audit:       auditLogger,
+					TaskService: h.TaskService,
+					Logger:      slog.Default(),
+				}
+
+				registry := wechat.NewConnectorRegistry()
+				connectorFactory := func(inst db.WechatInstallation) (wechat.EventConnector, error) {
+					conn := wechat.NewWSConnector(wechat.WSConnectorConfig{
+						InstallationService: installSvc,
+						Logger:              slog.Default(),
+					})
+					registry.Register(inst.BotID, conn)
+					return conn, nil
+				}
+
+				h.WechatHub = wechat.NewHub(queries, connectorFactory, dispatcher, wechat.HubConfig{})
+
+				outboundHandler := wechat.NewOutboundHandler(queries, registry, slog.Default())
+				outboundHandler.Register(bus)
+				slog.Info("wechat inbound pipeline wired")
+			}
+		}
+	} else {
+		slog.Info("wechat integration disabled (MULTICA_WECHAT_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -620,6 +666,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// terminal failure.
 					r.Post("/lark/install/begin", h.BeginLarkInstall)
 					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
+				})
+
+				// WeChat Work integration. Same access pattern as Lark:
+				// listing is member-visible, create/revoke require admin.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/wechat/installations", h.ListWechatInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Post("/wechat/installations", h.CreateWechatInstallation)
+					r.Delete("/wechat/installations/{installationId}", h.RevokeWechatInstallation)
+					r.Post("/wechat/installations/{installationId}/bindings", h.CreateWechatUserBinding)
 				})
 			})
 		})
