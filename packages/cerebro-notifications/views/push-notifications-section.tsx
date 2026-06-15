@@ -41,6 +41,20 @@ function detectUnsupportedReason(): string | null {
   return null;
 }
 
+// currentDeviceClass mirrors the server's DeviceClassFromUserAgent
+// (server/internal/service/push.go) so the settings UI shows the per-device
+// "Turn on" control under the matching channel — phone subscriptions under
+// Mobile, computer-browser subscriptions under Desktop. Unknown agents fall
+// back to "desktop", same as the server.
+export type PushDeviceClass = "mobile" | "desktop";
+
+export function currentDeviceClass(): PushDeviceClass {
+  if (typeof navigator === "undefined") return "desktop";
+  const ua = navigator.userAgent.toLowerCase();
+  const mobileHints = ["iphone", "ipad", "ipod", "android", "mobile", "windows phone"];
+  return mobileHints.some((h) => ua.includes(h)) ? "mobile" : "desktop";
+}
+
 // iOS only enables Web Push when the site has been added to the home screen
 // AND iOS is 16.4+. We can't sniff iOS version reliably, but we can detect
 // that the page is *not* running in standalone mode and warn early.
@@ -96,6 +110,50 @@ async function readyServiceWorker(): Promise<ServiceWorkerRegistration> {
     SW_READY_TIMEOUT_MS,
     "Background service for this page didn't start. Reload and try again.",
   );
+}
+
+export type SubscribeResult =
+  | { ok: true; endpoint: string }
+  | { ok: false; reason: "denied" | "dismissed" | "error"; message: string };
+
+// subscribeThisDevice runs the full opt-in for the current browser/device:
+// ask for OS permission, register the push subscription with the browser, and
+// persist it on the server. Shared by the settings "Turn on" button and the
+// in-browser prompt so the flow stays in one place (TECH-3548).
+export async function subscribeThisDevice(publicKey: string): Promise<SubscribeResult> {
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      return {
+        ok: false,
+        reason: permission === "denied" ? "denied" : "dismissed",
+        message: "Notifications were not allowed",
+      };
+    }
+
+    const reg = await readyServiceWorker();
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToBuffer(publicKey),
+    });
+
+    const json = sub.toJSON() as {
+      endpoint?: string;
+      keys?: { p256dh?: string; auth?: string };
+    };
+    if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) {
+      return { ok: false, reason: "error", message: "Browser returned an incomplete subscription" };
+    }
+
+    await api.subscribePush({
+      endpoint: json.endpoint,
+      keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
+      userAgent: navigator.userAgent,
+    });
+    return { ok: true, endpoint: json.endpoint };
+  } catch (err) {
+    return { ok: false, reason: "error", message: err instanceof Error ? err.message : "Failed to enable push" };
+  }
 }
 
 // CEREBRO-PATCH(web-push-flag-gate): wrapper hides the entire section when feature is disabled
@@ -154,43 +212,21 @@ function PushNotificationsSectionInner() {
 
   const enable = async () => {
     if (state.kind !== "off") return;
-    setState({ kind: "busy", publicKey: state.publicKey });
+    const publicKey = state.publicKey;
+    setState({ kind: "busy", publicKey });
 
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") {
-        toast.error("Notifications were not allowed");
-        if (permission === "denied") setState({ kind: "denied" });
-        else setState({ kind: "off", publicKey: state.publicKey });
-        return;
-      }
-
-      const reg = await readyServiceWorker();
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToBuffer(state.publicKey),
-      });
-
-      const json = sub.toJSON() as {
-        endpoint?: string;
-        keys?: { p256dh?: string; auth?: string };
-      };
-      if (!json.endpoint || !json.keys?.p256dh || !json.keys.auth) {
-        throw new Error("Browser returned an incomplete subscription");
-      }
-
-      await api.subscribePush({
-        endpoint: json.endpoint,
-        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
-        userAgent: navigator.userAgent,
-      });
-
+    const result = await subscribeThisDevice(publicKey);
+    if (result.ok) {
       toast.success("Push notifications enabled on this device");
-      setState({ kind: "on", publicKey: state.publicKey, endpoint: json.endpoint });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to enable push");
-      setState({ kind: "off", publicKey: state.publicKey });
+      setState({ kind: "on", publicKey, endpoint: result.endpoint });
+      return;
     }
+    toast.error(result.reason === "error" ? result.message : "Notifications were not allowed");
+    setState(
+      result.reason === "denied"
+        ? { kind: "denied" }
+        : { kind: "off", publicKey },
+    );
   };
 
   const disable = async () => {

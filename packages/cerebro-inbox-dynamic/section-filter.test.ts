@@ -361,6 +361,25 @@ describe("section-filter — classic parity (TECH-3541 #2)", () => {
     expect(out.map((e) => e.time)).toEqual([3, 1]);
   });
 
+  it("TECH-3541 (Jesper) — muted rows are hidden from every view, even with no view filter", () => {
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const entries = [
+      notifEntry(3, { read: false }),
+      notifEntry(2, { muted_until: future, read: false }),
+      notifEntry(1, { read: true }),
+    ];
+    // Default "All messages" box (no viewFilter) — muted row 2 drops out.
+    const all = selectSectionEntries(entries, { id: "s", kind: "all" }, ctx);
+    expect(all.map((e) => e.time)).toEqual([3, 1]);
+    // The explicit "Muted" view is the only place muted rows resurface.
+    const mutedView = selectSectionEntries(
+      entries,
+      { id: "s", kind: "all", viewFilter: "muted" },
+      ctx,
+    );
+    expect(mutedView.map((e) => e.time)).toEqual([2]);
+  });
+
   it("sorts by actor: last_me keeps my rows, sinks others", () => {
     const mine = notifEntry(1, { actor_type: "member", actor_id: "me" });
     const theirs = notifEntry(3, { actor_type: "agent", actor_id: "a1" });
@@ -391,12 +410,13 @@ describe("section-filter — classic parity (TECH-3541 #2)", () => {
     expect(groups.map((g) => g.label)).toEqual(["Alpha", "No project"]);
   });
 
-  it("default preset is a single 'All messages' box grouped by action", () => {
+  it("default preset starts with Secretary, then 'All messages' grouped by action", () => {
     const preset = operatorPreset();
     expect(preset.tabs).toHaveLength(1);
-    expect(preset.tabs[0]?.sections).toHaveLength(1);
-    expect(preset.tabs[0]?.sections[0]?.kind).toBe("all");
-    expect(preset.tabs[0]?.sections[0]?.groupBy).toBe("action");
+    expect(preset.tabs[0]?.sections).toHaveLength(2);
+    expect(preset.tabs[0]?.sections[0]?.kind).toBe("secretary");
+    expect(preset.tabs[0]?.sections[1]?.kind).toBe("all");
+    expect(preset.tabs[0]?.sections[1]?.groupBy).toBe("action");
   });
 
   it("groups two levels deep with 'Then by'", () => {

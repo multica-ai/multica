@@ -85,6 +85,7 @@ import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
 import { ArchivedInboxView } from "./archived-inbox-view";
+import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox } from "@multica/cerebro-notes/views";
@@ -158,6 +159,7 @@ export function DynamicInbox() {
   const typeLabels = useTypeLabels();
   const setMode = useSetInboxMode();
   const slackBlockEnabled = useFeatureFlag("cerebro_inbox_slack_block");
+  const secretaryEnabled = useFeatureFlag("cerebro_inbox_secretary");
   // TECH-3541 #2 — same flags the classic inbox uses to gate its view options.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
   const pinnedFilterEnabled = useFeatureFlag("cerebro_inbox_pinned_filter");
@@ -179,6 +181,10 @@ export function DynamicInbox() {
   const activeTab =
     layout.tabs.find((t) => t.id === activeTabId) ??
     layout.tabs[0] ?? { id: "", title: "Inbox", sections: [] };
+  const activeSections = useMemo(
+    () => activeTab.sections.filter((section) => section.kind !== "secretary" || secretaryEnabled),
+    [activeTab.sections, secretaryEnabled],
+  );
 
   // TECH-3502 #2 — inline rename of the active tab (also reachable from ⋯).
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -195,6 +201,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  const [secretarySelectedKey, setSecretarySelectedKey] = useState<string | null>(null);
+  const [secretaryCompletedKeys, setSecretaryCompletedKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
   // JEH-901 — "new message" → picking an AGENT must open an agent chat, not a
   // one-agent DM. Held in local state because no ChatSession exists yet (the
   // session is created on first send); mirrors the classic inbox new-chat flow.
@@ -217,17 +227,34 @@ export function DynamicInbox() {
     : null;
 
   const clearSelection = useCallback(() => {
+    if (secretarySelectedKey) {
+      setSecretaryCompletedKeys((keys) => {
+        if (keys.has(secretarySelectedKey)) return keys;
+        const next = new Set(keys);
+        next.add(secretarySelectedKey);
+        return next;
+      });
+    }
+    setSecretarySelectedKey(null);
     setSelected(null);
     setSelectedSnapshot(null);
     setNewChat(null);
-  }, []);
+  }, [secretarySelectedKey]);
 
   const onSelect = (entry: DynInboxEntry) => {
+    setSecretarySelectedKey(null);
     setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
     // TECH-3413 #7 — selecting never auto-advances to the next row; we only
     // ever set the row the user clicked.
+    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+  };
+  const onSecretarySelect = (entry: DynInboxEntry) => {
+    setSecretarySelectedKey(secretaryEntryKey(entry));
+    setNewChat(null);
+    setSelected(entry);
+    setSelectedSnapshot(entry);
     if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
   // TECH-3489 — issues and channels still archive via their host mutations.
@@ -312,6 +339,7 @@ export function DynamicInbox() {
   };
   // TECH-3422 — the Slack-block opens a channel/DM into the same detail panel.
   const onOpenChannel = (channel: Channel) => {
+    setSecretarySelectedKey(null);
     setSelected({
       kind: "channel",
       id: channel.id,
@@ -352,7 +380,13 @@ export function DynamicInbox() {
     );
   };
   const removeSection = (id: string) =>
-    updateActiveTab((t) => ({ ...t, sections: t.sections.filter((s) => s.id !== id) }));
+    // TECH-3541 (Jesper) — the permanent inbox block (first "all" box in the
+    // tab) cannot be removed.
+    updateActiveTab((t) => {
+      const inboxId = t.sections.find((s) => s.kind === "all")?.id ?? null;
+      if (id === inboxId) return t;
+      return { ...t, sections: t.sections.filter((s) => s.id !== id) };
+    });
   const changeSection = (next: InboxSectionConfig) =>
     updateActiveTab((t) => ({ ...t, sections: t.sections.map((s) => (s.id === next.id ? next : s)) }));
 
@@ -469,6 +503,35 @@ export function DynamicInbox() {
     onNewReminder: () => setShowReminder(true),
   };
 
+  // TECH-3541 (Jesper) — the permanent inbox block is the first "All messages"
+  // box in the active tab. The search bar is rendered as part of it, and it
+  // cannot be removed. When a custom tab has no "all" box, the search falls back
+  // to a standalone bar at the top so search is never lost.
+  const inboxBlockId = activeTab.sections.find((s) => s.kind === "all")?.id ?? null;
+
+  const searchBar = (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+      <Search className="size-3.5 flex-none text-muted-foreground" />
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search inbox…"
+        className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+      />
+      {query && (
+        <button
+          type="button"
+          className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
+          onClick={() => setQuery("")}
+          title="Clear search"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+
   const listColumn = (
     <div className="relative flex h-full min-h-0 flex-col">
       {/* tabs */}
@@ -580,6 +643,8 @@ export function DynamicInbox() {
                   )
                     // TECH-3421 — only offer the Notes box when Notes is enabled.
                     .filter((c) => c.kind !== "notes" || notesEnabled)
+                    // TECH-3557 — only offer Secretary when its flag is enabled.
+                    .filter((c) => c.kind !== "secretary" || secretaryEnabled)
                     .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
@@ -633,45 +698,28 @@ export function DynamicInbox() {
           </div>
         </div>
 
-        {/* search (TECH-3413 #9) */}
-        <div className="border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
-            <Search className="size-3.5 flex-none text-muted-foreground" />
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search inbox…"
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-            {query && (
-              <button
-                type="button"
-                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
-                onClick={() => setQuery("")}
-                title="Clear search"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
+        {/* search (TECH-3413 #9) — TECH-3541 (Jesper): when the active tab has a
+            permanent inbox block the search lives inside it; this top bar is a
+            fallback for custom tabs without an "All messages" box. */}
+        {!inboxBlockId && (
+          <div className="border-b border-border px-3 py-2">{searchBar}</div>
+        )}
 
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
-          {activeTab.sections.length === 0 && !loading && (
+          {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
               Empty tab — add a section from the ⋯ menu.
             </p>
           )}
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleSectionDragEnd}>
             <SortableContext
-              items={activeTab.sections.map((s) => s.id)}
+              items={activeSections.map((s) => s.id)}
               strategy={verticalListSortingStrategy}
             >
               <div className="space-y-3">
-                {activeTab.sections.map((section) => (
+                {activeSections.map((section) => (
                   <SortableSection key={section.id} id={section.id} highlight={section.id === justAddedId}>
                     {(handle) =>
                       // TECH-3421 — the Notes box renders its own data (recent
@@ -711,6 +759,18 @@ export function DynamicInbox() {
                             onRemove={() => removeSection(section.id)}
                           />
                         </div>
+                      ) : section.kind === "secretary" && secretaryEnabled ? (
+                        <SecretarySection
+                          dragHandle={handle}
+                          entries={displayEntries}
+                          filterContext={filterContext}
+                          selectedKey={selectedKey}
+                          completedKeys={secretaryCompletedKeys}
+                          query={query}
+                          onSelect={onSecretarySelect}
+                          onArchive={onArchive}
+                          onResetCompleted={() => setSecretaryCompletedKeys(new Set())}
+                        />
                       ) : (
                         <DynamicInboxSection
                           section={section}
@@ -723,6 +783,12 @@ export function DynamicInbox() {
                           selectedKey={selectedKey}
                           query={query}
                           dragHandle={handle}
+                          searchSlot={
+                            section.id === inboxBlockId ? (
+                              <div className="border-b border-border px-3 py-2">{searchBar}</div>
+                            ) : undefined
+                          }
+                          removable={section.id !== inboxBlockId}
                           onSelect={onSelect}
                           onArchive={onArchive}
                           onChange={changeSection}

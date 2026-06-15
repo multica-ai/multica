@@ -19,6 +19,7 @@ export type CerebroFlagKey =
   // already shown in the sidebar without double-counting.
   | "cerebro_comment_cost"
   | "cerebro_web_push"
+  | "cerebro_browser_push_prompt"
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
@@ -45,6 +46,9 @@ export type CerebroFlagKey =
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
   | "cerebro_inbox_slack_block"
+  // TECH-3557: Secretary block in the dynamic inbox. Default off until QA has
+  // verified desktop/mobile flows against the approved mockup.
+  | "cerebro_inbox_secretary"
   | "cerebro_voice_dictation_enabled"
   | "cerebro_voice_output_enabled"
   | "cerebro_voice_summary_enabled"
@@ -173,6 +177,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
   cerebro_web_push: true,
+  cerebro_browser_push_prompt: true,
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
@@ -193,6 +198,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_versions: false,
   cerebro_note_lock: false,
   cerebro_inbox_slack_block: false,
+  cerebro_inbox_secretary: false,
   cerebro_voice_dictation_enabled: false,
   cerebro_voice_output_enabled: false,
   cerebro_voice_summary_enabled: false,
@@ -484,6 +490,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable browser/PWA push notifications for new inbox items, comments, and mentions.",
   },
   {
+    key: "cerebro_browser_push_prompt",
+    label: "Browser push prompt",
+    group: "inbox",
+    description:
+      "Show a dismissible banner in the browser inviting the user to turn on push notifications (asks for permission, links to notification settings). Only appears in a browser, never in the desktop app.",
+  },
+  {
     key: "cerebro_dashboard",
     label: "Cerebro dashboard",
     group: "workspace",
@@ -531,6 +544,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a Slack-style block to the dynamic inbox: a list of people with live online dots, your direct messages and channels, and a \"is typing…\" indicator — open a conversation right inside the inbox. Offered in the dynamic inbox's \"Add section\" menu when on. Requires the Dynamic inbox.",
+  },
+  {
+    key: "cerebro_inbox_secretary",
+    label: "Inbox Secretary",
+    group: "inbox",
+    description:
+      "Add a focused Secretary block to the dynamic inbox. Users pick a batch size, let the app choose unread/oldest messages or select rows manually, then work through that small list in the existing message detail view. Default off until QA signs off.",
   },
   {
     key: "cerebro_inbox_wakeup_running",

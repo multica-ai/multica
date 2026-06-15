@@ -102,10 +102,54 @@ type Payload struct {
 	Badge bool `json:"-"`
 }
 
+// CEREBRO-PATCH(push-device-split): TECH-3548 — classify subscriptions by
+// device so the mobile and desktop push channels deliver independently.
+//
+// Device classes for routing a push to the right per-channel preference. The
+// "mobile" channel targets phones / installed PWAs; the "desktop" channel
+// targets a browser running on a computer. Derived from the subscription's
+// stored user agent — see DeviceClassFromUserAgent.
+const (
+	DeviceClassMobile  = "mobile"
+	DeviceClassDesktop = "desktop"
+)
+
+// DeviceClassFromUserAgent classifies a subscription's stored user agent so
+// the mobile and desktop push channels can be controlled independently. An
+// empty or unrecognised agent is treated as desktop — a browser on a computer
+// is the most common web-push client, and defaulting there means a push is
+// never silently dropped for an unknown device.
+func DeviceClassFromUserAgent(ua string) string {
+	s := strings.ToLower(ua)
+	for _, m := range []string{"iphone", "ipad", "ipod", "android", "mobile", "windows phone"} {
+		if strings.Contains(s, m) {
+			return DeviceClassMobile
+		}
+	}
+	return DeviceClassDesktop
+}
+
 // SendToUser fans the payload out to every device the user has subscribed.
 // Errors per-device are logged and do not abort the broadcast. Endpoints that
 // return 404 or 410 are pruned.
 func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) {
+	s.sendToUserMatching(ctx, userID, p, nil)
+}
+
+// SendToUserForClass sends only to the user's subscriptions whose device class
+// (derived from the stored user agent) matches `class` — DeviceClassMobile or
+// DeviceClassDesktop. This is what lets the mobile and desktop push channels
+// fire independently for the same event.
+func (s *PushService) SendToUserForClass(ctx context.Context, userID, class string, p Payload) {
+	s.sendToUserMatching(ctx, userID, p, func(userAgent string) bool {
+		return DeviceClassFromUserAgent(userAgent) == class
+	})
+}
+
+// sendToUserMatching is the shared fan-out. When `match` is nil every
+// subscription receives the push; otherwise only subscriptions whose user
+// agent passes `match` do.
+func (s *PushService) sendToUserMatching(ctx context.Context, userID string, p Payload, match func(userAgent string) bool) {
 	if !s.enabled {
 		return
 	}
@@ -115,10 +159,23 @@ func (s *PushService) SendToUser(ctx context.Context, userID string, p Payload) 
 		slog.Warn("push: invalid user id", "user_id", userID, "error", err)
 		return
 	}
-	subs, err := s.queries.ListPushSubscriptionsByUser(ctx, userUUID)
+	allSubs, err := s.queries.ListPushSubscriptionsByUser(ctx, userUUID)
 	if err != nil {
 		slog.Error("push: list subscriptions failed", "user_id", userID, "error", err)
 		return
+	}
+	subs := allSubs
+	if match != nil {
+		subs = subs[:0]
+		for _, sub := range allSubs {
+			ua := ""
+			if sub.UserAgent.Valid {
+				ua = sub.UserAgent.String
+			}
+			if match(ua) {
+				subs = append(subs, sub)
+			}
+		}
 	}
 	if len(subs) == 0 {
 		return

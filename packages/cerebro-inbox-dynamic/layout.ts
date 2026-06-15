@@ -51,7 +51,10 @@ export type SectionKind =
   | "filter"
   // TECH-3422 — the Slack-block: a people/DM/channels rail with live presence
   // and typing. Rendered by a dedicated component, not the entry-list filter.
-  | "team";
+  | "team"
+  // TECH-3557 — Secretary: a focused local batch over existing inbox rows.
+  // Rendered by a dedicated component so it can manage its start/selection flow.
+  | "secretary";
 
 /** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
  *  widened to the full classic-inbox set (project / agent / type) so the "All
@@ -115,7 +118,9 @@ export interface InboxSectionConfig {
   countStyle?: "plain" | "circle";
   /** #6: semantic colour for the circle count badge. Default "brand". */
   badgeColor?: SectionBadgeColor;
-  /** #4 (partial): hide muted rows in this box (e.g. reminders without muted). */
+  /** #4 (partial): hide muted rows in this box. TECH-3541 (Jesper) — muted /
+   *  snoozed rows are now hidden from every view globally, so this per-box flag
+   *  is a no-op; kept only so older persisted layouts still parse. */
   excludeMuted?: boolean;
   // --- TECH-3413 #4: composable filter for kind === "filter" (AND of the
   // enabled predicates; projectId is reused as the optional project narrow). ---
@@ -186,6 +191,8 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   // TECH-3422 — only surfaced in the Add-section menu when the
   // cerebro_inbox_slack_block flag is on (filtered in DynamicInbox).
   { kind: "team", label: "Chat" },
+  // TECH-3557 — only surfaced when the cerebro_inbox_secretary flag is on.
+  { kind: "secretary", label: "Secretary" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {
@@ -275,7 +282,7 @@ export function operatorPreset(): InboxLayout {
       {
         id: tabId,
         title: "Inbox",
-        sections: [section("all", { groupBy: "action" })],
+        sections: [section("secretary"), section("all", { groupBy: "action" })],
       },
     ],
   };

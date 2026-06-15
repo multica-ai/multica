@@ -332,6 +332,11 @@ func TestBuildPromptWakeupUsesWakeupPromptAndOriginalReplyParent(t *testing.T) {
 	if !strings.Contains(out, "--parent thread-root-456 --content-stdin") {
 		t.Fatalf("wakeup prompt must force replies under original thread anchor, got:\n%s", out)
 	}
+	// CEREBRO-PATCH(wakeup-silent-exit): TECH-3540 — a scheduled wakeup with nothing
+	// to do must exit silently, not post a "no reply needed" rogue comment.
+	if !strings.Contains(out, "post NOTHING and exit silently") {
+		t.Fatalf("scheduled wakeup prompt must carry the silent-exit guard, got:\n%s", out)
+	}
 }
 
 // CEREBRO-PATCH(approval-system-activity): proves owner-approved run-requests are
@@ -355,6 +360,11 @@ func TestBuildPromptApprovalSystemActivityFraming(t *testing.T) {
 	}
 	if !strings.Contains(out, "--parent thread-root-456 --content-stdin") {
 		t.Fatalf("approval prompt must reply under the original thread anchor, got:\n%s", out)
+	}
+	// The silent-exit guard is scoped to scheduled wakeups; an approval always
+	// carries real work, so it must NOT inherit "post nothing and exit".
+	if strings.Contains(out, "post NOTHING and exit silently") {
+		t.Fatalf("approval prompt must not carry the scheduled-wakeup silent-exit guard, got:\n%s", out)
 	}
 }
 

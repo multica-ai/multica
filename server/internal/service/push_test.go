@@ -25,3 +25,26 @@ func TestNormalizeVAPIDSubject(t *testing.T) {
 		})
 	}
 }
+
+// CEREBRO-PATCH(push-device-split): TECH-3548 — mobile vs desktop classification
+// drives independent push channels. Unknown/empty agents must fall back to
+// desktop so a push is never silently dropped for an unrecognised device.
+func TestDeviceClassFromUserAgent(t *testing.T) {
+	cases := []struct {
+		ua   string
+		want string
+	}{
+		{"Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Safari", DeviceClassMobile},
+		{"Mozilla/5.0 (Linux; Android 14; Pixel 8) Chrome Mobile", DeviceClassMobile},
+		{"Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) Safari", DeviceClassMobile},
+		{"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/124 Safari", DeviceClassDesktop},
+		{"Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124", DeviceClassDesktop},
+		{"", DeviceClassDesktop},
+		{"some-unknown-agent", DeviceClassDesktop},
+	}
+	for _, c := range cases {
+		if got := DeviceClassFromUserAgent(c.ua); got != c.want {
+			t.Errorf("DeviceClassFromUserAgent(%q) = %q, want %q", c.ua, got, c.want)
+		}
+	}
+}

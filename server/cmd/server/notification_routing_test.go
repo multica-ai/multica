@@ -872,22 +872,34 @@ type capturePushNotifier struct {
 	mu      sync.Mutex
 	pushes  []service.Payload
 	userIDs []string
+	classes []string
 }
 
 func (c *capturePushNotifier) Enabled() bool { return true }
 
-func (c *capturePushNotifier) SendToUser(_ context.Context, userID string, p service.Payload) {
+func (c *capturePushNotifier) SendToUserForClass(_ context.Context, userID, class string, p service.Payload) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.userIDs = append(c.userIDs, userID)
+	c.classes = append(c.classes, class)
 	c.pushes = append(c.pushes, p)
 }
 
+// CEREBRO-PATCH(push-device-split): TECH-3548 — capture the device class and
+// expose only mobile-class pushes via snapshot(), so the existing dedup/routing
+// assertions (written before the mobile/desktop split) keep asserting on the
+// mobile push fan-out specifically.
 func (c *capturePushNotifier) snapshot() ([]string, []service.Payload) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	userIDs := append([]string(nil), c.userIDs...)
-	pushes := append([]service.Payload(nil), c.pushes...)
+	var userIDs []string
+	var pushes []service.Payload
+	for i, class := range c.classes {
+		if class == service.DeviceClassMobile {
+			userIDs = append(userIDs, c.userIDs[i])
+			pushes = append(pushes, c.pushes[i])
+		}
+	}
 	return userIDs, pushes
 }
 

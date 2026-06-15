@@ -90,6 +90,12 @@ export interface DynamicInboxSectionProps {
   query?: string;
   /** Drag-to-reorder handle injected by the sortable wrapper (TECH-3413 #1). */
   dragHandle?: React.ReactNode;
+  /** TECH-3541 (Jesper) — the inbox search bar, rendered as part of the
+   *  permanent inbox block (the default "All messages" box). */
+  searchSlot?: React.ReactNode;
+  /** TECH-3541 (Jesper) — the permanent inbox block cannot be removed; its X
+   *  affordance is hidden. Defaults to removable. */
+  removable?: boolean;
   onSelect: (entry: DynInboxEntry) => void;
   onArchive: (entry: DynInboxEntry) => void;
   onChange: (next: InboxSectionConfig) => void;
@@ -461,11 +467,6 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
                     ))}
                   </>
                 )}
-                <DropdownMenuItem
-                  onClick={() => props.onChange({ ...section, excludeMuted: !section.excludeMuted })}
-                >
-                  Hide muted {section.excludeMuted ? "✓" : ""}
-                </DropdownMenuItem>
               </DropdownMenuGroup>
               {/* TECH-3541 #2 — classic inbox bulk maintenance actions, on the
                   "All messages" box only. These operate on the whole inbox,
@@ -510,16 +511,23 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          <button
-            type="button"
-            className="rounded p-1 hover:bg-muted"
-            onClick={props.onRemove}
-            title="Remove section"
-          >
-            <X className="size-3.5" />
-          </button>
+          {props.removable !== false && (
+            <button
+              type="button"
+              className="rounded p-1 hover:bg-muted"
+              onClick={props.onRemove}
+              title="Remove section"
+            >
+              <X className="size-3.5" />
+            </button>
+          )}
         </div>
       </header>
+
+      {/* TECH-3541 (Jesper) — the inbox search bar lives inside the permanent
+          inbox block. Kept visible even when the box is collapsed so search is
+          always reachable. */}
+      {props.searchSlot}
 
       {!isCollapsed && section.kind === "filter" && editFilter && (
         <div className="border-b border-border/60">

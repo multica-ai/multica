@@ -61,7 +61,14 @@ func tickDueReminders(ctx context.Context, queries *db.Queries, bus *events.Bus)
 
 		if item.RecipientType == "member" &&
 			resolveChannelChoice(ctx, queries, item.RecipientType, recipientID, channelMobile, "reminder") {
-			pushReminderToMember(ctx, queries, recipientID, workspaceID, issueKey, itemID, item.Title, textString(item.Body))
+			pushReminderToMember(ctx, queries, recipientID, workspaceID, issueKey, itemID, item.Title, textString(item.Body), service.DeviceClassMobile, channelMobile)
+		}
+
+		// CEREBRO-PATCH(push-device-split): TECH-3548 — desktop channel also
+		// fires a Web Push to the user's computer-class browsers.
+		if item.RecipientType == "member" &&
+			resolveChannelChoice(ctx, queries, item.RecipientType, recipientID, channelDesktop, "reminder") {
+			pushReminderToMember(ctx, queries, recipientID, workspaceID, issueKey, itemID, item.Title, textString(item.Body), service.DeviceClassDesktop, channelDesktop)
 		}
 
 		if bus != nil && item.RecipientType == "member" &&
@@ -83,12 +90,12 @@ func tickDueReminders(ctx context.Context, queries *db.Queries, bus *events.Bus)
 	}
 }
 
-func pushReminderToMember(ctx context.Context, queries *db.Queries, recipientID, workspaceID, issueKey, itemID, title, body string) {
+func pushReminderToMember(ctx context.Context, queries *db.Queries, recipientID, workspaceID, issueKey, itemID, title, body, deviceClass, channel string) {
 	if pushNotifier == nil || !pushNotifier.Enabled() {
 		return
 	}
-	transport := resolveChannelTransport(ctx, queries, "member", recipientID, channelMobile)
-	pushNotifier.SendToUser(ctx, recipientID, service.Payload{
+	transport := resolveChannelTransport(ctx, queries, "member", recipientID, channel)
+	pushNotifier.SendToUserForClass(ctx, recipientID, deviceClass, service.Payload{
 		Title:   truncateForPush(title, pushTitleMaxRunes),
 		Body:    truncateForPush(stripMentionMarkdownForPush(body), pushBodyMaxRunes),
 		URL:     pushDeepLinkURL(ctx, queries, workspaceID, issueKey),
