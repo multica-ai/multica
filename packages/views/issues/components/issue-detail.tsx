@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleCheck,
   Milestone,
   MoreHorizontal,
@@ -95,6 +96,7 @@ import {
   rightSidebarPanelMotionProps,
   useAnimatedRightSidebarState,
 } from "../../layout/animated-right-sidebar";
+import { useIssueSiblings } from "../hooks/use-issue-navigation";
 
 function SubscriberPopoverContent({
   members,
@@ -714,6 +716,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
+
+  // Previous / next navigation within the column the user came from. The board
+  // and list views publish their displayed columns to an ephemeral store; we
+  // read back the current issue's neighbours. `hasContext` is false on a deep
+  // link (no list visited this session), in which case the buttons are hidden.
+  const siblings = useIssueSiblings(wsId, id);
+  // `paths` is rebuilt on every render (useWorkspacePaths), so memoizing this
+  // would buy nothing; a plain handler reads clearer. Only ever invoked from an
+  // inline onClick, so the fresh identity each render costs nothing.
+  const goToSibling = (siblingId: string | null) => {
+    if (siblingId) router.push(paths.issueDetail(siblingId));
+  };
+
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api);
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1803,6 +1818,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
+            {siblings.hasContext && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        disabled={!siblings.prevId}
+                        aria-label={t(($) => $.detail.prev_issue_tooltip)}
+                        onClick={() => goToSibling(siblings.prevId)}
+                      >
+                        <ChevronUp />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.prev_issue_tooltip)}</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        disabled={!siblings.nextId}
+                        aria-label={t(($) => $.detail.next_issue_tooltip)}
+                        onClick={() => goToSibling(siblings.nextId)}
+                      >
+                        <ChevronDown />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.next_issue_tooltip)}</TooltipContent>
+                </Tooltip>
+              </>
+            )}
             {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
               <Tooltip>
                 <TooltipTrigger
