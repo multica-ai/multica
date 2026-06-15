@@ -776,8 +776,9 @@ type CreateCommentRequest struct {
 }
 
 type CommentTriggerPreviewRequest struct {
-	Content  string  `json:"content"`
-	ParentID *string `json:"parent_id"`
+	Content          string  `json:"content"`
+	ParentID         *string `json:"parent_id"`
+	EditingCommentID *string `json:"editing_comment_id"`
 }
 
 type CommentTriggerPreviewResponse struct {
@@ -804,6 +805,10 @@ type commentAgentTrigger struct {
 	Agent  db.Agent
 	Source commentAgentTriggerSource
 	Squad  *db.Squad
+}
+
+type commentTriggerComputeOptions struct {
+	ExcludeTriggerCommentID pgtype.UUID
 }
 
 func commentAgentTriggerReason(trigger commentAgentTrigger) string {
@@ -847,12 +852,42 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var parentComment *db.Comment
+	var editingComment *db.Comment
+	var opts commentTriggerComputeOptions
+	if req.EditingCommentID != nil {
+		editingID, ok := parseUUIDOrBadRequest(w, *req.EditingCommentID, "editing_comment_id")
+		if !ok {
+			return
+		}
+		comment, err := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+			ID:          editingID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || uuidToString(comment.IssueID) != uuidToString(issue.ID) {
+			writeError(w, http.StatusBadRequest, "invalid editing comment")
+			return
+		}
+		editingComment = &comment
+		opts.ExcludeTriggerCommentID = editingID
+	}
+
+	var parentID pgtype.UUID
 	if req.ParentID != nil {
 		parentID, ok := parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
 		if !ok {
 			return
 		}
+
+		if editingComment != nil && uuidToString(parentID) != uuidToString(editingComment.ParentID) {
+			writeError(w, http.StatusBadRequest, "parent_id does not match editing comment")
+			return
+		}
+	} else if editingComment != nil && editingComment.ParentID.Valid {
+		parentID = editingComment.ParentID
+	}
+
+	var parentComment *db.Comment
+	if parentID.Valid {
 		parent, err := h.Queries.GetComment(r.Context(), parentID)
 		if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
 			writeError(w, http.StatusBadRequest, "invalid parent comment")
@@ -868,7 +903,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	triggers := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID)
+	triggers := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{Agents: make([]CommentTriggerAgentResponse, 0, len(triggers))}
 	for _, trigger := range triggers {
 		resp.Agents = append(resp.Agents, commentAgentTriggerToResponse(trigger))
@@ -1058,7 +1093,7 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	if isNoteComment(comment.Content) {
 		return
 	}
-	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID)
+	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 }
@@ -1121,7 +1156,7 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 }
 
-func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string) []commentAgentTrigger {
+func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
 	if isNoteComment(content) {
 		return nil
 	}
@@ -1137,7 +1172,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		triggers = append(triggers, trigger)
 	}
 
-	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID) &&
+	if actorType == "member" && h.shouldEnqueueOnComment(ctx, issue, actorType, actorID, opts) &&
 		!h.commentMentionsOthersButNotAssignee(content, issue) &&
 		!h.isReplyToMemberThread(ctx, parentComment, content, issue) {
 		if agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -1148,18 +1183,18 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 	}
 
-	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, actorType, actorID); ok {
+	if trigger, ok := h.computeAssignedSquadLeaderCommentTrigger(ctx, issue, content, actorType, actorID, opts); ok {
 		add(trigger)
 	}
 
-	for _, trigger := range h.computeMentionedAgentCommentTriggers(ctx, issue, content, parentComment, actorType, actorID) {
+	for _, trigger := range h.computeMentionedAgentCommentTriggers(ctx, issue, content, parentComment, actorType, actorID, opts) {
 		add(trigger)
 	}
 
 	return triggers
 }
 
-func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content, authorType, authorID string) (commentAgentTrigger, bool) {
+func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, issue db.Issue, content, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
 		return commentAgentTrigger{}, false
 	}
@@ -1187,14 +1222,25 @@ func (h *Handler) computeAssignedSquadLeaderCommentTrigger(ctx context.Context, 
 	if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: squad.LeaderID,
-	})
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, squad.LeaderID, opts)
 	if err != nil || hasPending {
 		return commentAgentTrigger{}, false
 	}
 	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee, Squad: &squad}, true
+}
+
+func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
+	if opts.ExcludeTriggerCommentID.Valid {
+		return h.Queries.HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx, db.HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams{
+			IssueID:                 issueID,
+			AgentID:                 agentID,
+			ExcludeTriggerCommentID: opts.ExcludeTriggerCommentID,
+		})
+	}
+	return h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
 }
 
 // commentMentionsOthersButNotAssignee returns true if the comment @mentions
@@ -1332,7 +1378,7 @@ func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no status gate here — @mention is an explicit action and should work
 // even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string) []commentAgentTrigger {
+func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {
 	wsID := uuidToString(issue.WorkspaceID)
 	mentions := util.ParseMentions(content)
 	if shouldInheritParentMentions(parentComment, mentions, authorType) {
@@ -1381,10 +1427,7 @@ func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			// Dedup: skip if leader already has a pending task for this issue.
-			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-				IssueID: issue.ID,
-				AgentID: leaderID,
-			})
+			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
 			if err != nil || hasPending {
 				continue
 			}
@@ -1414,10 +1457,7 @@ func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		// Dedup: skip if this agent already has a pending task for this issue.
-		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-			IssueID: issue.ID,
-			AgentID: agentUUID,
-		})
+		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
 		if err != nil || hasPending {
 			continue
 		}
@@ -1467,8 +1507,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content       string    `json:"content"`
-		AttachmentIDs *[]string `json:"attachment_ids"`
+		Content          string    `json:"content"`
+		AttachmentIDs    *[]string `json:"attachment_ids"`
+		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1487,6 +1528,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+	}
+	suppressAgentIDs, ok := parseUUIDSliceOrBadRequest(w, req.SuppressAgentIDs, "suppress_agent_ids")
+	if !ok {
+		return
 	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
@@ -1546,7 +1591,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
-			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, nil)
+			h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, suppressAgentIDs)
 		}
 	}
 

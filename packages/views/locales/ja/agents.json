@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "自分のもの",
-    "all": "すべて"
+    "all": "すべて",
+    "archived": "アーカイブ済み"
   },
   "sort": {
     "label_recent": "最近のアクティビティ",
@@ -57,7 +58,11 @@
     "workload": "作業量",
     "runtime": "ランタイム",
     "activity_7d": "アクティビティ（7日）",
-    "runs": "実行"
+    "runs": "実行",
+    "last_active": "最終アクティブ",
+    "model": "モデル",
+    "created": "作成日時",
+    "owner": "オーナー"
   },
   "row": {
     "you": "あなた",
@@ -65,7 +70,9 @@
     "no_description": "説明なし",
     "fallback_runtime_cloud": "クラウド",
     "fallback_runtime_local": "ローカル",
-    "actions_aria": "行の操作"
+    "actions_aria": "行の操作",
+    "task_count_one": "{{count}} 件のタスク",
+    "task_count_other": "{{count}} 件のタスク"
   },
   "activity_tooltip": {
     "created_today": "今日作成",
@@ -197,6 +204,7 @@
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
     "integrations": "連携",
+    "runtime_config": "ルーティング",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
     "discard_keep": "編集を続ける",
@@ -305,6 +313,26 @@
       "save_failed_toast": "MCP config を保存できませんでした",
       "redacted_title": "設定済み — 現在の表示では非表示",
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。"
+    },
+    "runtime_config": {
+      "intro": "OpenClaw ランタイムがこのエージェントの各ターンをどのように実行するかを選択します。Local モードはエージェントを daemon プロセス内で実行します。Gateway モードは各ターンを OpenClaw Gateway に転送します — daemon のホストが軽量な調整役で、エージェントの実作業はより強力なマシンで動かしたい場合に有用です。",
+      "mode_label": "ルーティングモード",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "デフォルト。daemon は `openclaw agent --local …` を起動し、エージェントループがこのホストで実行されます。",
+      "mode_gateway_hint": "daemon は OpenClaw Gateway にダイヤルします。エンドポイントフィールドを空欄のままにすると daemon ホストの `~/.openclaw/openclaw.json` から継承します。",
+      "gateway_legend": "Gateway エンドポイント",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "ポート",
+      "port_invalid": "ポートは正の整数である必要があります。",
+      "token_label": "認証トークン",
+      "token_placeholder": "Gateway が発行する bearer トークン",
+      "token_masked_placeholder": "保存済み — ローテーションするには新しい値を入力。空欄のままだと保持されます",
+      "tls_label": "TLS を使用",
+      "tls_hint": "http:// の代わりに https:// でダイヤル",
+      "saved_toast": "ルーティング設定を保存しました",
+      "save_failed_toast": "ルーティング設定の保存に失敗しました"
     },
     "skills": {
       "intro": "このエージェントに割り当てられたワークスペースのスキルです。ローカルランタイムのスキルは常に自動的に利用できます。",
@@ -432,5 +460,32 @@
     "section_cloud": "クラウド",
     "agent_count_other": "エージェント {{count}} 件",
     "empty": "まだマシンがありません"
+  },
+  "last_active": {
+    "today": "今日",
+    "days_ago_one": "{{count}} 日前",
+    "days_ago_other": "{{count}} 日前",
+    "none": "30 日間アクティビティなし"
+  },
+  "toolbar": {
+    "result_count_title": "該当エージェント / スコープ内全体",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_availability": "可用性",
+    "section_runtime": "ランタイム",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "section_owner": "オーナー",
+    "section_model": "モデル"
+  },
+  "actions": {
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除"
   }
 }

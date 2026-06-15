@@ -257,7 +257,6 @@
     "col_health": "상태",
     "col_owner": "소유자",
     "col_agents": "에이전트",
-    "col_workload": "작업량",
     "col_cost": "비용 · 7일",
     "col_cli": "CLI",
     "cost_delta_flat": "변화 없음",

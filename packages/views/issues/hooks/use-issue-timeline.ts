@@ -297,9 +297,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[]) => {
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds });
+        await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message

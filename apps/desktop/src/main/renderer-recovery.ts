@@ -17,6 +17,7 @@ type ReloadPromptResult = "reload" | "dismiss";
 type RendererRecoveryOptions = {
   isDev: boolean;
   showReloadPrompt: (payload: ReloadPromptPayload) => Promise<ReloadPromptResult>;
+  getDiagnosticContext?: () => Record<string, unknown>;
   log?: (tag: string, ...args: unknown[]) => void;
   unresponsivePromptDelayMs?: number;
 };
@@ -26,11 +27,16 @@ export function installRendererRecoveryHandlers(
   {
     isDev,
     showReloadPrompt,
+    getDiagnosticContext,
     log = defaultDevLog,
     unresponsivePromptDelayMs = 1500,
   }: RendererRecoveryOptions,
 ) {
   let unresponsivePromptTimer: ReturnType<typeof setTimeout> | null = null;
+  const mergeDiagnosticContext = (context: Record<string, unknown>) => ({
+    ...readDiagnosticContext(getDiagnosticContext),
+    ...context,
+  });
   const maybePromptReload = (payload: ReloadPromptPayload) => {
     if (isDev) return;
     void showReloadPrompt(payload).then((result) => {
@@ -43,14 +49,17 @@ export function installRendererRecoveryHandlers(
   window.webContents.on("render-process-gone", (_event, details) => {
     if (isDev) log("process-gone", JSON.stringify(details));
     if (!isRecoverableRendererExit(details)) return;
-    maybePromptReload({ kind: "render-process-gone", context: { details } });
+    maybePromptReload({
+      kind: "render-process-gone",
+      context: mergeDiagnosticContext({ details }),
+    });
   });
 
   window.webContents.on("preload-error", (_event, preloadPath, error) => {
     if (isDev) log("preload-error", `path=${preloadPath} err=${formatError(error)}`);
     maybePromptReload({
       kind: "preload-error",
-      context: { preloadPath, error: formatError(error) },
+      context: mergeDiagnosticContext({ preloadPath, error: formatError(error) }),
     });
   });
 
@@ -58,7 +67,10 @@ export function installRendererRecoveryHandlers(
     if (isDev || unresponsivePromptTimer) return;
     unresponsivePromptTimer = setTimeout(() => {
       unresponsivePromptTimer = null;
-      maybePromptReload({ kind: "unresponsive", context: {} });
+      maybePromptReload({
+        kind: "unresponsive",
+        context: mergeDiagnosticContext({}),
+      });
     }, unresponsivePromptDelayMs);
   });
 
@@ -140,6 +152,17 @@ function rendererRecoveryDetail(payload: ReloadPromptPayload) {
 
 function defaultDevLog(tag: string, ...args: unknown[]) {
   process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+}
+
+function readDiagnosticContext(
+  getDiagnosticContext: (() => Record<string, unknown>) | undefined,
+) {
+  if (!getDiagnosticContext) return {};
+  try {
+    return getDiagnosticContext();
+  } catch {
+    return {};
+  }
 }
 
 function formatError(error: unknown) {

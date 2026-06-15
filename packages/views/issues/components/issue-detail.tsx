@@ -86,6 +86,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 
 function SubscriberPopoverContent({
   members,
@@ -1298,6 +1299,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (panel.isCollapsed()) panel.expand();
     else panel.collapse();
   }, [isMobile, sidebarRef]);
+
+  useIssueDetailScrollRestore({
+    restoreKey: `${wsId}:${id}`,
+    scrollContainerEl,
+    ready: !!issue && !loading && !timelineLoading,
+    disabled: !!highlightCommentId,
+  });
 
   if (loading) {
     return (

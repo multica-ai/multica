@@ -670,10 +670,29 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 
 const listAutopilots = `-- name: ListAutopilots :many
 
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
-WHERE workspace_id = $1
-  AND ($2::text IS NULL OR status = $2)
-ORDER BY created_at DESC
+SELECT
+  a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id,
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND ($2::text IS NULL OR a.status = $2)
+ORDER BY a.created_at DESC
 `
 
 type ListAutopilotsParams struct {
@@ -681,34 +700,50 @@ type ListAutopilotsParams struct {
 	Status      pgtype.Text `json:"status"`
 }
 
+type ListAutopilotsRow struct {
+	Autopilot     Autopilot          `json:"autopilot"`
+	TriggerKinds  []string           `json:"trigger_kinds"`
+	NextRunAt     pgtype.Timestamptz `json:"next_run_at"`
+	LastRunStatus string             `json:"last_run_status"`
+}
+
 // =====================
 // Autopilot CRUD
 // =====================
-func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]Autopilot, error) {
+// List rows carry three derived columns the list UI needs (trigger badges,
+// next run, last-run outcome) so the page never has to N+1 into the detail
+// endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
+// columns answer "how does this fire today", not "what is configured".
+// last_run_status is COALESCEd to ” (never ran) because sqlc cannot infer
+// nullability through a scalar subquery; the handler maps ” back to omitted.
+func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsRow, error) {
 	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.Status)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Autopilot{}
+	items := []ListAutopilotsRow{}
 	for rows.Next() {
-		var i Autopilot
+		var i ListAutopilotsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Title,
-			&i.Description,
-			&i.AssigneeID,
-			&i.Status,
-			&i.ExecutionMode,
-			&i.IssueTitleTemplate,
-			&i.CreatedByType,
-			&i.CreatedByID,
-			&i.LastRunAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.AssigneeType,
-			&i.ProjectID,
+			&i.Autopilot.ID,
+			&i.Autopilot.WorkspaceID,
+			&i.Autopilot.Title,
+			&i.Autopilot.Description,
+			&i.Autopilot.AssigneeID,
+			&i.Autopilot.Status,
+			&i.Autopilot.ExecutionMode,
+			&i.Autopilot.IssueTitleTemplate,
+			&i.Autopilot.CreatedByType,
+			&i.Autopilot.CreatedByID,
+			&i.Autopilot.LastRunAt,
+			&i.Autopilot.CreatedAt,
+			&i.Autopilot.UpdatedAt,
+			&i.Autopilot.AssigneeType,
+			&i.Autopilot.ProjectID,
+			&i.TriggerKinds,
+			&i.NextRunAt,
+			&i.LastRunStatus,
 		); err != nil {
 			return nil, err
 		}

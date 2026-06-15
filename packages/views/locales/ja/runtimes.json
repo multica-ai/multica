@@ -245,7 +245,6 @@
     "col_health": "状態",
     "col_owner": "所有者",
     "col_agents": "エージェント",
-    "col_workload": "作業量",
     "col_cost": "コスト · 7 日",
     "col_cli": "CLI",
     "cost_delta_flat": "変化なし",

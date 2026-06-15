@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1131,6 +1132,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
+		// runtime_config is stored as JSONB and may legitimately be the
+		// empty object `{}` for agents that haven't opted into any
+		// provider-specific tuning. Forward only non-empty payloads so the
+		// daemon's per-provider decoders treat absent-or-empty identically.
+		var runtimeConfig json.RawMessage
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1141,6 +1150,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			McpConfig:     mcpConfig,
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
+			RuntimeConfig: runtimeConfig,
 		}
 	}
 
@@ -1651,38 +1661,49 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
-	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
-	//
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes installed before this PR) — the response carries no
-	// `auth_token`, and the daemon falls back to its existing credential.
+	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
+	// owner is required because task tokens are still bound to an owning user;
+	// without one, fail the claim explicitly instead of letting the daemon
+	// fall back to a member/owner credential. MUL-3292.
 	// Token expires after the queue/runtime upper bound (24h) so it survives
 	// long-running tasks but cannot outlive a forgotten one.
-	if runtime.OwnerID.Valid {
-		tokenStr, terr := auth.GenerateAgentTaskToken()
-		if terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to generate agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
+	if !runtime.OwnerID.Valid {
+		outcome = "error_token"
+		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"workspace_id", runtimeWorkspaceID,
+		)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after missing runtime owner failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
 		}
-		if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
-			TokenHash:   auth.HashToken(tokenStr),
-			TaskID:      task.ID,
-			AgentID:     task.AgentID,
-			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      runtime.OwnerID,
-			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}); terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to persist agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to persist task token")
-			return
-		}
-		resp.AuthToken = tokenStr
+		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
+		return
 	}
+	tokenStr, terr := auth.GenerateAgentTaskToken()
+	if terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to generate agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
+	}
+	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(tokenStr),
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		UserID:      runtime.OwnerID,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}); terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to persist agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+		return
+	}
+	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

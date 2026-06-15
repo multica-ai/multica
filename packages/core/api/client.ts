@@ -163,6 +163,8 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  ListAutopilotsResponseSchema,
+  EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
@@ -661,12 +663,13 @@ export class ApiClient {
     });
   }
 
-  async previewCommentTriggers(issueId: string, content: string, parentId?: string): Promise<CommentTriggerPreview> {
+  async previewCommentTriggers(issueId: string, content: string, parentId?: string, editingCommentId?: string): Promise<CommentTriggerPreview> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/comments/trigger-preview`, {
       method: "POST",
       body: JSON.stringify({
         content,
         ...(parentId ? { parent_id: parentId } : {}),
+        ...(editingCommentId ? { editing_comment_id: editingCommentId } : {}),
       }),
     });
     return parseWithFallback(raw, CommentTriggerPreviewSchema, { agents: [] }, {
@@ -687,10 +690,14 @@ export class ApiClient {
     return this.fetch("/api/assignee-frequency");
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[]): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
-      body: JSON.stringify({ content, attachment_ids: attachmentIds }),
+      body: JSON.stringify({
+        content,
+        attachment_ids: attachmentIds,
+        ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+      }),
     });
   }
 
@@ -1545,6 +1552,16 @@ export class ApiClient {
     });
   }
 
+  // Incremental attach: POST /skills/add only inserts the given ids (the
+  // server upserts with ON CONFLICT DO NOTHING), so callers don't need to
+  // read the agent's current skill set first.
+  async addAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/skills/add`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
     return this.fetch("/api/tokens");
@@ -1942,7 +1959,13 @@ export class ApiClient {
   async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/autopilots?${search}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
+    return parseWithFallback(
+      raw,
+      ListAutopilotsResponseSchema,
+      EMPTY_LIST_AUTOPILOTS_RESPONSE as ListAutopilotsResponse,
+      { endpoint: "GET /api/autopilots" },
+    );
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {

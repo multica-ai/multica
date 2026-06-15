@@ -13,7 +13,8 @@
   },
   "scope": {
     "mine": "Mine",
-    "all": "All"
+    "all": "All",
+    "archived": "Archived"
   },
   "sort": {
     "label_recent": "Recent activity",
@@ -66,7 +67,11 @@
     "workload": "Workload",
     "runtime": "Runtime",
     "activity_7d": "Activity (7d)",
-    "runs": "Runs"
+    "runs": "Runs",
+    "last_active": "Last active",
+    "model": "Model",
+    "created": "Created",
+    "owner": "Owner"
   },
   "row": {
     "you": "You",
@@ -74,7 +79,9 @@
     "no_description": "No description",
     "fallback_runtime_cloud": "Cloud",
     "fallback_runtime_local": "Local",
-    "actions_aria": "Row actions"
+    "actions_aria": "Row actions",
+    "task_count_one": "{{count}} task",
+    "task_count_other": "{{count}} tasks"
   },
   "activity_tooltip": {
     "created_today": "Created today",
@@ -210,6 +217,7 @@
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
     "integrations": "Integrations",
+    "runtime_config": "Routing",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -320,6 +328,26 @@
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
       "redacted_hint": "Only the agent owner or a workspace admin can read this config."
+    },
+    "runtime_config": {
+      "intro": "Choose how the OpenClaw runtime executes this agent's turns. Local mode runs the agent inside the daemon process. Gateway mode forwards each turn to an OpenClaw Gateway — useful when the daemon host is a lightweight coordinator and the agent should run on a more powerful machine.",
+      "mode_label": "Routing mode",
+      "mode_local": "Local",
+      "mode_gateway": "Gateway",
+      "mode_local_hint": "Default. The daemon spawns `openclaw agent --local …` and the agent loop runs on this host.",
+      "mode_gateway_hint": "The daemon dials an OpenClaw Gateway. Leave the endpoint fields blank to inherit them from the daemon host's `~/.openclaw/openclaw.json`.",
+      "gateway_legend": "Gateway endpoint",
+      "host_label": "Host",
+      "host_placeholder": "gw.internal",
+      "port_label": "Port",
+      "port_invalid": "Port must be a positive integer.",
+      "token_label": "Auth token",
+      "token_placeholder": "Bearer token issued by the gateway",
+      "token_masked_placeholder": "Saved — submit a new value to rotate, or leave blank to keep",
+      "tls_label": "Use TLS",
+      "tls_hint": "Dial https:// instead of http://",
+      "saved_toast": "Routing config saved",
+      "save_failed_toast": "Failed to save routing config"
     },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
@@ -444,5 +472,32 @@
     "runtime_offline": "Daemon offline",
     "runtime_recovery": "Daemon restarted",
     "manual": "Cancelled by user"
+  },
+  "last_active": {
+    "today": "Today",
+    "days_ago_one": "{{count}} day ago",
+    "days_ago_other": "{{count}} days ago",
+    "none": "No activity (30d)"
+  },
+  "toolbar": {
+    "result_count_title": "Matching agents / agents in scope",
+    "filter_label": "Filter",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Clear filters",
+    "section_availability": "Availability",
+    "section_runtime": "Runtime",
+    "display": "Display",
+    "sort_by": "Sort by",
+    "direction_asc": "Ascending",
+    "direction_desc": "Descending",
+    "section_columns": "Columns",
+    "section_owner": "Owner",
+    "section_model": "Model"
+  },
+  "actions": {
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "clear_selection": "Clear selection"
   }
 }

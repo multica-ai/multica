@@ -66,6 +66,44 @@ describe("useCommentTriggerPreview", () => {
       "issue-1",
       "hello with more ordinary text",
       undefined,
+      undefined,
+    );
+  });
+
+  it("passes editing comment context and refetches when it changes", async () => {
+    const agentA = "00000000-0000-0000-0000-000000000001";
+    const content = `[@A](mention://agent/${agentA})`;
+    const { rerender } = renderHook(
+      ({ editingCommentId }) =>
+        useCommentTriggerPreview({
+          issueId: "issue-1",
+          parentId: "parent-1",
+          editingCommentId,
+          content,
+        }),
+      {
+        wrapper: createWrapper(),
+        initialProps: { editingCommentId: "comment-1" },
+      },
+    );
+
+    await advancePreviewDebounce();
+    expect(previewCommentTriggers).toHaveBeenCalledWith(
+      "issue-1",
+      content,
+      "parent-1",
+      "comment-1",
+    );
+
+    rerender({ editingCommentId: "comment-2" });
+    await advancePreviewDebounce();
+
+    expect(previewCommentTriggers).toHaveBeenCalledTimes(2);
+    expect(previewCommentTriggers).toHaveBeenLastCalledWith(
+      "issue-1",
+      content,
+      "parent-1",
+      "comment-2",
     );
   });
 

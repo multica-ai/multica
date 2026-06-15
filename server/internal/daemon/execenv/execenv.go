@@ -44,6 +44,11 @@ type PrepareParams struct {
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
 	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
+	// OpenclawGateway pins the OpenClaw Gateway endpoint inside the per-task
+	// wrapper. Only consulted when Provider == "openclaw" and the agent's
+	// runtime_config selected gateway mode (issue #3260). Zero means "inherit
+	// whatever the user's global openclaw.json already configures".
+	OpenclawGateway OpenclawGatewayPin
 	// LocalWorkDir, when non-empty, redirects the agent's working directory
 	// to a user-supplied absolute path instead of the synthesised envRoot/
 	// workdir. The path is NOT copied or mounted — the agent operates on
@@ -264,6 +269,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
+			Gateway:     params.OpenclawGateway,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -289,6 +295,9 @@ type ReuseParams struct {
 	// task starts — without this a stale wrapper from a prior run would keep
 	// the old MCP set in play.
 	McpConfig json.RawMessage
+	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
+	// agent picks up any runtime_config changes saved since the prior run.
+	OpenclawGateway OpenclawGatewayPin
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -417,6 +426,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
+			Gateway:     params.OpenclawGateway,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
