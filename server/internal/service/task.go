@@ -729,6 +729,7 @@ func (s *TaskService) EnqueueWakeupTask(ctx context.Context, issue db.Issue, age
 		Context:           contextJSON,
 		TriggerSummary:    pgtype.Text{String: buildWakeupTaskSummary(payload), Valid: true},
 		Title:             pgtype.Text{String: "Wakeup: " + truncateForSummary(payload.Prompt, triggerSummaryMaxLen), Valid: payload.Prompt != ""},
+		ForceFreshSession: pgtype.Bool{Bool: true, Valid: true}, // CEREBRO-PATCH(wakeup-fresh-session): TECH-3487 — a wakeup must not inherit a stale prior agent session.
 		OriginalUserID:    delegation.OriginalUserID,
 		DelegatingAgentID: delegation.DelegatingAgentID,
 		SourceTaskID:      delegation.SourceTaskID,
