@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -127,6 +129,70 @@ func TestRunLocalCLIEndToEndWithFakeAPI(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(tmp, ".multica", "runs", "run-1", "issue.md")); !os.IsNotExist(err) {
 		t.Fatalf("issue context file exists or stat failed unexpectedly: %v", err)
+	}
+}
+
+func TestRunLocalCLIStderrIncludesActiveTime(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
+	tmp := t.TempDir()
+	codexPath := filepath.Join(tmp, "codex")
+	if err := os.Symlink("/bin/sh", codexPath); err != nil {
+		t.Fatalf("symlink codex shim: %v", err)
+	}
+	origExecute := executeLocalCLIForRun
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+		reporter.SetActiveMs(134000) // 2m14s
+		return 0, nil
+	}
+	defer func() { executeLocalCLIForRun = origExecute }()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id": "issue-1", "identifier": "MUL-1", "title": "t",
+				"status": "todo", "priority": "medium", "workspace_id": "ws-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/local-runs":
+			json.NewEncoder(w).Encode(map[string]any{"id": "run-1", "issue_id": "issue-1", "cli_name": "codex"})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		}
+	}))
+	defer srv.Close()
+
+	cmd := newRunCommandForTest()
+	cmd.Flags().Set("server-url", srv.URL)
+	cmd.Flags().Set("workspace-id", "ws-1")
+	cmd.Flags().Set("cwd", tmp)
+	cmd.Flags().Set("comments", "off")
+	t.Setenv("MULTICA_TOKEN", "token-1")
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	err := runLocalCLI(cmd, []string{"MUL-1", codexPath, "-c", "true"})
+
+	w.Close()
+	os.Stderr = oldStderr
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	stderr := buf.String()
+
+	if err != nil {
+		t.Fatalf("runLocalCLI: %v", err)
+	}
+	if !strings.Contains(stderr, "active 2m14s") {
+		t.Fatalf("stderr = %q, want it to contain 'active 2m14s'", stderr)
+	}
+	if !strings.Contains(stderr, "exit 0") {
+		t.Fatalf("stderr = %q, want it to contain 'exit 0'", stderr)
 	}
 }
 
@@ -1108,6 +1174,37 @@ func TestClaudeTranscriptTrackerFinalUsesTurnDurationFallback(t *testing.T) {
 	finals := finalMessages(poster.messages())
 	if len(finals) != 1 || finals[0].Content != "方案如下。" {
 		t.Fatalf("finals = %+v, want turn_duration fallback final", finals)
+	}
+}
+
+func TestClaudeTranscriptTrackerTotalActiveMs(t *testing.T) {
+	tmp := t.TempDir()
+	sessionPath := filepath.Join(tmp, "sess-1.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	poster := &fakeLocalRunPoster{}
+	reporter := newLocalRunReporter(poster, "run-1")
+	tracker := newClaudeTranscriptTracker(reporter, nil, tmp, "", time.Date(2026, 5, 14, 12, 0, 0, 0, time.UTC))
+	tracker.ObserveSessionHook(claudeSessionHookPayload{SessionID: "sess-1", TranscriptPath: sessionPath, Cwd: tmp})
+
+	writeClaudeJSONLLines(t, sessionPath, []string{
+		`{"type":"user","uuid":"u1","timestamp":"2026-05-14T12:00:01Z","message":{"role":"user","content":"hello"}}`,
+		`{"type":"assistant","uuid":"a1","timestamp":"2026-05-14T12:00:02Z","message":{"role":"assistant","content":[{"type":"text","text":"Hi there."}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-05-14T12:00:03Z","isMeta":false,"durationMs":5000}`,
+		`{"type":"user","uuid":"u2","timestamp":"2026-05-14T12:00:04Z","message":{"role":"user","content":"another"}}`,
+		`{"type":"assistant","uuid":"a2","timestamp":"2026-05-14T12:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Reply two."}]}}`,
+		`{"type":"system","subtype":"turn_duration","timestamp":"2026-05-14T12:00:06Z","isMeta":false,"durationMs":3200}`,
+	})
+	tracker.Sync()
+
+	if got := tracker.TotalActiveMs(); got != 8200 {
+		t.Fatalf("TotalActiveMs() = %d, want 8200", got)
+	}
+
+	tracker.Close()
+	if got := reporter.ActiveMs(); got != 8200 {
+		t.Fatalf("reporter.ActiveMs() = %d after Close, want 8200", got)
 	}
 }
 
