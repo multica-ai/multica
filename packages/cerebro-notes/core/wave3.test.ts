@@ -41,7 +41,7 @@ describe("safeParseNoteComments", () => {
       { id: "a", kind: "comment", body: "hi" },
     ]);
     expect(out).toHaveLength(1);
-    expect(out[0].id).toBe("a");
+    expect(out[0]!.id).toBe("a");
   });
 
   it("fails soft to [] on a non-array", () => {
@@ -53,8 +53,8 @@ describe("safeParseNoteComments", () => {
     const out = safeParseNoteComments([
       { id: "a", kind: "wild", suggestion_state: "??" },
     ]);
-    expect(out[0].kind).toBe("comment");
-    expect(out[0].suggestion_state).toBe("pending");
+    expect(out[0]!.kind).toBe("comment");
+    expect(out[0]!.suggestion_state).toBe("pending");
   });
 });
 
@@ -66,15 +66,15 @@ describe("buildThreads", () => {
       comment({ id: "orphan", thread_root_id: "missing", body: "x" }),
     ]);
     expect(threads).toHaveLength(1);
-    expect(threads[0].root.id).toBe("root");
-    expect(threads[0].replies.map((r) => r.id)).toEqual(["r1"]);
+    expect(threads[0]!.root.id).toBe("root");
+    expect(threads[0]!.replies.map((r) => r.id)).toEqual(["r1"]);
   });
 });
 
 describe("safeParseNoteVersions / safeParseNoteLock", () => {
   it("versions fail soft to []", () => {
     expect(safeParseNoteVersions("garbage")).toEqual([]);
-    expect(safeParseNoteVersions([{ version_no: 3, reason: "weird" }])[0].reason).toBe("edit");
+    expect(safeParseNoteVersions([{ version_no: 3, reason: "weird" }])[0]!.reason).toBe("edit");
   });
 
   it("lock fails soft to a free lock", () => {
