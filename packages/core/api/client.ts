@@ -112,6 +112,16 @@ import type {
   CreateBillingCheckoutSessionResponse,
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
+  Sprint,
+  CreateSprintRequest,
+  UpdateSprintRequest,
+  CompleteSprintRequest,
+  ListSprintsResponse,
+  ListSprintIssuesResponse,
+  ListBacklogResponse,
+  SprintVelocityResponse,
+  ProjectVelocityResponse,
+  SprintBurndownResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -1767,6 +1777,73 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  // ─── Sprints ─────────────────────────────────────────────────────────────────
+
+  async listSprints(projectId: string): Promise<ListSprintsResponse> {
+    return this.fetch(`/api/projects/${projectId}/sprints`);
+  }
+
+  async createSprint(projectId: string, data: CreateSprintRequest): Promise<Sprint> {
+    return this.fetch(`/api/projects/${projectId}/sprints`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getSprint(sprintId: string): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${sprintId}`);
+  }
+
+  async updateSprint(sprintId: string, data: UpdateSprintRequest): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${sprintId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async startSprint(sprintId: string): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${sprintId}/start`, { method: "POST" });
+  }
+
+  async completeSprint(sprintId: string, data: CompleteSprintRequest): Promise<Sprint> {
+    return this.fetch(`/api/sprints/${sprintId}/complete`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listSprintIssues(sprintId: string): Promise<ListSprintIssuesResponse> {
+    return this.fetch(`/api/sprints/${sprintId}/issues`);
+  }
+
+  async addTicketToSprint(sprintId: string, ticketId: string): Promise<void> {
+    await this.fetch(`/api/sprints/${sprintId}/tickets/${ticketId}`, {
+      method: "POST",
+    });
+  }
+
+  async removeTicketFromSprint(sprintId: string, ticketId: string): Promise<void> {
+    await this.fetch(`/api/sprints/${sprintId}/tickets/${ticketId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listBacklog(projectId: string): Promise<ListBacklogResponse> {
+    return this.fetch(`/api/projects/${projectId}/backlog`);
+  }
+
+  async getSprintVelocity(sprintId: string): Promise<SprintVelocityResponse> {
+    return this.fetch(`/api/sprints/${sprintId}/velocity`);
+  }
+
+  async getProjectVelocity(projectId: string): Promise<ProjectVelocityResponse> {
+    return this.fetch(`/api/projects/${projectId}/velocity`);
+  }
+
+  async getSprintBurndown(sprintId: string): Promise<SprintBurndownResponse> {
+    return this.fetch(`/api/sprints/${sprintId}/burndown`);
   }
 
   // Labels

@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, Link2, ListTodo, MoreHorizontal, PanelRight, Pin, PinOff, Plus, Trash2, UserMinus, Zap } from "lucide-react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -715,6 +715,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
             actions={
               <>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground h-7 gap-1.5 text-xs"
+                      onClick={() => router.push(wsPaths.projectSprints(projectId))}
+                    >
+                      <Zap className="h-3.5 w-3.5" />
+                      <span className="hidden sm:inline">Sprints</span>
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">Sprints &amp; Backlog</TooltipContent>
+              </Tooltip>
               <Button
                 variant="ghost"
                 size="icon-sm"

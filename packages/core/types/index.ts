@@ -62,6 +62,22 @@ export type {
   AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
+export type {
+  Sprint,
+  SprintState,
+  SprintIssue,
+  VelocityPoint,
+  BurndownIssue,
+  ListSprintsResponse,
+  ListSprintIssuesResponse,
+  ListBacklogResponse,
+  CreateSprintRequest,
+  UpdateSprintRequest,
+  CompleteSprintRequest,
+  SprintVelocityResponse,
+  ProjectVelocityResponse,
+  SprintBurndownResponse,
+} from "./sprint";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
