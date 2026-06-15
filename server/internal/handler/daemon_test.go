@@ -147,6 +147,64 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 	return agentID, issueID
 }
 
+func createOwnedDirectTaskClaimFixture(t *testing.T, ctx context.Context, name string) (runtimeID, agentID, issueID, taskID string) {
+	t.Helper()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at, visibility
+		)
+		VALUES ($1, $2, $3, 'local', 'handler_test_runtime', 'online', 'owned direct claim fixture', '{}'::jsonb, $4, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID, "owned-direct-"+name, name+" runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create owned runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, name+" agent", runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create owned agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_type, assignee_id, number, position
+		)
+		VALUES (
+			$1, $2, 'todo', 'medium', $3, 'member',
+			'agent', $4,
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, name+" issue", testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create assigned issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create direct task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	return runtimeID, agentID, issueID, taskID
+}
+
 func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID, dispatchedAge string, started bool) string {
 	t.Helper()
 
@@ -304,6 +362,73 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+func TestClaimTaskByRuntime_DirectAgentTaskReturnsTaskToken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID, agentID, _, taskID := createOwnedDirectTaskClaimFixture(t, ctx, "task token")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "direct-task-token-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID          string `json:"id"`
+			AgentID     string `json:"agent_id"`
+			WorkspaceID string `json:"workspace_id"`
+			Kind        string `json:"kind"`
+			AuthToken   string `json:"auth_token"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected claimed direct task, got nil: %s", w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.Kind != "direct" {
+		t.Fatalf("claim task kind = %q, want direct", resp.Task.Kind)
+	}
+	if resp.Task.AgentID != agentID {
+		t.Fatalf("claim task agent_id = %s, want %s", resp.Task.AgentID, agentID)
+	}
+	if resp.Task.WorkspaceID != testWorkspaceID {
+		t.Fatalf("claim task workspace_id = %s, want %s", resp.Task.WorkspaceID, testWorkspaceID)
+	}
+	if !strings.HasPrefix(resp.Task.AuthToken, "mat_") {
+		t.Fatalf("claim task auth_token = %q, want mat_ task token", resp.Task.AuthToken)
+	}
+
+	token, err := testHandler.Queries.GetTaskTokenByHash(ctx, auth.HashToken(resp.Task.AuthToken))
+	if err != nil {
+		t.Fatalf("load persisted task token: %v", err)
+	}
+	if uuidToString(token.TaskID) != taskID {
+		t.Fatalf("task_token.task_id = %s, want %s", uuidToString(token.TaskID), taskID)
+	}
+	if uuidToString(token.AgentID) != agentID {
+		t.Fatalf("task_token.agent_id = %s, want %s", uuidToString(token.AgentID), agentID)
+	}
+	if uuidToString(token.WorkspaceID) != testWorkspaceID {
+		t.Fatalf("task_token.workspace_id = %s, want %s", uuidToString(token.WorkspaceID), testWorkspaceID)
+	}
+	if uuidToString(token.UserID) != testUserID {
+		t.Fatalf("task_token.user_id = %s, want %s", uuidToString(token.UserID), testUserID)
 	}
 }
 

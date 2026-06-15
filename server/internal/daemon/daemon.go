@@ -2700,6 +2700,17 @@ func taskAgentName(task Task) string {
 	return "Agent"
 }
 
+func agentTaskCredential(task Task) (string, error) {
+	token := strings.TrimSpace(task.AuthToken)
+	if token == "" {
+		return "", fmt.Errorf("refusing to spawn agent: task has no task-scoped auth_token (task_id=%s)", task.ID)
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return "", fmt.Errorf("refusing to spawn agent: task auth_token is not a task token (task_id=%s)", task.ID)
+	}
+	return token, nil
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	d.taskProviders.Store(task.ID, provider)
 	defer d.taskProviders.Delete(task.ID)
@@ -2893,24 +2904,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskStart := time.Now()
 	traceRunID := newTraceRunID(taskStart)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// Pass task-scoped credentials and context so the spawned agent CLI can call
+	// the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
-	// MULTICA_TOKEN is the credential the agent process will use to call the
-	// Multica API. Prefer the task-scoped token the server minted at claim
-	// time — that token is bound to (agent, task) and the auth middleware
-	// rejects it on owner-only endpoints (e.g. `/api/agents/{id}/env`), so
-	// the agent cannot use it to read another agent's secrets. Falls back
-	// to the daemon's own credential only when the server returned no
-	// auth_token (older server, or cloud / system runtime with no owner) —
-	// in that legacy mode lateral-movement protection relies on the
-	// runtime not handing the daemon a workspace-owner PAT in the first
-	// place. See MUL-2600.
-	agentToken := task.AuthToken
-	if agentToken == "" {
-		agentToken = d.client.Token()
+	// MULTICA_TOKEN must be the task-scoped token minted by the server at
+	// claim time. It is bound to (agent, task, workspace, owner), and the auth
+	// middleware derives agent identity from that binding. Never fall back to
+	// the daemon/member credential here: doing so makes agent CLI writes look
+	// like member writes in audit records.
+	agentToken, err := agentTaskCredential(task)
+	if err != nil {
+		return TaskResult{}, err
 	}
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        agentToken,
