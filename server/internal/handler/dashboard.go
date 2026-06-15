@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -32,6 +33,28 @@ import (
 // level operational metrics. Agent-detail pages still gate on per-agent
 // access (see GetWorkspaceAgentRunCounts).
 // ---------------------------------------------------------------------------
+
+// parseSinceOrStartDate resolves the query-time cutoff for a dashboard
+// endpoint. It prefers an explicit ?start_date=YYYY-MM-DD when present so
+// callers can pin a calendar boundary precisely (e.g. "this week from
+// Monday"). Falls back to parseSinceParamInTZ (?days= rolling window) when
+// start_date is absent or unparseable — existing clients are unaffected.
+//
+// The iOS client sends start_date alongside days so the agent-ranking
+// aggregates (no per-day breakdown) are scoped to the exact same window
+// that the daily chart data shows after its own client-side cutoff filter.
+func parseSinceOrStartDate(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
+	if raw := r.URL.Query().Get("start_date"); raw != "" {
+		loc, err := time.LoadLocation(tzName)
+		if err != nil || loc == nil {
+			loc = time.UTC
+		}
+		if t, err := time.ParseInLocation("2006-01-02", raw, loc); err == nil {
+			return pgtype.Timestamptz{Time: t, Valid: true}
+		}
+	}
+	return parseSinceParamInTZ(r, defaultDays, tzName)
+}
 
 // parseProjectIDParam reads ?project_id=<uuid> off the URL. Returns a
 // pgtype.UUID with Valid=false when the param is absent so sqlc's nullable
@@ -77,7 +100,7 @@ func (h *Handler) GetDashboardUsageDaily(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseSinceOrStartDate(r, 30, tz)
 
 	resp, err := h.listDashboardUsageDaily(r.Context(), parseUUID(workspaceID), tz, since, projectID)
 	if err != nil {
@@ -144,7 +167,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 	// "By agent" has no date grouping in the SQL — tz only determines
 	// the cutoff boundary, not the bucket axis.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseSinceOrStartDate(r, 30, tz)
 
 	resp, err := h.listDashboardUsageByAgent(r.Context(), parseUUID(workspaceID), since, projectID)
 	if err != nil {
@@ -210,7 +233,7 @@ func (h *Handler) GetDashboardAgentRunTime(w http.ResponseWriter, r *http.Reques
 	// Cutoff in the viewer's tz so the "last N days" window matches the
 	// per-agent cost card (GetDashboardUsageByAgent).
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseSinceOrStartDate(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardAgentRunTime(r.Context(), db.ListDashboardAgentRunTimeParams{
 		WorkspaceID: parseUUID(workspaceID),
@@ -261,7 +284,7 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 	// Slice day buckets in the viewer's tz so the Time / Tasks charts cut
 	// their calendar day identically to the Cost / Tokens charts.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseSinceOrStartDate(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardRunTimeDaily(r.Context(), db.ListDashboardRunTimeDailyParams{
 		WorkspaceID: parseUUID(workspaceID),
