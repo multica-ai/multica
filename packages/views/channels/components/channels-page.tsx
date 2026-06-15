@@ -11,12 +11,15 @@ import {
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  closestCenter,
   DndContext,
   DragOverlay,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragOverEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import {
@@ -50,6 +53,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   channelKeys,
   channelListOptions,
+  channelGroupsOptions,
   channelMessagesOptions,
   channelMembersOptions,
   messageThreadOptions,
@@ -114,6 +118,8 @@ interface ChannelsPageProps {
 }
 
 type SidePanelMode = "replies" | "members";
+
+const UNGROUPED_DROP_ID = "ungrouped-drop-zone";
 
 const SIDE_PANEL_DEFAULT_WIDTH = 360;
 const SIDE_PANEL_MIN_WIDTH = 320;
@@ -451,10 +457,12 @@ function ChannelList({
   wsId: string;
 }) {
   const qc = useQueryClient();
+  const { data: channelGroups = [] } = useQuery(channelGroupsOptions(wsId));
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [overGroupId, setOverGroupId] = useState<string | null | undefined>(undefined);
   const [showCreateGroupDialog, setShowCreateGroupDialog] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
 
@@ -462,26 +470,33 @@ function ChannelList({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
 
+  const invalidateGroupsAndList = () => {
+    qc.invalidateQueries({ queryKey: channelKeys.groups(wsId) });
+    qc.invalidateQueries({ queryKey: channelKeys.list(wsId) });
+  };
   const createGroupMutation = useMutation({
     mutationFn: (name: string) => api.createChannelGroup(name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+    onSuccess: invalidateGroupsAndList,
   });
   const renameGroupMutation = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) => api.updateChannelGroup(id, name),
-    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+    onSuccess: invalidateGroupsAndList,
   });
   const deleteGroupMutation = useMutation({
     mutationFn: (id: string) => api.deleteChannelGroup(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+    onSuccess: invalidateGroupsAndList,
   });
   const moveChannelMutation = useMutation({
     mutationFn: (args: { channelId: string; groupId: string | null; position: number }) =>
       api.moveChannelToGroup(args.channelId, args.groupId, args.position),
-    onSuccess: () => qc.invalidateQueries({ queryKey: channelKeys.list(wsId) }),
+    onSuccess: invalidateGroupsAndList,
   });
 
   const { groups, ungrouped, groupMap } = useMemo(() => {
     const gMap = new Map<string, { name: string; position: number; channels: ChannelSummary[] }>();
+    for (const g of channelGroups) {
+      gMap.set(g.id, { name: g.name, position: g.position, channels: [] });
+    }
     const ug: ChannelSummary[] = [];
     for (const ch of channels) {
       if (ch.group_id) {
@@ -499,12 +514,11 @@ function ChannelList({
     ug.sort((a, b) => a.position - b.position);
     const sortedGroups = [...gMap.entries()].sort((a, b) => a[1].position - b[1].position);
     return { groups: sortedGroups, ungrouped: ug, groupMap: gMap };
-  }, [channels]);
+  }, [channels, channelGroups]);
 
   const allIds = useMemo(() => {
     const ids: string[] = [];
     for (const [gId, g] of groups) {
-      ids.push(`group:${gId}`);
       if (!collapsed[gId]) {
         for (const ch of g.channels) ids.push(ch.id);
       }
@@ -513,38 +527,76 @@ function ChannelList({
     return ids;
   }, [groups, ungrouped, collapsed]);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveId(String(event.active.id));
-  }, []);
-
-  const handleDragEnd = useCallback((event: DragEndEvent) => {
-    setActiveId(null);
-    const { active, over } = event;
-    if (!over || active.id === over.id) return;
-
-    const draggedId = String(active.id);
-    if (draggedId.startsWith("group:")) return;
-
-    const overId = String(over.id);
-    let targetGroupId: string | null = null;
-    let position = 0;
-
-    if (overId.startsWith("group:")) {
-      targetGroupId = overId.slice(6);
-      const groupChannels = groupMap.get(targetGroupId)?.channels ?? [];
-      position = groupChannels.length > 0
-        ? groupChannels[groupChannels.length - 1]!.position + 1
-        : 1;
-    } else {
+  // Resolve which group a drag would land in, plus the target position.
+  // `groupId === null` means the ungrouped zone. Returns null when the
+  // pointer is over nothing droppable.
+  const resolveDropTarget = useCallback(
+    (overId: string): { groupId: string | null; position: number } | null => {
+      if (overId === UNGROUPED_DROP_ID) {
+        const last = ungrouped[ungrouped.length - 1];
+        return { groupId: null, position: last ? last.position + 1 : 1 };
+      }
+      if (overId.startsWith("group:")) {
+        const gId = overId.slice(6);
+        const gChannels = groupMap.get(gId)?.channels ?? [];
+        const last = gChannels[gChannels.length - 1];
+        return { groupId: gId, position: last ? last.position + 1 : 1 };
+      }
       const overChannel = channels.find((c) => c.id === overId);
       if (overChannel) {
-        targetGroupId = overChannel.group_id ?? null;
-        position = overChannel.position;
+        return { groupId: overChannel.group_id ?? null, position: overChannel.position };
       }
-    }
+      return null;
+    },
+    [channels, groupMap, ungrouped],
+  );
 
-    moveChannelMutation.mutate({ channelId: draggedId, groupId: targetGroupId, position });
-  }, [channels, groupMap, moveChannelMutation]);
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveId(String(event.active.id));
+    setOverGroupId(undefined);
+  }, []);
+
+  const handleDragOver = useCallback(
+    (event: DragOverEvent) => {
+      const { over } = event;
+      if (!over) {
+        setOverGroupId(undefined);
+        return;
+      }
+      const target = resolveDropTarget(String(over.id));
+      setOverGroupId(target ? target.groupId : undefined);
+    },
+    [resolveDropTarget],
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveId(null);
+      setOverGroupId(undefined);
+      const { active, over } = event;
+      if (!over) return;
+
+      const draggedId = String(active.id);
+      const dragged = channels.find((c) => c.id === draggedId);
+      if (!dragged) return;
+
+      const target = resolveDropTarget(String(over.id));
+      if (!target) return;
+
+      const currentGroup = dragged.group_id ?? null;
+      // No-op when dropped back onto itself or its current position.
+      if (target.groupId === currentGroup && target.position === dragged.position) {
+        return;
+      }
+
+      moveChannelMutation.mutate({
+        channelId: draggedId,
+        groupId: target.groupId,
+        position: target.position,
+      });
+    },
+    [channels, resolveDropTarget, moveChannelMutation],
+  );
 
   const handleCreateGroup = () => {
     setNewGroupName("");
@@ -602,49 +654,46 @@ function ChannelList({
         ) : (
           <DndContext
             sensors={sensors}
+            collisionDetection={closestCenter}
             onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
             onDragEnd={handleDragEnd}
           >
             <SortableContext items={allIds} strategy={verticalListSortingStrategy}>
               <div className="space-y-0.5 p-1.5">
                 {groups.map(([gId, g]) => (
-                  <div key={gId}>
-                    <ChannelGroupHeader
-                      groupId={gId}
-                      name={g.name}
-                      collapsed={!!collapsed[gId]}
-                      editing={editingGroupId === gId}
-                      editingName={editingName}
-                      onToggle={() => setCollapsed((s) => ({ ...s, [gId]: !s[gId] }))}
-                      onStartRename={() => { setEditingGroupId(gId); setEditingName(g.name); }}
-                      onRenameChange={setEditingName}
-                      onRenameSubmit={() => handleRenameSubmit(gId)}
-                      onRenameCancel={() => setEditingGroupId(null)}
-                      onDelete={() => deleteGroupMutation.mutate(gId)}
-                    />
-                    {!collapsed[gId] && g.channels.map((ch) => (
-                      <SortableChannelItem
-                        key={ch.id}
-                        channel={ch}
-                        isActive={ch.id === activeChannelId}
-                        onSelect={onSelect}
-                      />
-                    ))}
-                  </div>
-                ))}
-                {ungrouped.map((ch) => (
-                  <SortableChannelItem
-                    key={ch.id}
-                    channel={ch}
-                    isActive={ch.id === activeChannelId}
+                  <ChannelGroupSection
+                    key={gId}
+                    groupId={gId}
+                    name={g.name}
+                    channels={g.channels}
+                    collapsed={!!collapsed[gId]}
+                    isDragging={activeId !== null}
+                    isDropTarget={overGroupId === gId}
+                    activeChannelId={activeChannelId}
+                    editing={editingGroupId === gId}
+                    editingName={editingName}
+                    onToggle={() => setCollapsed((s) => ({ ...s, [gId]: !s[gId] }))}
+                    onStartRename={() => { setEditingGroupId(gId); setEditingName(g.name); }}
+                    onRenameChange={setEditingName}
+                    onRenameSubmit={() => handleRenameSubmit(gId)}
+                    onRenameCancel={() => setEditingGroupId(null)}
+                    onDelete={() => deleteGroupMutation.mutate(gId)}
                     onSelect={onSelect}
                   />
                 ))}
+                <UngroupedDropZone
+                  channels={ungrouped}
+                  isDragging={activeId !== null}
+                  isDropTarget={overGroupId === null}
+                  activeChannelId={activeChannelId}
+                  onSelect={onSelect}
+                />
               </div>
             </SortableContext>
             <DragOverlay>
               {activeDragChannel && (
-                <div className="flex h-8 items-center gap-2 rounded-md bg-accent px-2 text-sm shadow-md">
+                <div className="flex h-8 items-center gap-2 rounded-md bg-accent px-2 text-sm shadow-md ring-1 ring-border">
                   <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate">{activeDragChannel.name}</span>
                 </div>
@@ -679,10 +728,14 @@ function ChannelList({
   );
 }
 
-function ChannelGroupHeader({
+function ChannelGroupSection({
   groupId,
   name,
+  channels,
   collapsed,
+  isDragging,
+  isDropTarget,
+  activeChannelId,
   editing,
   editingName,
   onToggle,
@@ -691,10 +744,15 @@ function ChannelGroupHeader({
   onRenameSubmit,
   onRenameCancel,
   onDelete,
+  onSelect,
 }: {
   groupId: string;
   name: string;
+  channels: ChannelSummary[];
   collapsed: boolean;
+  isDragging: boolean;
+  isDropTarget: boolean;
+  activeChannelId: string | null;
   editing: boolean;
   editingName: string;
   onToggle: () => void;
@@ -703,47 +761,112 @@ function ChannelGroupHeader({
   onRenameSubmit: () => void;
   onRenameCancel: () => void;
   onDelete: () => void;
+  onSelect: (id: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
-    id: `group:${groupId}`,
-  });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const { setNodeRef } = useDroppable({ id: `group:${groupId}` });
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger>
-        <div
-          ref={setNodeRef}
-          style={style}
-          {...attributes}
-          {...listeners}
-          className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent"
-          onClick={onToggle}
-        >
-          <ChevronRight className={cn("h-3 w-3 transition-transform", !collapsed && "rotate-90")} />
-          {editing ? (
-            <input
-              autoFocus
-              className="min-w-0 flex-1 rounded bg-background px-1 text-xs outline-none ring-1 ring-ring"
-              value={editingName}
-              onChange={(e) => onRenameChange(e.target.value)}
-              onBlur={onRenameSubmit}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") onRenameSubmit();
-                if (e.key === "Escape") onRenameCancel();
-              }}
-              onClick={(e) => e.stopPropagation()}
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "rounded-md transition-colors",
+        isDropTarget && "bg-primary/10 ring-1 ring-primary/40",
+      )}
+    >
+      <ContextMenu>
+        <ContextMenuTrigger>
+          <div
+            className="flex h-7 cursor-pointer items-center gap-1 rounded-md px-1 text-xs font-medium text-muted-foreground hover:bg-accent"
+            onClick={onToggle}
+          >
+            <ChevronRight className={cn("h-3 w-3 transition-transform", !collapsed && "rotate-90")} />
+            {editing ? (
+              <input
+                autoFocus
+                className="min-w-0 flex-1 rounded bg-background px-1 text-xs outline-none ring-1 ring-ring"
+                value={editingName}
+                onChange={(e) => onRenameChange(e.target.value)}
+                onBlur={onRenameSubmit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") onRenameSubmit();
+                  if (e.key === "Escape") onRenameCancel();
+                }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span className="min-w-0 flex-1 truncate uppercase">{name}</span>
+            )}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent>
+          <ContextMenuItem onClick={onStartRename}>重命名</ContextMenuItem>
+          <ContextMenuItem className="text-destructive" onClick={onDelete}>删除分组</ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
+      {!collapsed && (
+        <div className="space-y-0.5">
+          {channels.map((ch) => (
+            <SortableChannelItem
+              key={ch.id}
+              channel={ch}
+              isActive={ch.id === activeChannelId}
+              onSelect={onSelect}
             />
-          ) : (
-            <span className="min-w-0 flex-1 truncate uppercase">{name}</span>
+          ))}
+          {channels.length === 0 && isDragging && (
+            <div
+              className={cn(
+                "mx-1 mb-0.5 ml-5 h-8 rounded-md border border-dashed transition-colors",
+                isDropTarget ? "border-primary/50" : "border-border/60",
+              )}
+            />
           )}
         </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        <ContextMenuItem onClick={onStartRename}>重命名</ContextMenuItem>
-        <ContextMenuItem className="text-destructive" onClick={onDelete}>删除分组</ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+      )}
+    </div>
+  );
+}
+
+function UngroupedDropZone({
+  channels,
+  isDragging,
+  isDropTarget,
+  activeChannelId,
+  onSelect,
+}: {
+  channels: ChannelSummary[];
+  isDragging: boolean;
+  isDropTarget: boolean;
+  activeChannelId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const { setNodeRef } = useDroppable({ id: UNGROUPED_DROP_ID });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "min-h-1 space-y-0.5 rounded-md transition-colors",
+        isDropTarget && "bg-primary/10 ring-1 ring-primary/40",
+      )}
+    >
+      {channels.map((ch) => (
+        <SortableChannelItem
+          key={ch.id}
+          channel={ch}
+          isActive={ch.id === activeChannelId}
+          onSelect={onSelect}
+        />
+      ))}
+      {channels.length === 0 && isDragging && (
+        <div
+          className={cn(
+            "mx-1 h-8 rounded-md border border-dashed transition-colors",
+            isDropTarget ? "border-primary/50" : "border-border/60",
+          )}
+        />
+      )}
+    </div>
   );
 }
 

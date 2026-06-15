@@ -4,6 +4,7 @@ import { api } from "../api";
 export const channelKeys = {
   all: (wsId: string) => ["channels", wsId] as const,
   list: (wsId: string) => [...channelKeys.all(wsId), "list"] as const,
+  groups: (wsId: string) => [...channelKeys.all(wsId), "groups"] as const,
   detail: (wsId: string, channelId: string) =>
     [...channelKeys.all(wsId), "detail", channelId] as const,
   members: (wsId: string, channelId: string) =>
@@ -25,6 +26,13 @@ export function channelListOptions(wsId: string) {
     queryKey: channelKeys.list(wsId),
     queryFn: () => api.listChannels(),
     select: (data) => data.channels,
+  });
+}
+
+export function channelGroupsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: channelKeys.groups(wsId),
+    queryFn: () => api.listChannelGroups(),
   });
 }
 
