@@ -45,7 +45,7 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]5$|^gpt-5-5$`), "openai:gpt-5.5"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4($|-2026-03-05|-xhigh)`), "openai:gpt-5.4"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4-mini($|[^a-z0-9])`), "openai:gpt-5.4-mini"},
-	{regexp.MustCompile(`^codex-auto-review$`), "openai:gpt-5.4-mini"},
+	{regexp.MustCompile(`(^|/|:)codex-auto-review$`), "openai:gpt-5.4-mini"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]3-codex$`), "openai:gpt-5.3-codex"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
 	{regexp.MustCompile(`claude-fable-5`), "anthropic:claude-fable-5"},

@@ -311,8 +311,13 @@ function canonicalCandidates(model: string): string[] {
   const stripDate = (s: string) =>
     s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
   const stripProvider = (s: string) => {
-    const i = s.indexOf("/");
-    return i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i)) ? s.slice(i + 1) : s;
+    for (const sep of ["/", ":"]) {
+      const i = s.indexOf(sep);
+      if (i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i))) {
+        return s.slice(i + 1);
+      }
+    }
+    return s;
   };
   // Only Anthropic IDs are dot↔dash equivalent. OpenAI separators are
   // semantic, so we leave `gpt-5.4` etc. alone.
@@ -324,18 +329,30 @@ function canonicalCandidates(model: string): string[] {
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
   const raw = model;
+  const normalized = raw.trim().toLowerCase();
   const noProvider = stripProvider(raw);
+  const normalizedNoProvider = stripProvider(normalized);
   const dashed = canonAnthropic(noProvider);
+  const normalizedDashed = canonAnthropic(normalizedNoProvider);
   const noTag = stripContextTag(dashed);
+  const normalizedNoTag = stripContextTag(normalizedDashed);
 
   push(raw);
+  push(normalized);
   push(noProvider);
+  push(normalizedNoProvider);
   push(dashed);
+  push(normalizedDashed);
   push(noTag);
+  push(normalizedNoTag);
   push(stripDate(raw));
+  push(stripDate(normalized));
   push(stripDate(noProvider));
+  push(stripDate(normalizedNoProvider));
   push(stripDate(dashed));
+  push(stripDate(normalizedDashed));
   push(stripDate(noTag));
+  push(stripDate(normalizedNoTag));
   for (const candidate of [...out]) {
     pushAlias(candidate);
   }

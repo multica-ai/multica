@@ -241,6 +241,19 @@ describe("estimateCost", () => {
     ).toBeCloseTo(0.75 + 4.5 + 0.075, 5);
   });
 
+  it("prices provider-prefixed and whitespace-padded Codex auto-review aliases", () => {
+    expect(isModelPriced("openai/codex-auto-review")).toBe(true);
+    expect(isModelPriced("openai:codex-auto-review")).toBe(true);
+    expect(isModelPriced(" CODEX-AUTO-REVIEW ")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "openai:codex-auto-review",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.75, 5);
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
@@ -451,6 +464,9 @@ describe("collectUnmappedModels", () => {
     const rows = [
       { ...zeroUsage, model: "claude-sonnet-4-6" },
       { ...zeroUsage, model: "gpt-5-codex" },
+      { ...zeroUsage, model: "codex-auto-review" },
+      { ...zeroUsage, model: "openai/codex-auto-review" },
+      { ...zeroUsage, model: "openai:codex-auto-review" },
       { ...zeroUsage, model: "fictional-model-x" },
     ];
     expect(collectUnmappedModels(rows)).toEqual(["fictional-model-x"]);

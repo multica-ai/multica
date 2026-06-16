@@ -33,10 +33,6 @@ func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
 }
 
 func TestPriceForModelAliasCodexAutoReview(t *testing.T) {
-	got, ok := PriceForModelAlias("codex-auto-review")
-	if !ok {
-		t.Fatal("PriceForModelAlias(codex-auto-review) did not resolve")
-	}
 	want := ModelPrice{
 		Provider:       "openai",
 		Model:          "gpt-5.4-mini",
@@ -45,7 +41,18 @@ func TestPriceForModelAliasCodexAutoReview(t *testing.T) {
 		CacheWritePerM: 0.075,
 		OutputPerM:     4.5,
 	}
-	if got != want {
-		t.Fatalf("PriceForModelAlias(codex-auto-review) = %+v, want %+v", got, want)
+	for _, model := range []string{
+		"codex-auto-review",
+		"openai/codex-auto-review",
+		"openai:codex-auto-review",
+		" CODEX-AUTO-REVIEW ",
+	} {
+		got, ok := PriceForModelAlias(model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", model)
+		}
+		if got != want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", model, got, want)
+		}
 	}
 }
