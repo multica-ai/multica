@@ -37,6 +37,11 @@
     --brand: oklch(0.55 0.16 255);
     --brand-foreground: oklch(0.985 0 0);
     --success: oklch(0.55 0.16 145);
+    /* CEREBRO-PATCH(status-slack-dot): lighter green for the *online* presence
+     * dot specifically (TECH-3686 follow-up). Brighter/lighter than --success so
+     * the active dot reads softer, per Jesper's tweak. --success itself is left
+     * unchanged so text-success / toasts keep their saturated tone. */
+    --success-bright: oklch(0.72 0.15 150);
     --warning: oklch(0.75 0.16 85);
     --info: oklch(0.55 0.18 250);
     --scrollbar-thumb: oklch(0 0 0 / 10%);

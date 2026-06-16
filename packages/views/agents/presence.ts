@@ -57,7 +57,13 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
   online: {
     label: "Online",
     // CEREBRO-PATCH(status-slack-dot): grey outline ring on every dot (Slack look).
-    dotClass: "bg-success border border-muted-foreground",
+    // TECH-3686 follow-up (Jesper): online dot uses a lighter green
+    // (--success-bright) and a 1px inset white/background ring that shrinks the
+    // green fill slightly and leaves a white border between the green and the grey
+    // ring. Implemented as an inset box-shadow (not a Tailwind ring) so it composes
+    // with the separate ring-background separation ring the avatar dots apply.
+    dotClass:
+      "bg-[var(--success-bright)] border border-muted-foreground shadow-[inset_0_0_0_1px_var(--background)]",
     textClass: "text-success",
     icon: CircleDot,
   },

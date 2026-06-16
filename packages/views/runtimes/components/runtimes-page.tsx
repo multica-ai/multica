@@ -41,7 +41,8 @@ const HEALTH_ORDER: HealthFilter[] = [
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
   // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
   // state; inactive (paused/offline/about_to_gc) is hollow (empty centre), not red.
-  online: "bg-success border border-muted-foreground",
+  // TECH-3686 follow-up: lighter online green + 1px inset white border (matches presence.ts).
+  online: "bg-[var(--success-bright)] border border-muted-foreground shadow-[inset_0_0_0_1px_var(--background)]",
   paused: "bg-background border border-muted-foreground",
   recently_lost: "bg-warning border border-muted-foreground",
   offline: "bg-background border border-muted-foreground",

@@ -37,7 +37,8 @@ export function ProviderChip({ provider }: { provider: string }) {
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
   // state; inactive states are hollow (empty centre) with a muted (not red) tone.
-  online: { dot: "bg-success border border-muted-foreground", tone: "bg-success/10 text-success" },
+  // TECH-3686 follow-up: lighter online green + 1px inset white border (matches presence.ts).
+  online: { dot: "bg-[var(--success-bright)] border border-muted-foreground shadow-[inset_0_0_0_1px_var(--background)]", tone: "bg-success/10 text-success" },
   paused: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
   recently_lost: { dot: "bg-warning border border-muted-foreground", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
