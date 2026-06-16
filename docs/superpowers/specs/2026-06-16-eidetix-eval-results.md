@@ -70,6 +70,51 @@ started_at→completed_at; tokens from `task_usage`):
   low-stakes generation. The same skill fix (post clean deliverable, keep recall
   reasoning internal) would also trim output tokens and turns.
 
+## Follow-up: clean-deliverable skill fix (v2 subset, t1–t3)
+
+Hypothesis: the pairwise tie was caused by recall narration burying the WITH
+deliverable, so a skill change ("post only the clean deliverable, keep recall
+reasoning internal") would flip pairwise to WITH. **The hypothesis was wrong.**
+Re-ran t1–t3 × 2 arms × 2 trials with the updated skill, judged identically
+against a re-judged v1 subset:
+
+| | v1-subset (before) | v2 (after fix) |
+|---|---|---|
+| Quality W/Wo | 4.67 / 2.88 | 4.67 / 3.17 |
+| Grounding W/Wo | 0.94 / 0.28 | 0.97 / 0.39 |
+| Pairwise WITH win-rate | 0.556 (n=9) | **0.0 (n=6)** |
+| Output Δtok (W−Wo) | +1669 | +755 |
+
+The fix worked *mechanically* — WITH output bloat dropped ~55% (+1669→+755
+tokens) — but pairwise went the wrong way (0.556 → 0.0).
+
+**Why (from reading the outputs):** the two LLM judges measure different things,
+and they genuinely diverge.
+- The **grounding** judge rewards brand-fidelity. The WITH arm uses the graph's
+  canonical assets verbatim (e.g. the exact /app hook "AI apps and agents in
+  production." + "Build, run, scale, and monetize. One place.") → grounding 0.97.
+- The **pairwise** judge rewards free-form persuasive craft. The WITHOUT arm,
+  unconstrained, writes punchier copy ("Ship an AI app. Get paid every time an
+  agent calls it." / "80% of every call") that reads better head-to-head — even
+  though it is off-brand and invents unverified specifics, which is exactly what
+  grounding penalizes.
+
+**The real lesson:** Eidetix optimizes fidelity / grounding / rule-compliance /
+consistency — anchoring the agent on correct, on-brand, canonical assets. It
+does NOT optimize (and may slightly constrain) raw creative punch, where an
+unconstrained agent can win by going off-script at the cost of brand compliance.
+For the stated problem — a team of agents producing *consistent, on-brand,
+rule-compliant* output without re-discovery — **grounding is the right metric,
+and Eidetix wins decisively (0.97 vs 0.39, and 0.97 vs 0.03 on the contamination
+rewrite).** Pairwise "which is punchier" is the wrong yardstick for that goal;
+treat it as a creativity signal, not a quality verdict, and do not trust it at
+n=6 where it contradicts the absolute scores.
+
+**Skill-fix disposition:** keep it (the ~55% token reduction is a real win and
+it does no harm to grounding/quality), but it is not a pairwise lever. If raw
+creative punch is also wanted, that is a separate prompt/skill concern (e.g.
+"use the canonical assets, then push for a bolder hook"), not an Eidetix one.
+
 ## Measurement caveats
 
 - The captured "output" per run is the agent's **last comment**, which often includes process narration, not just the deliverable. This inflated a naive banned-term keyword count for the WITH arm (the agent *names* NodeOps while explaining it avoided it) and contributes to the pairwise tie. The LLM grounding score reads deliverable intent and is the figure to trust; isolating a clean-deliverable field would sharpen both pairwise and the lexical check.
