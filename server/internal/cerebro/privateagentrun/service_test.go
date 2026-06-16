@@ -13,6 +13,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var (
@@ -157,7 +158,7 @@ func setupFixture(t *testing.T, label string) (*Service, pgtype.UUID, pgtype.UUI
 	t.Helper()
 	ctx := context.Background()
 	cq := cerebrodb.New(testPool)
-	svc := New(cq, events.New())
+	svc := New(db.New(testPool), cq, events.New())
 
 	ownerID := createMember(t, label+"-owner")
 	requesterID := createMember(t, label+"-requester")
