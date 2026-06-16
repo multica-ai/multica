@@ -194,6 +194,7 @@ export function invalidateWorkspaceTaskQueries(
   invalidateActiveQueries(qc, agentRunCountsKeys.last30d(wsId));
   invalidateActiveQueries(qc, agentTasksKeys.all(wsId));
   invalidateActiveQueries(qc, issueKeys.tasksAll());
+  invalidateActiveQueries(qc, issueKeys.myTaskRunsAll());
   invalidateActiveQueries(qc, issueKeys.usageAll());
   invalidateActiveQueries(qc, workspaceKeys.squads(wsId));
 }

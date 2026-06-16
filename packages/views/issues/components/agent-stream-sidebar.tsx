@@ -28,8 +28,8 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
   const timeAgo = useTimeAgo();
 
   const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
+    queryKey: issueKeys.myTaskRuns(issueId),
+    queryFn: () => api.listMyTasksByIssue(issueId),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });

@@ -1901,6 +1901,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
   }
 
+  async listMyTasksByIssue(issueId: string): Promise<AgentTask[]> {
+    return this.fetch(`/api/issues/${issueId}/my-task-runs`);
+  }
+
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
