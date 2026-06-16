@@ -144,6 +144,28 @@ type SkillFileData struct {
 	Content string `json:"content"`
 }
 
+type SharedSkillSyncPayload struct {
+	Skills []SharedSkillBundle `json:"skills"`
+}
+
+type SharedSkillBundle struct {
+	Key         string          `json:"key"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Content     string          `json:"content"`
+	SourcePath  string          `json:"source_path"`
+	Provider    string          `json:"provider"`
+	ContentHash string          `json:"content_hash,omitempty"`
+	Files       []SkillFileData `json:"files,omitempty"`
+}
+
+type SharedSkillSyncResult struct {
+	Status    string `json:"status"`
+	Created   int    `json:"created"`
+	Updated   int    `json:"updated"`
+	Unchanged int    `json:"unchanged"`
+}
+
 // TaskUsageEntry represents token usage for a single model during a task execution.
 type TaskUsageEntry struct {
 	Provider         string `json:"provider"`

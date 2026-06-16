@@ -293,8 +293,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -319,6 +319,14 @@ func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requ
 // ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
 func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
+}
+
+func (c *Client) SyncSharedSkills(ctx context.Context, runtimeID string, payload SharedSkillSyncPayload) (*SharedSkillSyncResult, error) {
+	var result SharedSkillSyncResult
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/shared-skills/sync", runtimeID), payload, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.

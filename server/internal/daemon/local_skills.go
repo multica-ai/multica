@@ -232,7 +232,10 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 	if err != nil || !supported {
 		return nil, supported, err
 	}
+	return listLocalSkillsFromRoot(provider, root)
+}
 
+func listLocalSkillsFromRoot(provider, root string) ([]runtimeLocalSkillSummary, bool, error) {
 	if _, err := os.Stat(root); err != nil {
 		if os.IsNotExist(err) {
 			return []runtimeLocalSkillSummary{}, true, nil
@@ -354,7 +357,10 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 	if err != nil || !supported {
 		return nil, supported, err
 	}
+	return loadLocalSkillBundleFromRoot(provider, root, skillKey)
+}
 
+func loadLocalSkillBundleFromRoot(provider, root, skillKey string) (*runtimeLocalSkillBundle, bool, error) {
 	key, err := normalizeLocalSkillKey(skillKey)
 	if err != nil {
 		return nil, true, err
