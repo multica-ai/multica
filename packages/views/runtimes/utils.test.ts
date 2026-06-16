@@ -313,6 +313,17 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
   });
 
+  it("prices deepseek-v4-pro at the current official $0.435/$0.87 tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-pro",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.435 + 0.87 + 0.003625, 5);
+  });
+
   it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
     // The DeepSeek docs explicitly route both legacy names to v4-flash —
     // they must hit the same numbers, not the older $0.27/$1.10 tier.
@@ -337,9 +348,46 @@ describe("estimateCost", () => {
     ).toBeCloseTo(flash, 5);
   });
 
-  it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
-    // Moonshot's K2.6 page is the only authoritative source today; K2.6 is
-    // explicitly NOT priced like K2. 1M input × $0.95 + 1M output × $4.00 = $4.95.
+  it("prices Google Gemini catalog rows at the official Standard text tier", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-3.1-pro-preview",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2 + 12 + 0.2, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "gemini-2.5-flash-lite",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.1 + 0.4 + 0.01, 5);
+  });
+
+  it("prices current Kimi K2.7/K2.6/K2.5 rows at Moonshot's published rates", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.7-code",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.95 + 4 + 0.19, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.7-code-highspeed",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.9 + 8 + 0.38, 5);
     expect(
       estimateCost({
         ...zeroUsage,
@@ -348,6 +396,15 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBeCloseTo(4.95, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.6 + 3 + 0.1, 5);
   });
 
   it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {
@@ -384,6 +441,8 @@ describe("estimateCost", () => {
     // $0.00 for the runtime that actually triggered this work.
     expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
     expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("nous:moonshotai/kimi-k2.5")).toBe(true);
+    expect(isModelPriced("google/gemini-2.5-flash-lite")).toBe(true);
     expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
     expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
   });
