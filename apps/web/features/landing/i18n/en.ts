@@ -293,6 +293,29 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.23",
+        date: "2026-06-16",
+        title: "Issue Date Filters and More Stable Agent Runs",
+        changes: [],
+        features: [
+          "Issues can now be filtered by created or updated date, with quick ranges and custom date selections",
+          "Command line users can now delete runtimes with safer defaults and an explicit option for related data",
+          "Lark connections can now use network proxies, helping teams in restricted network environments connect reliably",
+        ],
+        improvements: [
+          "Web and desktop failures are now easier to investigate with clearer reports for errors, freezes, and crashes",
+          "Project rows, comment previews, and comment composers are more consistent and easier to use",
+        ],
+        fixes: [
+          "Reply and edit previews now show the right agents or squads before a comment is saved",
+          "Plain Issue IDs in comments now stay as text unless they are intentionally linked",
+          "Google sign-in from command line login now returns to the command line correctly after browser authentication",
+          "Chat file uploads wait until an active agent is ready, avoiding failed uploads during loading",
+          "Transcript actions remain visible on touch devices where hover is unavailable",
+          "Agent instructions for posting comments now avoid shell formatting problems that could drop assignees, projects, or other fields",
+        ],
+      },
+      {
         version: "0.3.22",
         date: "2026-06-15",
         title: "Faster Lists, Easier Runtime Setup, and Safer Issue Editing",
