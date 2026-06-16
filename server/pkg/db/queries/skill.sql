@@ -47,7 +47,8 @@ WHERE id = $1
 RETURNING *;
 
 -- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1;
+-- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+DELETE FROM skill WHERE id = $1 AND workspace_id = $2;
 
 -- Skill File CRUD
 

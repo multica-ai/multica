@@ -16,6 +16,8 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
   const src = (node.attrs.src as string) || "";
   const alt = (node.attrs.alt as string) || "";
   const uploading = node.attrs.uploading as boolean;
+  const width = (node.attrs.width as number | null) ?? undefined;
+  const height = (node.attrs.height as number | null) ?? undefined;
 
   // <Attachment> emits its own .image-node wrapper, so the NodeViewWrapper
   // stays unclassed — no double image-node.
@@ -27,6 +29,9 @@ function ImageView({ node, editor, selected, deleteNode }: NodeViewProps) {
           url: src,
           filename: alt,
           uploading,
+          // Intrinsic dimensions reserve the <img> box pre-decode (no shift).
+          width,
+          height,
           // Tiptap image node is structurally an image regardless of alt.
           forceKind: "image",
         }}

@@ -4,6 +4,7 @@
     "italic": "Italic",
     "strikethrough": "Strikethrough",
     "code": "Code",
+    "highlight": "Highlight",
     "link": "Link",
     "list": "List",
     "quote": "Quote",
@@ -17,7 +18,8 @@
     },
     "list_dropdown": {
       "bullet_list": "Bullet List",
-      "ordered_list": "Ordered List"
+      "ordered_list": "Ordered List",
+      "task_list": "Task List"
     },
     "sub_issue": {
       "tooltip": "Create sub-issue from selection",
@@ -41,7 +43,8 @@
     "preview_too_large": "File is too large to preview. Please download.",
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
-    "open_in_new_tab": "Open in new tab"
+    "open_in_new_tab": "Open in new tab",
+    "remove": "Remove attachment"
   },
   "link_hover": {
     "copy_link": "Copy link",
@@ -54,12 +57,23 @@
     "group_issues": "Issues",
     "all_members": "All members",
     "searching": "Searching...",
-    "no_results": "No results"
+    "no_results": "No results",
+    "group_current": "Current page",
+    "group_recent": "Recently viewed",
+    "group_search": "Search results"
+  },
+  "slash_command": {
+    "no_skills_configured": "No skills configured",
+    "no_results": "No matching skills",
+    "commands": {
+      "note": "Add a note — won't trigger any agents"
+    }
   },
   "code_block": {
     "copy_code": "Copy code",
     "show_preview": "Show preview",
-    "show_source": "Show source"
+    "show_source": "Show source",
+    "fullscreen": "Fullscreen"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"

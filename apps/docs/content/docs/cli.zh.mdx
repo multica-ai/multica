@@ -79,6 +79,19 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica skill import ...` | 从 GitHub / ClawHub / 本机导入 Skill |
 | `multica skill files ...` | 嵌套：管理 Skill 的文件 |
 
+### Skill 导入冲突
+
+`multica skill import --url <url>` 默认等同于 `--on-conflict fail`。如果工作区里已经有同名 Skill，命令会返回结构化 `conflict` 结果并退出，不会修改工作区。
+
+如果你是已有 Skill 的 creator，并且想用新导入内容覆盖它，同时保留原 Skill 的 ID 和 agent 绑定，用 `--on-conflict overwrite`。如果想保留已有 Skill、另存一份，用 `--on-conflict rename`，系统会自动加 `-2` 这类后缀。如果只是批量导入时遇到同名项就跳过，用 `--on-conflict skip`。
+
+```bash
+multica skill import --url https://skills.sh/acme/repo/review-helper
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+```
+
 ## 小队
 
 | 命令 | 用途 |
@@ -88,7 +101,7 @@ Token 类型的详细区分见 [认证与令牌](/auth-tokens)。
 | `multica squad create --name "..." --leader <agent>` | 创建小队（owner / admin）|
 | `multica squad update <id> ...` | 修改名字、描述、instructions、队长、头像 |
 | `multica squad delete <id>` | 归档（软删除）—— 同时把分配给小队的 issue 转给队长 |
-| `multica squad member list/add/remove <squad-id>` | 管理小队成员 |
+| `multica squad member list/add/remove/set-role <squad-id>` | 管理小队成员并原地更新 role |
 | `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长智能体每轮结束时调用，记录 evaluation |
 
 完整模型见 [小队](/squads)。

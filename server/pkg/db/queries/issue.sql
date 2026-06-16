@@ -7,7 +7,7 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -17,6 +17,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     -- (1) assignee is an agent owned by the user
@@ -99,10 +100,11 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
+-- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 UPDATE issue SET
     status = $2,
     updated_at = now()
-WHERE id = $1
+WHERE id = $1 AND workspace_id = $3
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
@@ -130,14 +132,19 @@ ORDER BY created_at ASC
 LIMIT 1;
 
 -- name: DeleteIssue :exec
-DELETE FROM issue WHERE id = $1;
+-- Defense-in-depth: the workspace_id predicate makes the tenant invariant a
+-- SQL-layer guarantee rather than a handler-layer one. Handler loaders
+-- (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
+-- but a future loader bypass or a new caller skipping the loader would be
+-- silently catastrophic without this guard. See incident #1661.
+DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListOpenIssues :many
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
@@ -146,6 +153,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -191,6 +199,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
@@ -229,6 +238,17 @@ SELECT * FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC;
 
+-- name: ListChildrenByParents :many
+-- Batched variant of ListChildIssues: returns all children for the given
+-- parent set in one round trip. Used by Swimlane to avoid an N+1 fan-out
+-- (one request per visible parent lane). Result is grouped client-side by
+-- parent_issue_id; the workspace filter is also enforced so callers can't
+-- enumerate children of parents in workspaces they don't belong to.
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
+ORDER BY parent_issue_id, position ASC, created_at DESC;
+
 -- name: GetIssueByOrigin :one
 -- Finds the issue stamped with a specific (origin_type, origin_id) pair.
 -- Used by quick-create completion to deterministically locate the issue
@@ -265,6 +285,25 @@ WHERE workspace_id = $1
 GROUP BY parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
+
+-- name: SetIssueMetadataKey :one
+-- Atomically sets a single key in the issue's metadata JSONB. The
+-- workspace_id filter is the authorization gate — handler resolves the
+-- issue first so this is also the tenant check.
+UPDATE issue SET
+    metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: DeleteIssueMetadataKey :one
+-- Atomically removes a single key from the issue's metadata JSONB.
+-- Deleting a missing key is a no-op (still returns the row).
+UPDATE issue SET
+    metadata = metadata - sqlc.arg('key')::text,
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
 
 -- name: MarkIssueFirstExecuted :one
 -- Flips first_executed_at from NULL to now() atomically. Returns the row if

@@ -1,3 +1,5 @@
+import type { AgentTask } from "./agent";
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -55,6 +57,18 @@ export interface ChatMessage {
   elapsed_ms?: number | null;
 }
 
+export interface ChatMessagesCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  limit: number;
+  has_more: boolean;
+  next_cursor?: ChatMessagesCursor | null;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
@@ -65,6 +79,17 @@ export interface SendChatMessageResponse {
    * timer "snaps backwards" later when WS events update the cache.
    */
   created_at: string;
+}
+
+export interface CancelledChatMessage {
+  chat_session_id: string;
+  message_id: string;
+  content: string;
+  restore_to_input: boolean;
+}
+
+export interface CancelTaskResponse extends AgentTask {
+  cancelled_chat_message?: CancelledChatMessage;
 }
 
 /**

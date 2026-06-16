@@ -19,9 +19,11 @@ import { useT } from "../../../i18n";
  * it fits a single PropRow. Drops the "select a runtime first" state because
  * the inspector only renders this picker after a runtime is bound.
  *
- * Unsupported providers (e.g. hermes, which reads its own config) render an
- * inert italic "Managed by runtime" label instead of a clickable picker —
- * the back-end ignores agent.model for those runtimes anyway.
+ * Providers whose runtime ignores per-agent model selection report
+ * `supported=false` and render an inert italic "Managed by runtime" label
+ * instead of a clickable picker. No built-in provider sets this today
+ * (Antigravity gained `--model` in agy 1.0.6), but the branch stays for any
+ * future model-less runtime.
  */
 export function ModelPicker({
   runtimeId,
@@ -145,21 +147,21 @@ export function ModelPicker({
             // string actually ships to the agent.
             tooltip={m.label !== m.id ? `${m.label} · ${m.id}` : m.id}
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                <span className="truncate font-medium">{m.label}</span>
-                {m.default && (
-                  <span className="shrink-0 rounded bg-primary/10 px-1 text-[10px] font-medium text-primary">
-                    {t(($) => $.pickers.model_default_badge)}
-                  </span>
-                )}
-              </div>
+            {/* PickerItem wraps children in a flex `<span>`. Putting a
+                `<div>` inside that <span> is block-in-inline (invalid
+                HTML5) and triggers the browser-default centering quirk
+                that pushes descendants off-axis (model IDs floated to the
+                center instead of left-aligning under their labels). Use
+                `<span block text-left>` to keep layout deterministic —
+                matches the fix already applied in thinking-picker.tsx. */}
+            <span className="block min-w-0 flex-1 text-left">
+              <span className="block truncate text-[13px] font-medium">{m.label}</span>
               {m.label !== m.id && (
-                <div className="truncate font-mono text-[10px] text-muted-foreground">
+                <span className="mt-0.5 block truncate font-mono text-[10px] leading-snug text-muted-foreground">
                   {m.id}
-                </div>
+                </span>
               )}
-            </div>
+            </span>
           </PickerItem>
         ))}
 

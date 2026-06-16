@@ -64,6 +64,14 @@ const WORKSPACE_TAB_ICONS = {
 const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
 
+// Legacy `?tab=…` values that have been collapsed into another tab. Old
+// bookmarks still land on the correct surface without us preserving a
+// dead TabsContent entry. Lark used to be its own top-level workspace
+// tab; it now lives inside Integrations.
+const LEGACY_WORKSPACE_TAB_REDIRECTS: Record<string, string> = {
+  lark: "integrations",
+};
+
 export interface ExtraSettingsTab {
   value: string;
   label: string;
@@ -95,8 +103,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
+  const candidateTab = tabFromUrl
+    ? LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
+    : null;
   const activeTab =
-    tabFromUrl && validTabs.has(tabFromUrl) ? tabFromUrl : DEFAULT_TAB;
+    candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
 
   // replace (not push) so settings tab switches don't pollute browser history.
   // Preserve any other query params the page may carry.

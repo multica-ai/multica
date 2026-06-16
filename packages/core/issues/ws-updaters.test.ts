@@ -10,10 +10,12 @@ import {
   onIssueCreated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
   onIssueUpdated,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
+import { projectKeys } from "../projects/queries";
 import type {
   AgentActivityBucket,
   AgentRunCount,
@@ -34,6 +36,7 @@ const ISSUE_ID = "issue-1";
 const OTHER_ISSUE_ID = "issue-2";
 const PARENT_ISSUE_ID = "parent-1";
 const AGENT_ID = "agent-1";
+const PROJECT_ID = "project-1";
 
 const labelA: Label = {
   id: "label-a",
@@ -71,6 +74,7 @@ const baseIssue: Issue = {
   position: 0,
   start_date: null,
   due_date: null,
+  metadata: {},
   labels: [labelA],
   created_at: "2025-01-01T00:00:00Z",
   updated_at: "2025-01-01T00:00:00Z",
@@ -177,6 +181,87 @@ describe("onIssueLabelsChanged", () => {
   });
 });
 
+describe("onIssueMetadataChanged", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("replaces metadata in both detail and list caches (no merge)", () => {
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), {
+      ...baseIssue,
+      metadata: { pr_number: 1, stale: "yes" },
+    });
+    qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
+      byStatus: {
+        todo: {
+          issues: [{ ...baseIssue, metadata: { pr_number: 1 } }],
+          total: 1,
+        },
+      },
+    });
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pr_number: 2 });
+
+    const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
+    expect(detail?.metadata).toEqual({ pr_number: 2 });
+    const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
+    expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
+  });
+
+  it("leaves untouched caches as undefined (no spurious writes)", () => {
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
+
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
+    expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+});
+
+describe("project progress invalidation", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+    qc.setQueryData(projectKeys.list(WS_ID), [
+      {
+        id: PROJECT_ID,
+        workspace_id: WS_ID,
+        title: "Project",
+        description: null,
+        icon: null,
+        status: "in_progress",
+        priority: "none",
+        lead_type: null,
+        lead_id: null,
+        issue_count: 1,
+        done_count: 0,
+        resource_count: 0,
+        created_at: "2025-01-01T00:00:00Z",
+        updated_at: "2025-01-01T00:00:00Z",
+      },
+    ]);
+  });
+
+  it("invalidates project queries when an issue status changes", () => {
+    onIssueUpdated(qc, WS_ID, {
+      id: ISSUE_ID,
+      status: "done",
+    });
+
+    expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+
+  it("invalidates project queries when a project issue is created", () => {
+    onIssueCreated(qc, WS_ID, {
+      ...baseIssue,
+      project_id: PROJECT_ID,
+    });
+
+    expectInvalidated(qc, projectKeys.list(WS_ID));
+  });
+});
+
 describe("onIssueDeleted", () => {
   let qc: QueryClient;
 
@@ -235,6 +320,7 @@ describe("onIssueDeleted", () => {
         filename: "evidence.png",
         url: "s3://bucket/evidence.png",
         download_url: "https://example.test/evidence.png",
+        markdown_url: "https://example.test/api/attachments/att-1/download",
         content_type: "image/png",
         size_bytes: 1,
         created_at: "2025-01-01T00:00:00Z",

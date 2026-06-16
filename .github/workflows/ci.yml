@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Test self-host env derivation
+        run: bash scripts/selfhost-config.test.sh
+
       - name: Verify reserved-slugs.ts is up to date
         # Re-runs the generator and fails on any drift from the
         # checked-in TypeScript output. The Go side embeds the JSON
@@ -39,7 +42,12 @@ jobs:
           git diff --exit-code -- packages/core/paths/reserved-slugs.ts
 
       - name: Build, type check, lint, and test
-        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs'
+        # Mobile lives in a parallel mobile-verify workflow (path-filtered
+        # to apps/mobile/** + packages/core/types/**) so it doesn't add
+        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
+        # filter in sync with the root package.json scripts, which also
+        # exclude @multica/mobile.
+        run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs' --filter='!@multica/mobile'
 
   backend:
     runs-on: ubuntu-latest
@@ -91,3 +99,20 @@ jobs:
 
       - name: Test
         run: cd server && go test ./...
+
+  installer:
+    # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
+    # backend job so installer regressions surface independently, and
+    # exercised on macOS too because the installer targets macOS/Homebrew
+    # and `tar` / `sed` / `mktemp` differ between BSD and GNU userlands.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test shell installers
+        run: bash scripts/install.test.sh

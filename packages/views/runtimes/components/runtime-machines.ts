@@ -34,7 +34,24 @@ interface RuntimeMachineOptions {
   now: number;
   localDaemonId?: string | null;
   localMachineName?: string | null;
+  /**
+   * The viewing user's id. Used to scope the device-name consolidation
+   * below: the runtime list is workspace-wide (every member's runtimes),
+   * so matching purely on a host name could promote another member's
+   * identically-named machine to "this machine". Only a local runtime
+   * OWNED by the current user may be consolidated by device name.
+   */
+  currentUserId?: string | null;
   workloadByRuntimeId?: Map<string, RuntimeWorkloadSummary>;
+  /**
+   * When true, guarantee that the result contains a machine flagged
+   * `isCurrent`. If no server-side runtime matches the local daemon
+   * (e.g. the daemon is stopped, was never started, or its runtime was
+   * already GC'd), a placeholder local machine is synthesized so the
+   * caller can still attach controls to it (Start button, etc.).
+   * Desktop sets this; web omits it.
+   */
+  ensureLocalMachine?: boolean;
 }
 
 interface RuntimeMachineDraft {
@@ -80,9 +97,40 @@ export function buildRuntimeMachines(
     drafts.set(id, draft);
   }
 
-  return Array.from(drafts.values())
-    .map((draft) => finalizeRuntimeMachine(draft, options))
-    .sort(compareRuntimeMachines);
+  const machines = Array.from(drafts.values()).map((draft) =>
+    finalizeRuntimeMachine(draft, options),
+  );
+
+  if (options.ensureLocalMachine && !machines.some((m) => m.isCurrent)) {
+    machines.push(placeholderLocalMachine(options));
+  }
+
+  return machines.sort(compareRuntimeMachines);
+}
+
+function placeholderLocalMachine(
+  options: RuntimeMachineOptions,
+): RuntimeMachine {
+  const daemonId = options.localDaemonId ?? null;
+  return {
+    id: daemonId ? `local:${daemonId}` : "local:placeholder",
+    daemonId,
+    title: options.localMachineName ?? "This machine",
+    subtitle: null,
+    deviceInfo: null,
+    cliVersion: null,
+    mode: "local",
+    section: "local",
+    isCurrent: true,
+    health: "offline",
+    runtimes: [],
+    onlineCount: 0,
+    issueCount: 0,
+    runningCount: 0,
+    queuedCount: 0,
+    providerNames: [],
+    lastSeenAt: null,
+  };
 }
 
 export function filterRuntimeMachines(
@@ -128,13 +176,26 @@ function finalizeRuntimeMachine(
   draft: RuntimeMachineDraft,
   options: RuntimeMachineOptions,
 ): RuntimeMachine {
-  const runtimes = [...draft.runtimes].sort((a, b) =>
+  const runtimes = draft.runtimes.toSorted((a, b) =>
     a.provider.localeCompare(b.provider),
   );
   const first = runtimes[0];
   const providerNames = Array.from(new Set(runtimes.map((r) => r.provider))).sort();
+  // Device-name consolidation is only safe for the current user's own
+  // local runtimes — the list spans the whole workspace, so a host-name
+  // match alone could claim another member's identically-named machine.
+  const ownsLocalRuntime =
+    !!options.currentUserId &&
+    runtimes.some((r) => r.owner_id === options.currentUserId);
+  const matchesLocalName = (value: string | null | undefined): boolean =>
+    !!value && value.toLowerCase() === options.localMachineName?.toLowerCase();
   const isCurrent =
-    !!options.localDaemonId && draft.daemonId === options.localDaemonId;
+    (!!options.localDaemonId && draft.daemonId === options.localDaemonId) ||
+    (draft.mode === "local" &&
+      !!options.localMachineName &&
+      ownsLocalRuntime &&
+      (matchesLocalName(draft.daemonId) ||
+        runtimes.some((r) => matchesLocalName(runtimeDeviceName(r)))));
   const title = machineTitle(runtimes, {
     isCurrent,
     localMachineName: options.localMachineName,

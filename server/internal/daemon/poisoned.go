@@ -1,6 +1,11 @@
 package daemon
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
+)
 
 // FailureReason values for tasks whose session is "poisoned" — i.e.
 // resuming the same conversation on a follow-up task would deterministically
@@ -16,10 +21,23 @@ import "strings"
 //     invalid_request_error (oversized payload, malformed image, etc.).
 //     The bad message is already baked into the conversation history, so
 //     every resume hits the same 400. Detected via classifyPoisonedError.
+//   - Timeout-side: Codex reported semantic inactivity after the session got
+//     stuck without agent progress. Resuming that Codex session can replay the
+//     same stuck state, while a fresh manual rerun may succeed. Detected via
+//     classifyResumeUnsafeTimeout.
+//
+// MUL-2946: ReasonIterationLimit and ReasonAPIInvalidRequest are aliased
+// to the canonical taskfailure values so the daemon and the in-flight
+// classifier (used by every other failure path) share a single source
+// of truth. agent_fallback_message and codex_semantic_inactivity are
+// pre-existing operational reasons not in the canonical 21 — kept as
+// string literals here until a follow-up PR migrates them or extends
+// the taxonomy.
 const (
-	FailureReasonIterationLimit    = "iteration_limit"
-	FailureReasonAgentFallbackMsg  = "agent_fallback_message"
-	FailureReasonAPIInvalidRequest = "api_invalid_request"
+	FailureReasonIterationLimit          = string(taskfailure.ReasonIterationLimit)
+	FailureReasonAgentFallbackMsg        = "agent_fallback_message"
+	FailureReasonAPIInvalidRequest       = string(taskfailure.ReasonAPIInvalidRequest)
+	FailureReasonCodexSemanticInactivity = "codex_semantic_inactivity"
 )
 
 // poisonedOutputMaxLen caps how long an output can be and still be
@@ -95,6 +113,22 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 	// the request body — i.e. the conversation history — is the problem.
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
 		return FailureReasonAPIInvalidRequest, true
+	}
+	return "", false
+}
+
+// classifyResumeUnsafeTimeout reports whether a timeout means the recorded
+// session should not be resumed. Keep this intentionally provider-specific:
+// ordinary daemon/backend timeouts are infrastructure-shaped and should keep
+// the resume pointer so retries can continue the in-flight conversation.
+func classifyResumeUnsafeTimeout(provider, errMsg string) (string, bool) {
+	if strings.ToLower(strings.TrimSpace(provider)) != "codex" || errMsg == "" {
+		return "", false
+	}
+	lowered := strings.ToLower(errMsg)
+	if strings.Contains(lowered, strings.ToLower(agent.CodexSemanticInactivityMarker)) ||
+		strings.Contains(lowered, strings.ToLower(agent.CodexFirstTurnNoProgressMarker)) {
+		return FailureReasonCodexSemanticInactivity, true
 	}
 	return "", false
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -11,16 +11,19 @@ import {
 } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 
 interface ChatInputProps {
-  onSend: (content: string, attachmentIds?: string[]) => void;
+  onSend: (content: string, attachmentIds?: string[]) => void | boolean | Promise<void | boolean>;
+  restoreDraftRequest?: { id: string; content: string } | null;
+  onRestoreDraftConsumed?: () => void;
   /** Receives a File and returns the attachment row (with id + CDN link).
    *  The wrapper owner (ChatWindow) lazy-creates a chat_session if needed
    *  and forwards `chatSessionId` to the upload — chat-input only cares
@@ -39,15 +42,14 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
-  /** Rendered just before the submit button — used for context-anchor action. */
-  rightAdornment?: ReactNode;
-  /** Rendered inside the rounded container, above the editor — attached
-   *  context cards, drafts, etc. */
-  topSlot?: ReactNode;
+  /** Chat @ suggestions: current/recent issue/project entries. */
+  contextItems?: MentionItem[];
 }
 
 export function ChatInput({
   onSend,
+  restoreDraftRequest,
+  onRestoreDraftConsumed,
   onUploadFile,
   onStop,
   isRunning,
@@ -55,8 +57,7 @@ export function ChatInput({
   noAgent,
   agentName,
   leftAdornment,
-  rightAdornment,
-  topSlot,
+  contextItems,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -70,9 +71,10 @@ export function ChatInput({
   // mid-compose gives each agent its own draft. This is a STORAGE key, not
   // a React identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Used ONLY to force a
+  // `editorKey` — React `key` on the ContentEditor. Used to force a
   // remount when the user explicitly switches agent (so Tiptap's
-  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…").
+  // Placeholder, which only reads on mount, refreshes to "Tell {agent}…")
+  // or when a cancelled empty run restores a draft from the server.
   // Crucially this does NOT include `activeSessionId`: when the user
   // uploads a file in a brand-new chat, `handleUploadFile` first awaits
   // `ensureSession` which lazily creates the session and flips
@@ -83,14 +85,20 @@ export function ChatInput({
   // user would see the image flash on then disappear. Keeping editor
   // identity stable across the lazy-create event is what makes
   // first-upload-creates-session work the same as second-upload.
-  const draftKey =
-    activeSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
-  const editorKey = selectedAgentId ?? "no-agent";
+  const draftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editorRestore, setEditorRestore] = useState<{
+    id: string;
+    content: string;
+    draftKey: string;
+  } | null>(null);
+  const activeRestore = editorRestore?.draftKey === draftKey ? editorRestore : null;
+  const editorKey = `${selectedAgentId ?? "no-agent"}:${activeRestore?.id ?? "base"}`;
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
   // disables the instant an upload starts and re-enables the instant it
@@ -99,11 +107,39 @@ export function ChatInput({
   // racing the keyboard) — defense in depth.
   const [pendingUploads, setPendingUploads] = useState(0);
 
-  // Maps "CDN URL inserted into the editor" → "attachment row id" so that
+  // Maps "URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
-  // referenced in the message body. Cleared after every send. Mirrors the
-  // comment-input flow exactly.
+  // referenced in the message body. Cleared after every send. Mirrors
+  // the comment-input flow exactly. The map key MUST match what the
+  // editor actually wrote into the markdown — that's `markdownLink`
+  // (the stable per-attachment URL) for normal post-MUL-3130 uploads
+  // and `link` (= att.url) for the no-workspace upload branch where
+  // there's no attachment-row id to address. Storing only `link` here
+  // would cause `content.includes(url)` to miss every new chat upload
+  // because the editor persists `markdownLink` instead, and the
+  // `onSend` call would silently drop `attachment_ids` so the
+  // attachment never binds to the chat message.
   const uploadMapRef = useRef<Map<string, string>>(new Map());
+
+  useEffect(() => {
+    if (!restoreDraftRequest) return;
+    if (inputDraft.trim()) {
+      logger.info("input.restore skipped: draft already has content", {
+        draftKey,
+        restoreId: restoreDraftRequest.id,
+      });
+      onRestoreDraftConsumed?.();
+      return;
+    }
+    setInputDraft(draftKey, restoreDraftRequest.content);
+    setIsEmpty(!restoreDraftRequest.content.trim());
+    setEditorRestore({
+      id: restoreDraftRequest.id,
+      content: restoreDraftRequest.content,
+      draftKey,
+    });
+    onRestoreDraftConsumed?.();
+  }, [draftKey, inputDraft, onRestoreDraftConsumed, restoreDraftRequest, setInputDraft]);
 
   const handleUpload = useCallback(
     async (file: File): Promise<UploadResult | null> => {
@@ -111,7 +147,10 @@ export function ChatInput({
       setPendingUploads((n) => n + 1);
       try {
         const result = await onUploadFile(file);
-        if (result) uploadMapRef.current.set(result.link, result.id);
+        if (result) {
+          const persistedURL = result.markdownLink || result.link;
+          uploadMapRef.current.set(persistedURL, result.id);
+        }
         return result;
       } finally {
         setPendingUploads((n) => Math.max(0, n - 1));
@@ -127,12 +166,13 @@ export function ChatInput({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || disabled || noAgent) {
+    if (!content || isRunning || isSubmitting || disabled || noAgent) {
       logger.debug("input.send skipped", {
         emptyContent: !content,
         isRunning,
+        isSubmitting,
         disabled,
         noAgent,
       });
@@ -164,7 +204,17 @@ export function ChatInput({
       draftKey: keyAtSend,
       attachmentCount: activeIds.length,
     });
-    onSend(content, activeIds.length > 0 ? activeIds : undefined);
+    setIsSubmitting(true);
+    let accepted: void | boolean;
+    try {
+      accepted = await onSend(content, activeIds.length > 0 ? activeIds : undefined);
+    } catch (err) {
+      logger.warn("input.send failed", err);
+      setIsSubmitting(false);
+      return;
+    }
+    setIsSubmitting(false);
+    if (accepted === false) return;
     editorRef.current?.clearContent();
     // Drop focus so the caret doesn't keep blinking under the StatusPill /
     // streaming reply that's about to take over the user's attention. The
@@ -214,14 +264,13 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
-        {topSlot}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey
             // intentionally does not depend on activeSessionId.
             key={editorKey}
             ref={editorRef}
-            defaultValue={inputDraft}
+            defaultValue={activeRestore?.content ?? inputDraft}
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
@@ -230,11 +279,15 @@ export function ChatInput({
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             debounceMs={100}
+            mentionMode={contextItems ? "context" : "default"}
+            mentionContextItems={contextItems}
+            enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Mod+Enter submits. Bare Enter falls through to Tiptap's
-            // default, which continues lists/quotes and breaks paragraphs.
+            // Chat intentionally leaves submitOnEnter at its default false:
+            // Mod+Enter submits, while bare Enter falls through to Tiptap's
+            // default behavior for lists, quotes, and paragraph breaks.
             // Without this, Enter-as-send would steal the only key that
             // continues a bullet list, leaving users stuck after one item.
           />
@@ -245,7 +298,6 @@ export function ChatInput({
           </div>
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-          {rightAdornment}
           {uploadEnabled && (
             <FileUploadButton
               size="sm"
@@ -254,7 +306,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
             tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}

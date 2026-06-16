@@ -1,25 +1,27 @@
 ---
 title: Project Resources
-description: Attach typed pointers (Git repos today, more later) to a project so agents can pick them up as scoped context.
+description: Attach typed pointers (Git repos, local directories, more later) to a project so agents can pick them up as scoped context.
 ---
 
-A **Project Resource** is a typed pointer — a Git repo URL today, a Notion page or document link tomorrow — attached to a [project](/workspaces). When an [agent](/agents) runs against an issue inside that project, the daemon automatically writes the project's resource list into the agent's working directory and into its [meta-skill](/skills) prompt.
+A **Project Resource** is a typed pointer — a Git repo URL, a path on your own machine, a Notion page tomorrow — attached to a [project](/workspaces). When an [agent](/agents) runs against an issue inside that project, the daemon automatically writes the project's resource list into the agent's working directory and into its [meta-skill](/skills) prompt.
 
-The result: the agent knows which repo to check out, which docs are the "primary references" for this project, without anyone copy-pasting context into the issue body.
+The result: the agent knows which repo to check out (or which local directory to work in), and which docs are the "primary references" for this project, without anyone copy-pasting context into the issue body.
 
 ## Mental model
 
 A project is no longer just a label. It is a small **resource container**:
 
 - A project has 0..N **resources**.
-- A resource has a `resource_type` (e.g. `github_repo`) and a `resource_ref` (a JSON payload typed by `resource_type`).
+- A resource has a `resource_type` (e.g. `github_repo`, `local_directory`) and a `resource_ref` (a JSON payload typed by `resource_type`).
 - New resource types add a string + a handler. **No schema migration. No frontend rewrite.**
 
 This shape is intentional — it's the same pattern Multica already uses for agent providers: a `type` discriminator and a typed payload. It keeps the schema stable so adding "Notion page", "Google Doc", "uploaded file", or "external URL" later is a small, additive change.
 
-## Today: `github_repo`
+Today two resource types ship: [`github_repo`](#resource-type-github_repo) (clone-per-task into an isolated worktree) and [`local_directory`](#resource-type-local_directory) (run directly inside a folder on a specific daemon's machine).
 
-The first resource type ships ready to use:
+## Resource type: `github_repo`
+
+The default resource type — checked out per task into an isolated worktree:
 
 ```json
 {
@@ -32,6 +34,122 @@ The first resource type ships ready to use:
 ```
 
 `default_branch_hint` is optional — if present, the daemon surfaces it in the meta-skill so the agent knows which branch to base its work on.
+
+## Resource type: `local_directory`
+
+For repos that can't reasonably be re-cloned per task — multi-gigabyte game checkouts, large monorepos, or any project where the worktree-per-task model is painful — a project can instead point at an **existing directory on a specific [daemon](/daemon-runtimes)'s machine**. The agent runs **directly inside that folder**, with no clone, no copy, and no worktree.
+
+```json
+{
+  "resource_type": "local_directory",
+  "resource_ref": {
+    "local_path": "/Users/me/code/big-game",
+    "daemon_id": "0001234e-…",
+    "label": "main checkout"
+  }
+}
+```
+
+The trade-off vs. `github_repo` is intentional: only the bound daemon can pick up tasks against the directory, and tasks on the same directory run **serially** instead of in parallel. In exchange you keep your existing checkout, your existing branch, your existing dirty state — Multica never re-clones it.
+
+### When to pick `local_directory` over `github_repo`
+
+| Concern | `github_repo` (worktree) | `local_directory` |
+| --- | --- | --- |
+| Checkout cost per task | Fresh clone + worktree | None — agent runs in place |
+| Concurrency on the same repo | Many tasks in parallel | One at a time per directory |
+| Branch / dirty state | Each task gets a fresh branch from the default | Whatever the directory currently has |
+| Where it can run | Any daemon | Exactly one daemon (the one bound) |
+| Disk footprint | One worktree per task | Zero overhead — your existing folder |
+
+Pick `local_directory` when **either** of these matches:
+
+1. **Re-cloning is prohibitively expensive** — a multi-gigabyte game checkout, a monorepo with heavy LFS assets, or anything where the per-task `git clone` would dominate the actual work. You trade concurrency for a clone-free run.
+2. **Your changes are fine-grained and you want to review them locally as they happen** — you're iterating on a single component, you want to flip between the agent's edits and your editor every few minutes, and you'd rather have your existing checkout be the source of truth than a per-task worktree you have to dig out of `~/multica_workspaces/`.
+
+The trade-off you accept in both cases is the same: **this version ships no file-level write lock.** The per-directory serial gate (one task at a time on the same folder) is the only protection against agents in two different issues touching the same files at the same time. If you point two issues' agents at the same `local_directory`, their tasks queue rather than parallelise — that's by design. If you need real parallelism on the same codebase, stay on `github_repo`.
+
+### Attaching a local directory
+
+The folder picker lives in the **Desktop app** only — the web app has no way to read OS paths, so the "Add local directory" button is hidden there. On Desktop:
+
+1. Open the project → **Resources** panel.
+2. Click **Add local directory**. A native folder picker opens.
+3. Pick the folder. The path is bound to **the daemon currently registered by this Desktop install** — the resource record stores both the path and that daemon's ID.
+
+On Desktop the button stays visible but is **disabled with a hint** when the daemon on this machine is offline, or when the project already has a `local_directory` bound to this daemon — so you can see *why* it's unavailable. (On the web app the button is hidden outright, since there's no folder picker available there at all.) To bind another machine's directory, install Desktop on that machine and add the resource from there.
+
+From the CLI (works on web-only environments too, as long as you supply the daemon ID yourself):
+
+```bash
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /Users/me/code/big-game \
+  --daemon-id <daemon-uuid> \
+  --ref-label "main checkout"        # optional
+
+multica project resource update <project-id> <resource-id> \
+  --local-path /Users/me/code/big-game-new
+```
+
+`--daemon-id` comes from `multica daemon list`. The CLI also accepts the generic `--ref '<json>'` escape hatch if you'd rather pass the payload directly.
+
+### Path rules
+
+The path you attach must clear both an attach-time and a per-task validation. Both are enforced by the daemon that owns the resource — the server only stores the JSON. A path that breaks any rule fails the task with a typed error and leaves your directory untouched:
+
+- Must be **absolute**.
+- Must **exist** and be a **directory** (not a file, symlink to a file, or device node).
+- Must be **readable and writable** by the daemon process.
+- Cannot be a system root or an entire user profile — `/`, `/Users`, `/home`, `/root`, `/etc`, `/tmp`, `/var`, `/usr`, `/opt`, `/Users/Shared`, your own `$HOME`, any Windows drive root (`C:\`, `D:\`, …), or `C:\Users` / `C:\ProgramData` / `C:\Program Files` / `C:\Program Files (x86)` / `C:\Windows`.
+- A symlink that resolves to any of the above is rejected, and so is the canonical form of an OS-aliased path (e.g. on macOS, typing `/private/tmp` is rejected the same way as `/tmp`).
+
+The blacklist is intentionally aggressive — picking your home directory would put Multica's runtime files at the root of your account, which is never what you want. Pick a sub-folder (typically your actual project checkout) instead.
+
+### One per (project, daemon)
+
+A project may hold **at most one `local_directory` per daemon**. Attempting to add a second one on the same daemon returns a `409` from the API; the Desktop button hides itself when the limit is already reached and surfaces a tooltip explaining why.
+
+Different daemons are independent — a shared project can have one `local_directory` per teammate's machine, each binding the same project to a different folder on a different host. When the daemon claims a task, it picks the row that matches its own ID and ignores the rest.
+
+### Mixing resource types, and multiple `local_directory` resources
+
+Two cross-resource configurations show up in practice:
+
+- **`github_repo` + `local_directory` on the same project.** On the daemon that has a matching `local_directory` binding, the local directory **takes precedence**: the agent runs in your folder, and the daemon does not create or use a `github_repo` worktree for that task. (The per-workspace repo cache may still sync as usual — that's a background behaviour unrelated to this task's working tree.) The `github_repo` URL still appears in `.multica/project/resources.json` and in the agent's `## Repositories` section for reference — but the working tree the agent edits is your local one, not a worktree. On a daemon that has **no** `local_directory` row for this project (different machine, or before that teammate attached one), the task falls back to the usual `github_repo` worktree flow. Effectively the local directory is a per-daemon override of the worktree path.
+- **Two `local_directory` resources on the same project.** Because each `local_directory` is bound to exactly one daemon, this only happens across two different machines (the API rejects two on the same daemon at attach time, see above). Tasks are routed by the agent's runtime assignment, not by which daemon has a local directory: a task lands on the daemon that owns the receiving agent's runtime, that daemon picks the `local_directory` row matching its own ID, and ignores the rest. There is no load-balancing — if you want a specific machine to run a task, dispatch the agent that's bound to that machine's runtime.
+
+A daemon that has no `local_directory` row for a project that has one bound elsewhere is **not** blocked — its tasks simply proceed via the project's other resources (typically the `github_repo` fallback). The `local_directory` only matters for the daemon it's bound to.
+
+### Running tasks against a local directory
+
+When a task is dispatched on an issue whose project has a `local_directory` bound to the receiving daemon, the daemon:
+
+1. Re-validates the path (rules above).
+2. Acquires a per-directory lock keyed on the symlink-resolved real path — so two routes to the same folder (one via a symlink, one direct) still serialise.
+3. Writes the agent's `CLAUDE.md` / `AGENTS.md` (and `.multica/project/resources.json`) **into the user's directory**. The agent works there, just as if you'd opened the folder yourself.
+4. Keeps Multica's runtime artefacts (`output/`, `logs/`, `.gc_meta.json`) in a separate envRoot **outside** the user's directory.
+
+If a second task for the same directory arrives while the first is running, it parks with status **Waiting for local directory** (等待本地目录释放). The status is visible everywhere the task is — the chat task pill, the agent banner, the execution log, and the activity indicator — and the parked task counts toward the agent's "queued" presence. Cancelling the parked task releases its slot immediately; cancelling the running task lets the next one promote.
+
+The wait is not a timeout — a parked task stays parked until either the lock releases or the user / agent cancels it.
+
+### What Multica will and won't touch in your directory
+
+- **Will write** `CLAUDE.md` / `AGENTS.md` (or the equivalent for your agent's provider) and `.multica/project/resources.json` at the directory root, so the agent has its meta-skill and resource list. Add these to your `.gitignore` if you don't want them committed.
+- **Will write** whatever code edits the agent decides to make — exactly the same way as if you'd run the agent locally yourself.
+- **Will never physically delete** the directory or anything inside it. Garbage collection is path-aware: for `local_directory` envRoots it cleans only its own `output/` and `logs/` under `workspacesRoot`, and treats the user's directory as off-limits.
+
+### v1 limits (will tighten in follow-ups)
+
+The first release deliberately ships with sharper edges than `github_repo`. Expect this list to shrink over time — what's documented here is what's true today:
+
+- **No automatic branch switching.** The agent runs in whatever branch you have checked out. Switch branches before dispatching if it matters.
+- **No dirty-tree protection or auto-commit.** Uncommitted changes are visible to the agent, may be modified in place, and won't be stashed. Treat the directory as a real working tree and commit before risky runs.
+- **No automatic PR.** When the task ends, the changes sit on whatever branch they were made on — nothing is pushed and no PR is opened. Push and open the PR yourself when you're ready.
+- **`waiting_local_directory` shows status, not the holder.** The badge tells you the task is parked; it doesn't surface which task or which file path is currently holding the directory.
+
+These are tracked as the agent-task-lifecycle follow-up to the local-directory work; until that ships, treat `local_directory` as "the agent runs in your folder, the same way you would."
 
 ## Attaching repos at project creation
 

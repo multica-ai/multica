@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -8,6 +8,7 @@ import {
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
+  CalendarClock,
   Check,
   ChevronRight,
   Maximize2,
@@ -17,7 +18,8 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -29,7 +31,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
@@ -55,6 +57,17 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+
+function toDraftAttachment(attachment: Attachment): Attachment {
+  return {
+    ...attachment,
+    // `download_url` is minted for the current API response and may be a
+    // short-lived signed URL. Drafts survive across dialog closes and app
+    // restarts, so persist only durable fields and let render/download paths
+    // re-resolve through id/markdown_url when needed.
+    download_url: "",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -128,6 +141,11 @@ export function ManualCreatePanel({
     (data?.parent_issue_id as string) || undefined,
   );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
+  // Start date is a low-frequency field — by default it lives in the
+  // overflow ⋯ menu. Clicking the menu item flips this open, which both
+  // mounts the inline pill (the popover's anchor) AND opens the calendar.
+  // When the popover closes without a value set, the pill unmounts again.
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -140,13 +158,34 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // File upload — collect attachment IDs so we can link them after issue creation.
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const draftAttachments = draft.attachments ?? [];
+
+  // Prune draft attachments whose markdown reference was deleted in an
+  // earlier editing session. Runs once on mount: at that point the persisted
+  // description IS the draft body (no editor edits have happened yet), so
+  // dropping unreferenced records is safe. Don't prune on description updates
+  // — an onUpdate flush can race a just-finished upload whose markdown link
+  // hasn't been inserted yet, and pruning there would drop a live attachment.
+  useEffect(() => {
+    const { draft: current } = useIssueDraftStore.getState();
+    const attachments = current.attachments ?? [];
+    const kept = attachments.filter((a) =>
+      contentReferencesAttachment(current.description, a),
+    );
+    if (kept.length !== attachments.length) setDraft({ attachments: kept });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      const currentAttachments =
+        useIssueDraftStore.getState().draft.attachments ?? [];
+      const attachments = currentAttachments.some((a) => a.id === result.id)
+        ? currentAttachments
+        : [...currentAttachments, toDraftAttachment(result)];
+      setDraft({ attachments });
     }
     return result;
   };
@@ -173,7 +212,6 @@ export function ManualCreatePanel({
     setProjectId(undefined);
     setParentIssueId(undefined);
     setChildIssues([]);
-    setAttachmentIds([]);
     setDraft({
       title: "",
       description: "",
@@ -183,6 +221,7 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      attachments: [],
     });
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
@@ -192,16 +231,20 @@ export function ManualCreatePanel({
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
+      const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
+      const activeAttachmentIds = draftAttachments
+        .filter((a) => contentReferencesAttachment(description ?? "", a))
+        .map((a) => a.id);
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
-        description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
+        description,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
@@ -346,6 +389,10 @@ export function ManualCreatePanel({
   // Forward squad picks alongside agent picks so the agent panel honors
   // the actor the user already chose — otherwise a squad selection silently
   // falls back to the persisted actor / first visible agent on flip.
+  // parent_issue_id rides through the same carry channel: the modal opener
+  // (openCreateSubIssue) seeded it on the manual panel, and the agent panel
+  // needs it so the new issue is still created as a sub-issue when the user
+  // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
@@ -355,6 +402,14 @@ export function ManualCreatePanel({
     // duplicate content on every round-trip.
     setDraft({ title: "", description: "" });
     setLastMode("agent");
+    // Prefer the hydrated identifier from `parentIssue`, but fall back to the
+    // identifier the modal opener seeded on `data`. Without the fallback, a
+    // flip that happens before the issue detail query resolves drops the
+    // identifier and the agent chip renders as "Sub-issue of " with an empty
+    // tail. The UUID alone still wires the sub-issue relationship correctly;
+    // this only affects the display affordance.
+    const carryParentIdentifier =
+      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
     onSwitchMode?.({
       prompt,
       ...(assigneeId && assigneeType === "agent"
@@ -363,6 +418,8 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
+      ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
   };
 
@@ -409,6 +466,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={() => setIsExpanded(!isExpanded)}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
@@ -426,6 +484,7 @@ export function ManualCreatePanel({
                   <TooltipTrigger
                     render={
                       <button
+                        type="button"
                         onClick={onClose}
                         className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                       >
@@ -460,6 +519,7 @@ export function ManualCreatePanel({
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
                 debounceMs={500}
+                attachments={draftAttachments}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
@@ -494,14 +554,6 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Start date */}
-              <StartDatePicker
-                startDate={startDate}
-                onUpdate={(u) => updateStartDate(u.start_date ?? null)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
-
               {/* Due date */}
               <DueDatePicker
                 dueDate={dueDate}
@@ -517,6 +569,22 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {/* Start date — collapsed into the ⋯ menu by default since it's
+                  a low-frequency field. Renders inline only when the field
+                  has a value OR the user just opened it from the overflow
+                  menu (the picker's calendar popover needs the inline pill
+                  as its anchor). */}
+              {(startDate || startDatePickerOpen) && (
+                <StartDatePicker
+                  startDate={startDate}
+                  onUpdate={(u) => updateStartDate(u.start_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={startDatePickerOpen}
+                  onOpenChange={setStartDatePickerOpen}
+                />
+              )}
 
               {/* Parent chip — appears when parent is set.
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
@@ -579,6 +647,12 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
+                  {!startDate && (
+                    <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
+                      <CalendarClock className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_start_date)}
+                    </DropdownMenuItem>
+                  )}
                   {parentIssueId && parentIssue ? (
                     <DropdownMenuItem onClick={() => setParentPickerOpen(true)}>
                       <ArrowUp className="h-3.5 w-3.5" />
@@ -666,9 +740,18 @@ export function ManualCreatePanel({
                   />
                   {t(($) => $.create_issue.create_another)}
                 </label>
-                <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                </Button>
+                {!title.trim() ? (
+                  <TooltipProvider delay={200}>
+                    <Tooltip>
+                      <TooltipTrigger render={<span><Button size="sm" onClick={handleSubmit} disabled>{t(($) => $.create_issue.submit)}</Button></span>} />
+                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : (
+                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
+                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  </Button>
+                )}
               </div>
             </div>
           </>

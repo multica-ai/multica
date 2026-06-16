@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -154,7 +155,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
-	h.Analytics.Capture(analytics.TeamInviteSent(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteSent(
 		uuidToString(requester.UserID),
 		uuidToString(requester.WorkspaceID),
 		email,
@@ -426,32 +427,19 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accepting an invite is the physical event that "completes" onboarding for an
-	// invitee — atomic with CreateMember so the invariant
-	// "member row exists ↔ onboarded_at != null" cannot be violated.
-	// COALESCE in MarkUserOnboarded keeps this idempotent for users joining
+	// Accepting an invite marks the invitee as onboarded. The web /
+	// desktop workspace layout has a hard onboarded_at gate; without
+	// this mark, an invitee landing on their first workspace would be
+	// redirected back to /onboarding to fill out a questionnaire for a
+	// workspace someone else already set up. Atomic with CreateMember so
+	// `member` and `onboarded_at` can never disagree. COALESCE in
+	// MarkUserOnboarded keeps the call idempotent for users joining
 	// additional workspaces after their first.
 	firstOnboardingCompletion := !user.OnboardedAt.Valid
 	onboardedUser, err := qtx.MarkUserOnboarded(r.Context(), user.ID)
 	if err != nil {
+		slog.Warn("accept invitation: mark user onboarded failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
-		return
-	}
-
-	// Seed an install-runtime issue if the workspace has no runtime yet, so
-	// the invitee lands on a concrete next step rather than an empty list.
-	// claimStarterContentStateIfUnset keeps older desktop builds from showing
-	// the legacy import dialog (rendered when this column is NULL).
-	seededIssue, seededIssueCreated, err := ensureNoRuntimeOnboardingIssue(
-		r.Context(), qtx, accepted.WorkspaceID, user.ID, onboardedUser.Language,
-	)
-	if err != nil {
-		slog.Warn("accept invitation: ensure install-runtime issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
-		writeError(w, http.StatusInternalServerError, "failed to seed onboarding issue")
-		return
-	}
-	if err := claimStarterContentStateIfUnset(r.Context(), qtx, user.ID, onboardedUser.StarterContentState); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record starter content state")
 		return
 	}
 
@@ -478,21 +466,6 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		"member":        memberResp,
 	})
 
-	if seededIssueCreated {
-		prefix := h.getIssuePrefix(r.Context(), seededIssue.WorkspaceID)
-		issueResp := issueToResponse(seededIssue, prefix)
-		h.publish(protocol.EventIssueCreated, wsID, "member", userID, map[string]any{"issue": issueResp})
-		h.Analytics.Capture(analytics.IssueCreated(
-			userID,
-			wsID,
-			uuidToString(seededIssue.ID),
-			"",
-			"",
-			"",
-			analytics.SourceOnboarding,
-		))
-	}
-
 	// days_since_invite rounds down to whole days so the funnel segments
 	// "accepted same day" cleanly from "accepted later". inv.CreatedAt is
 	// the invitation row's insertion time so this is safe to compute here.
@@ -500,7 +473,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if inv.CreatedAt.Valid {
 		daysSinceInvite = int64(time.Since(inv.CreatedAt.Time).Hours() / 24)
 	}
-	h.Analytics.Capture(analytics.TeamInviteAccepted(
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteAccepted(
 		userID,
 		wsID,
 		daysSinceInvite,
@@ -510,7 +483,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		if onboardedUser.OnboardedAt.Valid {
 			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
 		}
-		h.Analytics.Capture(analytics.OnboardingCompleted(
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingCompleted(
 			userID,
 			wsID,
 			analytics.OnboardingPathInviteAccept,

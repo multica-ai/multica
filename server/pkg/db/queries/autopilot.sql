@@ -3,10 +3,35 @@
 -- =====================
 
 -- name: ListAutopilots :many
-SELECT * FROM autopilot
-WHERE workspace_id = $1
-  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
-ORDER BY created_at DESC;
+-- List rows carry three derived columns the list UI needs (trigger badges,
+-- next run, last-run outcome) so the page never has to N+1 into the detail
+-- endpoint. trigger_kinds/next_run_at only consider ENABLED triggers — the
+-- columns answer "how does this fire today", not "what is configured".
+-- last_run_status is COALESCEd to '' (never ran) because sqlc cannot infer
+-- nullability through a scalar subquery; the handler maps '' back to omitted.
+SELECT
+  sqlc.embed(a),
+  (
+    SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled
+  )::text[] AS trigger_kinds,
+  (
+    SELECT min(t.next_run_at)
+    FROM autopilot_trigger t
+    WHERE t.autopilot_id = a.id AND t.enabled AND t.kind = 'schedule'
+  )::timestamptz AS next_run_at,
+  COALESCE((
+    SELECT r.status
+    FROM autopilot_run r
+    WHERE r.autopilot_id = a.id
+    ORDER BY r.triggered_at DESC
+    LIMIT 1
+  ), '')::text AS last_run_status
+FROM autopilot a
+WHERE a.workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+ORDER BY a.created_at DESC;
 
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
@@ -18,23 +43,25 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
-    workspace_id, title, description, assignee_id,
-    status, execution_mode, issue_title_template,
+    workspace_id, title, description, assignee_type, assignee_id,
+    status, execution_mode, issue_title_template, project_id,
     created_by_type, created_by_id
 ) VALUES (
-    $1, $2, sqlc.narg('description'), $3,
-    $4, $5, sqlc.narg('issue_title_template'),
-    $6, $7
+    $1, $2, sqlc.narg('description'), $3, $4,
+    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
+    $7, $8
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
 UPDATE autopilot SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
+    assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
+    project_id = sqlc.narg('project_id'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -62,11 +89,12 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider
+    next_run_at, webhook_token, label, provider, event_filters
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
-    COALESCE(sqlc.narg('provider')::text, 'generic')
+    COALESCE(sqlc.narg('provider')::text, 'generic'),
+    sqlc.narg('event_filters')
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one
@@ -76,6 +104,7 @@ UPDATE autopilot_trigger SET
     timezone = COALESCE(sqlc.narg('timezone'), timezone),
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
+    event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -153,10 +182,15 @@ RETURNING *;
 -- =====================
 
 -- name: CreateAutopilotRun :one
+-- squad_id is an attribution hook: set to the assignee squad when the
+-- parent autopilot has assignee_type='squad', NULL otherwise. The executing
+-- agent_id on agent_task_queue still records who actually ran the work
+-- (the squad leader); squad_id lets reports group by squad without a join.
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
 ) VALUES (
-    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload')
+    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
+    sqlc.narg('squad_id')
 ) RETURNING *;
 
 -- name: GetAutopilotRun :one

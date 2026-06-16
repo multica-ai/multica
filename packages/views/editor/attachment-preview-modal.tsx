@@ -45,6 +45,7 @@ import {
 import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
@@ -56,7 +57,7 @@ import {
 } from "./utils/preview";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
-import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
+import { HtmlPreviewBody } from "./html-preview-body";
 import { CodeBlockStatic } from "./code-block-static";
 
 // ---------------------------------------------------------------------------
@@ -91,19 +92,33 @@ interface PreviewState {
   attachmentId: string | null;
 }
 
+function resolvePreviewMediaUrl(attachment: Attachment): string {
+  const raw =
+    attachment.download_url || attachment.markdown_url || attachment.url;
+  return resolvePublicFileUrl(raw) ?? raw;
+}
+
 function normalize(source: PreviewSource): PreviewState {
+  // Resolve any server-relative URL (e.g. `/api/attachments/{id}/download`
+  // returned by the unified-endpoint metadata path when no CloudFront
+  // signer is configured) against the configured API base. Web with the
+  // default empty base keeps the relative path and resolves it against
+  // the page origin — same behaviour as before this PR. Desktop renderer
+  // (loaded from `app://` / file: / dev-server origin) needs the absolute
+  // form so `<img src>` / `<iframe src>` / `<video src>` actually point at
+  // the API server instead of the shell origin.
   if (source.kind === "full") {
     return {
       filename: source.attachment.filename,
       contentType: source.attachment.content_type,
-      mediaUrl: source.attachment.download_url,
+      mediaUrl: resolvePreviewMediaUrl(source.attachment),
       attachmentId: source.attachment.id,
     };
   }
   return {
     filename: source.filename,
     contentType: "",
-    mediaUrl: source.url,
+    mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
     attachmentId: null,
   };
 }
@@ -352,7 +367,7 @@ function PreviewContent({
           <img
             src={state.mediaUrl}
             alt={state.filename}
-            className="max-h-full max-w-full rounded-lg object-contain"
+            className="h-full w-full rounded-lg object-contain"
           />
         </div>
       );
@@ -370,7 +385,7 @@ function PreviewContent({
           <video
             src={state.mediaUrl}
             controls
-            className="max-h-full max-w-full"
+            className="h-full w-full object-contain"
           />
         </div>
       );
@@ -400,16 +415,11 @@ function PreviewContent({
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
           render={(text) => (
-            <iframe
-              srcDoc={withFragmentNavShim(text)}
-              // `allow-scripts` without `allow-same-origin` — scripts run
-              // in an opaque origin and cannot read cookies / localStorage
-              // / parent state, nor escape via top-nav / popups / forms.
-              // Required so JS-driven charts (echarts / Plotly / vanilla
-              // SVG injection) render instead of showing a blank `<svg>`.
-              sandbox="allow-scripts"
-              className="h-full w-full bg-background"
+            <HtmlPreviewBody
+              source={{ kind: "inline", html: text }}
               title={state.filename}
+              className="h-full w-full"
+              iframeClassName="rounded-none border-0"
             />
           )}
         />

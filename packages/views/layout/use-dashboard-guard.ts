@@ -22,15 +22,22 @@ import { useNavigation } from "../navigation";
  *  - Not logged in → /login
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
  *  - Logged in but URL slug doesn't resolve to any workspace →
- *    `resolvePostAuthDestination(list, hasOnboarded)`:
- *      • un-onboarded → /onboarding
- *      • onboarded with workspaces → first workspace
- *      • onboarded with zero workspaces → /workspaces/new
+ *    `resolvePostAuthDestination(list, hasOnboarded)` (workspace-presence first;
+ *    see paths/resolve.ts for the full table)
  *
- * The "un-onboarded but in workspace" state is now physically impossible:
- * CreateWorkspace and AcceptInvitation both atomically set `onboarded_at`
- * inside the same transaction that inserts the `member` row.
- * Existing dirty rows from PR #1868 are cleaned by migration 065.
+ * The "un-onboarded but in workspace" state IS valid now — it's the
+ * mid-flow window between "user picked a runtime on the onboarding screen
+ * and got dropped into the workspace" and "user picked a starter prompt in
+ * the workspace OnboardingHelperModal, which fires BootstrapOnboardingRuntime
+ * and marks onboarded". This guard deliberately does NOT redirect that
+ * state out: it only redirects when the URL slug doesn't resolve,
+ * regardless of onboarded. The blocking modal inside the workspace shell
+ * handles completion.
+ *
+ * (Older comment claimed this state was physically impossible because
+ * CreateWorkspace and AcceptInvitation atomically marked onboarded.
+ * CreateWorkspace no longer marks; AcceptInvitation still does — invitees
+ * skip the modal entirely.)
  *
  * We read the workspace list query state directly (rather than relying on
  * useCurrentWorkspace's null return) so we can distinguish "list loading"

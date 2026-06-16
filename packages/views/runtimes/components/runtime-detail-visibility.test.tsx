@@ -22,7 +22,10 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
+    deleteRuntime: vi.fn(),
+    archiveAgentsAndDeleteRuntime: vi.fn(),
   },
+  ApiError: class ApiError extends Error {},
 }));
 
 vi.mock("sonner", () => ({
@@ -80,7 +83,12 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     },
     isPending: false,
   }),
-  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
+  useArchiveAgentsAndDeleteRuntime: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+    mutateAsync: vi.fn(),
+  }),
 }));
 
 // Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in
@@ -94,7 +102,10 @@ vi.mock("../../agents/presence", () => ({
   workloadConfig: { idle: { icon: () => null, textClass: "" } },
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("../../navigation", () => ({ AppLink: () => null }));
+vi.mock("../../navigation", () => ({
+  AppLink: () => null,
+  useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
+}));
 
 import { RuntimeDetail } from "./runtime-detail";
 
@@ -112,7 +123,6 @@ function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
     metadata: {},
     owner_id: "user-me",
     visibility: "private",
-    timezone: "UTC",
     last_seen_at: "2026-04-27T11:59:50Z",
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

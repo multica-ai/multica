@@ -17,8 +17,10 @@ import (
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format": blockedWithValue, // json output format for daemon communication
-	"--dir":    blockedWithValue, // task workdir anchor for skill / AGENTS.md discovery
+	"--format":                       blockedWithValue,  // json output format for daemon communication
+	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
+	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -45,12 +47,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	execPath = resolved
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
-	args := []string{"run", "--format", "json"}
+	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
 	// back to PWD (inherited from the daemon process) or process.cwd(), which
@@ -65,6 +64,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
 	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
@@ -87,8 +89,13 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 
 	env := buildEnv(b.cfg.Env)
-	// Auto-approve all tool use in daemon mode.
-	env = append(env, `OPENCODE_PERMISSION={"*":"allow"}`)
+	// Keep daemon-mode runs non-interactive without relying on
+	// OPENCODE_PERMISSION. OpenCode deep-merges that env override into user
+	// config while preserving existing key order, so a pre-existing
+	// permission.question key can be followed by a wildcard allow and bypass
+	// the intended question deny. Current OpenCode run sessions inject their
+	// own question/plan deny rules after agent config; this flag only answers
+	// prompts that survive those explicit denies.
 	// Override PWD so the child OpenCode process resolves its discovery root
 	// to the task workdir. cmd.Dir alone is not enough: OpenCode reads PWD
 	// (inherited from the parent daemon) before falling back to process.cwd()
@@ -96,6 +103,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// See packages/opencode/src/cli/cmd/run.ts in the upstream source.
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
+	}
+	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// OpenCode's general inline-config injection mechanism that merges at
+	// "local" scope (after the project-config loop, before remote / managed
+	// configs). MCP is the only field we currently project there; if a
+	// future Multica field needs the same channel it would assemble a
+	// combined OpenCode config slice before the env append.
+	//
+	// This deliberately leaves <workdir>/opencode.json untouched — the
+	// workdir is reused across turns for the same (agent, issue), and any
+	// agent- or user-written model / tools / permission settings in it must
+	// survive across runs.
+	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if mcpContent != "" {
+		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+		}
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
 	}
 	cmd.Env = env
 
