@@ -90,9 +90,14 @@ func validateLabelName(raw string) (string, error) {
 	if len(name) > maxLabelNameLen {
 		return "", errors.New("name must be 32 characters or fewer")
 	}
-	// TODO(labels): consider restricting to a charset that excludes newlines,
-	// tabs, and control characters. Emoji are left allowed — users can pick
-	// `🐛 bug` if they want. Tracked as a follow-up so we don't gate this PR.
+	// Newlines corrupt single-line rendering (label chips, dropdowns) and open
+	// a log/CSV injection vector, so reject them outright. Tabs and other
+	// control characters are still a follow-up; emoji are allowed — users can
+	// pick `🐛 bug` if they want. TrimSpace already strips leading/trailing
+	// newlines, so this only fires on a newline embedded in the stored value.
+	if strings.ContainsAny(name, "\n\r") {
+		return "", errors.New("name must not contain newline characters")
+	}
 	return name, nil
 }
 
