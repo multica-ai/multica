@@ -202,10 +202,12 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
                   }
                 />
                 <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuLabel>Recurring</DropdownMenuLabel>
-                  <DropdownMenuItem onClick={() => setShowRecurring(true)}>
-                    <Repeat className="size-4" /> Start or edit recurring…
-                  </DropdownMenuItem>
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Recurring</DropdownMenuLabel>
+                    <DropdownMenuItem onClick={() => setShowRecurring(true)}>
+                      <Repeat className="size-4" /> Start or edit recurring…
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
