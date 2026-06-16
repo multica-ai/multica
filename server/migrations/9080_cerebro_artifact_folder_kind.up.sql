@@ -12,6 +12,10 @@ ALTER TABLE artifact_folder
 -- part of the key.
 ALTER TABLE artifact_folder
     DROP CONSTRAINT IF EXISTS artifact_folder_workspace_id_parent_id_name_key;
+-- Postgres has no ADD CONSTRAINT IF NOT EXISTS, so drop the new constraint
+-- first to keep this migration idempotent (re-runnable without error).
+ALTER TABLE artifact_folder
+    DROP CONSTRAINT IF EXISTS artifact_folder_ws_kind_parent_name_key;
 ALTER TABLE artifact_folder
     ADD CONSTRAINT artifact_folder_ws_kind_parent_name_key
     UNIQUE (workspace_id, kind, parent_id, name);
