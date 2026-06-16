@@ -1,46 +1,72 @@
 {
-  "_comment": "Eval task suite (6 tasks). FINALISE after running probe_graph.py: rewrite each task so its best answer genuinely depends on facts the real Marketing graph holds, and fill graph_facts_expected with the ground-truth facts the judge will score grounding against. Keep task #6 graph-irrelevant (control: expect ~0 lift; guards against judge bias toward the WITH arm). status 'todo' (not backlog) so the issue auto-enqueues to the assigned agent.",
+  "_comment": "FINALISED 2026-06-16 against the real NodeOps Marketing graph (BRAND.md v1.1, BRAND-SURFACE-GATES.md, CreateOS positioning docs). Each task's best answer depends on facts only the graph holds — chiefly the CreateOS one-liners, the 'execution layer' (not 'orchestration') positioning, the createos.sh domain, and the hard NodeOps contamination ban. graph_facts_expected is the judge's grounding key (the agent never sees it). Task t6 is a graph-irrelevant control (expect ~0 lift; guards against judge bias toward the WITH arm). status 'todo' so the issue auto-enqueues to the assigned agent. The agent must RECALL these facts from Eidetix in the WITH arm; the WITHOUT arm has to guess and will typically use 'orchestration', mention NodeOps, or use the old domain.",
   "status": "todo",
   "tasks": [
     {
-      "id": "t1-launch-announcement",
-      "title": "[eval] Draft a launch announcement for our newest feature",
-      "description": "Write a short launch announcement (tweet + 1 short paragraph) for our newest product feature, in our established brand voice. Use our actual positioning and tone.",
+      "id": "t1-createos-launch-oneliner",
+      "title": "[eval] CreateOS launch post for createos.sh (B2B root)",
+      "description": "Write a short launch post (one headline + 2-3 sentences) announcing CreateOS for the createos.sh B2B homepage audience. Use our canonical positioning and voice. Include the product URL.",
       "graph_relevant": true,
-      "graph_facts_expected": ["<brand voice/tone facts from the graph>", "<current product positioning>"]
+      "graph_facts_expected": [
+        "B2B root one-liner is exactly: 'The unified execution layer for AI.'",
+        "Positioning noun is 'execution layer' (CreateOS), NEVER 'orchestration layer' (that is NodeOps).",
+        "Key differentiator is 'in production' (vs code-gen surfaces).",
+        "Canonical domain is createos.sh (not nodeops.network/createos or createos.nodeops.network).",
+        "Voice = CreateOS/Naman founder voice: humble, transparent, ships fast; no hype-buzzword soup.",
+        "MUST NOT contain any banned NodeOps term: NodeOps, 'orchestration layer', DePIN, decentralized compute, $NODE, AVS, restaking, slashing, NodeWatcher, NodeScore, 'NodeOps Network', 'NodeOps Console', 'built on NodeOps', 'vertically integrated'."
+      ]
     },
     {
-      "id": "t2-audience-positioning",
-      "title": "[eval] Positioning copy for our primary audience",
-      "description": "Write 3 positioning statements aimed at our primary target audience/persona. Reflect what we know about who they are and what they care about.",
+      "id": "t2-app-b2c-announcement",
+      "title": "[eval] createos.sh/app announcement (B2C hook + sub-line)",
+      "description": "Write a short announcement for the createos.sh/app (B2C) surface aimed at builders shipping AI apps and agents. Lead with our hook and supporting line.",
       "graph_relevant": true,
-      "graph_facts_expected": ["<primary persona facts>", "<value props that resonate with them>"]
+      "graph_facts_expected": [
+        "B2C hook is exactly: 'AI apps and agents in production.'",
+        "B2C sub-line is exactly: 'Build, run, scale, and monetize. One place.'",
+        "Surface is createos.sh/app.",
+        "MUST NOT use the B2B root line here, the NodeOps one-liner, or any banned NodeOps term."
+      ]
     },
     {
-      "id": "t3-campaign-brief",
-      "title": "[eval] Campaign brief consistent with prior decisions",
-      "description": "Propose a one-page campaign brief for an upcoming initiative. It must be consistent with prior campaign decisions and learnings we have already made.",
+      "id": "t3-rewrite-contaminated",
+      "title": "[eval] Fix this CreateOS blurb before it ships",
+      "description": "This blurb is queued to publish on createos.sh. Rewrite it so it is correct and on-brand: 'CreateOS is the unified execution layer for AI, built on NodeOps orchestration and our DePIN node network ($NODE-secured), giving you the full lifecycle of decentralized compute.' Keep it punchy.",
       "graph_relevant": true,
-      "graph_facts_expected": ["<prior campaign decisions/outcomes>", "<channels/approaches we settled on>"]
+      "graph_facts_expected": [
+        "This is the canonical contamination anti-pattern: 'unified execution layer for AI, built on NodeOps orchestration' must be removed.",
+        "Correct output strips ALL NodeOps surface language: 'built on NodeOps orchestration', 'DePIN', 'node network', '$NODE', 'decentralized compute'.",
+        "CreateOS stands alone; the one-liner 'The unified execution layer for AI.' needs no 'built on NodeOps' qualifier.",
+        "'full lifecycle' for CreateOS = discovery, deployment, scaling, monitoring, billing (NOT 'full lifecycle of decentralized compute').",
+        "A correct rewrite contains zero banned NodeOps terms."
+      ]
     },
     {
-      "id": "t4-rewrite-offbrand",
-      "title": "[eval] Rewrite an off-brand draft to match guidelines",
-      "description": "Here is a draft that does not match our guidelines: 'Hey!!! Our thing is the BEST thing ever, buy now!!!'. Rewrite it to match our brand voice and messaging standards.",
+      "id": "t4-full-lifecycle-explainer",
+      "title": "[eval] Short explainer: what 'full lifecycle' means on CreateOS",
+      "description": "Write a 3-4 sentence explainer for a feature page describing what CreateOS covers across the 'full lifecycle'. Be concrete about the stages.",
       "graph_relevant": true,
-      "graph_facts_expected": ["<brand voice/tone rules>", "<messaging do/don't from the graph>"]
+      "graph_facts_expected": [
+        "CreateOS 'full lifecycle' = five stages: discovery, deployment, scaling, monitoring, billing.",
+        "Frame CreateOS as the 'execution layer' that takes things 'in production'.",
+        "MUST NOT frame it as 'full lifecycle of decentralized compute' or use any NodeOps/DePIN term."
+      ]
     },
     {
-      "id": "t5-competitor-diff",
-      "title": "[eval] Differentiation vs a named competitor",
-      "description": "Write a short, accurate differentiation statement versus our main competitor. Only claim differences we actually stand behind.",
+      "id": "t5-diff-vs-codegen",
+      "title": "[eval] How CreateOS differs from code-gen tools (e.g. Replit)",
+      "description": "Write a short, accurate differentiation paragraph contrasting CreateOS with code-generation / app-builder tools like Replit. Only claim differences we actually stand behind.",
       "graph_relevant": true,
-      "graph_facts_expected": ["<competitor facts>", "<our real differentiators>"]
+      "graph_facts_expected": [
+        "Core differentiator vs code-gen surfaces is 'in production' — CreateOS runs/scales/monetizes apps, not just generates code.",
+        "CreateOS is the 'unified execution layer'; positioning noun 'execution layer'.",
+        "Stay on createos.sh framing; no NodeOps/orchestration/DePIN terms."
+      ]
     },
     {
       "id": "t6-control-generic",
-      "title": "[eval][control] Generic marketing best-practices checklist",
-      "description": "List 5 generally-accepted best practices for writing a clear product announcement. This is generic knowledge not specific to our team.",
+      "title": "[eval][control] Generic product-announcement best practices",
+      "description": "List 5 generally-accepted best practices for writing a clear B2B product announcement. This is generic marketing knowledge, not specific to our team.",
       "graph_relevant": false,
       "graph_facts_expected": []
     }

@@ -29,15 +29,25 @@ Counterbalance arm order and interleave runs so model/endpoint drift averages
 out. Pre-register the task suite + judge rubric before any run (no post-hoc
 task selection).
 
-## GATE A — graph must be populated (blocking)
+## GATE A — graph must be populated → PASSED (2026-06-16)
 
-The eval is invalid if `recall`/`search` on the real Marketing graph return
-little. Run `evals/eidetix/probe_graph.py` with the Marketing token first.
-- **POPULATED** → proceed; the probe output also seeds the task suite (build
-  tasks around the facts the graph actually holds).
-- **SPARSE/EMPTY** → stop. Either ingest team knowledge into the graph first,
-  or the "real graph" decision must change. Running real agents against an
-  empty graph burns money to measure nothing.
+Confirmed populated: the Marketing graph holds ~150 NodeOps/CreateOS marketing
+documents (inventory shared by the team; spot-read via the Notion source).
+Anchor docs verified: `BRAND.md v1.1`, `BRAND-SURFACE-GATES.md` (the NodeOps
+contamination ban), CreateOS positioning one-pagers/fact-sheets, `personas.md`,
+`competitors.md`, the 8-phase launch playbook, per-channel platform playbooks.
+
+The task suite (`tasks.json`) is finalised against real, objectively-gradeable
+facts from these docs — chiefly the canonical CreateOS one-liners, the
+"execution layer" (not "orchestration") positioning, the `createos.sh` domain,
+and the hard banned-term list (NodeOps, DePIN, $NODE, orchestration, …). These
+are high-contrast: an unaided agent typically reaches for "orchestration",
+mentions NodeOps, or uses the old domain, while a graph-aided agent complies —
+so the WITH/WITHOUT signal is sharp and checkable.
+
+`evals/eidetix/probe_graph.py` remains a pre-run sanity check: run it once with
+the real token to confirm `recall` actually surfaces these facts before
+spending the agent budget.
 
 ## Task suite
 
@@ -134,6 +144,18 @@ Alternative: deploy the branch to a CreateOS preview env and point the existing
 - Pre-registered task suite + rubric.
 - At least one graph-irrelevant control task (expect ~0 lift) to detect judge
   bias toward the WITH arm.
+
+## Partner constraints (confirmed by Eidetix team, 2026-06-15)
+
+- **Token scope:** the Marketing token supports all 8 MCP tools (read + write) — the loop's `get_schema`/`ingest_traces` path is authorised.
+- **Endpoint/transport:** `https://eidetix.nodeops.xyz/mcp/sse` + `Authorization: Bearer <token>` (matches the integration).
+- **No rate limits.** **Concurrency cap = 4.** Latency target < 1s/request.
+- Eval impact: the runner is **serial** (one agent in flight), so it never approaches the cap. Benign for the eval.
+- **Production impact (note, not an eval issue):** per-project binding means every agent on a marketing project shares one token → one graph. With >4 marketing agents running concurrently, the 5th+ concurrent Eidetix session hits the cap. Fail-open means no task breaks — those agents just proceed without shared memory for that call. If the team routinely runs >4 concurrent marketing agents, revisit (client-side queueing / a higher cap) post-v0.
+
+## Still pending from the Eidetix team
+- **Graph inventory** (documents / entities / topics) — needed to finalise the task suite and the grounding key. (GATE A: also confirms the graph is populated.)
+- **Trace schema** (`get_schema` output + `ingest_traces` shape) — to verify the write path; team is adding it to the doc.
 
 ## Open asks (gates before execution)
 
