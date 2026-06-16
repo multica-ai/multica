@@ -66,6 +66,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
     queryFn: () => Promise.resolve([]),
   }),
+  squadListOptions: () => ({
+    queryKey: ["workspaces", "ws-1", "squads"],
+    queryFn: () => Promise.resolve([]),
+  }),
   assigneeFrequencyOptions: () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
@@ -113,11 +117,19 @@ vi.mock("../../editor", () => ({
   // real API singleton; tests that care about download wiring should write
   // dedicated specs against `use-download-attachment.test.tsx`.
   useDownloadAttachment: () => vi.fn(),
+  // Inert preview hook — comment-card's AttachmentList uses it to gate the
+  // Eye button. Dedicated coverage lives in attachment-preview-modal.test.tsx.
+  useAttachmentPreview: () => ({
+    open: vi.fn(),
+    tryOpen: () => false,
+    modal: null,
+  }),
+  isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -138,6 +150,7 @@ vi.mock("../../editor", () => ({
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
+        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
       />
     );
   }),
@@ -207,6 +220,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
+  getProject: vi.fn(),
+  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -287,17 +302,50 @@ vi.mock("@multica/core/issues/stores", () => ({
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would
 // compute a 0-height viewport and render nothing. The mock renders every item
-// inline, which matches how the unvirtualized .map used to behave and keeps
-// existing assertions (`getByText('Started working on this')` etc.) working.
+// inline so id="comment-..." nodes are always present in the DOM — this
+// matches the production cold-path where `initialItemCount` force-mounts
+// items[0..targetIdx], giving the deep-link effect a real target node.
+//
+// scrollIntoViewSpy: the deep-link effect no longer calls native
+// scrollIntoView (it drives the timeline container's scrollTop directly to
+// avoid scrolling ancestor overflow:hidden boxes — see issue-detail.tsx). We
+// keep a no-op stub on the prototype so any stray scrollIntoView call from
+// other components doesn't throw; deep-link tests assert the highlight ring
+// instead, which is mechanism-independent and observable without layout.
+const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
+
 vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown }) => (
-    <div data-testid="virtuoso-mock">
-      {data.map((item, i) => (
-        <div key={i}>{itemContent(i, item) as React.ReactElement}</div>
-      ))}
-    </div>
-  ),
+  Virtuoso: forwardRef(function MockVirtuoso(
+    { data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
+    ref: any,
+  ) {
+    useImperativeHandle(ref, () => ({
+      // Real Virtuoso ref methods are not exercised by tests in this file
+      // since the deep-link cold-path drives the container's scrollTop on the
+      // real DOM node, not Virtuoso's imperative API.
+      scrollIntoView: vi.fn(),
+      scrollToIndex: vi.fn(),
+    }));
+    return (
+      <div data-testid="virtuoso-mock">
+        {data.map((item, i) => (
+          <div key={i}>{itemContent(i, item) as React.ReactElement}</div>
+        ))}
+      </div>
+    );
+  }),
 }));
+
+// jsdom's HTMLElement.prototype.scrollIntoView is a no-op stub; replace it
+// with a spy so the deep-link effect's call can be observed.
+beforeEach(() => {
+  scrollIntoViewSpy.mockClear();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    writable: true,
+    value: scrollIntoViewSpy,
+  });
+});
 
 // Mock modals
 vi.mock("@multica/core/modals", () => ({
@@ -305,11 +353,6 @@ vi.mock("@multica/core/modals", () => ({
     () => ({ open: vi.fn() }),
     { getState: () => ({ open: vi.fn() }) },
   ),
-}));
-
-// Mock core/utils
-vi.mock("@multica/core/utils", () => ({
-  timeAgo: () => "1d ago",
 }));
 
 // Mock core/hooks/use-file-upload
@@ -360,7 +403,9 @@ const mockIssue: Issue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  start_date: null,
   due_date: "2026-06-01T00:00:00Z",
+  metadata: {},
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -466,6 +511,9 @@ describe("IssueDetail (shared)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+    // Reset project mock — individual tests override per case. Default fixture
+    // has project_id: null so getProject is not invoked.
+    mockApiObj.getProject.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -488,30 +536,117 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
 
-  it("renders workspace name as breadcrumb link", async () => {
+  it("opts the description editor into the unmount flush", async () => {
+    // Closing the issue modal must save the description the user last saw —
+    // ContentEditor drops pending debounced updates on unmount by default
+    // (so cancelled comment drafts aren't resurrected), and only this
+    // explicit opt-in keeps a paste-then-close from losing the image
+    // markdown and its attachment_ids bind (MUL-3254). The flush behavior
+    // itself is covered in content-editor.test.tsx; this pins the wiring.
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByText("Test WS")).toBeInTheDocument();
-    });
-
-    const wsLink = screen.getByText("Test WS");
-    // After the URL-driven workspace refactor, issue paths are scoped under
-    // /<workspaceSlug>/issues.
-    expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
+    const description = await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(description).toHaveAttribute("data-flush-on-unmount", "true");
   });
 
-  it("renders properties sidebar with status, priority, assignee, due date", async () => {
+  it("renders the issue title leaf as a link to the issue detail page", async () => {
+    renderIssueDetail();
+
+    // The breadcrumb leaf is the whole "identifier + title" string wrapped in a
+    // single link to the issue's own detail route (used to open the full page
+    // from the inline Inbox pane). A bare issue has no ancestor crumbs.
+    const leaf = await screen.findByText("TES-1 Implement authentication");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+  });
+
+  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
+    // Default fixture has project_id: null.
+    renderIssueDetail();
+
+    // Leaf renders once loaded; a bare issue has no ancestor crumbs at all.
+    await screen.findByText("TES-1 Implement authentication");
+
+    // Project is never fetched and no project crumb appears.
+    expect(mockApiObj.getProject).not.toHaveBeenCalled();
+    expect(screen.queryByText("Marketing site refresh")).not.toBeInTheDocument();
+  });
+
+  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "p-1",
+      workspace_id: "ws-1",
+      title: "Marketing site refresh",
+      description: null,
+      icon: "🚀",
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+
+    renderIssueDetail();
+
+    const projectLink = await screen.findByText("Marketing site refresh");
+    // The whole project segment is a single AppLink pointing at the project
+    // detail route under the active workspace slug.
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+  });
+
+  it("renders properties sidebar with all core rows plus set optional rows", async () => {
     renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getByText("Properties")).toBeInTheDocument();
     });
 
+    // Core rows — always rendered regardless of whether the issue has a value.
     expect(screen.getByText("Status")).toBeInTheDocument();
-    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Assignee")).toBeInTheDocument();
+    // "Project" appears twice (row label + picker stub), so disambiguate by id.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // priority="high" + due_date are set in the fixture, so both optional rows show.
+    expect(screen.getByText("Priority")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
+    // No labels are attached in the fixture — the Labels optional row
+    // must stay hidden by default.
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Parent issue lives in its own section and only renders when the
+    // issue actually has a parent — the fixture has none.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    // The "+ Add property" affordance is always offered while any
+    // optional field is still hidden.
+    expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("hides every optional property row when none are set", async () => {
+    // Override the default fixture: nothing optional set.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      priority: "none",
+      start_date: null,
+      due_date: null,
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Properties")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Priority")).not.toBeInTheDocument();
+    expect(screen.queryByText("Due date")).not.toBeInTheDocument();
+    expect(screen.queryByText("Labels")).not.toBeInTheDocument();
+    // Project stays as a core row regardless of value.
+    expect(screen.getByTestId("project-picker")).toBeInTheDocument();
+    // No parent → no standalone Parent issue section either.
+    expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();
+    expect(screen.getByText("Add property")).toBeInTheDocument();
   });
 
   it("uses a non-resizable layout with the sidebar sheet closed by default on mobile", async () => {
@@ -525,6 +660,69 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
+    // Metadata is agent-facing; the sidebar only exposes a button that opens
+    // the raw JSON on demand. Keys are NOT rendered inline anywhere.
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      // Trigger label includes a "· N" count so users can see payload size
+      // before clicking — accept any count via regex.
+      expect(screen.getByRole("button", { name: /^Metadata\b/ })).toBeInTheDocument();
+    });
+
+    // Key names are not rendered in the sidebar prior to opening the dialog.
+    expect(screen.queryByText("pr_url")).not.toBeInTheDocument();
+    expect(screen.queryByText("pipeline_status")).not.toBeInTheDocument();
+  });
+
+  it("opens a dialog with formatted JSON when the Metadata button is clicked", async () => {
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      metadata: {
+        pr_url: "https://example.com/pr/1",
+        pipeline_status: "running",
+      },
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", { name: /^Metadata\b/ });
+    fireEvent.click(button);
+
+    // The dialog renders a <pre> containing the formatted JSON; checking the
+    // exact serialized payload also verifies the indent / structure.
+    const expected = JSON.stringify(
+      { pr_url: "https://example.com/pr/1", pipeline_status: "running" },
+      null,
+      2,
+    );
+    await waitFor(() => {
+      const pre = document.querySelector("pre");
+      expect(pre).not.toBeNull();
+      expect(pre!.textContent).toBe(expected);
+    });
+  });
+
+  it("hides the Metadata button entirely when the bag is empty", async () => {
+    // Default fixture already has metadata: {}, asserted explicitly here.
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Details")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
   });
 
   it("renders Details section with Created by and dates", async () => {
@@ -579,42 +777,238 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
-  describe("highlightCommentId scroll-to-comment", () => {
-    let scrollIntoViewSpy: ReturnType<typeof vi.fn>;
+  it("collapses non-trailing activity blocks and expands the last one by default", async () => {
+    // Timeline shape:
+    //   [activities: status_changed, priority_changed] ← block A (older)
+    //   [comment-1]
+    //   [activities: due_date_changed]                  ← block B (latest)
+    // Block A should be collapsed; block B should be expanded.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "in_progress" },
+        created_at: "2026-01-16T00:00:00Z",
+      },
+      {
+        type: "activity",
+        id: "act-2",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "priority_changed",
+        details: { from: "low", to: "high" },
+        created_at: "2026-01-16T01:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Talking it through",
+        parent_id: null,
+        created_at: "2026-01-17T00:00:00Z",
+        updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+      },
+      {
+        type: "activity",
+        id: "act-3",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "due_date_changed",
+        details: { to: "2026-02-01T00:00:00Z" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
 
-    beforeEach(() => {
-      scrollIntoViewSpy = vi.fn();
-      Element.prototype.scrollIntoView =
-        scrollIntoViewSpy as unknown as Element["scrollIntoView"];
+    renderIssueDetail();
+
+    // Latest block (single activity) is expanded — its rendered text is visible.
+    await waitFor(() => {
+      expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
     });
 
+    // Older block is collapsed: shows the summary, hides the individual entries.
+    expect(screen.getByText("2 activities")).toBeInTheDocument();
+    expect(screen.queryByText(/changed status/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/changed priority/i)).not.toBeInTheDocument();
+
+    // Clicking the summary expands the older block.
+    fireEvent.click(screen.getByText("2 activities"));
+    await waitFor(() => {
+      expect(screen.getByText(/changed status/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
+  });
+
+  it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
+    // 10 activities, all in the trailing block (no comment after them, so it's
+    // the trailing block by definition). Alternating action types so the
+    // 2-minute coalesce window never merges consecutive entries — we end up
+    // with 10 distinct rows.
+    const trailingBlock: TimelineEntry[] = [
+      { type: "activity", id: "act-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+      { type: "activity", id: "act-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "medium" }, created_at: "2026-01-18T00:01:00Z" },
+      { type: "activity", id: "act-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:02:00Z" },
+      { type: "activity", id: "act-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "medium", to: "high" }, created_at: "2026-01-18T00:03:00Z" },
+      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:04:00Z" },
+      { type: "activity", id: "act-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-18T00:05:00Z" },
+      { type: "activity", id: "act-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-18T00:06:00Z" },
+      { type: "activity", id: "act-8", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-18T00:07:00Z" },
+      { type: "activity", id: "act-9", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "blocked", to: "todo" }, created_at: "2026-01-18T00:08:00Z" },
+      { type: "activity", id: "act-10", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:09:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(trailingBlock);
+
+    renderIssueDetail();
+
+    // In the truncated default state the "N activities" collapse header
+    // stays hidden — the "Show N more" link is the only control we want
+    // to expose for a glance at recent activity.
+    await waitFor(() => {
+      expect(screen.getByText("Show 2 more activities")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("10 activities")).not.toBeInTheDocument();
+
+    // Only the 8 most recent entries (act-3..act-10) are rendered by default.
+    // act-1 and act-2 are folded behind the show-more line.
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument(); // act-3
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument(); // act-10
+    expect(screen.queryByText(/from Todo to In Progress/i)).not.toBeInTheDocument(); // act-1
+    expect(screen.queryByText(/from Low to Medium/i)).not.toBeInTheDocument(); // act-2
+
+    // Clicking the toggle reveals the older entries in place and brings the
+    // full "N activities" header back (so the user can fold the block).
+    fireEvent.click(screen.getByText("Show 2 more activities"));
+    await waitFor(() => {
+      expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    expect(screen.getByText("10 activities")).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
+  it("does not show the show-more toggle when the trailing block has 8 or fewer entries", async () => {
+    const trailingBlock: TimelineEntry[] = [
+      { type: "activity", id: "act-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
+      { type: "activity", id: "act-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "high" }, created_at: "2026-01-18T00:01:00Z" },
+      { type: "activity", id: "act-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:02:00Z" },
+      { type: "activity", id: "act-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-18T00:03:00Z" },
+      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:04:00Z" },
+      { type: "activity", id: "act-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-18T00:05:00Z" },
+      { type: "activity", id: "act-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-18T00:06:00Z" },
+      { type: "activity", id: "act-8", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:07:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(trailingBlock);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("8 activities")).toBeInTheDocument();
+    });
+    // Every one of the 8 entries should be visible — the trailing block fits
+    // exactly within the limit, so no "Show N more activities" line appears.
+    expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Low to High/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
+  it("expanding a non-trailing block shows every entry — only the trailing block truncates older ones", async () => {
+    // Non-trailing block (10 activities) + comment + trailing block (1 activity).
+    // Manually expanding the older block must reveal all 10 entries — the
+    // truncate-to-8 rule applies only to the trailing block.
+    const timeline: TimelineEntry[] = [
+      { type: "activity", id: "old-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "backlog", to: "todo" }, created_at: "2026-01-16T00:00:00Z" },
+      { type: "activity", id: "old-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "none", to: "low" }, created_at: "2026-01-16T00:01:00Z" },
+      { type: "activity", id: "old-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-16T00:02:00Z" },
+      { type: "activity", id: "old-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "medium" }, created_at: "2026-01-16T00:03:00Z" },
+      { type: "activity", id: "old-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-16T00:04:00Z" },
+      { type: "activity", id: "old-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "medium", to: "high" }, created_at: "2026-01-16T00:05:00Z" },
+      { type: "activity", id: "old-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-16T00:06:00Z" },
+      { type: "activity", id: "old-8", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-16T00:07:00Z" },
+      { type: "activity", id: "old-9", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-16T00:08:00Z" },
+      { type: "activity", id: "old-10", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-16T00:09:00Z" },
+      {
+        type: "comment", id: "comment-mid", actor_type: "member", actor_id: "user-1",
+        content: "Splitting the blocks", parent_id: null,
+        created_at: "2026-01-17T00:00:00Z", updated_at: "2026-01-17T00:00:00Z",
+        comment_type: "comment",
+      },
+      { type: "activity", id: "last-1", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:00:00Z" },
+    ] as TimelineEntry[];
+    mockApiObj.listTimeline.mockResolvedValue(timeline);
+
+    renderIssueDetail();
+
+    // The older block defaults to collapsed; its summary reports 10.
+    await waitFor(() => {
+      expect(screen.getByText("10 activities")).toBeInTheDocument();
+    });
+    // None of the older entries are rendered before expansion.
+    expect(screen.queryByText(/from Backlog to Todo/i)).not.toBeInTheDocument();
+
+    // Expand the older block by clicking its summary line.
+    fireEvent.click(screen.getByText("10 activities"));
+
+    // Every one of the 10 entries should now be visible — even though the
+    // block has more than 8 entries, the truncate-to-8 rule does not apply
+    // to non-trailing blocks, so no "Show N more activities" line appears.
+    await waitFor(() => {
+      expect(screen.getByText(/from Backlog to Todo/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/from No priority to Low/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Medium to High/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
+    expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
+    expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
+  });
+
+  describe("highlightCommentId scroll-to-comment", () => {
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
-      // Under virtualization the DOM anchor is a `data-comment-id` attribute
-      // on the item wrapper; we no longer rely on element id="comment-...".
+      // Wait for the comment row to mount. With initialItemCount in
+      // production, items[0..targetIdx] are force-mounted on first commit;
+      // the mock unconditionally inline-renders every item, so this just
+      // waits for the regular render pass.
       await waitFor(() => {
         expect(
-          document.querySelector('[data-comment-id="comment-2"]'),
+          document.getElementById("comment-comment-2"),
         ).not.toBeNull();
       });
 
-      // The deep-link useEffect polls until the target mounts, then calls
-      // scrollIntoView on the wrapper element.
+      // The deep-link effect lands on AND highlights the target comment: it
+      // drives the timeline container's scrollTop directly (jsdom has no
+      // layout, so the scroll itself isn't observable here) and applies the
+      // brand highlight ring. Assert the user-facing highlight.
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
-
-      const callContext = scrollIntoViewSpy.mock.contexts[0] as HTMLElement;
-      expect(callContext.getAttribute("data-comment-id")).toBe("comment-2");
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
-      // Reproduces the inbox-click race: timeline data is in the cache before
-      // the issue resolves. While `loading` is true the timeline skeleton is
-      // shown and no comment wrapper is mounted. The deep-link polling loop
-      // must keep retrying (up to ~320ms of rAFs) until the issue resolves
-      // and the target's `data-comment-id` appears in the DOM.
+      // Reproduces the inbox-click race: timeline data is in the cache
+      // before the issue resolves. While loading is true, IssueDetail
+      // renders the loading skeleton (the timeline never mounts), so no
+      // scroll/highlight can fire. After the issue resolves, the timeline
+      // mounts and the deep-link effect lands on + highlights the comment.
       let resolveIssue: (value: Issue) => void = () => {};
       const issuePromise = new Promise<Issue>((resolve) => {
         resolveIssue = resolve;
@@ -624,19 +1018,81 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetailWithHighlight("comment-2", "issue-1", { seedTimeline: true });
 
       expect(
-        document.querySelector('[data-comment-id="comment-2"]'),
+        document.getElementById("comment-comment-2"),
       ).toBeNull();
-      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+      // Nothing highlighted while the loading skeleton is up.
+      expect(document.querySelector(".ring-2")).toBeNull();
 
       resolveIssue(mockIssue);
 
       await waitFor(() => {
         expect(
-          document.querySelector('[data-comment-id="comment-2"]'),
+          document.getElementById("comment-comment-2"),
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
+      });
+    });
+
+    it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
+      // Seed a timeline where comment-3 is resolved (so it renders as a
+      // resolved-bar by default) and has a reply, reply-1, whose id is the
+      // deep-link target. The reply is not in the flat items array — only
+      // the resolved-bar root is. The effect must detect this, expand the
+      // thread, then on re-run scroll to the reply's id="comment-reply-1" node.
+      const timelineWithResolvedThread: TimelineEntry[] = [
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "comment-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Resolved root",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+          resolved_at: "2026-01-19T00:00:00Z",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply inside resolved thread",
+          parent_id: "comment-3",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ];
+      mockApiObj.listTimeline.mockResolvedValue(timelineWithResolvedThread);
+
+      const queryClient = createTestQueryClient();
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="reply-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      // After expansion, the reply must appear in the DOM (inside the now
+      // -unfolded CommentCard) and the deep-link effect must land on + highlight
+      // it. The reply highlight renders as a computed bg tint on its row (see
+      // CommentCard's reply branch), so assert the row carries the brand tint.
+      await waitFor(() => {
+        expect(
+          document.getElementById("comment-reply-1"),
+        ).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(
+          document.getElementById("comment-reply-1")?.className,
+        ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
       });
     });
   });

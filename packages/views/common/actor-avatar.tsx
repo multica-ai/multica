@@ -9,10 +9,27 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useAgentPresenceDetail } from "@multica/core/agents";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
+import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
+import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
+import { useNavigation } from "../navigation";
+
+/**
+ * Selects which agent hover-card payload to render when `enableHoverCard` is
+ * on. Two surfaces, two intents:
+ * - `"profile"` (default) — static identity (description, runtime, skills,
+ *   owner). Used by 20+ "who is this agent?" surfaces (comment authors,
+ *   pickers, list rows).
+ * - `"live"` — live activity peek (workload, current issue, last activity).
+ *   Used where the user already knows the identity and wants the live state,
+ *   e.g. the squad members tab.
+ *
+ * Has no effect for non-agent actors (members always render the member card).
+ */
+export type AgentHoverCardVariant = "profile" | "live";
 
 interface ActorAvatarProps {
   actorType: string;
@@ -33,10 +50,23 @@ interface ActorAvatarProps {
    * popover inside the dropdown.
    */
   showStatusDot?: boolean;
+  /**
+   * When `enableHoverCard` is on for an agent, choose which payload to
+   * render. See {@link AgentHoverCardVariant}. Defaults to `"profile"` so
+   * existing call sites keep their identity-card behaviour.
+   */
+  hoverCardVariant?: AgentHoverCardVariant;
+  /**
+   * Make the avatar click through to the actor page. Defaults on for members
+   * and agents, while picker/menu controls keep their own click behavior.
+   */
+  profileLink?: boolean;
 }
 
 const FOCUSABLE_ANCESTOR_SELECTOR =
   'a[href], button:not([disabled]), [role="button"]:not([aria-disabled="true"]), [tabindex]:not([tabindex="-1"])';
+const PROFILE_LINK_CONTROL_SELECTOR =
+  'button, [role^="menuitem"], [role="option"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="popover-trigger"]';
 
 export function ActorAvatar({
   actorType,
@@ -45,14 +75,19 @@ export function ActorAvatar({
   className,
   enableHoverCard,
   showStatusDot,
+  hoverCardVariant = "profile",
+  profileLink,
 }: ActorAvatarProps) {
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  const paths = useWorkspacePaths();
   const avatar = (
     <ActorAvatarBase
       name={getActorName(actorType, actorId)}
       initials={getActorInitials(actorType, actorId)}
       avatarUrl={getActorAvatarUrl(actorType, actorId)}
       isAgent={actorType === "agent"}
+      isSystem={actorType === "system"}
+      isSquad={actorType === "squad"}
       size={size}
       className={className}
     />
@@ -71,17 +106,86 @@ export function ActorAvatar({
   ) : (
     avatar
   );
+  const shouldLinkToProfile =
+    profileLink ??
+    (actorType === "member" || actorType === "agent" || actorType === "squad");
+  const profileHref = shouldLinkToProfile
+    ? actorType === "member"
+      ? paths.memberDetail(actorId)
+      : actorType === "agent"
+        ? paths.agentDetail(actorId)
+        : actorType === "squad"
+          ? paths.squadDetail(actorId)
+          : null
+    : null;
+  const content = profileHref ? (
+    <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
+  ) : (
+    dotted
+  );
 
   if (!enableHoverCard) {
-    return dotted;
+    return content;
   }
   if (actorType === "agent") {
-    return <AgentAvatarHoverCard agentId={actorId}>{dotted}</AgentAvatarHoverCard>;
+    return (
+      <AgentAvatarHoverCard agentId={actorId} variant={hoverCardVariant}>
+        {content}
+      </AgentAvatarHoverCard>
+    );
   }
   if (actorType === "member") {
-    return <MemberAvatarHoverCard userId={actorId}>{dotted}</MemberAvatarHoverCard>;
+    return <MemberAvatarHoverCard userId={actorId}>{content}</MemberAvatarHoverCard>;
   }
-  return dotted;
+  if (actorType === "squad") {
+    return <SquadAvatarHoverCard squadId={actorId}>{content}</SquadAvatarHoverCard>;
+  }
+  return content;
+}
+
+function ActorAvatarProfileLink({
+  href,
+  children,
+}: {
+  href: string;
+  children: React.ReactNode;
+}) {
+  const { push, openInNewTab } = useNavigation();
+
+  const navigate = (event: React.MouseEvent | React.KeyboardEvent) => {
+    const controlAncestor = event.currentTarget.parentElement?.closest(
+      PROFILE_LINK_CONTROL_SELECTOR,
+    );
+    if (controlAncestor) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (
+      "metaKey" in event &&
+      (event.metaKey || event.ctrlKey || event.shiftKey) &&
+      openInNewTab
+    ) {
+      openInNewTab(href);
+      return;
+    }
+    push(href);
+  };
+
+  return (
+    <span
+      role="link"
+      tabIndex={-1}
+      className="inline-flex cursor-pointer rounded-full"
+      onClick={navigate}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          navigate(event);
+        }
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
 // Small presence indicator overlaid on the bottom-right of an agent avatar.
@@ -89,7 +193,9 @@ export function ActorAvatar({
 // 14 px owner sub-avatar in agents-list rows) stay visually clean. The dot
 // scales with the avatar size — anything ≥24 px gets the standard 8 px dot,
 // smaller avatars use a 6 px dot so the indicator doesn't overwhelm them.
-function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
+// Exported for surfaces that render the base avatar directly (e.g. comment
+// trigger chips) but still want the standard presence dot.
+export function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
   const ws = useCurrentWorkspace();
   const detail = useAgentPresenceDetail(ws?.id, agentId);
   if (detail === "loading") return null;
@@ -114,13 +220,21 @@ function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
  */
 function AgentAvatarHoverCard({
   agentId,
+  variant,
   children,
 }: {
   agentId: string;
+  variant: AgentHoverCardVariant;
   children: React.ReactNode;
 }) {
+  const content =
+    variant === "live" ? (
+      <AgentLivePeekCard agentId={agentId} />
+    ) : (
+      <AgentProfileCard agentId={agentId} />
+    );
   return (
-    <ActorAvatarHoverCardShell content={<AgentProfileCard agentId={agentId} />}>
+    <ActorAvatarHoverCardShell content={content}>
       {children}
     </ActorAvatarHoverCardShell>
   );
@@ -135,6 +249,20 @@ function MemberAvatarHoverCard({
 }) {
   return (
     <ActorAvatarHoverCardShell content={<MemberProfileCard userId={userId} />}>
+      {children}
+    </ActorAvatarHoverCardShell>
+  );
+}
+
+function SquadAvatarHoverCard({
+  squadId,
+  children,
+}: {
+  squadId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <ActorAvatarHoverCardShell content={<SquadProfileCard squadId={squadId} />}>
       {children}
     </ActorAvatarHoverCardShell>
   );

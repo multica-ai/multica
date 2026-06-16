@@ -19,7 +19,8 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { isImeComposing, timeAgo } from "@multica/core/utils";
+import { isImeComposing } from "@multica/core/utils";
+import { useTimeAgo } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Input } from "@multica/ui/components/ui/input";
@@ -43,7 +44,9 @@ import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
+import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
+import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 
 interface InspectorProps {
   agent: Agent;
@@ -66,6 +69,12 @@ interface InspectorProps {
    */
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  /**
+   * Focus the overview pane's Integrations tab. The inspector's Lark status
+   * row is read-only and deep-links here; Manage / Disconnect live in the
+   * tab so the destructive action exists in exactly one place.
+   */
+  onShowIntegrations: () => void;
 }
 
 /**
@@ -89,8 +98,10 @@ export function AgentDetailInspector({
   currentUserId,
   canEdit,
   onUpdate,
+  onShowIntegrations,
 }: InspectorProps) {
   const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   const isOnline = runtime?.status === "online";
 
@@ -130,6 +141,14 @@ export function AgentDetailInspector({
             onChange={(m) => update({ model: m })}
           />
         </PropRow>
+        <ThinkingPropRow
+          runtimeId={agent.runtime_id}
+          runtimeOnline={!!isOnline}
+          model={agent.model ?? ""}
+          value={agent.thinking_level ?? ""}
+          canEdit={canEdit}
+          onChange={(v) => update({ thinking_level: v })}
+        />
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}
@@ -194,6 +213,31 @@ export function AgentDetailInspector({
           <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
       </div>
+
+      {/* Integrations — surfaces external-channel bind entry points
+          (Lark Bot today; Slack / Discord in the future). The bind
+          button self-hides when the server-side device-flow install
+          capability gate is closed, so this section may render empty
+          on deployments without a configured Lark app — that's
+          intentional and matches the "don't surface a flow that will
+          fail" guarantee. We only mount it for editors: viewers
+          shouldn't see a CTA they can't action. */}
+      {canEdit && (
+        <div className="flex flex-col px-5 py-4">
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {t(($) => $.inspector.section_integrations)}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <LarkAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              onShowConnectedDetails={onShowIntegrations}
+            />
+          </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -240,7 +284,7 @@ function AvatarEditor({
 
   if (!canEdit) {
     return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted">
+      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg">
         <ActorAvatar
           actorType="agent"
           actorId={agent.id}
@@ -271,7 +315,7 @@ function AvatarEditor({
         type="button"
         // rounded-lg matches the standard agent avatar treatment used in
         // list rows. Avoid rounded-full — circles are reserved for humans.
-        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="group relative h-14 w-14 shrink-0 overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={() => fileInputRef.current?.click()}
         disabled={uploading}
         aria-label={t(($) => $.inspector.change_avatar_aria)}
@@ -639,6 +683,10 @@ function PresenceBadge({
   presence: AgentPresenceDetail | null | undefined;
 }) {
   const { t } = useT("agents");
+  // Archived is carried by the unified presence (deriveAgentPresenceDetail
+  // sets availability="archived" before any runtime/task scan), so the
+  // normal path below renders the gray "Archived" badge with no special
+  // case here — same single source of truth as every other status surface.
   if (!presence) {
     return (
       <span className="inline-flex h-5 w-20 animate-pulse rounded-md bg-muted" />

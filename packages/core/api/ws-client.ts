@@ -1,7 +1,18 @@
 import type { WSMessage, WSEventType } from "../types/events";
 import { type Logger, noopLogger } from "../logger";
 
-type EventHandler = (payload: unknown, actorId?: string) => void;
+type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
+
+// Cap how much of an unparseable frame we put into the log. A malformed or
+// rogue server can stream arbitrarily large garbage, and the warn handler may
+// be a console / IPC bridge whose buffers we don't want to blow.
+const UNPARSEABLE_LOG_MAX_CHARS = 200;
+
+function summarizeUnparseable(data: unknown): string {
+  const text = typeof data === "string" ? data : String(data);
+  if (text.length <= UNPARSEABLE_LOG_MAX_CHARS) return text;
+  return `${text.slice(0, UNPARSEABLE_LOG_MAX_CHARS)}… (truncated, ${text.length} chars total)`;
+}
 
 /** Identifies the WS client to the server. Sent as `client_platform`,
  *  `client_version`, and `client_os` query parameters on the upgrade URL —
@@ -75,7 +86,16 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data as string) as WSMessage;
+      let msg: WSMessage;
+      try {
+        msg = JSON.parse(event.data as string) as WSMessage;
+      } catch {
+        this.logger.warn(
+          "ws: received unparseable message",
+          summarizeUnparseable(event.data),
+        );
+        return;
+      }
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
@@ -84,7 +104,7 @@ export class WSClient {
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {
         for (const handler of eventHandlers) {
-          handler(msg.payload, msg.actor_id);
+          handler(msg.payload, msg.actor_id, msg.actor_type);
         }
       }
       for (const handler of this.anyHandlers) {

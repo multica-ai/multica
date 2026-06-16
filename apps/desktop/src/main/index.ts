@@ -1,20 +1,53 @@
-import { app, BrowserWindow, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
-import { openExternalSafely } from "./external-url";
+import { setupLocalDirectory } from "./local-directory";
+import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { handleAppShortcut } from "./keyboard-shortcuts";
+import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  sanitizeRendererRouteContext,
+  type RendererRouteContext,
+} from "../shared/renderer-route-context";
+import {
+  createElectronReloadPrompt,
+  installRendererRecoveryHandlers,
+  type RendererRecoveryWindow,
+} from "./renderer-recovery";
+import {
+  writeFreezeBreadcrumb,
+  readAndClearFreezeBreadcrumb,
+  clearFreezeBreadcrumb,
+} from "./freeze-breadcrumb";
 
-// Bundled icon used for dev-mode dock/taskbar branding. In production the
-// app bundle icon (from electron-builder) wins; this path is only consumed
-// by the `is.dev` branch below.
-const DEV_ICON_PATH = join(__dirname, "../../resources/icon.png");
+// Bundled icon used for dock/taskbar branding. macOS/Windows production
+// builds let the OS pick up the icon from the .app bundle / .exe resources,
+// but Linux production needs an explicit BrowserWindow `icon` — AppImage
+// direct-launch doesn't register the .desktop entry, so GNOME has no path
+// from the running window to the hicolor icon and falls back to the
+// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// in prod) and the macOS dev dock branch.
+//
+// `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
+// `app.asar.unpacked/`, but `__dirname` resolves into `app.asar/`. The
+// Linux native window-icon code path expects a real filesystem path
+// (unlike Electron's nativeImage loader which transparently reads from
+// asar), so swap the segment — same pattern as bundledCliPath() in
+// daemon-manager.ts. In dev `__dirname` has no `app.asar`, so the replace
+// is a no-op.
+const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
+  "app.asar",
+  "app.asar.unpacked",
+);
 
 // macOS/Linux GUI launches inherit a minimal PATH from launchd that omits
 // the user's shell config (~/.zshrc, Homebrew, nvm, ~/.local/bin, etc.).
@@ -38,7 +71,15 @@ if (process.platform !== "win32") {
 
 const PROTOCOL = "multica";
 
+// Where the main process parks a freeze/crash breadcrumb until the next
+// renderer boot flushes it to telemetry. Lives in userData so it survives a
+// force-quit. Resolved lazily — app.getPath is only valid after `ready`.
+function freezeBreadcrumbPath(): string {
+  return join(app.getPath("userData"), "last-client-failure.json");
+}
+
 let mainWindow: BrowserWindow | null = null;
+let latestRendererRouteContext: RendererRouteContext | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -106,20 +147,55 @@ function createWindow(): void {
     trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
-    // Windows/Linux pick up the window/taskbar icon from this option in
-    // dev — on macOS it's ignored (dock comes from app.dock.setIcon below).
-    ...(is.dev ? { icon: DEV_ICON_PATH } : {}),
+    // Windows/Linux pick up the window/taskbar icon from this option.
+    // On macOS it's ignored (dock comes from app.dock.setIcon below).
+    // Linux production needs this explicitly because AppImage direct-launch
+    // does not install a .desktop entry, so the WM has no other path to
+    // the bundled icon; without it Ubuntu falls back to the theme default.
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       sandbox: false,
       webSecurity: false,
+      // Required for the Chromium PDF viewer (PDFium) to activate inside
+      // iframes — used by the attachment preview modal for application/pdf
+      // files. Default is false in Electron; without it <iframe src=*.pdf>
+      // renders blank.
+      //
+      // Security trade-off, accepted intentionally:
+      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
+      //      so `plugins: true` does NOT meaningfully widen the renderer's
+      //      attack surface beyond what is already accepted.
+      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+      //      cannot land in this renderer.
+      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+      //      and only handles the `application/pdf` MIME — it does not expose
+      //      Flash, Java, or other historical plugin surfaces.
+      //
+      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+      // to that view, keeping the main renderer plugin-free.
+      plugins: true,
       additionalArguments: [`--multica-locale=${systemLocale}`],
     },
+  });
+  const window = mainWindow;
+  latestRendererRouteContext = null;
+
+  window.on("closed", () => {
+    if (mainWindow === window) {
+      mainWindow = null;
+      latestRendererRouteContext = null;
+    }
   });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
   // origin whitelist doesn't reject connections from localhost dev origins.
-  mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+  window.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["wss://*/*", "ws://*/*"] },
     (details, callback) => {
       delete details.requestHeaders["Origin"];
@@ -127,8 +203,8 @@ function createWindow(): void {
     },
   );
 
-  mainWindow.on("ready-to-show", () => {
-    mainWindow?.show();
+  window.on("ready-to-show", () => {
+    window.show();
   });
 
   // Detect OS language changes while the app is running. Electron has no
@@ -136,40 +212,105 @@ function createWindow(): void {
   // catches the common case where users switch System Settings → Language
   // and bring the app back. The renderer decides whether to act (it ignores
   // the signal when the user has an explicit Settings choice).
-  mainWindow.on("focus", () => {
+  window.on("focus", () => {
     const current = getSystemLocale();
     if (current === lastKnownSystemLocale) return;
     lastKnownSystemLocale = current;
-    mainWindow?.webContents.send("locale:system-changed", current);
+    window.webContents.send("locale:system-changed", current);
   });
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  window.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
     return { action: "deny" };
   });
 
-  // Prevent Cmd+R / Ctrl+R / Shift+Cmd+R / Shift+Ctrl+R / F5 from
-  // reloading the page. In a desktop app an accidental reload destroys
-  // in-memory state (tabs, drafts, WS connections) with no URL bar to
-  // navigate back. DevTools refresh (via the DevTools UI) still works.
-  mainWindow.webContents.on("before-input-event", (_event, input) => {
-    if (input.type !== "keyDown") return;
-    const cmdOrCtrl =
-      process.platform === "darwin" ? input.meta : input.control;
-    if (
-      (cmdOrCtrl && input.key.toLowerCase() === "r") ||
-      input.key === "F5"
-    ) {
-      _event.preventDefault();
+  // Window-level keyboard shortcuts. Calling preventDefault here prevents
+  // both the renderer keydown AND the application menu accelerator, so
+  // anything we own here (reload-block, zoom, tab-close) is the sole handler
+  // for that combination — no double-fire with the macOS default View menu.
+  window.webContents.on("before-input-event", (event, input) => {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result) {
+      event.preventDefault();
     }
   });
 
-  installContextMenu(mainWindow.webContents);
+  // Dev-mode renderer diagnostics. When the renderer crashes hard enough
+  // that DevTools can't be opened (white screen with no clickable surface),
+  // the only way to recover the actual JS error is to forward it from the
+  // main process to the terminal running `make dev`. Without these, the
+  // user sees only the daemon-manager polling noise (`Render frame was
+  // disposed before WebFrameMain could be accessed`) which is a downstream
+  // symptom, not the cause.
+  //
+  // Gated by `is.dev` to keep production stderr clean — packaged builds
+  // don't have a terminal anyway, and we ship to crash-reporting separately.
+  if (is.dev) {
+    const log = (tag: string, ...args: unknown[]) =>
+      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+
+    // Forward every renderer-side console.* call. The detail object also
+    // carries source URL + line — included so a thrown stack trace from
+    // window.onerror is traceable back to a file.
+    window.webContents.on("console-message", (details) => {
+      const { level, message, sourceId, lineNumber } = details;
+      log(level, `${message} (${sourceId}:${lineNumber})`);
+    });
+
+    // Fires when loadURL / loadFile can't reach its target (dev server
+    // not up yet, network blip, file missing). errorCode is a Chromium
+    // net error number; -3 = ABORTED is normal during HMR and skipped.
+    window.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+        if (errorCode === -3) return;
+        log(
+          "did-fail-load",
+          `code=${errorCode} desc=${errorDescription} url=${validatedURL} mainFrame=${isMainFrame}`,
+        );
+      },
+    );
+
+  }
+
+  installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
+    isDev: is.dev,
+    showReloadPrompt: createElectronReloadPrompt((options) =>
+      dialog.showMessageBox(window, options),
+    ),
+    getDiagnosticContext: () => ({
+      windowUrl: window.webContents.getURL(),
+      ...(latestRendererRouteContext
+        ? { desktopRoute: latestRendererRouteContext }
+        : {}),
+    }),
+    // Only persist in production: a true hang/crash can't report itself, so we
+    // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
+    // is excluded to keep field telemetry clean.
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+  });
+
+  installContextMenu(window.webContents);
+  installNavigationGestures(window);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    mainWindow.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+    window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
-    mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+    window.loadFile(join(__dirname, "../renderer/index.html"));
   }
 }
 
@@ -192,6 +333,14 @@ const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
 if (is.dev) {
   app.setName(DEV_APP_NAME);
   app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+} else {
+  // Pin the production app name in code. Electron's Linux WM_CLASS is set
+  // from app.getName() when the first BrowserWindow is realized; the
+  // packaged ASAR's package.json `productName` already steers app.getName()
+  // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
+  // (declared in electron-builder.yml) survive a regression in
+  // productName / the build pipeline. Must run before requestSingleInstanceLock().
+  app.setName("Multica");
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -251,7 +400,7 @@ if (!gotTheLock) {
     // so the Canary dev build is visually distinct from a stock Electron
     // run. `app.dock` is macOS-only — guard the call.
     if (is.dev && process.platform === "darwin" && app.dock) {
-      const icon = nativeImage.createFromPath(DEV_ICON_PATH);
+      const icon = nativeImage.createFromPath(BUNDLED_ICON_PATH);
       if (!icon.isEmpty()) app.dock.setIcon(icon);
     }
 
@@ -268,6 +417,19 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
+    // Renderer requests window close (e.g. Cmd+W on last tab).
+    ipcMain.on("window:close", () => {
+      mainWindow?.close();
+    });
+
+    ipcMain.handle("file:download-url", (_event, url: string) => {
+      if (!mainWindow) {
+        console.warn("[download] ignored file:download-url — mainWindow torn down");
+        return;
+      }
+      downloadURLSafely(mainWindow, url);
+    });
+
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
     // preload can attach the values to `desktopAPI.appInfo` before any renderer
     // code reads them, ensuring the very first HTTP request from the renderer
@@ -278,11 +440,26 @@ if (!gotTheLock) {
       event.returnValue = { version: getAppVersion(), os };
     });
 
+    // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
+    // session. The renderer flushes it to telemetry on boot (it couldn't be
+    // reported when it happened — the renderer was hung or gone). Read-and-
+    // clear so a failure reports exactly once.
+    ipcMain.on("freeze:get-last", (event) => {
+      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
     // Sync IPC: preload exposes the validated runtime config before renderer
     // boot. If desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      const sanitized = sanitizeRendererRouteContext(context);
+      if (!sanitized) return;
+      latestRendererRouteContext = sanitized;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
@@ -355,6 +532,7 @@ if (!gotTheLock) {
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
+    setupLocalDirectory(() => mainWindow);
 
     // macOS: deep link arrives via open-url event
     app.on("open-url", (_event, url) => {

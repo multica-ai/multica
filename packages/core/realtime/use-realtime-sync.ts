@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type InfiniteData, type QueryClient } from "@tanstack/react-query";
 import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
@@ -14,34 +14,50 @@ import { projectKeys } from "../projects/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
+import { labelKeys } from "../labels/queries";
 import {
   agentTaskSnapshotKeys,
   agentActivityKeys,
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
+import { githubKeys } from "../github/queries";
+import { larkKeys } from "../lark/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssueMetadataChanged,
 } from "../issues/ws-updaters";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
-import { notificationPreferenceOptions } from "../notification-preferences/queries";
+import {
+  notificationPreferenceOptions,
+  notificationPreferenceKeys,
+} from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import {
+  showWebNotification,
+  type SystemNotificationPayload,
+} from "../platform/system-notification";
+import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
+  WorkspaceUpdatedPayload,
   MemberRemovedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
+  IssueMetadataChangedPayload,
   InboxNewPayload,
+  InboxItem,
+  NotificationPreferenceResponse,
   CommentCreatedPayload,
   CommentUpdatedPayload,
   CommentDeletedPayload,
@@ -57,17 +73,282 @@ import type {
   TaskMessagePayload,
   TaskQueuedPayload,
   TaskDispatchPayload,
+  TaskRunningPayload,
+  TaskWaitingLocalDirectoryPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatMessage,
   ChatPendingTask,
+  ChatMessagesPage,
   InvitationCreatedPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
 
 const logger = createLogger("realtime-sync");
+
+export function invalidateChatMessageQueries(
+  qc: QueryClient,
+  sessionId: string,
+) {
+  qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+}
+
+export function applyChatDoneToCache(
+  qc: QueryClient,
+  payload: ChatDonePayload,
+) {
+  const sessionId = payload.chat_session_id;
+  const taskId = payload.task_id;
+  const messageId = payload.message_id;
+  const content = payload.content;
+  if (messageId && content !== undefined) {
+    const assistant: ChatMessage = {
+      id: messageId,
+      chat_session_id: sessionId,
+      role: "assistant",
+      content,
+      task_id: taskId,
+      created_at: payload.created_at ?? new Date().toISOString(),
+      elapsed_ms: payload.elapsed_ms ?? null,
+    };
+    qc.setQueryData<ChatMessage[] | undefined>(
+      chatKeys.messages(sessionId),
+      (old) => {
+        if (!old) return old; // first fetch will pick it up
+        // Idempotent against reconnect replay.
+        if (old.some((m) => m.id === messageId)) return old;
+        return [...old, assistant];
+      },
+    );
+    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+      chatKeys.messagesPage(sessionId),
+      (old) => patchLatestChatMessagePage(old, assistant),
+    );
+  }
+  // Replacement is in the messages list now; safe to drop pending.
+  qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  // Authoritative refetch reconciles redaction / migrations / clients
+  // that took the fallback branch above.
+  invalidateChatMessageQueries(qc, sessionId);
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+function patchLatestChatMessagePage(
+  old: InfiniteData<ChatMessagesPage> | undefined,
+  message: ChatMessage,
+): InfiniteData<ChatMessagesPage> | undefined {
+  if (!old?.pages.length) return old;
+  const seen = old.pages.some((page) => page.messages.some((m) => m.id === message.id));
+  if (seen) return old;
+  return {
+    ...old,
+    pages: old.pages.map((page, index) => {
+      if (index !== 0) return page;
+      return {
+        ...page,
+        messages: [...page.messages, message],
+      };
+    }),
+  };
+}
+
+/**
+ * Apply a workspace:updated event to the cache. Always refreshes the
+ * workspace list. If the incoming `issue_prefix` differs from what's
+ * currently cached, also invalidates issueKeys.all for that workspace,
+ * since every issue's rendered identifier (`MUL-123`) is recomputed from
+ * the workspace prefix at read time. Without this, the UI keeps showing
+ * the old `OLD-N` keys until the next hard refresh.
+ *
+ * If the workspace isn't in the cached list (first observation), we
+ * conservatively invalidate — the prefix is effectively "new" relative to
+ * what's cached, so any issues already loaded under the old prefix would
+ * be stale anyway.
+ */
+export function applyWorkspaceUpdatedToCache(
+  qc: QueryClient,
+  payload: WorkspaceUpdatedPayload,
+): void {
+  const next = payload.workspace;
+  if (next?.id) {
+    const cached =
+      qc
+        .getQueryData<Workspace[]>(workspaceKeys.list())
+        ?.find((w) => w.id === next.id) ?? null;
+    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+      qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
+    }
+  }
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+/**
+ * Resolves the slug of the workspace an inbox item originated from, via the
+ * cached workspace list (fetched once when the cache is cold).
+ *
+ * Desktop notification routing must pin to the *source* workspace of the
+ * inbox item, not the currently active one: the user can be on workspace B
+ * when an `inbox:new` for workspace A arrives, and macOS Notification Center
+ * holds banners across workspace switches. Returns null when the workspace
+ * cannot be resolved — callers must NOT fall back to the current slug (that
+ * recreates the wrong-workspace routing this exists to prevent, #3766) and
+ * should show the notification without a deep link instead.
+ */
+export async function resolveInboxSourceSlug(
+  qc: QueryClient,
+  workspaceId: string,
+): Promise<string | null> {
+  if (!workspaceId) return null;
+  try {
+    const workspaces = await qc.ensureQueryData(workspaceListOptions());
+    return workspaces?.find((w) => w.id === workspaceId)?.slug ?? null;
+  } catch {
+    // Workspace list unavailable (e.g. network hiccup): degrade to a
+    // link-less notification rather than guessing a slug.
+    return null;
+  }
+}
+
+/**
+ * Handles an `inbox:new` event end-to-end: inbox cache invalidation, the
+ * focus / mute checks, and the native OS banner. Exported so the handler
+ * behavior (not just slug resolution) is testable.
+ *
+ * Every workspace-scoped read here keys on the ITEM's workspace
+ * (`item.workspace_id`), never the currently active one (#3766): the cache
+ * invalidation must refresh the source workspace's inbox list / unread
+ * count / dock badge, the mute check must honor the source workspace's
+ * preference, and the deep link must carry the source workspace's slug.
+ */
+export async function handleInboxNew(
+  qc: QueryClient,
+  item: InboxItem,
+): Promise<void> {
+  const sourceWsId = item.workspace_id;
+  if (sourceWsId) onInboxNew(qc, sourceWsId, item);
+  // Fire a native OS notification only when the app isn't focused. When
+  // the user is already looking at Multica, the inbox sidebar's unread
+  // styling is enough — no need to interrupt with a banner. `desktopAPI`
+  // is injected by the preload script; its absence (web app) skips silently.
+  if (typeof document !== "undefined" && document.hasFocus()) return;
+  // Resolve the source workspace's slug once: it pins BOTH the mute check
+  // and the deep link to the workspace the inbox item BELONGS to, never the
+  // currently active one. Reading `getCurrentSlug()` here was the source of
+  // wrong-workspace routing (#3766): an `inbox:new` from workspace A arriving
+  // while workspace B is active emitted a notification carrying B's slug and
+  // A's issue id, deep-linking to an issue B doesn't have.
+  const slug = await resolveInboxSourceSlug(qc, sourceWsId);
+  // Respect the SOURCE workspace's system-notification preference. Keying the
+  // query on `sourceWsId` is not enough: the request resolves its workspace
+  // from the `X-Workspace-Slug` header, which follows the ACTIVE workspace —
+  // so a cold-cache lookup while viewing B would read B's mute setting and
+  // cache it under A's key. Passing the source slug scopes the fetch to A.
+  // When the slug can't be resolved we read only an already-warm cache
+  // (populated earlier with the correct workspace context) rather than fetch
+  // with the wrong one; on network failure we fall through to the default
+  // ("all") rather than swallow the banner.
+  if (sourceWsId) {
+    try {
+      const prefData = slug
+        ? await qc.ensureQueryData(
+            notificationPreferenceOptions(sourceWsId, slug),
+          )
+        : qc.getQueryData<NotificationPreferenceResponse>(
+            notificationPreferenceKeys.all(sourceWsId),
+          );
+      if (prefData?.preferences?.system_notifications === "muted") return;
+    } catch {
+      // Fall through with default behavior.
+    }
+  }
+  // `issueKey` matches the inbox page's URL selector (issue id when the
+  // item is attached to an issue, otherwise the inbox item id). `itemId`
+  // is the inbox row's own id, needed to fire markInboxRead on click.
+  // A null slug (workspace list unavailable / item from a workspace this
+  // client can't see) still shows the banner — the user should learn about
+  // the inbox item — but with an empty slug so the click is a no-op
+  // (the inbox bridge ignores empty slugs) instead of routing wrong.
+  const payload: SystemNotificationPayload = {
+    slug: slug ?? "",
+    itemId: item.id,
+    issueKey: item.issue_id ?? item.id,
+    title: item.title,
+    body: item.body ?? "",
+  };
+  const desktopAPI = (
+    globalThis as unknown as {
+      desktopAPI?: {
+        showNotification?: (payload: SystemNotificationPayload) => void;
+      };
+    }
+  ).desktopAPI;
+  if (desktopAPI?.showNotification) {
+    // Desktop: native OS banner rendered by the Electron main process.
+    desktopAPI.showNotification(payload);
+    return;
+  }
+  // Web: the browser Notification API. No-op without granted permission or on
+  // SSR — the in-app inbox + unread badge still reflect the new item.
+  showWebNotification(payload);
+}
+
+/**
+ * Invalidates all workspace-scoped queries. Used after reconnect and when a
+ * new WSClient instance is detected (workspace switch) to recover events
+ * missed while disconnected.
+ */
+function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
+  const wsId = getCurrentWsId();
+  if (wsId) {
+    qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
+  }
+  // Per-issue caches are keyed without wsId, so the issueKeys.all(wsId)
+  // prefix above does not reach them. They rely entirely on WS events for
+  // freshness (staleTime: Infinity), so events missed while disconnected
+  // left them stale until a full reload — the inbox showed an agent's new
+  // comment while the issue timeline didn't (#3953). Inactive caches only
+  // get marked stale here and refetch on next mount; the one mounted issue
+  // refetches immediately, same as its own useWSReconnect already does.
+  qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
+  qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "workspaces" &&
+        key[1] === wsId &&
+        key[2] === "squads" &&
+        key[4] === "members-status"
+      );
+    },
+  });
+}
 
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
@@ -116,12 +397,24 @@ export function useRealtimeSync(
       },
       agent: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          // Squad members status is derived per agent, so any agent
+          // change (status flip, archive, runtime swap) needs to refresh the
+          // per-squad members-status cache without refetching the static squad
+          // list summary.
+          invalidateSquadMemberStatusQueries(qc, wsId);
+        }
       },
       member: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
       },
+      // workspace:updated is handled by the specific handler below
+      // (compares prefixes to decide whether to also invalidate issues).
+      // This generic fallback still fires for workspace:deleted (paired
+      // with the specific navigation handler) and any future workspace:*
+      // events without dedicated handlers.
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
@@ -132,6 +425,14 @@ export function useRealtimeSync(
       project: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      },
+      squad: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+          // squad:deleted triggers assignee transfer — refresh issues too.
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+        }
       },
       label: () => {
         // label:created/updated/deleted — also refresh issues, since each
@@ -151,11 +452,30 @@ export function useRealtimeSync(
       },
       daemon: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // Runtime online/offline transitions move the derived status
+          // for every agent that hosts on this runtime, which shifts the
+          // working/idle/offline pill on the squad page.
+          invalidateSquadMemberStatusQueries(qc, wsId);
+        }
       },
       autopilot: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+      },
+      github_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
+      },
+      lark_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+      },
+      pull_request: () => {
+        // PR list is keyed by issue id, not workspace, so we invalidate all
+        // PR queries — the open issue detail page will refetch its own list.
+        qc.invalidateQueries({ queryKey: ["github", "pull-requests"] });
       },
       // Powers the agent presence cache: any task lifecycle change
       // (dispatch / completed / failed / cancelled) refreshes the
@@ -184,6 +504,19 @@ export function useRealtimeSync(
         // every list-of-tasks query stale" so cache stays fresh even
         // when the relevant component isn't currently mounted.
         qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
+        // Per-issue token usage card (issue-detail right rail). Same
+        // shape as the tasks invalidation above — any task lifecycle
+        // event shifts the aggregated usage numbers.
+        qc.invalidateQueries({ queryKey: ["issues", "usage"] });
+        // Squad members-status reads the same task lifecycle to flip
+        // working ↔ idle for each agent member.
+        invalidateSquadMemberStatusQueries(qc, wsId);
+        // Comment trigger previews answer "who would a send wake right
+        // now" — the pending-task dedup guard makes that answer
+        // queue-dependent, so any task lifecycle change must refresh an
+        // open composer's chips (e.g. an agent finishing its run becomes
+        // triggerable again mid-typing).
+        qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreviewAll() });
       },
     };
 
@@ -202,7 +535,8 @@ export function useRealtimeSync(
 
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "inbox:new",
+      "workspace:updated",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -212,6 +546,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
+      "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -272,62 +607,17 @@ export function useRealtimeSync(
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
     });
 
+    const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
+      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
+    });
+
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
-      const wsId = getCurrentWsId();
-      if (wsId) onInboxNew(qc, wsId, item);
-      // Fire a native OS notification only when the app isn't focused. When
-      // the user is already looking at Multica, the inbox sidebar's unread
-      // styling is enough — no need to interrupt with a banner. `desktopAPI`
-      // is injected by the preload script; its absence (web app) skips silently.
-      if (typeof document !== "undefined" && document.hasFocus()) return;
-      // Respect the user's system-notification preference. The Settings page
-      // owns the only `useQuery` for this resource, so on a fresh app start
-      // (or any session that hasn't visited Settings) the React Query cache
-      // is empty — using `getQueryData` would silently default to "all" and
-      // ignore the user's saved choice. `ensureQueryData` resolves to the
-      // cached value if present and otherwise fetches once, populating the
-      // cache for subsequent events. On network failure we fall through to
-      // the default ("all") rather than swallow the banner entirely.
-      if (wsId) {
-        try {
-          const prefData = await qc.ensureQueryData(notificationPreferenceOptions(wsId));
-          if (prefData?.preferences?.system_notifications === "muted") return;
-        } catch {
-          // Fall through with default behavior.
-        }
-      }
-      // Capture the source workspace slug at emit time. The user may switch
-      // workspaces before clicking the banner (macOS Notification Center
-      // holds banners), so routing must not read "current slug" at click
-      // time — otherwise notifications from workspace A click through to
-      // workspace B's inbox and 404.
-      const slug = getCurrentSlug();
-      if (!slug) return;
-      const desktopAPI = (
-        window as unknown as {
-          desktopAPI?: {
-            showNotification?: (payload: {
-              slug: string;
-              itemId: string;
-              issueKey: string;
-              title: string;
-              body: string;
-            }) => void;
-          };
-        }
-      ).desktopAPI;
-      // `issueKey` matches the inbox page's URL selector (issue id when the
-      // item is attached to an issue, otherwise the inbox item id). `itemId`
-      // is the inbox row's own id, needed to fire markInboxRead on click.
-      desktopAPI?.showNotification?.({
-        slug,
-        itemId: item.id,
-        issueKey: item.issue_id ?? item.id,
-        title: item.title,
-        body: item.body ?? "",
-      });
+      await handleInboxNew(qc, item);
     });
 
     // --- Timeline event handlers (global fallback) ---
@@ -437,6 +727,10 @@ export function useRealtimeSync(
         window.location.assign(target);
       }
     };
+
+    const unsubWsUpdated = ws.on("workspace:updated", (p) => {
+      applyWorkspaceUpdatedToCache(qc, p as WorkspaceUpdatedPayload);
+    });
 
     const unsubWsDeleted = ws.on("workspace:deleted", (p) => {
       const { workspace_id } = p as WorkspaceDeletedPayload;
@@ -548,7 +842,7 @@ export function useRealtimeSync(
     const unsubChatMessage = ws.on("chat:message", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:message (global)", { chat_session_id: payload.chat_session_id });
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -558,13 +852,21 @@ export function useRealtimeSync(
       chatWsLogger.info("chat:done (global)", {
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
+        has_message: !!payload.message_id,
       });
-      // Assistant message was just written and task flipped out of 'running'.
-      // Clear pending-task cache immediately so the live-timeline-vs-assistant
-      // race window collapses to zero — the subsequent refetch will confirm.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // Inline-insert the assistant message into the messages cache BEFORE
+      // clearing pending-task. Both writes land in the same React render
+      // tick, so ChatMessageList sees `pendingAlreadyPersisted === true`
+      // and the live TimelineView unmounts only after AssistantMessage has
+      // mounted — no flicker window. This applies TkDodo's "combine
+      // setQueryData (active query) + invalidateQueries (others)" pattern
+      // (https://tkdodo.eu/blog/using-web-sockets-with-react-query).
+      //
+      // Falls back to invalidate-only when the server omits the message
+      // payload (older builds). Older clients hitting a newer server also
+      // work: they ignore the extra fields and rely on the invalidate
+      // below, which keeps the old behavior alive.
+      applyChatDoneToCache(qc, payload);
       invalidatePendingAggregate();
       // Assistant message just landed → has_unread may have flipped to true.
       invalidateSessionLists();
@@ -612,11 +914,51 @@ export function useRealtimeSync(
       );
     });
 
+    // task:running fires when the daemon transitions a previously-parked task
+    // (waiting_local_directory) back into the run phase. The dispatch→running
+    // path is collapsed in the handler above, so this handler exists mainly to
+    // clear a stale `waiting_local_directory` pill — without it, the pill
+    // would stay parked even after the daemon resumed work.
+    const unsubTaskRunning = ws.on("task:running", (p) => {
+      const payload = p as TaskRunningPayload;
+      if (!payload.chat_session_id) return;
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => {
+          if (!old || old.task_id !== payload.task_id) return old;
+          return { ...old, status: "running" };
+        },
+      );
+    });
+
+    // task:waiting_local_directory fires when the daemon dequeues a task but
+    // can't acquire the local_directory path lock — another task on this
+    // daemon is in the same directory. Write the status so TaskStatusPill
+    // can render the "Waiting for local directory" stage instead of pinning
+    // a stale "Starting / Thinking" frame.
+    const unsubTaskWaitingLocalDir = ws.on(
+      "task:waiting_local_directory",
+      (p) => {
+        const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (!payload.chat_session_id) return;
+        qc.setQueryData<ChatPendingTask>(
+          chatKeys.pendingTask(payload.chat_session_id),
+          (old) => {
+            if (!old || old.task_id !== payload.task_id) return old;
+            return { ...old, status: "waiting_local_directory" };
+          },
+        );
+      },
+    );
+
     // task:cancelled reaches us when:
     //   1. handleStop already cleared the cache locally (this is a no-op confirm)
     //   2. another tab / admin / system cancels — this is the only path that
     //      drops the pending pill in those cases. Without it the pill spins
     //      forever in the second-tab scenario.
+    // CancelTask also persists a best-effort assistant snapshot when the
+    // stopped chat task had already streamed transcript rows, so refresh the
+    // message page along with clearing pending.
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       if (!payload.chat_session_id) return;
@@ -625,6 +967,7 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
       });
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -635,9 +978,12 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      // `chat:done` (broadcast immediately before this event in CompleteTask)
+      // already wrote the assistant message into the messages cache and
+      // cleared `chatKeys.pendingTask`. This event is now only responsible
+      // for refreshing the per-user cross-session aggregate that drives the
+      // FAB indicator — `chat:done` is per-session and doesn't carry that
+      // information.
       invalidatePendingAggregate();
     });
 
@@ -655,7 +1001,7 @@ export function useRealtimeSync(
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
       qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
@@ -664,6 +1010,33 @@ export function useRealtimeSync(
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_read (global)", payload);
       invalidateSessionLists();
+    });
+
+    // chat:session_updated fires after the creator renames a session in
+    // any tab/device. Patch the cached row inline so the dropdown reflects
+    // the new title without a full sessions-list refetch.
+    const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
+      const payload = p as {
+        chat_session_id: string;
+        title?: string;
+        updated_at?: string;
+      };
+      chatWsLogger.info("chat:session_updated (global)", payload);
+      const id = getCurrentWsId();
+      if (!id) return;
+      const patch = (
+        old?: { id: string; title: string; updated_at: string }[],
+      ) =>
+        old?.map((s) =>
+          s.id === payload.chat_session_id
+            ? {
+                ...s,
+                title: payload.title ?? s.title,
+                updated_at: payload.updated_at ?? s.updated_at,
+              }
+            : s,
+        );
+      qc.setQueryData(chatKeys.sessions(id), patch);
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has
@@ -696,6 +1069,7 @@ export function useRealtimeSync(
       unsubIssueCreated();
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
+      unsubIssueMetadataChanged();
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();
@@ -709,6 +1083,7 @@ export function useRealtimeSync(
       unsubIssueReactionRemoved();
       unsubSubscriberAdded();
       unsubSubscriberRemoved();
+      unsubWsUpdated();
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
@@ -721,11 +1096,14 @@ export function useRealtimeSync(
       unsubChatDone();
       unsubTaskQueued();
       unsubTaskDispatch();
+      unsubTaskRunning();
+      unsubTaskWaitingLocalDir();
       unsubTaskCancelled();
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
       unsubChatSessionDeleted();
+      unsubChatSessionUpdated();
       timers.forEach(clearTimeout);
       timers.clear();
     };
@@ -738,26 +1116,30 @@ export function useRealtimeSync(
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, refetching all data");
       try {
-        const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-          qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
-        }
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+        invalidateWorkspaceScopedQueries(qc);
       } catch (e) {
         logger.error("reconnect refetch failed", e);
       }
     });
 
     return unsub;
+  }, [ws, qc]);
+
+  // New WSClient instance (workspace switch) -> invalidate workspace-scoped
+  // queries to recover events missed while the previous instance was torn down.
+  // Skips the initial assignment to avoid a redundant refetch on first mount.
+  const wsInstanceRef = useRef<WSClient | null>(null);
+  useEffect(() => {
+    if (!ws) return;
+    if (wsInstanceRef.current === null) {
+      // First non-null instance — store and skip invalidation.
+      wsInstanceRef.current = ws;
+      return;
+    }
+    if (wsInstanceRef.current === ws) return;
+    wsInstanceRef.current = ws;
+
+    logger.info("new WSClient instance detected, invalidating workspace queries");
+    invalidateWorkspaceScopedQueries(qc);
   }, [ws, qc]);
 }

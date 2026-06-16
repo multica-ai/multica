@@ -1,6 +1,6 @@
 {
   "page": {
-    "breadcrumb_title": "issue",
+    "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "工作区",
     "empty_title": "还没有 issue",
     "empty_hint": "创建一个 issue 开始使用。",
@@ -43,25 +43,44 @@
     "section_creator": "创建者",
     "section_project": "项目",
     "section_label": "标签",
+    "section_date": "日期",
+    "date_field": "字段",
+    "date_field_created": "创建时间",
+    "date_field_updated": "更新时间",
+    "date_today": "今天",
+    "date_last_3_days": "最近 3 天",
+    "date_last_7_days": "最近 7 天",
+    "date_custom_range": "自定义日期或范围",
+    "date_apply": "应用",
+    "date_clear": "清除日期筛选",
     "members_group": "成员",
     "agents_group": "智能体",
+    "squads_group": "小队",
     "issue_count_other": "{{count}} 个 issue",
-    "reset": "重置全部筛选"
+    "reset": "重置全部筛选",
+    "active_count_other": "{{count}} 个筛选"
   },
   "display": {
     "tooltip": "显示设置",
+    "grouping_section": "分组",
     "ordering_section": "排序",
     "card_properties_section": "卡片属性",
     "ascending_title": "升序",
     "descending_title": "降序",
+    "group_status": "状态",
+    "group_assignee": "负责人",
+    "group_parent": "父级 issue",
+    "group_project": "项目",
     "sort_manual": "手动",
     "sort_priority": "优先级",
+    "sort_start_date": "开始日期",
     "sort_due_date": "截止日期",
     "sort_created": "创建时间",
     "sort_title": "标题",
     "card_priority": "优先级",
     "card_description": "描述",
     "card_assignee": "负责人",
+    "card_start_date": "开始日期",
     "card_due_date": "截止日期",
     "card_project": "项目",
     "card_labels": "标签",
@@ -70,23 +89,71 @@
   "view": {
     "tooltip_board": "看板视图",
     "tooltip_list": "列表视图",
+    "tooltip_gantt": "甘特图",
+    "tooltip_swimlane": "泳道视图",
     "section": "视图",
     "board": "看板",
-    "list": "列表"
+    "list": "列表",
+    "gantt": "甘特图",
+    "swimlane": "泳道"
+  },
+  "gantt": {
+    "header_issue": "Issue",
+    "zoom_day": "日",
+    "zoom_week": "周",
+    "zoom_month": "月",
+    "show_completed": "显示已完成",
+    "empty": "暂无已排期的 issue — 给任意 issue 设置开始或截止日期，即可显示在时间轴上。",
+    "inverted_dates_warning": "开始日期晚于截止日期 — 已按区间最小/最大端绘制。"
+  },
+  "actor_issues": {
+    "scope": {
+      "assigned": {
+        "label": "已分配",
+        "description": "分配给这个成员或智能体的 issue"
+      },
+      "created": {
+        "label": "已创建",
+        "description": "这个成员或智能体创建的 issue"
+      }
+    },
+    "empty": {
+      "assigned": {
+        "title": "没有已分配的 issue",
+        "description": "分配到这里的 issue 会显示在此视图中。"
+      },
+      "created": {
+        "title": "没有已创建的 issue",
+        "description": "由这里创建的 issue 会显示在此视图中。"
+      }
+    },
+    "search_placeholder": "搜索 issue...",
+    "search_empty": "没有匹配的 issue。"
   },
   "list": {
     "empty_status": "无 issue",
     "add_issue_tooltip": "新建 issue"
+  },
+  "swimlane": {
+    "no_parent": "无父级",
+    "other_parents": "其他父级",
+    "no_project": "无项目",
+    "no_assignee": "未指派",
+    "open_parent": "打开父级 issue",
+    "toggle_collapse": "切换泳道"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
     "add_issue_tooltip": "新建 issue",
-    "empty_column": "无 issue"
+    "empty_column": "无 issue",
+    "empty_grouping": "没有匹配的 issue",
+    "ordered_by": "按{{field}}排序"
   },
   "detail": {
     "not_found": "这个 issue 不存在或已在该工作区被删除。",
+    "breadcrumb_project_unknown": "未知项目",
     "back_to_issues": "返回 issue 列表",
     "title_placeholder": "issue 标题",
     "desc_placeholder": "添加描述...",
@@ -97,14 +164,42 @@
     "add_sub_issue_aria": "添加子 issue",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
+    "section_pull_requests": "Pull Request",
+    "section_metadata": "元数据",
     "section_details": "详情",
     "section_token_usage": "Token 用量",
+    "pull_requests_loading": "加载中…",
+    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本 issue 的 identifier 即可自动关联。",
+    "pull_request_state_open": "Open",
+    "pull_request_state_draft": "Draft",
+    "pull_request_state_merged": "Merged",
+    "pull_request_state_closed": "Closed",
+    "pull_request_checks_passed": "Checks 通过",
+    "pull_request_checks_failed": "Checks 失败",
+    "pull_request_checks_pending": "Checks 运行中",
+    "pull_request_conflicts_clean": "无冲突",
+    "pull_request_conflicts_dirty": "存在冲突",
+    "pull_request_card_status_closed": "已关闭，未合入",
+    "pull_request_card_status_merged": "已合入",
+    "pull_request_card_status_conflicts": "存在合并冲突",
+    "pull_request_card_status_checks_failed": "部分检查失败",
+    "pull_request_card_status_checks_pending": "部分检查仍在运行",
+    "pull_request_card_status_checks_passed": "全部检查通过",
+    "pull_request_card_status_ready": "可以合入",
+    "pull_request_card_status_unknown": "暂无检查信息",
+    "pull_request_card_draft_prefix": "Draft · {{status}}",
+    "pull_request_card_files_count_one": "{{count}} 个文件",
+    "pull_request_card_files_count_other": "{{count}} 个文件",
+    "pull_request_card_show_more": "展开剩余 {{count}} 个",
+    "pull_request_card_show_less": "收起",
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_assignee": "负责人",
+    "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
     "prop_labels": "标签",
+    "add_property_action": "添加字段",
     "prop_created_by": "创建者",
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
@@ -145,6 +240,8 @@
     "changed_assignee": "更改了负责人",
     "status_changed": "状态从 {{from}} 改为 {{to}}",
     "priority_changed": "优先级从 {{from}} 改为 {{to}}",
+    "start_date_set": "开始日期设为 {{date}}",
+    "start_date_removed": "移除了开始日期",
     "due_date_set": "截止日期设为 {{date}}",
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个 issue 从\"{{from}}\"重命名为\"{{to}}\"",
@@ -153,7 +250,18 @@
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_one": "task 失败",
     "task_failed_other": "task 失败（{{count}} 次）",
-    "coalesced_badge": "×{{count}}"
+    "squad_leader_evaluated": "评估了小队触发",
+    "squad_leader_action": "已评估并采取了操作",
+    "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
+    "squad_leader_no_action": "已评估：无需操作",
+    "squad_leader_no_action_reason": "已评估：无需操作（{{reason}}）",
+    "squad_leader_failed": "评估失败",
+    "squad_leader_failed_reason": "评估失败：{{reason}}",
+    "coalesced_badge": "×{{count}}",
+    "activity_count_one": "{{count}} 条动态",
+    "activity_count_other": "{{count}} 条动态",
+    "show_more_activities_one": "展开更早 {{count}} 条动态",
+    "show_more_activities_other": "展开更早 {{count}} 条动态"
   },
   "comment": {
     "delete_title": "删除评论",
@@ -174,26 +282,56 @@
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起",
+    "trigger_source_issue_assignee": "assignee",
+    "trigger_source_mention_agent": "@mention",
+    "trigger_source_mention_squad_leader": "squad",
+    "trigger_source_unknown": "将触发",
+    "trigger_skipped_label": "已跳过",
+    "trigger_wont_trigger": "不会触发",
+    "trigger_none_will_trigger": "全部不会触发",
+    "trigger_reason_issue_assignee": "{{name}} 是当前 issue 的 assignee，这条评论会唤醒它。",
+    "trigger_reason_mention_agent": "这条评论 @ 了 {{name}}。",
+    "trigger_reason_mention_squad_leader": "{{name}} 是被 @ Squad 的 leader。",
+    "trigger_reason_unknown": "这条评论会触发 {{name}}。",
+    "trigger_will_start": "发送后开始工作",
+    "trigger_will_start_count_other": "发送后 {{count}} 个智能体开始工作",
+    "trigger_starts_now": "将立即开始工作。",
+    "trigger_starts_when_online": "当前离线，上线后开始。",
+    "trigger_click_to_skip": "点击后本次不触发。",
+    "trigger_click_to_manage": "点击管理本次触发对象。",
+    "trigger_click_to_restore": "本次不触发，点击恢复。",
+    "trigger_preview_title": "这条评论将触发",
+    "trigger_chip_aria": "{{name}} 触发状态：{{state}}",
     "resolve": {
-      "resolve_action": "标记为已解决",
+      "resolve_thread_action": "解决该讨论",
+      "unresolve_thread_action": "重新打开讨论",
+      "resolve_with_comment_action": "以此评论解决讨论",
       "unresolve_action": "重新打开",
+      "resolution_badge": "结论",
       "collapse": "收起",
       "bar_other": "来自 {{authors}} 的 {{count}} 条已解决评论",
+      "fold_other": "来自 {{authors}} 的 {{count}} 条评论",
       "bar_authors_more_other": "{{names}} 等 {{count}} 人",
       "resolve_failed": "标记已解决失败",
       "unresolve_failed": "重新打开失败"
     }
   },
   "reply": {
-    "placeholder": "回复...",
-    "expand_tooltip": "展开",
-    "collapse_tooltip": "收起"
+    "placeholder": "回复..."
+  },
+  "agent_activity": {
+    "hover_header_other": "{{count}} 个智能体正在工作",
+    "hover_header_queued_other": "{{count}} 个智能体排队中",
+    "status_running": "正在工作",
+    "status_queued": "排队中",
+    "chip_label": "工作中",
+    "empty_hover": "当前没有智能体在工作",
+    "filter_active_label": "正在查看工作中的智能体"
   },
   "agent_live": {
-    "is_working": "{{name}} 正在处理",
+    "is_working": "{{name}} 在工作",
     "is_queued": "{{name}} 排队中",
+    "is_waiting_local_directory": "{{name}} 正在等待本地目录",
     "queued_elapsed_prefix": "已排队 {{elapsed}}",
     "fallback_name": "智能体",
     "tool_count_other": "{{count}} 次工具调用",
@@ -222,10 +360,18 @@
     "trigger_initial": "首次运行",
     "status_queued": "排队中",
     "status_dispatched": "启动中",
+    "status_waiting_local_directory": "等待本地目录释放",
     "status_running": "处理中",
     "status_completed": "已完成",
     "status_failed": "失败",
     "status_cancelled": "已取消"
+  },
+  "terminate_dialog": {
+    "title": "确定停止该 task？",
+    "body": "Task 会被取消且无法恢复。",
+    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "keep": "保留运行",
+    "confirm": "停止 task"
   },
   "batch": {
     "selected": "已选择 {{count}} 个",
@@ -243,12 +389,18 @@
     "cancel": "取消"
   },
   "card": {
-    "update_failed": "更新 issue 失败"
+    "update_failed": "更新 issue 失败",
+    "updated_ago": "更新于 {{time}}"
   },
   "actions": {
     "status": "状态",
     "priority": "优先级",
     "assignee": "负责人",
+    "start_date": "开始日期",
+    "start_today": "今天",
+    "start_tomorrow": "明天",
+    "start_next_week": "下周",
+    "start_clear": "清除日期",
     "due_date": "截止日期",
     "due_today": "今天",
     "due_tomorrow": "明天",
@@ -272,7 +424,12 @@
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配给...",
       "members_group": "成员",
-      "agents_group": "智能体"
+      "agents_group": "智能体",
+      "squads_group": "小队"
+    },
+    "start_date": {
+      "trigger_label": "开始日期",
+      "clear_action": "清除日期"
     },
     "due_date": {
       "trigger_label": "截止日期",

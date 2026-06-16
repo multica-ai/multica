@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Save, LogOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Camera, Loader2, Save, LogOut } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -27,7 +27,10 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
@@ -98,6 +101,7 @@ export function WorkspaceTab() {
   const [name, setName] = useState(workspace?.name ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
+  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -119,13 +123,30 @@ export function WorkspaceTab() {
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
 
+  // Reset form state only when the user switches to a different workspace.
+  // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
+  // when an unrelated mutation — e.g. avatar/logo upload — replaces the
+  // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
-  }, [workspace]);
+    setIssuePrefix(workspace?.issue_prefix ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
+  }, [workspace?.id]);
 
-  const handleSave = async () => {
+  // Letters + digits only, uppercase, capped at 10 chars. The backend
+  // uppercases and trims on its side too — this is purely a UX guardrail
+  // so the value the user sees in the input matches what gets persisted.
+  const normalizePrefix = (raw: string) =>
+    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+
+  const normalizedPrefix = normalizePrefix(issuePrefix);
+  const prefixChanged =
+    !!workspace && normalizedPrefix !== workspace.issue_prefix;
+  const prefixInvalid = normalizedPrefix.length === 0;
+
+  const performSave = async (includePrefix: boolean) => {
     if (!workspace) return;
     setSaving(true);
     try {
@@ -133,15 +154,63 @@ export function WorkspaceTab() {
         name,
         description,
         context,
+        ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      // Issue identifiers (`MUL-123`) are computed from `issue_prefix` at
+      // read time, not stored on each issue row. When the prefix changes,
+      // every cached issue's rendered identifier is stale until refetched.
+      // Limit invalidation to the prefix-changed branch so unrelated saves
+      // (name / description / context) stay cheap.
+      if (includePrefix) {
+        qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
+      }
       toast.success(t(($) => $.workspace.toast_saved));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_save_failed));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSave = () => {
+    if (!workspace || prefixInvalid) return;
+    if (prefixChanged) {
+      setConfirmAction({
+        title: t(($) => $.workspace.prefix_confirm_title),
+        description: t(($) => $.workspace.prefix_confirm_description, {
+          oldPrefix: workspace.issue_prefix,
+          newPrefix: normalizedPrefix,
+        }),
+        variant: "destructive",
+        onConfirm: () => performSave(true),
+      });
+      return;
+    }
+    void performSave(false);
+  };
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { upload, uploading } = useFileUpload(api);
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!workspace) return;
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // Reset input so the same file can be re-selected
+    e.target.value = "";
+    try {
+      const result = await upload(file);
+      if (!result) return;
+      const updated = await api.updateWorkspace(workspace.id, { avatar_url: result.link });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      toast.success(t(($) => $.workspace.toast_logo_updated));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.workspace.toast_logo_failed));
     }
   };
 
@@ -185,6 +254,8 @@ export function WorkspaceTab() {
 
   if (!workspace) return null;
 
+  const logoUrl = resolvePublicFileUrl(workspace.avatar_url);
+
   return (
     <div className="space-y-8">
       {/* Workspace settings */}
@@ -193,6 +264,46 @@ export function WorkspaceTab() {
 
         <Card>
           <CardContent className="space-y-3">
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-md bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading || !canManageWorkspace}
+                aria-label={t(($) => $.workspace.change_logo_aria)}
+              >
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={workspace.name}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center text-lg font-semibold text-muted-foreground">
+                    {workspace.name.charAt(0).toUpperCase()}
+                  </span>
+                )}
+                {canManageWorkspace && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                    {uploading ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-white" />
+                    ) : (
+                      <Camera className="h-5 w-5 text-white" />
+                    )}
+                  </div>
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+              <div className="text-xs text-muted-foreground">
+                {t(($) => $.workspace.click_logo_hint)}
+              </div>
+            </div>
             <div>
               <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.name_label)}</Label>
               <Input
@@ -231,11 +342,28 @@ export function WorkspaceTab() {
                 {workspace.slug}
               </div>
             </div>
+            <div>
+              <Label className="text-xs text-muted-foreground">{t(($) => $.workspace.issue_prefix_label)}</Label>
+              <Input
+                type="text"
+                value={issuePrefix}
+                onChange={(e) => setIssuePrefix(normalizePrefix(e.target.value))}
+                disabled={!canManageWorkspace}
+                maxLength={10}
+                className="mt-1 font-mono uppercase"
+                placeholder={workspace.issue_prefix}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(($) => $.workspace.issue_prefix_hint, {
+                  example: `${normalizedPrefix || workspace.issue_prefix}-123`,
+                })}
+              </p>
+            </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
                 size="sm"
                 onClick={handleSave}
-                disabled={saving || !name.trim() || !canManageWorkspace}
+                disabled={saving || !name.trim() || prefixInvalid || !canManageWorkspace}
               >
                 <Save className="h-3 w-3" />
                 {saving ? t(($) => $.workspace.saving) : t(($) => $.workspace.save)}

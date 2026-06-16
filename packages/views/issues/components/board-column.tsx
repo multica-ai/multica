@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
-import { EyeOff, MoreHorizontal, Plus } from "lucide-react";
+import { memo, useMemo, type ReactNode } from "react";
+import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueAssigneeType, IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -20,17 +20,37 @@ import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
+import { ActorAvatar } from "../../common/actor-avatar";
 
-export function BoardColumn({
-  status,
+// Insertion-position prediction intentionally omitted. The server's
+// ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
+// cannot be faithfully replicated in JavaScript (ICU/V8). Showing an
+// inaccurate indicator is worse than showing none.
+
+export const BOARD_COL_WIDTH = 280;
+export const BOARD_CARD_WIDTH = BOARD_COL_WIDTH - 16 - 8; // col(280) - col p-2(16) - droppable p-1(8)
+
+export interface BoardColumnGroup {
+  id: string;
+  title: string;
+  status?: IssueStatus;
+  assigneeType?: IssueAssigneeType | null;
+  assigneeId?: string | null;
+  totalCount?: number;
+  createData?: Record<string, unknown>;
+}
+
+export const BoardColumn = memo(function BoardColumn({
+  group,
   issueIds,
   issueMap,
   childProgressMap,
   totalCount,
   footer,
   projectId,
+  sortLabel,
 }: {
-  status: IssueStatus;
+  group: BoardColumnGroup;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap?: Map<string, ChildProgress>;
@@ -38,9 +58,11 @@ export function BoardColumn({
   footer?: ReactNode;
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
+  sortLabel?: string | null;
 }) {
-  const cfg = STATUS_CONFIG[status];
-  const { setNodeRef, isOver } = useDroppable({ id: status });
+  const status = group.status;
+  const cfg = status ? STATUS_CONFIG[status] : null;
+  const { setNodeRef, isOver } = useDroppable({ id: group.id });
   const viewStoreApi = useViewStoreApi();
   const { t } = useT("issues");
 
@@ -55,27 +77,29 @@ export function BoardColumn({
   );
 
   return (
-    <div className={`flex w-[280px] shrink-0 flex-col rounded-xl ${cfg.columnBg} p-2`}>
+    <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
-        <StatusHeading status={status} count={totalCount ?? issueIds.length} />
+        <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
 
         {/* Right: add + menu */}
         <div className="flex items-center gap-1">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
-                  <MoreHorizontal className="size-3.5" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
-                <EyeOff className="size-3.5" />
-                {t(($) => $.board.hide_column)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {status && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                    <MoreHorizontal className="size-3.5" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
+                  <EyeOff className="size-3.5" />
+                  {t(($) => $.board.hide_column)}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <Tooltip>
             <TooltipTrigger
               render={
@@ -83,11 +107,13 @@ export function BoardColumn({
                   variant="ghost"
                   size="icon-sm"
                   className="rounded-full text-muted-foreground"
-                  onClick={() =>
-                    useModalStore
-                      .getState()
-                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
-                  }
+                  onClick={() => {
+                    const data = {
+                      ...(group.createData ?? {}),
+                      ...(projectId ? { project_id: projectId } : {}),
+                    };
+                    useModalStore.getState().open("create-issue", data);
+                  }}
                 >
                   <Plus className="size-3.5" />
                 </Button>
@@ -97,24 +123,75 @@ export function BoardColumn({
           </Tooltip>
         </div>
       </div>
-      <div
-        ref={setNodeRef}
-        className={`min-h-[200px] flex-1 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
-          isOver ? "bg-accent/60" : ""
-        }`}
-      >
-        <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-          {resolvedIssues.map((issue) => (
-            <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} />
-          ))}
-        </SortableContext>
-        {issueIds.length === 0 && (
-          <p className="py-8 text-center text-xs text-muted-foreground">
-            {t(($) => $.board.empty_column)}
-          </p>
+      <div className="relative min-h-[200px] flex-1 rounded-lg">
+        {isOver && sortLabel && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/40">
+            <span className="rounded-md bg-popover px-2.5 py-1 text-xs font-medium text-popover-foreground shadow-sm border border-border">
+              {sortLabel}
+            </span>
+          </div>
         )}
-        {footer}
+        <div
+          ref={setNodeRef}
+          className={`absolute inset-0 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
+            isOver && sortLabel
+              ? "ring-2 ring-brand/25 bg-accent/15"
+              : isOver
+                ? "bg-accent/60"
+                : ""
+          }`}
+        >
+          <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
+            {resolvedIssues.map((issue) => (
+              <DraggableBoardCard key={issue.id} issue={issue} childProgress={childProgressMap?.get(issue.id)} disableSorting={!!sortLabel} />
+            ))}
+          </SortableContext>
+          {issueIds.length === 0 && (
+            <p className="py-8 text-center text-xs text-muted-foreground">
+              {t(($) => $.board.empty_column)}
+            </p>
+          )}
+          {footer}
+        </div>
       </div>
+    </div>
+  );
+});
+
+function BoardGroupHeading({
+  group,
+  count,
+}: {
+  group: BoardColumnGroup;
+  count: number;
+}) {
+  if (group.status) {
+    return <StatusHeading status={group.status} count={count} />;
+  }
+
+  const actorIcon =
+    group.assigneeType && group.assigneeId ? (
+      <ActorAvatar
+        actorType={group.assigneeType}
+        actorId={group.assigneeId}
+        size={18}
+        showStatusDot={group.assigneeType === "agent"}
+      />
+    ) : (
+      <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full bg-background text-muted-foreground">
+        <UserMinus className="size-3.5" />
+      </span>
+    );
+
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      {actorIcon}
+      <span className="truncate text-sm font-medium" title={group.title}>
+        {group.title}
+      </span>
+      <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+        {count}
+      </span>
     </div>
   );
 }

@@ -85,6 +85,7 @@ var notifTypeToGroup = map[string]string{
 	"new_comment":     "comments",
 	"mentioned":       "comments",
 	"priority_changed": "updates",
+	"start_date_changed": "updates",
 	"due_date_changed": "updates",
 	"task_completed":  "agent_activity",
 	"task_failed":     "agent_activity",
@@ -338,7 +339,7 @@ func notifyIssueSubscribers(
 			Title:         title,
 			Body:          util.StrToText(body),
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -403,7 +404,7 @@ func notifyDirect(
 		Title:         title,
 		Body:          util.StrToText(body),
 		ActorType:     util.StrToText(e.ActorType),
-		ActorID:       parseUUID(e.ActorID),
+		ActorID:       optionalUUID(e.ActorID),
 		Details:       details,
 	})
 	if err != nil {
@@ -442,6 +443,7 @@ func notifyMentionedMembers(
 	recipientIDs := map[string]bool{}
 
 	hasAll := false
+	var squadIDs []string
 	for _, m := range mentions {
 		if m.Type == "all" {
 			hasAll = true
@@ -449,6 +451,29 @@ func notifyMentionedMembers(
 		}
 		if m.Type == "member" {
 			recipientIDs[m.ID] = true
+		}
+		if m.Type == "squad" {
+			squadIDs = append(squadIDs, m.ID)
+		}
+	}
+
+	// Expand each @squad mention to its human members. Agent members of a
+	// squad are reached via comment-trigger / assignment paths, not the
+	// mention-inbox path, so we only seed member-typed recipients here.
+	for _, sid := range squadIDs {
+		squadUUID, err := util.ParseUUID(sid)
+		if err != nil {
+			continue
+		}
+		members, err := queries.ListSquadMembers(context.Background(), squadUUID)
+		if err != nil {
+			slog.Error("failed to list squad members for @squad mention", "squad_id", sid, "error", err)
+			continue
+		}
+		for _, sm := range members {
+			if sm.MemberType == "member" {
+				recipientIDs[util.UUIDToString(sm.MemberID)] = true
+			}
 		}
 	}
 
@@ -490,7 +515,7 @@ func notifyMentionedMembers(
 			IssueID:       parseUUID(issueID),
 			Title:         title,
 			ActorType:     util.StrToText(e.ActorType),
-			ActorID:       parseUUID(e.ActorID),
+			ActorID:       optionalUUID(e.ActorID),
 			Details:       details,
 		})
 		if err != nil {
@@ -659,6 +684,25 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				priorityDetails)
 		}
 
+		if startDateChanged, _ := payload["start_date_changed"].(bool); startDateChanged {
+			prevStartDateStr := ""
+			if prevStartDate, ok := payload["prev_start_date"].(*string); ok && prevStartDate != nil {
+				prevStartDateStr = *prevStartDate
+			}
+			newStartDateStr := ""
+			if issue.StartDate != nil {
+				newStartDateStr = *issue.StartDate
+			}
+			startDateDetails, _ := json.Marshal(map[string]string{
+				"from": prevStartDateStr,
+				"to":   newStartDateStr,
+			})
+			notifySubscribers(ctx, queries, bus, issue.ID, issue.Status, e.WorkspaceID, e,
+				nil, "start_date_changed", "info",
+				issue.Title, "",
+				startDateDetails)
+		}
+
 		if dueDateChanged, _ := payload["due_date_changed"].(bool); dueDateChanged {
 			prevDueDateStr := ""
 			if prevDueDate, ok := payload["prev_due_date"].(*string); ok && prevDueDate != nil {
@@ -711,17 +755,31 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// The comment payload can come as handler.CommentResponse from the
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
-		var issueID, commentID, commentContent string
+		var issueID, commentID, commentContent, authorType string
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
 			commentContent = c.Content
+			authorType = c.AuthorType
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
 			commentContent, _ = c["content"].(string)
+			authorType, _ = c["author_type"].(string)
 		default:
+			return
+		}
+
+		// Platform-authored system comments (MUL-2538 child-done parent
+		// notify) must NOT create inbox rows or parse mentions from their
+		// body — the comment is a controlled platform signal, not a human
+		// commenter. Mention parsing is the dangerous bit: if the body
+		// transcluded a child title containing `mention://member/<uuid>`,
+		// the parent's assignee inbox would light up via the generic path.
+		// Skip the listener entirely; the WS broadcast still delivers the
+		// comment to the issue timeline.
+		if authorType == "system" {
 			return
 		}
 

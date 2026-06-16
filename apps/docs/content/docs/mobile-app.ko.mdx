@@ -1,0 +1,82 @@
+---
+title: 모바일 앱 (iOS)
+description: 아직 App Store에 없는 오픈소스 Multica iOS 앱을 직접 본인 iPhone에 빌드하는 방법.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica의 iOS 클라이언트는 오픈소스이며, web, desktop, 백엔드와 함께 [메인 저장소](https://github.com/multica-ai/multica)에 들어 있습니다. 아직 App Store에는 없으며, 그 상황이 바뀌기 전까지는 iPhone에서 사용하려는 사람이 직접 소스에서 빌드합니다. 빌드는 처음에는 약 10~20분, 그 이후에는 약 2분이 걸리며, [multica.ai](https://multica.ai)와 동일한 백엔드와 통신하므로 기존 계정이 그대로 동작합니다.
+
+<Callout type="info">
+이 페이지는 **개인 사용자**를 위한 것입니다. 앱 개발자는 저장소의 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md)를 읽어야 합니다 — dev / staging 변형과 전체 스크립트 목록을 다룹니다.
+</Callout>
+
+## 필요한 것
+
+- Xcode가 설치된 **Mac** (App Store에서 무료로 받을 수 있습니다).
+- Xcode → Settings → Accounts에 추가한 무료 **Apple ID**. 유료 Apple Developer Program 계정은 선택 사항이며, 7일 서명 기간을 1년으로 늘려줄 뿐입니다 — 아래 [7일 제한](#7-day-signing-limit)을 참고하세요.
+- USB 케이블로 연결되어 있고 [Developer Mode가 활성화된](https://docs.expo.dev/guides/ios-developer-mode/) **iPhone** (설정 → 개인 정보 보호 및 보안 → 개발자 모드).
+- 체크아웃한 Multica 소스 코드:
+
+  ```bash
+  git clone https://github.com/multica-ai/multica.git
+  cd multica
+  pnpm install
+  ```
+
+이 목록에서 빠진 것이 있다면, Expo의 [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/)를 따라 진행하세요 (**Development build → iOS Device**를 선택). 저장소 체크아웃을 제외한 모든 것에 대한 공식 설정 가이드입니다.
+
+## 빌드하기
+
+명령어 하나:
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+Xcode는 Apple ID가 자동으로 소유하는 "Personal Team"으로 빌드에 서명합니다 — 이 team은 어떤 Apple ID로든 처음 Xcode에 로그인할 때 조용히 생성되므로, 무언가를 설정한 기억이 없더라도 이미 존재합니다. 이것은 **Release 빌드**입니다: Metro 의존성이 없고, 스플래시 화면 → 앱으로 이어지며, App Store에서 설치한 것과 똑같습니다.
+
+첫 빌드는 CocoaPods를 다운로드하고 React Native를 소스에서 컴파일합니다 — 10~20분 정도 예상하세요. 이후 빌드는 Xcode의 캐시를 재사용합니다.
+
+일반적인 경로는 이것으로 끝입니다. 서명이 실패하면 [문제 해결](#troubleshooting)로 이동하세요.
+
+## 7일 서명 제한
+
+무료 Apple ID는 빌드를 **7일** 동안 서명합니다. 그 이후에는 앱이 iPhone에서 실행을 거부하고 "untrusted developer" 오류를 표시합니다. Mac에 다시 연결하고 동일한 명령어를 다시 실행하여 재서명하세요 — 데이터는 앱이 아니라 백엔드에 있으므로 그대로 유지됩니다.
+
+이를 연장하는 유일한 방법은 **Apple Developer Program 계정**입니다 ([developer.apple.com](https://developer.apple.com)에서 연 $99). 그러면 서명이 갱신 사이 1년 동안 유효하며, TestFlight를 통해 다른 기기에 배포할 수도 있습니다.
+
+## 업데이트
+
+아직 자동 업데이트는 없습니다. Multica 코드베이스가 앞으로 나아가면, pull한 후 다시 빌드하세요:
+
+```bash
+git pull
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+Xcode가 네이티브 컴파일을 캐시하므로 이후 빌드는 빠릅니다.
+
+## 아직 App Store에 없는 이유
+
+iOS 앱은 여전히 빠르게 움직이고 있습니다 — 팀은 지금 App Store 심사 주기보다 출시 후 반복 개선을 선호합니다. 정식 App Store 출시 전에 TestFlight 베타가 가장 유력한 다음 단계입니다. 그때까지는 위의 직접 빌드 방식이 iOS에서 Multica를 사용하는 유일한 방법입니다.
+
+TestFlight가 열릴 때 알림을 받고 싶다면 [GitHub 저장소](https://github.com/multica-ai/multica)를 watch하세요.
+
+## 문제 해결
+
+**"No matching provisioning profiles found"** — Xcode가 기본 번들 id `ai.multica.mobile`를 Apple ID로 서명하기를 거부합니다. 드물지만, 누군가 Apple 개발자 포털에서 해당 접두사를 등록했다면 발생합니다. 본인이 제어하는 아무 역방향 도메인(`com.yourname.multica`이면 충분합니다)을 골라 export한 후 다시 실행하세요:
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+id 자체는 어떤 의미가 있을 필요가 없습니다 — Apple은 단지 다른 team이 점유하지 않았다는 것만 요구합니다.
+
+**"Could not launch &lt;app&gt;" / "Untrusted Developer"** — 7일 제한에 도달했거나(빌드를 다시 실행하세요), iPhone에서 개발자 프로필을 수동으로 신뢰해야 합니다: 설정 → 일반 → VPN 및 기기 관리 → Apple ID를 탭 → 신뢰.
+
+**`Pod install`에서 빌드가 멈추거나 끝없이 컴파일됨** — 첫 빌드는 CocoaPods가 의존성을 다운로드하고 Xcode가 React Native를 소스에서 컴파일하기 때문에 실제로 10~20분이 걸립니다. 이후 빌드는 훨씬 빠릅니다.
+
+**앱이 백엔드에 연결할 수 없음** — `apps/mobile/.env.production`이 수정되지 않았는지 확인하세요(기본값은 `EXPO_PUBLIC_API_URL=https://api.multica.ai`입니다). 변경했다면 `git checkout apps/mobile/.env.production`으로 복원하세요.

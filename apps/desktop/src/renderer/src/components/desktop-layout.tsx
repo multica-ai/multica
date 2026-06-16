@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
@@ -13,8 +13,8 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { ChatFab, ChatWindow } from "@multica/views/chat";
-import { StarterContentPrompt } from "@multica/views/onboarding";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import { DesktopNavigationProvider } from "@/platform/navigation";
@@ -35,6 +35,7 @@ function SidebarTopBar() {
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
         <button
+          type="button"
           onClick={goBack}
           disabled={!canGoBack}
           aria-label="Go back"
@@ -43,6 +44,7 @@ function SidebarTopBar() {
           <ChevronLeft className="size-4" />
         </button>
         <button
+          type="button"
           onClick={goForward}
           disabled={!canGoForward}
           aria-label="Go forward"
@@ -53,6 +55,20 @@ function SidebarTopBar() {
       </div>
     </div>
   );
+}
+
+function useNativeNavigationGestures() {
+  const { goBack, goForward } = useTabHistory();
+
+  useEffect(() => {
+    return window.desktopAPI.onNavigationGesture((gesture) => {
+      if (gesture === "back") {
+        goBack();
+      } else {
+        goForward();
+      }
+    });
+  }, [goBack, goForward]);
 }
 
 // The main area's top bar doubles as a window drag region. When the sidebar
@@ -112,18 +128,30 @@ function useInternalLinkHandler() {
  *      inbox even if the user has since switched to workspace B. Marking
  *      the row read is handled by InboxPage's selected-item effect, which
  *      covers both click-to-select and URL-param-select paths.
+ *
+ * The click routes through `useNavigation().push` — NOT the
+ * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
+ * workspace's tab group. The navigation adapter detects a cross-workspace
+ * path and translates it into `switchWorkspace(slug, path)`, so clicking a
+ * workspace-A notification while B is active performs a real workspace
+ * switch instead of mounting A's inbox inside B's tab group (#3766).
  */
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
+  const { push } = useNavigation();
+  // The adapter identity changes with the active tab's location; the ref
+  // keeps the main-process subscription stable across navigations.
+  const pushRef = useRef(push);
+  useEffect(() => {
+    pushRef.current = push;
+  }, [push]);
 
   useEffect(() => {
     return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
       if (!slug) return;
       const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      window.dispatchEvent(
-        new CustomEvent("multica:navigate", { detail: { path: inboxPath } }),
-      );
+      pushRef.current(inboxPath);
     });
   }, []);
 
@@ -133,6 +161,7 @@ function DesktopInboxBridge() {
 export function DesktopShell() {
   useInternalLinkHandler();
   useActiveTitleSync();
+  useNativeNavigationGestures();
 
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab
@@ -169,7 +198,6 @@ export function DesktopShell() {
         </div>
         {slug && <ModalRegistry />}
         {slug && <SearchCommand />}
-        {slug && <StarterContentPrompt />}
         <WindowOverlay />
       </WorkspaceSlugProvider>
     </DesktopNavigationProvider>

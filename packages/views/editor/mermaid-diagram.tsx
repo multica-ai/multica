@@ -15,7 +15,7 @@
  * the page.
  */
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2 } from "lucide-react";
 import { useT } from "../i18n";
@@ -113,6 +113,60 @@ function getMermaidLayout(svg: string): MermaidLayout {
   return {};
 }
 
+// Default skeleton height while Mermaid loads + renders for the first time
+// in this session. Picked to absorb most issue-detail diagrams without
+// excessive empty space; web.dev's CLS guidance recommends reserving any
+// such space upfront so async content doesn't shift surrounding layout.
+const MERMAID_SKELETON_HEIGHT_PX = 280;
+const MERMAID_LAYOUT_CACHE_PREFIX = "multica:mermaid:layout:";
+
+// DJB2 — small, fast, sufficient for sessionStorage cache keys. The chart
+// text itself is too unwieldy as a key (length, special chars), and a
+// crypto-strength hash would have to be async.
+function hashChart(chart: string): string {
+  let hash = 5381;
+  for (let i = 0; i < chart.length; i++) {
+    hash = ((hash << 5) + hash) ^ chart.charCodeAt(i);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function readCachedLayout(chart: string): MermaidLayout | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(
+      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
+    );
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      typeof parsed?.width === "number" &&
+      typeof parsed?.height === "number" &&
+      parsed.width > 0 &&
+      parsed.height > 0
+    ) {
+      return { width: parsed.width, height: parsed.height };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedLayout(chart: string, layout: MermaidLayout): void {
+  if (typeof window === "undefined") return;
+  if (!layout.width || !layout.height) return;
+  try {
+    window.sessionStorage.setItem(
+      MERMAID_LAYOUT_CACHE_PREFIX + hashChart(chart),
+      JSON.stringify({ width: layout.width, height: layout.height }),
+    );
+  } catch {
+    // Quota exceeded or storage disabled — degrade silently; we still
+    // render correctly, just without the zero-shift optimisation.
+  }
+}
+
 function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): string {
   const cssVariables = getSandboxCssVariables(host);
 
@@ -200,7 +254,11 @@ export function MermaidDiagram({ chart }: { chart: string }) {
   const themeVersion = useThemeVersion();
   const [sandboxedDocument, setSandboxedDocument] = useState<string | null>(null);
   const [expandedDocument, setExpandedDocument] = useState<string | null>(null);
-  const [layout, setLayout] = useState<MermaidLayout>({});
+  // Lazy initial value: if we've rendered this exact chart already in the
+  // current session, the cached layout lets us reserve correct space on the
+  // very first paint — eliminating the 0px → real-height shift that breaks
+  // deep-link scroll positioning and ambient reading position.
+  const [layout, setLayout] = useState<MermaidLayout>(() => readCachedLayout(chart) ?? {});
   const [error, setError] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
@@ -212,7 +270,10 @@ export function MermaidDiagram({ chart }: { chart: string }) {
         setError(null);
         setSandboxedDocument(null);
         setExpandedDocument(null);
-        setLayout({});
+        // Seed layout from cache (if any) so the skeleton sizes correctly
+        // even when `chart` changes after mount — the lazy useState above
+        // only fires once.
+        setLayout(readCachedLayout(chart) ?? {});
         const mermaid = await getMermaid();
         mermaid.initialize({
           startOnLoad: false,
@@ -222,7 +283,9 @@ export function MermaidDiagram({ chart }: { chart: string }) {
         });
         const { svg: renderedSvg } = await mermaid.render(diagramId, chart);
         if (!cancelled) {
-          setLayout(getMermaidLayout(renderedSvg));
+          const measured = getMermaidLayout(renderedSvg);
+          setLayout(measured);
+          writeCachedLayout(chart, measured);
           setSandboxedDocument(
             buildSandboxedMermaidDocument(renderedSvg, containerRef.current),
           );
@@ -255,8 +318,21 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     );
   }
 
+  // While the iframe is not yet ready, hold the container at the skeleton
+  // height (cached real height when available, fallback default otherwise).
+  // Once the iframe renders, drop the min-height — the iframe's own height
+  // drives layout. If the cache was right, this transition is zero-shift.
+  const containerStyle: CSSProperties | undefined = sandboxedDocument
+    ? undefined
+    : { minHeight: layout.height ?? MERMAID_SKELETON_HEIGHT_PX };
+
   return (
-    <div ref={containerRef} className="mermaid-diagram" aria-label="Mermaid diagram">
+    <div
+      ref={containerRef}
+      className="mermaid-diagram"
+      aria-label="Mermaid diagram"
+      style={containerStyle}
+    >
       {sandboxedDocument ? (
         <>
           <iframe

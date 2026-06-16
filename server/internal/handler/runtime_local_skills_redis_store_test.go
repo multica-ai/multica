@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -224,7 +225,15 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 
 	name := "Review Helper"
 	desc := "Desc"
-	req, err := store.Create(ctx, "runtime-1", "user-42", "review-helper", &name, &desc)
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID:     "runtime-1",
+		CreatorID:     "user-42",
+		SkillKey:      "review-helper",
+		Name:          &name,
+		Description:   &desc,
+		Action:        LocalSkillImportActionOverwrite,
+		TargetSkillID: "target-skill-99",
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -248,6 +257,47 @@ func TestRedisLocalSkillImportStore_PreservesCreatorID(t *testing.T) {
 	if got.Description == nil || *got.Description != desc {
 		t.Fatalf("description lost: %v", got.Description)
 	}
+	// The overwrite intent must survive the round trip — it is consumed at
+	// report time, not delivered to the daemon.
+	if got.Action != LocalSkillImportActionOverwrite {
+		t.Fatalf("action lost round trip: %q", got.Action)
+	}
+	if got.TargetSkillID != "target-skill-99" {
+		t.Fatalf("target_skill_id lost round trip: %q", got.TargetSkillID)
+	}
+}
+
+func TestRedisLocalSkillImportStore_PreservesConflict(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-1",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	info := LocalSkillImportConflict{ExistingSkillID: "skill-7", ExistingCreatedBy: "user-2", CanOverwrite: false}
+	if err := store.Conflict(ctx, req.ID, info); err != nil {
+		t.Fatalf("conflict: %v", err)
+	}
+
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != RuntimeLocalSkillConflict {
+		t.Fatalf("status = %s, want conflict", got.Status)
+	}
+	if got.Conflict == nil {
+		t.Fatalf("conflict metadata lost round trip")
+	}
+	if got.Conflict.ExistingSkillID != "skill-7" || got.Conflict.ExistingCreatedBy != "user-2" || got.Conflict.CanOverwrite {
+		t.Fatalf("conflict metadata corrupted: %+v", got.Conflict)
+	}
 }
 
 func TestRedisLocalSkillImportStore_PopPendingAcrossInstances(t *testing.T) {
@@ -257,7 +307,11 @@ func TestRedisLocalSkillImportStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisLocalSkillImportStore(rdb)
 	nodeB := NewRedisLocalSkillImportStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-import", "user-1", "review-helper", nil, nil)
+	req, err := nodeA.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-import",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -353,6 +407,58 @@ func TestRedisLocalSkillListStore_PopPendingAtomicClaim(t *testing.T) {
 	}
 	if again != nil {
 		t.Fatalf("second pop should be empty, got %+v", again)
+	}
+}
+
+func TestRedisLocalSkillImportStore_PopPendingBatch(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisLocalSkillImportStore(rdb)
+
+	// Create 5 pending imports.
+	ids := make([]string, 5)
+	for i := range ids {
+		req, err := store.Create(ctx, LocalSkillImportRequestInput{
+			RuntimeID: "runtime-batch",
+			CreatorID: "user-1",
+			SkillKey:  fmt.Sprintf("skill-%d", i),
+		})
+		if err != nil {
+			t.Fatalf("create %d: %v", i, err)
+		}
+		ids[i] = req.ID
+	}
+
+	// Pop batch of 3 — should return 3 in creation order.
+	batch, err := store.PopPendingBatch(ctx, "runtime-batch", 3)
+	if err != nil {
+		t.Fatalf("pop batch: %v", err)
+	}
+	if len(batch) != 3 {
+		t.Fatalf("expected 3, got %d", len(batch))
+	}
+	for _, req := range batch {
+		if req.Status != RuntimeLocalSkillRunning {
+			t.Fatalf("batch item status = %s, want running", req.Status)
+		}
+	}
+
+	// Pop remaining — should get 2.
+	rest, err := store.PopPendingBatch(ctx, "runtime-batch", 10)
+	if err != nil {
+		t.Fatalf("pop rest: %v", err)
+	}
+	if len(rest) != 2 {
+		t.Fatalf("expected 2 remaining, got %d", len(rest))
+	}
+
+	// Pop again — nothing left.
+	empty, err := store.PopPendingBatch(ctx, "runtime-batch", 10)
+	if err != nil {
+		t.Fatalf("pop empty: %v", err)
+	}
+	if len(empty) != 0 {
+		t.Fatalf("expected 0, got %d", len(empty))
 	}
 }
 

@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Trash2,
   ChevronRight,
   Cpu,
+  Globe,
   Lock,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +14,7 @@ import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import { deriveRuntimeHealth } from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
@@ -23,35 +23,20 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@multica/ui/components/ui/select";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AppLink } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
+import { formatLastSeen, isSelfHealingRuntime } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -106,10 +91,10 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
-  const deleteMutation = useDeleteRuntime(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -132,16 +117,13 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     (a) => a.runtime_id === runtime.id && !a.archived_at,
   );
 
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
-        setDeleteOpen(false);
-      },
-      onError: (e) => {
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
-      },
-    });
+  // Successful delete (light or cascade) closes the dialog and navigates
+  // back to the runtimes list. Toast lives here so the cascade-mode count
+  // and the light-mode "Runtime deleted" share one entry point.
+  const handleDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(paths.runtimes());
+    toast.success(t(($) => $.detail.toast_deleted));
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
@@ -149,49 +131,22 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Topbar — back link + breadcrumb + right-side actions. Mirrors the
-          skill-detail-page topbar so users build one mental model for
-          "go back to the index" across the dashboard. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.runtimes()} />}
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_runtimes)}
-        </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canDelete && (
+      <BreadcrumbHeader
+        segments={[{ href: paths.runtimes(), label: t(($) => $.page.title) }]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {runtime.name}
+          </span>
+        }
+        actions={
+          !canDelete ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
-          )}
-          {canDelete && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setDeleteOpen(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label={t(($) => $.detail.delete_aria)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Body — single scroll container that owns the Hero card AND the
           analytic blocks below. Putting Hero inside the scroll (instead of
@@ -209,7 +164,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
-            <UsageSection runtimeId={runtime.id} />
+            <UsageSection runtime={runtime} />
           </div>
 
           {/* Right rail: serving agents + diagnostics */}
@@ -230,27 +185,16 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Delete confirmation — unified light/cascade dialog. Shared across
+          this page and the runtime list kebab so the two entry points stay
+          in lockstep on copy and behaviour. */}
+      <DeleteRuntimeDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        runtime={runtime}
+        wsId={wsId}
+        onDeleted={handleDeleted}
+      />
     </div>
   );
 }
@@ -506,6 +450,10 @@ function DiagnosticsCard({
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
+  const selfHealing = isSelfHealingRuntime(runtime);
+  // canDelete here doubles as the "can edit runtime" predicate — it already
+  // means "workspace owner/admin OR runtime owner", which is the same gate
+  // the server enforces for the visibility PATCH.
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
@@ -514,12 +462,12 @@ function DiagnosticsCard({
       <div className="space-y-3 p-4">
         <div>
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {t(($) => $.detail.diagnostics_timezone)}
+            {t(($) => $.detail.diagnostics_visibility)}
           </div>
           {canDelete ? (
-            <TimezoneEditor runtime={runtime} />
+            <VisibilityEditor runtime={runtime} />
           ) : (
-            <TimezoneReadout runtime={runtime} />
+            <VisibilityReadout runtime={runtime} />
           )}
         </div>
         {isLocal && (
@@ -537,15 +485,41 @@ function DiagnosticsCard({
         )}
         {canDelete && (
           <div className="border-t pt-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              {t(($) => $.detail.delete_button)}
-            </Button>
+            {selfHealing ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    // Wrapping span keeps the trigger hoverable — a disabled
+                    // <button> swallows pointer events, so the tooltip would
+                    // never open if it were the trigger itself.
+                    <span className="block w-full">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled
+                        className="h-8 w-full justify-start gap-2 text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_button)}
+                      </Button>
+                    </span>
+                  }
+                />
+                <TooltipContent>
+                  {t(($) => $.detail.delete_disabled_tooltip)}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-full justify-start gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.delete_button)}
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -553,121 +527,123 @@ function DiagnosticsCard({
   );
 }
 
-// Common IANA zones offered as quick picks when Intl.supportedValuesOf is not
-// available, and promoted near the top otherwise.
-const COMMON_TIMEZONES = [
-  "UTC",
-  "America/Los_Angeles",
-  "America/Denver",
-  "America/Chicago",
-  "America/New_York",
-  "America/Sao_Paulo",
-  "Europe/London",
-  "Europe/Berlin",
-  "Europe/Paris",
-  "Europe/Moscow",
-  "Africa/Cairo",
-  "Asia/Dubai",
-  "Asia/Kolkata",
-  "Asia/Bangkok",
-  "Asia/Shanghai",
-  "Asia/Singapore",
-  "Asia/Tokyo",
-  "Australia/Sydney",
-  "Pacific/Auckland",
-];
-
-function browserTimezone(): string {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    return tz || "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-
-type IntlWithSupportedValues = typeof Intl & {
-  supportedValuesOf?: (key: "timeZone") => string[];
-};
-
-function supportedTimezones(): string[] {
-  try {
-    const supported = (Intl as IntlWithSupportedValues).supportedValuesOf?.(
-      "timeZone",
-    );
-    return supported && supported.length > 0 ? supported : COMMON_TIMEZONES;
-  } catch {
-    return COMMON_TIMEZONES;
-  }
-}
-
-function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
+// VisibilityReadout renders a static "Private" / "Public" pill for users
+// who can't edit the runtime. The description used to sit under the chip;
+// it now lives in the hover tooltip so the Diagnostics column stays compact
+// and matches the surrounding sections. Older backends that omit the field
+// render as "Private" to match the strict default.
+function VisibilityReadout({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  const visibility = runtime.visibility === "public" ? "public" : "private";
+  const Icon = visibility === "public" ? Globe : Lock;
   return (
-    <div className="space-y-1.5">
-      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
-        {runtime.timezone || "UTC"}
-      </div>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span className="inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1.5 text-xs">
+            <Icon className="h-3 w-3 text-muted-foreground" />
+            <span className="font-medium">
+              {t(($) => $.detail.visibility_label[visibility])}
+            </span>
+          </span>
+        }
+      />
+      <TooltipContent>
+        {t(($) => $.detail.visibility_hint[visibility])}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
-// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
-// zones (plus the runtime's current value if it is unusual), and commits the
-// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
-// separate "edit" mode because the change is reversible.
-function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
+// VisibilityEditor lets the runtime owner (or workspace admin) flip
+// public↔private. The PATCH endpoint also re-checks; this is a UI gate, not
+// a security boundary. Per-choice description text lives in the hover
+// tooltip so the two buttons stay a tight icon+label pair instead of the
+// previous two-line block that competed with the surrounding cards.
+function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const updateRuntime = useUpdateRuntime(wsId);
-  const current = runtime.timezone || "UTC";
-  const browser = browserTimezone();
-  const browserSuffix = t(($) => $.detail.timezone_browser_suffix);
+  const current = runtime.visibility === "public" ? "public" : "private";
 
-  const options = Array.from(
-    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
-  ).filter(Boolean);
-  const handleTimezoneChange = (next: string) => {
+  const flip = (next: "private" | "public") => {
     if (next === current) return;
     updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { timezone: next } },
+      { runtimeId: runtime.id, patch: { visibility: next } },
       {
         onSuccess: () =>
-          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-        onError: () =>
-          toast.error(t(($) => $.detail.timezone_toast_failed)),
+          toast.success(
+            t(($) => $.detail.visibility_toast_updated, {
+              visibility: t(($) => $.detail.visibility_label[next]),
+            }),
+          ),
+        onError: (err) =>
+          toast.error(
+            err instanceof Error && err.message
+              ? err.message
+              : t(($) => $.detail.visibility_toast_failed),
+          ),
       },
     );
   };
 
   return (
-    <div className="space-y-1.5">
-      <Select
-        value={current}
+    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+      <VisibilityChoice
+        active={current === "private"}
+        icon={<Lock className="h-3 w-3" />}
+        label={t(($) => $.detail.visibility_label.private)}
+        tooltip={t(($) => $.detail.visibility_hint.private)}
         disabled={updateRuntime.isPending}
-        onValueChange={(next) => {
-          if (next) handleTimezoneChange(next);
-        }}
-      >
-        <SelectTrigger size="sm" className="w-full rounded-md font-mono text-xs">
-          <SelectValue>
-            {current === browser ? `${current}${browserSuffix}` : current}
-          </SelectValue>
-        </SelectTrigger>
-        <SelectContent align="start" className="max-h-72">
-          {options.map((tz) => (
-            <SelectItem key={tz} value={tz} className="font-mono text-xs">
-              {tz === browser ? `${tz}${browserSuffix}` : tz}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
+        onClick={() => flip("private")}
+      />
+      <VisibilityChoice
+        active={current === "public"}
+        icon={<Globe className="h-3 w-3" />}
+        label={t(($) => $.detail.visibility_label.public)}
+        tooltip={t(($) => $.detail.visibility_hint.public)}
+        disabled={updateRuntime.isPending}
+        onClick={() => flip("public")}
+      />
     </div>
+  );
+}
+
+function VisibilityChoice({
+  active,
+  icon,
+  label,
+  tooltip,
+  disabled,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  tooltip: string;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium transition-colors ${
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+          >
+            <span className="shrink-0">{icon}</span>
+            <span>{label}</span>
+          </button>
+        }
+      />
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }

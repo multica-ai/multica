@@ -30,7 +30,9 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     parent_issue_id: null,
     project_id: null,
     position: 0,
+    start_date: null,
     due_date: null,
+    metadata: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -203,5 +205,47 @@ describe("filterIssues", () => {
     // L4 (empty labels) and L5 (missing labels field) must both be filtered out.
     expect(result.map((i) => i.id)).not.toContain("L4");
     expect(result.map((i) => i.id)).not.toContain("L5");
+  });
+
+  // --- Agent running quick filter ---
+  it("keeps only running issues when agentRunningFilter is on", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["2", "4"]),
+    });
+    expect(result.map((i) => i.id)).toEqual(["2", "4"]);
+  });
+
+  it("hides everything when agentRunningFilter is on but no ids running", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      agentRunningFilter: true,
+      runningIssueIds: new Set(),
+    });
+    expect(result).toHaveLength(0);
+  });
+
+  it("ignores runningIssueIds when agentRunningFilter is off", () => {
+    // The set is irrelevant unless the toggle is true — this guards against
+    // a future refactor accidentally applying the set as an implicit
+    // pre-filter when the user hasn't asked for it.
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      runningIssueIds: new Set(["2"]),
+    });
+    expect(result).toHaveLength(4);
+  });
+
+  it("composes agentRunningFilter with other filters (AND semantics)", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      agentRunningFilter: true,
+      runningIssueIds: new Set(["1", "2"]),
+    });
+    // Issue 2 is in_progress (filtered out by status), issue 1 is todo and
+    // in the running set → only "1" survives.
+    expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 });

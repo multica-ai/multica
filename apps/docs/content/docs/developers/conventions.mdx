@@ -70,7 +70,7 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 
 ### Issue keys
 
-Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (3 letters, uppercase) + sequence number. The prefix is set at workspace creation and is never changed afterward.
+Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (uppercase letters and digits, typically 3 chars, max 10) + sequence number. Workspace admins can change the prefix in Settings → General; changing it renumbers every existing issue, so external references that embed the old prefix (PR titles, branch names, links in docs and chat) stop resolving.
 
 ### Comments in code
 
@@ -160,6 +160,7 @@ Chinese term reference:
 | Confirm / Continue / Back | 确认 / 继续 / 返回 |
 | Edit / New / Create / Add | 编辑 / 新建 / 创建 / 添加 |
 | Remove / Send / Open / Close | 移除 / 发送 / 打开 / 关闭 |
+| Preview / Download / Upload | 预览 / 下载 / 上传 |
 | Done / Loading... | 完成 / 加载中... |
 | Profile / Account / Appearance | 个人资料 / 账号 / 外观 |
 | Theme / Language | 主题 / 语言 |

@@ -34,7 +34,9 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
+  useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -43,6 +45,12 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Attachment } from "@multica/core/types";
+import {
+  parseMarkdownChunked,
+  MARKDOWN_CHUNK_THRESHOLD,
+  type MarkdownManagerLike,
+} from "./utils/parse-markdown-chunked";
+import type { MentionItem } from "./extensions/mention-suggestion";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
@@ -51,7 +59,7 @@ import { EditorBubbleMenu } from "./bubble-menu";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
-import "./content-editor.css";
+import "./styles/index.css";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -89,11 +97,24 @@ interface ContentEditorProps {
    */
   currentIssueId?: string;
   /**
-   * When true, the @mention extension is not registered. Use for editors
-   * where mentioning members/agents has no business meaning (e.g. agent
-   * system prompts, where the content is fed to an LLM as plain text).
+   * When true, the `@` suggestion picker is disabled but the mention node
+   * type remains in the schema, so existing mentions pasted in from other
+   * Multica editors still render as the normal pill. Use for editors where
+   * *creating* a new mention has no business meaning (e.g. agent system
+   * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
+  mentionMode?: "default" | "context";
+  mentionContextItems?: MentionItem[];
+  /** Enable the `/` command picker. Defaults false. */
+  enableSlashCommands?: boolean;
+  /**
+   * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
+   * lists the active agent's skills (chat); "command" shows the fixed built-in
+   * command menu (issue comments), e.g. /note.
+   */
+  slashCommandMode?: "skill" | "command";
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -103,6 +124,17 @@ interface ContentEditorProps {
    * available (NodeView buttons fall back to opening the raw URL).
    */
   attachments?: Attachment[];
+  /**
+   * Flush a pending debounced `onUpdate` when the editor unmounts instead of
+   * dropping it. Default false ON PURPOSE: most composers clear their draft
+   * and then unmount (comment edit cancel, create-issue / feedback submit),
+   * and a flush there would hand the discarded content right back to
+   * `onUpdate`, resurrecting the cleared draft. Opt in only where closing
+   * means "keep what the user last saw" — e.g. the issue-detail description
+   * editor, whose 1500ms debounce would otherwise drop a paste made just
+   * before the modal closes.
+   */
+  flushPendingOnUnmount?: boolean;
 }
 
 interface ContentEditorRef {
@@ -137,16 +169,89 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      mentionMode = "default",
+      mentionContextItems,
+      enableSlashCommands = false,
+      slashCommandMode = "skill",
       attachments,
+      flushPendingOnUnmount = false,
     },
     ref,
   ) {
     const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+    const flushPendingOnUnmountRef = useRef(flushPendingOnUnmount);
+    // Markdown serialized at `onUpdate` time, awaiting its debounce fire. The
+    // unmount flush emits this cached copy — it runs mid-teardown and can't
+    // assume the editor instance is still readable.
+    const pendingFlushRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
-    const onUploadFileRef = useRef(onUploadFile);
+    const onUploadFileRef = useRef<
+      ((file: File) => Promise<UploadResult | null>) | undefined
+    >(undefined);
+    const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+
+    // In-session record of attachments freshly uploaded through this editor.
+    // Surfaces (like the quick-create modal) that don't have a server-supplied
+    // `attachments` prop still need the AttachmentDownloadProvider to know
+    // about images the user just pasted/dropped — without a record in scope,
+    // Attachment.normalize() can't swap the persisted /api/attachments/<id>/
+    // download URL to a freshly-loadable one, and the <img> renders broken in
+    // any environment where the renderer's origin doesn't proxy /api to the
+    // API host (MUL-3192, Desktop/Electron).
+    const [sessionUploads, setSessionUploads] = useState<Attachment[]>([]);
+    // Wrap the caller-supplied uploader so we can stash each successful result
+    // in `sessionUploads`. The wrapper is rebuilt only when the underlying
+    // `onUploadFile` identity changes, so the inner ref handed to Tiptap stays
+    // stable across renders the way the original passthrough did.
+    const wrappedOnUploadFile = useMemo(() => {
+      if (!onUploadFile) return undefined;
+      return async (file: File): Promise<UploadResult | null> => {
+        const result = await onUploadFile(file);
+        // Only track attachments that carry a persisted id — the no-workspace
+        // avatar branch returns an id-less record that the resolver can't key
+        // off of, and tracking it would just bloat memory without helping
+        // anyone. See useFileUpload's `markdownLink` docstring for why.
+        if (result?.id) {
+          setSessionUploads((prev) =>
+            // Deduplicate on id so a re-upload (or a paste-then-drop of the
+            // same blob) doesn't create a parallel record.
+            prev.some((a) => a.id === result.id) ? prev : [...prev, result],
+          );
+        }
+        return result;
+      };
+    }, [onUploadFile]);
+
+    // Merged list fed to AttachmentDownloadProvider. Caller-supplied attachments
+    // (issue / comment editors that pre-load the full attachments[] from the
+    // server) take precedence — we only append session uploads the caller
+    // doesn't already have, so a parent re-render that includes the same record
+    // doesn't end up with two copies.
+    //
+    // One exception on id collision: when the caller's copy has an EMPTY
+    // `download_url` (the create-issue draft strips the short-lived signed URL
+    // before persisting), backfill it from the session upload. The session copy
+    // holds the this-response signed URL, so the just-pasted image first-paints
+    // from it instead of taking an extra redirect hop through `markdown_url`.
+    const providerAttachments = useMemo(() => {
+      if (sessionUploads.length === 0) return attachments;
+      const sessionById = new Map(sessionUploads.map((a) => [a.id, a]));
+      const merged: Attachment[] = [];
+      for (const a of attachments ?? []) {
+        const session = a.id ? sessionById.get(a.id) : undefined;
+        if (session) sessionById.delete(a.id);
+        merged.push(
+          session && !a.download_url
+            ? { ...a, download_url: session.download_url }
+            : a,
+        );
+      }
+      merged.push(...sessionById.values());
+      return merged;
+    }, [attachments, sessionUploads]);
 
     // Current workspace slug kept in a ref so the click handler always sees the
     // latest value without recreating the editor. Used by openLink to prefix
@@ -159,9 +264,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
-    onUploadFileRef.current = onUploadFile;
+    onUploadFileRef.current = wrappedOnUploadFile;
+    mentionContextItemsRef.current = mentionContextItems ?? [];
+    flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
+
+    const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
+    // parseMarkdownChunked). Small docs stay on the single-parse fast path.
+    const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
       immediatelyRender: false,
@@ -169,10 +281,32 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
+        // For large docs we mount empty (below) and parse in chunks here, so the
+        // O(n²) marked tokenizer never sees the whole document at once.
+        if (mountChunked) {
+          const manager = (
+            ed.storage as { markdown?: { manager?: MarkdownManagerLike } }
+          ).markdown?.manager;
+          if (manager) {
+            ed.commands.setContent(
+              parseMarkdownChunked(manager, initialContent),
+              { emitUpdate: false },
+            );
+          } else {
+            ed.commands.setContent(initialContent, {
+              emitUpdate: false,
+              contentType: "markdown",
+            });
+          }
+        }
         lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
       },
-      content: defaultValue ? preprocessMarkdown(defaultValue) : "",
-      contentType: defaultValue ? "markdown" : undefined,
+      content: mountChunked ? "" : initialContent,
+      contentType: mountChunked
+        ? undefined
+        : defaultValue
+          ? "markdown"
+          : undefined,
       extensions: createEditorExtensions({
         placeholder: placeholderText,
         queryClient,
@@ -180,11 +314,20 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        mentionMode,
+        getMentionContextItems: () => mentionContextItemsRef.current,
+        enableSlashCommands,
+        slashCommandMode,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
+        if (flushPendingOnUnmountRef.current) {
+          pendingFlushRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        }
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
+          debounceRef.current = undefined;
+          pendingFlushRef.current = null;
           const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
@@ -211,17 +354,108 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           },
         },
         attributes: {
-          class: cn("rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
         },
       },
     });
 
-    // Cleanup debounce on unmount
+    // Cleanup on unmount. A pending debounced update is DROPPED by default,
+    // not flushed — see the `flushPendingOnUnmount` prop doc for why. When the
+    // owner opted in, emit the markdown cached at `onUpdate` time so a long
+    // debounce can't swallow the last edit when the surrounding modal closes.
     useEffect(() => {
       return () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (!debounceRef.current) return;
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+        if (!flushPendingOnUnmountRef.current) return;
+        const pending = pendingFlushRef.current;
+        pendingFlushRef.current = null;
+        if (pending === null || pending === lastEmittedRef.current) return;
+        lastEmittedRef.current = pending;
+        onUpdateRef.current?.(pending);
       };
     }, []);
+
+    // Sync external `defaultValue` changes into the editor.
+    // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
+    // without this effect, a WS-driven description update keeps the editor
+    // showing stale content until the issue is closed and reopened.
+    useEffect(() => {
+      if (!editor || editor.isDestroyed) return;
+
+      // Guard 0: never clobber an in-flight upload. An external `defaultValue`
+      // change can arrive mid-upload — e.g. chat lazy-creates a session on the
+      // first file upload, which flips `activeSessionId` → the draft key →
+      // `defaultValue`. If we `setContent` over a document that still holds an
+      // `uploading` image/fileCard node, that node is wiped and the upload's
+      // finalize can no longer find it (the file vanishes, leaving an empty
+      // `!file[name]()`). Like the dirty guards below, an uploading node is
+      // local state that an external sync must not overwrite.
+      let hasUploadingNode = false;
+      editor.state.doc.descendants((node) => {
+        if (node.attrs.uploading) hasUploadingNode = true;
+        return !hasUploadingNode;
+      });
+      if (hasUploadingNode) return;
+
+      const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+      // "Dirty" = user has local edits not yet flushed through the debounced
+      // `onUpdate`. `lastEmittedRef` is advanced only after a debounce fire,
+      // so a divergence means the editor holds unsaved bytes.
+      const isDirty =
+        lastEmittedRef.current !== null && current !== lastEmittedRef.current;
+
+      // Guard 1: focused AND dirty — protect bytes the user is actively
+      // typing. Focused-but-clean falls through: applying setContent is safe
+      // (no user input to lose) and necessary, because onBlur has no replay
+      // mechanism and a focused clean editor would otherwise drop this sync
+      // permanently.
+      if (editor.isFocused && isDirty) return;
+
+      // Guard 2: unfocused-but-dirty — blur happened but the debounce window
+      // (debounceMs, 1500ms for description) hasn't flushed yet. The pending
+      // onUpdate will reach the server and the cache will reconcile; skipping
+      // here avoids overwriting unsaved local edits.
+      if (isDirty) return;
+
+      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
+      const incomingNormalized = stripBlobUrls(incoming).trimEnd();
+      // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
+      // when the cache reflects a write this same editor just emitted.
+      if (incomingNormalized === current) return;
+
+      // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
+      // `emitUpdate: true`; without this we would re-trigger onUpdate →
+      // server save → self-write loop.
+      const { from, to } = editor.state.selection;
+      // Same chunked path on WS-driven re-parse of a large description.
+      const manager =
+        incoming.length > MARKDOWN_CHUNK_THRESHOLD
+          ? (editor.storage as { markdown?: { manager?: MarkdownManagerLike } })
+              .markdown?.manager
+          : undefined;
+      if (manager) {
+        editor.commands.setContent(parseMarkdownChunked(manager, incoming), {
+          emitUpdate: false,
+        });
+      } else {
+        editor.commands.setContent(incoming, {
+          emitUpdate: false,
+          contentType: "markdown",
+        });
+      }
+
+      // Clamp prior selection to the new doc size so the caret doesn't snap
+      // to position 0 after ProseMirror replaces the document.
+      const docSize = editor.state.doc.content.size;
+      editor.commands.setTextSelection({
+        from: Math.min(from, docSize),
+        to: Math.min(to, docSize),
+      });
+
+      lastEmittedRef.current = stripBlobUrls(editor.getMarkdown()).trimEnd();
+    }, [defaultValue, editor]);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
@@ -269,13 +503,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     if (!editor) return null;
 
     return (
-      <AttachmentDownloadProvider attachments={attachments}>
+      <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
-          className="relative flex min-h-full flex-col"
+          className="relative flex flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
-          <EditorContent className="flex-1 min-h-full" editor={editor} />
+          <EditorContent className="flex flex-1 flex-col" editor={editor} />
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
           )}

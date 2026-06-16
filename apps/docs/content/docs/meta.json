@@ -16,8 +16,10 @@
     "agents",
     "agents-create",
     "skills",
+    "squads",
     "---How agents run---",
     "daemon-runtimes",
+    "install-agent-runtime",
     "tasks",
     "providers",
     "---Collaborating with agents---",
@@ -27,6 +29,9 @@
     "autopilots",
     "---Inbox---",
     "inbox",
+    "---Integrations---",
+    "github-integration",
+    "lark-bot-integration",
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",
@@ -35,6 +40,7 @@
     "cli",
     "auth-tokens",
     "desktop-app",
+    "mobile-app",
     "---Developers---",
     "developers"
   ]

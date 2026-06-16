@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 // NOTE on workspace scoping:
@@ -14,12 +14,19 @@ export const chatKeys = {
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
   messages: (sessionId: string) => ["chat", "messages", sessionId] as const,
+  messagesPage: (sessionId: string) => ["chat", "messages-page", sessionId] as const,
   pendingTask: (sessionId: string) => ["chat", "pending-task", sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-task execution messages — shared with issue agent cards. */
   taskMessages: (taskId: string) => ["task-messages", taskId] as const,
 };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isTaskMessageTaskId(taskId: string | null | undefined): taskId is string {
+  return typeof taskId === "string" && UUID_PATTERN.test(taskId);
+}
 
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
@@ -42,6 +49,19 @@ export function chatMessagesOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.messages(sessionId),
     queryFn: () => api.listChatMessages(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+export function chatMessagesPageOptions(sessionId: string, limit = 50) {
+  return infiniteQueryOptions({
+    queryKey: chatKeys.messagesPage(sessionId),
+    queryFn: ({ pageParam }) =>
+      api.listChatMessagesPage(sessionId, { before: pageParam, limit }),
+    initialPageParam: null as { created_at: string; id: string } | null,
+    getNextPageParam: (lastPage) =>
+      lastPage.has_more ? lastPage.next_cursor ?? undefined : undefined,
     enabled: !!sessionId,
     staleTime: Infinity,
   });
@@ -70,7 +90,7 @@ export function taskMessagesOptions(taskId: string) {
   return queryOptions({
     queryKey: chatKeys.taskMessages(taskId),
     queryFn: () => api.listTaskMessages(taskId),
-    enabled: !!taskId,
+    enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
   });
 }

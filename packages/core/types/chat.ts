@@ -1,3 +1,5 @@
+import type { AgentTask } from "./agent";
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -29,6 +31,14 @@ export interface ChatMessage {
   task_id: string | null;
   created_at: string;
   /**
+   * Attachments linked to this message via the attachment table's
+   * chat_message_id FK. Populated by ListChatMessages. UI renders these
+   * as file/image cards inside the bubble; the markdown URL inline in
+   * `content` may have an expiring signature, while attachment metadata
+   * here is stable and the source of truth for click-time download.
+   */
+  attachments?: import("./attachment").Attachment[];
+  /**
    * When set, this is an assistant message synthesized by the server's
    * FailTask fallback (mirrors the issue path's failure system comment).
    * `content` carries the raw daemon-reported errMsg; the front-end maps
@@ -47,6 +57,18 @@ export interface ChatMessage {
   elapsed_ms?: number | null;
 }
 
+export interface ChatMessagesCursor {
+  created_at: string;
+  id: string;
+}
+
+export interface ChatMessagesPage {
+  messages: ChatMessage[];
+  limit: number;
+  has_more: boolean;
+  next_cursor?: ChatMessagesCursor | null;
+}
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
@@ -57,6 +79,17 @@ export interface SendChatMessageResponse {
    * timer "snaps backwards" later when WS events update the cache.
    */
   created_at: string;
+}
+
+export interface CancelledChatMessage {
+  chat_session_id: string;
+  message_id: string;
+  content: string;
+  restore_to_input: boolean;
+}
+
+export interface CancelTaskResponse extends AgentTask {
+  cancelled_chat_message?: CancelledChatMessage;
 }
 
 /**

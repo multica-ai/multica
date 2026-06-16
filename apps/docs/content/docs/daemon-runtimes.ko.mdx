@@ -1,0 +1,111 @@
+---
+title: 데몬과 런타임
+description: 에이전트는 Multica 서버에서 실행되지 않습니다. 여러분의 기기에서 실행됩니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica에서 [에이전트](/agents)는 우리 서버에서 실행되지 **않습니다**. 로컬에 설치된 [AI 코딩 도구](/providers)를 호출하는 **데몬**이라는 작은 프로그램이 구동하여, 여러분 자신의 기기에서 실행됩니다. Multica 서버는 조율만 담당합니다. [이슈](/issues)를 저장하고, [작업](/tasks)을 대기열에 넣고, 알맞은 **런타임**으로 분배합니다(런타임 = 데몬 × AI 코딩 도구 하나).
+
+이 구조가 Multica와 Linear / Jira의 가장 큰 차이점입니다. **여러분의 API 키, 툴체인, 코드 디렉터리는 모두 여러분의 기기에 남아 있으며**, Multica 서버는 그중 어느 것도 보지 못합니다. 따라서 "내 에이전트가 동작하지 않는다"는 거의 항상 로컬 문제입니다. 데몬이 실행 중이 아니거나, AI 도구가 설치되어 있지 않거나, 키가 만료되었을 수 있습니다. 먼저 로컬을 확인하세요. 안내는 [문제 해결](/troubleshooting)을 참고하세요.
+
+## 데몬 시작하기
+
+데몬은 Multica CLI의 일부입니다. [Multica CLI](/cli)를 설치한 뒤, 여러분의 기기에서 실행하세요.
+
+```bash
+multica daemon start
+```
+
+시작 시 데몬은 네 가지 일을 합니다.
+
+1. 로그인할 때 저장된 인증 정보를 읽습니다
+2. `PATH`에 설치된 AI 코딩 도구를 감지합니다(내장 12종: [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi))
+3. 감지된 각 도구에 대한 런타임과 함께 자신을 서버에 등록합니다
+4. **3초마다** 가져올 작업이 있는지 폴링하고, **15초마다 하트비트를 전송**합니다
+
+자주 쓰는 명령:
+
+| 명령 | 용도 |
+|---|---|
+| `multica daemon start` | 시작(기본은 백그라운드. 포그라운드로 실행하려면 `--foreground` 추가) |
+| `multica daemon stop` | 중지 |
+| `multica daemon restart` | 재시작 |
+| `multica daemon status` | 상태 표시 |
+| `multica daemon logs` | 로그 표시(따라가려면 `-f` 추가) |
+
+전체 CLI 참고는 [CLI 명령](/cli)을 확인하세요.
+
+**데스크톱 앱에는 데몬이 포함되어 있습니다.** [데스크톱 앱](/desktop-app)을 사용한다면 `multica daemon start`를 수동으로 실행할 필요가 없습니다. 시작할 때 데몬을 자동으로 띄웁니다. 여러분의 워크플로에 어떤 방식이 맞는지는 [데스크톱 앱](/desktop-app) 페이지를 참고하세요.
+
+## 한 기기에 여러 런타임이 생기는 이유
+
+런타임은 서버도 아니고 컨테이너도 아닙니다. "**데몬 × AI 코딩 도구 하나**"의 조합입니다. 예를 들어, Claude Code와 Codex가 모두 설치된 MacBook에서 데몬을 시작하고, 여러분이 두 개의 워크스페이스 멤버라고 합시다. 그러면 Multica는 4개의 런타임을 등록합니다.
+
+<Mermaid chart={`
+graph TD
+    D["여러분의 데몬<br/>MacBook"]
+    D --> R1["런타임<br/>워크스페이스 A × Claude Code"]
+    D --> R2["런타임<br/>워크스페이스 A × Codex"]
+    D --> R3["런타임<br/>워크스페이스 B × Claude Code"]
+    D --> R4["런타임<br/>워크스페이스 B × Codex"]
+`} />
+
+핵심 포인트:
+
+- **하나의 데몬은 여러 런타임에 매핑될 수 있습니다.** 설치된 도구와 가입한 워크스페이스의 조합마다 하나씩 생깁니다
+- **같은 데몬, 워크스페이스, 도구는 정확히 하나의 런타임을 만듭니다.** 데몬을 재시작해도 중복 레코드가 생기지 않습니다
+- Multica UI의 **런타임** 페이지가 이 행들을 나열합니다
+
+<Callout type="info">
+**클라우드 런타임이 곧 제공됩니다.** 현재는 대기자 명단 단계입니다. 제공이 시작되면 로컬 데몬을 실행하지 않고도 Multica Cloud에서 직접 에이전트 작업을 실행할 수 있습니다. [다운로드 페이지](https://multica.ai/download)에서 이메일로 등록하면 알림을 받을 수 있습니다.
+</Callout>
+
+## 런타임이 오프라인으로 표시되는 시점
+
+Multica는 하트비트로 런타임이 온라인인지 판단합니다. 세 가지 핵심 수치:
+
+| 이벤트 | 임곗값 |
+|---|---|
+| 데몬 하트비트 빈도 | **15초**마다 |
+| 누락으로 표시 | **45초** 동안 하트비트 없음(3회 누락) |
+| 자동 삭제 | 연결된 에이전트 없이 **7일** 넘게 누락 상태 |
+
+누락은 영구적이지 않습니다. 데몬이 다시 하트비트를 보내는 즉시 온라인으로 돌아오며, 런타임 레코드도 보존됩니다. 데몬을 재시작해도 런타임은 사라지지 않습니다.
+
+<Callout type="warning">
+**누락된 런타임에서 실행 중이던 작업은 실패로 표시됩니다**(실패 사유 `runtime_offline`). 재시도 가능한 출처(이슈, 채팅)에 대해서는 Multica가 자동으로 다시 대기열에 넣습니다. 오토파일럿이 트리거한 작업은 자동으로 재시도되지 않습니다. [작업 → 어떤 실패가 자동 재시도되는지](/tasks#which-failures-retry-automatically-which-dont)를 참고하세요.
+</Callout>
+
+## 동시에 실행할 수 있는 작업 수
+
+Multica는 두 계층에서 동시성 제한을 적용합니다.
+
+- **데몬 계층**: 기본 **동시 작업 20개**(환경 변수 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`로 조정 가능)
+- **에이전트 계층**: 기본 **에이전트당 동시 작업 6개**(에이전트별로 설정)
+
+둘 중 더 엄격한 쪽이 적용됩니다. 데몬이 이미 작업 20개를 실행 중이라면, 어떤 에이전트에 여유가 남아 있어도 새 작업은 대기합니다.
+
+작업이 `dispatched`로 넘어가지 못하고 `queued`에 멈춰 있다면, 보통 이 두 제한 중 하나가 포화 상태인 것입니다.
+
+## 데몬 충돌 후 진행 중이던 작업은 어떻게 되나
+
+데몬이 충돌하거나 강제 종료되면, 데몬이 가져갔던 작업은 `dispatched` 또는 `running` 상태에 남습니다. 다음 시작 시 데몬은 서버에 "이 작업들은 더 이상 제 것이 아니니, 실패로 표시해 주세요"라고 알립니다. 서버는 이를 사유 `runtime_recovery`와 함께 `failed`로 전환합니다. 재시도 가능한 출처에 대해서는 작업이 자동으로 다시 대기열에 들어갑니다.
+
+이 단계가 네트워크 문제로 실패하더라도, 백업으로 **30초마다** 서버 측 스캔이 돕니다. 45초 넘게 하트비트가 없는 런타임은 누락으로 표시되며, 그 위의 작업도 함께 회수됩니다.
+
+## 동작하지 않는 에이전트 문제 해결
+
+"내 에이전트가 동작하지 않는다"는 문제를 만나면, 먼저 이 세 단계 체크리스트를 진행하세요.
+
+1. `multica daemon status`를 실행해 데몬이 실행 중이고 온라인인지 확인하세요
+2. `multica daemon logs -f`를 실행해 오류가 있는지 확인하세요
+3. Multica UI의 **런타임** 페이지를 열어 런타임이 "온라인"으로 표시되는지 확인하세요
+
+더 많은 시나리오는 [문제 해결](/troubleshooting)을 참고하세요.
+
+## 다음
+
+- [작업](/tasks) — 데몬이 작업을 가져온 뒤의 전체 생애 주기
+- [제공자 대조표](/providers) — 12종 AI 코딩 도구의 기능 차이

@@ -1,11 +1,11 @@
 import { defineI18n } from "fumadocs-core/i18n";
 
-// English is the default; Chinese is available under /zh/.
-// hideLocale: 'default-locale' keeps English URLs prefix-free
-// (`/docs/`) while Chinese lives under `/docs/zh/...`.
-// parser: 'dot' picks up `page.zh.mdx` and `meta.zh.json`.
+// English is the default; Chinese (/zh/), Korean (/ko/), and Japanese (/ja/)
+// are available. hideLocale: 'default-locale' keeps English URLs prefix-free
+// (`/docs/`) while translated locales live under `/docs/<lang>/...`.
+// parser: 'dot' picks up `page.zh.mdx` / `page.ko.mdx` / `page.ja.mdx` and `meta.<lang>.json`.
 export const i18n = defineI18n({
-  languages: ["en", "zh"],
+  languages: ["en", "zh", "ko", "ja"],
   defaultLanguage: "en",
   hideLocale: "default-locale",
   parser: "dot",

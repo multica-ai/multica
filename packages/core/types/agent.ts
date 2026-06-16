@@ -4,6 +4,14 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// Runtime visibility is a separate axis from agent visibility — different
+// vocabulary because it gates a different action. "private" (default) means
+// only the runtime owner and workspace admins can bind agents to it;
+// "public" opens binding to any workspace member. Older backends that
+// haven't shipped MUL-2062 omit the field; the consumer must default to
+// "private" so the strictest behavior is the fallback.
+export type RuntimeVisibility = "private" | "public";
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -16,7 +24,8 @@ export interface RuntimeDevice {
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;
-  timezone: string;
+  /** Defaults to "private" when the backend predates the visibility flag. */
+  visibility: RuntimeVisibility;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -30,6 +39,7 @@ export type AgentRuntime = RuntimeDevice;
 export type TaskFailureReason =
   | "agent_error"
   | "timeout"
+  | "codex_semantic_inactivity"
   | "runtime_offline"
   | "runtime_recovery"
   | "manual";
@@ -60,7 +70,19 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  // `waiting_local_directory` is the daemon-emitted hold state for the
+  // local_directory flow: a task that has been dispatched but is parked
+  // because another task currently owns the same on-disk path lock.
+  // Treated as an active (non-terminal) state alongside queued/dispatched/
+  // running by every consumer that buckets tasks into "active vs done".
+  status:
+    | "queued"
+    | "dispatched"
+    | "waiting_local_directory"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -98,9 +120,24 @@ export interface AgentTask {
   kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
-   * the daemon reports a work_dir (typically once execution starts).
+   * the daemon reports a work_dir (typically once execution starts). This is
+   * the canonical absolute path the agent runs in; UI surfaces should prefer
+   * `relative_work_dir` to avoid leaking the user's home directory.
    */
   work_dir?: string;
+  /**
+   * Privacy-safe display form of `work_dir`, derived on the server. For
+   * standard tasks the daemon's workspaces root has been stripped off
+   * (`<wsUUID>/<taskShort>/workdir`); for local_directory tasks where the
+   * path lives outside that layout, the server strips recognised home
+   * prefixes (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`)
+   * and otherwise falls back to the basename so neither the home directory
+   * nor the username leak into the UI. Older backends omit the field —
+   * render it conditionally and never render `work_dir` raw (not even in
+   * a tooltip / `title` / `aria-label`, since the goal is that screen
+   * shares and screenshots also stay safe).
+   */
+  relative_work_dir?: string;
 }
 
 export interface Agent {
@@ -113,13 +150,62 @@ export interface Agent {
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
-  custom_env: Record<string, string>;
   custom_args: string[];
-  custom_env_redacted: boolean;
+  /**
+   * Coarse metadata signalling whether the agent has any custom env
+   * vars configured, without exposing the keys or values. Reads of
+   * the real map go through the dedicated `GET /api/agents/{id}/env`
+   * endpoint (owner/admin only, audited). MUL-2600.
+   *
+   * Optional in the type so older backends (pre-MUL-2600) that omit
+   * the field don't crash the renderer; downstream code should treat
+   * `undefined` as "unknown — assume no env" rather than "definitely
+   * has env".
+   */
+  has_custom_env?: boolean;
+  /**
+   * Number of keys in the agent's custom_env map. Always present
+   * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
+   */
+  custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded to runtimes that consume
+   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
+   * materialises it in the runtime-native place: Claude flags, Codex
+   * config.toml, ACP session params, OpenCode env config, OpenClaw
+   * wrapper config, etc. `null` (or the field omitted on legacy backends)
+   * means no managed config; the daemon falls back to the CLI's own
+   * default. MUL-2764.
+   *
+   * When the caller can't see secrets (an agent actor, or a non-owner
+   * non-admin), the server replaces the value with `null` and sets
+   * `mcp_config_redacted` to true so the UI can render a "configured
+   * but hidden" state without exposing potentially sensitive fields.
+   */
+  mcp_config?: unknown | null;
+  /**
+   * True when the server stripped `mcp_config` from this response
+   * because the caller lacks permission to see secrets. The UI uses
+   * this to distinguish "no config" (`mcp_config === null &&
+   * !mcp_config_redacted`) from "config exists but you can't see it".
+   * Older backends omit this field; treat `undefined` as false.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
+  /**
+   * Runtime-native reasoning/effort token (e.g. Claude's
+   * `low|medium|high|xhigh|max`, Codex's
+   * `none|minimal|low|medium|high|xhigh`). Empty string means "no
+   * override": the backend omits the effort flag and the upstream CLI
+   * config / built-in default decides at run time. The picker is
+   * per-runtime per-model — the API never normalises across providers.
+   * Older backends omit this field entirely; treat undefined as ""
+   * (MUL-2339).
+   */
+  thinking_level?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   created_at: string;
@@ -153,9 +239,81 @@ export interface CreateAgentRequest {
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   model?: string;
+  /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
+  thinking_level?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+}
+
+/** Agent template summary — fields needed by the picker grid. Does NOT
+ *  include `instructions` to keep the list payload small; the detail
+ *  endpoint or the create flow returns the full template body. */
+export interface AgentTemplateSummary {
+  slug: string;
+  name: string;
+  description: string;
+  /** Optional grouping for the picker UI ("Engineering" / "Writing" / …). */
+  category?: string;
+  /** Optional lucide-react icon name (e.g. "Search"). Frontend falls back
+   *  to a generic icon when empty. */
+  icon?: string;
+  /** Optional semantic color token for the icon badge — one of "info" /
+   *  "success" / "warning" / "primary" / "secondary". Frontend has a
+   *  static class map so Tailwind can JIT-scan all variants. */
+  accent?: string;
+  skills: AgentTemplateSkillRef[];
+}
+
+/** Full agent template — same as `AgentTemplateSummary` plus the
+ *  instructions block. Returned by `GET /api/agent-templates/:slug`. */
+export interface AgentTemplate extends AgentTemplateSummary {
+  instructions: string;
+}
+
+/** Skill reference inside an agent template. `source_url` is the upstream
+ *  GitHub / skills.sh URL fetched on create; `cached_*` mirror the upstream
+ *  frontmatter at template-author time and let the picker render without
+ *  HTTP fetches. */
+export interface AgentTemplateSkillRef {
+  source_url: string;
+  cached_name: string;
+  cached_description: string;
+}
+
+export interface CreateAgentFromTemplateRequest {
+  template_slug: string;
+  name: string;
+  runtime_id: string;
+  model?: string;
+  visibility?: AgentVisibility;
+  max_concurrent_tasks?: number;
+  /** Optional overrides applied to the template before creation. nil/omit
+   *  uses the template's own value. */
+  description?: string;
+  instructions?: string;
+  avatar_url?: string;
+  /** Workspace skill IDs attached **in addition to** the template's
+   *  skills. Server dedupes against template skills automatically. */
+  extra_skill_ids?: string[];
+}
+
+export interface CreateAgentFromTemplateResponse {
+  agent: Agent;
+  /** Skill IDs that were newly created in the workspace from upstream URLs. */
+  imported_skill_ids: string[];
+  /** Skill IDs that already existed in the workspace (same name) and were
+   *  reused rather than re-imported. The UI can surface this as a toast so
+   *  the user knows their pre-existing skill wasn't overwritten. */
+  reused_skill_ids: string[];
+}
+
+/** 422 body returned by `POST /api/agents/from-template` when one or more
+ *  template skill URLs cannot be reached. The transaction is rolled back —
+ *  no partial workspace state. */
+export interface CreateAgentFromTemplateFailure {
+  error: string;
+  failed_urls: string[];
 }
 
 export interface UpdateAgentRequest {
@@ -165,12 +323,60 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
-  custom_env?: Record<string, string>;
+  /**
+   * NOTE: `custom_env` is intentionally NOT updatable through this
+   * request shape. Env edits flow through `client.updateAgentEnv` /
+   * `PUT /api/agents/{id}/env` — that path is owner/admin only,
+   * denies agent actors, and writes a persistent audit row. The
+   * server REJECTS any `PUT /api/agents/{id}` body that includes
+   * `custom_env` with a 400; do not put the field in this payload.
+   * MUL-2600.
+   */
   custom_args?: string[];
+  /**
+   * MCP server configuration. Tri-state semantics (MUL-2764):
+   *   - field omitted → no change
+   *   - `null` → clear the column; the daemon falls back to the CLI's
+   *     built-in default at launch
+   *   - object → replace the stored JSON verbatim; runtime backends
+   *     validate / translate it according to their own MCP integration
+   */
+  mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
+   *   - field omitted → no change
+   *   - "" → clear the override; backend omits the effort flag and the
+   *     local CLI config / built-in default decides what the model runs at
+   *   - non-empty → set; validated server-side against the target
+   *     runtime's provider enum, rejected with 400 if not recognised
+   */
+  thinking_level?: string;
+}
+
+/**
+ * Wire shape for the dedicated env-management endpoints
+ * (`GET /api/agents/{id}/env` and `PUT /api/agents/{id}/env`). Kept
+ * deliberately separate from `Agent` so generic agent reads cannot
+ * accidentally surface env values. MUL-2600.
+ */
+export interface AgentEnvResponse {
+  agent_id: string;
+  custom_env: Record<string, string>;
+}
+
+/**
+ * Body for `PUT /api/agents/{id}/env`. Values equal to `"****"` are
+ * treated by the server as "preserve the existing value for this key"
+ * — a defence-in-depth guard so a UI that round-trips a masked map
+ * cannot accidentally clobber real secrets. Submit only the keys
+ * touched in the form; omitted keys are removed by the server.
+ */
+export interface UpdateAgentEnvRequest {
+  custom_env: Record<string, string>;
 }
 
 // Skills
@@ -279,6 +485,55 @@ export interface RuntimeUsageByHour {
   task_count: number;
 }
 
+// One (date, model) bucket of token usage for the workspace dashboard.
+// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
+// provider field on the wire) and optionally narrowed to a single project
+// on the server side. Cost stays client-side via the model pricing table.
+export interface DashboardUsageDaily {
+  date: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-(agent, model) token totals for the workspace dashboard. Identical
+// wire shape to RuntimeUsageByAgent — the client folds by agent_id and
+// sums cost.
+export interface DashboardUsageByAgent {
+  agent_id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  task_count: number;
+}
+
+// Per-agent total terminal-task run-time + counts. Powers the workspace
+// dashboard's "time by agent" list. failed_count is a subset of
+// task_count (failed tasks still contribute to total_seconds because
+// they consumed runtime to fail).
+export interface DashboardAgentRunTime {
+  agent_id: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
+// One (date) bucket of terminal-task run-time + counts for the workspace
+// dashboard. Powers the Time and Tasks metrics on the daily-trend toggle
+// — same toggle as Tokens / Cost, anchored on completed_at so day buckets
+// line up with the per-agent run-time card.
+export interface DashboardRunTimeDaily {
+  date: string;
+  total_seconds: number;
+  task_count: number;
+  failed_count: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"
@@ -302,6 +557,34 @@ export interface RuntimeModel {
   label: string;
   provider?: string;
   default?: boolean;
+  /**
+   * Per-model reasoning/effort catalog discovered by the daemon. Currently
+   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
+   * for every other provider, which the UI treats as "no thinking-level
+   * picker for this model". See MUL-2339.
+   */
+  thinking?: RuntimeModelThinking;
+}
+
+export interface RuntimeModelThinking {
+  /** Levels the user is allowed to pick for this model. */
+  supported_levels: RuntimeModelThinkingLevel[];
+  /** Informational: the level the upstream CLI documents as its built-in
+   *  default when no `--effort` flag is passed. Surfaced by the daemon
+   *  but not actively rendered today — Multica's empty `thinking_level`
+   *  means "no override; let the local CLI config decide", which may
+   *  itself differ from this value. */
+  default_level?: string;
+}
+
+export interface RuntimeModelThinkingLevel {
+  /** Runtime-native token passed to the CLI; never normalised. */
+  value: string;
+  /** Display label matching each CLI's own UI (`Low`, `Extra high`, …). */
+  label: string;
+  /** Optional helper copy lifted from upstream catalog
+   *  (`codex debug models` emits one per level). */
+  description?: string;
 }
 
 export type RuntimeModelListStatus =
@@ -334,8 +617,17 @@ export type RuntimeLocalSkillStatus =
   | "pending"
   | "running"
   | "completed"
+  | "conflict"
   | "failed"
   | "timeout";
+
+export type RuntimeLocalSkillImportAction = "overwrite";
+
+export interface RuntimeLocalSkillImportConflict {
+  existing_skill_id: string;
+  existing_created_by?: string;
+  can_overwrite: boolean;
+}
 
 export interface RuntimeLocalSkillSummary {
   key: string;
@@ -361,6 +653,9 @@ export interface CreateRuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
 }
 
 export interface RuntimeLocalSkillImportRequest {
@@ -369,8 +664,12 @@ export interface RuntimeLocalSkillImportRequest {
   skill_key: string;
   name?: string;
   description?: string;
+  action?: RuntimeLocalSkillImportAction;
+  target_skill_id?: string;
+  supports_conflict?: boolean;
   status: RuntimeLocalSkillStatus;
   skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -382,5 +681,7 @@ export interface RuntimeLocalSkillsResult {
 }
 
 export interface RuntimeLocalSkillImportResult {
-  skill: Skill;
+  status: "created" | "updated" | "conflict";
+  skill?: Skill;
+  conflict?: RuntimeLocalSkillImportConflict;
 }

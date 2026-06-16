@@ -17,8 +17,12 @@ import {
   Cloud,
   Cpu,
   Filter,
+  Folder,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
@@ -31,6 +35,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { api } from "@multica/core/api";
+import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
@@ -43,6 +48,13 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  /**
+   * Optional content rendered between the header chips and the event list.
+   * Used by autopilot run rows to surface the inbound webhook trigger
+   * payload so it's visible regardless of whether the agent echoes it.
+   * The dialog stays generic — slot content is the caller's concern.
+   */
+  headerSlot?: React.ReactNode;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -162,14 +174,18 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
+  headerSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
+  const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
+  const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -203,6 +219,26 @@ export function AgentTranscriptDialog({
     if (selectedTools.size === 0) return items;
     return items.filter((item) => selectedTools.has(itemFilterKey(item)));
   }, [items, selectedTools]);
+
+  // Apply user-chosen sort direction. Reverse is a pure presentation concern —
+  // the underlying timeline (and its seq numbers) is untouched, so copy/filter
+  // and segment navigation continue to work against the same data.
+  const displayItems = useMemo(
+    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
+    [filteredItems, sortDirection],
+  );
+
+  // Toggling direction is a manual user action; jump the scroll container back
+  // to the top so the newest end of the timeline (per the chosen direction) is
+  // immediately visible. Avoids stranding the user mid-scroll on the wrong end.
+  const handleSortDirectionChange = useCallback(
+    (dir: typeof sortDirection) => {
+      if (dir === sortDirection) return;
+      setSortDirection(dir);
+      scrollContainerRef.current?.scrollTo({ top: 0 });
+    },
+    [sortDirection, setSortDirection],
+  );
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -241,20 +277,31 @@ export function AgentTranscriptDialog({
     eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
 
-  // Copy all events as text (uses filtered items)
+  // Copy all events as text. Use the displayed order so users get the same
+  // sequence they see on screen — matters when sort is set to newest-first.
+  const handleCopyWorkdir = useCallback(() => {
+    if (!task.relative_work_dir) return;
+    void copyText(task.relative_work_dir).then((ok) => {
+      if (!ok) return;
+      setCopiedWorkdir(true);
+      setTimeout(() => setCopiedWorkdir(false), 2000);
+    });
+  }, [task.relative_work_dir]);
+
   const handleCopyAll = useCallback(() => {
-    const text = filteredItems
+    const text = displayItems
       .map((item) => {
         const label = getEventLabel(item);
         const summary = getEventSummary(item);
         return `[${label}] ${summary}`;
       })
       .join("\n");
-    navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then((ok) => {
+      if (!ok) return;
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [filteredItems]);
+  }, [displayItems]);
 
   // Toggle tool filter
   const toggleTool = useCallback((tool: string) => {
@@ -328,6 +375,17 @@ export function AgentTranscriptDialog({
             {statusBadge}
 
             <div className="ml-auto flex items-center gap-1">
+              {items.length > 1 && (
+                <SortDirectionToggle
+                  value={sortDirection}
+                  onChange={handleSortDirectionChange}
+                  labels={{
+                    chronological: t(($) => $.transcript.sort_chronological),
+                    newestFirst: t(($) => $.transcript.sort_newest_first),
+                    ariaLabel: t(($) => $.transcript.sort_label),
+                  }}
+                />
+              )}
               {filterOptions.length > 0 && (
                 <DropdownMenu>
                   <DropdownMenuTrigger
@@ -368,6 +426,7 @@ export function AgentTranscriptDialog({
                 </DropdownMenu>
               )}
               <button
+                type="button"
                 onClick={handleCopyAll}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -375,6 +434,7 @@ export function AgentTranscriptDialog({
                 {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
               </button>
               <button
+                type="button"
                 onClick={() => onOpenChange(false)}
                 className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
               >
@@ -426,6 +486,31 @@ export function AgentTranscriptDialog({
                 : t(($) => $.transcript.events, { count: items.length })}
             </MetadataChip>
 
+            {/* Working directory — server-derived display path. Falls back to
+                nothing when older backends omit the field rather than rendering
+                `work_dir` raw and leaking the user's home directory. The
+                absolute `task.work_dir` deliberately never reaches the DOM
+                anywhere — only `relative_work_dir` is safe to render / put in
+                title / copy to clipboard, because the server has already
+                stripped $HOME and the username out of it. The button
+                truncates because real workdir paths are routinely long
+                enough to push every other chip off the row. */}
+            {task.relative_work_dir && (
+              <button
+                type="button"
+                onClick={handleCopyWorkdir}
+                title={task.relative_work_dir}
+                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                {copiedWorkdir ? (
+                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                ) : (
+                  <Folder className="h-3 w-3 shrink-0" />
+                )}
+                <span className="truncate font-mono">{task.relative_work_dir}</span>
+              </button>
+            )}
+
             {/* Created time */}
             {task.created_at && (
               <MetadataChip>
@@ -441,13 +526,20 @@ export function AgentTranscriptDialog({
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
-        {filteredItems.length > 0 && (
+        {displayItems.length > 0 && (
           <div className="border-b px-4 py-2.5 shrink-0">
             <TimelineBar
-              items={filteredItems}
+              items={displayItems}
               selectedSeq={selectedSeq}
               onSegmentClick={handleSegmentClick}
             />
+          </div>
+        )}
+
+        {/* ── Optional header slot (e.g. webhook payload preview) ── */}
+        {headerSlot && (
+          <div className="border-b px-4 py-3 shrink-0 bg-muted/20">
+            {headerSlot}
           </div>
         )}
 
@@ -456,7 +548,7 @@ export function AgentTranscriptDialog({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {filteredItems.length === 0 ? (
+          {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               {isLive ? (
                 <div className="flex items-center gap-2">
@@ -469,7 +561,7 @@ export function AgentTranscriptDialog({
             </div>
           ) : (
             <div className="divide-y">
-              {filteredItems.map((item) => (
+              {displayItems.map((item) => (
                 <TranscriptEventRow
                   key={item.seq}
                   ref={(el) => {
@@ -485,6 +577,55 @@ export function AgentTranscriptDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Sort direction toggle ──────────────────────────────────────────────────
+
+interface SortDirectionToggleProps {
+  value: TranscriptSortDirection;
+  onChange: (dir: TranscriptSortDirection) => void;
+  labels: { chronological: string; newestFirst: string; ariaLabel: string };
+}
+
+function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
+  return (
+    <div
+      role="group"
+      aria-label={labels.ariaLabel}
+      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "chronological"}
+        title={labels.chronological}
+        onClick={() => onChange("chronological")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "chronological"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowDownNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.chronological}</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "newest_first"}
+        title={labels.newestFirst}
+        onClick={() => onChange("newest_first")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "newest_first"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowUpNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.newestFirst}</span>
+      </button>
+    </div>
   );
 }
 
@@ -548,6 +689,7 @@ function TimelineBar({
 
         return (
           <button
+            type="button"
             key={seg.startIdx}
             className={cn(
               "h-full transition-all duration-150 hover:opacity-80 relative group",
@@ -587,6 +729,10 @@ const TranscriptEventRow = ({
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
+  const date = useMemo(
+    () => (item.created_at ? new Date(item.created_at) : null),
+    [item.created_at],
+  );
 
   const hasDetail =
     (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
@@ -643,6 +789,17 @@ const TranscriptEventRow = ({
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
             #{item.seq}
           </span>
+
+          {/* Timestamp */}
+          {date && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
+              {date.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
         </div>
 
         {/* Expanded detail */}

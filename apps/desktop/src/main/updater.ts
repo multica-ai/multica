@@ -1,7 +1,10 @@
-import { autoUpdater } from "electron-updater";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
+import { app, type BrowserWindow, ipcMain } from "electron";
 
-autoUpdater.autoDownload = false;
+// Silent background updates: electron-updater downloads on its own as soon
+// as `update-available` fires; we only surface UI when the package is fully
+// downloaded and ready to install on next quit.
+autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
 // Windows arm64 ships its own update metadata channel because
@@ -26,31 +29,90 @@ export type ManualUpdateCheckResult =
     }
   | { ok: false; error: string };
 
+type RendererChannel =
+  | "updater:update-available"
+  | "updater:download-progress"
+  | "updater:update-downloaded";
+
+function isDestroyedObjectError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("Object has been destroyed");
+}
+
+function sendToLiveRenderer(
+  win: BrowserWindow | null,
+  channel: RendererChannel,
+  payload: unknown,
+): void {
+  if (!win || win.isDestroyed()) return;
+
+  try {
+    const { webContents } = win;
+    if (webContents.isDestroyed()) return;
+    webContents.send(channel, payload);
+  } catch (err) {
+    if (isDestroyedObjectError(err)) return;
+    throw err;
+  }
+}
+
+// Single-flight guard around checkForUpdates(). With autoDownload=true the
+// startup, periodic, and manual triggers can all kick off downloads, and
+// overlapping calls have caused duplicate download warnings in the past
+// (see electronjs.org/docs/latest/api/auto-updater). Coalesce concurrent
+// callers onto the same in-flight promise.
+let inFlightCheck: Promise<unknown> | null = null;
+function checkForUpdatesOnce(): Promise<unknown> {
+  if (inFlightCheck) return inFlightCheck;
+  const p = autoUpdater
+    .checkForUpdates()
+    .then((result) => {
+      // checkForUpdates resolves as soon as metadata is fetched; the actual
+      // download (when autoDownload=true) is exposed on result.downloadPromise.
+      // Without a handler a download failure becomes an unhandled rejection
+      // in the main process — Node may terminate it on future versions.
+      void (result as { downloadPromise?: Promise<unknown> } | null)?.downloadPromise?.catch(
+        (err) => {
+          console.error("Failed to download update:", err);
+        },
+      );
+      return result;
+    })
+    .finally(() => {
+      if (inFlightCheck === p) inFlightCheck = null;
+    });
+  inFlightCheck = p;
+  return p;
+}
+
 export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
   autoUpdater.on("update-available", (info) => {
-    const win = getMainWindow();
-    win?.webContents.send("updater:update-available", {
+    // Forwarded for renderer-side state tracking only; the notification UI
+    // does not render an "available" affordance with autoDownload=true.
+    sendToLiveRenderer(getMainWindow(), "updater:update-available", {
       version: info.version,
       releaseNotes: info.releaseNotes,
     });
   });
 
   autoUpdater.on("download-progress", (progress) => {
-    const win = getMainWindow();
-    win?.webContents.send("updater:download-progress", {
+    sendToLiveRenderer(getMainWindow(), "updater:download-progress", {
       percent: progress.percent,
     });
   });
 
-  autoUpdater.on("update-downloaded", () => {
-    const win = getMainWindow();
-    win?.webContents.send("updater:update-downloaded");
+  autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
+    sendToLiveRenderer(getMainWindow(), "updater:update-downloaded", {
+      version: info.version,
+      releaseNotes: info.releaseNotes,
+    });
   });
 
   autoUpdater.on("error", (err) => {
     console.error("Auto-updater error:", err);
   });
 
+  // Retained for IPC back-compat with older renderer bundles. With
+  // autoDownload=true the renderer no longer triggers this path.
   ipcMain.handle("updater:download", () => {
     return autoUpdater.downloadUpdate();
   });
@@ -61,7 +123,9 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
 
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
     try {
-      const result = await autoUpdater.checkForUpdates();
+      const result = (await checkForUpdatesOnce()) as
+        | { updateInfo: { version: string }; isUpdateAvailable?: boolean }
+        | null;
       const currentVersion = app.getVersion();
       // Trust electron-updater's own decision rather than re-deriving it from
       // a version-string compare. The two diverge for pre-release channels,
@@ -85,7 +149,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
 
   // Initial check shortly after startup so we don't block boot.
   setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err) => {
+    checkForUpdatesOnce().catch((err) => {
       console.error("Failed to check for updates:", err);
     });
   }, STARTUP_CHECK_DELAY_MS);
@@ -93,7 +157,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   // Background poll so long-running sessions still pick up new releases
   // without requiring the user to restart the app.
   setInterval(() => {
-    autoUpdater.checkForUpdates().catch((err) => {
+    checkForUpdatesOnce().catch((err) => {
       console.error("Periodic update check failed:", err);
     });
   }, PERIODIC_CHECK_INTERVAL_MS);

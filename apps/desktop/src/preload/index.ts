@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  type RendererRouteContextInput,
+} from "../shared/renderer-route-context";
+import {
+  isNavigationGesture,
+  NAVIGATION_GESTURE_CHANNEL,
+  type NavigationGesture,
+} from "../shared/navigation-gestures";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -69,6 +79,16 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
+   *  the renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). */
+  getLastFreeze: (): FreezeBreadcrumb | null => {
+    try {
+      return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
+    } catch {
+      return null;
+    }
+  },
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>
@@ -89,6 +109,11 @@ const desktopAPI = {
   },
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  /** Download a file by URL through Electron's native download system.
+   *  Shows a save dialog and saves to disk. Unlike openExternal, this
+   *  avoids browser rendering of HTML files on Linux.
+   *  On non-desktop platforms this property is undefined. */
+  downloadURL: (url: string) => ipcRenderer.invoke("file:download-url", url),
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
@@ -136,10 +161,48 @@ const desktopAPI = {
       ipcRenderer.removeListener("inbox:open", handler);
     };
   },
+  /** Listen for native macOS back/forward swipe gestures. */
+  onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
+      if (isNavigationGesture(gesture)) callback(gesture);
+    };
+    ipcRenderer.on(NAVIGATION_GESTURE_CHANNEL, handler);
+    return () => {
+      ipcRenderer.removeListener(NAVIGATION_GESTURE_CHANNEL, handler);
+    };
+  },
+  /** Report the renderer's memory-router path for recovery diagnostics. */
+  setRendererRouteContext: (context: RendererRouteContextInput) =>
+    ipcRenderer.send(RENDERER_ROUTE_CONTEXT_CHANNEL, context),
+  /** Open the OS folder picker and return the chosen absolute path. */
+  pickDirectory: (defaultPath?: string) =>
+    ipcRenderer.invoke("local-directory:pick", defaultPath),
+  /** Validate that a path is an existing readable+writable directory. */
+  validateLocalDirectory: (path: string) =>
+    ipcRenderer.invoke("local-directory:validate", path),
+  /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
+   *  The renderer should close the active tab; if it was the last tab,
+   *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */
+  onCloseActiveTab: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on("tab:close-active", handler);
+    return () => {
+      ipcRenderer.removeListener("tab:close-active", handler);
+    };
+  },
+  /** Ask the main process to close the window (used after closing the last tab). */
+  closeWindow: () => ipcRenderer.send("window:close"),
 };
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   pid?: number;
   uptime?: string;
   daemonId?: string;
@@ -150,6 +213,11 @@ interface DaemonStatus {
   serverUrl?: string;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 const daemonAPI = {
   start: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:start"),
@@ -159,6 +227,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  getHostName: (): Promise<string> =>
+    ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
     const handler = (_: unknown, status: DaemonStatus) => callback(status);
     ipcRenderer.on("daemon:status", handler);
@@ -170,6 +240,11 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:sync-token", token, userId),
   clearToken: (): Promise<void> =>
     ipcRenderer.invoke("daemon:clear-token"),
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ): Promise<DaemonReauthResult> =>
+    ipcRenderer.invoke("daemon:reauthenticate", token, userId),
   isCliInstalled: (): Promise<boolean> =>
     ipcRenderer.invoke("daemon:is-cli-installed"),
   getPrefs: (): Promise<{ autoStart: boolean; autoStop: boolean }> =>
@@ -202,8 +277,11 @@ const updaterAPI = {
     ipcRenderer.on("updater:download-progress", handler);
     return () => ipcRenderer.removeListener("updater:download-progress", handler);
   },
-  onUpdateDownloaded: (callback: () => void) => {
-    const handler = () => callback();
+  onUpdateDownloaded: (
+    callback: (info: { version: string; releaseNotes?: string }) => void,
+  ) => {
+    const handler = (_: unknown, info: { version: string; releaseNotes?: string }) =>
+      callback(info);
     ipcRenderer.on("updater:update-downloaded", handler);
     return () => ipcRenderer.removeListener("updater:update-downloaded", handler);
   },
