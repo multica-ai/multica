@@ -283,18 +283,20 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 // heartbeat paths share a single type and a single decoder shape. Aliases
 // (rather than wrappers) keep call sites unchanged.
 type (
-	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
-	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
-	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
-	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
-	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+	HeartbeatResponse        = protocol.DaemonHeartbeatAckPayload
+	PendingUpdate            = protocol.DaemonHeartbeatPendingUpdate
+	PendingProviderCLIUpdate = protocol.DaemonHeartbeatPendingProviderCLIUpdate
+	PendingModelList         = protocol.DaemonHeartbeatPendingModelList
+	PendingLocalSkills       = protocol.DaemonHeartbeatPendingLocalSkills
+	PendingLocalSkillImport  = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":                   runtimeID,
+		"supports_batch_import":        true,
+		"supports_provider_cli_update": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -304,6 +306,11 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
+}
+
+// ReportProviderCLIUpdateResult sends a provider CLI update result back to the server.
+func (c *Client) ReportProviderCLIUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/provider-cli-update/%s/result", runtimeID, updateID), result, nil)
 }
 
 // ReportModelListResult sends the model-discovery result back to the server.

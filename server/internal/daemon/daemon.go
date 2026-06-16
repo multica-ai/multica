@@ -658,6 +658,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.preflightAuth(ctx); err != nil {
 		return err
 	}
+	if err := d.verifyPendingProviderCLIUpdates(); err != nil {
+		d.logger.Warn("provider CLI auto-update: pending verification failed", "error", err)
+	}
 
 	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
 	defer d.deregisterRuntimes()
@@ -670,6 +673,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
+	go d.providerCLIAutoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 
 	// Preflight succeeded and the background loops are up: the daemon has
@@ -678,7 +682,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, provider-cli-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -1408,10 +1412,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingProviderCLIUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
+			"provider_cli_update", resp.PendingProviderCLIUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
@@ -1419,6 +1424,9 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
+	}
+	if resp.PendingProviderCLIUpdate != nil {
+		go d.handleProviderCLIUpdate(ctx, runtimeID, resp.PendingProviderCLIUpdate)
 	}
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
@@ -1736,13 +1744,13 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 // Overridable for tests to avoid real sleeps.
 var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
-	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) error {
+	return d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
 		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
 	})
 }
 
-func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) error {
 	var lastErr error
 	for attempt, wait := range updateReportBackoffs {
 		if wait > 0 {
@@ -1751,7 +1759,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 				d.logger.Error("CLI update report cancelled",
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt, "error", ctx.Err())
-				return
+				return ctx.Err()
 			case <-time.After(wait):
 			}
 		}
@@ -1763,7 +1771,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt+1)
 			}
-			return
+			return nil
 		}
 		lastErr = err
 
@@ -1772,7 +1780,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 			d.logger.Error("CLI update report rejected — not retrying",
 				"runtime_id", runtimeID, "update_id", updateID,
 				"status", reqErr.StatusCode, "error", err)
-			return
+			return err
 		}
 
 		d.logger.Warn("CLI update report failed — will retry",
@@ -1781,6 +1789,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+	return lastErr
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the

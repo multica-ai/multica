@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -72,36 +73,44 @@ var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo"}
 
 // Config holds all daemon configuration.
 type Config struct {
-	ServerBaseURL                  string
-	DaemonID                       string
-	LegacyDaemonIDs                []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
-	DeviceName                     string
-	RuntimeName                    string
-	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
-	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
-	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
-	KeepEnvAfterTask               bool                  // preserve env after task for debugging
-	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
-	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
-	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
-	GCInterval                     time.Duration         // how often the GC loop runs (default: 1h)
-	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
-	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
-	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
-	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
-	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
-	PollInterval                   time.Duration
-	HeartbeatInterval              time.Duration
-	AgentTimeout                   time.Duration
-	CodexSemanticInactivityTimeout time.Duration
-	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
-	ClaudeArgs                     []string
-	CodexArgs                      []string
-	CodebuddyArgs                  []string
+	ServerBaseURL                          string
+	DaemonID                               string
+	LegacyDaemonIDs                        []string // historical daemon_ids this machine may have registered under; reported at register time so the server can merge old runtime rows
+	DeviceName                             string
+	RuntimeName                            string
+	CLIVersion                             string                // multica CLI version (e.g. "0.1.13")
+	LaunchedBy                             string                // "desktop" when spawned by the Electron app, empty for standalone
+	Profile                                string                // profile name (empty = default)
+	Agents                                 map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
+	WorkspacesRoot                         string                // base path for execution envs (default: ~/multica_workspaces)
+	KeepEnvAfterTask                       bool                  // preserve env after task for debugging
+	HealthPort                             int                   // local HTTP port for health checks (default: 19514)
+	MaxConcurrentTasks                     int                   // max tasks running in parallel (default: 20)
+	GCEnabled                              bool                  // enable periodic workspace garbage collection (default: true)
+	GCInterval                             time.Duration         // how often the GC loop runs (default: 1h)
+	GCTTL                                  time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
+	GCOrphanTTL                            time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
+	GCArtifactTTL                          time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
+	GCArtifactPatterns                     []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	AutoUpdateEnabled                      bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
+	AutoUpdateCheckInterval                time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
+	ProviderCLIUpdateMode                  ProviderCLIUpdateMode // provider CLI updater mode: off, dry-run, or apply (default: dry-run)
+	ProviderCLIUpdateInterval              time.Duration         // how often provider CLI latest versions are checked (default: 24h)
+	ProviderCLIUpdateWindowStart           time.Duration         // local time-of-day offset when apply mode may start (default: 04:00)
+	ProviderCLIUpdateWindowStartConfigured bool                  // true when MULTICA_PROVIDER_CLI_AUTO_UPDATE_WINDOW_START was explicitly set, including 00:00
+	ProviderCLIUpdateWindowDuration        time.Duration         // length of the apply window (default: 2h)
+	ProviderCLIPinnedVersions              map[string]string     // provider -> version; skips latest lookup and holds that version
+	ProviderCLIRollbackVersions            map[string]string     // provider -> version used if apply-mode install fails
+	ProviderCLIInstallPrefixes             map[string]string     // provider -> explicit npm --prefix; required for version-manager shims
+	PollInterval                           time.Duration
+	HeartbeatInterval                      time.Duration
+	AgentTimeout                           time.Duration
+	CodexSemanticInactivityTimeout         time.Duration
+	AgentIdleWatchdog                      time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog                      time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	ClaudeArgs                             []string
+	CodexArgs                              []string
+	CodebuddyArgs                          []string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -471,35 +480,63 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	providerCLIUpdateMode, err := parseProviderCLIUpdateMode(os.Getenv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_MODE"))
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateInterval, err := durationFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_INTERVAL", DefaultProviderCLIUpdateInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateWindowStart, providerCLIUpdateWindowStartConfigured, err := timeOfDayFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_WINDOW_START", DefaultProviderCLIUpdateWindowStart)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIUpdateWindowDuration, err := durationFromEnv("MULTICA_PROVIDER_CLI_AUTO_UPDATE_WINDOW_DURATION", DefaultProviderCLIUpdateWindowDuration)
+	if err != nil {
+		return Config{}, err
+	}
+	providerCLIPinnedVersions := parseProviderCLIVersionMap(os.Getenv("MULTICA_PROVIDER_CLI_PINNED_VERSIONS"))
+	providerCLIRollbackVersions := parseProviderCLIVersionMap(os.Getenv("MULTICA_PROVIDER_CLI_ROLLBACK_VERSIONS"))
+	providerCLIInstallPrefixes := parseProviderCLIVersionMap(os.Getenv("MULTICA_PROVIDER_CLI_INSTALL_PREFIXES"))
+
 	return Config{
-		ServerBaseURL:                  serverBaseURL,
-		DaemonID:                       daemonID,
-		LegacyDaemonIDs:                legacyDaemonIDs,
-		DeviceName:                     deviceName,
-		RuntimeName:                    runtimeName,
-		Profile:                        profile,
-		Agents:                         agents,
-		WorkspacesRoot:                 workspacesRoot,
-		KeepEnvAfterTask:               keepEnv,
-		GCEnabled:                      gcEnabled,
-		GCInterval:                     gcInterval,
-		GCTTL:                          gcTTL,
-		GCOrphanTTL:                    gcOrphanTTL,
-		GCArtifactTTL:                  gcArtifactTTL,
-		GCArtifactPatterns:             gcArtifactPatterns,
-		AutoUpdateEnabled:              autoUpdateEnabled,
-		AutoUpdateCheckInterval:        autoUpdateInterval,
-		HealthPort:                     healthPort,
-		MaxConcurrentTasks:             maxConcurrentTasks,
-		PollInterval:                   pollInterval,
-		HeartbeatInterval:              heartbeatInterval,
-		AgentTimeout:                   agentTimeout,
-		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
-		AgentIdleWatchdog:              agentIdleWatchdog,
-		AgentToolWatchdog:              agentToolWatchdog,
-		ClaudeArgs:                     claudeArgs,
-		CodexArgs:                      codexArgs,
-		CodebuddyArgs:                  codebuddyArgs,
+		ServerBaseURL:                          serverBaseURL,
+		DaemonID:                               daemonID,
+		LegacyDaemonIDs:                        legacyDaemonIDs,
+		DeviceName:                             deviceName,
+		RuntimeName:                            runtimeName,
+		Profile:                                profile,
+		Agents:                                 agents,
+		WorkspacesRoot:                         workspacesRoot,
+		KeepEnvAfterTask:                       keepEnv,
+		GCEnabled:                              gcEnabled,
+		GCInterval:                             gcInterval,
+		GCTTL:                                  gcTTL,
+		GCOrphanTTL:                            gcOrphanTTL,
+		GCArtifactTTL:                          gcArtifactTTL,
+		GCArtifactPatterns:                     gcArtifactPatterns,
+		AutoUpdateEnabled:                      autoUpdateEnabled,
+		AutoUpdateCheckInterval:                autoUpdateInterval,
+		ProviderCLIUpdateMode:                  providerCLIUpdateMode,
+		ProviderCLIUpdateInterval:              providerCLIUpdateInterval,
+		ProviderCLIUpdateWindowStart:           providerCLIUpdateWindowStart,
+		ProviderCLIUpdateWindowStartConfigured: providerCLIUpdateWindowStartConfigured,
+		ProviderCLIUpdateWindowDuration:        providerCLIUpdateWindowDuration,
+		ProviderCLIPinnedVersions:              providerCLIPinnedVersions,
+		ProviderCLIRollbackVersions:            providerCLIRollbackVersions,
+		ProviderCLIInstallPrefixes:             providerCLIInstallPrefixes,
+		HealthPort:                             healthPort,
+		MaxConcurrentTasks:                     maxConcurrentTasks,
+		PollInterval:                           pollInterval,
+		HeartbeatInterval:                      heartbeatInterval,
+		AgentTimeout:                           agentTimeout,
+		CodexSemanticInactivityTimeout:         codexSemanticInactivityTimeout,
+		AgentIdleWatchdog:                      agentIdleWatchdog,
+		AgentToolWatchdog:                      agentToolWatchdog,
+		ClaudeArgs:                             claudeArgs,
+		CodexArgs:                              codexArgs,
+		CodebuddyArgs:                          codebuddyArgs,
 	}, nil
 }
 
@@ -521,6 +558,26 @@ func isOfficialCloudServer(baseURL string) bool {
 		return false
 	}
 	return strings.EqualFold(u.Hostname(), officialCloudHost)
+}
+
+func timeOfDayFromEnv(key string, fallback time.Duration) (time.Duration, bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, false, nil
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) != 2 {
+		return 0, true, fmt.Errorf("%s must use HH:MM", key)
+	}
+	hour, err := strconv.Atoi(parts[0])
+	if err != nil || hour < 0 || hour > 23 {
+		return 0, true, fmt.Errorf("%s hour must be 0-23", key)
+	}
+	minute, err := strconv.Atoi(parts[1])
+	if err != nil || minute < 0 || minute > 59 {
+		return 0, true, fmt.Errorf("%s minute must be 0-59", key)
+	}
+	return time.Duration(hour)*time.Hour + time.Duration(minute)*time.Minute, true, nil
 }
 
 // NormalizeServerBaseURL converts a WebSocket or HTTP URL to a base HTTP URL.

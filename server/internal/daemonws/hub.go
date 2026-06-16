@@ -70,7 +70,7 @@ func (c *client) markSeen(eventID string) bool {
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
 // the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, supportsProviderCLIUpdate bool) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // MessageKindRecorder is the optional metric hook called once per inbound
 // daemon WebSocket frame. kind is the protocol message type with the
@@ -432,7 +432,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.SupportsProviderCLIUpdate)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,
