@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -11,6 +12,21 @@ import (
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"gopkg.in/yaml.v3"
 )
+
+// TaskContextMarkerRelPath is a non-secret marker the daemon writes under the
+// task workdir. The CLI uses it as a fallback daemon-task signal when a child
+// sandbox strips all MULTICA_* env vars before invoking `multica`.
+const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
+
+// TaskContextMarkerManagedBy is the marker discriminator the CLI checks before
+// treating TaskContextMarkerRelPath as daemon-owned.
+const TaskContextMarkerManagedBy = "multica-daemon-task"
+
+type taskContextMarkerFile struct {
+	ManagedBy string `json:"managed_by"`
+	AgentID   string `json:"agent_id,omitempty"`
+	IssueID   string `json:"issue_id,omitempty"`
+}
 
 // writeContextFiles renders and writes .agent_context/issue_context.md and
 // skills into the appropriate provider-native location.
@@ -35,6 +51,10 @@ import (
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
+		return err
+	}
+
 	contextDir := filepath.Join(workDir, ".agent_context")
 	if err := recordMkdirAll(contextDir, 0o755, manifest); err != nil {
 		return fmt.Errorf("create .agent_context dir: %w", err)
@@ -78,6 +98,47 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		return fmt.Errorf("write project resources: %w", err)
 	}
 
+	return nil
+}
+
+func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	dir := filepath.Dir(filepath.Join(workDir, TaskContextMarkerRelPath))
+	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
+		return fmt.Errorf("create .multica dir: %w", err)
+	}
+	// The sidecar manifest removes this marker on normal local_directory
+	// cleanup. If a crash leaves it behind, the CLI intentionally treats it
+	// as daemon context and fails closed instead of using a user PAT.
+	payload := taskContextMarkerFile{
+		ManagedBy: TaskContextMarkerManagedBy,
+		AgentID:   ctx.AgentID,
+		IssueID:   ctx.IssueID,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal task context marker: %w", err)
+	}
+	if err := recordWriteFile(filepath.Join(workDir, TaskContextMarkerRelPath), data, 0o644, manifest); err != nil {
+		if errors.Is(err, errPathPreExists) {
+			path := filepath.Join(workDir, TaskContextMarkerRelPath)
+			existing, readErr := os.ReadFile(path)
+			if readErr != nil {
+				return fmt.Errorf("read existing task context marker: %w", readErr)
+			}
+			var marker taskContextMarkerFile
+			if json.Unmarshal(existing, &marker) != nil || marker.ManagedBy != TaskContextMarkerManagedBy {
+				return fmt.Errorf("write task context marker: %w", err)
+			}
+			if writeErr := os.WriteFile(path, data, 0o644); writeErr != nil {
+				return fmt.Errorf("refresh task context marker: %w", writeErr)
+			}
+			if manifest != nil {
+				manifest.Files = append(manifest.Files, path)
+			}
+			return nil
+		}
+		return fmt.Errorf("write task context marker: %w", err)
+	}
 	return nil
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 var agentCmd = &cobra.Command{
@@ -249,7 +250,7 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
-	if inAgentExecutionContext() && !strings.HasPrefix(token, "mat_") {
+	if inDaemonManagedExecutionContext() && !strings.HasPrefix(token, "mat_") {
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
 	}
 
@@ -287,15 +288,47 @@ func normalizeAPIBaseURL(raw string) string {
 	return raw
 }
 
-// inAgentExecutionContext reports whether the CLI is being invoked from
-// inside a daemon-managed agent task (daemon sets MULTICA_AGENT_ID and
-// MULTICA_TASK_ID in the agent env). In that context the workspace must be
-// provided explicitly by the daemon — falling back to user-global
-// ~/.multica/config.json would let the agent act on whatever workspace the
-// user last configured, which is how cross-workspace contamination happens
-// when multiple workspaces share a host.
+// inAgentExecutionContext reports whether the CLI has explicit task identity
+// markers from a daemon-managed agent task.
 func inAgentExecutionContext() bool {
 	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+}
+
+// inDaemonManagedExecutionContext reports whether the CLI is being invoked
+// from inside a daemon-managed agent task. MULTICA_DAEMON_PORT is included as
+// a defense-in-depth marker for subprocesses that lose MULTICA_AGENT_ID or
+// MULTICA_TASK_ID but still run under the daemon environment. In this context
+// workspace and token must come from daemon-provided env; falling back to
+// user-global ~/.multica/config.json can make agent writes land as a member.
+func inDaemonManagedExecutionContext() bool {
+	return inAgentExecutionContext() || os.Getenv("MULTICA_DAEMON_PORT") != "" || hasDaemonTaskContextMarker()
+}
+
+func hasDaemonTaskContextMarker() bool {
+	dir, err := os.Getwd()
+	if err != nil {
+		return false
+	}
+	for {
+		markerPath := filepath.Join(dir, execenv.TaskContextMarkerRelPath)
+		data, err := os.ReadFile(markerPath)
+		if err == nil {
+			var marker struct {
+				ManagedBy string `json:"managed_by"`
+			}
+			if json.Unmarshal(data, &marker) == nil && marker.ManagedBy == execenv.TaskContextMarkerManagedBy {
+				return true
+			}
+		} else if !os.IsNotExist(err) {
+			return true
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+		dir = parent
+	}
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {
@@ -305,7 +338,7 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	}
 	// Inside an agent task the daemon is the only authority on workspace
 	// identity. Never read the user-global CLI config here.
-	if inAgentExecutionContext() {
+	if inDaemonManagedExecutionContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)
@@ -319,7 +352,7 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 	id := resolveWorkspaceID(cmd)
 	if id == "" {
-		if inAgentExecutionContext() {
+		if inDaemonManagedExecutionContext() {
 			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")
 		}
 		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'multica config set workspace_id <id>'")

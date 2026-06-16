@@ -10,9 +10,16 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Unsetenv("MULTICA_AGENT_ID")
-	os.Unsetenv("MULTICA_TASK_ID")
-	os.Unsetenv("MULTICA_TOKEN")
+	for _, key := range []string{
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_TOKEN",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_WORKSPACE_ID",
+		"MULTICA_SERVER_URL",
+	} {
+		os.Unsetenv(key)
+	}
 	os.Exit(m.Run())
 }
 
