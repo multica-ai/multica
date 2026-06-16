@@ -246,6 +246,8 @@ export function ChatInput({
         <div className="absolute bottom-1 right-1.5 flex items-center gap-4 sm:gap-1">
           <FileUploadButton
             size="sm"
+            // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+            multiple
             disabled={!!disabled}
             onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
             onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}

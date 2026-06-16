@@ -237,6 +237,8 @@ function ReplyInput({
               <div className="flex items-center justify-between gap-1 pt-1">
                 <FileUploadButton
                   size="sm"
+                  // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+                  multiple
                   onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
                 />

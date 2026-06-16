@@ -2272,6 +2272,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
                   size="sm"
+                  // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+                  multiple
                   onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
