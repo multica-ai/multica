@@ -1550,14 +1550,19 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin pins that the
-// "## Comment Formatting" section emits the quoted-HEREDOC stdin mandate on
-// non-Windows hosts for EVERY provider, not just Codex. Post-MUL-2904 the
-// guardrail is provider-agnostic because the corruption is shell-driven; the
-// quoted delimiter is what blocks backtick / `$()` substitution in the body.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile pins that the
+// "## Comment Formatting" section emits the file-first mandate on non-Windows
+// hosts for EVERY provider (post-#4182). The previous quoted-HEREDOC
+// `--content-stdin` rule was kept for years to defend against backtick / `$()`
+// substitution in the body (MUL-2904), but the heredoc/flag boundary turned out
+// to be its own structural bug: when a model wrapped extra flags around the
+// heredoc on `multica issue create`, the flags were silently swallowed into
+// stdin (OXY-78, OXY-76). The file path defeats both classes — the body never
+// reaches the shell, and all flags live on one shell-token line — and converges
+// the Linux/macOS template with the long-standing Windows file-only path.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
-func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) {
+func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 	saved := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
@@ -1583,20 +1588,27 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesStdin(t *testing.T) 
 
 			for _, want := range []string{
 				"## Comment Formatting",
-				"always use `--content-stdin` with a HEREDOC",
-				"even for short single-line replies",
-				"<<'COMMENT'",
+				"always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`",
+				"#4182",
 				"Never use inline `--content` for agent-authored comments",
 				"Keep the same `--parent` value",
+				"rm ./reply.md",
 				"do not rely on `\\n` escapes",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing comment-formatting guidance %q\n---\n%s", fileName, want, s)
 				}
 			}
-			// The heading is no longer Codex-scoped.
-			if strings.Contains(s, "Codex-Specific Comment Formatting") {
-				t.Errorf("%s still carries the old Codex-scoped heading\n---\n%s", fileName, s)
+
+			// The previous mandate (#1795 / #1851 / MUL-2904) must NOT remain.
+			for _, banned := range []string{
+				"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
+				"<<'COMMENT'",
+				"Codex-Specific Comment Formatting",
+			} {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s", fileName, banned, s)
+				}
 			}
 		})
 	}
@@ -4072,7 +4084,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 
 // TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged guarantees
 // that the new metadata wiring does not break the codex-specific comment
-// formatting rules (HEREDOC on Linux, --content-file on Windows). The
+// formatting rules (--content-file on every host, post-#4182). The
 // comment-formatting block lives below the metadata write step in the
 // workflow, so any reordering or accidental absorption of the codex
 // section would surface here.
@@ -4082,7 +4094,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 	oldGOOS := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = oldGOOS })
 
-	t.Run("linux_heredoc", func(t *testing.T) {
+	t.Run("linux_content_file", func(t *testing.T) {
 		runtimeGOOS = "linux"
 		dir := t.TempDir()
 		ctx := TaskContextForEnv{
@@ -4105,9 +4117,9 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "multica issue metadata list issue-md-codex --output json") {
 			t.Fatalf("metadata list step missing\n---\n%s", s)
 		}
-		// ...AND the codex-specific stdin-only rule is still emitted.
-		if !strings.Contains(s, "always use `--content-stdin` with a HEREDOC") {
-			t.Fatalf("codex linux HEREDOC rule missing\n---\n%s", s)
+		// ...AND the post-#4182 file-first rule is still emitted on Linux.
+		if !strings.Contains(s, "always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`") {
+			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
 		// ...AND the per-turn reply instruction still points at this
 		// turn's trigger comment id.

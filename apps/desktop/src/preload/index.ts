@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   type RendererRouteContextInput,
@@ -78,6 +79,16 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
+   *  the renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). */
+  getLastFreeze: (): FreezeBreadcrumb | null => {
+    try {
+      return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
+    } catch {
+      return null;
+    }
+  },
   /** Listen for auth token delivered via deep link */
   onAuthToken: (callback: (token: string) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, token: string) =>

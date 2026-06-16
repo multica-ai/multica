@@ -7,11 +7,15 @@ import (
 	"testing"
 )
 
-// TestBuildCommentReplyInstructionsCodexLinux pins that the strong
-// "MUST use --content-stdin + HEREDOC" mandate stays alive for Codex on
-// non-Windows hosts. Codex's habit of emitting literal `\n` inside
-// `--content "..."` is the original reason this mandate exists
-// (#1795 / #1851); on Linux/macOS stdin is the right answer.
+// TestBuildCommentReplyInstructionsCodexLinux pins that the Linux/macOS
+// reply template now mandates `--content-file` (post-#4182). The previous
+// `--content-stdin` + HEREDOC mandate (#1795 / #1851 / MUL-2904) was kept
+// for years to defend against backtick / `$()` substitution in the body,
+// but the heredoc/flag boundary turned out to be fragile in its own right:
+// when a model wrapped extra flags around the heredoc on `multica issue
+// create`, the flags got swallowed into stdin and silently dropped (OXY-78,
+// OXY-76). The file path defeats both classes — the body never reaches the
+// shell, and all flags live on one shell-token line.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
@@ -25,10 +29,11 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 	got := BuildCommentReplyInstructions("codex", issueID, triggerID)
 
 	for _, want := range []string{
-		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
-		"Always use `--content-stdin`",
-		"even when the reply is a single line",
-		"<<'COMMENT'",
+		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md",
+		"Write the reply body to a UTF-8 file",
+		"`--content-file`",
+		"#4182",
+		"rm ./reply.md",
 		"Do NOT write literal `\\n` escapes to simulate line breaks",
 		"do NOT reuse --parent values from previous turns",
 	} {
@@ -37,19 +42,32 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(got, "--content \"...\"") {
-		t.Fatalf("codex reply instructions should not offer inline --content form\n---\n%s", got)
+	for _, banned := range []string{
+		"--content \"...\"",
+		"<<'COMMENT'",
+		"cat <<",
+		"--parent " + triggerID + " --content-stdin",
+	} {
+		if strings.Contains(got, banned) {
+			t.Fatalf("codex/linux reply instructions should not contain %q\n---\n%s", banned, got)
+		}
 	}
 }
 
-// TestBuildCommentReplyInstructionsNonCodexLinux pins the MUL-2904 regression:
-// EVERY provider on Linux/macOS — not just Codex — gets the quoted-HEREDOC
-// `--content-stdin` template and is steered away from inline `--content "..."`.
-// The duplicate-comment loop on OKK-497 happened because an agent inlined a
-// backtick-wrapped table name into `--content`; the shell ran it as a command
-// substitution, silently deleted it, the stored comment no longer matched the
-// model's intent, and the model retried forever. The corruption is shell-driven,
-// so the guardrail cannot be scoped to one provider.
+// TestBuildCommentReplyInstructionsNonCodexLinux pins that EVERY provider on
+// Linux/macOS — not just Codex — gets the `--content-file` template. Two
+// shell-driven failure classes motivate the uniform file path:
+//   - MUL-2904 / OKK-497: an agent inlined a backtick-wrapped table name into
+//     `--content`; the shell ran it as a command substitution, silently deleted
+//     it, the stored comment no longer matched the model's intent, and the
+//     model retried forever.
+//   - GitHub #4182 (OXY-78 / OXY-76): an agent wrapped extra flags around an
+//     `--content-stdin` HEREDOC; the bash heredoc/flag boundary swallowed
+//     `--assignee` / `--project` into stdin or dropped them as failed
+//     standalone shell statements, while the create still exited 0 with nulls.
+//
+// Both classes are shell-driven, so the guardrail is uniform across providers
+// and across hosts.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
@@ -67,8 +85,11 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
-					"cat <<'COMMENT' | multica issue comment add " + issueID + " --parent " + triggerID + " --content-stdin",
-					"Always use `--content-stdin`",
+					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md",
+					"Write the reply body to a UTF-8 file",
+					"`--content-file`",
+					"#4182",
+					"rm ./reply.md",
 					"do NOT reuse --parent values from previous turns",
 					"If you decide to reply",
 				} {
@@ -77,11 +98,18 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 					}
 				}
 
-				// The regression itself: agent-authored comments must never be
-				// steered at inline `--content "..."`, which the shell can
-				// rewrite (backticks / `$()` / quotes) before the CLI sees it.
-				if strings.Contains(got, "--content \"...\"") {
-					t.Errorf("%s reply instructions still offers the inline --content form\n---\n%s", name, got)
+				// The two regressions: agent-authored comments must never be
+				// steered at inline `--content "..."` (MUL-2904) and never at
+				// `--content-stdin` HEREDOC on multi-flag commands (#4182).
+				for _, banned := range []string{
+					"--content \"...\"",
+					"<<'COMMENT'",
+					"cat <<",
+					"--parent " + triggerID + " --content-stdin",
+				} {
+					if strings.Contains(got, banned) {
+						t.Errorf("%s reply instructions still contains %q\n---\n%s", name, banned, got)
+					}
 				}
 			})
 		}

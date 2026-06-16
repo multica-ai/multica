@@ -44,7 +44,7 @@ import {
   useMarkChatSessionRead,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
@@ -186,6 +186,7 @@ export function ChatWindow() {
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const migrateInputDraft = useChatStore((s) => s.migrateInputDraft);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -370,8 +371,19 @@ export function ChatWindow() {
 
   const handleUploadFile = useCallback(
     async (file: File) => {
+      // An upload in a brand-new chat lazily creates the session, flipping the
+      // draft key from `__new__:agent` to the session id mid-upload. The
+      // in-progress (empty-href) file-card markdown the editor already wrote
+      // into the `__new__:agent` draft would otherwise be stranded there and
+      // resurface as a stale `!file[name]()` the next time a new chat opens for
+      // this agent. Migrate that draft onto the session id so it travels with
+      // the session and the `__new__:agent` slot is cleared.
+      const wasNewSession = !activeSessionId;
       const sessionId = await ensureSession("");
       if (!sessionId) return null;
+      if (wasNewSession) {
+        migrateInputDraft(newSessionDraftKey(selectedAgentId), sessionId);
+      }
       // Prime the messages cache as empty before flipping activeSessionId so
       // ChatMessageList mounts directly (no Skeleton frame). Skip the write
       // when an entry already exists — a concurrent handleSend may have
@@ -384,7 +396,15 @@ export function ChatWindow() {
       setActiveSession(sessionId);
       return uploadWithToast(file, { chatSessionId: sessionId });
     },
-    [ensureSession, uploadWithToast, qc, setActiveSession],
+    [
+      activeSessionId,
+      ensureSession,
+      migrateInputDraft,
+      selectedAgentId,
+      uploadWithToast,
+      qc,
+      setActiveSession,
+    ],
   );
 
   const cancelChatTask = useCallback(

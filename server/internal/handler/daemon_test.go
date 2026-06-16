@@ -2128,10 +2128,12 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
+	setWorkspaceIssuePrefixForTest(t, "MUL")
+
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mul-1198 fixture', 'in_progress', 'none', $2, 'member', 81198, 0)
+		VALUES ($1, 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2161,7 +2163,10 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
-	const agentFinalOutput = "sure, will look into it shortly"
+	agentFinalOutput := fmt.Sprintf(
+		"sure, see MUL-3310, issue/MUL-3310, feature/MUL-3310, and [MUL-3310](mention://issue/%s)",
+		issueID,
+	)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",

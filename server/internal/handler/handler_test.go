@@ -171,6 +171,22 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
+func setWorkspaceIssuePrefixForTest(t *testing.T, prefix string) {
+	t.Helper()
+
+	ctx := context.Background()
+	var previous string
+	if err := testPool.QueryRow(ctx, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous); err != nil {
+		t.Fatalf("load workspace prefix: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, prefix, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace prefix: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, previous, testWorkspaceID)
+	})
+}
+
 func handlerTestRuntimeID(t *testing.T) string {
 	t.Helper()
 
@@ -1684,6 +1700,78 @@ func TestCommentCRUD(t *testing.T) {
 	req = newRequest("DELETE", "/api/issues/"+issueID, nil)
 	req = withURLParam(req, "id", issueID)
 	testHandler.DeleteIssue(w, req)
+}
+
+func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+
+	ctx := context.Background()
+	setWorkspaceIssuePrefixForTest(t, "MUL")
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
+		VALUES ($1, 'member', $2, $3, 3310)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "preserve bare issue identifiers").Scan(&issueID); err != nil {
+		t.Fatalf("create issue fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	explicitMention := fmt.Sprintf("[MUL-3310](mention://issue/%s)", issueID)
+	createCases := []string{
+		"MUL-3310",
+		"issue/MUL-3310",
+		"feature/MUL-3310",
+		explicitMention,
+	}
+
+	var firstCommentID string
+	for _, content := range createCases {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "id", issueID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", content, w.Code, w.Body.String())
+		}
+
+		var created CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatalf("decode created comment: %v", err)
+		}
+		if created.Content != content {
+			t.Fatalf("CreateComment(%q) stored %q", content, created.Content)
+		}
+		if firstCommentID == "" {
+			firstCommentID = created.ID
+		}
+	}
+
+	updatedContent := "updated MUL-3310 issue/MUL-3310 feature/MUL-3310 " + explicitMention
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/comments/"+firstCommentID, map[string]any{
+		"content": updatedContent,
+	})
+	req = withURLParam(req, "commentId", firstCommentID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated comment: %v", err)
+	}
+	if updated.Content != updatedContent {
+		t.Fatalf("UpdateComment stored %q, want %q", updated.Content, updatedContent)
+	}
 }
 
 func TestCreateCommentRejectsMalformedParentID(t *testing.T) {

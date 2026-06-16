@@ -48,7 +48,7 @@ The most complete integration. Session resumption works, MCP works, and it consu
 
 ### Codex (OpenAI)
 
-JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written into the per-task `$CODEX_HOME/config.toml`. **Session resumption code exists but is currently unreachable** — pick Claude Code or one of the ACP family if you need resume.
+JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written into the per-task `$CODEX_HOME/config.toml`. **Session resumption works** through Codex app-server `thread/resume`; stale or missing threads fall back to a fresh thread.
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ JSON-RPC 2.0 transport with finer-grained approval gates. MCP config is written 
 
 ### Cursor (Anysphere)
 
-The CLI counterpart to the Cursor editor. **Session resumption is broken** — Cursor's CLI doesn't return a session id, so the value you pass on resume is always invalid.
+The CLI counterpart to the Cursor editor. **Session resumption works** with current Cursor Agent releases: Multica reads `session_id` from the stream-json events and passes it back with `--resume <id>`.
 
 | | |
 |---|---|

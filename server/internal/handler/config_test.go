@@ -128,6 +128,7 @@ func TestGetConfigUsesAppURLForSameOriginDaemonSetup(t *testing.T) {
 }
 
 func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
+	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.internal.example/")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -152,6 +153,7 @@ func TestGetConfigUsesFrontendOriginForSameOriginDaemonSetup(t *testing.T) {
 
 func TestGetConfigOmitsOfficialCloudDaemonSetup(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.multica.ai")
+	t.Setenv("MULTICA_APP_URL", "")
 	t.Setenv("FRONTEND_ORIGIN", "https://multica.ai")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)

@@ -19,6 +19,7 @@ import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
@@ -331,6 +332,26 @@ export default function App() {
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
   useCmdWCloseTab();
+
+  // Flush a freeze/crash breadcrumb the main process parked from a previous
+  // session. A true hang or process death can't report itself when it happens
+  // (the renderer is blocked or gone), so the main process persists it and we
+  // emit it here on the next boot. The in-thread, recoverable freeze tier is
+  // handled separately by the shared watchdog in CoreProvider.
+  useEffect(() => {
+    const last = window.desktopAPI.getLastFreeze();
+    if (!last) return;
+    const crashed = last.kind === "render-process-gone";
+    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
+      // Spread context FIRST so our explicit fields below always win — a
+      // future context key (e.g. its own `source`) must not silently override.
+      ...last.context,
+      source: crashed ? "render-process-gone" : "main-unresponsive",
+      recovered: false,
+      breadcrumb_ts: last.ts,
+      crashed_version: last.version,
+    });
+  }, []);
 
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.

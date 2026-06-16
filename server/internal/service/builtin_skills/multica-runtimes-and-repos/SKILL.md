@@ -40,11 +40,12 @@ multica runtime list --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
+multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 ```
 
-`runtime update` is a write. `repo checkout` creates a git worktree in the task working directory.
+`runtime update` and `runtime delete` are writes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which archives those agents and cancels their queued/running tasks before deleting the runtime. `repo checkout` creates a git worktree in the task working directory.
 
 `repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path.
 

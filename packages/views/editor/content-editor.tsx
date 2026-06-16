@@ -384,6 +384,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
 
+      // Guard 0: never clobber an in-flight upload. An external `defaultValue`
+      // change can arrive mid-upload — e.g. chat lazy-creates a session on the
+      // first file upload, which flips `activeSessionId` → the draft key →
+      // `defaultValue`. If we `setContent` over a document that still holds an
+      // `uploading` image/fileCard node, that node is wiped and the upload's
+      // finalize can no longer find it (the file vanishes, leaving an empty
+      // `!file[name]()`). Like the dirty guards below, an uploading node is
+      // local state that an external sync must not overwrite.
+      let hasUploadingNode = false;
+      editor.state.doc.descendants((node) => {
+        if (node.attrs.uploading) hasUploadingNode = true;
+        return !hasUploadingNode;
+      });
+      if (hasUploadingNode) return;
+
       const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
       // "Dirty" = user has local edits not yet flushed through the debounced
       // `onUpdate`. `lastEmittedRef` is advanced only after a debounce fire,

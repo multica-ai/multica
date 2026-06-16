@@ -72,6 +72,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   }, [uploadWithToast, issueId]);
 
   useEffect(() => {
+    setSuppressedAgentIds(new Set());
+  }, [issueId]);
+
+  useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
     setSuppressedAgentIds((prev) => {
       const next = new Set([...prev].filter((id) => visible.has(id)));

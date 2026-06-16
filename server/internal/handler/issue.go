@@ -8,9 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
@@ -59,6 +61,23 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+}
+
+// validIssueStatuses / validIssuePriorities mirror the CHECK constraints on
+// the issue table. Write handlers pre-validate these so callers get a clean
+// 400 with the allowed values instead of a database CHECK violation bubbling
+// up as a 500.
+var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
+
+func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
+	for _, a := range allowed {
+		if value == a {
+			return true
+		}
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", ")))
+	return false
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -766,6 +785,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
+	if !ok {
+		return
+	}
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
@@ -899,6 +922,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
+	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
 		where = append(where, fmt.Sprintf(`(
@@ -1036,6 +1060,68 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 type issueActorFilter struct {
 	actorType string
 	actorID   pgtype.UUID
+}
+
+type issueDateFilter struct {
+	column string
+	start  time.Time
+	end    time.Time
+}
+
+func parseIssueDateFilter(w http.ResponseWriter, values url.Values) (*issueDateFilter, bool) {
+	field := strings.TrimSpace(values.Get("date_field"))
+	startRaw := strings.TrimSpace(values.Get("date_start"))
+	endRaw := strings.TrimSpace(values.Get("date_end"))
+	if field == "" && startRaw == "" && endRaw == "" {
+		return nil, true
+	}
+	if field == "" || startRaw == "" || endRaw == "" {
+		writeError(w, http.StatusBadRequest, "date_field, date_start, and date_end are required together")
+		return nil, false
+	}
+
+	column := ""
+	switch field {
+	case "created_at":
+		column = "created_at"
+	case "updated_at":
+		column = "updated_at"
+	default:
+		writeError(w, http.StatusBadRequest, "invalid date_field")
+		return nil, false
+	}
+
+	start, err := time.Parse(time.RFC3339Nano, startRaw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid date_start")
+		return nil, false
+	}
+	end, err := time.Parse(time.RFC3339Nano, endRaw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid date_end")
+		return nil, false
+	}
+	if !start.Before(end) {
+		writeError(w, http.StatusBadRequest, "date_start must be before date_end")
+		return nil, false
+	}
+
+	return &issueDateFilter{column: column, start: start, end: end}, true
+}
+
+func appendIssueDateFilter(where []string, addArg func(any) string, filter *issueDateFilter) []string {
+	if filter == nil {
+		return where
+	}
+	startRef := addArg(filter.start)
+	endRef := addArg(filter.end)
+	return append(where, fmt.Sprintf(
+		"i.%s >= %s AND i.%s < %s",
+		filter.column,
+		startRef,
+		filter.column,
+		endRef,
+	))
 }
 
 func splitCommaParam(raw string) []string {
@@ -1310,6 +1396,12 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			addArg(labelIDs),
 		))
 	}
+
+	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
+	if !ok {
+		return
+	}
+	where = appendIssueDateFilter(where, addArg, dateFilter)
 
 	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
 		if groupAssigneeType == "none" {
@@ -2007,6 +2099,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if priority == "" {
 		priority = "none"
 	}
+	if !validateIssueEnum(w, "status", status, validIssueStatuses) {
+		return
+	}
+	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
+		return
+	}
 
 	var assigneeType pgtype.Text
 	var assigneeID pgtype.UUID
@@ -2252,9 +2350,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
 	if req.Status != nil {
+		if !validateIssueEnum(w, "status", *req.Status, validIssueStatuses) {
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
+		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
+			return
+		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
 	if req.Position != nil {
@@ -2745,6 +2849,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !hasMutation {
 		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
 		return
+	}
+	if req.Updates.Status != nil {
+		if !validateIssueEnum(w, "status", *req.Updates.Status, validIssueStatuses) {
+			return
+		}
+	}
+	if req.Updates.Priority != nil {
+		if !validateIssueEnum(w, "priority", *req.Updates.Priority, validIssuePriorities) {
+			return
+		}
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)

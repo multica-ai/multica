@@ -238,6 +238,27 @@ var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
 
+var validIssuePriorities = []string{
+	"urgent", "high", "medium", "low", "none",
+}
+
+func validateIssueStatus(status string) error {
+	return validateIssueEnum("status", status, validIssueStatuses)
+}
+
+func validateIssuePriority(priority string) error {
+	return validateIssueEnum("priority", priority, validIssuePriorities)
+}
+
+func validateIssueEnum(field, value string, allowed []string) error {
+	for _, a := range allowed {
+		if value == a {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", "))
+}
+
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
@@ -659,6 +680,18 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if title == "" {
 		return fmt.Errorf("--title is required")
 	}
+	statusFlag, _ := cmd.Flags().GetString("status")
+	if statusFlag != "" {
+		if err := validateIssueStatus(statusFlag); err != nil {
+			return err
+		}
+	}
+	priorityFlag, _ := cmd.Flags().GetString("priority")
+	if priorityFlag != "" {
+		if err := validateIssuePriority(priorityFlag); err != nil {
+			return err
+		}
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -682,11 +715,11 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if hasDesc {
 		body["description"] = desc
 	}
-	if v, _ := cmd.Flags().GetString("status"); v != "" {
-		body["status"] = v
+	if statusFlag != "" {
+		body["status"] = statusFlag
 	}
-	if v, _ := cmd.Flags().GetString("priority"); v != "" {
-		body["priority"] = v
+	if priorityFlag != "" {
+		body["priority"] = priorityFlag
 	}
 	if v, _ := cmd.Flags().GetString("parent"); v != "" {
 		parent, err := resolveIssueRef(ctx, client, v)
@@ -828,6 +861,21 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	statusChanged := cmd.Flags().Changed("status")
+	statusFlag, _ := cmd.Flags().GetString("status")
+	if statusChanged {
+		if err := validateIssueStatus(statusFlag); err != nil {
+			return err
+		}
+	}
+	priorityChanged := cmd.Flags().Changed("priority")
+	priorityFlag, _ := cmd.Flags().GetString("priority")
+	if priorityChanged {
+		if err := validateIssuePriority(priorityFlag); err != nil {
+			return err
+		}
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -853,13 +901,11 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["description"] = desc
 	}
-	if cmd.Flags().Changed("status") {
-		v, _ := cmd.Flags().GetString("status")
-		body["status"] = v
+	if statusChanged {
+		body["status"] = statusFlag
 	}
-	if cmd.Flags().Changed("priority") {
-		v, _ := cmd.Flags().GetString("priority")
-		body["priority"] = v
+	if priorityChanged {
+		body["priority"] = priorityFlag
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")
@@ -994,15 +1040,8 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
 
-	valid := false
-	for _, s := range validIssueStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validIssueStatuses, ", "))
+	if err := validateIssueStatus(status); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)
