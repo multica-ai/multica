@@ -13,7 +13,7 @@ import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { CerebroChatSessionRowActions } from "@multica/cerebro-chat/views";
 import { Star } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ChatSession } from "@multica/core/types";
 import type { DynInboxEntry } from "../section-filter";
 
@@ -119,6 +119,7 @@ const ARMED_FLIP_BACK_MS = 5000;
 function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   const [armed, setArmed] = useState(false);
   const showStar = active || armed;
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Armed but not yet favorited → give the user a full 5s to click, then flip
   // back to the avatar. Re-arming resets the timer (effect re-runs on `armed`).
@@ -128,8 +129,35 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
     return () => clearTimeout(t);
   }, [armed, active]);
 
+  // TECH-3579 (Jesper) — the star must follow the row when it's swiped. The
+  // mobile swipe handlers translate the *row element* imperatively via an
+  // inline `transform` (see cerebro-inbox-row-actions). This star is an overlay
+  // sibling of that row inside the `relative` wrapper, so without mirroring it
+  // would stay pinned while the avatar slides out from under it. Watch the row's
+  // inline style and copy its translateX onto the star, keeping the star's own
+  // vertical centering (translateY(-50%)) intact.
+  useEffect(() => {
+    const button = buttonRef.current;
+    const row = button?.parentElement?.firstElementChild as HTMLElement | null;
+    if (!button || !row) return;
+    const sync = () => {
+      const rowTransform = row.style.transform;
+      button.style.transform = rowTransform
+        ? `${rowTransform} translateY(-50%)`
+        : "translateY(-50%)";
+      // Mirror the snap-back / settle transition so the star eases back in sync
+      // with the row instead of jumping.
+      button.style.transition = row.style.transition;
+    };
+    sync();
+    const observer = new MutationObserver(sync);
+    observer.observe(row, { attributes: true, attributeFilter: ["style"] });
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <button
+      ref={buttonRef}
       type="button"
       aria-label={active ? "Remove from favorites" : showStar ? "Set as favorite" : "Favorite this conversation"}
       aria-pressed={active}
