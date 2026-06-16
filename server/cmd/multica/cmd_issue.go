@@ -210,6 +210,13 @@ var issueRunMessagesCmd = &cobra.Command{
 	RunE:  runIssueRunMessages,
 }
 
+var issueUsageCmd = &cobra.Command{
+	Use:   "usage <issue-id>",
+	Short: "Show aggregated token usage for an issue",
+	Args:  exactArgs(1),
+	RunE:  runIssueUsage,
+}
+
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
 	Short: "Re-enqueue an issue's current agent assignment as a fresh task",
@@ -271,6 +278,7 @@ func init() {
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
+	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueSearchCmd)
@@ -357,6 +365,9 @@ func init() {
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+
+	// issue usage
+	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1373,6 +1384,44 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			errMsg,
 		})
 	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runIssueUsage(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/usage", &result); err != nil {
+		return fmt.Errorf("get issue usage: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	// JSON numbers decode to float64; formatMetadataValue renders them as clean
+	// integers (no scientific notation for large cache-token counts).
+	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS"}
+	rows := [][]string{{
+		formatMetadataValue(result["total_input_tokens"]),
+		formatMetadataValue(result["total_output_tokens"]),
+		formatMetadataValue(result["total_cache_read_tokens"]),
+		formatMetadataValue(result["total_cache_write_tokens"]),
+		formatMetadataValue(result["task_count"]),
+	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
