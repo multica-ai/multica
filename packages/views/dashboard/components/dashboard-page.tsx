@@ -120,8 +120,8 @@ const FALLBACK_LLM_LIMIT_STATUS: LlmLimitStatus = {
 };
 
 function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
+  if (n >= 100) return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return n.toFixed(2);
 }
 
 // Local segmented control — same visual language the runtime usage section

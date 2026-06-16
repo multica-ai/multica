@@ -27,7 +27,7 @@ export const weeklyTokenStackConfig = {
 export function WeeklyTokensChart({ data }: { data: WeeklyTokenData[] }) {
   const { t } = useT("runtimes");
   return (
-    <ChartContainer config={weeklyTokenStackConfig} className="aspect-[3/1] w-full">
+    <ChartContainer config={weeklyTokenStackConfig} className="aspect-[3/1] w-full" data-testid="weekly-token-tracker">
       <BarChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
         <CartesianGrid vertical={false} />
         <XAxis

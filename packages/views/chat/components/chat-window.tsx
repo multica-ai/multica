@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square, RefreshCw } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -196,6 +196,8 @@ export function ChatWindow() {
   const {
     data: rawMessagePages,
     isLoading: messagesLoading,
+    isFetching: isFetchingMessages,
+    refetch: refetchMessages,
     fetchNextPage: fetchOlderMessages,
     hasNextPage: hasOlderMessages,
     isFetchingNextPage: isFetchingOlderMessages,
@@ -756,6 +758,23 @@ export function ChatWindow() {
             onSelectSession={handleSelectSession}
           />
           <ChatTokenBadges />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground"
+                  data-acceptance="chat-messages-manual-refresh"
+                  onClick={() => void refetchMessages()}
+                  disabled={isFetchingMessages}
+                />
+              }
+            >
+              <RefreshCw className={cn("size-3.5", isFetchingMessages && "animate-spin")} />
+            </TooltipTrigger>
+            <TooltipContent side="top">메시지 새로고침</TooltipContent>
+          </Tooltip>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
           <Tooltip>
@@ -1440,8 +1459,8 @@ function SessionDropdown({
   return (
     <>
       <Popover open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-        <div className="flex min-w-0 items-center gap-1">
-          <PopoverTrigger className="flex max-w-96 min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-accent data-[popup-open]:bg-accent data-open:bg-accent">
+        <div className="flex min-w-0 items-center gap-1" data-testid="chat-session-list">
+          <PopoverTrigger data-testid="chat-agent-selector" className="flex max-w-96 min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition-colors hover:bg-accent data-[popup-open]:bg-accent data-open:bg-accent">
             {triggerAgent && (
               <ActorAvatar
                 actorType="agent"
@@ -1486,11 +1505,11 @@ function SessionDropdown({
           onClick={(e) => e.stopPropagation()}
         >
           {historySessions.length === 0 ? (
-            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+            <div className="px-2 py-1.5 text-xs text-muted-foreground" data-testid="chat-session-list">
               {t(($) => $.window.no_previous)}
             </div>
           ) : (
-            <div role="group" aria-label={t(($) => $.window.history_group)}>
+            <div role="group" aria-label={t(($) => $.window.history_group)} data-testid="chat-session-list">
               <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">
                 {t(($) => $.window.history_group)}
               </div>
