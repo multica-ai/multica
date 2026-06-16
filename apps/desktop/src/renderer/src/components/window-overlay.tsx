@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { NewWorkspacePage } from "@multica/views/workspace/new-workspace-page";
 import { InvitePage } from "@multica/views/invite";
 import { InvitationsPage } from "@multica/views/invitations";
-import { OnboardingFlow } from "@multica/views/onboarding";
 import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
@@ -10,8 +9,8 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
- * user is in a pre-workspace flow (onboarding, create workspace, accept
- * invite).
+ * user is in a pre-workspace flow (create workspace, accept invite,
+ * batch invitations).
  *
  * This component is intentionally thin — just a fixed positioning shell
  * that covers the tab system. It does NOT hide traffic lights or provide
@@ -60,29 +59,6 @@ function WindowOverlayInner() {
         />
       )}
       {overlay.type === "invitations" && <InvitationsPage />}
-      {overlay.type === "onboarding" && (
-        <OnboardingFlow
-          onComplete={(ws, issueId) => {
-            close();
-            // Runtime-connected onboarding lands on its single guide
-            // issue. Runtime-less exits still land on the issues list.
-            if (ws && issueId) {
-              push(paths.workspace(ws.slug).issueDetail(issueId));
-            } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
-            } else {
-              push(paths.root());
-            }
-          }}
-          // Restart the bundled daemon when the user hits Refresh on
-          // Step 3. The daemon's PATH probe runs once at boot, so a
-          // newly-installed CLI (Claude / Codex / Cursor) doesn't show
-          // up until the daemon is bounced.
-          onRuntimeRefresh={async () => {
-            await window.daemonAPI?.restart?.();
-          }}
-        />
-      )}
     </div>
   );
 }

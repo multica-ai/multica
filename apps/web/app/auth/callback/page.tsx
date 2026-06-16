@@ -94,13 +94,12 @@ function CallbackContent() {
               // Network blip on the invite lookup is non-fatal — fall through
               // to the normal post-auth destination so the user isn't stuck
               // on a blank callback screen. Worst case they land on
-              // /onboarding and the sidebar will surface invites later.
+              // /workspaces/new and the sidebar will surface invites later.
             }
           }
 
-          // 3. Default: hand off to the resolver (onboarding for first-timers,
-          //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces).
+          // 3. Default: hand off to the resolver (first workspace, or
+          //    /workspaces/new if the user has no workspaces).
           router.push(resolvePostAuthDestination(wsList, onboarded));
         })
         .catch((err) => {

@@ -53,7 +53,6 @@ export const paths = {
   newWorkspace: () => "/workspaces/new",
   invite: (id: string) => `/invite/${encode(id)}`,
   invitations: () => "/invitations",
-  onboarding: () => "/onboarding",
   authCallback: () => "/auth/callback",
   root: () => "/",
 };

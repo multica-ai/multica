@@ -90,15 +90,15 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    expect(mockPush).not.toHaveBeenCalledWith(paths.newWorkspace());
     // nextUrl is a fast path — listMyInvitations should not be queried.
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with no next= and no pending invitations lands on /onboarding", async () => {
+  it("unonboarded user with no next= and no pending invitations lands on /workspaces/new", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
     });
     expect(mockListMyInvitations).toHaveBeenCalled();
   });
@@ -117,7 +117,7 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.invitations());
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    expect(mockPush).not.toHaveBeenCalledWith(paths.newWorkspace());
   });
 
   it("onboarded user with workspace lands in that workspace", async () => {
@@ -174,11 +174,11 @@ describe("CallbackPage", () => {
     });
   });
 
-  it("falls through to /onboarding when listMyInvitations errors", async () => {
+  it("falls through to /workspaces/new when listMyInvitations errors", async () => {
     mockListMyInvitations.mockRejectedValue(new Error("network"));
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
     });
   });
 });
