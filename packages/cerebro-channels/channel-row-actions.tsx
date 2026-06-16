@@ -29,6 +29,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { cn } from "@multica/ui/lib/utils";
 import { useMuteChannel, useUnmuteChannel, useMarkChannelUnread } from "./state-mutations";
 
 export function CerebroChannelRowActions({
@@ -45,6 +46,7 @@ export function CerebroChannelRowActions({
   const markUnread = useMarkChannelUnread();
   const markRead = useMarkChannelRead();
   const strings = useCerebroInboxStrings();
+  const [menuOpen, setMenuOpen] = useState(false);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [customReminder, setCustomReminder] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
@@ -137,14 +139,21 @@ export function CerebroChannelRowActions({
 
   return (
     <>
-      <DropdownMenu>
+      {/* Keep the trigger displayed while the menu is open — it anchors the
+          popup, and losing :hover when the cursor moves toward the menu would
+          collapse it to display:none, sending the menu to the top-left corner
+          (TECH-3623). */}
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger
           render={
             <button
               type="button"
               aria-label="Channel actions"
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+              className={cn(
+                "absolute right-2 top-1/2 size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+                menuOpen ? "inline-flex" : "hidden sm:group-hover:inline-flex",
+              )}
             />
           }
         >

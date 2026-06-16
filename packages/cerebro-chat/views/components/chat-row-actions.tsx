@@ -51,6 +51,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -105,6 +106,7 @@ export function CerebroChatSessionRowActions({
   const unmute = useUnmuteChat();
   const remove = useDeleteChatSession();
 
+  const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirm, setConfirm] = useState<"convert" | "delete" | null>(null);
@@ -263,14 +265,22 @@ export function CerebroChatSessionRowActions({
         />
       ) : (
         // Desktop: a single hover "..." dropdown, matching issue/channel rows.
-        <DropdownMenu>
+        // Keep the trigger displayed while the menu is open — it is the popup's
+        // positioning anchor, and the moment the cursor leaves the row toward
+        // the menu the row loses :hover, collapsing the trigger to
+        // `display:none`. Base UI then measures a zero-rect anchor and the menu
+        // jumps to the top-left corner (TECH-3623).
+        <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger
             render={
               <button
                 type="button"
                 aria-label={s.more_actions}
                 onClick={(e) => e.stopPropagation()}
-                className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+                className={cn(
+                  "absolute right-2 top-1/2 size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+                  menuOpen ? "inline-flex" : "hidden sm:group-hover:inline-flex",
+                )}
               />
             }
           >
