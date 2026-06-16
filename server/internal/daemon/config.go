@@ -17,6 +17,8 @@ import (
 	// into Config via cerebroruntime.SandboxConfig to keep upstream merge
 	// surface minimal. See server/internal/cerebro/runtime/config.go.
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	// CEREBRO-PATCH(fork-auto-update): the fork self-updates from its OWN release channel, so default auto-update ON for the fleet (TECH-3602). See server/internal/cerebro/forkdist.
+	"github.com/multica-ai/multica/server/internal/cerebro/forkdist"
 )
 
 const (
@@ -473,7 +475,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// older server build, which a fresh CLI may no longer talk to. Keeping
 	// auto-update off by default for self-host avoids both footguns (MUL-2381).
 	// Operators on either side can flip the default with MULTICA_DAEMON_AUTO_UPDATE.
-	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL)
+	// CEREBRO-PATCH(fork-auto-update): the fork's self-updater targets its own release channel (forkdist), so a self-update keeps every cerebro patch instead of clobbering it — default ON for any real fleet server, still off for local dev and overridable via the env var below (TECH-3602).
+	autoUpdateEnabled := isOfficialCloudServer(serverBaseURL) || forkdist.AutoUpdateDefaultOn(serverBaseURL)
 	if v := strings.TrimSpace(os.Getenv("MULTICA_DAEMON_AUTO_UPDATE")); v != "" {
 		switch strings.ToLower(v) {
 		case "false", "0", "no", "off":
