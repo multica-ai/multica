@@ -717,6 +717,7 @@ var catalog = []Capability{
 			"DELETE /api/workspaces/{id}/cost-optimization/holdout/{key}",
 			"PUT /api/workspaces/{id}/display-currency",
 			"PUT /api/workspaces/{id}/wakeup-settings",
+			"PUT /api/workspaces/{id}/web-fetch-policy",
 			"PUT /api/cerebro/workspaces/{id}/auth-settings/",
 			"POST /api/workspaces/{id}/pause-tasks",
 			"POST /api/workspaces/{id}/generate-logo",
