@@ -249,6 +249,7 @@ function DesktopRowActions({ menuItems, strings }: DesktopProps) {
   // inbox row (issue, channel, DM) opens the same menu. The right-click menu
   // stays as a keyboard-free fallback anchored at the click point (Gmail style).
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [contextPos, setContextPos] = useState<{ x: number; y: number }>({
     x: 0,
@@ -270,15 +271,23 @@ function DesktopRowActions({ menuItems, strings }: DesktopProps) {
   return (
     <div ref={wrapperRef}>
       {/* Hover-only "..." trigger, positioned absolute over the row, revealed
-          when the parent row is hovered. Same affordance as channel/DM rows. */}
-      <DropdownMenu>
+          when the parent row is hovered. Same affordance as channel/DM rows.
+          While the menu is open we force the trigger to stay displayed: it is
+          the popup's positioning anchor, and the moment the cursor leaves the
+          row toward the menu the row loses :hover, which would collapse the
+          trigger to `display:none` — Base UI then measures a zero-rect anchor
+          and the menu jumps to the top-left corner (TECH-3623). */}
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger
           render={
             <button
               type="button"
               aria-label={strings.more_actions}
               onClick={(e) => e.stopPropagation()}
-              className="absolute right-2 top-1/2 hidden size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:group-hover:inline-flex"
+              className={cn(
+                "absolute right-2 top-1/2 size-7 -translate-y-1/2 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground",
+                menuOpen ? "inline-flex" : "hidden sm:group-hover:inline-flex",
+              )}
             />
           }
         >
