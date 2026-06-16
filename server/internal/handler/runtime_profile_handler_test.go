@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -133,5 +134,52 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 	if rtRows != 1 {
 		t.Fatalf("expected runtime to survive 409, found %d", rtRows)
+	}
+}
+
+
+// TestCreateRuntimeProfile_ForcesWorkspaceVisibility is the regression guard
+// for the visibility leak: visibility=private is not user-settable in v1
+// because the read paths don't enforce it. A client that POSTs
+// visibility:"private" must get a profile stored as 'workspace' — never
+// private — so a "private" profile can't leak to other members or be
+// registered by other daemons. Belt-and-suspenders: also assert the row in
+// the DB is 'workspace'.
+func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Visibility Forced Profile",
+		"protocol_family": "codex",
+		"command_name":    "vis-forced-codex",
+		"visibility":      "private", // must be ignored
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateRuntimeProfile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RuntimeProfileResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+	})
+
+	if resp.Visibility != "workspace" {
+		t.Fatalf("response visibility = %q, want workspace (private must be forced to workspace)", resp.Visibility)
+	}
+	var dbVis string
+	if err := testPool.QueryRow(ctx, `SELECT visibility FROM runtime_profile WHERE id = $1`, resp.ID).Scan(&dbVis); err != nil {
+		t.Fatalf("read stored visibility: %v", err)
+	}
+	if dbVis != "workspace" {
+		t.Fatalf("stored visibility = %q, want workspace", dbVis)
 	}
 }

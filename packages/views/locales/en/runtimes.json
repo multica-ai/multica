@@ -287,15 +287,10 @@
       "base_family": "Base protocol family",
       "command": "Command",
       "description": "Description",
-      "visibility": "Visibility",
       "no_description": "No description",
       "edit": "Edit",
       "delete": "Delete",
       "select_hint": "Select a runtime to see its details."
-    },
-    "visibility": {
-      "workspace": "Workspace",
-      "private": "Private"
     },
     "form": {
       "create_title": "New custom runtime",
@@ -311,9 +306,6 @@
       "command_name_placeholder": "claude",
       "description_label": "Description",
       "description_placeholder": "Optional — what this runtime is for",
-      "visibility_label": "Visibility",
-      "visibility_workspace_hint": "Any workspace member can use this runtime.",
-      "visibility_private_hint": "Only you and workspace admins can use this runtime.",
       "error_display_name_required": "Display name is required.",
       "error_command_required": "Command is required.",
       "back": "Back",

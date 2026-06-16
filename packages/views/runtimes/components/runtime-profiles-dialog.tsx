@@ -15,7 +15,6 @@ import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import type {
   RuntimeProfile,
-  RuntimeProfileVisibility,
   RuntimeProtocolFamily,
 } from "@multica/core/types";
 import {
@@ -365,11 +364,6 @@ function DetailPanel({
               </span>
             )}
           </DetailRow>
-          <DetailRow label={t(($) => $.profiles.detail.visibility)}>
-            {profile.visibility === "private"
-              ? t(($) => $.profiles.visibility.private)
-              : t(($) => $.profiles.visibility.workspace)}
-          </DetailRow>
         </dl>
       </div>
 
@@ -536,9 +530,6 @@ function ProfileDetailsForm({
     commandName: profile?.command_name ?? "",
     description: profile?.description ?? "",
   });
-  const [visibility, setVisibility] = useState<RuntimeProfileVisibility>(
-    profile?.visibility ?? "workspace",
-  );
   const [errors, setErrors] = useState<ProfileFormErrorField[]>([]);
   // Server-side error surfaced under the display-name field (duplicate) or
   // as a generic banner.
@@ -567,7 +558,6 @@ function ProfileDetailsForm({
           protocol_family: family,
           command_name: values.commandName.trim(),
           ...(description ? { description } : {}),
-          visibility,
         });
         toast.success(t(($) => $.profiles.form.toast_created));
         onSaved(created);
@@ -578,7 +568,6 @@ function ProfileDetailsForm({
             display_name: values.displayName.trim(),
             command_name: values.commandName.trim(),
             description: description ? description : null,
-            visibility,
           },
         });
         toast.success(t(($) => $.profiles.form.toast_updated));
@@ -712,25 +701,12 @@ function ProfileDetailsForm({
             it's wired end-to-end. See TODO(MUL-3284) in
             server/internal/daemon/daemon.go. */}
 
-        <fieldset className="space-y-1.5">
-          <legend className="text-xs text-muted-foreground">
-            {t(($) => $.profiles.form.visibility_label)}
-          </legend>
-          <div className="flex gap-2">
-            <VisibilityOption
-              active={visibility === "workspace"}
-              label={t(($) => $.profiles.visibility.workspace)}
-              hint={t(($) => $.profiles.form.visibility_workspace_hint)}
-              onClick={() => setVisibility("workspace")}
-            />
-            <VisibilityOption
-              active={visibility === "private"}
-              label={t(($) => $.profiles.visibility.private)}
-              hint={t(($) => $.profiles.form.visibility_private_hint)}
-              onClick={() => setVisibility("private")}
-            />
-          </div>
-        </fieldset>
+        {/* NOTE: a visibility control is intentionally omitted in v1. The
+            server forces every profile to 'workspace' because the read paths
+            (list, daemon pull, register) do not yet enforce 'private', so
+            offering a private toggle would leak the profile to other members.
+            Re-add once creator-visibility filtering exists. Follow-up:
+            MUL-3308. */}
 
         {formError && (
           <p role="alert" className="text-xs text-destructive">
@@ -761,36 +737,5 @@ function ProfileDetailsForm({
         </div>
       </div>
     </div>
-  );
-}
-
-function VisibilityOption({
-  active,
-  label,
-  hint,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  hint: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      title={hint}
-      className={cn(
-        "flex-1 rounded-md border px-3 py-2 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-        active ? "border-primary bg-accent" : "bg-background hover:bg-accent/50",
-      )}
-    >
-      <span className="font-medium">{label}</span>
-      <span className="mt-0.5 block text-[11px] text-muted-foreground">
-        {hint}
-      </span>
-    </button>
   );
 }

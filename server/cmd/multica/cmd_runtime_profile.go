@@ -94,7 +94,6 @@ func init() {
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
-	runtimeProfileCreateCmd.Flags().String("visibility", "", "Visibility: workspace or private")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
@@ -106,7 +105,6 @@ func init() {
 	// args to the agent launch command, so a CLI flag would promise admins a
 	// no-op. Re-add once it's wired end-to-end (TODO(MUL-3284), see
 	// server/internal/daemon/daemon.go).
-	runtimeProfileUpdateCmd.Flags().String("visibility", "", "New visibility: workspace or private")
 	runtimeProfileUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the profile")
 	runtimeProfileUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -130,17 +128,10 @@ func validateProtocolFamily(family string) error {
 	return nil
 }
 
-// validateVisibility rejects anything other than the two server-accepted
-// visibility values. An empty string is allowed (means "let the server pick
-// its default" on create, "leave unchanged" on update).
-func validateVisibility(visibility string) error {
-	switch visibility {
-	case "", "workspace", "private":
-		return nil
-	default:
-		return fmt.Errorf("invalid --visibility %q: must be workspace or private", visibility)
-	}
-}
+// NOTE: a --visibility flag is intentionally NOT exposed in v1. The server
+// forces every profile to 'workspace' because the read paths do not yet
+// enforce 'private' (exposing it would leak "private" profiles). Re-add once
+// creator-visibility filtering exists. Follow-up: MUL-3308.
 
 func runRuntimeProfileList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -175,7 +166,6 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	commandName, _ := cmd.Flags().GetString("command-name")
 	displayName, _ := cmd.Flags().GetString("display-name")
 	description, _ := cmd.Flags().GetString("description")
-	visibility, _ := cmd.Flags().GetString("visibility")
 
 	if strings.TrimSpace(family) == "" {
 		return fmt.Errorf("--protocol-family is required")
@@ -187,9 +177,6 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--display-name is required")
 	}
 	if err := validateProtocolFamily(family); err != nil {
-		return err
-	}
-	if err := validateVisibility(visibility); err != nil {
 		return err
 	}
 
@@ -209,9 +196,6 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if description != "" {
 		body["description"] = description
-	}
-	if visibility != "" {
-		body["visibility"] = visibility
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -240,20 +224,13 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("visibility") {
-		v, _ := cmd.Flags().GetString("visibility")
-		if err := validateVisibility(v); err != nil {
-			return err
-		}
-		body["visibility"] = v
-	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --visibility, --enabled")
+		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --enabled")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -375,7 +352,7 @@ func outputRuntimeProfile(cmd *cobra.Command, profile map[string]any) error {
 
 // printRuntimeProfileTable renders profiles as a stable, sorted table.
 func printRuntimeProfileTable(profiles []map[string]any) {
-	headers := []string{"ID", "DISPLAY_NAME", "PROTOCOL_FAMILY", "COMMAND_NAME", "VISIBILITY", "ENABLED"}
+	headers := []string{"ID", "DISPLAY_NAME", "PROTOCOL_FAMILY", "COMMAND_NAME", "ENABLED"}
 	rows := make([][]string, 0, len(profiles))
 	for _, p := range profiles {
 		rows = append(rows, []string{
@@ -383,7 +360,6 @@ func printRuntimeProfileTable(profiles []map[string]any) {
 			strVal(p, "display_name"),
 			strVal(p, "protocol_family"),
 			strVal(p, "command_name"),
-			strVal(p, "visibility"),
 			strVal(p, "enabled"),
 		})
 	}

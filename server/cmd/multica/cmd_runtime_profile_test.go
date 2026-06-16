@@ -36,7 +36,6 @@ func newProfileCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("description", "", "")
-	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -47,7 +46,6 @@ func newProfileUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("description", "", "")
-	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().Bool("enabled", true, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
@@ -144,7 +142,6 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	_ = cmd.Flags().Set("protocol-family", "codex")
 	_ = cmd.Flags().Set("command-name", "company-codex")
 	_ = cmd.Flags().Set("display-name", "Company Codex")
-	_ = cmd.Flags().Set("visibility", "workspace")
 
 	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
 		t.Fatalf("runRuntimeProfileCreate: %v", err)
@@ -163,8 +160,10 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if _, present := gotBody["fixed_args"]; present {
 		t.Errorf("fixed_args must not be sent by the CLI, got %#v", gotBody["fixed_args"])
 	}
-	if gotBody["visibility"] != "workspace" {
-		t.Errorf("visibility = %v, want workspace", gotBody["visibility"])
+	// visibility is intentionally NOT exposed by the CLI in v1 (server forces
+	// 'workspace'), so it must never be sent.
+	if _, present := gotBody["visibility"]; present {
+		t.Errorf("visibility must not be sent by the CLI, got %#v", gotBody["visibility"])
 	}
 }
 
