@@ -56,11 +56,13 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"issue_assigned": true,
 		"mentioned":      true,
 		// CEREBRO-PATCH(inbox-reminder-push): reminder is a separate routing key for reminder-only push.
-		"reminder":                    true,
-		"task_failed":                 true,
-		"unassigned":                  true,
-		"reaction_added":              false,
-		"new_comment":                 true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
+		"reminder":       true,
+		"task_failed":    true,
+		"unassigned":     true,
+		"reaction_added": false,
+		"new_comment":    true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
+		// CEREBRO-PATCH(dm-push): FIR-308 — direct messages get their own routing key so a person-to-person DM can be muted/kept independently of issue-comment traffic. Inbox on by default, mirroring new_comment; the row is folded into the DM channel row in the inbox.
+		"dm_message":                  true,
 		"assignee_changed":            false,
 		"status_changed":              false,
 		"start_date_changed.assignee": true,
@@ -84,13 +86,15 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"system_notification": true,
 	},
 	channelNotifications: {
-		"issue_assigned":              false,
-		"mentioned":                   false,
-		"reminder":                    false,
-		"task_failed":                 false,
-		"unassigned":                  false,
-		"reaction_added":              true,
-		"new_comment":                 true,
+		"issue_assigned": false,
+		"mentioned":      false,
+		"reminder":       false,
+		"task_failed":    false,
+		"unassigned":     false,
+		"reaction_added": true,
+		"new_comment":    true,
+		// CEREBRO-PATCH(dm-push): FIR-308 — DMs also surface in the notifications feed by default (parity with new_comment).
+		"dm_message":                  true,
 		"assignee_changed":            true,
 		"status_changed":              true,
 		"start_date_changed.assignee": false,
@@ -110,13 +114,15 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"system_notification": false,
 	},
 	channelMobile: {
-		"issue_assigned":              true,
-		"mentioned":                   true,
-		"reminder":                    false,
-		"task_failed":                 false,
-		"unassigned":                  false,
-		"reaction_added":              false,
-		"new_comment":                 true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
+		"issue_assigned": true,
+		"mentioned":      true,
+		"reminder":       false,
+		"task_failed":    false,
+		"unassigned":     false,
+		"reaction_added": false,
+		"new_comment":    true, // CEREBRO-PATCH(new-comment-inbox-default): TECH-3001 — default to Jesper's preference
+		// CEREBRO-PATCH(dm-push): FIR-308 — push a DM to the phone by default. The message excerpt in the push body is gated separately by the per-user dm_excerpt preference.
+		"dm_message":                  true,
 		"assignee_changed":            false,
 		"status_changed":              false,
 		"start_date_changed.assignee": true,
@@ -136,13 +142,15 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"system_notification": false,
 	},
 	channelDesktop: {
-		"issue_assigned":              true,
-		"mentioned":                   true,
-		"reminder":                    false,
-		"task_failed":                 true,
-		"unassigned":                  false,
-		"reaction_added":              false,
-		"new_comment":                 false,
+		"issue_assigned": true,
+		"mentioned":      true,
+		"reminder":       false,
+		"task_failed":    true,
+		"unassigned":     false,
+		"reaction_added": false,
+		"new_comment":    false,
+		// CEREBRO-PATCH(dm-push): FIR-308 — push a DM to the computer browser (web push) by default, so "phone + browser" both fire out of the box.
+		"dm_message":                  true,
 		"assignee_changed":            false,
 		"status_changed":              false,
 		"start_date_changed.assignee": true,
@@ -371,4 +379,82 @@ func responseAssigneeMemberID(assigneeType, assigneeID *string) string {
 		return ""
 	}
 	return *assigneeID
+}
+
+// CEREBRO-PATCH(dm-push): FIR-308 — direct-message push helpers. A DM is a
+// comment on a kind='dm' issue; it routes under the dedicated "dm_message" key
+// (see the comment-created listener) and produces a recipient-localized push
+// whose body is only included when the recipient opted into showing the
+// message excerpt. Privacy default: name only, no message content.
+
+// resolveDMExcerpt reports whether the recipient opted to show the message
+// excerpt in DM push notifications. Reads
+// `preferences.notifications.dm_excerpt` (bool). Default false — the push shows
+// only the sender's name unless the user explicitly turns the excerpt on.
+func resolveDMExcerpt(ctx context.Context, queries *db.Queries, recipientID string) bool {
+	prefs, err := queries.GetUserPreferences(ctx, parseUUID(recipientID))
+	if err != nil || len(prefs) == 0 {
+		return false
+	}
+	var blob map[string]any
+	if err := json.Unmarshal(prefs, &blob); err != nil {
+		return false
+	}
+	notif, _ := blob["notifications"].(map[string]any)
+	if notif == nil {
+		return false
+	}
+	v, _ := notif["dm_excerpt"].(bool)
+	return v
+}
+
+// resolveUserLanguage returns the user's UI language ("da" or "en"), defaulting
+// to Danish — Firtal's primary language and the user_profile default — when the
+// column is unset or carries an unrecognized value.
+func resolveUserLanguage(ctx context.Context, queries *db.Queries, userID string) string {
+	if u, err := queries.GetUser(ctx, parseUUID(userID)); err == nil && u.Language.Valid {
+		if u.Language.String == "en" {
+			return "en"
+		}
+	}
+	return "da"
+}
+
+// dmSenderDisplayName resolves the human-readable name of whoever sent the DM,
+// for use in the push title. Falls back to a generic word when the actor can't
+// be resolved so the push still reads naturally.
+func dmSenderDisplayName(ctx context.Context, queries *db.Queries, actorType, actorID, lang string) string {
+	if actorID != "" {
+		switch actorType {
+		case "member":
+			if u, err := queries.GetUser(ctx, parseUUID(actorID)); err == nil && u.Name != "" {
+				return u.Name
+			}
+		case "agent":
+			if a, err := queries.GetAgent(ctx, parseUUID(actorID)); err == nil && a.Name != "" {
+				return a.Name
+			}
+		}
+	}
+	if lang == "en" {
+		return "someone"
+	}
+	return "nogen"
+}
+
+// dmPushContent builds the (title, body) of a DM push for one recipient. The
+// title is always "<New message from> <sender>"; the body carries the message
+// excerpt only when the recipient enabled dm_excerpt, otherwise it is empty so
+// the push reveals the sender but not the content.
+func dmPushContent(ctx context.Context, queries *db.Queries, recipientID, actorType, actorID, content string) (string, string) {
+	lang := resolveUserLanguage(ctx, queries, recipientID)
+	sender := dmSenderDisplayName(ctx, queries, actorType, actorID, lang)
+	title := "Ny besked fra " + sender
+	if lang == "en" {
+		title = "New message from " + sender
+	}
+	if resolveDMExcerpt(ctx, queries, recipientID) {
+		return title, content
+	}
+	return title, ""
 }
