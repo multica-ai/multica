@@ -68,3 +68,7 @@ server/server
 data/
 .kilo
 .idea
+.vscode/
+
+# Delve debugger binaries (created by Go debug sessions)
+**/__debug_bin*
