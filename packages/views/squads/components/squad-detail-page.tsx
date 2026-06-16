@@ -1130,9 +1130,11 @@ function SquadOverviewPane({
 const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
   working: "bg-success",
   idle: "bg-muted-foreground/40",
-  offline: "bg-muted-foreground/40",
+  // CEREBRO-PATCH(status-red-green): offline/archived agents read red, not grey
+  // (idle stays neutral — an idle agent is online, just not working).
+  offline: "bg-destructive",
   unstable: "bg-warning",
-  archived: "bg-muted-foreground/40",
+  archived: "bg-destructive",
 };
 
 // Members tab body — re-uses the existing list/role editing patterns.

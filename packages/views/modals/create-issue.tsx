@@ -634,6 +634,8 @@ export function ManualCreatePanel({
                 {/* CEREBRO-PATCH(file-upload-button-api): new onAttach/onEmbed
                     prop API on FileUploadButton (popup picker). */}
                 <FileUploadButton
+                  // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+                  multiple
                   onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />

@@ -214,6 +214,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
           <div className="absolute bottom-1 left-1.5 flex items-center">
             <FileUploadButton
               size="sm"
+              // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+              multiple
               onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
               onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
             />

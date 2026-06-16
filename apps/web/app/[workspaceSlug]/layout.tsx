@@ -4,6 +4,7 @@ import { use, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
+import { MemberPresenceProvider } from "@multica/core/presence";
 import { workspaceBySlugOptions } from "@multica/core/workspace";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -97,11 +98,16 @@ export default function WorkspaceLayout({
 
   return (
     <WorkspaceSlugProvider slug={workspaceSlug}>
-      <CerebroWorkspaceFavicon />
-      <CerebroWorkspaceTitle />
-      <CerebroWorkspaceSidebarColor />
-      <CerebroOpenInAppBanner />
-      {children}
+      {/* CEREBRO-PATCH(member-presence-dot): TECH-3583 — one workspace-wide
+          presence heartbeat so every member avatar (pickers, @-mentions,
+          assignees) can show a red/green online dot, not just the inbox rail. */}
+      <MemberPresenceProvider wsId={workspace.id}>
+        <CerebroWorkspaceFavicon />
+        <CerebroWorkspaceTitle />
+        <CerebroWorkspaceSidebarColor />
+        <CerebroOpenInAppBanner />
+        {children}
+      </MemberPresenceProvider>
     </WorkspaceSlugProvider>
   );
 }

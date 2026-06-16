@@ -344,6 +344,8 @@ function ThreadEntry({
             <div className="mt-2 flex items-center justify-between">
               <FileUploadButton
                 size="sm"
+                // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+                multiple
                 onAttach={(files) =>
                   files.forEach((f) => editorRef.current?.uploadFile(f))
                 }
@@ -571,6 +573,8 @@ function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputPro
           <DraftSavedHint show={draft.saved} className="mr-1" />
           <FileUploadButton
             size="sm"
+            // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+            multiple
             onAttach={(files) =>
               files.forEach((f) => editorRef.current?.uploadFile(f))
             }

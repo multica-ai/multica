@@ -379,7 +379,8 @@ function FoundView({
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              onlineCount === 0 ? "bg-muted-foreground/40" : "bg-success",
+              // CEREBRO-PATCH(status-red-green): no runtime online reads red, not grey
+              onlineCount === 0 ? "bg-destructive" : "bg-success",
             )}
             aria-hidden
           />
@@ -559,7 +560,7 @@ function RuntimeCard({
           <span
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              online ? "bg-success" : "bg-muted-foreground/40",
+              online ? "bg-success" : "bg-destructive",
             )}
             aria-hidden
           />

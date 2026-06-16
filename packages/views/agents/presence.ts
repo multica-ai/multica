@@ -24,7 +24,9 @@ import type { AgentAvailability, Workload } from "@multica/core/agents";
 //   AVAILABILITY (drives the dot everywhere a dot appears):
 //     online    → success         (green)
 //     unstable  → warning         (amber) — pairs with the runtime card's amber
-//     offline   → muted-foreground (gray)
+//     paused    → destructive     (red)   intentional, but not online
+//     offline   → destructive     (red)
+//     archived  → destructive     (red)
 //
 //   WORKLOAD (drives the optional workload chip on focused surfaces):
 //     working   → brand           (blue)  has activity
@@ -55,12 +57,13 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
     textClass: "text-success",
     icon: CircleDot,
   },
-  // Paused uses brand tone — intentional state, not anomaly. Distinct from
-  // amber 'unstable' (transient signal) and grey 'offline' (long-gone).
+  // CEREBRO-PATCH(status-red-green): inactive states (paused/offline/archived)
+  // use red instead of brand/grey so online (green) vs not-online (red) reads
+  // at a glance. Replaces the upstream brand-blue paused / grey offline tones.
   paused: {
     label: "Paused",
-    dotClass: "bg-brand",
-    textClass: "text-brand",
+    dotClass: "bg-destructive",
+    textClass: "text-destructive",
     icon: PauseCircle,
   },
   unstable: {
@@ -71,17 +74,17 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
   },
   offline: {
     label: "Offline",
-    dotClass: "bg-muted-foreground/40",
-    textClass: "text-muted-foreground",
+    dotClass: "bg-destructive",
+    textClass: "text-destructive",
     icon: CircleSlash,
   },
-  // Lifecycle state, not a runtime state — a retired agent. Gray like
+  // Lifecycle state, not a runtime state — a retired agent. Red like
   // offline (it can't take work) but labelled distinctly so the user reads
   // "this agent is archived", not "temporarily unreachable".
   archived: {
     label: "Archived",
-    dotClass: "bg-muted-foreground/40",
-    textClass: "text-muted-foreground",
+    dotClass: "bg-destructive",
+    textClass: "text-destructive",
     icon: Archive,
   },
 };

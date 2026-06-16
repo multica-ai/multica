@@ -151,9 +151,13 @@ export function FeedbackModal({
         </div>
 
         <div className="flex items-center justify-between px-4 py-3 border-t shrink-0">
+          {/* CEREBRO-PATCH(file-upload-button-api): multi-select + onAttach/onEmbed
+              popup picker (matches the other attach sites). */}
           <FileUploadButton
             size="sm"
-            onSelect={(file) => editorRef.current?.uploadFile(file)}
+            multiple
+            onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
+            onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
           />
           <Button size="sm" onClick={handleSubmit} disabled={!canSubmit}>
             {mutation.isPending ? t(($) => $.feedback.sending) : t(($) => $.feedback.send)}

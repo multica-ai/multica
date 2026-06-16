@@ -40,9 +40,11 @@ const HEALTH_ORDER: HealthFilter[] = [
 // Dot tokens stay in code — labels/descriptions flow through useT.
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
   online: "bg-success",
-  paused: "bg-brand",
+  // CEREBRO-PATCH(status-red-green): paused/offline read red, not brand/grey,
+  // so online (green) vs not-online (red) is unmistakable.
+  paused: "bg-destructive",
   recently_lost: "bg-warning",
-  offline: "bg-muted-foreground/40",
+  offline: "bg-destructive",
   about_to_gc: "bg-destructive",
 };
 

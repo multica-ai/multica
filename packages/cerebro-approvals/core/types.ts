@@ -45,6 +45,10 @@ export const approvalSchema = z
     issue_id: z.string().nullable().default(null),
     issue_identifier: z.string().nullable().default(null),
     issue_title: z.string().nullable().default(null),
+    // The human (member) who triggered the agent run that hit this approval.
+    // Optional: an older backend that omits them degrades cleanly.
+    triggered_by_id: z.string().nullable().default(null),
+    triggered_by_name: z.string().nullable().default(null),
   })
   .loose();
 

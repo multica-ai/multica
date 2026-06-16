@@ -601,6 +601,8 @@ export function AgentCreatePanel({
                 prop API on FileUploadButton (popup picker). */}
             <FileUploadButton
               size="sm"
+              // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
+              multiple
               disabled={uploading}
               onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
               onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
