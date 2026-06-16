@@ -61,6 +61,7 @@ import { useGitHubSettings } from "@multica/core/github";
 import { useGitlabSettings } from "@multica/core/gitlab";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
+import { useModalStore } from "@multica/core/modals";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -490,9 +491,16 @@ function ActivityBlock({
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
 
-function SubIssueRow({ child }: { child: Issue }) {
+function SubIssueRow({
+  child,
+  openIssueLinksInModal = false,
+}: {
+  child: Issue;
+  openIssueLinksInModal?: boolean;
+}) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
+  const openModal = useModalStore((s) => s.open);
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
@@ -515,9 +523,27 @@ function SubIssueRow({ child }: { child: Issue }) {
     [child.id, updateIssue, t],
   );
 
-  // AppLink wraps only the title/identifier area. Pickers and checkbox are
-  // siblings, so their clicks never navigate — no stopPropagation acrobatics
-  // and no risk of the native checkbox / picker triggers being blocked.
+  const issueLinkClassName = "flex min-w-0 flex-1 items-center gap-2.5";
+  const issueLinkContent = (
+    <>
+      <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+        {child.identifier}
+      </span>
+      <span
+        className={cn(
+          "text-sm truncate flex-1",
+          isDone
+            ? "text-muted-foreground"
+            : "group-hover/row:text-foreground",
+        )}
+      >
+        {child.title}
+      </span>
+    </>
+  );
+
+  // The issue link wraps only the title/identifier area. Pickers and checkbox
+  // are siblings, so their clicks never navigate.
   return (
     <div
       className={cn(
@@ -552,24 +578,19 @@ function SubIssueRow({ child }: { child: Issue }) {
           />
         }
       />
-      <AppLink
-        href={paths.issueDetail(child.id)}
-        className="flex min-w-0 flex-1 items-center gap-2.5"
-      >
-        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-          {child.identifier}
-        </span>
-        <span
-          className={cn(
-            "text-sm truncate flex-1",
-            isDone
-              ? "text-muted-foreground"
-              : "group-hover/row:text-foreground",
-          )}
+      {openIssueLinksInModal ? (
+        <button
+          type="button"
+          className={cn(issueLinkClassName, "text-left")}
+          onClick={() => openModal("issue-detail", { issueId: child.id })}
         >
-          {child.title}
-        </span>
-      </AppLink>
+          {issueLinkContent}
+        </button>
+      ) : (
+        <AppLink href={paths.issueDetail(child.id)} className={issueLinkClassName}>
+          {issueLinkContent}
+        </AppLink>
+      )}
       <AssigneePicker
         assigneeType={child.assignee_type}
         assigneeId={child.assignee_id}
@@ -608,19 +629,22 @@ interface IssueDetailProps {
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
   highlightCommentId?: string;
+  /** In modal detail, related issue links replace the current modal instead of navigating. */
+  openIssueLinksInModal?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, openIssueLinksInModal = false }: IssueDetailProps) {
   const { t } = useT("issues");
   const id = issueId;
   const router = useNavigation();
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const paths = useWorkspacePaths();
+  const openModal = useModalStore((s) => s.open);
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -981,6 +1005,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  const renderParentIssueLink = useCallback(
+    (className: string, children: React.ReactNode) => {
+      if (!parentIssue) return null;
+      if (openIssueLinksInModal) {
+        return (
+          <button
+            type="button"
+            className={className}
+            onClick={() =>
+              openModal("issue-detail", { issueId: parentIssue.id })
+            }
+          >
+            {children}
+          </button>
+        );
+      }
+      return (
+        <AppLink href={paths.issueDetail(parentIssue.id)} className={className}>
+          {children}
+        </AppLink>
+      );
+    },
+    [openIssueLinksInModal, openModal, parentIssue, paths],
+  );
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   // Selection store is global (workspace-scoped); clear it whenever this
@@ -1365,14 +1413,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${parentIssueOpen ? "rotate-90" : ""}`} />
           </button>
           {parentIssueOpen && <div className="pl-2">
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-xs hover:bg-accent/50 transition-colors group"
-            >
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
-            </AppLink>
+            {renderParentIssueLink(
+              "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 -mx-2 text-left text-xs hover:bg-accent/50 transition-colors group",
+              <>
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
+              </>,
+            )}
           </div>}
         </div>
       )}
@@ -1535,6 +1583,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             highlightedCommentId={highlightedId}
+            openIssueLinksInModal={openIssueLinksInModal}
           />
         </div>
       );
@@ -1562,12 +1611,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <div className="flex flex-1 items-center gap-1.5 min-w-0">
             {workspace && (
               <>
-                <AppLink
-                  href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  {workspace.name}
-                </AppLink>
+                {openIssueLinksInModal ? (
+                  <span className="text-muted-foreground shrink-0">{workspace.name}</span>
+                ) : (
+                  <AppLink
+                    href={paths.issues()}
+                    className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                  >
+                    {workspace.name}
+                  </AppLink>
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
@@ -1593,12 +1646,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )}
             {parentIssue && (
               <>
-                <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {parentIssue.identifier}
-                </AppLink>
+                {renderParentIssueLink(
+                  "text-muted-foreground hover:text-foreground transition-colors truncate shrink-0",
+                  parentIssue.identifier,
+                )}
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
               </>
             )}
@@ -1706,28 +1757,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           />
 
           {parentIssue && (
-            <AppLink
-              href={paths.issueDetail(parentIssue.id)}
-              className="mt-2 inline-flex max-w-full items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group/parent"
-            >
-              <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
-              <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
-              <span className="truncate group-hover/parent:text-foreground">
-                {parentIssue.title}
-              </span>
-              {parentChildIssues.length > 0 && (() => {
-                const done = parentChildIssues.filter((c) => c.status === "done").length;
-                return (
-                  <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
-                    <ProgressRing done={done} total={parentChildIssues.length} size={11} />
-                    <span className="tabular-nums text-[10.5px] font-medium">
-                      {done}/{parentChildIssues.length}
+            renderParentIssueLink(
+              "mt-2 inline-flex max-w-full items-center gap-1.5 text-left text-xs text-muted-foreground hover:text-foreground transition-colors group/parent",
+              <>
+                <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
+                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
+                <span className="truncate group-hover/parent:text-foreground">
+                  {parentIssue.title}
+                </span>
+                {parentChildIssues.length > 0 && (() => {
+                  const done = parentChildIssues.filter((c) => c.status === "done").length;
+                  return (
+                    <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
+                      <ProgressRing done={done} total={parentChildIssues.length} size={11} />
+                      <span className="tabular-nums text-[10.5px] font-medium">
+                        {done}/{parentChildIssues.length}
+                      </span>
                     </span>
-                  </span>
-                );
-              })()}
-            </AppLink>
+                  );
+                })()}
+              </>,
+            )
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
@@ -1844,7 +1895,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 {!subIssuesCollapsed && (
                   <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
                     {childIssues.map((child) => (
-                      <SubIssueRow key={child.id} child={child} />
+                      <SubIssueRow
+                        key={child.id}
+                        child={child}
+                        openIssueLinksInModal={openIssueLinksInModal}
+                      />
                     ))}
                   </div>
                 )}

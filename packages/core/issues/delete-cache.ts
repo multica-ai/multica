@@ -161,6 +161,7 @@ export function cleanupDeletedIssueCaches(
 
   qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.graph(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   // Project Gantt cache lives outside `myAll`, so it needs an explicit
   // refresh when an issue is removed — the deleted row may have been a

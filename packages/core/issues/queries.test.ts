@@ -7,6 +7,9 @@ import type { Issue, ListIssuesParams, ListIssuesResponse } from "../types";
 import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
+  ISSUE_PAGE_SIZE,
+  GRAPH_STATUSES,
+  issueGraphOptions,
   issueKeys,
   projectGanttIssuesOptions,
 } from "./queries";
@@ -130,5 +133,57 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("issueGraphOptions", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("walks every status page so relationship nodes are not truncated", async () => {
+    const total = ISSUE_PAGE_SIZE + 1;
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (!params?.status) throw new Error("expected status");
+        const offset = params.offset ?? 0;
+        if (offset === 0) {
+          return {
+            issues: Array.from({ length: ISSUE_PAGE_SIZE }, (_, index) => ({
+              ...makeIssue(index),
+              id: `${params.status}-${index}`,
+              status: params.status!,
+            })),
+            total,
+          };
+        }
+        return {
+          issues: [
+            {
+              ...makeIssue(ISSUE_PAGE_SIZE),
+              id: `${params.status}-${ISSUE_PAGE_SIZE}`,
+              status: params.status,
+            },
+          ],
+          total,
+        };
+      });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchQuery(issueGraphOptions(WS_ID));
+
+    expect(data).toHaveLength(GRAPH_STATUSES.length * total);
+    expect(listIssues).toHaveBeenCalledTimes(GRAPH_STATUSES.length * 2);
+    expect(issueGraphOptions(WS_ID).queryKey).toEqual(issueKeys.graph(WS_ID));
   });
 });

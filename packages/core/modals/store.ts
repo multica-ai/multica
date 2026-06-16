@@ -11,6 +11,7 @@ type ModalType =
   | "feedback"
   | "issue-set-parent"
   | "issue-add-child"
+  | "issue-detail"
   | "issue-delete-confirm"
   | "issue-backlog-agent-hint"
   | null;

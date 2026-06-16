@@ -19,6 +19,8 @@ import {
   User,
   UserMinus,
   UserPen,
+  Waypoints,
+  X,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -65,7 +67,7 @@ import {
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useIssueViewStore } from "@multica/core/issues/stores/view-store";
@@ -496,9 +498,11 @@ function LabelSubContent({
 export function IssuesHeader({
   scopedIssues,
   allowGantt = false,
+  allowGraph = false,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
+  allowGraph?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -567,7 +571,11 @@ export function IssuesHeader({
           onToggle={toggleAgentRunningFilter}
           scopedIssueIds={scopedIssueIds}
         />
-        <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+        <IssueDisplayControls
+          scopedIssues={scopedIssues}
+          allowGantt={allowGantt}
+          allowGraph={allowGraph}
+        />
       </div>
     </div>
   );
@@ -577,6 +585,7 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  allowGraph = false,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -584,6 +593,8 @@ export function IssueDisplayControls({
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
+  // Relationship graph is currently implemented by the global Issues page.
+  allowGraph?: boolean;
 }) {
   const { t } = useT("issues");
   const viewMode = useViewStore((s) => s.viewMode);
@@ -639,6 +650,106 @@ export function IssueDisplayControls({
   };
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
+  const wsId = useWorkspaceId();
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: labels = [] } = useQuery(labelListOptions(wsId));
+  const actorNameByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const member of members) map.set(`member:${member.user_id}`, member.name);
+    for (const agent of agents) map.set(`agent:${agent.id}`, agent.name);
+    for (const squad of squads) map.set(`squad:${squad.id}`, squad.name);
+    return map;
+  }, [agents, members, squads]);
+  const projectTitleById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project.title])),
+    [projects],
+  );
+  const labelNameById = useMemo(
+    () => new Map(labels.map((label) => [label.id, label.name])),
+    [labels],
+  );
+  const activeFilterChips = useMemo(() => {
+    const chips: { key: string; label: string; onRemove: () => void }[] = [];
+    const actorLabel = (value: ActorFilterValue) =>
+      actorNameByKey.get(`${value.type}:${value.id}`) ?? value.id.slice(0, 8);
+
+    for (const status of statusFilters) {
+      chips.push({
+        key: `status:${status}`,
+        label: `${t(($) => $.filters.section_status)}: ${t(($) => $.status[status as IssueStatus])}`,
+        onRemove: () => act.toggleStatusFilter(status as IssueStatus),
+      });
+    }
+    for (const priority of priorityFilters) {
+      chips.push({
+        key: `priority:${priority}`,
+        label: `${t(($) => $.filters.section_priority)}: ${t(($) => $.priority[priority as IssuePriority])}`,
+        onRemove: () => act.togglePriorityFilter(priority as IssuePriority),
+      });
+    }
+    for (const assignee of assigneeFilters) {
+      chips.push({
+        key: `assignee:${assignee.type}:${assignee.id}`,
+        label: `${t(($) => $.filters.section_assignee)}: ${actorLabel(assignee)}`,
+        onRemove: () => act.toggleAssigneeFilter(assignee),
+      });
+    }
+    if (includeNoAssignee) {
+      chips.push({
+        key: "assignee:none",
+        label: t(($) => $.filters.no_assignee),
+        onRemove: act.toggleNoAssignee,
+      });
+    }
+    for (const creator of creatorFilters) {
+      chips.push({
+        key: `creator:${creator.type}:${creator.id}`,
+        label: `${t(($) => $.filters.section_creator)}: ${actorLabel(creator)}`,
+        onRemove: () => act.toggleCreatorFilter(creator),
+      });
+    }
+    for (const projectId of projectFilters) {
+      chips.push({
+        key: `project:${projectId}`,
+        label: `${t(($) => $.filters.section_project)}: ${projectTitleById.get(projectId) ?? projectId.slice(0, 8)}`,
+        onRemove: () => act.toggleProjectFilter(projectId),
+      });
+    }
+    if (includeNoProject) {
+      chips.push({
+        key: "project:none",
+        label: t(($) => $.filters.no_project),
+        onRemove: act.toggleNoProject,
+      });
+    }
+    for (const labelId of labelFilters) {
+      chips.push({
+        key: `label:${labelId}`,
+        label: `${t(($) => $.filters.section_label)}: ${labelNameById.get(labelId) ?? labelId.slice(0, 8)}`,
+        onRemove: () => act.toggleLabelFilter(labelId),
+      });
+    }
+    return chips;
+  }, [
+    act,
+    actorNameByKey,
+    assigneeFilters,
+    creatorFilters,
+    includeNoAssignee,
+    includeNoProject,
+    labelFilters,
+    labelNameById,
+    priorityFilters,
+    projectFilters,
+    projectTitleById,
+    statusFilters,
+    t,
+  ]);
+  const visibleFilterChips = activeFilterChips.slice(0, 3);
+  const hiddenFilterChipCount = activeFilterChips.length - visibleFilterChips.length;
 
   return (
     <div className="flex items-center gap-1">
@@ -833,9 +944,55 @@ export function IssueDisplayControls({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        {activeFilterChips.length > 0 && (
+          <>
+            <div className="hidden max-w-[min(34rem,44vw)] items-center gap-1 overflow-hidden lg:flex">
+              {visibleFilterChips.map((chip) => (
+                <span
+                  key={chip.key}
+                  className="inline-flex h-7 min-w-0 items-center gap-1 rounded-full border bg-muted/45 px-2 text-xs text-muted-foreground"
+                  title={chip.label}
+                >
+                  <span className="max-w-36 truncate">{chip.label}</span>
+                  <button
+                    type="button"
+                    className="-mr-1 inline-flex size-4 items-center justify-center rounded-full hover:bg-background hover:text-foreground"
+                    onClick={chip.onRemove}
+                    aria-label={`${t(($) => $.filters.remove_filter)} ${chip.label}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+              {hiddenFilterChipCount > 0 && (
+                <span className="inline-flex h-7 shrink-0 items-center rounded-full border bg-muted/45 px-2 text-xs text-muted-foreground">
+                  +{hiddenFilterChipCount}
+                </span>
+              )}
+              <button
+                type="button"
+                className="inline-flex h-7 shrink-0 items-center rounded-full px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={act.clearFilters}
+              >
+                {t(($) => $.filters.clear)}
+              </button>
+            </div>
+            <button
+              type="button"
+              className="inline-flex h-7 items-center gap-1 rounded-full border bg-muted/45 px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
+              onClick={act.clearFilters}
+              title={t(($) => $.filters.reset)}
+            >
+              {t(($) => $.filters.active_count, {
+                count: activeFilterChips.length,
+              })}
+              <X className="size-3" />
+            </button>
+          </>
+        )}
 
         {/* Display settings */}
-        <Popover>
+        {!(viewMode === "graph" && allowGraph) && <Popover>
           <Tooltip>
             <PopoverTrigger
               render={
@@ -952,7 +1109,7 @@ export function IssueDisplayControls({
               </div>
             </div>
           </PopoverContent>
-        </Popover>
+        </Popover>}
 
         {/* View toggle. If a store has `viewMode === "gantt"` persisted but
             this surface doesn't render Gantt, fall back to "list" so the
@@ -967,6 +1124,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="icon-sm" className="text-muted-foreground">
                         {viewMode === "board" ? (
                           <Columns3 className="size-4" />
+                        ) : viewMode === "graph" && allowGraph ? (
+                          <Waypoints className="size-4" />
                         ) : viewMode === "gantt" && allowGantt ? (
                           <ChartGantt className="size-4" />
                         ) : (
@@ -980,6 +1139,8 @@ export function IssueDisplayControls({
               <TooltipContent side="bottom">
                 {viewMode === "board"
                   ? t(($) => $.view.tooltip_board)
+                  : viewMode === "graph" && allowGraph
+                  ? t(($) => $.view.tooltip_graph)
                   : viewMode === "gantt" && allowGantt
                   ? t(($) => $.view.tooltip_gantt)
                   : t(($) => $.view.tooltip_list)}
@@ -996,6 +1157,12 @@ export function IssueDisplayControls({
                   <List />
                   {t(($) => $.view.list)}
                 </DropdownMenuItem>
+                {allowGraph && (
+                  <DropdownMenuItem onClick={() => act.setViewMode("graph")}>
+                    <Waypoints />
+                    {t(($) => $.view.graph)}
+                  </DropdownMenuItem>
+                )}
                 {allowGantt && (
                   <DropdownMenuItem onClick={() => act.setViewMode("gantt")}>
                     <ChartGantt />

@@ -102,10 +102,29 @@ function urlTransform(url: string): string {
 // Custom react-markdown components
 // ---------------------------------------------------------------------------
 
-function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
+function IssueMentionLink({
+  issueId,
+  label,
+  openInModal = false,
+}: {
+  issueId: string;
+  label?: string;
+  openInModal?: boolean;
+}) {
   const { push, openInNewTab } = useNavigation();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
+  if (openInModal) {
+    return (
+      <span className="inline align-middle">
+        <IssueMentionCard
+          issueId={issueId}
+          fallbackLabel={label}
+          openInModal
+        />
+      </span>
+    );
+  }
   return (
     <span
       className="inline align-middle"
@@ -132,9 +151,11 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
 function ReadonlyLink({
   href,
   children,
+  openIssueLinksInModal = false,
 }: {
   href?: string;
   children?: React.ReactNode;
+  openIssueLinksInModal?: boolean;
 }) {
   const slug = useWorkspaceSlug();
 
@@ -147,7 +168,13 @@ function ReadonlyLink({
           : Array.isArray(children)
             ? children.join("")
             : undefined;
-      return <IssueMentionLink issueId={match[2]} label={label} />;
+      return (
+        <IssueMentionLink
+          issueId={match[2]}
+          label={label}
+          openInModal={openIssueLinksInModal}
+        />
+      );
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -167,10 +194,19 @@ function ReadonlyLink({
   );
 }
 
-function buildComponents(): Partial<Components> {
+function buildComponents({
+  openIssueLinksInModal = false,
+}: {
+  openIssueLinksInModal?: boolean;
+} = {}): Partial<Components> {
   return {
     // Links — route mention:// to mention components, others show preview card
-    a: ReadonlyLink,
+    a: (props) => (
+      <ReadonlyLink
+        {...props}
+        openIssueLinksInModal={openIssueLinksInModal}
+      />
+    ),
 
     // Images — unified through <Attachment>. The resolver context provided
     // by AttachmentDownloadProvider (mounted in ReadonlyContent below) turns
@@ -302,6 +338,7 @@ interface ReadonlyContentProps {
    * timeline entry); a fresh array on every parent render busts the memo.
    */
   attachments?: Attachment[];
+  openIssueLinksInModal?: boolean;
 }
 
 // Memoized so a long timeline of comments (Inbox + IssueDetail) does not
@@ -313,6 +350,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
   attachments,
+  openIssueLinksInModal = false,
 }: ReadonlyContentProps) {
   const processed = useMemo(() => preprocessMarkdown(content), [content]);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -320,7 +358,10 @@ export const ReadonlyContent = memo(function ReadonlyContent({
 
   // Components map is now static — all attachment-aware logic lives in
   // <Attachment>, which reads the surrounding AttachmentDownloadProvider.
-  const components = useMemo(() => buildComponents(), []);
+  const components = useMemo(
+    () => buildComponents({ openIssueLinksInModal }),
+    [openIssueLinksInModal],
+  );
 
   return (
     <AttachmentDownloadProvider attachments={attachments}>
