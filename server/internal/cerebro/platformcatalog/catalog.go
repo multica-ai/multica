@@ -589,6 +589,15 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:         "manage_web_fetch_policy",
+		Title:       "Manage web_fetch policy",
+		Category:    CategoryPermissions,
+		Description: "Set the per-workspace allow/disallow list of URLs agents may fetch with web_fetch (TECH-3522).",
+		Ops: []string{
+			"PUT /api/workspaces/{id}/web-fetch-policy",
+		},
+	},
+	{
 		Key:         "manage_agent_vault_access",
 		Title:       "Manage Agent Vault access",
 		Category:    CategoryPermissions,
