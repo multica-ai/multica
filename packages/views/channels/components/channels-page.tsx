@@ -827,12 +827,9 @@ function ChannelGroupSection({
               onSelect={onSelect}
             />
           ))}
-          {channels.length === 0 && isDragging && (
+          {channels.length === 0 && isDragging && isDropTarget && (
             <div
-              className={cn(
-                "mx-1 mb-0.5 ml-5 h-8 rounded-md border border-dashed transition-colors",
-                isDropTarget ? "border-primary/50" : "border-border/60",
-              )}
+              className="mx-1 mb-0.5 ml-5 h-8 rounded-md border border-dashed border-primary/50 transition-colors"
             />
           )}
         </div>
