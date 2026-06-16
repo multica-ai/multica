@@ -94,7 +94,8 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
+  // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 allow the board to filter by sprint member.
+  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id" | "sprint_id"
 >;
 
 // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 allow filtering the list view by on-behalf-of member.
@@ -324,12 +325,14 @@ export const PROJECT_GANTT_PAGE_LIMIT = 500;
  */
 export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 
-async function fetchProjectGanttIssues(projectId: string) {
+async function fetchProjectGanttIssues(projectId: string, sprintId?: string) {
   const issues = [];
   let offset = 0;
   while (offset < PROJECT_GANTT_MAX_ISSUES) {
     const res = await api.listIssues({
       project_id: projectId,
+      // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 narrow the gantt to a sprint's members.
+      sprint_id: sprintId || undefined,
       scheduled: true,
       limit: PROJECT_GANTT_PAGE_LIMIT,
       offset,
@@ -355,10 +358,11 @@ async function fetchProjectGanttIssues(projectId: string) {
  * `total` is reached so an oversized project can't silently lose bars past
  * the first page.
  */
-export function projectGanttIssuesOptions(wsId: string, projectId: string) {
+export function projectGanttIssuesOptions(wsId: string, projectId: string, sprintId?: string) {
   return queryOptions({
-    queryKey: issueKeys.projectGantt(wsId, projectId),
-    queryFn: () => fetchProjectGanttIssues(projectId),
+    // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 key + fetch the gantt by sprint when filtered.
+    queryKey: [...issueKeys.projectGantt(wsId, projectId), sprintId ?? ""],
+    queryFn: () => fetchProjectGanttIssues(projectId, sprintId),
   });
 }
 

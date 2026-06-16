@@ -1415,6 +1415,8 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter.
     if (params?.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
+    // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 forward sprint member filter.
+    if (params?.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -1442,6 +1444,8 @@ export class ApiClient {
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter (grouped).
     if (params.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
+    // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 forward sprint member filter (grouped).
+    if (params.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);

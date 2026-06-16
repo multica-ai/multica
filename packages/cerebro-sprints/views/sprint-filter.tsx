@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { projectTreeOptions } from "@multica/core/projects/nesting";
-import type { ProjectTreeItem } from "@multica/core/types";
+
+import { projectSprintsOptions } from "../core/queries";
 import {
   Select,
   SelectContent,
@@ -20,39 +20,33 @@ interface Props {
   className?: string;
 }
 
-function flatten(nodes: ProjectTreeItem[]): ProjectTreeItem[] {
-  const out: ProjectTreeItem[] = [];
-  for (const node of nodes) {
-    out.push(node);
-    if (node.children?.length) out.push(...flatten(node.children));
-  }
-  return out;
-}
+const ALL = "__all__";
 
 /**
- * SprintFilter is a board/list filter widget for picking a sprint sub-project.
- * The host surface owns the actual filtering — this just selects the project id.
- * Renders nothing when the project has no sprint children.
+ * SprintFilter is a board/list filter widget for picking a real sprint
+ * (cerebro_sprint row) that belongs to this project. The host surface owns the
+ * actual filtering — this just selects the sprint id. Renders nothing when the
+ * project has no sprints.
  */
 export function SprintFilter({ workspaceId, projectId, value, onChange, className }: Props) {
-  const treeQuery = useQuery(projectTreeOptions(workspaceId));
-  const sprints = flatten(treeQuery.data ?? []).filter((project) => project.parent_project_id === projectId);
-  if (treeQuery.isLoading || sprints.length === 0) return null;
+  const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
+  const sprints = sprintsQuery.data?.sprints ?? [];
+  if (sprintsQuery.isLoading || sprints.length === 0) return null;
 
   return (
     <div className={className}>
       <Select
-        value={value || "__all__"}
-        onValueChange={(v) => onChange(v === "__all__" || v == null ? "" : v)}
+        value={value || ALL}
+        onValueChange={(v) => onChange(v === ALL || v == null ? "" : v)}
       >
         <SelectTrigger>
           <SelectValue placeholder="All sprints" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__all__">All sprints</SelectItem>
+          <SelectItem value={ALL}>All sprints</SelectItem>
           {sprints.map((s) => (
             <SelectItem key={s.id} value={s.id}>
-              {s.title}
+              {s.name}
             </SelectItem>
           ))}
         </SelectContent>

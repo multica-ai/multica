@@ -764,6 +764,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		referenceRefIDFilter = pgtype.Text{String: refID, Valid: true}
 	}
 
+	// CEREBRO-PATCH(issue-sprint-filter): TECH-3620 ?sprint_id=<uuid> narrows
+	// the list to a sprint's members (cerebro_sprint_issue), server-side so
+	// the sprint board paginates correctly on large projects.
+	var sprintFilter pgtype.UUID
+	if s := r.URL.Query().Get("sprint_id"); s != "" {
+		id, ok := parseUUIDOrBadRequest(w, s, "sprint_id")
+		if !ok {
+			return
+		}
+		sprintFilter = id
+	}
+
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
@@ -973,6 +985,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			`EXISTS (SELECT 1 FROM cerebro_issue_reference cir WHERE cir.issue_id = i.id AND cir.object = %s::text AND cir.ref_id = %s::text)`,
 			addArg(referenceObjectFilter.String),
 			addArg(referenceRefIDFilter.String),
+		))
+	}
+	// CEREBRO-PATCH(issue-sprint-filter): TECH-3620 narrow to a sprint's members.
+	if sprintFilter.Valid {
+		where = append(where, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM cerebro_sprint_issue csi WHERE csi.issue_id = i.id AND csi.sprint_id = %s::uuid)`,
+			addArg(sprintFilter),
 		))
 	}
 	// CEREBRO-PATCH(nested-projects): project_ids includes descendant projects.
@@ -1299,6 +1318,18 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			)`,
 			addArg(object),
 			addArg(refID),
+		))
+	}
+	// CEREBRO-PATCH(issue-sprint-filter-grouped): TECH-3620 mirror the ?sprint_id
+	// member filter so the assignee board stays in lock-step with ListIssues.
+	if raw := strings.TrimSpace(r.URL.Query().Get("sprint_id")); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "sprint_id")
+		if !ok {
+			return
+		}
+		where = append(where, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM cerebro_sprint_issue csi WHERE csi.issue_id = i.id AND csi.sprint_id = %s::uuid)`,
+			addArg(id),
 		))
 	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
