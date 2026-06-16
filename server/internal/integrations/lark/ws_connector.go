@@ -559,7 +559,9 @@ func (g *GorillaDialer) DialContext(ctx context.Context, urlStr string, requestH
 	}
 	// Shallow copy so we don't mutate the shared dialer's Proxy field.
 	dd := *d
-	dd.Proxy = g.Proxy
+	if g.Proxy != nil {
+		dd.Proxy = g.Proxy
+	}
 	if dd.Proxy == nil {
 		dd.Proxy = http.ProxyFromEnvironment
 	}

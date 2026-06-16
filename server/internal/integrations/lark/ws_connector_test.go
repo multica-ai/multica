@@ -652,30 +652,50 @@ func TestWSConnectorReassemblesChunkedDataFrame(t *testing.T) {
 	}
 }
 
-func TestGorillaDialerProxyDefaults(t *testing.T) {
+func TestGorillaDialerPreservesConfiguredDialerProxy(t *testing.T) {
 	t.Parallel()
 
-	// Default: nil proxy means ProxyFromEnvironment is used.
-	d := NewGorillaDialer()
-	if d.Proxy != nil {
-		t.Error("expected nil Proxy on new dialer")
+	proxyErr := errors.New("configured proxy refused")
+	d := &GorillaDialer{
+		Dialer: &websocket.Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return nil, proxyErr
+			},
+		},
 	}
 
-	// Setting Proxy to a custom func is preserved.
-	custom := func(r *http.Request) (*url.URL, error) { return nil, nil }
-	d.Proxy = custom
-	if d.Proxy == nil {
-		t.Fatal("Proxy field should accept custom func")
-	}
-
-	// DialContext with a non-existent endpoint exercises the proxy path
-	// without panicking. The connection will fail, but the dialer must
-	// not crash regardless of whether Proxy is nil or custom.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
-	if err == nil {
-		t.Error("expected dial to fail against closed port")
+	if !errors.Is(err, proxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, proxyErr)
+	}
+}
+
+func TestGorillaDialerProxyOverridesConfiguredDialerProxy(t *testing.T) {
+	t.Parallel()
+
+	configuredProxyErr := errors.New("configured proxy refused")
+	overrideProxyErr := errors.New("override proxy refused")
+	d := &GorillaDialer{
+		Dialer: &websocket.Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return nil, configuredProxyErr
+			},
+		},
+		Proxy: func(*http.Request) (*url.URL, error) {
+			return nil, overrideProxyErr
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
+	if !errors.Is(err, overrideProxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, overrideProxyErr)
+	}
+	if errors.Is(err, configuredProxyErr) {
+		t.Fatalf("DialContext used configured proxy error %v instead of override", configuredProxyErr)
 	}
 }
 
@@ -687,15 +707,12 @@ func TestGorillaDialerProxyForwardsError(t *testing.T) {
 	d.Proxy = func(r *http.Request) (*url.URL, error) {
 		return nil, proxyErr
 	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	// gorilla/websocket calls Proxy during CONNECT for wss:// URLs;
-	// for ws:// the Proxy is not invoked (plain TCP, no CONNECT tunnel).
-	// This test verifies the dialer does not panic when Proxy returns
-	// an error — the connection will simply fail fast.
 	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
-	if err == nil {
-		t.Error("expected dial to fail")
+	if !errors.Is(err, proxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, proxyErr)
 	}
 }
 
