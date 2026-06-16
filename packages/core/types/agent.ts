@@ -26,12 +26,96 @@ export interface RuntimeDevice {
   owner_id: string | null;
   /** Defaults to "private" when the backend predates the visibility flag. */
   visibility: RuntimeVisibility;
+  /**
+   * The custom runtime profile this registered runtime was launched from,
+   * or `null` for a built-in protocol family. The UI uses this to stamp a
+   * "Built-in" vs "Custom" badge on the runtime row. Older backends that
+   * predate the custom-runtime feature omit the field; consumers must treat
+   * a missing value as `null` (built-in).
+   */
+  profile_id?: string | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export type AgentRuntime = RuntimeDevice;
+
+// ---------------------------------------------------------------------------
+// Custom runtime profiles (MUL-3284)
+//
+// A RuntimeProfile is a workspace-level *definition* of a custom runtime
+// backend — distinct from a RuntimeDevice, which is a daemon-registered
+// *instance*. An admin authors a profile (display name + base protocol
+// family + the CLI command to launch), and daemons can then register
+// runtimes against it; those instances carry `profile_id` pointing back here.
+// ---------------------------------------------------------------------------
+
+// The fixed allow-list of base protocol families a custom runtime can wrap.
+// These are the only backends the create flow may select; the server rejects
+// anything else with 400. Kept as a const tuple so the union type is derived
+// from the single source of truth.
+export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
+  "claude",
+  "codebuddy",
+  "codex",
+  "copilot",
+  "opencode",
+  "openclaw",
+  "hermes",
+  "gemini",
+  "pi",
+  "cursor",
+  "kimi",
+  "kiro",
+  "antigravity",
+] as const;
+
+export type RuntimeProtocolFamily =
+  (typeof RUNTIME_PROFILE_PROTOCOL_FAMILIES)[number];
+
+// Profile visibility mirrors RuntimeVisibility's vocabulary but uses the
+// workspace/private axis the server documents for profiles.
+export type RuntimeProfileVisibility = "workspace" | "private";
+
+export interface RuntimeProfile {
+  id: string;
+  workspace_id: string;
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description: string | null;
+  fixed_args: string[];
+  visibility: RuntimeProfileVisibility;
+  created_by: string | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// POST body. `protocol_family` is required and immutable after creation.
+// Optional fields are omitted entirely when unset (never sent as null/empty)
+// so the server applies its own defaults.
+export interface CreateRuntimeProfileRequest {
+  display_name: string;
+  protocol_family: RuntimeProtocolFamily;
+  command_name: string;
+  description?: string;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
+
+// PATCH body — every field optional; `protocol_family` is intentionally
+// absent because it is immutable.
+export interface UpdateRuntimeProfileRequest {
+  display_name?: string;
+  command_name?: string;
+  description?: string | null;
+  fixed_args?: string[];
+  visibility?: RuntimeProfileVisibility;
+  enabled?: boolean;
+}
 
 // Coarse classifier set by the backend when a task transitions to "failed".
 // Mirrors the migration-055 enum in agent_task_queue.failure_reason. Used by
