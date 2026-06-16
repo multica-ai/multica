@@ -25,6 +25,7 @@ import {
   LogOut,
   Plus,
   Check,
+  BookOpenCheck,
   BookOpenText,
   SquarePen,
   CircleUser,
@@ -112,6 +113,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "knowledge"
   | "squads"
   | "usage"
   | "agentDashboard"
@@ -127,6 +129,7 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "wiki"
+  | "knowledge"
   | "squads"
   | "usage"
   | "agent_dashboard"
@@ -144,6 +147,7 @@ const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[]
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "wiki", labelKey: "wiki", icon: BookOpenText },
+  { key: "knowledge", labelKey: "knowledge", icon: BookOpenCheck },
   { key: "squads", labelKey: "squads", icon: Users },
   { key: "usage", labelKey: "usage", icon: BarChart3 },
   { key: "agentDashboard", labelKey: "agent_dashboard", icon: Activity },

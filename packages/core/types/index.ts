@@ -212,6 +212,7 @@ export type {
   WikiPageActivityAction,
   ListWikiPageActivitiesResponse,
 } from "./wiki";
+export type * from "../knowledge/types";
 export type {
   Squad,
   SquadMember,

@@ -9,6 +9,7 @@ import {
   Archive,
   ArrowDownToLine,
   ArrowUpToLine,
+  BookOpenCheck,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -101,6 +102,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
+import { knowledgeCandidatesOptions } from "@multica/core/knowledge/queries";
+import { useCreateKnowledgeDraftFromIssue, useCreateKnowledgeFeedback } from "@multica/core/knowledge/mutations";
+import type { KnowledgeCandidate, KnowledgeFeedbackValue } from "@multica/core/knowledge/types";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -258,6 +262,12 @@ function metadataHealthPort(metadata: Record<string, unknown> | undefined): numb
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return null;
+}
+
+function candidateKnowledgeItemId(candidate: KnowledgeCandidate): string | null {
+  if (!candidate.metadata || typeof candidate.metadata !== "object") return null;
+  const value = (candidate.metadata as Record<string, unknown>).knowledge_item_id;
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function formatActivity(
@@ -948,6 +958,7 @@ export function IssueDetail({
   highlightCommentId,
 }: IssueDetailProps) {
   const { t, i18n } = useT("issues");
+  const { t: tKnowledge } = useT("knowledge");
   const timeAgo = useTimeAgo();
   // `issueId` is the raw route param — may be a UUID *or* a human-readable
   // identifier (e.g. "OPE-460") when the URL has been canonicalized.  We keep
@@ -1004,6 +1015,7 @@ export function IssueDetail({
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const [previewLogs, setPreviewLogs] = useState<{ title: string; logs: string } | null>(null);
@@ -1241,6 +1253,13 @@ export function IssueDetail({
   // WS events arriving before the issue loads are an acceptable edge case
   // (the refetch-on-mount will pick them up).
   const resolvedId = issue?.id ?? id;
+  const createKnowledgeDraft = useCreateKnowledgeDraftFromIssue();
+  const createKnowledgeFeedback = useCreateKnowledgeFeedback();
+  const { data: knowledgeCandidatesData } = useQuery({
+    ...knowledgeCandidatesOptions(wsId, { issue_id: resolvedId, limit: 20 }),
+    enabled: !!issue,
+  });
+  const knowledgeCandidates = knowledgeCandidatesData?.candidates ?? [];
   const { data: localRuntimes = [] } = useQuery({
     queryKey: ["local-preview-runtimes", wsId],
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner: "me" }),
@@ -1961,6 +1980,27 @@ export function IssueDetail({
     }
   };
 
+  const handleCreateKnowledgeDraft = async () => {
+    try {
+      const detail = await createKnowledgeDraft.mutateAsync({ issue_id: resolvedId });
+      toast.success(tKnowledge(($) => $.issue.generated));
+      if (detail.item.id) {
+        router.push(paths.knowledgeDetail(detail.item.id));
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tKnowledge(($) => $.issue.generate_failed));
+    }
+  };
+
+  const handleKnowledgeFeedback = async (knowledgeId: string, value: KnowledgeFeedbackValue) => {
+    try {
+      await createKnowledgeFeedback.mutateAsync({ id: knowledgeId, value });
+      toast.success(tKnowledge(($) => $.toast.feedback_sent));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : tKnowledge(($) => $.toast.action_failed));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
@@ -2269,6 +2309,105 @@ export function IssueDetail({
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
       )}
+
+      {/* Knowledge */}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${knowledgeOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setKnowledgeOpen(!knowledgeOpen)}
+        >
+          {tKnowledge(($) => $.issue.section)}
+          {knowledgeCandidates.length > 0 && (
+            <span className="tabular-nums text-muted-foreground">
+              · {knowledgeCandidates.length}
+            </span>
+          )}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${knowledgeOpen ? "rotate-90" : ""}`} />
+        </button>
+        {knowledgeOpen && (
+          <div className="space-y-2 pl-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 w-full justify-start text-xs"
+              disabled={createKnowledgeDraft.isPending}
+              onClick={handleCreateKnowledgeDraft}
+            >
+              <BookOpenCheck className="h-3.5 w-3.5" />
+              {createKnowledgeDraft.isPending
+                ? tKnowledge(($) => $.issue.generating)
+                : tKnowledge(($) => $.issue.generate_draft)}
+            </Button>
+
+            <div className="space-y-1.5">
+              <p className="px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {tKnowledge(($) => $.issue.candidates)}
+              </p>
+              {knowledgeCandidates.length === 0 ? (
+                <p className="px-2 text-xs text-muted-foreground">
+                  {tKnowledge(($) => $.issue.no_candidates)}
+                </p>
+              ) : (
+                knowledgeCandidates.map((candidate) => {
+                  const knowledgeId = candidateKnowledgeItemId(candidate);
+                  return (
+                    <div key={candidate.id} className="rounded-md border bg-muted/10 px-2 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+                          {candidate.trigger_reason || candidate.source_type}
+                        </span>
+                        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                          {candidate.status}
+                        </span>
+                      </div>
+                      {candidate.signals.length > 0 && (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                          {candidate.signals.join(" · ")}
+                        </p>
+                      )}
+                      {knowledgeId && (
+                        <div className="mt-2 flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            render={<AppLink href={paths.knowledgeDetail(knowledgeId)} />}
+                          >
+                            {tKnowledge(($) => $.issue.open_draft)}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            disabled={createKnowledgeFeedback.isPending}
+                            onClick={() => handleKnowledgeFeedback(knowledgeId, "helpful")}
+                          >
+                            {tKnowledge(($) => $.feedback.helpful)}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-[11px]"
+                            disabled={createKnowledgeFeedback.isPending}
+                            onClick={() => handleKnowledgeFeedback(knowledgeId, "misleading")}
+                          >
+                            {tKnowledge(($) => $.feedback.misleading)}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Details */}
       <div>

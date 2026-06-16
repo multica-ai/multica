@@ -23,6 +23,7 @@ import { AutopilotsPage } from "@multica/views/autopilots/components";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { WikiPage } from "@multica/views/wiki";
+import { KnowledgePage } from "@multica/views/knowledge";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
@@ -95,6 +96,11 @@ function PageShell() {
 function WikiPageRoute() {
   const { pageId } = useParams();
   return <WikiPage pageId={pageId} />;
+}
+
+function KnowledgePageRoute() {
+  const { id } = useParams();
+  return <KnowledgePage knowledgeId={id} />;
 }
 
 /**
@@ -173,6 +179,8 @@ export const appRoutes: RouteObject[] = [
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
           { path: "wiki", element: <WikiPage />, handle: { title: "Wiki" } },
           { path: "wiki/:pageId", element: <WikiPageRoute />, handle: { title: "Wiki" } },
+          { path: "knowledge", element: <KnowledgePage />, handle: { title: "Knowledge" } },
+          { path: "knowledge/:id", element: <KnowledgePageRoute />, handle: { title: "Knowledge" } },
           {
             path: "skills/:id",
             element: <SkillDetailPage />,

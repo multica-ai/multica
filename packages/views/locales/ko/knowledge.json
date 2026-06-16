@@ -1,0 +1,12 @@
+{
+  "page": { "title": "Knowledge", "search": "Search knowledge" },
+  "status": { "all": "All", "draft": "Draft", "reviewed": "Reviewed", "published": "Published", "archived": "Archived", "deprecated": "Deprecated" },
+  "type": { "lesson": "Lesson", "playbook": "Playbook", "reference": "Reference" },
+  "confidence": { "low": "Low confidence", "medium": "Medium confidence", "high": "High confidence" },
+  "fields": { "problem_pattern": "Problem pattern", "trigger_conditions": "Trigger conditions", "diagnostic_steps": "Diagnostic steps", "recommended_practice": "Recommended practice", "anti_patterns": "Anti-patterns", "applicability": "Applicability" },
+  "feedback": { "helpful": "Helpful", "not_helpful": "Not helpful", "misleading": "Misleading", "outdated": "Outdated" },
+  "list": { "empty_title": "No knowledge found", "empty_body": "Try another status or search query.", "no_summary": "No summary yet." },
+  "detail": { "empty_title": "Select knowledge", "empty_body": "Choose an item from the list to review, edit, publish, or archive it.", "untitled": "Untitled knowledge", "title_placeholder": "Knowledge title", "labels_placeholder": "Labels, comma separated", "review": "Review", "publish": "Publish", "archive": "Archive", "restore": "Restore", "save": "Save", "sources": "Sources", "no_sources": "No sources are attached.", "source_fallback": "Source", "effect": "Effect", "no_feedback": "No feedback yet.", "publish_targets": "Publish targets", "embeddings": "Embeddings" },
+  "issue": { "section": "Knowledge", "generate_draft": "Generate draft", "generating": "Generating...", "generated": "Knowledge draft generated", "generate_failed": "Failed to generate knowledge draft", "candidates": "Candidates", "no_candidates": "No knowledge candidates for this issue yet.", "open_draft": "Open draft", "feedback": "Feedback" },
+  "toast": { "saved": "Knowledge saved", "save_failed": "Failed to save knowledge", "review": "Knowledge reviewed", "publish": "Knowledge published", "archive": "Knowledge archived", "restore": "Knowledge restored", "action_failed": "Action failed", "feedback_sent": "Feedback sent" }
+}

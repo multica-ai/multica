@@ -172,6 +172,22 @@ import type {
   MobilePushRegistrationResponse,
   UpsertMobilePushRegistrationRequest,
 } from "../types";
+import type {
+  CreateKnowledgeFeedbackRequest,
+  EvaluateKnowledgeCandidateRequest,
+  KnowledgeCandidate,
+  KnowledgeDetail,
+  KnowledgeFeedback,
+  KnowledgeItem,
+  ListKnowledgeCandidatesParams,
+  ListKnowledgeCandidatesResponse,
+  ListKnowledgeParams,
+  ListKnowledgeResponse,
+  ListKnowledgeSourcesResponse,
+  SearchKnowledgeRequest,
+  SearchKnowledgeResponse,
+  UpdateKnowledgeRequest,
+} from "../knowledge/types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   CloudRuntimeNode,
@@ -271,6 +287,23 @@ import {
   EMPTY_MOBILE_PUSH_REGISTRATION_RESPONSE,
   MobilePushRegistrationResponseSchema,
 } from "./schemas";
+import {
+  EMPTY_KNOWLEDGE_DETAIL,
+  EMPTY_KNOWLEDGE_FEEDBACK,
+  EMPTY_KNOWLEDGE_ITEM,
+  EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE,
+  EMPTY_LIST_KNOWLEDGE_RESPONSE,
+  EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
+  EMPTY_SEARCH_KNOWLEDGE_RESPONSE,
+  KnowledgeCandidateSchema,
+  KnowledgeDetailSchema,
+  KnowledgeFeedbackSchema,
+  KnowledgeItemSchema,
+  ListKnowledgeCandidatesResponseSchema,
+  ListKnowledgeResponseSchema,
+  ListKnowledgeSourcesResponseSchema,
+  SearchKnowledgeResponseSchema,
+} from "../knowledge/schemas";
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -2097,6 +2130,193 @@ export class ApiClient {
 
   async listWikiPageActivities(pageId: string, limit = 50): Promise<ListWikiPageActivitiesResponse> {
     return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
+  }
+
+  // Knowledge
+  async listKnowledge(params?: ListKnowledgeParams): Promise<ListKnowledgeResponse> {
+    const search = new URLSearchParams();
+    if (params?.q) search.set("q", params.q);
+    if (params?.status) search.set("status", params.status);
+    if (params?.type) search.set("type", params.type);
+    if (params?.labels?.length) search.set("labels", params.labels.join(","));
+    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.agent_id) search.set("agent_id", params.agent_id);
+    if (params?.include_inactive) search.set("include_inactive", "true");
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/knowledge?${search}`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_RESPONSE,
+      { endpoint: "GET /api/knowledge" },
+    );
+  }
+
+  async getKnowledge(id: string): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}`);
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "GET /api/knowledge/:id",
+    });
+  }
+
+  async updateKnowledge(id: string, data: UpdateKnowledgeRequest): Promise<KnowledgeItem> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeItemSchema, EMPTY_KNOWLEDGE_ITEM, {
+      endpoint: "PATCH /api/knowledge/:id",
+    });
+  }
+
+  async reviewKnowledge(id: string): Promise<KnowledgeItem> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/review`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeItemSchema, EMPTY_KNOWLEDGE_ITEM, {
+      endpoint: "POST /api/knowledge/:id/review",
+    });
+  }
+
+  async publishKnowledge(id: string): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/publish`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/:id/publish",
+    });
+  }
+
+  async archiveKnowledge(id: string): Promise<KnowledgeItem> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/archive`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeItemSchema, EMPTY_KNOWLEDGE_ITEM, {
+      endpoint: "POST /api/knowledge/:id/archive",
+    });
+  }
+
+  async restoreKnowledge(id: string): Promise<KnowledgeItem> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/restore`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeItemSchema, EMPTY_KNOWLEDGE_ITEM, {
+      endpoint: "POST /api/knowledge/:id/restore",
+    });
+  }
+
+  async listKnowledgeSources(id: string): Promise<ListKnowledgeSourcesResponse> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/sources`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeSourcesResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
+      { endpoint: "GET /api/knowledge/:id/sources" },
+    );
+  }
+
+  async searchKnowledge(data: SearchKnowledgeRequest): Promise<SearchKnowledgeResponse> {
+    const raw = await this.fetch<unknown>("/api/knowledge/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: data.query,
+        embedding: data.embedding ?? [],
+        limit: data.limit ?? 10,
+        filters: data.filters ?? {},
+      }),
+    });
+    return parseWithFallback(
+      raw,
+      SearchKnowledgeResponseSchema,
+      EMPTY_SEARCH_KNOWLEDGE_RESPONSE,
+      { endpoint: "POST /api/knowledge/search" },
+    );
+  }
+
+  async listKnowledgeCandidates(
+    params?: ListKnowledgeCandidatesParams,
+  ): Promise<ListKnowledgeCandidatesResponse> {
+    const search = new URLSearchParams();
+    if (params?.issue_id) search.set("issue_id", params.issue_id);
+    if (params?.status) search.set("status", params.status);
+    if (params?.source_type) search.set("source_type", params.source_type);
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/knowledge/candidates?${search}`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeCandidatesResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE,
+      { endpoint: "GET /api/knowledge/candidates" },
+    );
+  }
+
+  async evaluateKnowledgeCandidate(
+    data: EvaluateKnowledgeCandidateRequest,
+  ): Promise<KnowledgeCandidate> {
+    const raw = await this.fetch<unknown>("/api/knowledge/candidates/evaluate", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeCandidateSchema, {
+      id: "",
+      workspace_id: "",
+      issue_id: "",
+      comment_id: null,
+      agent_task_id: null,
+      source_type: "",
+      source_id: "",
+      trigger_reason: "",
+      signal_strength: "",
+      signals: [],
+      score: 0,
+      status: "",
+      dedupe_key: "",
+      created_by: null,
+      metadata: {},
+      evaluated_at: "",
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "POST /api/knowledge/candidates/evaluate",
+    });
+  }
+
+  async createKnowledgeDraftFromIssue(data: { issue_id: string }): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>("/api/knowledge/drafts/from-issue", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/drafts/from-issue",
+    });
+  }
+
+  async createKnowledgeDraftFromCandidate(
+    candidateId: string,
+    data?: { regenerate?: boolean },
+  ): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/candidates/${candidateId}/draft`, {
+      method: "POST",
+      body: JSON.stringify({ regenerate: data?.regenerate ?? false }),
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/candidates/:id/draft",
+    });
+  }
+
+  async createKnowledgeFeedback(
+    id: string,
+    data: CreateKnowledgeFeedbackRequest,
+  ): Promise<KnowledgeFeedback> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/feedback`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeFeedbackSchema, EMPTY_KNOWLEDGE_FEEDBACK, {
+      endpoint: "POST /api/knowledge/:id/feedback",
+    });
   }
 
   // Members

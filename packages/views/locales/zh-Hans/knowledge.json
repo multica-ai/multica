@@ -1,0 +1,63 @@
+{
+  "page": { "title": "Knowledge", "search": "搜索 Knowledge" },
+  "status": {
+    "all": "全部",
+    "draft": "草稿",
+    "reviewed": "待发布",
+    "published": "已发布",
+    "archived": "已归档",
+    "deprecated": "已过期"
+  },
+  "type": { "lesson": "Lesson", "playbook": "Playbook", "reference": "Reference" },
+  "confidence": { "low": "低置信度", "medium": "中置信度", "high": "高置信度" },
+  "fields": {
+    "problem_pattern": "问题模式",
+    "trigger_conditions": "触发条件",
+    "diagnostic_steps": "诊断步骤",
+    "recommended_practice": "推荐做法",
+    "anti_patterns": "反模式",
+    "applicability": "适用范围"
+  },
+  "feedback": { "helpful": "有帮助", "not_helpful": "没帮助", "misleading": "误导", "outdated": "已过期" },
+  "list": { "empty_title": "没有匹配的 Knowledge", "empty_body": "换一个状态或搜索词试试。", "no_summary": "还没有摘要。" },
+  "detail": {
+    "empty_title": "选择一条 Knowledge",
+    "empty_body": "从列表选择 Knowledge 后，可以审核、编辑、发布或归档。",
+    "untitled": "未命名 Knowledge",
+    "title_placeholder": "Knowledge 标题",
+    "labels_placeholder": "标签，用逗号分隔",
+    "review": "审核",
+    "publish": "发布",
+    "archive": "归档",
+    "restore": "恢复",
+    "save": "保存",
+    "sources": "来源",
+    "no_sources": "还没有关联来源。",
+    "source_fallback": "来源",
+    "effect": "效果",
+    "no_feedback": "还没有反馈。",
+    "publish_targets": "发布目标",
+    "embeddings": "Embeddings"
+  },
+  "issue": {
+    "section": "Knowledge",
+    "generate_draft": "沉淀经验",
+    "generating": "生成中...",
+    "generated": "Knowledge 草稿已生成",
+    "generate_failed": "生成 Knowledge 草稿失败",
+    "candidates": "候选",
+    "no_candidates": "这个 issue 还没有 Knowledge 候选。",
+    "open_draft": "打开草稿",
+    "feedback": "反馈"
+  },
+  "toast": {
+    "saved": "Knowledge 已保存",
+    "save_failed": "保存 Knowledge 失败",
+    "review": "Knowledge 已审核",
+    "publish": "Knowledge 已发布",
+    "archive": "Knowledge 已归档",
+    "restore": "Knowledge 已恢复",
+    "action_failed": "操作失败",
+    "feedback_sent": "反馈已提交"
+  }
+}
