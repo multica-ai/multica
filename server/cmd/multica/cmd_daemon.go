@@ -270,6 +270,13 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		} else {
 			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
 		}
+		// Tail the log file to surface actionable errors (e.g. "no agent CLI
+		// found") directly in the terminal so users don't have to hunt for
+		// the log file.
+		if tail, err := tailLogForUser(logPath, 12); err == nil && tail != "" {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, tail)
+		}
 		return nil
 	}
 
@@ -382,6 +389,14 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	cfg, err := daemon.LoadConfig(overrides)
 	if err != nil {
+		if strings.Contains(err.Error(), "no agent CLI found") {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "❌  Cannot start daemon — no AI agent CLI detected.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(os.Stderr, "")
+			return fmt.Errorf("no agent CLI found")
+		}
 		return err
 	}
 	cfg.CLIVersion = version
@@ -698,6 +713,22 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 func flagString(cmd *cobra.Command, name string) string {
 	val, _ := cmd.Flags().GetString(name)
 	return val
+}
+
+// tailLogForUser reads the last n lines from a log file and returns them as a
+// formatted string suitable for stderr output. Returns empty string on any
+// error (missing file, unreadable, etc.) — this is a best-effort convenience,
+// not a critical path.
+func tailLogForUser(path string, n int) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // --- daemon disk-usage ---

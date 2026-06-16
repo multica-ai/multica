@@ -207,12 +207,19 @@ function Install-MulticaCLI {
         Remove-Item -Path $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # Configure PATH
+    # Configure PATH — always ensure the install dir is on both the persisted
+    # User PATH (registry) and the current session's $env:Path.  When re-running
+    # the installer the registry may already contain the entry from a previous
+    # run, but the current session was started *before* that install, so its
+    # in-memory $env:Path still lacks the directory.  Unconditionally syncing
+    # the session PATH avoids the "command not found" trap after install.
     $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($currentPath -notlike "*$InstallDir*") {
         [Environment]::SetEnvironmentVariable("Path", "$InstallDir;$currentPath", "User")
-        $env:Path = "$InstallDir;$env:Path"
         Write-Info "Added $InstallDir to user PATH"
+    }
+    if ($env:Path -notlike "*$InstallDir*") {
+        $env:Path = "$InstallDir;$env:Path"
     }
 
     # Configure server URL

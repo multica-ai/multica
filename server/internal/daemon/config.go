@@ -292,7 +292,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["mmx"] = e
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, cbc (codebuddy), codex, copilot, opencode, openclaw, wujieclaw, hermes, gemini, pi, cursor-agent, kimi, kiro-cli, DeepSeek-TUI (deepseek-tui), agy, qoderclicn, or mmx and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found on PATH — install at least one of: claude, codex, copilot, cbc (codebuddy), opencode, gemini, cursor-agent, kimi, kiro-cli, deepseek-tui, agy, qoderclicn, mmx\n\n" +
+			"Quick start (pick one):\n" +
+			"  Claude Code : https://docs.anthropic.com/en/docs/claude-code\n" +
+			"  Codex       : https://github.com/openai/codex\n" +
+			"  Cursor      : https://cursor.com\n\n" +
+			"After installing, ensure the binary is on PATH, then run: multica daemon start")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
