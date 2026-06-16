@@ -146,6 +146,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").
 		providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+	case "droid":
+		providerRoot = filepath.Join(home, ".factory", "skills")
 	default:
 		return nil, false, nil
 	}

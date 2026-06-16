@@ -123,6 +123,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
+	case "droid":
+		return droidStaticModels(), nil
 	case "hermes":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverHermesModels(ctx, executablePath)
@@ -322,6 +324,35 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
 	})
+}
+
+// droidStaticModels reflects the model IDs documented at
+// https://docs.factory.ai/models.md. Factory's CLI has no stable
+// `models list` subcommand suitable for daemon-side discovery, so
+// Multica ships a curated static catalog and passes IDs verbatim to
+// `droid exec --model`.
+func droidStaticModels() []Model {
+	levels := []ThinkingLevel{
+		{Value: "off", Label: "Off"},
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+		{Value: "xhigh", Label: "Extra high"},
+		{Value: "max", Label: "Max"},
+	}
+	thinking := &ModelThinking{SupportedLevels: levels, DefaultLevel: "high"}
+	return []Model{
+		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic", Default: true, Thinking: thinking},
+		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Thinking: thinking},
+		{ID: "claude-opus-4-6", Label: "Claude Opus 4.6", Provider: "anthropic", Thinking: thinking},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Thinking: thinking},
+		{ID: "gpt-5.3-codex", Label: "GPT-5.3 Codex", Provider: "openai", Thinking: thinking},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai", Thinking: thinking},
+		{ID: "gemini-3.1-pro-preview", Label: "Gemini 3.1 Pro", Provider: "google", Thinking: thinking},
+		{ID: "gemini-3-flash-preview", Label: "Gemini 3 Flash", Provider: "google", Thinking: thinking},
+		{ID: "kimi-k2.6", Label: "Kimi K2.6", Provider: "kimi", Thinking: thinking},
+		{ID: "deepseek-v4-pro", Label: "DeepSeek V4 Pro", Provider: "deepseek", Thinking: thinking},
+	}
 }
 
 // cursorStaticModels is a minimal fallback used when

@@ -208,6 +208,19 @@ function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
 }
 
+// Factory Droid — geometric mark inspired by Factory's CLI branding.
+function DroidLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#111827" />
+      <path
+        d="M6 6h4.5v4.5H6V6zm7.5 0H18v4.5h-4.5V6zM6 13.5h4.5V18H6v-4.5zm7.5 0H18V18h-4.5v-4.5z"
+        fill="#F3F4F6"
+      />
+    </svg>
+  );
+}
+
 // Kiro CLI — official icon sourced from kiro.dev/icon.svg.
 function KiroLogo({ className }: { className: string }) {
   const maskId = `kiro-logo-mask-${useId().replace(/:/g, "")}`;
@@ -282,6 +295,8 @@ export function ProviderLogo({
       return <PiLogo className={className} />;
     case "copilot":
       return <CopilotLogo className={className} />;
+    case "droid":
+      return <DroidLogo className={className} />;
     case "cursor":
       return <CursorLogo className={className} />;
     case "kimi":
