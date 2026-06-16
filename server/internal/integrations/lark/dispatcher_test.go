@@ -68,9 +68,21 @@ func (f *fakeQueries) mintToken() pgtype.UUID {
 	return validUUID(0xA0 + f.nextTokenByte)
 }
 
+// GetActiveLarkInstallationByAppID mirrors the partial unique index's
+// WHERE status = 'active' filter: only active rows are reachable via this
+// lookup in production. Revoked rows are invisible to routing and never
+// returned by this method — the fake must match that contract.
 func (f *fakeQueries) GetActiveLarkInstallationByAppID(ctx context.Context, appID string) (db.LarkInstallation, error) {
 	f.calledInstallation++
-	return f.installationByApp, f.installationErr
+	if f.installationErr != nil {
+		return db.LarkInstallation{}, f.installationErr
+	}
+	if f.installationByApp.Status != string(InstallationActive) {
+		// Not active — the partial unique index would exclude this row;
+		// mirror the same outcome in the fake.
+		return db.LarkInstallation{}, pgx.ErrNoRows
+	}
+	return f.installationByApp, nil
 }
 
 func (f *fakeQueries) GetLarkUserBindingByOpenID(ctx context.Context, arg db.GetLarkUserBindingByOpenIDParams) (db.LarkUserBinding, error) {
@@ -356,25 +368,6 @@ func TestDispatcher_UnknownAppDropped(t *testing.T) {
 	}
 	if audit.drops[0].InstallationID.Valid {
 		t.Fatalf("audit row should omit installation_id for unknown app: %+v", audit.drops[0])
-	}
-}
-
-func TestDispatcher_RevokedInstallationDropped(t *testing.T) {
-	inst := activeInstallation()
-	inst.Status = string(InstallationRevoked)
-	queries := &fakeQueries{installationByApp: inst}
-	audit := &fakeAudit{}
-	d := &Dispatcher{Queries: queries, Audit: audit}
-
-	res, err := d.Handle(context.Background(), InboundMessage{AppID: "ok"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if res.DropReason != DropReasonRevokedInstallation {
-		t.Fatalf("got drop reason %q", res.DropReason)
-	}
-	if len(audit.drops) != 1 || audit.drops[0].Reason != DropReasonRevokedInstallation {
-		t.Fatalf("audit drops: %+v", audit.drops)
 	}
 }
 

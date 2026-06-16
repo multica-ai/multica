@@ -91,10 +91,13 @@ SELECT * FROM lark_installation
 WHERE workspace_id = $1 AND agent_id = $2;
 
 -- name: GetLarkInstallationByAppID :one
--- Returns the (single) installation row for an app_id. With the partial
--- unique index (migration 119), revoked history rows may coexist, so
--- callers that need an active installation must use
--- GetActiveLarkInstallationByAppID instead.
+-- DEPRECATED — has no production callers as of migration 119.
+-- With the partial unique index, multiple rows per app_id can now coexist
+-- (active + revoked history). This query's ":one" return type is therefore
+-- non-deterministic — QueryRow may return an arbitrary row among those
+-- matching app_id. Use GetActiveLarkInstallationByAppID for routing, or
+-- add deterministic ordering (e.g. status = 'active' DESC, updated_at DESC)
+-- before repurposing this definition.
 SELECT * FROM lark_installation WHERE app_id = $1;
 
 -- name: GetActiveLarkInstallationByAppID :one

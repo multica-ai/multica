@@ -111,11 +111,6 @@ const (
 	// this is the idempotency path.
 	DropReasonDuplicate DropReason = "duplicate"
 
-	// DropReasonRevokedInstallation — installation.status='revoked'.
-	// The WS connection should already be closed; this catches any
-	// in-flight events that landed during teardown.
-	DropReasonRevokedInstallation DropReason = "revoked_installation"
-
 	// DropReasonInvalidEvent — payload failed schema validation
 	// (missing required fields, wrong event_type for this hook, etc.).
 	DropReasonInvalidEvent DropReason = "invalid_event"

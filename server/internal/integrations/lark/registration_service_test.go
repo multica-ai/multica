@@ -1,6 +1,7 @@
 package lark
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -259,26 +262,135 @@ func TestUUIDEqual(t *testing.T) {
 // remaining cross-workspace scenario is a direct rebind attempt against
 // an app_id that is already active in a different workspace. The service
 // must abort rather than revoke the other workspace's installation.
-//
-// This is a documentation test — the happy-path (unbind→rebind succeeds
-// with migration 119) is covered by the migration-suite integration
-// tests; the abort path requires a full DB transaction setup which is
-// not available in this unit-test package.
 func TestRegistrationServiceCrossWorkspaceConflict(t *testing.T) {
-	// TODO: implement with a fakeTx + fakeQuerier that returns a
-	// GetActiveLarkInstallationByAppID row from a different workspace,
-	// then assert finishSuccess calls markError with
-	// RegistrationReasonInstallationConflict and a message mentioning
-	// "another workspace".
-	//
-	// The expected behavior:
-	//   1. finishSuccess calls GetActiveLarkInstallationByAppID
-	//   2. finds a row with workspace_id != sess.workspaceID
-	//   3. uuidEqual(existing.WorkspaceID, sess.workspaceID) == false
-	//   4. marks error with RegistrationReasonInstallationConflict
-	//   5. does NOT call SetLarkInstallationStatus
-	t.Skip("requires full DB transaction mock — covered by migration-suite integration test")
+	ctx := context.Background()
+	sessWorkspace := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+	conflictingWorkspace := uuidFromStringSvc(t, "22222222-2222-2222-2222-222222222222")
+	agentID := uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333")
+	initiatorID := uuidFromStringSvc(t, "44444444-4444-4444-4444-444444444444")
+	appID := "cli-cross-ws-test"
+
+	// The existing active installation belongs to a DIFFERENT workspace.
+	crossWSInst := &db.LarkInstallation{
+		WorkspaceID: conflictingWorkspace,
+		AgentID:     uuidFromStringSvc(t, "55555555-5555-5555-5555-555555555555"),
+		AppID:       appID,
+		Status:      string(InstallationActive),
+	}
+	// Pass crossWSInst via the fakeTxStarter so BeginTx wires it into the
+	// QueryRow path that finishSuccess exercises.
+	txStarter := fakeTxStarter{crossWorkspaceInstallation: crossWSInst}
+
+	// A fake API client that returns valid bot info so finishSuccess
+	// passes the GetBotInfo gate. Fully implements APIClient.
+	api := &fakeAPIClientForTest{
+		botInfo: BotInfo{OpenID: "ou_test_bot"},
+	}
+	// A real InstallationService with a real secretbox — finishSuccess only
+	// calls box.Seal, which is pure and needs no DB connection.
+	box, err := secretbox.New(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatalf("secretbox.New: %v", err)
+	}
+	installs, err := NewInstallationService(nil, box)
+	if err != nil {
+		t.Fatalf("NewInstallationService: %v", err)
+	}
+	// A fake binder that records bind calls (abort never reaches it).
+	binder := &fakeInstallerBinderForTest{}
+
+	svc, err := NewRegistrationService(
+		RegistrationServiceConfig{},
+		&RegistrationClient{},
+		api,
+		db.New(nil), // replaced by WithTx below
+		txStarter,
+		installs,
+		binder,
+	)
+	if err != nil {
+		t.Fatalf("NewRegistrationService: %v", err)
+	}
+
+	// Plant the session directly so we bypass BeginInstall's auth guard.
+	sess := &registrationSession{
+		id:          "test-cross-ws",
+		workspaceID: sessWorkspace,
+		agentID:     agentID,
+		initiatorID: initiatorID,
+		status:      RegistrationStatusPending,
+	}
+	svc.mu.Lock()
+	svc.sessions["test-cross-ws"] = sess
+	svc.mu.Unlock()
+
+	// Call finishSuccess with a PollResult whose app_id matches the fake row.
+	svc.finishSuccess(ctx, sess, &PollResult{
+		ClientID:     appID,
+		ClientSecret: "fake-secret",
+	}, RegionLark)
+
+	// Assert: session is marked as an error with the conflict reason.
+	st := sess.snapshot()
+	if st.Status != RegistrationStatusError {
+		t.Errorf("session status = %q, want error", st.Status)
+	}
+	if st.ErrorReason != RegistrationReasonInstallationConflict {
+		t.Errorf("error_reason = %q, want %q", st.ErrorReason, RegistrationReasonInstallationConflict)
+	}
+	// Assert: error message mentions cross-workspace nature.
+	if !strings.Contains(st.ErrorMessage, "another workspace") {
+		t.Errorf("error_message = %q, want it to mention 'another workspace'", st.ErrorMessage)
+	}
+	// Assert: BindInstallerTx was NOT called — we must not silently revoke
+	// another tenant's installation.
+	if len(binder.calls) != 0 {
+		t.Errorf("BindInstallerTx unexpectedly called %d times", len(binder.calls))
+	}
 }
+
+// fakeInstallationServiceForTest is kept for documentation — the test now
+// uses a real InstallationService with a real secretbox.Box instead.
+type fakeInstallationServiceForTest struct{}
+
+// fakeInstallerBinderForTest records bind calls; abort never reaches it.
+type fakeInstallerBinderForTest struct {
+	calls []InstallerBindParams
+}
+
+func (f *fakeInstallerBinderForTest) BindInstallerTx(_ context.Context, _ *db.Queries, p InstallerBindParams) error {
+	f.calls = append(f.calls, p)
+	return nil
+}
+
+// fakeAPIClientForTest fully implements APIClient for finishSuccess tests,
+// returning canned bot info and no-op responses for all other methods.
+type fakeAPIClientForTest struct {
+	botInfo BotInfo
+}
+
+func (f *fakeAPIClientForTest) IsConfigured() bool                                             { return true }
+func (f *fakeAPIClientForTest) SendInteractiveCard(context.Context, SendCardParams) (string, error) { return "", nil }
+func (f *fakeAPIClientForTest) PatchInteractiveCard(context.Context, PatchCardParams) error        { return nil }
+func (f *fakeAPIClientForTest) SendTextMessage(context.Context, SendTextParams) (string, error)    { return "", nil }
+func (f *fakeAPIClientForTest) SendMarkdownCard(context.Context, SendMarkdownCardParams) (string, error) {
+	return "", nil
+}
+func (f *fakeAPIClientForTest) SendBindingPromptCard(context.Context, BindingPromptParams) error { return nil }
+func (f *fakeAPIClientForTest) GetBotInfo(context.Context, InstallationCredentials) (BotInfo, error) {
+	return f.botInfo, nil
+}
+func (f *fakeAPIClientForTest) GetMessage(context.Context, InstallationCredentials, string) ([]LarkMessage, error) {
+	return nil, nil
+}
+func (f *fakeAPIClientForTest) ListChatMessages(context.Context, InstallationCredentials, ListMessagesParams) ([]LarkMessage, error) {
+	return nil, nil
+}
+func (f *fakeAPIClientForTest) BatchGetUsers(context.Context, InstallationCredentials, []string) (map[string]string, error) {
+	return nil, nil
+}
+func (f *fakeAPIClientForTest) AddMessageReaction(context.Context, AddReactionParams) (string, error)  { return "", nil }
+func (f *fakeAPIClientForTest) DeleteMessageReaction(context.Context, DeleteReactionParams) error   { return nil }
 
 // TestRegistrationServicePublishInstalledEmitsCreatedEvent pins the
 // MUL-3059 fix: a completed install must publish lark_installation:created
@@ -354,12 +466,92 @@ func (f *fakeInstallerBinder) BindInstallerTx(_ context.Context, _ *db.Queries, 
 	return f.err
 }
 
-// fakeTxStarter is a TxStarter stub for constructor tests — never
-// actually called.
-type fakeTxStarter struct{}
+// fakeTxStarter is a TxStarter stub for constructor tests. It can
+// also be configured with a crossWorkspaceInstallation to drive finishSuccess tests.
+type fakeTxStarter struct {
+	crossWorkspaceInstallation *db.LarkInstallation
+}
 
-func (fakeTxStarter) Begin(_ context.Context) (pgx.Tx, error) {
-	return nil, errors.New("fakeTxStarter Begin not implemented")
+// Begin with a pointer receiver satisfies TxStarter for all callers.
+// When crossWorkspaceInstallation is set (new test) it returns a wired
+// dbTxAdapter; when nil (old tests) it returns an error.
+func (f *fakeTxStarter) Begin(_ context.Context) (pgx.Tx, error) {
+	if f.crossWorkspaceInstallation == nil {
+		return nil, errors.New("fakeTxStarter Begin not implemented")
+	}
+	return &dbTxAdapter{DBTX: &fakeQueryRowDBTX{
+		row: &fakeRow{inst: f.crossWorkspaceInstallation},
+	}}, nil
+}
+
+// fakeQueryRowDBTX implements db.DBTX — only QueryRow is wired; Exec and
+// Query panic if reached (the cross-workspace abort path returns before
+// any Exec/Query call).
+type fakeQueryRowDBTX struct {
+	row *fakeRow
+}
+
+func (f *fakeQueryRowDBTX) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errors.New("unexpected Exec call in test")
+}
+func (f *fakeQueryRowDBTX) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	return nil, errors.New("unexpected Query call in test")
+}
+func (f *fakeQueryRowDBTX) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	return f.row
+}
+
+// dbTxAdapter wraps db.DBTX to satisfy pgx.Tx. Production
+// queries.WithTx only uses the DBTX methods; all other pgx.Tx methods
+// (Begin, Commit, etc.) are no-ops.
+type dbTxAdapter struct {
+	db.DBTX
+}
+
+func (a *dbTxAdapter) Begin(ctx context.Context) (pgx.Tx, error) { return a, nil }
+func (a *dbTxAdapter) Commit(ctx context.Context) error           { return nil }
+func (a *dbTxAdapter) Rollback(ctx context.Context) error        { return nil }
+func (a *dbTxAdapter) CopyFrom(ctx context.Context, target pgx.Identifier, cols []string, src pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (a *dbTxAdapter) Conn() *pgx.Conn                       { return nil }
+func (a *dbTxAdapter) LargeObjects() pgx.LargeObjects         { return pgx.LargeObjects{} }
+func (a *dbTxAdapter) Prepare(ctx context.Context, name string, sql string) (pgx.StatementDescription, error) {
+	return pgx.StatementDescription{}, errors.New("unexpected Prepare call in test")
+}
+func (a *dbTxAdapter) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	return pgconn.CommandTag{}, errors.New("unexpected Exec call in test")
+}
+func (a *dbTxAdapter) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	return nil, errors.New("unexpected Query call in test")
+}
+
+// fakeRow implements pgx.Row for test queries. It returns the canned
+// installation when scanned, or the canned error.
+type fakeRow struct {
+	inst *db.LarkInstallation
+	err  error
+}
+
+// Scan mirrors the column layout of GetActiveLarkInstallationByAppID's
+// SELECT * — the 16 fields in LarkInstallation scan order.
+func (f *fakeRow) Scan(dest ...interface{}) error {
+	if f.err != nil {
+		return f.err
+	}
+	src := []interface{}{
+		&f.inst.ID, &f.inst.WorkspaceID, &f.inst.AgentID, &f.inst.AppID,
+		&f.inst.AppSecretEncrypted, &f.inst.TenantKey, &f.inst.BotOpenID,
+		&f.inst.InstallerUserID, &f.inst.Status, &f.inst.WsLeaseToken,
+		&f.inst.WsLeaseExpiresAt, &f.inst.InstalledAt, &f.inst.CreatedAt,
+		&f.inst.UpdatedAt, &f.inst.BotUnionID, &f.inst.Region,
+	}
+	for i, d := range dest {
+		if d != nil && i < len(src) {
+			*(d.(*interface{})) = *(src[i].(*interface{}))
+		}
+	}
+	return nil
 }
 
 // newRegistrationServiceForTest constructs a service with all
