@@ -171,6 +171,8 @@ export interface UpdateMeRequest {
   profile_description?: string;
   /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
   timezone?: string;
+  /** Per-user visual execution-history toggle; undefined leaves untouched. */
+  visual_execution_history?: boolean;
 }
 
 export interface CreateMemberRequest {

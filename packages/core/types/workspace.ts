@@ -59,6 +59,12 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /**
+   * Per-user opt-in for the visual (chat-style, read-only) execution-history
+   * view. false = raw log view (default). Personal viewing preference; the
+   * issue execution-log gate reads this to decide which run viewer to open.
+   */
+  visual_execution_history: boolean;
   created_at: string;
   updated_at: string;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
   Select,
@@ -9,6 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { Label } from "@multica/ui/components/ui/label";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -242,7 +244,65 @@ export function PreferencesTab() {
       </section>
 
       <TimezoneSection />
+
+      <VisualExecutionHistorySection />
     </div>
+  );
+}
+
+// Per-user opt-in for the visual (chat-style, read-only) execution-history
+// view. A personal viewing preference — like theme/language/timezone — so it
+// lives here rather than on workspace settings, and needs no admin gate.
+// Persists via PATCH /api/me and pushes the response into the auth store so
+// the issue execution-log gate reacts without a refetch.
+function VisualExecutionHistorySection() {
+  const { t } = useT("settings");
+  const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
+  const [saving, setSaving] = useState(false);
+  const enabled = user?.visual_execution_history ?? false;
+
+  const handleToggle = async (next: boolean) => {
+    if (saving || next === enabled) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateMe({ visual_execution_history: next });
+      setUser(updated);
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.preferences.visual_execution_history.sync_failed),
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="space-y-2">
+      <h2 className="text-sm font-semibold">
+        {t(($) => $.preferences.visual_execution_history.title)}
+      </h2>
+      <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+        <div className="space-y-1">
+          <Label htmlFor="visual-execution-history" className="text-sm font-medium">
+            {t(($) => $.preferences.visual_execution_history.label)}
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            {enabled
+              ? t(($) => $.preferences.visual_execution_history.description_on)
+              : t(($) => $.preferences.visual_execution_history.description_off)}
+          </p>
+        </div>
+        <Switch
+          id="visual-execution-history"
+          checked={enabled}
+          disabled={saving}
+          onCheckedChange={handleToggle}
+        />
+      </div>
+    </section>
   );
 }
 

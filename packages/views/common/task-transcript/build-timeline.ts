@@ -1,5 +1,5 @@
 import type { TaskMessagePayload } from "@multica/core/types/events";
-import { redactSecrets } from "./redact";
+import { redactInputValues, redactSecrets } from "./redact";
 
 /** A unified timeline entry: tool calls, thinking, text, and errors in chronological order. */
 export interface TimelineItem {
@@ -46,6 +46,11 @@ function redactTimelineItems(items: TimelineItem[]): TimelineItem[] {
     ...item,
     content: item.content ? redactSecrets(item.content) : item.content,
     output: item.output ? redactSecrets(item.output) : item.output,
+    // Tool `input` is rendered both as a summary (raw field reads) and as
+    // pretty-printed JSON by the chat renderer, neither of which redacts on
+    // its own. Deep-redact the values here so secrets passed as tool args
+    // never reach either path. See redactInputValues.
+    input: item.input ? redactInputValues(item.input) : item.input,
   }));
 }
 

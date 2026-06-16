@@ -709,6 +709,8 @@ type User struct {
 	ProfileDescription      string             `json:"profile_description"`
 	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
 	Timezone pgtype.Text `json:"timezone"`
+	// Per-user opt-in for the visual (chat-style, read-only) execution history view. false = raw log view (default). Personal viewing preference; does not affect how execution data is stored or captured.
+	VisualExecutionHistory bool `json:"visual_execution_history"`
 }
 
 type VerificationCode struct {

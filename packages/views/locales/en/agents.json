@@ -466,6 +466,23 @@
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first"
   },
+  "visual_run": {
+    "dialog_title": "Agent run transcript",
+    "agent_fallback": "Agent",
+    "status_running": "Running",
+    "status_completed": "Completed",
+    "status_failed": "Failed",
+    "status_cancelled": "Cancelled",
+    "view_raw_log": "View raw log",
+    "close": "Close",
+    "empty_terminal": "This run produced no output.",
+    "empty_live": "Starting up\u2026",
+    "cancelled_note": "This run was cancelled.",
+    "outcome_completed": "Run completed{{duration}}.",
+    "outcome_failed": "Run failed{{duration}}.",
+    "outcome_cancelled": "Run cancelled{{duration}}.",
+    "duration_suffix": " in {{duration}}"
+  },
   "task_failure": {
     "agent_error": "Agent execution error",
     "timeout": "Task timed out",

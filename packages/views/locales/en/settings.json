@@ -19,6 +19,13 @@
       "browser_suffix": " (browser)",
       "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
       "sync_failed": "Failed to save your timezone preference."
+    },
+    "visual_execution_history": {
+      "title": "Execution History",
+      "label": "Visual execution history",
+      "description_on": "Agent runs open as a readable, chat-style transcript. In-progress runs stream live; finished runs show a read-only conversation.",
+      "description_off": "Agent runs open as the raw technical log. Turn this on to read runs as a chat-style transcript instead.",
+      "sync_failed": "Failed to save your execution history preference."
     }
   },
   "page": {

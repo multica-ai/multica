@@ -35,3 +35,29 @@ export function redactSecrets(text: string): string {
   }
   return result;
 }
+
+/**
+ * Deep-redact every string value inside a tool-input object. The chat
+ * renderer reads tool `input` two ways — `getToolSummary` pulls raw string
+ * fields straight off the object, and `ToolCallRow` stringifies the whole
+ * object — so redacting a stringified copy alone would still leak the
+ * summary line. We instead walk the structure and run `redactSecrets` on
+ * each leaf string, returning a new object so the original message payload
+ * (and the query cache it lives in) is never mutated.
+ */
+export function redactInputValues<T>(value: T): T {
+  if (typeof value === "string") {
+    return redactSecrets(value) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactInputValues(item)) as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, v] of Object.entries(value)) {
+      out[key] = redactInputValues(v);
+    }
+    return out as T;
+  }
+  return value;
+}

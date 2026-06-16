@@ -454,6 +454,23 @@
     "sort_chronological": "时间顺序",
     "sort_newest_first": "最新在前"
   },
+  "visual_run": {
+    "dialog_title": "智能体运行记录",
+    "agent_fallback": "智能体",
+    "status_running": "运行中",
+    "status_completed": "已完成",
+    "status_failed": "已失败",
+    "status_cancelled": "已取消",
+    "view_raw_log": "查看原始日志",
+    "close": "关闭",
+    "empty_terminal": "此次运行没有产生输出。",
+    "empty_live": "正在启动\u2026",
+    "cancelled_note": "此次运行已取消。",
+    "outcome_completed": "运行完成{{duration}}。",
+    "outcome_failed": "运行失败{{duration}}。",
+    "outcome_cancelled": "运行已取消{{duration}}。",
+    "duration_suffix": "，用时 {{duration}}"
+  },
   "task_failure": {
     "agent_error": "智能体执行出错",
     "timeout": "task 超时",

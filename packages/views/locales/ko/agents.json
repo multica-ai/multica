@@ -466,6 +466,23 @@
     "sort_chronological": "오래된 순",
     "sort_newest_first": "최신 순"
   },
+  "visual_run": {
+    "dialog_title": "에이전트 실행 기록",
+    "agent_fallback": "에이전트",
+    "status_running": "실행 중",
+    "status_completed": "완료됨",
+    "status_failed": "실패함",
+    "status_cancelled": "취소됨",
+    "view_raw_log": "원본 로그 보기",
+    "close": "닫기",
+    "empty_terminal": "이 실행에서 생성된 출력이 없습니다.",
+    "empty_live": "시작하는 중\u2026",
+    "cancelled_note": "이 실행은 취소되었습니다.",
+    "outcome_completed": "실행 완료{{duration}}.",
+    "outcome_failed": "실행 실패{{duration}}.",
+    "outcome_cancelled": "실행 취소됨{{duration}}.",
+    "duration_suffix": " ({{duration}} 소요)"
+  },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",
     "timeout": "작업 시간 초과",

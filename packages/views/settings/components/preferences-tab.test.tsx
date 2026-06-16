@@ -14,7 +14,9 @@ const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
-  current: null as { id: string; timezone?: string | null } | null,
+  current: null as
+    | { id: string; timezone?: string | null; visual_execution_history?: boolean }
+    | null,
 }));
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
@@ -249,4 +251,62 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
   }, 20000);
+});
+
+describe("PreferencesTab — Visual execution history toggle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders an accessibly-labelled switch reflecting the stored value", () => {
+    userRef.current = { id: "user-1", visual_execution_history: true };
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", { name: /visual execution history/i });
+    expect(toggle).toBeTruthy();
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("defaults to off when the user has not opted in", () => {
+    userRef.current = { id: "user-1" };
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", { name: /visual execution history/i });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("toggling on PATCHes /api/me and updates the auth store", async () => {
+    userRef.current = { id: "user-1", visual_execution_history: false };
+    const updatedUser = { id: "user-1", visual_execution_history: true };
+    mockUpdateMe.mockResolvedValueOnce(updatedUser);
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: /visual execution history/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateMe).toHaveBeenCalledWith({ visual_execution_history: true });
+      expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
+    });
+  });
+
+  it("surfaces a toast when the PATCH fails", async () => {
+    userRef.current = { id: "user-1", visual_execution_history: false };
+    mockUpdateMe.mockRejectedValueOnce(new Error("network down"));
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: /visual execution history/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateMe).toHaveBeenCalledWith({ visual_execution_history: true });
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+    });
+    expect(mockSetUser).not.toHaveBeenCalled();
+  });
 });

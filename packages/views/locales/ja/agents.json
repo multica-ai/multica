@@ -446,6 +446,23 @@
     "sort_chronological": "古い順",
     "sort_newest_first": "新しい順"
   },
+  "visual_run": {
+    "dialog_title": "エージェント実行記録",
+    "agent_fallback": "エージェント",
+    "status_running": "実行中",
+    "status_completed": "完了",
+    "status_failed": "失敗",
+    "status_cancelled": "キャンセル済み",
+    "view_raw_log": "生ログを表示",
+    "close": "閉じる",
+    "empty_terminal": "この実行では出力がありませんでした。",
+    "empty_live": "起動中\u2026",
+    "cancelled_note": "この実行はキャンセルされました。",
+    "outcome_completed": "実行が完了しました{{duration}}。",
+    "outcome_failed": "実行が失敗しました{{duration}}。",
+    "outcome_cancelled": "実行がキャンセルされました{{duration}}。",
+    "duration_suffix": "（{{duration}}）"
+  },
   "task_failure": {
     "agent_error": "エージェント実行エラー",
     "timeout": "タスクがタイムアウトしました",

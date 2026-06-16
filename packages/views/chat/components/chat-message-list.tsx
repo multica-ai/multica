@@ -27,11 +27,22 @@ import type { AgentAvailability } from "@multica/core/agents";
 import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
-import { buildTimeline } from "../../common/task-transcript";
+import { buildTimeline } from "../../common/task-transcript/build-timeline";
 import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { useT } from "../../i18n";
+
+// Virtuoso's `followOutput: "smooth"` is JS-driven and so is NOT caught by the
+// CSS `prefers-reduced-motion` block in base.css. Honour the user's setting
+// here by falling back to an instant ("auto") jump. Evaluated per-scroll so a
+// mid-session OS setting change is respected without re-mounting.
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true
+  );
+}
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -48,6 +59,14 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  /**
+   * Open the list anchored to this item index (top of the list) instead of
+   * the default bottom-anchor. Used by the read-only visual run view for a
+   * *terminal* run, where the supervisor wants to read from the top down.
+   * Leave undefined for live chat / in-progress runs so the list keeps its
+   * bottom-anchor + auto-follow behavior.
+   */
+  initialTopMostItemIndex?: number;
 }
 
 export function ChatMessageList({
@@ -58,6 +77,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  initialTopMostItemIndex,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -110,10 +130,17 @@ export function ChatMessageList({
         customScrollParent={scrollContainerEl}
         data={messages}
         firstItemIndex={firstIndex}
+        initialTopMostItemIndex={initialTopMostItemIndex}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
         atBottomStateChange={setIsNearBottom}
-        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        followOutput={() =>
+          !isFetchingOlderMessages && isNearBottom
+            ? prefersReducedMotion()
+              ? "auto"
+              : "smooth"
+            : false
+        }
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();

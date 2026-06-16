@@ -12,6 +12,17 @@ function message(seq: number, type: TaskMessagePayload["type"], content?: string
   };
 }
 
+function toolUse(seq: number, tool: string, input: Record<string, unknown>): TaskMessagePayload {
+  return {
+    task_id: "task-1",
+    issue_id: "issue-1",
+    seq,
+    type: "tool_use",
+    tool,
+    input,
+  };
+}
+
 describe("task transcript timeline", () => {
   it("merges adjacent text and thinking fragments split by streaming flushes", () => {
     const items = buildTimeline([
@@ -100,5 +111,45 @@ describe("task transcript timeline", () => {
     ]);
 
     expect(items[0]?.created_at).toBe("2026-06-09T09:00:00.000Z");
+  });
+
+  it("redacts secrets inside tool input values, covering summary and JSON", () => {
+    // Migrating execution history to the chat renderer means tool `input`
+    // is rendered both as a raw summary field and as pretty-printed JSON.
+    // buildTimeline must mask the value at the source so neither path leaks
+    // a secret that the old log dialog would have redacted.
+    const items = buildTimeline([
+      toolUse(1, "bash", {
+        command: "deploy",
+        env: { OPENAI_API_KEY: "sk-abcdef0123456789abcdef" },
+      }),
+    ]);
+
+    const input = items[0]?.input as Record<string, unknown>;
+    const env = input.env as Record<string, unknown>;
+    expect(env.OPENAI_API_KEY).toBe("[REDACTED API KEY]");
+
+    const serialized = JSON.stringify(items[0]?.input);
+    expect(serialized).not.toContain("sk-abcdef0123456789abcdef");
+  });
+
+  it("redacts a secret surfaced as the tool summary string", () => {
+    // getToolSummary reads `input.command` directly; a secret embedded in a
+    // command must already be masked by the time the chat renderer reads it.
+    const items = buildTimeline([
+      toolUse(1, "bash", {
+        command: "curl -H 'Authorization: Bearer supersecrettoken123'",
+      }),
+    ]);
+
+    const input = items[0]?.input as Record<string, unknown>;
+    expect(String(input.command)).not.toContain("supersecrettoken123");
+    expect(String(input.command)).toContain("Bearer [REDACTED]");
+  });
+
+  it("does not mutate the original message input", () => {
+    const original = { secret: "sk-abcdef0123456789abcdef" };
+    buildTimeline([toolUse(1, "bash", original)]);
+    expect(original.secret).toBe("sk-abcdef0123456789abcdef");
   });
 });

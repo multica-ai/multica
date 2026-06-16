@@ -63,8 +63,12 @@ type UserResponse struct {
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
 	ProfileDescription      string          `json:"profile_description"`
-	CreatedAt               string          `json:"created_at"`
-	UpdatedAt               string          `json:"updated_at"`
+	// Per-user opt-in for the visual (chat-style, read-only) execution
+	// history view. Round-trips through GetMe into the frontend auth store
+	// where the execution-log gate reads it. Defaults to false.
+	VisualExecutionHistory bool   `json:"visual_execution_history"`
+	CreatedAt              string `json:"created_at"`
+	UpdatedAt              string `json:"updated_at"`
 }
 
 // MaxProfileDescriptionLen caps the user-supplied profile_description body.
@@ -92,6 +96,7 @@ func userToResponse(u db.User) UserResponse {
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
 		ProfileDescription:      u.ProfileDescription,
+		VisualExecutionHistory:  u.VisualExecutionHistory,
 		CreatedAt:               timestampToString(u.CreatedAt),
 		UpdatedAt:               timestampToString(u.UpdatedAt),
 	}
@@ -442,6 +447,8 @@ type UpdateMeRequest struct {
 	ProfileDescription *string `json:"profile_description"`
 	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
 	Timezone *string `json:"timezone"`
+	// Per-user visual execution-history toggle; nil leaves untouched.
+	VisualExecutionHistory *bool `json:"visual_execution_history"`
 }
 
 type GoogleLoginRequest struct {
@@ -710,6 +717,12 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		params.Timezone = pgtype.Text{String: tz, Valid: true}
+	}
+
+	if req.VisualExecutionHistory != nil {
+		// Valid=false leaves the column untouched (COALESCE-on-NULL in the
+		// query); a non-nil request pins the chosen boolean.
+		params.VisualExecutionHistory = pgtype.Bool{Bool: *req.VisualExecutionHistory, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)
