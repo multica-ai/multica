@@ -67,6 +67,24 @@ describe("buildRunChat", () => {
     expect(assistant?.content).toBe("boom");
   });
 
+  it("redacts secrets in the raw error before it reaches the failure bubble", () => {
+    const messages = buildRunChat(
+      task({
+        status: "failed",
+        failure_reason: "agent_error",
+        error:
+          "psql failed: postgres://admin:s3cr3t@db.internal:5432/app (token ghp_0123456789abcdef0123456789abcdef0123)",
+      }),
+    );
+    const assistant = messages.find((m) => m.role === "assistant");
+    expect(assistant?.content).not.toContain("s3cr3t");
+    expect(assistant?.content).not.toContain(
+      "ghp_0123456789abcdef0123456789abcdef0123",
+    );
+    expect(assistant?.content).toContain("[REDACTED CONNECTION STRING]");
+    expect(assistant?.content).toContain("[REDACTED GITHUB TOKEN]");
+  });
+
   it("a cancelled run is terminal and emits an assistant message with no failure reason", () => {
     const messages = buildRunChat(task({ status: "cancelled" }));
     const assistant = messages.find((m) => m.role === "assistant");

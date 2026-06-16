@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -116,9 +116,25 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   // Always resolve the open task from the live list (not a snapshot), so the
   // dialog re-renders running→completed in place. Stays non-null across the
   // active→past bucket change because the lookup spans both buckets.
-  const openTask = openTaskId
+  //
+  // `listTasksByIssue` is unbounded (no LIMIT — see ListTasksByIssue in
+  // agent.sql), so the open task normally never leaves `tasks`. We still hold
+  // the last-known object as a fallback: if the lookup ever transiently misses
+  // (a future LIMIT/pagination, a refetch gap, the task being deleted), the
+  // dialog keeps showing the last good state instead of slamming shut
+  // mid-read. It only closes when the user clears `openTaskId`.
+  const lastKnownTask = useRef<AgentTask | null>(null);
+  const liveTask = openTaskId
     ? (tasks.find((task) => task.id === openTaskId) ?? null)
     : null;
+  if (openTaskId === null) {
+    lastKnownTask.current = null;
+  } else if (liveTask) {
+    lastKnownTask.current = liveTask;
+  }
+  const openTask =
+    liveTask ??
+    (lastKnownTask.current?.id === openTaskId ? lastKnownTask.current : null);
 
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 

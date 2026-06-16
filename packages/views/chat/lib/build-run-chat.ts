@@ -1,5 +1,6 @@
 import type { AgentTask, ChatMessage } from "@multica/core/types";
 import { stripMentionMarkdown } from "../../issues/utils/strip-mention-markdown";
+import { redactSecrets } from "../../common/task-transcript/redact";
 
 /**
  * Adapter: an agent run (`AgentTask`) → the `ChatMessage[]` the chat renderer
@@ -106,7 +107,11 @@ export function buildRunChat(
     role: "assistant",
     // `content` is only a fallback when the timeline is empty; for a failed
     // run it's the raw error the FailureBubble shows under "Show details".
-    content: task.error ?? "",
+    // `task.error` is a top-level field that never passes through
+    // `buildTimeline`'s deep redaction, and agent errors routinely echo the
+    // failing command, env, or connection string — so run it through the
+    // client-side secret net here, at the source, before it reaches the bubble.
+    content: task.error ? redactSecrets(task.error) : "",
     task_id: task.id,
     created_at: task.completed_at ?? task.created_at,
     failure_reason: failureReason,
