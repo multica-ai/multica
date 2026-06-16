@@ -519,6 +519,31 @@ func (h *Handler) listLocalCLIRunsByIssue(r *http.Request, issue db.Issue) ([]lo
 	return runs, rows.Err()
 }
 
+func (h *Handler) listLocalCLIRunsByIssueForOwner(r *http.Request, issue db.Issue, ownerID pgtype.UUID) ([]localCLIRun, error) {
+	rows, err := h.DB.Query(r.Context(), `
+		SELECT id, workspace_id, issue_id, owner_id, cli_name, status,
+			started_at, completed_at, exit_code, work_dir, context_dir,
+			comments_mode, top_comment_id, error, source, source_key, created_at, updated_at
+		FROM local_cli_run
+		WHERE issue_id = $1 AND workspace_id = $2 AND owner_id = $3
+		ORDER BY created_at DESC
+	`, issue.ID, issue.WorkspaceID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []localCLIRun
+	for rows.Next() {
+		run, err := scanLocalCLIRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, run)
+	}
+	return runs, rows.Err()
+}
+
 func (h *Handler) writeLocalCLIMessages(w http.ResponseWriter, r *http.Request, run localCLIRun) {
 	query := `
 		SELECT id, run_id, seq, type, tool, content, input, output, created_at, source, source_key

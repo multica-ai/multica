@@ -1491,6 +1491,107 @@ func TestListTasksByIssue_ReturnsExecutionHistoryAcrossOwners(t *testing.T) {
 	}
 }
 
+func TestListMyTasksByIssue_ReturnsOnlyCurrentUserTraceRuns(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	otherUserID := createWorkspaceMemberUser(t, "Other Trace Owner", "other-trace-owner@test.multica.ai")
+	issue := createIssueWithStatusForCommentTest(t, "todo")
+
+	ownedAgentID := createHandlerTestAgent(t, "trace-owned-agent", nil)
+	ownedTaskID := createHandlerTestTaskForAgentOnIssue(t, ownedAgentID, issue.ID)
+
+	var otherAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'trace-other-owner-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, otherUserID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("create other-owner agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, otherAgentID) })
+
+	var otherTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, started_at)
+		VALUES ($1, $2, 'running', 0, $3, now())
+		RETURNING id
+	`, otherAgentID, runtimeID, issue.ID).Scan(&otherTaskID); err != nil {
+		t.Fatalf("create other-owner task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID) })
+
+	var workspaceAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'trace-workspace-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, NULL, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&workspaceAgentID); err != nil {
+		t.Fatalf("create workspace agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, workspaceAgentID) })
+	workspaceTaskID := createHandlerTestTaskForAgentOnIssue(t, workspaceAgentID, issue.ID)
+
+	var ownedRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, testUserID).Scan(&ownedRunID); err != nil {
+		t.Fatalf("create owned local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, ownedRunID) })
+
+	var otherRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, otherUserID).Scan(&otherRunID); err != nil {
+		t.Fatalf("create other-owner local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, otherRunID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issue.ID+"/my-task-runs", nil)
+	req = withURLParam(req, "id", issue.ID)
+
+	testHandler.ListMyTasksByIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	gotIDs := map[string]bool{}
+	for _, item := range result {
+		if id, ok := item["id"].(string); ok {
+			gotIDs[id] = true
+		}
+	}
+
+	for _, id := range []string{ownedTaskID, workspaceTaskID, ownedRunID} {
+		if !gotIDs[id] {
+			t.Errorf("expected current-user trace run %s in response", id)
+		}
+	}
+	for _, id := range []string{otherTaskID, otherRunID} {
+		if gotIDs[id] {
+			t.Errorf("unexpected other-owner trace run %s in response", id)
+		}
+	}
+}
+
 // TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
 // usage is not readable across workspaces via a bare issue UUID.
 func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {

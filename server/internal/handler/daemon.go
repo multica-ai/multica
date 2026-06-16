@@ -2392,6 +2392,47 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, combined)
 }
 
+// ListMyTasksByIssue returns the issue runs whose traces are scoped to the
+// requesting user. The issue-level execution log endpoint intentionally remains
+// all-owner; this endpoint is for the right-side Runs/Trace viewer.
+func (h *Handler) ListMyTasksByIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	userID := parseUUID(requestUserID(r))
+
+	tasks, err := h.Queries.ListTasksByIssueForOwner(r.Context(), db.ListTasksByIssueForOwnerParams{
+		IssueID: issue.ID,
+		OwnerID: userID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list tasks")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, len(tasks))
+	for i, t := range tasks {
+		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
+	}
+	localRuns, err := h.listLocalCLIRunsByIssueForOwner(r, issue, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list local runs")
+		return
+	}
+	combined := make([]any, 0, len(resp)+len(localRuns))
+	for _, task := range resp {
+		combined = append(combined, task)
+	}
+	for _, run := range localRuns {
+		combined = append(combined, localCLIRunToResponse(run))
+	}
+
+	writeJSON(w, http.StatusOK, combined)
+}
+
 // ListTaskMessagesByUser returns task messages for a task.
 // Used by the frontend under regular user auth (not daemon auth).
 // Verifies the task belongs to the caller's workspace.
