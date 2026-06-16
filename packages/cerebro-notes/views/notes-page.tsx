@@ -17,6 +17,9 @@ import {
   Repeat,
   Folder,
   FolderPlus,
+  MoreHorizontal,
+  Link2,
+  ListPlus,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -74,7 +77,9 @@ import {
   useCreateArtifactFolder,
 } from "@multica/cerebro-artifacts/core";
 import type { ArtifactFolder } from "@multica/core/types";
-import { NoteReferences } from "./note-references";
+import { NoteReferences, NoteAddReferenceDialog } from "./note-references";
+import { NoteCreateIssueDialog } from "./note-create-issue-dialog";
+import { NoteFolderCreateDialog } from "./note-folder-create-dialog";
 import { NoteLockBanner } from "./note-lock-banner";
 import { NoteCommentsPanel } from "./note-comments-panel";
 import { NoteVersionsDialog } from "./note-versions-dialog";
@@ -108,6 +113,9 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   // manager, so they were hard to find (TECH-3637). Surface the same panel here.
   const noteTypesEnabled = useFeatureFlag("cerebro_note_types");
   const [showRecurring, setShowRecurring] = React.useState(false);
+  // Folder creation from the "New note" split-button menu (TECH-3690), so it
+  // works even when the folder rail is off-screen (mobile, note open).
+  const [creatingFolder, setCreatingFolder] = React.useState(false);
   // Folders (TECH-3637). Notes keep their own folder namespace, separate from
   // Documents (kind: "note"). `folderId` is the folder we're currently inside:
   // null = the root, where loose (unfiled) notes and top-level folders live.
@@ -176,41 +184,55 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
         </span>
         <div className="ml-auto flex min-w-0 items-center gap-2">
           {/* Search lives in the folder/list rail now (TECH-3637), not the top
-              bar. The "New note" split button keeps its caret to start or edit a
-              recurring note without a separate top-bar button. */}
+              bar. The "New note" split button always carries a caret menu so a
+              new folder can be made even when the folder rail is hidden (mobile,
+              note open) — TECH-3690 — plus recurring notes when enabled. */}
           <div className="flex shrink-0 items-stretch">
             <Button
               size="sm"
               onClick={handleNew}
               disabled={createNote.isPending}
-              className={cn(noteTypesEnabled && "rounded-r-none")}
+              className="rounded-r-none"
             >
               <Plus className="size-4" />
-              <span className="hidden sm:inline">New note</span>
+              {/* Label is always shown — the bare "+" on mobile was unclear
+                  (TECH-3690). */}
+              <span>New note</span>
             </Button>
-            {noteTypesEnabled && (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      size="sm"
-                      aria-label="Recurring notes"
-                      className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
-                    >
-                      <ChevronDown className="size-4" />
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Recurring</DropdownMenuLabel>
-                    <DropdownMenuItem onClick={() => setShowRecurring(true)}>
-                      <Repeat className="size-4" /> Start or edit recurring…
-                    </DropdownMenuItem>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    aria-label="More create options"
+                    className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
+                  >
+                    <ChevronDown className="size-4" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onClick={handleNew}>
+                    <Plus className="size-4" /> New note
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setCreatingFolder(true)}>
+                    <FolderPlus className="size-4" /> New folder
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+                {noteTypesEnabled && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Recurring</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={() => setShowRecurring(true)}>
+                        <Repeat className="size-4" /> Start or edit recurring…
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>
@@ -286,6 +308,13 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
           )}
         </div>
       </div>
+
+      <NoteFolderCreateDialog
+        open={creatingFolder}
+        onOpenChange={setCreatingFolder}
+        parentId={folderId}
+        onCreated={(folder) => setFolderId(folder.id)}
+      />
 
       {noteTypesEnabled && (
         <Sheet open={showRecurring} onOpenChange={setShowRecurring}>
@@ -568,6 +597,9 @@ function NoteEditor({
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
+  // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
+  const [addRefOpen, setAddRefOpen] = React.useState(false);
+  const [creatingIssue, setCreatingIssue] = React.useState(false);
   const [editor, setEditor] = React.useState<Editor | null>(null);
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
@@ -665,7 +697,10 @@ function NoteEditor({
           onTakeOver={editLock.takeOver}
         />
       )}
-      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
+      {/* Action bar (TECH-3690): one tidy row. Folder + Share sit up front; the
+          rest (pin, comments, history, add reference, create issue, delete)
+          collapse into a single "⋯" menu so the bar no longer feels cluttered. */}
+      <div className="flex items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
           variant="ghost"
@@ -674,14 +709,46 @@ function NoteEditor({
         >
           <ChevronLeft className="size-4" /> Notes
         </Button>
+
+        {/* Folder first (request 4 — "folders skal ligge i række 1"). */}
         <DropdownMenu>
           <DropdownMenuTrigger
             nativeButton={false}
             render={
               <Badge variant="outline" className="cursor-pointer gap-1.5">
-                {VIS_ICON[note.visibility]}
-                {VISIBILITY_LABELS[note.visibility]}
+                <Folder className="size-3" />
+                {currentFolder ? currentFolder.name : "No folder"}
               </Badge>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuRadioGroup
+              value={note.folder_id ?? ""}
+              onValueChange={(v) =>
+                setNoteFolder.mutate({ id: note.id, folderId: v || null })
+              }
+            >
+              <DropdownMenuLabel>Folder</DropdownMenuLabel>
+              <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
+              {folders.map((f) => (
+                <DropdownMenuRadioItem key={f.id} value={f.id}>
+                  {f.name}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Visibility is now a single "Share" button (request 4) — the icon
+            still reflects who can see it; the menu sets it. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            nativeButton={false}
+            render={
+              <Button size="sm" variant="outline" className="gap-1.5">
+                {VIS_ICON[note.visibility]}
+                <span>Share</span>
+              </Button>
             }
           />
           <DropdownMenuContent align="start" className="w-60">
@@ -720,76 +787,63 @@ function NoteEditor({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Button
-          size="sm"
-          variant={note.pinned ? "secondary" : "ghost"}
-          onClick={() => setPin.mutate({ id: note.id, pinned: !note.pinned })}
-        >
-          <Pin className="size-4" />
-          <span className="hidden sm:inline">
-            {note.pinned ? "Pinned" : "Pin"}
-          </span>
-        </Button>
-
+        {/* Everything else lives behind one "⋯" menu (request 5 + 6). */}
         <DropdownMenu>
           <DropdownMenuTrigger
-            nativeButton={false}
             render={
-              <Badge variant="outline" className="cursor-pointer gap-1.5">
-                <Folder className="size-3" />
-                {currentFolder ? currentFolder.name : "No folder"}
-              </Badge>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                className="ml-auto shrink-0"
+                aria-label="Note actions"
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
             }
           />
-          <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuRadioGroup
-              value={note.folder_id ?? ""}
-              onValueChange={(v) =>
-                setNoteFolder.mutate({ id: note.id, folderId: v || null })
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuItem
+              onClick={() =>
+                setPin.mutate({ id: note.id, pinned: !note.pinned })
               }
             >
-              <DropdownMenuLabel>Folder</DropdownMenuLabel>
-              <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
-              {folders.map((f) => (
-                <DropdownMenuRadioItem key={f.id} value={f.id}>
-                  {f.name}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
+              <Pin className="size-4" />
+              {note.pinned ? "Unpin" : "Pin"}
+            </DropdownMenuItem>
+            {commentsEnabled && (
+              <DropdownMenuItem
+                onClick={() =>
+                  showComments ? closeComments() : setShowComments(true)
+                }
+              >
+                <MessageSquare className="size-4" />
+                Comments
+              </DropdownMenuItem>
+            )}
+            {versionsEnabled && (
+              <DropdownMenuItem onClick={() => setShowHistory(true)}>
+                <History className="size-4" />
+                History
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={() => setAddRefOpen(true)}>
+              <Link2 className="size-4" />
+              Add reference
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setCreatingIssue(true)}>
+              <ListPlus className="size-4" />
+              Create issue
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onClick={() => deleteNote.mutate(note.id)}
+            >
+              <Trash2 className="size-4" />
+              Delete
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {versionsEnabled && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => setShowHistory(true)}
-          >
-            <History className="size-4" />
-            <span className="hidden sm:inline">History</span>
-          </Button>
-        )}
-
-        {commentsEnabled && (
-          <Button
-            size="sm"
-            variant={showComments ? "secondary" : "ghost"}
-            onClick={() => (showComments ? closeComments() : setShowComments(true))}
-          >
-            <MessageSquare className="size-4" />
-            <span className="hidden sm:inline">Comments</span>
-          </Button>
-        )}
-
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto text-destructive"
-          onClick={() => deleteNote.mutate(note.id)}
-        >
-          <Trash2 className="size-4" />
-          <span className="hidden sm:inline">Delete</span>
-        </Button>
       </div>
 
       <div className="flex min-h-0 flex-1">
@@ -907,6 +961,17 @@ function NoteEditor({
           onOpenChange={setShowHistory}
         />
       )}
+
+      <NoteAddReferenceDialog
+        noteId={note.id}
+        open={addRefOpen}
+        onOpenChange={setAddRefOpen}
+      />
+      <NoteCreateIssueDialog
+        note={note}
+        open={creatingIssue}
+        onOpenChange={setCreatingIssue}
+      />
     </div>
   );
 }

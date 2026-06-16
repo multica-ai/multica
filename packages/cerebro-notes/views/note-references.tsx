@@ -3,7 +3,11 @@
 // NoteReferences (TECH-3421) — the "References" section shown above a note's
 // body. It mirrors the issue-reference list (@multica/cerebro-references) but
 // for notes: a compact list of the things this note points at, each clickable
-// to navigate, plus an "Add reference" picker.
+// to navigate, plus a remove control per row.
+//
+// Adding a reference is driven from the note's "⋯" actions menu via the
+// controlled NoteAddReferenceDialog (TECH-3690), so the references header stays
+// clutter-free and the action is discoverable on mobile too.
 //
 // For the MVP the only object type is `issue`. The rendering and the add picker
 // both switch on `ref.object`, so adding business objects later is a localized
@@ -11,15 +15,16 @@
 // than a rewrite.
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link2, ListTodo, Plus, X } from "lucide-react";
+import { Link2, ListTodo, X } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import {
   Command,
   CommandEmpty,
@@ -84,7 +89,7 @@ function ReferenceRow({
 }) {
   const clickable = objectHref(reference, useWorkspacePaths()) !== null;
   return (
-    <div className="group flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
+    <div className="flex items-center gap-2 rounded-md border border-border px-2.5 py-1.5 text-sm">
       <ListTodo
         className="size-4 shrink-0 text-muted-foreground"
         aria-hidden="true"
@@ -101,10 +106,12 @@ function ReferenceRow({
       >
         {objectLabel(reference)}
       </button>
+      {/* Remove is always visible — a hover-only affordance was invisible and
+          unusable on touch devices (TECH-3690). */}
       <Button
         variant="ghost"
-        size="icon"
-        className="size-6 shrink-0 opacity-0 group-hover:opacity-100"
+        size="icon-xs"
+        className="shrink-0 text-muted-foreground hover:text-foreground"
         disabled={removing}
         onClick={() => onRemove(reference)}
         aria-label="Remove reference"
@@ -115,10 +122,20 @@ function ReferenceRow({
   );
 }
 
-function AddReferencePicker({ noteId }: { noteId: string }) {
+// NoteAddReferenceDialog is the controlled issue picker. It is opened from the
+// note's "⋯" actions menu (TECH-3690) rather than an inline button, so it lives
+// as a self-contained dialog with no anchor of its own.
+export function NoteAddReferenceDialog({
+  noteId,
+  open,
+  onOpenChange,
+}: {
+  noteId: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const addReference = useAddNoteReference(noteId);
   const paths = useWorkspacePaths();
-  const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const query = useDebounced(q.trim());
 
@@ -150,21 +167,19 @@ function AddReferencePicker({ noteId }: { noteId: string }) {
       label: truncate(`${issue.identifier} ${issue.title}`),
       url: paths.issueDetail(issue.id),
     });
-    setOpen(false);
+    onOpenChange(false);
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs">
-            <Plus className="size-3.5" />
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md gap-3 p-0">
+        <DialogHeader className="px-4 pt-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Link2 className="size-4" />
             Add reference
-          </Button>
-        }
-      />
-      <PopoverContent align="end" className="w-80 p-0">
-        <Command shouldFilter={false}>
+          </DialogTitle>
+        </DialogHeader>
+        <Command shouldFilter={false} className="rounded-t-none">
           <CommandInput
             value={q}
             onValueChange={setQ}
@@ -199,8 +214,8 @@ function AddReferencePicker({ noteId }: { noteId: string }) {
             )}
           </CommandList>
         </Command>
-      </PopoverContent>
-    </Popover>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -225,33 +240,29 @@ export function NoteReferences({ noteId }: { noteId: string }) {
     });
   };
 
-  // Hide the whole section while the first load is in flight and there is
-  // nothing cached yet — avoids a flash of the empty state.
+  // Nothing to show until there is at least one reference. Adding is driven
+  // from the "⋯" menu (TECH-3690), so an empty header would just be noise.
   if (isLoading && references.length === 0) return null;
+  if (references.length === 0) return null;
 
   return (
     <div data-testid="note-reference-list" className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-          <Link2 className="size-3.5" aria-hidden="true" />
-          References
-        </div>
-        <AddReferencePicker noteId={noteId} />
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <Link2 className="size-3.5" aria-hidden="true" />
+        References
       </div>
 
-      {references.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {references.map((reference) => (
-            <ReferenceRow
-              key={reference.id}
-              reference={reference}
-              onOpen={openReference}
-              onRemove={removeReference}
-              removing={pendingDeleteId === reference.id}
-            />
-          ))}
-        </div>
-      )}
+      <div className="flex flex-col gap-1.5">
+        {references.map((reference) => (
+          <ReferenceRow
+            key={reference.id}
+            reference={reference}
+            onOpen={openReference}
+            onRemove={removeReference}
+            removing={pendingDeleteId === reference.id}
+          />
+        ))}
+      </div>
     </div>
   );
 }
