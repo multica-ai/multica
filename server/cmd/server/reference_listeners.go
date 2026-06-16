@@ -113,6 +113,31 @@ func registerReferenceListeners(bus *events.Bus, queries *db.Queries) {
 		}
 		processIssueReferences(ctx, bus, queries, issue.WorkspaceID, issue.ID, "description", issue.ID, e.ActorType, e.ActorID, *issue.Description)
 	})
+
+	// channel_message:created — scan channel message content for issue mentions
+	bus.Subscribe(protocol.EventChannelMessageCreated, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		msg, ok := payload["message"].(map[string]any)
+		if !ok {
+			data, err := json.Marshal(payload["message"])
+			if err != nil {
+				return
+			}
+			if err := json.Unmarshal(data, &msg); err != nil {
+				return
+			}
+		}
+		content, _ := msg["content"].(string)
+		messageID, _ := msg["id"].(string)
+		channelID, _ := payload["channel_id"].(string)
+		if content == "" || messageID == "" {
+			return
+		}
+		processChannelMessageReferences(ctx, bus, queries, e.WorkspaceID, channelID, messageID, e.ActorType, e.ActorID, content)
+	})
 }
 
 // processIssueReferences parses issue mentions from content and creates
@@ -196,6 +221,81 @@ func processIssueReferences(
 		}
 
 		// Publish activity:created for WS broadcasting.
+		dummyEvent := events.Event{
+			WorkspaceID: workspaceID,
+			ActorType:   actorType,
+			ActorID:     actorID,
+		}
+		publishActivityEvent(bus, dummyEvent, activity)
+	}
+}
+
+// processChannelMessageReferences parses issue mentions from a channel message
+// and creates "referenced_by" activity entries on each target issue.
+func processChannelMessageReferences(
+	ctx context.Context,
+	bus *events.Bus,
+	queries *db.Queries,
+	workspaceID, channelID, messageID,
+	actorType, actorID, content string,
+) {
+	mentions := util.ParseMentions(content)
+
+	var channelName string
+	if channelID != "" {
+		if ch, err := queries.GetChannel(ctx, db.GetChannelParams{
+			ID:          parseUUID(channelID),
+			WorkspaceID: parseUUID(workspaceID),
+		}); err == nil {
+			channelName = ch.Name
+		}
+	}
+
+	for _, m := range mentions {
+		if m.Type != "issue" {
+			continue
+		}
+		targetIssueID := m.ID
+
+		// Dedup: skip if this exact reference already exists.
+		_, err := queries.CheckChannelReferenceActivityExists(ctx, db.CheckChannelReferenceActivityExistsParams{
+			IssueID:  parseUUID(targetIssueID),
+			SourceID: messageID,
+		})
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("channel reference: failed to check existing activity",
+				"target_issue_id", targetIssueID, "error", err)
+			continue
+		}
+
+		details, _ := json.Marshal(map[string]string{
+			"source_type":         "channel_message",
+			"source_id":           messageID,
+			"source_channel_id":   channelID,
+			"source_channel_name": channelName,
+			"actor_type":          actorType,
+			"actor_id":            actorID,
+		})
+
+		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			WorkspaceID: parseUUID(workspaceID),
+			IssueID:     parseUUID(targetIssueID),
+			ActorType:   util.StrToText(actorType),
+			ActorID:     optionalUUID(actorID),
+			Action:      "referenced_by",
+			Details:     details,
+		})
+		if err != nil {
+			slog.Error("channel reference: failed to create referenced_by activity",
+				"target_issue_id", targetIssueID,
+				"message_id", messageID,
+				"error", err)
+			continue
+		}
+
 		dummyEvent := events.Event{
 			WorkspaceID: workspaceID,
 			ActorType:   actorType,

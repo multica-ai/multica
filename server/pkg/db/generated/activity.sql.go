@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const checkChannelReferenceActivityExists = `-- name: CheckChannelReferenceActivityExists :one
+SELECT 1 FROM activity_log
+WHERE issue_id = $1
+  AND action = 'referenced_by'
+  AND details->>'source_type' = 'channel_message'
+  AND details->>'source_id' = $2::text
+LIMIT 1
+`
+
+type CheckChannelReferenceActivityExistsParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	SourceID string      `json:"source_id"`
+}
+
+func (q *Queries) CheckChannelReferenceActivityExists(ctx context.Context, arg CheckChannelReferenceActivityExistsParams) (int32, error) {
+	row := q.db.QueryRow(ctx, checkChannelReferenceActivityExists, arg.IssueID, arg.SourceID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const checkReferenceActivityExists = `-- name: CheckReferenceActivityExists :one
 SELECT 1 FROM activity_log
 WHERE issue_id = $1

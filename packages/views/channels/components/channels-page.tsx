@@ -995,8 +995,6 @@ function MessageList({
   const editorRef = useRef<ContentEditorRef>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const nav = useNavigation();
-  const paths = useWorkspacePaths();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => editorRef.current?.uploadFiles(files),
@@ -1039,13 +1037,15 @@ function MessageList({
     onError: () => toast.error("发送失败"),
   });
 
+  const [convertedIssues, setConvertedIssues] = useState<Map<string, { issueId: string; issueNumber: number }>>(new Map());
+
   const convertMutation = useMutation({
     mutationFn: ({ messageId, title, description }: { messageId: string; title?: string; description?: string }) =>
       api.convertMessageToIssue(channelId, messageId, { title, description }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       toast.success(`已创建 Issue #${data.issue_number}`);
+      setConvertedIssues((prev) => new Map(prev).set(variables.messageId, { issueId: data.issue_id, issueNumber: data.issue_number }));
       setConvertTarget(null);
-      nav.push(paths.issueDetail(data.issue_id));
     },
     onError: () => toast.error("转换失败"),
   });
@@ -1088,6 +1088,7 @@ function MessageList({
                 onOpenReplies={onOpenReplies}
                 onConvertManual={(m) => setConvertTarget(m)}
                 onConvertAgent={(m) => openModal("quick-create-issue", { description: m.content })}
+                linkedIssue={convertedIssues.get(msg.id)}
               />
             ))}
             <div ref={bottomRef} />
@@ -1171,11 +1172,13 @@ function MessageRow({
   onOpenReplies,
   onConvertManual,
   onConvertAgent,
+  linkedIssue,
 }: {
   message: ChannelMessage;
   onOpenReplies: (id: string) => void;
   onConvertManual: (msg: ChannelMessage) => void;
   onConvertAgent: (msg: ChannelMessage) => void;
+  linkedIssue?: { issueId: string; issueNumber: number };
 }) {
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
@@ -1222,6 +1225,12 @@ function MessageRow({
               </button>
             )}
             <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
+            {linkedIssue && (
+              <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-0.5 text-xs text-muted-foreground">
+                <FileText className="h-3 w-3" />
+                <span>已转为 Issue #{linkedIssue.issueNumber}</span>
+              </div>
+            )}
           </div>
         </li>
       </ContextMenuTrigger>
