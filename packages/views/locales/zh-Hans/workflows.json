@@ -67,6 +67,7 @@
     "toast_template_unset": "已取消模板",
     "toast_saved": "工作流已保存",
     "toast_save_failed": "保存工作流失败",
+    "toast_format_schema_invalid": "Format Schema JSON 格式不合法，请修正后重试",
     "toast_deleted": "工作流已删除",
     "toast_delete_failed": "删除工作流失败",
     "toast_activated": "工作流已启用",

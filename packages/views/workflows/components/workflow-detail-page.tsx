@@ -205,8 +205,25 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
     if (!workflow) return;
     try {
       await updateWorkflowMutation.mutateAsync({ id: id!, title: workflow.title, description: workflow.description });
-      // Save all pending node edits
+      // Save all pending node edits — normalize format_schema first.
       for (const [nodeId, edits] of Object.entries(nodeEdits)) {
+        // Normalize format_schema: textarea always produces a string, but the
+        // API expects a JSON value (object/array/null). A bare string stored
+        // in the JSONB column causes Go's validateJSONSchema to fail with
+        // "cannot unmarshal string into Go value of type map[string]interface{}".
+        if (typeof edits.format_schema === "string") {
+          const trimmed = edits.format_schema.trim();
+          if (!trimmed) {
+            edits.format_schema = null;
+          } else {
+            try {
+              edits.format_schema = JSON.parse(trimmed);
+            } catch {
+              toast.error(t(($) => $.detail.toast_format_schema_invalid));
+              return;
+            }
+          }
+        }
         updateNodeMutation.mutate({ nodeId, ...edits });
       }
       // Delete nodes marked for removal

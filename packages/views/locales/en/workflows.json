@@ -67,6 +67,7 @@
     "toast_template_unset": "Template unset",
     "toast_saved": "Workflow saved",
     "toast_save_failed": "Failed to save workflow",
+    "toast_format_schema_invalid": "Format Schema JSON is invalid. Please fix and retry.",
     "toast_deleted": "Workflow deleted",
     "toast_delete_failed": "Failed to delete workflow",
     "toast_activated": "Workflow activated",

@@ -89,6 +89,10 @@ export type {
   GitHubConnectResponse,
 } from "./github";
 export type {
+  GitlabMergeRequest,
+  GitlabSettings,
+} from "./gitlab";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

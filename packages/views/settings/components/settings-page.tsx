@@ -12,6 +12,7 @@ import {
   Bell,
   Plug,
   Workflow,
+  GitBranch,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -24,6 +25,7 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
+import { GitlabTab } from "./gitlab-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
@@ -45,6 +47,7 @@ const WORKSPACE_TAB_KEYS = [
   "general",
   "repositories",
   "github",
+  "gitlab",
   "integrations",
   "labs",
   "members",
@@ -53,6 +56,7 @@ const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
   github: "github",
+  gitlab: "gitlab",
   integrations: "integrations",
   labs: "labs",
   members: "members",
@@ -61,6 +65,7 @@ const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
   github: GitHubMark,
+  gitlab: GitBranch,
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
@@ -83,11 +88,25 @@ interface SettingsPageProps {
 
 export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const { t } = useT("settings");
-  const workspaceName = useCurrentWorkspace()?.name;
+  const workspace = useCurrentWorkspace();
+  const workspaceName = workspace?.name;
   const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
   const { data: admins = [] } = useWorkflowAdmins();
   const isWorkflowAdmin = user ? admins.some((a) => a.id === user.id) : false;
+
+  // Default to "gitlab" if code_platform is not set
+  const codePlatform =
+    (workspace?.settings as Record<string, unknown> | undefined)?.code_platform === "github"
+      ? "github"
+      : "gitlab";
+
+  // Filter workspace tabs based on code platform (only one platform tab shown)
+  const visibleWorkspaceTabs = WORKSPACE_TAB_KEYS.filter((key) => {
+    if (key === "github") return codePlatform === "github";
+    if (key === "gitlab") return codePlatform === "gitlab";
+    return true;
+  });
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
@@ -96,10 +115,10 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     () =>
       new Set<string>([
         ...ACCOUNT_TAB_KEYS.filter((k) => k !== "workflow-admins" || isWorkflowAdmin),
-        ...Object.values(WORKSPACE_TAB_VALUES),
+        ...visibleWorkspaceTabs.map((k) => WORKSPACE_TAB_VALUES[k]),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs, isWorkflowAdmin],
+    [extraAccountTabs, isWorkflowAdmin, visibleWorkspaceTabs],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
@@ -149,7 +168,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground truncate">
             {workspaceName ?? t(($) => $.page.workspace_fallback)}
           </span>
-          {WORKSPACE_TAB_KEYS.map((key) => {
+          {visibleWorkspaceTabs.map((key) => {
             const Icon = WORKSPACE_TAB_ICONS[key];
             return (
               <TabsTrigger key={key} value={WORKSPACE_TAB_VALUES[key]}>
@@ -172,6 +191,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="github"><GitHubTab /></TabsContent>
+          <TabsContent value="gitlab"><GitlabTab /></TabsContent>
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>

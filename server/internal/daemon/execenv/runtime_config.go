@@ -23,7 +23,7 @@ var runtimeGOOS = runtime.GOOS
 //
 // CR/LF and other whitespace control bytes collapse to a single space; other
 // C0 controls and DEL are dropped; markdown structural characters that have
-// meaning in inline context (`*`, `_`, `` ` ``, `\`, `[`, `]`, `<`) are
+// meaning in inline context (`*`, `_`, “ ` “, `\`, `[`, `]`, `<`) are
 // backslash-escaped. Trailing whitespace is trimmed.
 func sanitizeNameForBriefMarkdown(name string) string {
 	var b strings.Builder
@@ -237,6 +237,16 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "- %s\n", repo.URL)
 		}
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
+		if ctx.CodePlatform == "gitlab" {
+			b.WriteString("### After committing code\n\n")
+			b.WriteString("Create a merge request (pushes the branch automatically):\n\n")
+			b.WriteString("You must run this command from inside the checked-out repository directory (e.g. after `cd <repo-directory>`).\n")
+			b.WriteString("```bash\n")
+			b.WriteString("multica mr create --source-branch <branch> --title \"<title>\" [--description \"<desc>\"] [--target-branch <branch>]\n")
+			b.WriteString("```\n\n")
+			b.WriteString("The command pushes the branch via the GitLab PAT and then creates the MR. The title must contain the issue's identifier.\n")
+			b.WriteString("The MR URL will be printed to stdout — include it in your completion report.\n\n")
+		}
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).

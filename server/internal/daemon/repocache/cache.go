@@ -241,8 +241,20 @@ func isBareRepo(path string) bool {
 // refs and abort the entire fetch.
 const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
+// gitCredentialArgs returns git -c flags that supply the PAT as a credential
+// helper when GITLAB_PAT is set in the environment. Returns nil otherwise.
+func gitCredentialArgs() []string {
+	pat := os.Getenv("GITLAB_PAT")
+	if pat == "" {
+		return nil
+	}
+	return []string{"-c", fmt.Sprintf("credential.helper=!f(){ echo \"password=%s\"; }; f", pat)}
+}
+
 func gitCloneBare(url, dest string) error {
-	cmd := exec.Command("git", "clone", "--bare", url, dest)
+	args := gitCredentialArgs()
+	args = append(args, "clone", "--bare", url, dest)
+	cmd := exec.Command("git", args...)
 	cmd.Env = gitEnv()
 
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -293,7 +305,9 @@ func gitFetch(barePath string) error {
 // runGitFetch is the raw `git fetch origin` wrapper. Callers should go through
 // gitFetch, which migrates legacy caches first.
 func runGitFetch(barePath string) error {
-	cmd := exec.Command("git", "-C", barePath, "fetch", "origin")
+	args := gitCredentialArgs()
+	args = append(args, "-C", barePath, "fetch", "origin")
+	cmd := exec.Command("git", args...)
 	cmd.Env = gitEnv()
 
 	if out, err := cmd.CombinedOutput(); err != nil {

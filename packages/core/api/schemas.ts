@@ -845,3 +845,56 @@ export const EMPTY_BUILTIN_PLUGIN_LIST: BuiltinPluginListResponse = {
 };
 
 export type BuiltinPluginListResponse = z.infer<typeof BuiltinPluginListResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// GitLab merge request schemas — lenient by the same rules as the rest of
+// this file: strings default to "", enums are `z.string()`, arrays default
+// to `[]`, nullable fields accept null, `.loose()` passes unknown fields.
+// ---------------------------------------------------------------------------
+
+const GitlabMergeRequestSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  repo_owner: z.string(),
+  repo_name: z.string(),
+  mr_number: z.number().default(0),
+  title: z.string(),
+  state: z.string().default("opened"),
+  html_url: z.string(),
+  source_branch: z.string().nullable().default(null),
+  target_branch: z.string().nullable().default(null),
+  author_login: z.string().nullable().default(null),
+  author_avatar_url: z.string().nullable().default(null),
+  merged_at: z.string().nullable().default(null),
+  closed_at: z.string().nullable().default(null),
+  mr_created_at: z.string().default(""),
+  mr_updated_at: z.string().default(""),
+}).loose();
+
+export const ListMergeRequestsResponseSchema = z.object({
+  merge_requests: z.array(GitlabMergeRequestSchema).default([]),
+}).loose();
+
+export const EMPTY_MERGE_REQUESTS_RESPONSE = { merge_requests: [] };
+
+const GitlabSettingsSchema = z.object({
+  configured: z.boolean().default(false),
+  enabled: z.boolean().default(false),
+  canManage: z.boolean().default(false),
+  settings: z.object({
+    mrSidebarEnabled: z.boolean().default(false),
+    autoLinkEnabled: z.boolean().default(false),
+  }).loose(),
+}).loose();
+
+export const GitlabSettingsResponseSchema = GitlabSettingsSchema;
+
+export const EMPTY_GITLAB_SETTINGS_RESPONSE = {
+  configured: false,
+  enabled: false,
+  canManage: false,
+  settings: {
+    mrSidebarEnabled: false,
+    autoLinkEnabled: false,
+  },
+};

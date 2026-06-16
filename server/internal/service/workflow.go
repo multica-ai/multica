@@ -945,7 +945,12 @@ func validateJSONSchema(schema, input []byte) (bool, error) {
 
 	var schemaMap map[string]any
 	if err := json.Unmarshal(schema, &schemaMap); err != nil {
-		return false, fmt.Errorf("invalid format schema: %w", err)
+		// Schema is valid JSON but not a JSON object (e.g., a bare string,
+		// number, or null — which can happen when the frontend sends a
+		// textarea string without parsing it back to an object first).
+		// Treat non-object schemas as "no type constraint", same as an
+		// empty schema.
+		return true, nil
 	}
 
 	typeStr, _ := schemaMap["type"].(string)
