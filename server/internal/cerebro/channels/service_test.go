@@ -377,7 +377,9 @@ func TestEnqueueChannelListenerTasks_AgentGateDeniesEnqueue(t *testing.T) {
 	commenter := createTestUserAndMember(t, "filip-listen-deny")
 	agentID := createTestAgent(t, "mia-listen-deny")
 
-	// Build a channel issue with the agent subscribed (default listen mode = always).
+	// Build a channel issue with the agent subscribed. Channels now default to
+	// mention_only (TECH-3691), so pin an explicit 'always' override below to
+	// keep this test exercising the gate path rather than the default skip.
 	q := db.New(testPool)
 	number, err := q.IncrementIssueCounter(ctx, testWorkspaceID)
 	if err != nil {
@@ -404,6 +406,9 @@ func TestEnqueueChannelListenerTasks_AgentGateDeniesEnqueue(t *testing.T) {
 		IssueID: issue.ID, UserType: "agent", UserID: agentID, Reason: "creator",
 	}); err != nil {
 		t.Fatalf("subscribe agent: %v", err)
+	}
+	if err := testSvc.SetListenMode(ctx, issue.ID, agentID, ListenModeAlways); err != nil {
+		t.Fatalf("set listen mode always: %v", err)
 	}
 
 	prev := testSvc.AgentTriggerGate
@@ -444,5 +449,81 @@ func TestEnqueueChannelListenerTasks_AgentGateDeniesEnqueue(t *testing.T) {
 	}
 	if taskCount != 0 {
 		t.Fatalf("group-gate denial leaked an enqueued task: got %d", taskCount)
+	}
+}
+
+// TECH-3691: a subscribed agent in a named channel with no explicit listen-mode
+// row defaults to mention_only — a plain (non-@mention) member comment must NOT
+// fire the agent, and the dispatcher must skip it before even consulting the
+// group gate. A DM with the same shape keeps the 'always' default and reaches
+// the gate.
+func TestEnqueueChannelListenerTasks_DefaultByKind(t *testing.T) {
+	ctx := context.Background()
+	commenter := createTestUserAndMember(t, "filip-default-kind")
+	agentID := createTestAgent(t, "mia-default-kind")
+	q := db.New(testPool)
+
+	makeIssue := func(kind string) db.Issue {
+		number, err := q.IncrementIssueCounter(ctx, testWorkspaceID)
+		if err != nil {
+			t.Fatalf("increment issue counter: %v", err)
+		}
+		issue, err := q.CreateIssue(ctx, db.CreateIssueParams{
+			WorkspaceID: testWorkspaceID,
+			Title:       "default-kind-" + kind,
+			Status:      "todo",
+			Priority:    "none",
+			CreatorType: "member",
+			CreatorID:   commenter,
+			Position:    0,
+			Number:      number,
+			Kind:        pgtype.Text{String: kind, Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("create %s issue: %v", kind, err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
+		})
+		if err := q.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID: issue.ID, UserType: "agent", UserID: agentID, Reason: "creator",
+		}); err != nil {
+			t.Fatalf("subscribe agent: %v", err)
+		}
+		return issue
+	}
+
+	// Gate denies so the 'always' path stops before the nil TaskService; we
+	// only assert whether the gate was reached at all.
+	prev := testSvc.AgentTriggerGate
+	var gateCalls int
+	testSvc.AgentTriggerGate = func(ctx context.Context, workspaceID, userID, candidateAgentID, ownerID pgtype.UUID) (bool, error) {
+		gateCalls++
+		return false, nil
+	}
+	t.Cleanup(func() { testSvc.AgentTriggerGate = prev })
+
+	comment := db.Comment{
+		ID:         parseUUID("66666666-6666-6666-6666-666666666666"),
+		AuthorType: "member",
+		AuthorID:   commenter,
+		Content:    "just thinking out loud",
+		Type:       "comment",
+	}
+
+	// Named channel: default mention_only → skipped before the gate.
+	channel := makeIssue("channel")
+	comment.IssueID = channel.ID
+	testSvc.EnqueueChannelListenerTasks(ctx, channel, comment, nil, "member", uuidString(commenter))
+	if gateCalls != 0 {
+		t.Fatalf("channel default should be mention_only and skip before the gate, but gate was called %d time(s)", gateCalls)
+	}
+
+	// DM: default always → reaches the gate.
+	dm := makeIssue("dm")
+	comment.IssueID = dm.ID
+	testSvc.EnqueueChannelListenerTasks(ctx, dm, comment, nil, "member", uuidString(commenter))
+	if gateCalls != 1 {
+		t.Fatalf("dm default should be always and reach the gate exactly once, got %d gate call(s)", gateCalls)
 	}
 }

@@ -1,9 +1,11 @@
 // Package channels owns the cerebro-only "channel listen mode" feature: a
 // per-(channel × agent) toggle deciding whether an agent participating in a
 // chat-channel reacts to every comment ('always') or only when explicitly
-// @-mentioned ('mention_only'). The default for any agent subscribed to a
-// channel is 'always' — rows in cerebro_channel_agent_settings only need to
-// exist when the user has flipped an agent into mention_only mode.
+// @-mentioned ('mention_only'). The default for an agent without an explicit
+// row depends on the channel kind (TECH-3691): DMs default to 'always' (1:1
+// chat), named channels default to 'mention_only' (multi-party — stay quiet
+// until @-mentioned). Rows in cerebro_channel_agent_settings exist only when
+// the user has overridden that default.
 package channels
 
 import (
@@ -28,6 +30,18 @@ const ListenModeAlways = "always"
 // ListenModeMentionOnly means the agent only reacts when @-mentioned. Equivalent
 // to today's pre-cerebro behaviour for non-assigned agents.
 const ListenModeMentionOnly = "mention_only"
+
+// defaultListenMode is the listen mode applied to a subscribed agent that has
+// no explicit row in cerebro_channel_agent_settings. DMs default to 'always'
+// (1:1 chat — the agent answers every message); named channels default to
+// 'mention_only' (TECH-3691 — agents stay quiet in a multi-party channel
+// until explicitly @-mentioned).
+func defaultListenMode(kind string) string {
+	if kind == "channel" {
+		return ListenModeMentionOnly
+	}
+	return ListenModeAlways
+}
 
 // EventChannelListenModeChanged is the WS event broadcast on listen-mode flip.
 // Restricted to channel participants (audience set by caller in the HTTP path).
@@ -165,8 +179,15 @@ func (s *Service) EnqueueChannelListenerTasks(
 			continue
 		}
 
-		// Listen-mode lookup. Default 'always' when no row exists.
-		mode := ListenModeAlways
+		// Listen-mode lookup. Default depends on channel kind (TECH-3691):
+		//   - dm:      1:1 conversation — the agent replies to every message
+		//              ('always'), no @-mention required.
+		//   - channel: multi-party — the agent stays quiet unless explicitly
+		//              @-mentioned ('mention_only'), so a busy channel does not
+		//              fire every subscribed agent on every message.
+		// An explicit row in cerebro_channel_agent_settings still overrides
+		// the default in either direction.
+		mode := defaultListenMode(issue.Kind)
 		got, err := s.CerebroQueries.GetChannelAgentListenMode(ctx, cerebrodb.GetChannelAgentListenModeParams{
 			ChannelID: issue.ID,
 			AgentID:   sub.UserID,
@@ -234,8 +255,9 @@ func (s *Service) SetListenMode(ctx context.Context, channelID, agentID pgtype.U
 }
 
 // ListListenModes returns every explicit listen-mode row for a channel.
-// Agents subscribed to the channel without a row default to 'always'; the
-// frontend applies that default when a row is missing.
+// Agents subscribed without a row fall back to the kind-aware default
+// (see defaultListenMode: 'always' for DMs, 'mention_only' for channels);
+// the frontend applies that same default when a row is missing.
 func (s *Service) ListListenModes(ctx context.Context, channelID pgtype.UUID) ([]cerebrodb.ListChannelAgentListenModesRow, error) {
 	return s.CerebroQueries.ListChannelAgentListenModes(ctx, channelID)
 }
