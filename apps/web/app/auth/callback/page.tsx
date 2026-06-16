@@ -7,7 +7,7 @@ import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
-import { validateCliCallback } from "@multica/views/auth";
+import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
 import {
   Card,
   CardHeader,
@@ -74,8 +74,7 @@ function CallbackContent() {
       api
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
-          const separator = cliCallback.includes("?") ? "&" : "?";
-          window.location.href = `${cliCallback}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(cliState)}`;
+          redirectToCliCallback(cliCallback, token, cliState);
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
