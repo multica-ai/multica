@@ -74,8 +74,9 @@ type TaskContextForEnv struct {
 	ProjectID               string                  // issue's project, when present
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID           string                  // non-empty for chat tasks
-	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
+	KnowledgeContext        []KnowledgeContextForEnv
+	ChatSessionID           string // non-empty for chat tasks
+	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
@@ -97,6 +98,18 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+}
+
+// KnowledgeContextForEnv is a compact RAG item rendered into the runtime brief.
+type KnowledgeContextForEnv struct {
+	ID                string
+	Title             string
+	Summary           string
+	RecommendedAction string
+	AntiPatterns      string
+	SourceIssue       string
+	Score             float64
+	Reason            string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

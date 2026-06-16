@@ -49,6 +49,7 @@ type Task struct {
 	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present
 	ProjectTitle            string                `json:"project_title,omitempty"`             // human-readable project title for context injection
 	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`         // project-scoped resources to expose to the agent
+	KnowledgeContext        []KnowledgeContext    `json:"knowledge_context,omitempty"`         // high-confidence knowledge injected by the server at claim time
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
@@ -87,6 +88,19 @@ type Task struct {
 	// Empty when the server-side runtime has no owning user — the daemon
 	// then falls back to its own token. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// KnowledgeContext is a compact, prompt-safe knowledge item selected by the
+// server for this specific task claim.
+type KnowledgeContext struct {
+	ID                string  `json:"id"`
+	Title             string  `json:"title"`
+	Summary           string  `json:"summary,omitempty"`
+	RecommendedAction string  `json:"recommended_action,omitempty"`
+	AntiPatterns      string  `json:"anti_patterns,omitempty"`
+	SourceIssue       string  `json:"source_issue,omitempty"`
+	Score             float64 `json:"score"`
+	Reason            string  `json:"reason"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -2758,6 +2758,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		KnowledgeContext:                 convertKnowledgeContextForEnv(task.KnowledgeContext),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
@@ -3817,6 +3818,26 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertKnowledgeContextForEnv(items []KnowledgeContext) []execenv.KnowledgeContextForEnv {
+	if len(items) == 0 {
+		return nil
+	}
+	result := make([]execenv.KnowledgeContextForEnv, len(items))
+	for i, item := range items {
+		result[i] = execenv.KnowledgeContextForEnv{
+			ID:                item.ID,
+			Title:             item.Title,
+			Summary:           item.Summary,
+			RecommendedAction: item.RecommendedAction,
+			AntiPatterns:      item.AntiPatterns,
+			SourceIssue:       item.SourceIssue,
+			Score:             item.Score,
+			Reason:            item.Reason,
 		}
 	}
 	return result

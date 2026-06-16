@@ -98,6 +98,45 @@ func (q *Queries) CreateKnowledgeFeedback(ctx context.Context, arg CreateKnowled
 	return i, err
 }
 
+const createKnowledgeInjectionEvent = `-- name: CreateKnowledgeInjectionEvent :one
+INSERT INTO knowledge_injection_event (
+    workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id
+) VALUES (
+    $1, $2, $3,
+    $4, $5
+)
+RETURNING id, workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id, created_at
+`
+
+type CreateKnowledgeInjectionEventParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	KnowledgeItemID  pgtype.UUID `json:"knowledge_item_id"`
+	AgentTaskID      pgtype.UUID `json:"agent_task_id"`
+	InjectionTarget  string      `json:"injection_target"`
+	RetrievalEventID pgtype.UUID `json:"retrieval_event_id"`
+}
+
+func (q *Queries) CreateKnowledgeInjectionEvent(ctx context.Context, arg CreateKnowledgeInjectionEventParams) (KnowledgeInjectionEvent, error) {
+	row := q.db.QueryRow(ctx, createKnowledgeInjectionEvent,
+		arg.WorkspaceID,
+		arg.KnowledgeItemID,
+		arg.AgentTaskID,
+		arg.InjectionTarget,
+		arg.RetrievalEventID,
+	)
+	var i KnowledgeInjectionEvent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeItemID,
+		&i.AgentTaskID,
+		&i.InjectionTarget,
+		&i.RetrievalEventID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createKnowledgeItem = `-- name: CreateKnowledgeItem :one
 INSERT INTO knowledge_item (
     workspace_id, project_id, agent_id, title, type, domain_labels,
@@ -887,7 +926,15 @@ func (q *Queries) ListKnowledgeSources(ctx context.Context, arg ListKnowledgeSou
 }
 
 const searchKnowledgeText = `-- name: SearchKnowledgeText :many
-WITH candidates AS (
+WITH query_terms AS (
+    SELECT COALESCE(array_agg(term), '{}')::text[] AS terms
+    FROM (
+        SELECT DISTINCT term
+        FROM regexp_split_to_table(LOWER($2::text), '[^[:alnum:]_]+') AS term
+        WHERE length(term) > 2
+    ) q
+),
+candidates AS (
     SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at,
         (
             CASE WHEN LOWER(ki.title) LIKE '%' || LOWER($2::text) || '%' THEN 4 ELSE 0 END +
@@ -896,7 +943,26 @@ WITH candidates AS (
             CASE WHEN LOWER(ki.anti_patterns) LIKE '%' || LOWER($2::text) || '%' THEN 2 ELSE 0 END +
             CASE WHEN LOWER(ki.trigger_conditions) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
             CASE WHEN LOWER(ki.diagnostic_steps) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END
+            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.8
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.title) LIKE '%' || term || '%'
+            ), 0) +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.6
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.problem_pattern) LIKE '%' || term || '%'
+                   OR LOWER(ki.recommended_practice) LIKE '%' || term || '%'
+            ), 0) +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.3
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.anti_patterns) LIKE '%' || term || '%'
+                   OR LOWER(ki.trigger_conditions) LIKE '%' || term || '%'
+                   OR LOWER(ki.diagnostic_steps) LIKE '%' || term || '%'
+                   OR LOWER(ki.applicability) LIKE '%' || term || '%'
+            ), 0)
         )::float8 AS text_score
     FROM knowledge_item ki
     WHERE ki.workspace_id = $3

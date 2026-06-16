@@ -124,6 +124,41 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 	}
 }
 
+func writeRelevantKnowledgeSection(b *strings.Builder, items []KnowledgeContextForEnv) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("## Relevant Knowledge\n\n")
+	b.WriteString("The server selected these reviewed knowledge items for this task. Apply them only when relevant. When you use one in your work or final comment, cite its ID, for example `Used knowledge: KNO-123`.\n\n")
+	for _, item := range items {
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = "Untitled knowledge"
+		}
+		fmt.Fprintf(b, "- `%s` — **%s**", item.ID, title)
+		if item.Score > 0 {
+			fmt.Fprintf(b, " (score %.2f)", item.Score)
+		}
+		b.WriteString("\n")
+		if value := strings.TrimSpace(item.Summary); value != "" {
+			fmt.Fprintf(b, "  - Summary: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.RecommendedAction); value != "" {
+			fmt.Fprintf(b, "  - Recommended action: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.AntiPatterns); value != "" {
+			fmt.Fprintf(b, "  - Avoid: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.SourceIssue); value != "" {
+			fmt.Fprintf(b, "  - Source issue: %s\n", value)
+		}
+		if value := strings.TrimSpace(item.Reason); value != "" {
+			fmt.Fprintf(b, "  - Reason: %s\n", value)
+		}
+	}
+	b.WriteString("\n")
+}
+
 // InjectRuntimeConfig writes the meta skill content into the runtime-specific
 // config file so the agent discovers its environment through its native mechanism.
 //
@@ -544,6 +579,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString(ctxText)
 		b.WriteString("\n\n")
 	}
+
+	writeRelevantKnowledgeSection(&b, ctx.KnowledgeContext)
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")

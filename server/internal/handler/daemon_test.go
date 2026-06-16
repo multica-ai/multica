@@ -4069,6 +4069,16 @@ type claimCommentTaskResp struct {
 		TriggerCommentID string `json:"trigger_comment_id"`
 		NewCommentCount  int    `json:"new_comment_count"`
 		NewCommentsSince string `json:"new_comments_since"`
+		KnowledgeContext []struct {
+			ID                string  `json:"id"`
+			Title             string  `json:"title"`
+			Summary           string  `json:"summary"`
+			RecommendedAction string  `json:"recommended_action"`
+			AntiPatterns      string  `json:"anti_patterns"`
+			SourceIssue       string  `json:"source_issue"`
+			Score             float64 `json:"score"`
+			Reason            string  `json:"reason"`
+		} `json:"knowledge_context"`
 	} `json:"task"`
 }
 
@@ -4089,6 +4099,174 @@ func claimCommentTask(t *testing.T, runtimeID, daemonID string) claimCommentTask
 		t.Fatalf("expected a claimed task, got nil: %s", w.Body.String())
 	}
 	return resp
+}
+
+func TestClaimTaskByRuntime_InjectsRelevantKnowledgeContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Knowledge claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Knowledge claim agent")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET description = 'Metro native adapter work needs prior mobile bundling knowledge.'
+		WHERE id = $1
+	`, issueID); err != nil {
+		t.Fatalf("update issue description: %v", err)
+	}
+
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Metro native adapter trigger comment playbook",
+		"type":                 "lesson",
+		"confidence_status":    "high",
+		"problem_pattern":      "Metro native adapter failures happen when React Native bundles browser-only SDK code.",
+		"recommended_practice": "Add a .native.ts adapter before importing the shared module.",
+		"anti_patterns":        "Do not force Metro to bundle browser SDK code.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   issueID,
+		}},
+	})
+	created = publishKnowledgeForRAG(t, created.Item.ID)
+
+	var priorTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, result)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour', now() - interval '50 minutes', '{"status":"fixed metro native adapter"}'::jsonb)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&priorTaskID); err != nil {
+		t.Fatalf("insert prior task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
+
+	var contextCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'metro adapter context after previous run', 'comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&contextCommentID); err != nil {
+		t.Fatalf("insert context comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, contextCommentID) })
+
+	taskID, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment
+		SET content = 'Please fix the Metro native adapter trigger comment failure.'
+		WHERE id = $1
+	`, triggerID); err != nil {
+		t.Fatalf("update trigger comment: %v", err)
+	}
+
+	resp := claimCommentTask(t, runtimeID, "knowledge-context-claim")
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if len(resp.Task.KnowledgeContext) != 1 {
+		t.Fatalf("knowledge_context length = %d, want 1: %#v", len(resp.Task.KnowledgeContext), resp.Task.KnowledgeContext)
+	}
+	got := resp.Task.KnowledgeContext[0]
+	if got.ID != created.Item.ID {
+		t.Fatalf("knowledge id = %s, want %s", got.ID, created.Item.ID)
+	}
+	if !strings.Contains(got.RecommendedAction, ".native.ts adapter") {
+		t.Fatalf("recommended_action missing adapter guidance: %#v", got)
+	}
+	if got.SourceIssue == "" {
+		t.Fatalf("source_issue should be populated: %#v", got)
+	}
+
+	var query string
+	if err := testPool.QueryRow(ctx, `
+		SELECT query
+		FROM knowledge_retrieval_event
+		WHERE workspace_id = $1
+		  AND $2::uuid = ANY(top_knowledge_item_ids)
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, testWorkspaceID, created.Item.ID).Scan(&query); err != nil {
+		t.Fatalf("load retrieval event: %v", err)
+	}
+	for _, want := range []string{
+		"Please fix the Metro native adapter trigger comment failure.",
+		"New comments context: 1 issue comments since",
+		"Last task result",
+	} {
+		if !strings.Contains(query, want) {
+			t.Fatalf("retrieval query missing %q:\n%s", want, query)
+		}
+	}
+
+	var injectionCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM knowledge_injection_event
+		WHERE workspace_id = $1
+		  AND knowledge_item_id = $2
+		  AND agent_task_id = $3
+		  AND injection_target = 'daemon_brief'
+	`, testWorkspaceID, created.Item.ID, taskID).Scan(&injectionCount); err != nil {
+		t.Fatalf("count injection events: %v", err)
+	}
+	if injectionCount != 1 {
+		t.Fatalf("injection events = %d, want 1", injectionCount)
+	}
+}
+
+func TestClaimTaskByRuntime_DoesNotInjectArchivedDeprecatedKnowledge(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Archived knowledge claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Archived knowledge claim agent")
+
+	archived := createKnowledgeFixture(t, map[string]any{
+		"title":                "Archived Metro native adapter knowledge",
+		"type":                 "lesson",
+		"confidence_status":    "high",
+		"problem_pattern":      "archived metro native adapter trigger comment",
+		"recommended_practice": "This archived item must not be injected.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   issueID,
+		}},
+	})
+	archived = publishKnowledgeForRAG(t, archived.Item.ID)
+	if _, err := testPool.Exec(ctx, `UPDATE knowledge_item SET lifecycle_status = 'archived' WHERE id = $1`, archived.Item.ID); err != nil {
+		t.Fatalf("archive knowledge: %v", err)
+	}
+
+	deprecated := createKnowledgeFixture(t, map[string]any{
+		"title":                "Deprecated Metro native adapter knowledge",
+		"type":                 "lesson",
+		"confidence_status":    "high",
+		"problem_pattern":      "deprecated metro native adapter trigger comment",
+		"recommended_practice": "This deprecated item must not be injected.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   issueID,
+		}},
+	})
+	deprecated = publishKnowledgeForRAG(t, deprecated.Item.ID)
+	if _, err := testPool.Exec(ctx, `UPDATE knowledge_item SET lifecycle_status = 'deprecated' WHERE id = $1`, deprecated.Item.ID); err != nil {
+		t.Fatalf("deprecate knowledge: %v", err)
+	}
+
+	_, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE comment
+		SET content = 'Please use metro native adapter trigger comment context.'
+		WHERE id = $1
+	`, triggerID); err != nil {
+		t.Fatalf("update trigger comment: %v", err)
+	}
+
+	resp := claimCommentTask(t, runtimeID, "archived-knowledge-context-claim")
+	if len(resp.Task.KnowledgeContext) != 0 {
+		t.Fatalf("knowledge_context length = %d, want 0: %#v", len(resp.Task.KnowledgeContext), resp.Task.KnowledgeContext)
+	}
 }
 
 // TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount

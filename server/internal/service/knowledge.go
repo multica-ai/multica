@@ -110,6 +110,47 @@ type KnowledgeSearchResult struct {
 	MatchReason string
 }
 
+type KnowledgeTaskClaimParams struct {
+	WorkspaceID             pgtype.UUID
+	AgentTaskID             pgtype.UUID
+	AgentID                 pgtype.UUID
+	MemberID                pgtype.UUID
+	Issue                   *db.Issue
+	IssueIdentifier         string
+	IssueLabels             []string
+	ProjectTitle            string
+	ProjectResources        []KnowledgeTaskProjectResource
+	TriggerCommentContent   string
+	NewCommentCount         int
+	NewCommentsSince        string
+	ChatMessage             string
+	AutopilotTitle          string
+	AutopilotDescription    string
+	AutopilotSource         string
+	AutopilotTriggerPayload string
+	QuickCreatePrompt       string
+	LastTaskResult          []byte
+	LastTaskError           string
+	LastTaskFailureReason   string
+	Limit                   int32
+}
+
+type KnowledgeTaskProjectResource struct {
+	ResourceType string
+	Label        string
+}
+
+type KnowledgeContextItem struct {
+	ID                string  `json:"id"`
+	Title             string  `json:"title"`
+	Summary           string  `json:"summary,omitempty"`
+	RecommendedAction string  `json:"recommended_action,omitempty"`
+	AntiPatterns      string  `json:"anti_patterns,omitempty"`
+	SourceIssue       string  `json:"source_issue,omitempty"`
+	Score             float64 `json:"score"`
+	Reason            string  `json:"reason"`
+}
+
 type KnowledgeDetail struct {
 	Item            db.KnowledgeItem
 	Sources         []db.KnowledgeSource
@@ -690,6 +731,61 @@ func (s *KnowledgeService) UpsertEmbedding(ctx context.Context, itemID, workspac
 }
 
 func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) ([]KnowledgeSearchResult, error) {
+	results, _, err := s.searchWithRetrieval(ctx, p)
+	return results, err
+}
+
+func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTaskClaimParams) ([]KnowledgeContextItem, error) {
+	query := buildTaskClaimKnowledgeQuery(p)
+	if query == "" {
+		return nil, nil
+	}
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 8 {
+		limit = 8
+	}
+	results, retrieval, err := s.searchWithRetrieval(ctx, KnowledgeSearchParams{
+		WorkspaceID: p.WorkspaceID,
+		MemberID:    p.MemberID,
+		Query:       query,
+		Limit:       limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]KnowledgeContextItem, 0, len(results))
+	for _, result := range results {
+		if result.Item.ConfidenceStatus != "high" {
+			continue
+		}
+		item := KnowledgeContextItem{
+			ID:                util.UUIDToString(result.Item.ID),
+			Title:             result.Item.Title,
+			Summary:           truncateKnowledgeText(firstNonEmpty(result.Item.ProblemPattern, result.Item.Applicability, result.Item.TriggerConditions), 500),
+			RecommendedAction: truncateKnowledgeText(result.Item.RecommendedPractice, 700),
+			AntiPatterns:      truncateKnowledgeText(result.Item.AntiPatterns, 400),
+			SourceIssue:       s.sourceIssueIdentifier(ctx, p.WorkspaceID, result.Item.ID),
+			Score:             result.FinalScore,
+			Reason:            taskClaimInjectionReason(result),
+		}
+		out = append(out, item)
+		if _, err := s.Queries.CreateKnowledgeInjectionEvent(ctx, db.CreateKnowledgeInjectionEventParams{
+			WorkspaceID:      p.WorkspaceID,
+			KnowledgeItemID:  result.Item.ID,
+			AgentTaskID:      p.AgentTaskID,
+			InjectionTarget:  "daemon_brief",
+			RetrievalEventID: retrieval.ID,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeSearchParams) ([]KnowledgeSearchResult, db.KnowledgeRetrievalEvent, error) {
 	query := strings.TrimSpace(p.Query)
 	if p.Limit <= 0 {
 		p.Limit = 10
@@ -698,16 +794,16 @@ func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) 
 		p.Limit = 50
 	}
 	if query == "" && len(p.Embedding) == 0 {
-		return nil, validationError("query or embedding is required")
+		return nil, db.KnowledgeRetrievalEvent{}, validationError("query or embedding is required")
 	}
 	if len(p.Embedding) > 0 && len(p.Embedding) != KnowledgeEmbeddingDimensions {
-		return nil, validationError(fmt.Sprintf("embedding must have %d dimensions", KnowledgeEmbeddingDimensions))
+		return nil, db.KnowledgeRetrievalEvent{}, validationError(fmt.Sprintf("embedding must have %d dimensions", KnowledgeEmbeddingDimensions))
 	}
 	if err := validateSearchFilters(ctx, s.Queries, p.WorkspaceID, p.Filters); err != nil {
-		return nil, err
+		return nil, db.KnowledgeRetrievalEvent{}, err
 	}
 	if err := validateFilterEnums(p.Filters); err != nil {
-		return nil, err
+		return nil, db.KnowledgeRetrievalEvent{}, err
 	}
 
 	resultMap := map[string]*KnowledgeSearchResult{}
@@ -723,7 +819,7 @@ func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) 
 			Labels:      normalizeLabels(p.Filters.Labels),
 		})
 		if err != nil {
-			return nil, err
+			return nil, db.KnowledgeRetrievalEvent{}, err
 		}
 		for _, row := range rows {
 			key := util.UUIDToString(row.ID)
@@ -748,7 +844,7 @@ func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) 
 			Limit:       p.Limit,
 		})
 		if err != nil {
-			return nil, err
+			return nil, db.KnowledgeRetrievalEvent{}, err
 		}
 		for _, row := range rows {
 			key := util.UUIDToString(row.ID)
@@ -782,10 +878,11 @@ func (s *KnowledgeService) Search(ctx context.Context, p KnowledgeSearchParams) 
 	if int32(len(results)) > p.Limit {
 		results = results[:p.Limit]
 	}
-	if _, err := s.recordRetrieval(ctx, p, query, results); err != nil {
-		return nil, err
+	retrieval, err := s.recordRetrieval(ctx, p, query, results)
+	if err != nil {
+		return nil, db.KnowledgeRetrievalEvent{}, err
 	}
-	return results, nil
+	return results, retrieval, nil
 }
 
 func (s *KnowledgeService) AddFeedback(ctx context.Context, p KnowledgeFeedbackParams) (db.KnowledgeFeedback, error) {
@@ -1097,6 +1194,110 @@ func (s *KnowledgeService) recordRetrieval(ctx context.Context, p KnowledgeSearc
 		ResultCount:         int32(len(results)),
 		TopKnowledgeItemIds: topIDs,
 	})
+}
+
+func buildTaskClaimKnowledgeQuery(p KnowledgeTaskClaimParams) string {
+	var parts []string
+	add := func(label, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, label+": "+value)
+		}
+	}
+	if p.Issue != nil {
+		if p.IssueIdentifier != "" {
+			add("Issue", p.IssueIdentifier)
+		}
+		add("Issue title", p.Issue.Title)
+		if p.Issue.Description.Valid {
+			add("Issue description", p.Issue.Description.String)
+		}
+		add("Issue status", p.Issue.Status)
+		add("Issue priority", p.Issue.Priority)
+	}
+	if len(p.IssueLabels) > 0 {
+		add("Issue labels", strings.Join(p.IssueLabels, ", "))
+	}
+	add("Project", p.ProjectTitle)
+	if len(p.ProjectResources) > 0 {
+		resourceParts := make([]string, 0, len(p.ProjectResources))
+		for _, resource := range p.ProjectResources {
+			part := strings.TrimSpace(resource.ResourceType)
+			if resource.Label != "" {
+				part += " " + strings.TrimSpace(resource.Label)
+			}
+			if strings.TrimSpace(part) != "" {
+				resourceParts = append(resourceParts, part)
+			}
+		}
+		add("Project resources", strings.Join(resourceParts, ", "))
+	}
+	add("Trigger comment", p.TriggerCommentContent)
+	if p.NewCommentCount > 0 {
+		add("New comments context", fmt.Sprintf("%d issue comments since %s after the previous run", p.NewCommentCount, p.NewCommentsSince))
+	}
+	add("Chat message", p.ChatMessage)
+	add("Autopilot title", p.AutopilotTitle)
+	add("Autopilot description", p.AutopilotDescription)
+	add("Autopilot source", p.AutopilotSource)
+	add("Autopilot trigger payload", p.AutopilotTriggerPayload)
+	add("Quick create prompt", p.QuickCreatePrompt)
+	if len(p.LastTaskResult) > 0 {
+		add("Last task result", truncateKnowledgeText(string(p.LastTaskResult), 800))
+	}
+	add("Last task error", p.LastTaskError)
+	add("Last task failure reason", p.LastTaskFailureReason)
+	return truncateKnowledgeText(strings.Join(parts, "\n"), 6000)
+}
+
+func (s *KnowledgeService) sourceIssueIdentifier(ctx context.Context, workspaceID, itemID pgtype.UUID) string {
+	sources, err := s.Queries.ListKnowledgeSources(ctx, db.ListKnowledgeSourcesParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return ""
+	}
+	workspace, wsErr := s.Queries.GetWorkspace(ctx, workspaceID)
+	prefix := ""
+	if wsErr == nil {
+		prefix = workspace.IssuePrefix
+	}
+	for _, source := range sources {
+		if source.SourceType != "issue" || !source.SourceID.Valid {
+			continue
+		}
+		issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
+		if err != nil {
+			continue
+		}
+		if prefix != "" {
+			return fmt.Sprintf("%s-%d", prefix, issue.Number)
+		}
+		return util.UUIDToString(issue.ID)
+	}
+	for _, source := range sources {
+		if source.SourceTitle.Valid && strings.TrimSpace(source.SourceTitle.String) != "" {
+			return strings.TrimSpace(source.SourceTitle.String)
+		}
+		if source.SourceUrl.Valid && strings.TrimSpace(source.SourceUrl.String) != "" {
+			return strings.TrimSpace(source.SourceUrl.String)
+		}
+	}
+	return ""
+}
+
+func taskClaimInjectionReason(result KnowledgeSearchResult) string {
+	if result.MatchReason == "" {
+		return "matched task claim context"
+	}
+	return "matched task claim context via " + result.MatchReason
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func validateKnowledgeEnums(itemType, confidence, lifecycle string) error {

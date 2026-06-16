@@ -172,7 +172,15 @@ DO UPDATE SET embedding = EXCLUDED.embedding, embedded_at = now()
 RETURNING id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at;
 
 -- name: SearchKnowledgeText :many
-WITH candidates AS (
+WITH query_terms AS (
+    SELECT COALESCE(array_agg(term), '{}')::text[] AS terms
+    FROM (
+        SELECT DISTINCT term
+        FROM regexp_split_to_table(LOWER(sqlc.arg('query')::text), '[^[:alnum:]_]+') AS term
+        WHERE length(term) > 2
+    ) q
+),
+candidates AS (
     SELECT ki.*,
         (
             CASE WHEN LOWER(ki.title) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 4 ELSE 0 END +
@@ -181,7 +189,26 @@ WITH candidates AS (
             CASE WHEN LOWER(ki.anti_patterns) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 2 ELSE 0 END +
             CASE WHEN LOWER(ki.trigger_conditions) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
             CASE WHEN LOWER(ki.diagnostic_steps) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END
+            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.8
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.title) LIKE '%' || term || '%'
+            ), 0) +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.6
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.problem_pattern) LIKE '%' || term || '%'
+                   OR LOWER(ki.recommended_practice) LIKE '%' || term || '%'
+            ), 0) +
+            COALESCE((
+                SELECT COUNT(*)::float8 * 0.3
+                FROM unnest((SELECT terms FROM query_terms)) AS term
+                WHERE LOWER(ki.anti_patterns) LIKE '%' || term || '%'
+                   OR LOWER(ki.trigger_conditions) LIKE '%' || term || '%'
+                   OR LOWER(ki.diagnostic_steps) LIKE '%' || term || '%'
+                   OR LOWER(ki.applicability) LIKE '%' || term || '%'
+            ), 0)
         )::float8 AS text_score
     FROM knowledge_item ki
     WHERE ki.workspace_id = sqlc.arg('workspace_id')
@@ -268,6 +295,15 @@ INSERT INTO knowledge_retrieval_event (
 ) VALUES (
     sqlc.arg('workspace_id'), sqlc.narg('member_id'), sqlc.narg('query'), sqlc.arg('retrieval_mode'),
     COALESCE(sqlc.narg('filters'), '{}'::jsonb), sqlc.arg('result_count'), COALESCE(sqlc.narg('top_knowledge_item_ids')::uuid[], '{}')
+)
+RETURNING *;
+
+-- name: CreateKnowledgeInjectionEvent :one
+INSERT INTO knowledge_injection_event (
+    workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id
+) VALUES (
+    sqlc.arg('workspace_id'), sqlc.arg('knowledge_item_id'), sqlc.narg('agent_task_id'),
+    sqlc.arg('injection_target'), sqlc.narg('retrieval_event_id')
 )
 RETURNING *;
 

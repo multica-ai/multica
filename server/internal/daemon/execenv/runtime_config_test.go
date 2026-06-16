@@ -46,6 +46,45 @@ func TestBuildMetaSkillContentPromotesRoleFrontmatterAfterIdentity(t *testing.T)
 	}
 }
 
+func TestBuildMetaSkillContentRelevantKnowledge(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID: "issue-knowledge",
+		KnowledgeContext: []KnowledgeContextForEnv{{
+			ID:                "knowledge-1",
+			Title:             "Use native adapters for mobile browser SDKs",
+			Summary:           "React Native cannot bundle browser-only SDK entrypoints.",
+			RecommendedAction: "Add a .native.ts adapter before importing the shared module.",
+			AntiPatterns:      "Do not force Metro to bundle browser SDK code.",
+			SourceIssue:       "OPE-2649",
+			Score:             7.5,
+			Reason:            "matched task claim context via text",
+		}},
+	})
+	if !strings.Contains(out, "## Relevant Knowledge") {
+		t.Fatalf("missing Relevant Knowledge section:\n%s", out)
+	}
+	for _, want := range []string{
+		"`knowledge-1`",
+		"Use native adapters for mobile browser SDKs",
+		"Recommended action: Add a .native.ts adapter",
+		"Avoid: Do not force Metro",
+		"Used knowledge: KNO-123",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in Relevant Knowledge section:\n%s", want, out)
+		}
+	}
+}
+
+func TestBuildMetaSkillContentOmitsRelevantKnowledgeWhenEmpty(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-empty-knowledge"})
+	if strings.Contains(out, "## Relevant Knowledge") {
+		t.Fatalf("Relevant Knowledge should be omitted when empty:\n%s", out)
+	}
+}
+
 func TestBuildMetaSkillContentSynthesizesRoleFrontmatterWhenMissing(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{

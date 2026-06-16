@@ -1645,6 +1645,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	h.injectKnowledgeContextForClaim(r.Context(), &resp, *task)
+
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
 	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
@@ -1685,6 +1687,105 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue) {
+	if h.KnowledgeService == nil || resp == nil || resp.WorkspaceID == "" {
+		return
+	}
+	workspaceID := parseUUID(resp.WorkspaceID)
+	var issue *db.Issue
+	issueIdentifier := ""
+	if task.IssueID.Valid {
+		if row, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: task.IssueID, WorkspaceID: workspaceID}); err == nil {
+			issue = &row
+			if ws, err := h.Queries.GetWorkspace(ctx, workspaceID); err == nil && ws.IssuePrefix != "" {
+				issueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(row.Number))
+			}
+		}
+	}
+
+	labels := h.issueLabelNamesForClaim(ctx, workspaceID, task.IssueID)
+	lastResult, lastError, lastFailure := h.lastTaskOutcomeForClaim(ctx, task)
+	projectResources := make([]service.KnowledgeTaskProjectResource, 0, len(resp.ProjectResources))
+	for _, resource := range resp.ProjectResources {
+		projectResources = append(projectResources, service.KnowledgeTaskProjectResource{
+			ResourceType: resource.ResourceType,
+			Label:        resource.Label,
+		})
+	}
+	items, err := h.KnowledgeService.SearchForTaskClaim(ctx, service.KnowledgeTaskClaimParams{
+		WorkspaceID:             workspaceID,
+		AgentTaskID:             task.ID,
+		AgentID:                 task.AgentID,
+		Issue:                   issue,
+		IssueIdentifier:         issueIdentifier,
+		IssueLabels:             labels,
+		ProjectTitle:            resp.ProjectTitle,
+		ProjectResources:        projectResources,
+		TriggerCommentContent:   resp.TriggerCommentContent,
+		NewCommentCount:         resp.NewCommentCount,
+		NewCommentsSince:        resp.NewCommentsSince,
+		ChatMessage:             resp.ChatMessage,
+		AutopilotTitle:          resp.AutopilotTitle,
+		AutopilotDescription:    resp.AutopilotDescription,
+		AutopilotSource:         resp.AutopilotSource,
+		AutopilotTriggerPayload: strings.TrimSpace(string(resp.AutopilotTriggerPayload)),
+		QuickCreatePrompt:       resp.QuickCreatePrompt,
+		LastTaskResult:          lastResult,
+		LastTaskError:           lastError,
+		LastTaskFailureReason:   lastFailure,
+		Limit:                   5,
+	})
+	if err != nil {
+		slog.Warn("task claim: failed to inject knowledge context",
+			"task_id", uuidToString(task.ID),
+			"workspace_id", resp.WorkspaceID,
+			"error", err,
+		)
+		return
+	}
+	resp.KnowledgeContext = items
+}
+
+func (h *Handler) issueLabelNamesForClaim(ctx context.Context, workspaceID, issueID pgtype.UUID) []string {
+	if !issueID.Valid {
+		return nil
+	}
+	rows, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issueID, WorkspaceID: workspaceID})
+	if err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.Name) != "" {
+			out = append(out, row.Name)
+		}
+	}
+	return out
+}
+
+func (h *Handler) lastTaskOutcomeForClaim(ctx context.Context, task db.AgentTaskQueue) ([]byte, string, string) {
+	if !task.IssueID.Valid {
+		return nil, "", ""
+	}
+	row, err := h.Queries.GetLastTaskOutcomeForIssueAndAgent(ctx, db.GetLastTaskOutcomeForIssueAndAgentParams{
+		AgentID:       task.AgentID,
+		IssueID:       task.IssueID,
+		CurrentTaskID: task.ID,
+	})
+	if err != nil {
+		return nil, "", ""
+	}
+	errorText := ""
+	if row.Error.Valid {
+		errorText = row.Error.String
+	}
+	failureReason := ""
+	if row.FailureReason.Valid {
+		failureReason = row.FailureReason.String
+	}
+	return row.Result, errorText, failureReason
 }
 
 func (h *Handler) injectIssueSquadLeaderBriefing(ctx context.Context, resp *AgentTaskResponse, task db.AgentTaskQueue, issue db.Issue) {
