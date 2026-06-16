@@ -176,6 +176,37 @@ describe("AgentStreamSidebar", () => {
     await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active-new"));
   });
 
+  it("keeps a manually selected recent run while another run is active", async () => {
+    const activeRun = makeTask({
+      id: "task-active",
+      status: "running",
+      created_at: "2026-01-01T00:03:00Z",
+      started_at: "2026-01-01T00:03:30Z",
+      completed_at: null,
+      trigger_summary: "Active run",
+    });
+    const recentRun = makeTask({
+      id: "task-recent",
+      status: "completed",
+      created_at: "2026-01-01T00:01:00Z",
+      completed_at: "2026-01-01T00:02:00Z",
+      trigger_summary: "Completed run",
+    });
+    mockApi.listTasksByIssue.mockResolvedValue([recentRun, activeRun]);
+
+    const { queryClient } = renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active"));
+    fireEvent.click(screen.getByRole("button", { name: /runs/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Completed run/i }));
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
+
+    await queryClient.invalidateQueries({ queryKey: ["issues", "tasks", "issue-1"] });
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
+  });
+
   it("defaults to the newest recent run when there are no active runs", async () => {
     mockApi.listTasksByIssue.mockResolvedValue([
       makeTask({

@@ -5,8 +5,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, Loader2, MessageSquarePlus, RotateCw, Search, Square, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
-import { useIssueDetailCollapseStore } from "@multica/core/issues/stores";
-import { TaskTraceOutput } from "./task-trace-output";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, TaskFailureReason } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -369,14 +367,6 @@ function ActiveRow({
   const trigger = useTriggerText(task);
   const time = activeTimeText(task, timeAgo);
 
-  const defaultCollapsed = task.status !== "running" && task.status !== "failed";
-  const isCollapsed = useIssueDetailCollapseStore((s) =>
-    s.isTaskCollapsed(issueId, task.id, defaultCollapsed)
-  );
-  const setCollapsed = (collapsed: boolean) => {
-    useIssueDetailCollapseStore.getState().setTaskCollapsed(issueId, task.id, collapsed);
-  };
-
   // Transcript only meaningful once messages exist — pure-queued tasks
   // have nothing to show yet.
   const showTranscript = task.status !== "queued";
@@ -409,8 +399,6 @@ function ActiveRow({
         task={task}
         runIndex={runIndex}
         colorClass={colorClass}
-        isCollapsed={isCollapsed}
-        onToggleCollapse={() => setCollapsed(!isCollapsed)}
       >
         <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
         {/* Status + time always visible — actions append on hover, never
@@ -456,11 +444,6 @@ function ActiveRow({
         />
       )}
     </RowShell>
-    {!isCollapsed && (
-      <div className="pl-6 pr-1 py-1 border-l border-border/60 ml-3.5 mb-1.5 transition-all duration-300">
-        <TaskTraceOutput task={task} compact />
-      </div>
-    )}
   </div>
   );
 }
@@ -498,14 +481,6 @@ function PastRow({
       ? `exit ${task.exit_code}`
       : null;
 
-  const defaultCollapsed = task.status !== "running" && task.status !== "failed";
-  const isCollapsed = useIssueDetailCollapseStore((s) =>
-    s.isTaskCollapsed(issueId, task.id, defaultCollapsed)
-  );
-  const setCollapsed = (collapsed: boolean) => {
-    useIssueDetailCollapseStore.getState().setTaskCollapsed(issueId, task.id, collapsed);
-  };
-
   const handleTriggerClick =
     task.trigger_comment_id && onHighlightComment
       ? () => onHighlightComment(task.trigger_comment_id!)
@@ -532,8 +507,6 @@ function PastRow({
         task={task}
         runIndex={runIndex}
         colorClass={colorClass}
-        isCollapsed={isCollapsed}
-        onToggleCollapse={() => setCollapsed(!isCollapsed)}
       >
         <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
         <span className="shrink-0 whitespace-nowrap text-xs">
@@ -590,11 +563,6 @@ function PastRow({
           onSubmit={(note) => retryTask(note)}
         />
       </RowShell>
-      {!isCollapsed && (
-        <div className="pl-6 pr-1 py-1 border-l border-border/60 ml-3.5 mb-1.5 transition-all duration-300">
-          <TaskTraceOutput task={task} compact />
-        </div>
-      )}
     </div>
   );
 }
@@ -605,29 +573,16 @@ function RowShell({
   task,
   runIndex,
   colorClass,
-  isCollapsed,
-  onToggleCollapse,
   children,
 }: {
   task: AgentTask;
   runIndex?: number;
   colorClass?: string;
-  isCollapsed?: boolean;
-  onToggleCollapse?: () => void;
   children: React.ReactNode;
 }) {
-  const handleClick = (e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("button") || target.closest("a") || target.closest("[role='button']")) {
-      return;
-    }
-    onToggleCollapse?.();
-  };
-
   return (
     <div
-      onClick={handleClick}
-      className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40 cursor-pointer${
+      className={`group relative flex items-center gap-2 rounded px-1 py-1.5 transition-colors hover:bg-accent/40${
         colorClass ? ` border-l-2 ${colorClass}` : ""
       }`}
     >
@@ -636,11 +591,6 @@ function RowShell({
           #{runIndex}
         </span>
       )}
-      <ChevronRight
-        className={`h-3 w-3 shrink-0 stroke-[2.5] text-muted-foreground/60 transition-transform ${
-          !isCollapsed ? "rotate-90" : ""
-        }`}
-      />
       {task.agent_id ? (
         <ActorAvatar
           actorType="agent"
