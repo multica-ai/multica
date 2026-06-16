@@ -19,13 +19,13 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Contract | Line | Behavior | Safe check |
 |---|---|---|---|
 | Create flags: `name`, `description`, `instructions`, `runtime-id` | 159–162 | Registered create flags; `name`/`runtime-id` enforced in `runAgentCreate` | `multica agent create --help` |
-| `runtime-config`, `model`, `custom-args` flags | 163–165 | `model` help: "Prefer this over passing --model in --custom-args"; `custom-args` help names codex/openclaw rejecting `--model` (CLI help only, not server-enforced) | `multica agent create --help` |
+| `runtime-config`, `model`, `thinking-level`, `custom-args` flags | 163–166 | `model` help: "Prefer this over passing --model in --custom-args"; `thinking-level` writes top-level `agent.thinking_level`; `custom-args` help names codex/openclaw rejecting `--model` (CLI help only, not server-enforced) | `multica agent create --help` |
 | Secret-safe env input: `custom-env`, `custom-env-stdin`, `custom-env-file` | 166–168 | `--custom-env` warns about shell history / `ps`; stdin and file modes keep secrets off the command line; mutually exclusive | `multica agent create --help` |
 | Secret-safe MCP input: `mcp-config`, `mcp-config-stdin`, `mcp-config-file` (create) | 169–171 | Same three-channel pattern as `custom-env`; `--mcp-config` warns about shell history / `ps`; value must be a JSON object or `null` | `multica agent create --help` |
 | MCP flags on `agent update` | 192–194 | Same three channels on update; `--mcp-config null` clears. Unlike `custom_env`, `mcp_config` IS settable via update | `multica agent update --help` |
 | `runAgentCreate` builds body + `POST /api/agents` | 414 | Only sets a body key when the flag `Changed`; posts to `/api/agents` (line 482) | read 414–489 |
-| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model | 437–478 | `resolveCustomEnv` (455) and `resolveMcpConfig` (460) gate their secret channels; omitted flags are not sent | read 437–478 |
-| `runAgentUpdate` sends `mcp_config` | 550 | `resolveMcpConfig` adds `mcp_config` to the `PUT /api/agents/{id}` body (564); `custom_env` is intentionally not a flag here | read 495–565 |
+| Body assembly: description/instructions/runtime-config/custom-args/custom-env/mcp-config/model/thinking-level | 437–482 | `resolveCustomEnv` (455) and `resolveMcpConfig` (460) gate their secret channels; omitted flags are not sent | read 437–482 |
+| `runAgentUpdate` sends `thinking_level` and `mcp_config` | 540, 554 | `--thinking-level` adds top-level `thinking_level`; `resolveMcpConfig` adds `mcp_config` to the `PUT /api/agents/{id}` body (568); `custom_env` is intentionally not a flag here | read 495–569 |
 | `parseMcpConfig` / `resolveMcpConfig` helpers | 1066, 1094 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read 1066–1150 |
 | `agent skills set` = replace-all | 772 | `PUT /api/agents/{id}/skills` (790); `--skill-ids ''` clears all (779) | `multica agent skills set --help` |
 | `agent skills add` = additive | 797 | `POST /api/agents/{id}/skills/add` (818); requires ≥1 id (804, 808) | `multica agent skills add --help` |

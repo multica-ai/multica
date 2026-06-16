@@ -290,6 +290,7 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	cmd.Flags().String("runtime-id", "", "")
 	cmd.Flags().String("runtime-config", "", "")
 	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("thinking-level", "", "")
 	cmd.Flags().String("custom-args", "", "")
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("status", "", "")
@@ -304,6 +305,128 @@ func TestAgentUpdateNoFieldsErrorPointsAtEnvCommand(t *testing.T) {
 	msg := err.Error()
 	if !strings.Contains(msg, "multica agent env set") {
 		t.Fatalf("no-fields error must direct users to `multica agent env set`; got: %q", msg)
+	}
+}
+
+func newAgentCreateBodyTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "create"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("custom-env", "", "")
+	cmd.Flags().Bool("custom-env-stdin", false, "")
+	cmd.Flags().String("custom-env-file", "", "")
+	cmd.Flags().String("mcp-config", "", "")
+	cmd.Flags().Bool("mcp-config-stdin", false, "")
+	cmd.Flags().String("mcp-config-file", "", "")
+	cmd.Flags().String("visibility", "private", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 6, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	return cmd
+}
+
+func newAgentUpdateBodyTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("name", "", "")
+	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("instructions", "", "")
+	cmd.Flags().String("runtime-id", "", "")
+	cmd.Flags().String("runtime-config", "", "")
+	cmd.Flags().String("model", "", "")
+	cmd.Flags().String("thinking-level", "", "")
+	cmd.Flags().String("custom-args", "", "")
+	cmd.Flags().String("mcp-config", "", "")
+	cmd.Flags().Bool("mcp-config-stdin", false, "")
+	cmd.Flags().String("mcp-config-file", "", "")
+	cmd.Flags().String("visibility", "", "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().Int32("max-concurrent-tasks", 0, "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().String("profile", "", "")
+	return cmd
+}
+
+func TestAgentCreateSendsThinkingLevel(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/agents" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "agent-1", "name": gotBody["name"]})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := newAgentCreateBodyTestCmd()
+	_ = cmd.Flags().Set("name", "Planner")
+	_ = cmd.Flags().Set("runtime-id", "runtime-1")
+	_ = cmd.Flags().Set("model", "claude-sonnet-4-6")
+	_ = cmd.Flags().Set("thinking-level", "max")
+
+	if _, err := captureStdout(t, func() error { return runAgentCreate(cmd, nil) }); err != nil {
+		t.Fatalf("runAgentCreate: %v", err)
+	}
+	if gotBody["thinking_level"] != "max" {
+		t.Fatalf("thinking_level = %#v, want max; body=%#v", gotBody["thinking_level"], gotBody)
+	}
+	if gotBody["runtime_config"] != nil {
+		t.Fatalf("runtime_config should be omitted when only --thinking-level is set; body=%#v", gotBody)
+	}
+}
+
+func TestAgentUpdateSendsThinkingLevelAndAllowsClear(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/agents/agent-1" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "agent-1", "name": "Planner"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	setCmd := newAgentUpdateBodyTestCmd()
+	_ = setCmd.Flags().Set("thinking-level", "medium")
+	if _, err := captureStdout(t, func() error { return runAgentUpdate(setCmd, []string{"agent-1"}) }); err != nil {
+		t.Fatalf("runAgentUpdate set: %v", err)
+	}
+
+	clearCmd := newAgentUpdateBodyTestCmd()
+	_ = clearCmd.Flags().Set("thinking-level", "")
+	if _, err := captureStdout(t, func() error { return runAgentUpdate(clearCmd, []string{"agent-1"}) }); err != nil {
+		t.Fatalf("runAgentUpdate clear: %v", err)
+	}
+
+	if len(bodies) != 2 {
+		t.Fatalf("request count = %d, want 2", len(bodies))
+	}
+	if bodies[0]["thinking_level"] != "medium" {
+		t.Fatalf("set body = %#v, want thinking_level medium", bodies[0])
+	}
+	if got, ok := bodies[1]["thinking_level"]; !ok || got != "" {
+		t.Fatalf("clear body = %#v, want explicit empty thinking_level", bodies[1])
 	}
 }
 

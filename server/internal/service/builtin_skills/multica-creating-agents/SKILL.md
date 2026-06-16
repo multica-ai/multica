@@ -50,6 +50,7 @@ Minimum create call (`--name` and `--runtime-id` are both required):
 
 ```bash
 multica agent create --name <name> --runtime-id <runtime-id> \
+  --model <model-id> --thinking-level <level> \
   --description "<short catalog summary>" \
   --instructions "<runtime behavior contract>" \
   --output json
@@ -58,8 +59,8 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`visibility`, …) on the flag being `Changed` — so omitted flags fall through
-to server defaults rather than sending empty strings.
+`thinking-level`, `visibility`, …) on the flag being `Changed` — so omitted
+flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
@@ -74,7 +75,7 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
 | `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
-| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
+| `thinking_level` / `--thinking-level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
@@ -88,7 +89,8 @@ Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
 
-`thinking_level` is validated only at the provider level: an unrecognized
+`thinking_level` is set with `--thinking-level` on `agent create` and
+`agent update`. It is validated only at the provider level: an unrecognized
 literal returns 400, but a value that is valid for the provider yet
 unsupported for the chosen model is NOT rejected here — that gap surfaces as a
 daemon-side task error at execution time.
