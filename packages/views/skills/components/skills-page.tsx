@@ -38,7 +38,7 @@ import {
 import { useNavigation } from "../../navigation";
 import { PageHeader } from "../../layout/page-header";
 import { canEditSkill } from "../hooks/use-can-edit-skill";
-import { readOrigin } from "../lib/origin";
+import { readOrigin, isRuntimeManagedOrigin } from "../lib/origin";
 import { CreateSkillDialog } from "./create-skill-dialog";
 import { type SkillRow, useSkillColumns } from "./skill-columns";
 import { useT } from "../../i18n";
@@ -248,7 +248,7 @@ export default function SkillsPage() {
     return filtered.map((skill) => {
       const origin = readOrigin(skill);
       const runtime =
-        origin.type === "runtime_local" && origin.runtime_id
+        isRuntimeManagedOrigin(origin) && origin.runtime_id
           ? runtimesById.get(origin.runtime_id) ?? null
           : null;
       return {

@@ -94,7 +94,7 @@ type Config struct {
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
-	SharedSkillsDir                string                // shared skill root synced to the workspace (default: ~/.pi/share/skills)
+	SharedSkillsDir                string                // optional global override; when empty each provider uses its own shared root
 	SharedSkillsSyncInterval       time.Duration         // how often to scan and sync SharedSkillsDir
 	PollInterval                   time.Duration
 	HeartbeatInterval              time.Duration
@@ -474,14 +474,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoUpdateInterval = overrides.AutoUpdateCheckInterval
 	}
 
+	// Empty means "resolve per provider" in shared_skills.go (pi → ~/.pi/share/skills).
 	sharedSkillsDir := strings.TrimSpace(os.Getenv("MULTICA_SHARED_SKILLS_DIR"))
-	if sharedSkillsDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Config{}, fmt.Errorf("resolve shared skills dir: %w", err)
-		}
-		sharedSkillsDir = filepath.Join(home, ".pi", "share", "skills")
-	}
 	sharedSkillsInterval, err := durationFromEnv("MULTICA_SHARED_SKILLS_SYNC_INTERVAL", DefaultSharedSkillsSyncInterval)
 	if err != nil {
 		return Config{}, err

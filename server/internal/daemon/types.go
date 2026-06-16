@@ -145,7 +145,8 @@ type SkillFileData struct {
 }
 
 type SharedSkillSyncPayload struct {
-	Skills []SharedSkillBundle `json:"skills"`
+	Skills      []SharedSkillBundle `json:"skills"`
+	PresentKeys []string            `json:"present_keys"`
 }
 
 type SharedSkillBundle struct {
@@ -159,11 +160,27 @@ type SharedSkillBundle struct {
 	Files       []SkillFileData `json:"files,omitempty"`
 }
 
+type SharedSkillSyncConflict struct {
+	Key    string `json:"key"`
+	Name   string `json:"name"`
+	Skill  string `json:"skill_id,omitempty"`
+	Reason string `json:"reason"`
+}
+
+type SharedSkillSyncItemError struct {
+	Key   string `json:"key"`
+	Name  string `json:"name,omitempty"`
+	Error string `json:"error"`
+}
+
 type SharedSkillSyncResult struct {
-	Status    string `json:"status"`
-	Created   int    `json:"created"`
-	Updated   int    `json:"updated"`
-	Unchanged int    `json:"unchanged"`
+	Status    string                      `json:"status"`
+	Created   int                         `json:"created"`
+	Updated   int                         `json:"updated"`
+	Unchanged int                         `json:"unchanged"`
+	Deleted   int                         `json:"deleted"`
+	Conflicts []SharedSkillSyncConflict   `json:"conflicts,omitempty"`
+	Errors    []SharedSkillSyncItemError  `json:"errors,omitempty"`
 }
 
 // TaskUsageEntry represents token usage for a single model during a task execution.

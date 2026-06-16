@@ -160,6 +160,9 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	sharedSkillScanMu    sync.Mutex
+	sharedSkillScanCache map[string]string // scanRoot\x00skillKey -> fingerprint
 }
 
 // New creates a new Daemon instance.
@@ -185,6 +188,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		sharedSkillScanCache:      make(map[string]string),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate

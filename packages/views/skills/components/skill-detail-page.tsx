@@ -61,7 +61,7 @@ import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
-import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
+import { readOrigin, isRuntimeManagedOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
 import { FileViewer } from "./file-viewer";
 import { useT } from "../../i18n";
@@ -194,11 +194,13 @@ function OriginSidebarCard({
   const { t } = useT("skills");
   if (origin.type === "manual") return null;
 
-  const isRuntime = origin.type === "runtime_local";
+  const isRuntime = isRuntimeManagedOrigin(origin);
   const label =
-    origin.type === "runtime_local"
-      ? t(($) => $.detail.origin_card.imported_runtime)
-      : origin.type === "clawhub"
+    origin.type === "runtime_shared"
+      ? t(($) => $.detail.origin_card.imported_runtime_shared)
+      : origin.type === "runtime_local"
+        ? t(($) => $.detail.origin_card.imported_runtime)
+        : origin.type === "clawhub"
         ? t(($) => $.detail.origin_card.imported_clawhub)
         : origin.type === "github"
           ? t(($) => $.detail.origin_card.imported_github)
@@ -345,7 +347,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     [skill],
   );
   const originRuntime = useMemo<AgentRuntime | null>(() => {
-    if (!origin || origin.type !== "runtime_local" || !origin.runtime_id)
+    if (!origin || !isRuntimeManagedOrigin(origin) || !origin.runtime_id)
       return null;
     return runtimes.find((r) => r.id === origin.runtime_id) ?? null;
   }, [origin, runtimes]);
@@ -538,7 +540,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   // --- Sub-line metadata for the header ---
   const originLabel = (() => {
     if (!origin) return null;
-    if (origin.type === "runtime_local") {
+    if (isRuntimeManagedOrigin(origin)) {
+      if (origin.type === "runtime_shared") {
+        return originRuntime
+          ? t(($) => $.detail.subline.origin_runtime_shared_named, { name: originRuntime.name })
+          : origin.provider
+            ? t(($) => $.detail.subline.origin_runtime_shared_provider, { provider: origin.provider })
+            : t(($) => $.detail.subline.origin_runtime_shared_unknown);
+      }
       return originRuntime
         ? t(($) => $.detail.subline.origin_runtime_named, { name: originRuntime.name })
         : origin.provider
@@ -701,7 +710,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {originLabel && (
                 <span className="inline-flex items-center gap-1">
-                  {origin?.type === "runtime_local" ? (
+                  {origin && isRuntimeManagedOrigin(origin) ? (
                     <HardDrive className="h-3 w-3" />
                   ) : (
                     <Sparkles className="h-3 w-3" />

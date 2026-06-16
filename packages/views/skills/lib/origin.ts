@@ -20,6 +20,10 @@ export type OriginInfo = {
   source_url?: string;
 };
 
+export function isRuntimeManagedOrigin(origin: OriginInfo): boolean {
+  return origin.type === "runtime_local" || origin.type === "runtime_shared";
+}
+
 export function readOrigin(skill: SkillSummary): OriginInfo {
   const raw = (skill.config?.origin ?? null) as
     | (OriginInfo & Record<string, unknown>)

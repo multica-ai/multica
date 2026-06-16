@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/skill"
 )
@@ -225,6 +228,59 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 		return files[i].Path < files[j].Path
 	})
 	return files, nil
+}
+
+// localSkillScanFingerprint hashes file paths with size+mtime so sync can skip
+// re-reading unchanged skill bundles between polls.
+func localSkillScanFingerprint(skillDir string) (string, error) {
+	walkRoot := skillDir
+	if resolved, err := filepath.EvalSymlinks(skillDir); err == nil {
+		walkRoot = resolved
+	}
+	h := sha256.New()
+	err := filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.IsDir() {
+			if path != walkRoot && isIgnoredLocalSkillEntry(entry.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if isIgnoredLocalSkillEntry(entry.Name()) {
+			return nil
+		}
+		rel, err := filepath.Rel(walkRoot, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.Clean(rel)
+		if rel == "." || filepath.IsAbs(rel) || strings.HasPrefix(rel, "..") {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil
+		}
+		_, _ = h.Write([]byte(rel))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(info.ModTime().UTC().Format(time.RFC3339Nano)))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(fmt.Sprintf("%d", info.Size())))
+		_, _ = h.Write([]byte{0})
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, error) {

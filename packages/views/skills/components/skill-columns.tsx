@@ -22,7 +22,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { readOrigin, totalFileCount } from "../lib/origin";
+import { readOrigin, isRuntimeManagedOrigin, totalFileCount } from "../lib/origin";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../../i18n";
 
@@ -194,13 +194,20 @@ function SourceCell({
 
   let icon = <Pencil className="h-3 w-3 shrink-0" />;
   let label: string = t(($) => $.table.source_manual);
-  if (origin.type === "runtime_local") {
+  if (isRuntimeManagedOrigin(origin)) {
     icon = <HardDrive className="h-3 w-3 shrink-0" />;
-    label = runtime
-      ? t(($) => $.table.source_runtime_named, { name: runtime.name })
-      : origin.provider
-        ? t(($) => $.table.source_runtime_provider, { provider: origin.provider })
-        : t(($) => $.table.source_runtime_unknown);
+    label =
+      origin.type === "runtime_shared"
+        ? runtime
+          ? t(($) => $.table.source_runtime_shared_named, { name: runtime.name })
+          : origin.provider
+            ? t(($) => $.table.source_runtime_shared_provider, { provider: origin.provider })
+            : t(($) => $.table.source_runtime_shared_unknown)
+        : runtime
+          ? t(($) => $.table.source_runtime_named, { name: runtime.name })
+          : origin.provider
+            ? t(($) => $.table.source_runtime_provider, { provider: origin.provider })
+            : t(($) => $.table.source_runtime_unknown);
   } else if (origin.type === "clawhub") {
     icon = <Download className="h-3 w-3 shrink-0" />;
     label = t(($) => $.table.source_clawhub);

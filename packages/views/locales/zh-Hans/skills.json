@@ -59,6 +59,9 @@
     "source_runtime_named": "来自 {{name}}",
     "source_runtime_provider": "来自 {{provider}} 运行时",
     "source_runtime_unknown": "来自某个运行时",
+    "source_runtime_shared_named": "从 {{name}} 同步",
+    "source_runtime_shared_provider": "从 {{provider}} 共享目录同步",
+    "source_runtime_shared_unknown": "从共享目录同步",
     "source_clawhub": "来自 ClawHub",
     "source_skills_sh": "来自 Skills.sh",
     "source_github": "来自 GitHub"
@@ -81,6 +84,9 @@
       "origin_runtime_named": "本地运行时 · {{name}}",
       "origin_runtime_provider": "本地运行时 · {{provider}}",
       "origin_runtime_unknown": "本地运行时",
+      "origin_runtime_shared_named": "共享目录 · {{name}}",
+      "origin_runtime_shared_provider": "共享目录 · {{provider}}",
+      "origin_runtime_shared_unknown": "共享目录",
       "origin_clawhub": "导入自 · ClawHub",
       "origin_skills_sh": "导入自 · Skills.sh",
       "origin_github": "导入自 · GitHub",
@@ -116,6 +122,7 @@
     },
     "origin_card": {
       "imported_runtime": "从本地运行时导入",
+      "imported_runtime_shared": "从共享运行时目录同步",
       "imported_clawhub": "从 ClawHub 导入",
       "imported_skills_sh": "从 Skills.sh 导入",
       "imported_github": "从 GitHub 导入",
