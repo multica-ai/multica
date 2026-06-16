@@ -40,9 +40,12 @@ describe("normalizeGitVersion", () => {
 
   it("falls back to 0.0.0-<hash> when no tags are reachable", () => {
     // `git describe --tags --always` returns just the short commit hash
-    // when there are no tags in the history at all.
+    // when there are no tags in the history at all. A hash that begins with
+    // a digit (e.g. "2f24057b") is still not valid semver and must fall
+    // through — otherwise electron-updater rejects it on launch.
     expect(normalizeGitVersion("f1415e96")).toBe("0.0.0-f1415e96");
     expect(normalizeGitVersion("abc1234")).toBe("0.0.0-abc1234");
+    expect(normalizeGitVersion("2f24057b")).toBe("0.0.0-2f24057b");
   });
 });
 
