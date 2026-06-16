@@ -25,6 +25,7 @@ import {
   agentListOptions,
 } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
+import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   useChannelFavoritesStore,
@@ -169,6 +170,14 @@ export function SlackBlock({
     enabled: !!wsId && showAgents,
   });
   const { onlineUserIds } = useMemberPresence(wsId);
+  // Agent presence (online/offline dot), keyed by agent id. Only paid for
+  // when the user opts into the agents list — pass undefined otherwise so the
+  // runtime/snapshot queries stay idle. `availability === "online"` is the
+  // single green-dot signal; every other state (offline/unstable/paused) reads
+  // as the red offline dot, matching the binary member dot in this block.
+  const { byAgent: agentPresence } = useWorkspacePresenceMap(
+    showAgents ? wsId : undefined,
+  );
   // Watch typing for the currently selected conversation so a member's DM row
   // can surface "typing…" when they type.
   const { typingUserIds } = useChannelTyping(selectedChannelId);
@@ -249,6 +258,7 @@ export function SlackBlock({
           unread: act?.unread ? 1 : 0,
           starred: false,
           agentId: a.id,
+          online: agentPresence.get(a.id)?.availability === "online",
         });
       }
     }
@@ -260,6 +270,7 @@ export function SlackBlock({
     agents,
     showAgents,
     agentActivity,
+    agentPresence,
     favorites,
     selfUserId,
     memberRole,
@@ -347,9 +358,9 @@ export function SlackBlock({
             ) : (
               <ActorAvatar actorType="member" actorId={it.userId!} size={24} />
             )}
-            {it.kind === "person" && (
+            {(it.kind === "person" || it.kind === "agent") && (
               <span
-                data-testid={`presence-dot-${it.userId}`}
+                data-testid={`presence-dot-${it.userId ?? it.agentId}`}
                 data-online={it.online ? "true" : "false"}
                 className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card ${
                   it.online ? "bg-success" : "bg-destructive"
