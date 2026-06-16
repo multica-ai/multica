@@ -128,6 +128,19 @@ const nextConfig = {
   },
   async rewrites() {
     return {
+      // beforeFiles runs before the catch-all below. A DEDICATED (non-catch-all)
+      // rewrite is required for the interactive-terminal live-stream WebSocket to
+      // be upgraded by the Next.js standalone proxy: the catch-all `/api/:path*`
+      // forwards HTTP fine but does NOT forward the WS `upgrade` for that path, so
+      // the browser session-poll returns 200 yet the terminal WS closes 1006 and
+      // the panel sits on "Waiting for agent…". Mirrors the working `/ws` rewrite.
+      // (TECH-3388)
+      beforeFiles: [
+        {
+          source: "/api/cerebro/terminal/sessions/:sid/ws",
+          destination: `${remoteApiUrl}/api/cerebro/terminal/sessions/:sid/ws`,
+        },
+      ],
       afterFiles: [
         {
           source: "/api/:path*",
