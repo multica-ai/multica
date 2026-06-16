@@ -1062,10 +1062,11 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	return claimed, nil
 }
 
-// maybeReleaseSquadTask checks whether the squad this task belongs to is at
+// maybeReleaseSquadTask checks whether the squad this task belongs to is over
 // capacity. If the squad has max_concurrent_tasks > 0 and the current running
-// count meets or exceeds it, the task is released back to queued and the
-// function returns (true, reason). Otherwise returns (false, "").
+// count (which includes the just-claimed task) strictly exceeds the cap, the
+// task is released back to queued and the function returns (true, reason).
+// Otherwise returns (false, "").
 func (s *TaskService) maybeReleaseSquadTask(ctx context.Context, task db.AgentTaskQueue) (bool, string) {
 	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
@@ -1089,7 +1090,7 @@ func (s *TaskService) maybeReleaseSquadTask(ctx context.Context, task db.AgentTa
 	if err != nil {
 		return false, ""
 	}
-	if running >= int64(squad.MaxConcurrentTasks) {
+	if running > int64(squad.MaxConcurrentTasks) {
 		// Squad at capacity: release the task back to queued.
 		n, relErr := s.Queries.ReleaseTaskToQueued(ctx, task.ID)
 		if relErr != nil {
