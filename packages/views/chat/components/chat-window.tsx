@@ -790,7 +790,7 @@ export function ChatWindow() {
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         onRestoreDraftConsumed={handleRestoreDraftConsumed}
-        onUploadFile={activeAgent ? handleUploadFile : undefined}
+        onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
