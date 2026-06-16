@@ -1495,6 +1495,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
+					r.Get("/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-route): TECH-3642 unified per-agent capabilities card.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
 					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
 					// task-allowlist group above so agent task tokens can also reach them.

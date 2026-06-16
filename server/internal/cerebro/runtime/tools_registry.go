@@ -341,6 +341,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "evaluate_policy", Description: "Dry-run a Persona permission evaluation.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
+	{Name: "get_agent_capabilities", Description: "Get an agent's capabilities card: skills, tools, credentials (names only), and limits. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusExcluded},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
 	{Name: "get_grant", Description: "Fetch one Persona grant.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
