@@ -19,18 +19,16 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("!onboarded + workspace[0] → /<first.slug>/issues (skip onboarding)", () => {
-    // Onboarding guide is skipped — new users with a workspace land
-    // directly on their first workspace.
+  it("!onboarded + workspace[0] → /<first.slug>/issues (no onboarding)", () => {
+    // New users land directly in their first workspace.
     const ws = [makeWs("acme")];
     expect(resolvePostAuthDestination(ws, false)).toBe(
       paths.workspace("acme").issues(),
     );
   });
 
-  it("!onboarded + no workspace → /workspaces/new (skip onboarding)", () => {
-    // Onboarding guide is skipped — new users without a workspace go
-    // straight to workspace creation.
+  it("!onboarded + no workspace → /workspaces/new (no onboarding)", () => {
+    // New users without a workspace go straight to workspace creation.
     expect(resolvePostAuthDestination([], false)).toBe(paths.newWorkspace());
   });
 

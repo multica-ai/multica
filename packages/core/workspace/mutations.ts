@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Workspace } from "../types";
 import { api } from "../api";
+import { useAuthStore } from "../auth";
 import { workspaceKeys } from "./queries";
 
 export function useCreateWorkspace() {
@@ -18,6 +19,10 @@ export function useCreateWorkspace() {
     // is pure navigation now — no imperative store writes needed.
     onSuccess: (newWs) => {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] = []) => [...old, newWs]);
+      // Creating a workspace now marks the user as onboarded server-side.
+      // Refresh the auth store so downstream consumers see the updated
+      // `onboarded_at` without waiting for the next page load.
+      void useAuthStore.getState().refreshMe();
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: workspaceKeys.list() });

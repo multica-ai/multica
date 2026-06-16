@@ -16,7 +16,7 @@ import { useWindowOverlayStore, type WindowOverlay } from "@/stores/window-overl
  * Desktop has three layers that can own the visible page:
  *
  *   1. Logged-out state → `/login`. No workspace context, no tabs.
- *   2. Window overlays (onboarding, new-workspace, invite) → synthetic paths
+ *   2. Window overlays (new-workspace, invite, invitations) → synthetic paths
  *      that match the equivalent web routes. Overlays are NOT tab routes on
  *      desktop (see `stores/window-overlay-store.ts` + `routes.tsx`), so the
  *      tab path alone would either miss them or mislabel them as "/".
@@ -116,8 +116,6 @@ function overlayPath(overlay: WindowOverlay): string {
   switch (overlay.type) {
     case "new-workspace":
       return "/workspaces/new";
-    case "onboarding":
-      return "/onboarding";
     case "invite":
       return `/invite/${overlay.invitationId}`;
     case "invitations":

@@ -32,7 +32,7 @@ import { useT } from "@multica/views/i18n";
  * Pick where a logged-in user with no explicit `?next=` should land.
  * Un-onboarded users with pending invitations on their email get routed to
  * the batch /invitations page; everyone else falls through to the standard
- * resolver. A network blip on listMyInvitations is non-fatal — we fall
+ * resolver (first workspace, or /workspaces/new if none). A network blip on listMyInvitations is non-fatal — we fall
  * through rather than trap the user on an error screen.
  */
 async function resolveLoggedInDestination(
@@ -83,7 +83,7 @@ function LoginPageContent() {
   const hasOnboarded = useHasOnboarded();
 
   // Already authenticated — honor ?next= or fall back to first workspace
-  // (or /onboarding if the user has none). Skip this entire path when
+  // (or /workspaces/new if the user has none). Skip this entire path when
   // the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading || !user || cliCallbackRaw) return;

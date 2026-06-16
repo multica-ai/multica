@@ -25,19 +25,10 @@ import { useNavigation } from "../navigation";
  *    `resolvePostAuthDestination(list, hasOnboarded)` (workspace-presence first;
  *    see paths/resolve.ts for the full table)
  *
- * The "un-onboarded but in workspace" state IS valid now — it's the
- * mid-flow window between "user picked a runtime on the onboarding screen
- * and got dropped into the workspace" and "user picked a starter prompt in
- * the workspace OnboardingHelperModal, which fires BootstrapOnboardingRuntime
- * and marks onboarded". This guard deliberately does NOT redirect that
- * state out: it only redirects when the URL slug doesn't resolve,
- * regardless of onboarded. The blocking modal inside the workspace shell
- * handles completion.
- *
- * (Older comment claimed this state was physically impossible because
- * CreateWorkspace and AcceptInvitation atomically marked onboarded.
- * CreateWorkspace no longer marks; AcceptInvitation still does — invitees
- * skip the modal entirely.)
+ * This guard only redirects when the URL slug doesn't resolve, regardless of
+ * onboarded status. The onboarding flow and its blocking modal have been
+ * removed; workspace creation is now the default entry point for users with no
+ * workspace.
  *
  * We read the workspace list query state directly (rather than relying on
  * useCurrentWorkspace's null return) so we can distinguish "list loading"

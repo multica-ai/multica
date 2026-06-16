@@ -41,9 +41,9 @@ function extractWorkspaceSlug(path: string): string | null {
  * desktop are rendered as a window-level overlay instead of a tab route.
  * Returns `true` if the navigation was handled (caller should NOT proceed).
  *
- * Side effect: when opening the new-workspace overlay, the tab router is
- * ALSO reset to "/". Rationale — the only way a push lands on
- * /workspaces/new is that the workspace context is gone (fresh install,
+ * Side effect: when opening the new-workspace or invitations overlay, the
+ * tab router is ALSO reset to "/". Rationale — the only way a push lands on
+ * one of these paths is that the workspace context is gone (fresh install,
  * delete-last, leave-last). Leaving the tab parked on a workspace-scoped
  * path would keep those components mounted under the overlay; the next
  * render after the list cache updates would then throw (useWorkspaceId
@@ -53,13 +53,6 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
   const overlay = useWindowOverlayStore.getState();
   if (path === "/workspaces/new") {
     overlay.open({ type: "new-workspace" });
-    if (router && router.state.location.pathname !== "/") {
-      router.navigate("/", { replace: true });
-    }
-    return true;
-  }
-  if (path === "/onboarding") {
-    overlay.open({ type: "onboarding" });
     if (router && router.state.location.pathname !== "/") {
       router.navigate("/", { replace: true });
     }
