@@ -31,7 +31,10 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@multica/ui/components/ui/sheet";
-import { NoteTypesPanel } from "@multica/cerebro-artifacts/views/components";
+import {
+  NoteTypesPanel,
+  DocumentToolsSidebar,
+} from "@multica/cerebro-artifacts/views/components";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -44,7 +47,7 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { History, MessageSquare, MessageSquarePlus } from "lucide-react";
+import { History, MessageSquare } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
@@ -88,7 +91,6 @@ import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
 } from "./comment-anchor-plugin";
-import { useEditorSelectionButton } from "./use-editor-selection-button";
 
 // drag-and-drop payload type for moving a note row onto a folder.
 const NOTE_DND_TYPE = "application/x-note-id";
@@ -604,7 +606,11 @@ function NoteEditor({
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
   const editorRef = React.useRef<ContentEditorRef>(null);
-  const editorContainerRef = React.useRef<HTMLDivElement>(null);
+  // Live body driving the outline + word/character count. Seeded from the note
+  // and kept current by the editor's debounced onUpdate so the "Oversigt" and
+  // counts react while typing, without waiting for the save round-trip.
+  const [liveBody, setLiveBody] = React.useState(note.body);
+  const contentScrollRef = React.useRef<HTMLDivElement>(null);
 
   const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
   const isOwner = note.owner_id === myId;
@@ -639,15 +645,11 @@ function NoteEditor({
   const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
   useCommentAnchors(editor, commentAnchors, activeAnchor);
 
-  const { selection: textSelection, dismiss: dismissSelection } =
-    useEditorSelectionButton(editorContainerRef, commentsEnabled && !readOnly);
-
-  function startCommentOnSelection() {
-    if (!textSelection) return;
-    setDraftQuote(textSelection.text);
+  function startCommentOnSelection(text: string) {
+    if (!text) return;
+    setDraftQuote(text);
     setActiveAnchorId(null);
     setShowComments(true);
-    dismissSelection();
   }
 
   function closeComments() {
@@ -665,6 +667,7 @@ function NoteEditor({
   // stored as markdown that round-trips through the editor. Auto-save on the
   // debounced update and again on blur so nothing is lost on navigate-away.
   function saveBody(markdown: string) {
+    setLiveBody(markdown);
     if (markdown !== note.body) updateNote.mutate({ id: note.id, body: markdown });
   }
 
@@ -847,7 +850,10 @@ function NoteEditor({
       </div>
 
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6">
+        <div
+          ref={contentScrollRef}
+          className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6"
+        >
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -861,22 +867,34 @@ function NoteEditor({
 
           {/* Body uses the SAME rich editor as issue comments + descriptions, so
               "@" behaves identically (people, agents, issues, …) inline. When
-              the note is locked by someone else we render it read-only instead. */}
+              the note is locked by someone else we render it read-only instead.
+              The bubble menu's "Comment" icon (commentsEnabled) opens the
+              comments panel anchored to the selected text. */}
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
-            <div ref={editorContainerRef} className="flex min-h-0 flex-1 flex-col">
+            <div className="flex min-h-0 flex-1 flex-col">
               <ContentEditor
                 ref={editorRef}
                 defaultValue={note.body}
                 onUpdate={saveBody}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
+                onCommentOnSelection={
+                  commentsEnabled ? startCommentOnSelection : undefined
+                }
                 placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
                 className="min-h-[50vh] flex-1"
               />
             </div>
           )}
+        </div>
+
+        {/* Heading navigation ("Oversigt") + word/character count, shared with
+            the Documents view (TECH-3637). Hidden below lg and when there are
+            <2 headings. */}
+        <div className="hidden shrink-0 overflow-auto py-6 pr-4 lg:block">
+          <DocumentToolsSidebar body={liveBody} contentRef={contentScrollRef} />
         </div>
 
         {/* Desktop: comments as an inline side rail. */}
@@ -931,27 +949,6 @@ function NoteEditor({
             />
           </SheetContent>
         </Sheet>
-      )}
-
-      {/* Floating "comment on selection" affordance: appears above a text
-          selection inside the editor and opens the comments panel with that
-          selection attached + highlighted (TECH-3637). */}
-      {commentsEnabled && !readOnly && textSelection && (
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={startCommentOnSelection}
-          style={{
-            position: "fixed",
-            top: textSelection.top - 40,
-            left: textSelection.left,
-            transform: "translateX(-50%)",
-            zIndex: 50,
-          }}
-          className="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-md hover:opacity-90"
-        >
-          <MessageSquarePlus className="size-3.5" /> Comment
-        </button>
       )}
 
       {versionsEnabled && (

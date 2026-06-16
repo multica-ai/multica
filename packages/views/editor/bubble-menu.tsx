@@ -72,6 +72,7 @@ import {
   Heading3,
   FilePlus,
   Loader2,
+  MessageSquarePlus, // CEREBRO-PATCH(bubble-menu-comment-on-selection): note comment affordance (TECH-3637).
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -480,9 +481,15 @@ function CreateSubIssueButton({
 function EditorBubbleMenu({
   editor,
   currentIssueId,
+  // CEREBRO-PATCH(bubble-menu-comment-on-selection): TECH-3637 — when set, the
+  // bubble menu shows a "comment on this selection" icon button styled like the
+  // other actions, so notes get the affordance inside the smart-positioned
+  // toolbar instead of a separate floating pill that overlapped the header.
+  onCommentOnSelection,
 }: {
   editor: Editor;
   currentIssueId?: string;
+  onCommentOnSelection?: (text: string) => void;
 }) {
   const { t } = useT("editor");
   const [visible, setVisible] = useState(false);
@@ -651,6 +658,30 @@ function EditorBubbleMenu({
               <>
                 <Separator orientation="vertical" className="mx-0.5 h-5" />
                 <CreateSubIssueButton editor={editor} parentIssueId={currentIssueId} />
+              </>
+            )}
+            {/* CEREBRO-PATCH(bubble-menu-comment-on-selection): TECH-3637 — note
+                comment affordance, an icon button matching the others. */}
+            {onCommentOnSelection && (
+              <>
+                <Separator orientation="vertical" className="mx-0.5 h-5" />
+                <Tooltip>
+                  <TooltipTrigger render={
+                    <Toggle
+                      size="sm"
+                      pressed={false}
+                      onPressedChange={() => {
+                        const { from, to } = editor.state.selection;
+                        const text = editor.state.doc.textBetween(from, to, " ", " ").trim();
+                        if (text) onCommentOnSelection(text);
+                      }}
+                      onMouseDown={(e) => e.preventDefault()}
+                    />
+                  }>
+                    <MessageSquarePlus className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="top" sideOffset={8}>Comment</TooltipContent>
+                </Tooltip>
               </>
             )}
           </div>
