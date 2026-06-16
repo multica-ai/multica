@@ -31,6 +31,7 @@ type Agent struct {
 	Visibility         string             `json:"visibility"`
 	Status             string             `json:"status"`
 	MaxConcurrentTasks int32              `json:"max_concurrent_tasks"`
+	MaxRunsPerDay      int32              `json:"max_runs_per_day"`
 	OwnerID            pgtype.UUID        `json:"owner_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`

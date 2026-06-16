@@ -691,3 +691,13 @@ SET status = CASE WHEN EXISTS (
     updated_at = now()
 WHERE a.id = $1
 RETURNING *;
+
+
+-- name: CountTodayAgentTasks :one
+-- Count tasks created today (UTC) for a single agent. Used by the
+-- per-agent daily run budget guard (agent.max_runs_per_day). Counts
+-- every task created since UTC midnight regardless of status — even
+-- queued/dispatched tasks count toward the daily budget.
+SELECT count(*) FROM agent_task_queue
+WHERE agent_id = $1
+  AND created_at >= date_trunc('day', now());

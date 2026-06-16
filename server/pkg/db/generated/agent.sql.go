@@ -2798,3 +2798,17 @@ func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTas
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err
 }
+
+
+const countTodayAgentTasks = \`-- name: CountTodayAgentTasks :one
+SELECT count(*) FROM agent_task_queue
+WHERE agent_id = $1
+  AND created_at >= date_trunc('day', now())
+\`
+
+func (q *Queries) CountTodayAgentTasks(ctx context.Context, agentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTodayAgentTasks, agentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
