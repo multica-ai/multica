@@ -732,7 +732,7 @@ function CostByList({
               {formatTokens(row.tokens)}
             </div>
             <div className="text-right text-sm font-medium tabular-nums">
-              ${row.cost.toFixed(2)}
+              {row.cost.toFixed(2)}
             </div>
           </div>
         );
