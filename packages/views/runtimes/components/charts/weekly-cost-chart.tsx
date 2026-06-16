@@ -42,7 +42,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
           tickLine={false}
           axisLine={false}
           tickMargin={8}
-          tickFormatter={(v: number) => `$${v}`}
+          tickFormatter={(v: number) => String(v)}
           width={50}
         />
         <ChartTooltip
@@ -61,7 +61,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
               }}
               formatter={(value, name) =>
                 typeof value === "number"
-                  ? `$${value.toFixed(2)} ${name}`
+                  ? `${value.toFixed(2)} ${name}`
                   : `${value} ${name}`
               }
               footer={(payload) => {
