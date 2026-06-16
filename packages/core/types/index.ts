@@ -96,6 +96,7 @@ export type {
   ArtifactAuthorType,
   ArtifactScope,
   ArtifactFolder,
+  ArtifactFolderKind, // CEREBRO-PATCH(artifact-folder-kind): TECH-3637
   ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,

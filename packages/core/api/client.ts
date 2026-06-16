@@ -3848,8 +3848,11 @@ export class ApiClient {
   }
 
   // Artifact folders
-  async listArtifactFolders(): Promise<ArtifactFolder[]> {
-    return this.fetch("/api/artifact-folders");
+  // CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter so
+  // notes and documents list separate folder trees.
+  async listArtifactFolders(kind?: string): Promise<ArtifactFolder[]> {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+    return this.fetch(`/api/artifact-folders${qs}`);
   }
 
   async createArtifactFolder(

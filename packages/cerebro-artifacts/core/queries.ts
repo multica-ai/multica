@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import type { ListArtifactsParams } from "@multica/core/types";
+import type { ArtifactFolderKind, ListArtifactsParams } from "@multica/core/types";
 
 export const artifactKeys = {
   all: (wsId: string) => ["artifacts", wsId] as const,
@@ -23,8 +23,8 @@ export const artifactKeys = {
       params.limit ?? 50,
       params.offset ?? 0,
     ] as const,
-  folders: (wsId: string) =>
-    [...artifactKeys.all(wsId), "folders"] as const,
+  folders: (wsId: string, kind?: string) =>
+    [...artifactKeys.all(wsId), "folders", kind ?? "all"] as const,
 };
 
 export function artifactsByIssueOptions(wsId: string, issueId: string) {
@@ -59,10 +59,13 @@ export function artifactSearchOptions(wsId: string, params: ListArtifactsParams)
   });
 }
 
-export function artifactFoldersOptions(wsId: string) {
+export function artifactFoldersOptions(
+  wsId: string,
+  opts?: { kind?: ArtifactFolderKind },
+) {
   return queryOptions({
-    queryKey: artifactKeys.folders(wsId),
-    queryFn: () => api.listArtifactFolders(),
+    queryKey: artifactKeys.folders(wsId, opts?.kind),
+    queryFn: () => api.listArtifactFolders(opts?.kind),
     enabled: Boolean(wsId),
   });
 }

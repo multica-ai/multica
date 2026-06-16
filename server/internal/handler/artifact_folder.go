@@ -26,6 +26,7 @@ type ArtifactFolderResponse struct {
 	WorkspaceID string  `json:"workspace_id"`
 	ParentID    *string `json:"parent_id"`
 	Name        string  `json:"name"`
+	Kind        string  `json:"kind"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -35,6 +36,7 @@ func artifactFolderToResponse(f db.ArtifactFolder) ArtifactFolderResponse {
 		ID:          uuidToString(f.ID),
 		WorkspaceID: uuidToString(f.WorkspaceID),
 		Name:        f.Name,
+		Kind:        f.Kind,
 		CreatedAt:   timestampToString(f.CreatedAt),
 		UpdatedAt:   timestampToString(f.UpdatedAt),
 	}
@@ -52,6 +54,9 @@ func artifactFolderToResponse(f db.ArtifactFolder) ArtifactFolderResponse {
 type CreateArtifactFolderRequest struct {
 	Name     string  `json:"name"`
 	ParentID *string `json:"parent_id"`
+	// CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — scope folders to a surface
+	// ("document" or "note"); empty defaults to "document" for existing callers.
+	Kind string `json:"kind"`
 }
 
 func (h *Handler) CreateArtifactFolder(w http.ResponseWriter, r *http.Request) {
@@ -91,12 +96,18 @@ func (h *Handler) CreateArtifactFolder(w http.ResponseWriter, r *http.Request) {
 		parentID = parent.ID
 	}
 
+	kind := req.Kind
+	if kind == "" {
+		kind = "document"
+	}
+
 	id, _ := uuid.NewV7()
 	folder, err := h.Queries.CreateArtifactFolder(r.Context(), db.CreateArtifactFolderParams{
 		ID:          pgtype.UUID{Bytes: id, Valid: true},
 		WorkspaceID: parseUUID(workspaceID),
 		ParentID:    parentID,
 		Name:        req.Name,
+		Kind:        kind,
 	})
 	if err != nil {
 		slog.Error("create artifact folder failed", "error", err)
@@ -126,7 +137,16 @@ func (h *Handler) ListArtifactFolders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folders, err := h.Queries.ListArtifactFoldersByWorkspace(r.Context(), parseUUID(workspaceID))
+	// Optional ?kind= scopes the list to one surface so notes and documents
+	// don't share a folder tree (TECH-3637). Absent = every folder.
+	var kindFilter pgtype.Text
+	if k := r.URL.Query().Get("kind"); k != "" {
+		kindFilter = pgtype.Text{String: k, Valid: true}
+	}
+	folders, err := h.Queries.ListArtifactFoldersByWorkspace(r.Context(), db.ListArtifactFoldersByWorkspaceParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Kind:        kindFilter,
+	})
 	if err != nil {
 		slog.Error("list artifact folders failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list folders")

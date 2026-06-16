@@ -144,13 +144,17 @@ export function useCreateArtifactFolder() {
     mutationFn: (data: CreateArtifactFolderRequest) =>
       api.createArtifactFolder(data),
     onSuccess: (folder) => {
+      // Cache is keyed by folder kind (TECH-3637): drop the new folder into its
+      // own list, not the shared one.
       qc.setQueryData<ArtifactFolder[]>(
-        artifactKeys.folders(wsId),
+        artifactKeys.folders(wsId, folder.kind),
         (old) => (old ? [...old, folder] : [folder]),
       );
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
+    onSettled: (folder) => {
+      qc.invalidateQueries({
+        queryKey: artifactKeys.folders(wsId, folder?.kind),
+      });
     },
   });
 }

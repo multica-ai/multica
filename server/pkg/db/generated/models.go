@@ -167,6 +167,7 @@ type ArtifactFolder struct {
 	Name        string             `json:"name"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Kind        string             `json:"kind"`
 }
 
 type Attachment struct {

@@ -59,7 +59,10 @@ export function NoteVersionsDialog({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-4xl"
+        // The base Sheet caps a right sheet at `sm:max-w-sm`; override with the
+        // same data-side variant so it actually widens (TECH-3637). Wide enough
+        // for the timeline + a roomy preview side by side.
+        className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-5xl"
       >
         <SheetHeader className="border-b px-5 py-3">
           <SheetTitle className="flex items-center gap-2 text-base">

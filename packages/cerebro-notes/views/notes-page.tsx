@@ -12,10 +12,11 @@ import {
   Globe,
   NotebookPen,
   ChevronLeft,
+  ChevronDown,
+  ChevronRight,
   Repeat,
   Folder,
   FolderPlus,
-  Inbox,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -38,9 +39,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
+  DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { History, MessageSquare, MessageSquarePlus } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import {
   ContentEditor,
@@ -82,8 +85,6 @@ import {
 } from "./comment-anchor-plugin";
 import { useEditorSelectionButton } from "./use-editor-selection-button";
 
-// Rail sentinel for "notes in no folder" (distinct from null = all notes).
-const UNFILED = "__unfiled__";
 // drag-and-drop payload type for moving a note row onto a folder.
 const NOTE_DND_TYPE = "application/x-note-id";
 
@@ -107,11 +108,15 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   // manager, so they were hard to find (TECH-3637). Surface the same panel here.
   const noteTypesEnabled = useFeatureFlag("cerebro_note_types");
   const [showRecurring, setShowRecurring] = React.useState(false);
-  // Folders (TECH-3637). Notes are artifacts, so they share the artifact
-  // folders. `folderFilter` is the rail selection: null = all notes, "unfiled"
-  // = notes in no folder, or a folder id.
-  const [folderFilter, setFolderFilter] = React.useState<string | null>(null);
-  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  // Folders (TECH-3637). Notes keep their own folder namespace, separate from
+  // Documents (kind: "note"). `folderId` is the folder we're currently inside:
+  // null = the root, where loose (unfiled) notes and top-level folders live.
+  // Drilling into a folder scopes the list to that folder + shows its
+  // subfolders, with a breadcrumb back to the root.
+  const [folderId, setFolderId] = React.useState<string | null>(null);
+  const { data: folders = [] } = useQuery(
+    artifactFoldersOptions(wsId, { kind: "note" }),
+  );
   const setNoteFolder = useSetNoteFolder();
 
   const { data: notes = [] } = useQuery(
@@ -125,11 +130,24 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
     [notes, selectedId],
   );
 
+  const noteFolderIds = React.useMemo(
+    () => new Set(folders.map((f) => f.id)),
+    [folders],
+  );
+  const searching = search.trim().length > 0;
   const visibleNotes = React.useMemo(() => {
-    if (folderFilter === null) return notes;
-    if (folderFilter === UNFILED) return notes.filter((n) => !n.folder_id);
-    return notes.filter((n) => n.folder_id === folderFilter);
-  }, [notes, folderFilter]);
+    // While searching, show flat matches across every folder. Otherwise the
+    // list is scoped to the current folder (root shows the loose notes).
+    if (searching) return notes;
+    // Root: loose notes, plus any whose folder_id points outside the note
+    // folder tree — e.g. a note filed before notes got their own folders
+    // (TECH-3637). Treat that as unfiled so the note never disappears.
+    if (folderId === null)
+      return notes.filter(
+        (n) => !n.folder_id || !noteFolderIds.has(n.folder_id),
+      );
+    return notes.filter((n) => n.folder_id === folderId);
+  }, [notes, folderId, searching, noteFolderIds]);
 
   const pinned = visibleNotes.filter((n) => n.pinned);
   const rest = visibleNotes.filter((n) => !n.pinned);
@@ -141,7 +159,7 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   async function handleNew() {
     const note = await createNote.mutateAsync({
       visibility: "private",
-      folder_id: folderFilter && folderFilter !== UNFILED ? folderFilter : null,
+      folder_id: folderId,
     });
     if (note) setSelectedId(note.id);
   }
@@ -157,35 +175,41 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
           default
         </span>
         <div className="ml-auto flex min-w-0 items-center gap-2">
-          <div className="relative min-w-0 flex-1 sm:flex-none">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search notes…"
-              className="h-8 w-full pl-8 sm:w-56"
-            />
-          </div>
-          {noteTypesEnabled && (
+          {/* Search lives in the folder/list rail now (TECH-3637), not the top
+              bar. The "New note" split button keeps its caret to start or edit a
+              recurring note without a separate top-bar button. */}
+          <div className="flex shrink-0 items-stretch">
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => setShowRecurring(true)}
-              className="shrink-0"
+              onClick={handleNew}
+              disabled={createNote.isPending}
+              className={cn(noteTypesEnabled && "rounded-r-none")}
             >
-              <Repeat className="size-4" />
-              <span className="hidden sm:inline">Recurring</span>
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">New note</span>
             </Button>
-          )}
-          <Button
-            size="sm"
-            onClick={handleNew}
-            disabled={createNote.isPending}
-            className="shrink-0"
-          >
-            <Plus className="size-4" />
-            <span className="hidden sm:inline">New note</span>
-          </Button>
+            {noteTypesEnabled && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      size="sm"
+                      aria-label="Recurring notes"
+                      className="rounded-l-none border-l border-primary-foreground/20 px-1.5"
+                    >
+                      <ChevronDown className="size-4" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuLabel>Recurring</DropdownMenuLabel>
+                  <DropdownMenuItem onClick={() => setShowRecurring(true)}>
+                    <Repeat className="size-4" /> Start or edit recurring…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </div>
       </header>
 
@@ -201,8 +225,11 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
           <FolderRail
             folders={folders}
             notes={notes}
-            selected={folderFilter}
-            onSelect={setFolderFilter}
+            current={folderId}
+            searching={searching}
+            search={search}
+            onSearch={setSearch}
+            onNavigate={setFolderId}
             onDropNote={dropNoteInFolder}
           />
           {notes.length === 0 ? (
@@ -211,7 +238,9 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
             </p>
           ) : visibleNotes.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">
-              No notes in this folder yet. Drag a note here, or tap “New note”.
+              {searching
+                ? "No notes match your search."
+                : "No notes here yet. Drag a note in, or tap “New note”."}
             </p>
           ) : (
             <>
@@ -258,7 +287,7 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
 
       {noteTypesEnabled && (
         <Sheet open={showRecurring} onOpenChange={setShowRecurring}>
-          <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+          <SheetContent className="overflow-y-auto data-[side=right]:w-[94vw] data-[side=right]:sm:max-w-xl">
             <SheetHeader>
               <SheetTitle>Recurring notes</SheetTitle>
               <SheetDescription>
@@ -276,20 +305,29 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   );
 }
 
-// FolderRail (TECH-3637): the folder list at the top of the notes rail. Each
-// row filters the list, and is a drop target so a note row can be dragged into
-// it. "Unfiled" un-files a dropped note; "New folder" creates one inline.
+// FolderRail (TECH-3637): the navigable folder menu at the top of the notes
+// rail. It holds the note search, a breadcrumb of where you are, and the
+// subfolders of the current folder. Clicking a folder drills in (the list
+// scopes to it); the breadcrumb walks back out. Each folder row is a drop
+// target so a note can be dragged into it. "New folder" creates a folder inside
+// the current one, so folders nest.
 function FolderRail({
   folders,
   notes,
-  selected,
-  onSelect,
+  current,
+  searching,
+  search,
+  onSearch,
+  onNavigate,
   onDropNote,
 }: {
   folders: ArtifactFolder[];
   notes: Note[];
-  selected: string | null;
-  onSelect: (id: string | null) => void;
+  current: string | null;
+  searching: boolean;
+  search: string;
+  onSearch: (v: string) => void;
+  onNavigate: (id: string | null) => void;
   onDropNote: (noteId: string, folderId: string | null) => void;
 }) {
   const createFolder = useCreateArtifactFolder();
@@ -297,14 +335,34 @@ function FolderRail({
   const [name, setName] = React.useState("");
   const [dragOver, setDragOver] = React.useState<string | null>(null);
 
-  const unfiledCount = notes.filter((n) => !n.folder_id).length;
-  const countFor = (id: string) => notes.filter((n) => n.folder_id === id).length;
+  const byId = React.useMemo(() => {
+    const m = new Map<string, ArtifactFolder>();
+    folders.forEach((f) => m.set(f.id, f));
+    return m;
+  }, [folders]);
+
+  // Breadcrumb: walk the parent chain from the current folder up to the root.
+  const trail = React.useMemo(() => {
+    const out: ArtifactFolder[] = [];
+    let cur = current ? byId.get(current) : undefined;
+    const guard = new Set<string>();
+    while (cur && !guard.has(cur.id)) {
+      guard.add(cur.id);
+      out.unshift(cur);
+      cur = cur.parent_id ? byId.get(cur.parent_id) : undefined;
+    }
+    return out;
+  }, [byId, current]);
+
+  const childFolders = folders.filter((f) => (f.parent_id ?? null) === current);
+  const countFor = (id: string | null) =>
+    notes.filter((n) => (n.folder_id ?? null) === id).length;
 
   function submitFolder() {
     const trimmed = name.trim();
     if (!trimmed) return;
     createFolder.mutate(
-      { name: trimmed, parent_id: null },
+      { name: trimmed, parent_id: current, kind: "note" },
       { onSuccess: () => { setName(""); setAdding(false); } },
     );
   }
@@ -328,104 +386,107 @@ function FolderRail({
     };
   }
 
-  // A plain render function (not a nested component) so rows aren't remounted on
-  // every render — remounting a drop target mid-drag would drop the drop event.
-  const row = (opts: {
-    rowKey: string;
-    active: boolean;
-    droppable?: { folderId: string | null };
-    onClick: () => void;
-    icon: React.ReactNode;
-    label: string;
-    count?: number;
-  }) => (
-    <button
-      key={opts.rowKey}
-      onClick={opts.onClick}
-      {...(opts.droppable
-        ? dropHandlers(opts.rowKey, opts.droppable.folderId)
-        : {})}
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-muted/50",
-        opts.active && "bg-muted font-medium",
-        dragOver === opts.rowKey && "ring-2 ring-primary ring-inset",
-      )}
-    >
-      {opts.icon}
-      <span className="flex-1 truncate">{opts.label}</span>
-      {opts.count !== undefined && opts.count > 0 && (
-        <span className="text-[11px] text-muted-foreground">{opts.count}</span>
-      )}
-    </button>
-  );
-
   return (
-    <div className="space-y-0.5 border-b p-2">
-      {row({
-        rowKey: "all",
-        active: selected === null,
-        onClick: () => onSelect(null),
-        icon: <NotebookPen className="size-3.5 text-muted-foreground" />,
-        label: "All notes",
-        count: notes.length,
-      })}
-      {row({
-        rowKey: "unfiled",
-        active: selected === UNFILED,
-        droppable: { folderId: null },
-        onClick: () => onSelect(UNFILED),
-        icon: <Inbox className="size-3.5 text-muted-foreground" />,
-        label: "Unfiled",
-        count: unfiledCount,
-      })}
-      {folders.map((f) =>
-        row({
-          rowKey: f.id,
-          active: selected === f.id,
-          droppable: { folderId: f.id },
-          onClick: () => onSelect(f.id),
-          icon: (
-            <Folder
-              className={cn(
-                "size-3.5",
-                selected === f.id ? "text-amber-500" : "text-muted-foreground",
-              )}
-            />
-          ),
-          label: f.name,
-          count: countFor(f.id),
-        }),
-      )}
-      {adding ? (
-        <div className="flex items-center gap-1 px-2 py-1">
-          <Input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") submitFolder();
-              if (e.key === "Escape") { setAdding(false); setName(""); }
-            }}
-            placeholder="Folder name"
-            className="h-7 text-xs"
-          />
-          <Button
-            size="sm"
-            className="h-7 shrink-0"
-            onClick={submitFolder}
-            disabled={createFolder.isPending || !name.trim()}
-          >
-            Add
-          </Button>
-        </div>
-      ) : (
+    <div className="space-y-2 border-b p-2">
+      {/* Search moved here from the top bar (TECH-3637): it's part of the
+          folder/list menu, and searches notes across every folder. */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={search}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search notes…"
+          className="h-8 w-full pl-8"
+        />
+      </div>
+
+      {/* Breadcrumb: All notes › Folder › Subfolder, each clickable to jump. */}
+      <div className="flex flex-wrap items-center gap-0.5 px-0.5 text-[12px] text-muted-foreground">
         <button
-          onClick={() => setAdding(true)}
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+          onClick={() => onNavigate(null)}
+          {...dropHandlers("crumb-root", null)}
+          className={cn(
+            "rounded px-1 py-0.5 hover:bg-muted/50",
+            current === null && "font-medium text-foreground",
+            dragOver === "crumb-root" && "ring-2 ring-primary ring-inset",
+          )}
         >
-          <FolderPlus className="size-3.5" />
-          New folder
+          All notes
         </button>
+        {trail.map((f, i) => (
+          <React.Fragment key={f.id}>
+            <ChevronRight className="size-3 shrink-0 opacity-60" />
+            <button
+              onClick={() => onNavigate(f.id)}
+              {...dropHandlers(`crumb-${f.id}`, f.id)}
+              className={cn(
+                "max-w-[10rem] truncate rounded px-1 py-0.5 hover:bg-muted/50",
+                i === trail.length - 1 && "font-medium text-foreground",
+                dragOver === `crumb-${f.id}` && "ring-2 ring-primary ring-inset",
+              )}
+            >
+              {f.name}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Subfolders of the current folder, each a drop target + drill-in row.
+          Hidden while searching, since results are a flat cross-folder list. */}
+      {!searching && (
+        <div className="space-y-0.5">
+          {childFolders.map((f) => (
+            <button
+              key={f.id}
+              onClick={() => onNavigate(f.id)}
+              {...dropHandlers(f.id, f.id)}
+              className={cn(
+                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-muted/50",
+                dragOver === f.id && "ring-2 ring-primary ring-inset",
+              )}
+            >
+              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="flex-1 truncate">{f.name}</span>
+              {countFor(f.id) > 0 && (
+                <span className="text-[11px] text-muted-foreground">
+                  {countFor(f.id)}
+                </span>
+              )}
+              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+            </button>
+          ))}
+          {adding ? (
+            <div className="flex items-center gap-1 px-2 py-1">
+              <Input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitFolder();
+                  if (e.key === "Escape") { setAdding(false); setName(""); }
+                }}
+                placeholder="Folder name"
+                className="h-7 text-xs"
+              />
+              <Button
+                size="sm"
+                className="h-7 shrink-0"
+                onClick={submitFolder}
+                disabled={createFolder.isPending || !name.trim()}
+              >
+                Add
+              </Button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAdding(true)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+            >
+              <FolderPlus className="size-3.5" />
+              New folder{current ? " here" : ""}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -499,6 +560,7 @@ function NoteEditor({
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
+  const isMobile = useIsMobile();
 
   const [title, setTitle] = React.useState(note.title);
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
@@ -520,7 +582,9 @@ function NoteEditor({
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: comments = [] } = useNoteComments(note.id);
-  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  const { data: folders = [] } = useQuery(
+    artifactFoldersOptions(wsId, { kind: "note" }),
+  );
   const setNoteFolder = useSetNoteFolder();
   const currentFolder = folders.find((f) => f.id === note.folder_id) ?? null;
 
@@ -759,8 +823,9 @@ function NoteEditor({
           )}
         </div>
 
-        {commentsEnabled && showComments && (
-          <div className="hidden w-80 shrink-0 border-l sm:block">
+        {/* Desktop: comments as an inline side rail. */}
+        {commentsEnabled && showComments && !isMobile && (
+          <div className="w-80 shrink-0 border-l">
             <NoteCommentsPanel
               noteId={note.id}
               noteBody={note.body}
@@ -777,6 +842,40 @@ function NoteEditor({
           </div>
         )}
       </div>
+
+      {/* Mobile: there's no room for a side rail, so comments open as a
+          near-full-width sheet. Without this, tapping "Comment" on mobile did
+          nothing (TECH-3637). */}
+      {commentsEnabled && isMobile && (
+        <Sheet
+          open={showComments}
+          onOpenChange={(o) => {
+            if (!o) closeComments();
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="flex flex-col p-0 data-[side=right]:w-[94vw]"
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>Comments</SheetTitle>
+            </SheetHeader>
+            <NoteCommentsPanel
+              noteId={note.id}
+              noteBody={note.body}
+              isOwner={isOwner}
+              draftQuote={draftQuote}
+              activeAnchorId={activeAnchorId}
+              onClearDraft={() => setDraftQuote(null)}
+              onSelectThread={(id) => {
+                setDraftQuote(null);
+                setActiveAnchorId(id);
+              }}
+              onClose={closeComments}
+            />
+          </SheetContent>
+        </Sheet>
+      )}
 
       {/* Floating "comment on selection" affordance: appears above a text
           selection inside the editor and opens the comments panel with that
