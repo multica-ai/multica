@@ -37,6 +37,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
 	// instead of inheriting from the outer Claude Code session.
+	//
+	// --strict-mcp-config is paired here, NOT set unconditionally in
+	// buildClaudeArgs: it makes --mcp-config the EXCLUSIVE source (the #1168
+	// per-agent isolation contract). When no per-agent config is provided we
+	// deliberately omit it so the spawned Claude inherits the operator's
+	// account-level MCP connectors (e.g. claude.ai Figma) authorized on the
+	// daemon's Max account. Without this, every agent started with zero MCP
+	// servers (devrushit fork PR #1451, still unmerged upstream on v0.3.22).
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
 	if len(opts.McpConfig) > 0 {
@@ -47,7 +55,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 		mcpConfigPath = path
 		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
-		args = append(args, "--mcp-config", mcpConfigPath)
+		args = append(args, "--mcp-config", mcpConfigPath, "--strict-mcp-config")
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
 	defer func() {
@@ -503,7 +511,10 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
+		// NOTE: --strict-mcp-config is intentionally NOT here. It is paired with
+		// --mcp-config at the call site so it only applies when a per-agent MCP
+		// config is supplied; otherwise account-level connectors flow through.
+		// See the --mcp-config block in Execute (devrushit fork PR #1451).
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
