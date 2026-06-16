@@ -726,27 +726,27 @@ describe("ApiClient", () => {
 
 describe("isTransientAuthProbeError", () => {
   it("returns false for 401 Unauthorized (genuine auth failure)", () => {
-    const err = new ApiError(401, "Unauthorized");
+    const err = new ApiError("Unauthorized", 401, "Unauthorized");
     expect(isTransientAuthProbeError(err)).toBe(false);
   });
 
   it("returns false for 403 Forbidden", () => {
-    const err = new ApiError(403, "Forbidden");
+    const err = new ApiError("Forbidden", 403, "Forbidden");
     expect(isTransientAuthProbeError(err)).toBe(false);
   });
 
   it("returns true for 500 Internal Server Error (transient)", () => {
-    const err = new ApiError(500, "Internal Server Error");
+    const err = new ApiError("Internal Server Error", 500, "Internal Server Error");
     expect(isTransientAuthProbeError(err)).toBe(true);
   });
 
   it("returns true for 503 Service Unavailable (transient)", () => {
-    const err = new ApiError(503, "Service Unavailable");
+    const err = new ApiError("Service Unavailable", 503, "Service Unavailable");
     expect(isTransientAuthProbeError(err)).toBe(true);
   });
 
   it("returns true for 408 Request Timeout (transient)", () => {
-    const err = new ApiError(408, "Request Timeout");
+    const err = new ApiError("Request Timeout", 408, "Request Timeout");
     expect(isTransientAuthProbeError(err)).toBe(true);
   });
 
@@ -763,12 +763,12 @@ describe("isTransientAuthProbeError", () => {
 
 describe("isUnauthorizedError", () => {
   it("returns true for ApiError with status 401", () => {
-    const err = new ApiError(401, "Unauthorized");
+    const err = new ApiError("Unauthorized", 401, "Unauthorized");
     expect(isUnauthorizedError(err)).toBe(true);
   });
 
   it("returns false for ApiError with status 403", () => {
-    const err = new ApiError(403, "Forbidden");
+    const err = new ApiError("Forbidden", 403, "Forbidden");
     expect(isUnauthorizedError(err)).toBe(false);
   });
 
