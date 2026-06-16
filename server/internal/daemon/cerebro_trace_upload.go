@@ -10,26 +10,87 @@ package daemon
 
 import (
 	"context"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/traceupload"
 )
 
-// startTraceUpload builds the trace-upload manager from the environment and
-// launches its workers + boot-sweep. With the feature flag off NewManager
-// returns nil and every later Enqueue is a no-op — not a single HTTP call or
-// disk write happens. A misconfiguration (flag on, endpoint/key missing) is
-// logged and the daemon continues without uploading.
+// startTraceUpload launches the trace-upload manager. Config resolution order:
+//  1. Local env fully configures it (enabled + endpoint + key) → use env.
+//  2. Local env EXPLICITLY disables it (MULTICA_TRACE_UPLOAD_ENABLED set falsey)
+//     → do nothing, and do not contact the server.
+//  3. Otherwise → fetch the fleet config from the server OFF the boot path
+//     (TECH-3621 rollout), so one server-side setting turns trace upload on for
+//     every machine without delaying startup.
+//
+// With the feature off, no manager is created and every later Enqueue is a
+// no-op — not a single disk write happens.
 func (d *Daemon) startTraceUpload(ctx context.Context) {
 	cfg := traceupload.ConfigFromEnv(d.cfg.WorkspacesRoot)
+	if cfg.Enabled && cfg.Endpoint != "" && cfg.APIKey != "" {
+		d.startTraceUploadWith(ctx, cfg) // local env fully configures it
+		return
+	}
+	// CEREBRO-PATCH(daemon-trace-upload-fleet-fetch): TECH-3621 — respect an
+	// explicit local opt-out, else fetch the fleet config asynchronously so a
+	// slow/unreachable server never delays task claiming.
+	if raw, ok := os.LookupEnv(traceupload.EnvEnabled); ok && strings.TrimSpace(raw) != "" && !cfg.Enabled {
+		return // operator explicitly disabled trace upload on this machine
+	}
+	go d.fetchAndStartTraceUpload(ctx)
+}
+
+// startTraceUploadWith builds the manager from a resolved config and records it
+// under the mutex (the async fleet fetch can call this after boot, concurrently
+// with enqueueTraceUpload). A nil manager (feature off / misconfigured) is left
+// unset so enqueue stays a no-op.
+func (d *Daemon) startTraceUploadWith(ctx context.Context, cfg traceupload.Config) {
 	mgr, err := traceupload.NewManager(cfg, d.logger)
 	if err != nil {
 		d.logger.Warn("trace upload disabled: misconfigured", "error", err)
 		return
 	}
-	d.traceUploader = mgr
-	if mgr != nil {
-		mgr.Start(ctx)
+	if mgr == nil {
+		return
 	}
+	d.traceUploaderMu.Lock()
+	d.traceUploader = mgr
+	d.traceUploaderMu.Unlock()
+	mgr.Start(ctx)
+}
+
+// fetchAndStartTraceUpload pulls the fleet trace-upload config from the server
+// (TECH-3621 rollout path) and starts the manager if the server has the feature
+// on. Runs in its own goroutine; best-effort with a short timeout, so it never
+// blocks boot. preflightAuth has already run, so d.client is authenticated.
+func (d *Daemon) fetchAndStartTraceUpload(ctx context.Context) {
+	runtimeIDs := d.allRuntimeIDs()
+	if len(runtimeIDs) == 0 {
+		return // no runtime to scope the request to
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := d.client.FetchTraceConfig(fetchCtx, runtimeIDs[0])
+	if err != nil {
+		d.logger.Debug("trace upload: server config fetch failed, not uploading this boot", "error", err)
+		return
+	}
+	if resp == nil || !resp.Enabled || resp.Endpoint == "" || resp.APIKey == "" {
+		return // server has the feature off
+	}
+	cfg := traceupload.ConfigFromValues(d.cfg.WorkspacesRoot, resp.Endpoint, resp.APIKey, resp.MaxAgeHours)
+	d.logger.Info("trace upload: enabled from server fleet config", "endpoint", resp.Endpoint)
+	d.startTraceUploadWith(ctx, cfg)
+}
+
+// traceUploaderSnapshot returns the current manager under the mutex, so readers
+// (enqueueTraceUpload) never race the async fleet-fetch writer.
+func (d *Daemon) traceUploaderSnapshot() *traceupload.Manager {
+	d.traceUploaderMu.Lock()
+	defer d.traceUploaderMu.Unlock()
+	return d.traceUploader
 }
 
 // enqueueTraceUpload records a finished task's transcript for upload. It runs
@@ -37,7 +98,8 @@ func (d *Daemon) startTraceUpload(ctx context.Context) {
 // id, transcript not found, ledger error) is logged and dropped — the task has
 // already completed and must not be affected.
 func (d *Daemon) enqueueTraceUpload(task Task, provider string, result TaskResult) {
-	if d.traceUploader == nil {
+	uploader := d.traceUploaderSnapshot()
+	if uploader == nil {
 		return // flag off — zero work
 	}
 	if provider != "claude" && provider != "codex" {
@@ -85,7 +147,7 @@ func (d *Daemon) enqueueTraceUpload(task Task, provider string, result TaskResul
 			"task", shortID(task.ID), "provider", provider, "error", err)
 		return
 	}
-	if err := d.traceUploader.Enqueue(sidecar, path); err != nil {
+	if err := uploader.Enqueue(sidecar, path); err != nil {
 		d.logger.Warn("trace upload: enqueue failed, skipping", "task", shortID(task.ID), "error", err)
 	}
 }
