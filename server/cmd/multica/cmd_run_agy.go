@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 type agyLocalRunProvider struct{}
@@ -16,8 +17,14 @@ func (agyLocalRunProvider) Run(args []string, cwd string, env localCLIEnv, repor
 	if err := validateAgyLocalRunArgs(args[1:]); err != nil {
 		return 1, err
 	}
+
+	startedAt := time.Now()
 	childArgs := agyLocalRunChildArgs(args)
-	return runProviderPTY(childArgs, cwd, env, "")
+	exitCode, runErr := runProviderPTY(childArgs, cwd, env, "")
+	if reporter != nil {
+		reporter.SetActiveMs(time.Since(startedAt).Milliseconds())
+	}
+	return exitCode, runErr
 }
 
 // validateAgyLocalRunArgs rejects flags that multica manages automatically.
@@ -33,14 +40,19 @@ func validateAgyLocalRunArgs(args []string) error {
 	return nil
 }
 
+// agyLocalRunChildArgs prepares the arguments for the child command.
+// Currently, it acts as an identity transform (cloning the slice) since the
+// Antigravity CLI does not yet require additional flags for injecting settings
+// or system prompts (similar to Claude's --settings and --append-system-prompt).
+// This remains as an explicit extension point for future parameter mapping.
 func agyLocalRunChildArgs(args []string) []string {
 	return append([]string{args[0]}, args[1:]...)
 }
 
 // agyLocalRunSystemPrompt is reserved for future use when agy supports
 // injecting runtime context (similar to Claude's --append-system-prompt).
-// Today the Antigravity CLI has no equivalent flag; instructions are delivered
-// via AGENTS.md in the task workdir.
+// Today the Antigravity CLI has no equivalent flag; the issue ID is already
+// available to agy via the MULTICA_ISSUE_ID environment variable.
 func agyLocalRunSystemPrompt(issueID string) string {
 	issueID = strings.TrimSpace(issueID)
 	if issueID == "" {

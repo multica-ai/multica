@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -244,6 +245,153 @@ func TestValidateAgyLocalRunArgs(t *testing.T) {
 				t.Fatalf("validateAgyLocalRunArgs(%v) error = %v, wantErr %v", tt.args, err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAgyLocalRunSystemPrompt(t *testing.T) {
+	tests := []struct {
+		name    string
+		issueID string
+		wantNil bool
+		wantSub string
+	}{
+		{name: "empty issue", issueID: "", wantNil: true},
+		{name: "whitespace only", issueID: "   ", wantNil: true},
+		{name: "valid issue", issueID: "abc-123", wantSub: "Bound Multica issue ID: abc-123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agyLocalRunSystemPrompt(tt.issueID)
+			if tt.wantNil {
+				if got != "" {
+					t.Fatalf("agyLocalRunSystemPrompt(%q) = %q, want empty", tt.issueID, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantSub) {
+				t.Fatalf("agyLocalRunSystemPrompt(%q) = %q, want substring %q", tt.issueID, got, tt.wantSub)
+			}
+			if !strings.Contains(got, "multica issue get") {
+				t.Fatalf("agyLocalRunSystemPrompt(%q) missing CLI command reference", tt.issueID)
+			}
+		})
+	}
+}
+
+func TestAgyLocalRunChildArgs(t *testing.T) {
+	args := []string{"agy", "some-arg", "--model", "gemini-pro"}
+	got := agyLocalRunChildArgs(args)
+	if !slices.Equal(got, args) {
+		t.Fatalf("agyLocalRunChildArgs(%v) = %v, want copy of original slice", args, got)
+	}
+	// Verify it's a clone (does not share back-array with source args)
+	got[0] = "mutated"
+	if args[0] == "mutated" {
+		t.Fatalf("agyLocalRunChildArgs shared backing array; original was mutated")
+	}
+}
+
+func TestRunLocalCLIEndToEndWithFakeAPIForAgy(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
+	tmp := t.TempDir()
+	agyPath := filepath.Join(tmp, "agy")
+	if err := os.Symlink("/bin/sh", agyPath); err != nil {
+		t.Fatalf("symlink agy shim: %v", err)
+	}
+	origExecute := executeLocalCLIForRun
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+		if cliName != "agy" {
+			t.Fatalf("cliName = %q, want agy", cliName)
+		}
+		if len(args) == 0 || args[0] != agyPath {
+			t.Fatalf("args = %v, want agy path first", args)
+		}
+		if env.RunID != "run-1" || env.IssueID != "issue-1" || env.WorkspaceID != "ws-1" {
+			t.Fatalf("env = %+v, want run, issue, and workspace metadata", env)
+		}
+		reporter.SetActiveMs(1500)
+		return 0, nil
+	}
+	defer func() { executeLocalCLIForRun = origExecute }()
+	var (
+		createBody map[string]any
+		patches    []map[string]any
+		messages   []map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":           "issue-1",
+				"identifier":   "MUL-1",
+				"title":        "Fake issue",
+				"status":       "todo",
+				"priority":     "medium",
+				"description":  "Do it",
+				"workspace_id": "ws-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/local-runs":
+			json.NewDecoder(r.Body).Decode(&createBody)
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "run-1",
+				"issue_id":    "issue-1",
+				"cli_name":    "agy",
+				"context_dir": "",
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/local-runs/run-1":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			patches = append(patches, body)
+			json.NewEncoder(w).Encode(map[string]any{"id": "run-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/run-1/messages":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			messages = append(messages, body)
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := newRunCommandForTest()
+	if err := cmd.Flags().Set("server-url", srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("workspace-id", "ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("cwd", tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("comments", "off"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_TOKEN", "token-1")
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	err := runLocalCLI(cmd, []string{"MUL-1", agyPath, "-c", `printf '{"type":"result","result":"done"}\n'`})
+	if err != nil {
+		t.Fatalf("runLocalCLI: %v", err)
+	}
+
+	if createBody["cli_name"] != "agy" || createBody["comments_mode"] != "off" || createBody["work_dir"] != tmp {
+		t.Fatalf("unexpected create body: %+v", createBody)
+	}
+	if len(patches) < 2 {
+		t.Fatalf("patches = %+v, want running and terminal status updates", patches)
+	}
+	if patches[0]["status"] != "running" {
+		t.Fatalf("first patch = %+v, want running status update", patches[0])
+	}
+	lastPatch := patches[len(patches)-1]
+	if lastPatch["status"] != "completed" || int(lastPatch["exit_code"].(float64)) != 0 {
+		t.Fatalf("last patch = %+v, want completed exit 0", lastPatch)
 	}
 }
 
