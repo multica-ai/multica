@@ -381,12 +381,17 @@ func parseAgentIDQueryParam(w http.ResponseWriter, r *http.Request) ([]pgtype.UU
 }
 
 func parseOwnerIDQueryParam(w http.ResponseWriter, r *http.Request, currentUserID pgtype.UUID) ([]pgtype.UUID, bool) {
-	rawValues := collectUUIDQueryValues(r, "owner_id", "owner_ids")
+	rawValues := []string{uuidToString(currentUserID)}
 	if raw := strings.TrimSpace(r.URL.Query().Get("owner")); raw != "" {
-		if raw == "me" {
-			rawValues = append(rawValues, uuidToString(currentUserID))
-		} else {
-			rawValues = append(rawValues, raw)
+		if raw != "me" && raw != "all" && raw != uuidToString(currentUserID) {
+			writeError(w, http.StatusForbidden, "owner_id must match current user")
+			return nil, false
+		}
+	}
+	for _, raw := range collectUUIDQueryValues(r, "owner_id", "owner_ids") {
+		if strings.TrimSpace(raw) != uuidToString(currentUserID) {
+			writeError(w, http.StatusForbidden, "owner_id must match current user")
+			return nil, false
 		}
 	}
 	return parseUUIDQueryValues(w, rawValues, "owner_id")
