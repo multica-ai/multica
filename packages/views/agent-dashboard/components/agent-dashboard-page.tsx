@@ -342,7 +342,40 @@ export function ownerFilterDisplayLabel({
   return selectedMember?.name || selectedMember?.email || selectedOwnerFallback;
 }
 
-function useDashboardUrlState() {
+export interface DashboardOwnerSelection {
+  selectedOwnerId: string | null;
+  explicitAll: boolean;
+  followsCurrentUserDefault: boolean;
+}
+
+export function parseDashboardOwnerSelection(
+  params: URLSearchParams,
+  currentUserId: string | null,
+): DashboardOwnerSelection {
+  if (params.has("owner")) {
+    const owner = params.get("owner")?.trim() ?? "";
+    if (owner === "" || owner === "all") {
+      return {
+        selectedOwnerId: null,
+        explicitAll: true,
+        followsCurrentUserDefault: false,
+      };
+    }
+    return {
+      selectedOwnerId: owner,
+      explicitAll: false,
+      followsCurrentUserDefault: false,
+    };
+  }
+
+  return {
+    selectedOwnerId: currentUserId,
+    explicitAll: false,
+    followsCurrentUserDefault: true,
+  };
+}
+
+function useDashboardUrlState(currentUserId: string | null) {
   const navigation = useNavigation();
   const initial = navigation.searchParams;
   const pathname = navigation.pathname;
@@ -352,8 +385,8 @@ function useDashboardUrlState() {
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(() =>
     parseSelectedAgents(initial.get("agents")),
   );
-  const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(() =>
-    initial.get("owner")?.trim() || null,
+  const [ownerSelection, setOwnerSelection] = useState<DashboardOwnerSelection>(() =>
+    parseDashboardOwnerSelection(initial, currentUserId),
   );
   const [startHour, setStartHour] = useState(() => parseHour(initial.get("start_hour"), 0));
   const [endHour, setEndHour] = useState(() => parseHour(initial.get("end_hour"), 23));
@@ -364,9 +397,24 @@ function useDashboardUrlState() {
   const [page, setPage] = useState(() => Math.max(1, Number(initial.get("page") ?? "1") || 1));
 
   useEffect(() => {
+    if (
+      ownerSelection.followsCurrentUserDefault &&
+      currentUserId &&
+      ownerSelection.selectedOwnerId !== currentUserId
+    ) {
+      setOwnerSelection({
+        selectedOwnerId: currentUserId,
+        explicitAll: false,
+        followsCurrentUserDefault: true,
+      });
+    }
+  }, [currentUserId, ownerSelection]);
+
+  useEffect(() => {
     const params = new URLSearchParams();
     if (days !== 30) params.set("days", String(days));
-    if (selectedOwnerId) params.set("owner", selectedOwnerId);
+    if (ownerSelection.selectedOwnerId) params.set("owner", ownerSelection.selectedOwnerId);
+    else if (ownerSelection.explicitAll) params.set("owner", "all");
     if (selectedAgentIds.length > 0) params.set("agents", selectedAgentIds.join(","));
     if (startHour !== 0) params.set("start_hour", String(startHour));
     if (endHour !== 23) params.set("end_hour", String(endHour));
@@ -384,7 +432,7 @@ function useDashboardUrlState() {
     pathname,
     replace,
     selectedAgentIds,
-    selectedOwnerId,
+    ownerSelection,
     sortDir,
     sortKey,
     startHour,
@@ -401,9 +449,13 @@ function useDashboardUrlState() {
       setSelectedAgentIds(next);
       setPage(1);
     },
-    selectedOwnerId,
+    selectedOwnerId: ownerSelection.selectedOwnerId,
     setSelectedOwnerId: (next: string | null) => {
-      setSelectedOwnerId(next);
+      setOwnerSelection({
+        selectedOwnerId: next,
+        explicitAll: next === null,
+        followsCurrentUserDefault: false,
+      });
       setSelectedAgentIds([]);
       setPage(1);
     },
@@ -423,6 +475,7 @@ function useDashboardUrlState() {
     setSortDir,
     page,
     setPage,
+    ownerFilterReady: !ownerSelection.followsCurrentUserDefault || !!ownerSelection.selectedOwnerId,
   };
 }
 
@@ -450,7 +503,8 @@ export function AgentDashboardPage() {
     setSortDir,
     page,
     setPage,
-  } = useDashboardUrlState();
+    ownerFilterReady,
+  } = useDashboardUrlState(currentUserId);
 
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
@@ -458,17 +512,19 @@ export function AgentDashboardPage() {
     () => agents.filter((agent) => !selectedOwnerId || agent.owner_id === selectedOwnerId),
     [agents, selectedOwnerId],
   );
-  const dashboardQuery = useQuery(
-    agentRunDashboardOptions(wsId, {
-      days,
-      agentIds: selectedAgentIds,
-      ownerId: selectedOwnerId,
-      startHour,
-      endHour,
-      timezone,
-      limit: 50,
-    }),
-  );
+  const dashboardOptions = agentRunDashboardOptions(wsId, {
+    days,
+    agentIds: selectedAgentIds,
+    ownerId: selectedOwnerId,
+    startHour,
+    endHour,
+    timezone,
+    limit: 50,
+  });
+  const dashboardQuery = useQuery({
+    ...dashboardOptions,
+    enabled: dashboardOptions.enabled && ownerFilterReady,
+  });
   const detailQuery = useQuery(
     agentRunDashboardRunDetailOptions(wsId, selectedRunId),
   );

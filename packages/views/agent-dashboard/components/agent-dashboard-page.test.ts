@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { ownerFilterDisplayLabel, parseHour } from "./agent-dashboard-page";
+import {
+  ownerFilterDisplayLabel,
+  parseDashboardOwnerSelection,
+  parseHour,
+} from "./agent-dashboard-page";
 
 describe("parseHour", () => {
   it("uses the fallback when the hour param is missing or empty", () => {
@@ -41,5 +45,31 @@ describe("ownerFilterDisplayLabel", () => {
         selectedOwnerFallback: "Selected member",
       }),
     ).toBe("Selected member");
+  });
+});
+
+describe("parseDashboardOwnerSelection", () => {
+  it("defaults to the current user when the URL has no owner parameter", () => {
+    expect(parseDashboardOwnerSelection(new URLSearchParams(), "user-1")).toEqual({
+      selectedOwnerId: "user-1",
+      explicitAll: false,
+      followsCurrentUserDefault: true,
+    });
+  });
+
+  it("keeps an explicit all-members selection unowned", () => {
+    expect(parseDashboardOwnerSelection(new URLSearchParams("owner=all"), "user-1")).toEqual({
+      selectedOwnerId: null,
+      explicitAll: true,
+      followsCurrentUserDefault: false,
+    });
+  });
+
+  it("uses an explicit owner instead of the current-user default", () => {
+    expect(parseDashboardOwnerSelection(new URLSearchParams("owner=user-2"), "user-1")).toEqual({
+      selectedOwnerId: "user-2",
+      explicitAll: false,
+      followsCurrentUserDefault: false,
+    });
   });
 });
