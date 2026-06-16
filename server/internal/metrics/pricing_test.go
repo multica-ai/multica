@@ -38,7 +38,7 @@ func TestPriceForModelAliasCodexAutoReview(t *testing.T) {
 		Model:          "gpt-5.4-mini",
 		InputPerM:      0.75,
 		CacheReadPerM:  0.075,
-		CacheWritePerM: 0.075,
+		CacheWritePerM: 0.75,
 		OutputPerM:     4.5,
 	}
 	for _, model := range []string{
