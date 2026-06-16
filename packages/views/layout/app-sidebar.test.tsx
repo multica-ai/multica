@@ -100,10 +100,48 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
 }));
+const CollapsibleContext = React.createContext<{
+  open: boolean;
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>;
+} | null>(null);
+
 vi.mock("@multica/ui/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  CollapsibleTrigger: () => <button type="button" />,
+  Collapsible: ({
+    children,
+    defaultOpen = false,
+  }: {
+    children: React.ReactNode;
+    defaultOpen?: boolean;
+  }) => {
+    const [open, setOpen] = React.useState(defaultOpen);
+    return (
+      <CollapsibleContext.Provider value={{ open, setOpen }}>
+        {children}
+      </CollapsibleContext.Provider>
+    );
+  },
+  CollapsibleContent: ({ children }: { children: React.ReactNode }) => {
+    const state = React.useContext(CollapsibleContext);
+    return state?.open ? <>{children}</> : null;
+  },
+  CollapsibleTrigger: ({
+    children,
+    className,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+  }) => {
+    const state = React.useContext(CollapsibleContext);
+    return (
+      <button
+        type="button"
+        className={className}
+        onClick={() => state?.setOpen((open) => !open)}
+      >
+        {children}
+      </button>
+    );
+  },
 }));
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -169,6 +207,9 @@ vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project"] }),
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
+vi.mock("@multica/core/projects/nesting", () => ({
+  projectTreeOptions: () => ({ queryKey: ["project-tree"] }),
+}));
 vi.mock("@multica/core/projects/config", () => ({
   getProjectColor: () => "blue",
 }));
@@ -185,6 +226,21 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "project-tree") {
+      return {
+        data: [
+          {
+            id: "project-1",
+            title: "Sidebar Project",
+            status: "active",
+            priority: "none",
+            issue_count: 0,
+            done_count: 0,
+            children: [],
+          },
+        ],
+      };
+    }
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     return { data: [] };
   },
@@ -243,5 +299,14 @@ describe("PinRow", () => {
       "href",
       "/beta",
     );
+  });
+
+  it("starts the projects sidebar section collapsed", () => {
+    featureFlags.current = true;
+    render(<AppSidebar />);
+
+    expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument();
+    expect(screen.queryByText("New Project")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sidebar Project")).not.toBeInTheDocument();
   });
 });

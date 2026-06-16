@@ -867,7 +867,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
                 {projectsEnabled && (
-                <Collapsible defaultOpen>
+                // CEREBRO-PATCH(projects-sidebar-default-collapsed): TECH-3687 start Projects collapsed on load.
+                <Collapsible>
                   <SidebarMenuItem>
                     <CollapsibleTrigger
                       className={cn(
