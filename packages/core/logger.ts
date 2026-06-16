@@ -14,16 +14,40 @@ const CONSOLE_METHOD: Record<LogLevel, "log" | "info" | "warn" | "error"> = {
   error: "error",
 };
 
+const LEVEL_PRIORITY: Record<LogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
 /** Storage key for toggling frontend logging at runtime. */
 const LOG_LEVEL_KEY = "multica_log_level";
 
-function isSilent(): boolean {
-  if (typeof window === "undefined") return false;
+const DEFAULT_LEVEL: LogLevel = "info";
+
+type StoredLevel = LogLevel | "off";
+
+const VALID_LEVELS: StoredLevel[] = ["debug", "info", "warn", "error", "off"];
+
+function isValidLevel(level: string | null): level is StoredLevel {
+  return level !== null && (VALID_LEVELS as string[]).includes(level);
+}
+
+function readStoredLevel(): StoredLevel {
+  if (typeof window === "undefined") return DEFAULT_LEVEL;
   try {
-    return window.localStorage.getItem(LOG_LEVEL_KEY) === "off";
+    const raw = window.localStorage.getItem(LOG_LEVEL_KEY);
+    return isValidLevel(raw) ? raw : DEFAULT_LEVEL;
   } catch {
-    return false;
+    return DEFAULT_LEVEL;
   }
+}
+
+function shouldLog(level: LogLevel): boolean {
+  const stored = readStoredLevel();
+  if (stored === "off") return false;
+  return LEVEL_PRIORITY[level] >= LEVEL_PRIORITY[stored];
 }
 
 export interface Logger {
@@ -34,11 +58,11 @@ export interface Logger {
 }
 
 export function createLogger(namespace: string): Logger {
-  if (isSilent()) return noopLogger;
-
   const make =
     (level: LogLevel) =>
     (msg: string, ...data: unknown[]) => {
+      if (!shouldLog(level)) return;
+
       const ts = new Date().toISOString().slice(11, 23);
       const prefix = `%c${ts} [${namespace}]`;
       if (data.length > 0) {
@@ -63,3 +87,18 @@ export const noopLogger: Logger = {
   warn() {},
   error() {},
 };
+
+/** Set the runtime log level. Persists in localStorage and takes effect immediately. */
+export function setLogLevel(level: StoredLevel): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LOG_LEVEL_KEY, level);
+  } catch {
+    // Ignore storage errors (e.g. private mode).
+  }
+}
+
+/** Get the current runtime log level. */
+export function getLogLevel(): StoredLevel {
+  return readStoredLevel();
+}

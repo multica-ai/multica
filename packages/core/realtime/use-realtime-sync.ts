@@ -950,7 +950,7 @@ export function useRealtimeSync(
     if (!ws) return;
 
     const unsub = ws.onReconnect(async () => {
-      logger.info("reconnected, refetching all data");
+      logger.debug("reconnected, refetching all data");
       try {
         invalidateWorkspaceScopedQueries(qc);
       } catch (e) {
@@ -975,7 +975,7 @@ export function useRealtimeSync(
     if (wsInstanceRef.current === ws) return;
     wsInstanceRef.current = ws;
 
-    logger.info("new WSClient instance detected, invalidating workspace queries");
+    logger.debug("new WSClient instance detected, invalidating workspace queries");
     invalidateWorkspaceScopedQueries(qc);
   }, [ws, qc]);
 }
