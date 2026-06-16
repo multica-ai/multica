@@ -23,9 +23,9 @@ against:
 | Runtime caught in a tool-use loop | Duration grows until `MULTICA_AGENT_TIMEOUT` fires; tokens spent, output dropped. |
 | Long-tail exploratory task        | Tool count grows linearly; budget bleed is silent.                                |
 
-Per-provider ceilings (`--max-turns`, `--max-budget-usd`, `--limits`)
-fire cleanly on the runtime side and stop the bleed before the
-daemon's timeout wall has to.
+Per-provider ceilings (`--max-turns`, `--max-budget-usd`) fire cleanly
+on the runtime side and stop the bleed before the daemon's timeout
+wall has to.
 
 ## What `custom_args` is
 
@@ -34,9 +34,23 @@ See [`server/pkg/agent/agent.go`](../server/pkg/agent/agent.go) —
 hardcoded protocol flags, filtered against a per-backend blocklist of
 protocol-critical flags that the daemon controls.
 
+There are in fact **two** operator-controlled layers, applied in order:
+
+1. **Daemon-wide defaults** — `MULTICA_CLAUDE_ARGS` /
+   `MULTICA_CODEX_ARGS`, read by the daemon
+   ([`server/internal/daemon/config.go`](../server/internal/daemon/config.go)),
+   shell-word parsed, and flowed in as `ExecOptions.ExtraArgs`. These
+   apply to every agent of that backend. (Also documented in
+   [`CLI_AND_DAEMON.md`](../CLI_AND_DAEMON.md).)
+2. **Per-agent `custom_args`** — `ExecOptions.CustomArgs`, set on a
+   single agent.
+
+Both are filtered against the same blocklist; `ExtraArgs` is appended
+**before** `custom_args`, so a per-agent value wins on a repeated flag.
+
 For Claude Code
-([`server/pkg/agent/claude.go`](../server/pkg/agent/claude.go)) the
-effective command is:
+([`server/pkg/agent/claude.go`](../server/pkg/agent/claude.go), `buildClaudeArgs`)
+the effective command is:
 
 ```
 claude -p \
@@ -45,20 +59,24 @@ claude -p \
     --verbose \
     --strict-mcp-config \
     --permission-mode bypassPermissions \
+    --disallowedTools AskUserQuestion \
     [--model <opts.Model>] \
+    [--effort <opts.ThinkingLevel>] \
     [--max-turns <opts.MaxTurns>] \
     [--append-system-prompt <opts.SystemPrompt>] \
     [--resume <opts.ResumeSessionID>] \
-    <filtered custom_args> \
+    <filtered MULTICA_CLAUDE_ARGS (daemon-wide ExtraArgs)> \
+    <filtered custom_args (per-agent)> \
     [--mcp-config <path>]
 ```
 
-`custom_args` lands after the per-task flags (`--model` /
-`--max-turns` / `--append-system-prompt` / `--resume`) and before the
-daemon-appended `--mcp-config`. If any user-supplied arg matches a
-protocol-critical flag (see [Blocked flags](#blocked-flags)), the
-daemon drops it and logs a warning; everything else passes through
-untouched.
+The full ordering is: **hardcoded protocol flags → per-task flags
+(`--model`, `--effort`, `--max-turns`, …) → daemon-wide env defaults
+(`MULTICA_CLAUDE_ARGS` / `ExtraArgs`) → per-agent `custom_args` →
+daemon-owned tail args (e.g. `--mcp-config`)**. If any user-supplied
+arg matches a protocol-critical flag (see
+[Blocked flags](#blocked-flags)), the daemon drops it and logs a
+warning; everything else passes through untouched.
 
 ## Setting `custom_args`
 
@@ -142,11 +160,18 @@ For the Claude backend the blocked set today is:
 | `--input-format`    | stream-json is the daemon↔runtime protocol.                          |
 | `--permission-mode` | `bypassPermissions` is required for autonomous task execution.       |
 | `--mcp-config`      | Set by the daemon from the agent's `mcp_config` (controlled toolset). |
+| `--effort`          | Owned by the per-agent `thinking_level` picker — the daemon injects `--effort <thinking_level>` itself. |
 
-Everything else is yours to configure. This explicitly includes
-`--max-turns`, `--max-budget-usd`, `--model` (though `opts.Model`
-from the task is preferred), `--append-system-prompt`, and any
-future claude-cli flag.
+This is the blocklist as of writing, not a fixed allowlist of
+everything else: the daemon filters known protocol-critical flags, so
+treat any future daemon-owned flag as potentially blocked too. The
+flags you'd normally reach for here — `--max-turns`,
+`--max-budget-usd`, `--model` (though `opts.Model` from the task is
+preferred), and `--append-system-prompt` — do pass through today.
+
+A value set in `custom_args` for a blocked flag (e.g. `--effort`) is
+silently dropped with the warn-level log above, so the override has no
+effect — set `thinking_level` on the agent instead.
 
 ## Verifying the change landed
 
@@ -157,13 +182,23 @@ scheduled task) and check the daemon log:
 # The daemon logs the full exec argv for each task (all backends emit
 # the same "agent command" key, so this works for claude, codex, and
 # every other runtime):
-grep 'agent command' ~/.multica/daemon.log | tail -1 | jq .args
+grep 'agent command' ~/.multica/daemon.log | tail -1
 ```
 
-You should see your flags in the `args` array. If they're missing,
-check the warn-level log for `custom_args: blocked protocol-critical
-flag, skipping` — you probably tried to override a member of the
-blocklist.
+The daemon logs through a `tint` text handler
+([`server/internal/logger/logger.go`](../server/internal/logger/logger.go)),
+not JSON, so the line is human-readable — look at the `args=[…]`
+field. (Don't pipe it to `jq`; the log is not JSON.) You should see
+your flags in that slice. If they're missing, check the warn-level log
+for `custom_args: blocked protocol-critical flag, skipping` — you
+probably tried to override a member of the blocklist.
+
+> **Heads up.** `filterCustomArgs` only strips the blocklist; it does
+> not validate that a flag exists. `claude` hard-errors on an unknown
+> option (`error: unknown option '--xyz'`) and exits immediately, so a
+> single typo in `custom_args` makes **every** task for that agent
+> fail on launch — not silently dropped, but a hard failure. Sanity-
+> check flag spelling before saving.
 
 ## Related
 
