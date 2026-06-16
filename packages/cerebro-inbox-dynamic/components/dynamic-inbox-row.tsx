@@ -201,14 +201,6 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
     };
   }, []);
 
-  // Armed but not yet favorited → give the user a full 5s to click, then flip
-  // back to the avatar. Re-arming resets the timer (effect re-runs on `armed`).
-  useEffect(() => {
-    if (!armed || active) return;
-    const t = setTimeout(() => setArmed(false), ARMED_FLIP_BACK_MS);
-    return () => clearTimeout(t);
-  }, [armed, active]);
-
   return (
     <button
       ref={buttonRef}

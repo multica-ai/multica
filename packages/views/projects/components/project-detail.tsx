@@ -143,6 +143,7 @@ function ProjectIssuesContent({
   filter,
   sort,
   ganttIssues,
+  selectedSprintId,
 }: {
   projectId: string;
   projectIssues: Issue[];
@@ -153,6 +154,8 @@ function ProjectIssuesContent({
   filter: MyIssuesFilter;
   sort?: IssueSortParam;
   ganttIssues: Issue[];
+  // CEREBRO-PATCH(project-detail-sprint-create): TECH-3620 sprint the inline/empty-state create should join.
+  selectedSprintId?: string;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -241,6 +244,11 @@ function ProjectIssuesContent({
     [visibleStatuses, baseColumns],
   );
 
+  // CEREBRO-PATCH(project-detail-sprint-create): TECH-3620 carry the selected sprint into every create entry point.
+  const createIssueData = useMemo(
+    () => ({ project_id: projectId, ...(selectedSprintId ? { sprint_id: selectedSprintId } : {}) }),
+    [projectId, selectedSprintId],
+  );
   const updateIssueMutation = useUpdateIssue();
   const handleMoveIssue = useCallback(
     (issueId: string, updates: Pick<UpdateIssueRequest, "status" | "assignee_type" | "assignee_id" | "position" | "parent_issue_id">, onSettled?: () => void) => {
@@ -276,7 +284,7 @@ function ProjectIssuesContent({
           size="sm"
           className="mt-1"
           onClick={() =>
-            useModalStore.getState().open("create-issue", { project_id: projectId })
+            useModalStore.getState().open("create-issue", createIssueData)
           }
         >
           <Plus className="size-3.5 mr-1.5" />
@@ -300,7 +308,7 @@ function ProjectIssuesContent({
           childProgressMap={childProgressMap}
           myIssuesScope={scope}
           myIssuesFilter={filter}
-          createIssueData={{ project_id: projectId }}
+          createIssueData={createIssueData}
           sort={sort}
           projectId={projectId}
         />
@@ -313,7 +321,7 @@ function ProjectIssuesContent({
           myIssuesScope={scope}
           myIssuesFilter={filter}
           doneTotal={doneColumnCount}
-          createIssueData={{ project_id: projectId }}
+          createIssueData={createIssueData}
           sort={sort}
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
@@ -360,14 +368,17 @@ function ProjectIssuesSurface({
   const labelFilters = useViewStore((s) => s.labelFilters);
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of filter on project pages.
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
-  // CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 filter project board/list by sprint sub-project.
+  // CEREBRO-PATCH(project-detail-sprint-filter): TECH-3620 filter project board/list by real sprint membership.
   const sprintsFlag = useFeatureFlag("cerebro_sprints");
-  const [selectedSprintProjectId, setSelectedSprintProjectId] = useState("");
+  const [selectedSprintId, setSelectedSprintId] = useState("");
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+  // Sprint is a cerebro_sprint row, not a project: keep the project scope and
+  // add sprint_id so the SERVER narrows to the sprint's members with the same
+  // pagination — no client-side first-page filtering that drops members.
   const effectiveFilter = useMemo<MyIssuesFilter>(
-    () => (selectedSprintProjectId ? { ...filter, project_id: selectedSprintProjectId } : filter),
-    [filter, selectedSprintProjectId],
+    () => (selectedSprintId ? { ...filter, sprint_id: selectedSprintId } : filter),
+    [filter, selectedSprintId],
   );
 
   const sort = useMemo(
@@ -409,7 +420,8 @@ function ProjectIssuesSurface({
     enabled: usesAssigneeBoard,
   });
   const ganttIssuesQuery = useQuery({
-    ...projectGanttIssuesOptions(wsId, selectedSprintProjectId || projectId),
+    // CEREBRO-PATCH(project-detail-sprint-filter): TECH-3620 gantt also filters by sprint server-side.
+    ...projectGanttIssuesOptions(wsId, projectId, selectedSprintId || undefined),
     enabled: usesGantt,
   });
   const ganttIssues = ganttIssuesQuery.data ?? [];
@@ -428,8 +440,8 @@ function ProjectIssuesSurface({
           <SprintFilter
             workspaceId={wsId}
             projectId={projectId}
-            value={selectedSprintProjectId}
-            onChange={setSelectedSprintProjectId}
+            value={selectedSprintId}
+            onChange={setSelectedSprintId}
             className="max-w-64"
           />
         </div>
@@ -444,6 +456,8 @@ function ProjectIssuesSurface({
         filter={effectiveFilter}
         sort={sort}
         ganttIssues={ganttIssues}
+        // CEREBRO-PATCH(project-detail-sprint-create): TECH-3620 new issues created here join the selected sprint.
+        selectedSprintId={selectedSprintId}
       />
       <BatchActionToolbar />
     </CerebroStatusModelProvider>

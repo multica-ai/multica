@@ -7,10 +7,11 @@
 // the parent so it opens the conversation in its detail panel; this component
 // never navigates itself.
 //
-// TECH-3494 — the list is unified: a single total limit applies across all
-// three kinds, the default sort is "most recent conversation" across all kinds,
-// and the user picks whether to group by type or see one flat list. No
-// per-group scroll. All UI text is English.
+// TECH-3494 — the list is unified: the default sort is "most recent
+// conversation" across all kinds, and the user picks whether to group by type
+// or see one flat list. No per-group scroll. All UI text is English.
+// TECH-3665 — the row limit is per kind when grouped by type (so the Channels
+// group is always shown by default) and a single shared total when flat.
 //
 // Styling: light-mode, Tailwind semantic tokens only (bg-card,
 // text-muted-foreground, bg-success for the online dot, etc.). No hardcoded
@@ -56,7 +57,8 @@ export interface SlackBlockProps {
   wsId: string;
   selectedChannelId: string | null;
   onOpenChannel: (channel: Channel) => void;
-  /** Total rows to show across channels + people + agents. 0 = all. Default 10. */
+  /** Rows to show. Per kind when grouped by type, a shared total when flat.
+   *  0 = all. Default 10. */
   limit?: number;
   onSetLimit: (n: number) => void;
   /** Sort order across all kinds. Starred float to the top. Default "recent". */
@@ -73,6 +75,10 @@ export interface SlackBlockProps {
   onSetShowAgents: (v: boolean) => void;
   /** Opens an agent chat in the parent's detail panel (no DM channel). */
   onOpenAgentChat: (agentId: string) => void;
+  /** TECH-3664 — opens an EXISTING (unread) agent chat session so clicking an
+   *  agent that shows "New" lands on the unread conversation instead of a blank
+   *  new chat. Falls back to onOpenAgentChat when absent or no unread session. */
+  onOpenAgentSession?: (sessionId: string) => void;
   onRemove: () => void;
 }
 
@@ -108,6 +114,9 @@ type ChatItem = {
   userId?: string;
   agentId?: string;
   online?: boolean;
+  /** TECH-3664 — id of the agent's most-recent unread chat session, if any.
+   *  Set so clicking an unread agent row opens that session. */
+  sessionId?: string;
 };
 
 /** Most-recent activity timestamp for a conversation (ms), 0 when none. */
@@ -151,6 +160,7 @@ export function SlackBlock({
   showAgents = false,
   onSetShowAgents,
   onOpenAgentChat,
+  onOpenAgentSession,
   onRemove,
 }: SlackBlockProps) {
   // Gate the whole block behind its cerebro feature flag. Reading it keeps the
@@ -194,17 +204,29 @@ export function SlackBlock({
     [members, selfUserId],
   );
 
-  // Most-recent agent chat activity, keyed by agent id.
+  // Most-recent agent chat activity, keyed by agent id. TECH-3664 — also track
+  // the id of the most-recent UNREAD session so clicking an agent that shows
+  // "New" opens that conversation instead of a blank new chat.
   const agentActivity = useMemo(() => {
-    const map = new Map<string, { recency: number; unread: boolean }>();
+    const map = new Map<
+      string,
+      { recency: number; unread: boolean; unreadSessionId?: string; unreadRecency: number }
+    >();
     for (const s of chatSessions) {
       if (s.status === "archived") continue;
       const recency = Date.parse(s.updated_at) || 0;
       const prev = map.get(s.agent_id);
-      map.set(s.agent_id, {
+      const next = {
         recency: Math.max(prev?.recency ?? 0, recency),
         unread: (prev?.unread ?? false) || s.has_unread,
-      });
+        unreadSessionId: prev?.unreadSessionId,
+        unreadRecency: prev?.unreadRecency ?? -1,
+      };
+      if (s.has_unread && recency >= next.unreadRecency) {
+        next.unreadSessionId = s.id;
+        next.unreadRecency = recency;
+      }
+      map.set(s.agent_id, next);
     }
     return map;
   }, [chatSessions]);
@@ -258,6 +280,7 @@ export function SlackBlock({
           unread: act?.unread ? 1 : 0,
           starred: false,
           agentId: a.id,
+          sessionId: act?.unreadSessionId,
           online: agentPresence.get(a.id)?.availability === "online",
         });
       }
@@ -294,8 +317,23 @@ export function SlackBlock({
       return a.name.localeCompare(b.name);
     });
     const effective = limit == null ? DEFAULT_LIMIT : limit;
-    return effective > 0 ? sorted.slice(0, effective) : sorted;
-  }, [allItems, normalizedSearch, unreadFirst, sort, limit]);
+    if (effective <= 0) return sorted;
+    // TECH-3665 — when grouped by type (the default), the limit is applied PER
+    // KIND so the Channels group is always shown by default. With a single
+    // global cap, busier People/DM rows ranked higher by recency could push
+    // every channel past the cap, leaving the Channels group empty even though
+    // the workspace has channels. The flat list keeps one shared total cap.
+    if (groupBy === "type") {
+      const perKind = new Map<ChatItem["kind"], number>();
+      return sorted.filter((it) => {
+        const taken = perKind.get(it.kind) ?? 0;
+        if (taken >= effective) return false;
+        perKind.set(it.kind, taken + 1);
+        return true;
+      });
+    }
+    return sorted.slice(0, effective);
+  }, [allItems, normalizedSearch, unreadFirst, sort, limit, groupBy]);
 
   const onlineCount = useMemo(
     () =>
@@ -323,8 +361,12 @@ export function SlackBlock({
   };
 
   const openItem = (it: ChatItem) => {
-    if (it.kind === "agent" && it.agentId) onOpenAgentChat(it.agentId);
-    else if (it.kind === "channel" && it.channel) onOpenChannel(it.channel);
+    if (it.kind === "agent" && it.agentId) {
+      // TECH-3664 — an agent with an unread session opens that conversation;
+      // otherwise the row starts a fresh chat as before.
+      if (it.sessionId && onOpenAgentSession) onOpenAgentSession(it.sessionId);
+      else onOpenAgentChat(it.agentId);
+    } else if (it.kind === "channel" && it.channel) onOpenChannel(it.channel);
     else if (it.kind === "person" && it.userId) void openMember(it.userId);
   };
 
@@ -400,15 +442,23 @@ export function SlackBlock({
     );
   };
 
+  // TECH-3664 — when "Unread first" is on, every unread conversation (channel,
+  // person OR agent) floats into ONE block at the very top, with a thin
+  // horizontal divider under it; the rest are grouped/flat below as chosen.
+  // shownItems is already sorted (starred → unread → recency/name), so the
+  // partition preserves order within each block.
+  const unreadItems = unreadFirst ? shownItems.filter((i) => i.unread > 0) : [];
+  const restItems = unreadFirst ? shownItems.filter((i) => i.unread === 0) : shownItems;
+
   let groups: Array<{ label: string; items: ChatItem[] }>;
   if (groupBy === "type") {
     groups = [
-      { label: "Channels", items: shownItems.filter((i) => i.kind === "channel") },
-      { label: "People", items: shownItems.filter((i) => i.kind === "person") },
-      { label: "Agents", items: shownItems.filter((i) => i.kind === "agent") },
+      { label: "Channels", items: restItems.filter((i) => i.kind === "channel") },
+      { label: "People", items: restItems.filter((i) => i.kind === "person") },
+      { label: "Agents", items: restItems.filter((i) => i.kind === "agent") },
     ].filter((g) => g.items.length > 0);
   } else {
-    groups = [{ label: "", items: shownItems }];
+    groups = restItems.length > 0 ? [{ label: "", items: restItems }] : [];
   }
 
   return (
@@ -531,6 +581,19 @@ export function SlackBlock({
           </p>
         ) : (
           <div className="flex flex-col gap-3" data-testid="chat-list">
+            {/* TECH-3664 — unread block across all kinds, with a thin divider
+                under it, kept above the grouped/flat read rows. */}
+            {unreadItems.length > 0 && (
+              <div className="flex flex-col gap-1" data-testid="unread-group">
+                {unreadItems.map(renderRow)}
+                {groups.length > 0 && (
+                  <hr
+                    data-testid="unread-divider"
+                    className="mt-2 border-t border-border"
+                  />
+                )}
+              </div>
+            )}
             {groups.map((g) => (
               <div key={g.label || "flat"} className="flex flex-col gap-1">
                 {g.label && (

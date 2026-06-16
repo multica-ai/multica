@@ -137,7 +137,9 @@ export function NoteTypesPanel() {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const { data: noteTypes, isLoading } = useNoteTypes();
-  const { data: folders } = useQuery(artifactFoldersOptions(wsId));
+  const { data: folders } = useQuery(
+    artifactFoldersOptions(wsId, { kind: "note" }),
+  );
   const create = useCreateNoteType();
   const update = useUpdateNoteType();
   const remove = useDeleteNoteType();

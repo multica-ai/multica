@@ -22,7 +22,7 @@ export type {
   CerebroFlagGroup,
   CerebroFlagGroupKey,
 } from "./registry";
-export { CerebroFeatureFlagsTab } from "./settings-tab";
+export { CerebroFeatureFlagsTab, FlagRow as CerebroFlagRow } from "./settings-tab";
 export { cerebroFeatureFlagTabs } from "./settings-tabs";
 export {
   useSecretaryCriteria,

@@ -51,6 +51,8 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 // CEREBRO-PATCH(create-issue-duplicate-check-import): FIR-2504.
 import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
+// CEREBRO-PATCH(create-issue-sprint-assign-import): TECH-3620 assign new issue to a sprint when created from a sprint board.
+import { useAssignIssueToSprint } from "@multica/cerebro-sprints/core";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -171,6 +173,8 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
+  // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620 link the new issue to data.sprint_id (set by the sprint board).
+  const assignIssueToSprintMutation = useAssignIssueToSprint(wsId);
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -212,6 +216,16 @@ export function ManualCreatePanel({
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
+
+      // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620 join the sprint the board was filtered to.
+      const sprintId = typeof data?.sprint_id === "string" ? data.sprint_id : "";
+      if (sprintId) {
+        try {
+          await assignIssueToSprintMutation.mutateAsync({ issueId: issue.id, sprintId });
+        } catch {
+          toast.error("Issue created, but sprint assignment failed");
+        }
+      }
 
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't

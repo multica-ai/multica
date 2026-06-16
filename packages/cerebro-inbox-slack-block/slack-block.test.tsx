@@ -15,6 +15,10 @@ const presenceState = vi.hoisted(() => ({
   agents: new Map<string, { availability: string }>(),
 }));
 
+// Mutable chat-session list the mocked useQuery returns for the agents' chat
+// activity. Tests seed it before render; empty by default (no agent unread).
+const chatState = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>> }));
+
 // Mutable favorites set + spy for the starring tests.
 const favState = vi.hoisted(() => ({
   keys: [] as string[],
@@ -129,6 +133,7 @@ vi.mock("@tanstack/react-query", async () => {
       if (key === "members") return { data: members };
       if (key === "channels") return { data: channels };
       if (key === "agents") return { data: agents };
+      if (key === "chat-sessions") return { data: chatState.sessions };
       return { data: [] };
     },
   };
@@ -155,7 +160,7 @@ vi.mock("@multica/core/agents", () => ({
 }));
 
 vi.mock("@multica/core/chat/queries", () => ({
-  chatSessionsOptions: () => ({ queryKey: ["chat-sessions", "ws"] }),
+  chatSessionsOptions: () => ({ queryKey: ["chat", "ws", "chat-sessions"] }),
 }));
 
 // canAssignAgent gate — every agent is assignable in these tests; archived
@@ -270,6 +275,7 @@ describe("SlackBlock", () => {
     mockCreateChannel.mockResolvedValue(aliceDm);
     presenceState.online = new Set();
     presenceState.agents = new Map();
+    chatState.sessions = [];
     favState.keys = [];
     favState.toggle.mockClear();
     wsHandlers.clear();
@@ -484,6 +490,21 @@ describe("SlackBlock", () => {
     expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
   });
 
+  // TECH-3665 — when grouped by type, the limit is per kind so the Channels
+  // group is always shown by default. A single global cap of 1 sorted by name
+  // would keep only "Alice" and drop the channel entirely; per-kind keeps one
+  // person AND the channel.
+  it("applies the limit per kind when grouped by type so channels still show", async () => {
+    await act(async () => {
+      renderBlock({ limit: 1, groupBy: "type", sort: "name", unreadFirst: false });
+    });
+    // Channel kept (would be dropped by a single global cap of 1).
+    expect(screen.getByText("general")).toBeInTheDocument();
+    // People still capped to 1: Alice in, Bob out.
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
+  });
+
   it("picking a limit from settings calls onSetLimit", async () => {
     const onSetLimit = vi.fn();
     const user = userEvent.setup();
@@ -515,7 +536,9 @@ describe("SlackBlock", () => {
     favState.keys = ["member:bob"]; // Bob starred → above Alice
     const user = userEvent.setup();
     await act(async () => {
-      renderBlock({ groupBy: "none" });
+      // unreadFirst off so this isolates pure starred ordering — with it on,
+      // Alice's unread DM would float above Bob (TECH-3664).
+      renderBlock({ groupBy: "none", unreadFirst: false });
     });
 
     const names = screen
@@ -564,5 +587,85 @@ describe("SlackBlock", () => {
     });
     await user.click(screen.getByText(/Unread first/));
     expect(onSetUnreadFirst).toHaveBeenCalledWith(false);
+  });
+
+  // TECH-3664 — unread conversations float into ONE block at the very top
+  // (across channels/people/agents) with a thin divider under it; the rest stay
+  // grouped below. Alice's DM is unread; Bob and #general are read.
+  it("floats unread into a top block with a divider, above the grouped rest", async () => {
+    await act(async () => {
+      renderBlock({ unreadFirst: true, groupBy: "type" });
+    });
+
+    const unread = screen.getByTestId("unread-group");
+    expect(within(unread).getByText("Alice")).toBeInTheDocument();
+    expect(within(unread).queryByText("Bob")).not.toBeInTheDocument();
+    expect(screen.getByTestId("unread-divider")).toBeInTheDocument();
+    // Read rows stay in their type groups below the divider.
+    expect(screen.getByText("Channels")).toBeInTheDocument();
+    expect(screen.getByText("People")).toBeInTheDocument();
+  });
+
+  it("places an unread row above a starred-but-read row", async () => {
+    favState.keys = ["member:bob"]; // Bob starred + read; Alice unread
+    await act(async () => {
+      renderBlock({ unreadFirst: true, groupBy: "none" });
+    });
+
+    const order = screen
+      .getAllByTestId(/^presence-dot-/)
+      .map((d) => d.getAttribute("data-testid"));
+    // Alice (unread) comes before Bob (starred but read).
+    expect(order.indexOf("presence-dot-alice")).toBeLessThan(
+      order.indexOf("presence-dot-bob"),
+    );
+  });
+
+  it("does not render a divider when there are no read rows to separate", async () => {
+    // Only Alice's unread DM survives the cap, so nothing sits below the block.
+    await act(async () => {
+      renderBlock({ unreadFirst: true, groupBy: "none", limit: 1, sort: "name" });
+    });
+    expect(screen.getByTestId("unread-group")).toBeInTheDocument();
+    expect(screen.queryByTestId("unread-divider")).not.toBeInTheDocument();
+  });
+
+  // TECH-3664 — clicking an agent that shows "New" opens its UNREAD session
+  // (not a blank new chat) when the parent supplies onOpenAgentSession.
+  it("opens an agent's unread session instead of a blank chat", async () => {
+    chatState.sessions = [
+      {
+        id: "sess-sara",
+        agent_id: "agent-sara",
+        updated_at: "2026-06-01T00:00:00Z",
+        has_unread: true,
+        status: "active",
+      },
+    ];
+    const onOpenAgentChat = vi.fn();
+    const onOpenAgentSession = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ showAgents: true, onOpenAgentChat, onOpenAgentSession });
+    });
+
+    // The agent shows the "New" unread badge.
+    expect(screen.getByText("New")).toBeInTheDocument();
+    await user.click(screen.getByText("Sara - CTO"));
+    expect(onOpenAgentSession).toHaveBeenCalledWith("sess-sara");
+    expect(onOpenAgentChat).not.toHaveBeenCalled();
+  });
+
+  it("starts a new chat for an agent with no unread session", async () => {
+    const onOpenAgentChat = vi.fn();
+    const onOpenAgentSession = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ showAgents: true, onOpenAgentChat, onOpenAgentSession });
+    });
+
+    await user.click(screen.getByText("Sara - CTO"));
+    expect(onOpenAgentChat).toHaveBeenCalledWith("agent-sara");
+    expect(onOpenAgentSession).not.toHaveBeenCalled();
   });
 });

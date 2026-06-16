@@ -81,3 +81,19 @@ export function useSetNotePin() {
     },
   });
 }
+
+// useSetNoteFolder moves a note into a folder (or out of all folders when
+// folderId is null). A note is an artifact under the hood, so this reuses the
+// shared artifact folder-move endpoint; we just invalidate the notes list so
+// the moved note lands in the right folder view (TECH-3637).
+export function useSetNoteFolder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, folderId }: { id: string; folderId: string | null }) =>
+      api.moveArtifactToFolder(id, { folder_id: folderId }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: noteKeys.all(wsId) });
+    },
+  });
+}

@@ -1441,12 +1441,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          {/* CEREBRO-PATCH(issue-detail-sprint-as-project): FIR-2718 - sprint uses
-             the normal Project field by selecting the sprint sub-project. */}
+          {/* CEREBRO-PATCH(issue-detail-sprint-as-project): TECH-3620 - Project and Sprint are
+             independent now; the Project field is the issue's home project. */}
           <PropRow label={t(($) => $.detail.prop_project)}>
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
-          {/* CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 sprint picker; renders only with the flag on and a project with sprint children. */}
+          {/* CEREBRO-PATCH(issue-detail-sprint-picker): TECH-3620 sprint picker; assigns via the sprint join, keeps project_id. Renders with the flag on and a project that has real sprints. */}
           {sprintsEnabled && issue.project_id && (
             <PropRow label="Sprint">
               <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />

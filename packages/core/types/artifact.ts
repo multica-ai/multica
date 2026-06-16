@@ -71,11 +71,17 @@ export interface ListArtifactsParams {
   offset?: number;
 }
 
+// CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — kind scopes a folder to a
+// surface: "document" (the file manager) or "note". Notes and Documents share
+// the artifact engine but keep separate folder trees.
+export type ArtifactFolderKind = "document" | "note";
+
 export interface ArtifactFolder {
   id: string;
   workspace_id: string;
   parent_id: string | null;
   name: string;
+  kind: ArtifactFolderKind;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +89,7 @@ export interface ArtifactFolder {
 export interface CreateArtifactFolderRequest {
   name: string;
   parent_id?: string | null;
+  kind?: ArtifactFolderKind;
 }
 
 export interface UpdateArtifactFolderRequest {

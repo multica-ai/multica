@@ -133,9 +133,11 @@ function AddReferencePicker({ noteId }: { noteId: string }) {
     enabled: open && query.length > 0,
   });
 
-  // Real issues only — channels/DMs are issues too but are not a reference
-  // object kind in this MVP.
-  const issues = (issueRes?.issues ?? []).filter((i) => i.kind === "issue");
+  // The search endpoint already restricts to real issues server-side
+  // (`AND i.kind = 'issue'`). Don't re-filter on `kind` here: the search
+  // response leaves `kind` empty, so a `kind === "issue"` filter dropped every
+  // result and the picker found nothing (TECH-3637).
+  const issues = issueRes?.issues ?? [];
 
   const pickIssue = (issue: {
     id: string;

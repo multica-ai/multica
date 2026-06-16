@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -799,15 +800,15 @@ var (
 
 const webFetchMaxBytes = 50 * 1024 // 50 KB
 
-// webFetchAllowlist is the default URL allowlist when no config is set.
-var webFetchAllowlist = []string{
-	".firtal.com",
-	"docs.anthropic.com",
-}
-
 // WebFetchTool implements Tool for fetching web page text content.
+//
+// TECH-3522: the URL allowlist is no longer hardcoded. The tool resolves the
+// per-workspace web_fetch policy (allow/disallow mode + host rules) on every
+// call via cerebro queries, falling back to the seeded default when the feature
+// is off or the workspace has no policy — so behaviour is unchanged on deploy.
 type WebFetchTool struct {
-	configAllowlist []string // from agent_tool_grant.config_json, nil = use default
+	cerebro *cerebrodb.Queries
+	tctx    ToolContext
 }
 
 func (t *WebFetchTool) Name() string { return "web_fetch" }
@@ -840,20 +841,12 @@ func (t *WebFetchTool) Call(ctx context.Context, args map[string]any) (string, e
 	}
 	host := strings.ToLower(parsed.Hostname())
 
-	allowlist := t.configAllowlist
-	if len(allowlist) == 0 {
-		allowlist = webFetchAllowlist
-	}
-
-	allowed := false
-	for _, pattern := range allowlist {
-		if host == strings.TrimPrefix(pattern, ".") || strings.HasSuffix(host, pattern) {
-			allowed = true
-			break
+	policy := webfetchpolicy.Effective(ctx, t.cerebro, t.tctx.WorkspaceID)
+	if !policy.Allows(host) {
+		if policy.Mode == webfetchpolicy.ModeDisallow {
+			return "", fmt.Errorf("web_fetch: host %q is blocked by this workspace's web_fetch policy (disallow-list). A workspace admin controls the blocked-host list in Settings → Web fetch", host)
 		}
-	}
-	if !allowed {
-		return "", fmt.Errorf("web_fetch: URL host %q is not in the allowlist", host)
+		return "", fmt.Errorf("web_fetch: host %q is not on this workspace's web_fetch allow-list, so it cannot be fetched. A workspace admin can add it in Settings → Web fetch (allowed hosts: %s)", host, strings.Join(policy.Rules, ", "))
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -884,6 +877,24 @@ func (t *WebFetchTool) Call(ctx context.Context, args map[string]any) (string, e
 		text = text[:webFetchMaxBytes] + "\n[truncated]"
 	}
 	return text, nil
+}
+
+// webFetchPolicyHint returns a one-line description of the workspace's active
+// web_fetch URL policy, injected into the agent's system prompt so it can fetch
+// the right hosts and explain to the user why a blocked host was rejected
+// (TECH-3522).
+func webFetchPolicyHint(ctx context.Context, cerebro *cerebrodb.Queries, workspaceID pgtype.UUID) string {
+	policy := webfetchpolicy.Effective(ctx, cerebro, workspaceID)
+	rules := strings.Join(policy.Rules, ", ")
+	if rules == "" {
+		rules = "(none)"
+	}
+	if policy.Mode == webfetchpolicy.ModeDisallow {
+		return "web_fetch policy: this workspace allows fetching ALL hosts EXCEPT these blocked ones: " + rules +
+			". If a fetch is blocked, tell the user the host is on the workspace's blocked list and that an admin manages it in Settings > Web fetch."
+	}
+	return "web_fetch policy: this workspace only allows fetching these hosts: " + rules +
+		". A request to any other host will be rejected — if so, tell the user the host is not on the workspace's allow-list and that an admin can add it in Settings > Web fetch."
 }
 
 // ── gogcli_sheets_write ──────────────────────────────────────────────────────
@@ -1646,7 +1657,7 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalGetGrantTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalRegistryTool{queries: queries, tctx: tctx, registry: r})
-	r.Register(&WebFetchTool{})
+	r.Register(&WebFetchTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})
 	for _, tool := range customerServiceMCPTools() {
 		r.Register(tool)

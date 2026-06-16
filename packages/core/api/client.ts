@@ -1415,6 +1415,8 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter.
     if (params?.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
+    // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 forward sprint member filter.
+    if (params?.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -1442,6 +1444,8 @@ export class ApiClient {
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter (grouped).
     if (params.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
+    // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 forward sprint member filter (grouped).
+    if (params.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
@@ -3844,8 +3848,11 @@ export class ApiClient {
   }
 
   // Artifact folders
-  async listArtifactFolders(): Promise<ArtifactFolder[]> {
-    return this.fetch("/api/artifact-folders");
+  // CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter so
+  // notes and documents list separate folder trees.
+  async listArtifactFolders(kind?: string): Promise<ArtifactFolder[]> {
+    const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+    return this.fetch(`/api/artifact-folders${qs}`);
   }
 
   async createArtifactFolder(
@@ -3951,6 +3958,17 @@ export class ApiClient {
   async testCerebroConnection<T = unknown>(wsId: string, body: unknown): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/connections/test`, {
       method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-web-fetch-policy-client): TECH-3522 per-workspace web_fetch policy methods.
+  async getCerebroWebFetchPolicy<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/web-fetch-policy`); // CEREBRO-PATCH(cerebro-web-fetch-policy-client)
+  }
+  async updateCerebroWebFetchPolicy<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/web-fetch-policy`, { // CEREBRO-PATCH(cerebro-web-fetch-policy-client)
+      method: "PUT",
       body: JSON.stringify(body),
     });
   }

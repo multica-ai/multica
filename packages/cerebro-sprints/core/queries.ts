@@ -167,6 +167,9 @@ export function useAssignIssueToSprint(wsId: string) {
     onSuccess: (_data, { issueId }) => {
       qc.invalidateQueries({ queryKey: sprintsKeys.issueAssignment(wsId, issueId) });
       qc.invalidateQueries({ queryKey: sprintsKeys.all(wsId) });
+      // The project board filters by sprint server-side, so a membership change
+      // must refresh the issue lists too (covers create-in-sprint + reassignment).
+      qc.invalidateQueries({ queryKey: ["issues"] });
     },
   });
 }

@@ -12,15 +12,16 @@ import (
 )
 
 const createArtifactFolder = `-- name: CreateArtifactFolder :one
-INSERT INTO artifact_folder (id, workspace_id, parent_id, name)
-VALUES ($1, $2, $4, $3)
-RETURNING id, workspace_id, parent_id, name, created_at, updated_at
+INSERT INTO artifact_folder (id, workspace_id, parent_id, name, kind)
+VALUES ($1, $2, $5, $3, $4)
+RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind
 `
 
 type CreateArtifactFolderParams struct {
 	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Name        string      `json:"name"`
+	Kind        string      `json:"kind"`
 	ParentID    pgtype.UUID `json:"parent_id"`
 }
 
@@ -30,6 +31,7 @@ func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFo
 		arg.ID,
 		arg.WorkspaceID,
 		arg.Name,
+		arg.Kind,
 		arg.ParentID,
 	)
 	var i ArtifactFolder
@@ -40,6 +42,7 @@ func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFo
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -62,7 +65,7 @@ func (q *Queries) DeleteArtifactFolder(ctx context.Context, arg DeleteArtifactFo
 }
 
 const getArtifactFolder = `-- name: GetArtifactFolder :one
-SELECT id, workspace_id, parent_id, name, created_at, updated_at FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -81,12 +84,13 @@ func (q *Queries) GetArtifactFolder(ctx context.Context, arg GetArtifactFolderPa
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const listArtifactFoldersByParent = `-- name: ListArtifactFoldersByParent :many
-SELECT id, workspace_id, parent_id, name, created_at, updated_at FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
 WHERE workspace_id = $1
   AND (
         ($2::uuid IS NULL AND parent_id IS NULL)
@@ -116,6 +120,7 @@ func (q *Queries) ListArtifactFoldersByParent(ctx context.Context, arg ListArtif
 			&i.Name,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -128,13 +133,21 @@ func (q *Queries) ListArtifactFoldersByParent(ctx context.Context, arg ListArtif
 }
 
 const listArtifactFoldersByWorkspace = `-- name: ListArtifactFoldersByWorkspace :many
-SELECT id, workspace_id, parent_id, name, created_at, updated_at FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
 WHERE workspace_id = $1
+  AND ($2::text IS NULL OR kind = $2)
 ORDER BY name ASC
 `
 
-func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ArtifactFolder, error) {
-	rows, err := q.db.Query(ctx, listArtifactFoldersByWorkspace, workspaceID)
+type ListArtifactFoldersByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Kind        pgtype.Text `json:"kind"`
+}
+
+// CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter scopes
+// the folder list to one surface so notes and documents don't mix.
+func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, arg ListArtifactFoldersByWorkspaceParams) ([]ArtifactFolder, error) {
+	rows, err := q.db.Query(ctx, listArtifactFoldersByWorkspace, arg.WorkspaceID, arg.Kind)
 	if err != nil {
 		return nil, err
 	}
@@ -149,6 +162,7 @@ func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, workspaceI
 			&i.Name,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}
@@ -166,7 +180,7 @@ UPDATE artifact_folder SET
     parent_id = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
-RETURNING id, workspace_id, parent_id, name, created_at, updated_at
+RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind
 `
 
 type UpdateArtifactFolderParams struct {
@@ -191,6 +205,7 @@ func (q *Queries) UpdateArtifactFolder(ctx context.Context, arg UpdateArtifactFo
 		&i.Name,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 	)
 	return i, err
 }

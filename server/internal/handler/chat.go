@@ -343,6 +343,11 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	sessionID := chi.URLParam(r, "sessionId")
 
+	// CEREBRO-PATCH(chat-no-hard-delete): TECH-3664 — archive, never destroy (history is permanent).
+	if h.archiveChatSessionInsteadOfDelete(w, r, userID, workspaceID, sessionID) {
+		return
+	}
+
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
 		return

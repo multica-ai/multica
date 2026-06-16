@@ -4,12 +4,12 @@ import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { History, RotateCcw, Check } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@multica/ui/components/ui/dialog";
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@multica/ui/components/ui/sheet";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
@@ -31,7 +31,8 @@ const REASON_LABEL: Record<NoteVersion["reason"], string> = {
 
 // NoteVersionsDialog (Wave 3 / G2): a note's history, newest first. Each entry
 // shows who/when/why; the body is previewed and can be restored. "Save version"
-// captures the current state as a labelled checkpoint.
+// captures the current state as a labelled checkpoint. Rendered as a full-height
+// side sheet (TECH-3637) so a long note body has room without truncation.
 export function NoteVersionsDialog({
   noteId,
   open,
@@ -55,20 +56,26 @@ export function NoteVersionsDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[80vh] max-w-3xl flex-col gap-0 p-0">
-        <DialogHeader className="border-b px-5 py-3">
-          <DialogTitle className="flex items-center gap-2 text-base">
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        // The base Sheet caps a right sheet at `sm:max-w-sm`; override with the
+        // same data-side variant so it actually widens (TECH-3637). Wide enough
+        // for the timeline + a roomy preview side by side.
+        className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:max-w-5xl"
+      >
+        <SheetHeader className="border-b px-5 py-3">
+          <SheetTitle className="flex items-center gap-2 text-base">
             <History className="size-4" /> Version history
-          </DialogTitle>
-          <DialogDescription className="sr-only">
+          </SheetTitle>
+          <SheetDescription className="sr-only">
             See who changed this note and restore an earlier version.
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
         <div className="flex min-h-0 flex-1">
           {/* Timeline */}
-          <div className="w-64 shrink-0 border-r">
+          <div className="flex w-64 shrink-0 flex-col border-r">
             <div className="flex items-center justify-between px-3 py-2">
               <span className="text-xs text-muted-foreground">
                 {versions.length} version{versions.length === 1 ? "" : "s"}
@@ -82,7 +89,7 @@ export function NoteVersionsDialog({
                 <Check className="size-3.5" /> Save version
               </Button>
             </div>
-            <ScrollArea className="h-[calc(80vh-7.5rem)]">
+            <ScrollArea className="min-h-0 flex-1">
               {isLoading ? (
                 <p className="p-3 text-sm text-muted-foreground">Loading…</p>
               ) : versions.length === 0 ? (
@@ -154,8 +161,8 @@ export function NoteVersionsDialog({
             )}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }
 

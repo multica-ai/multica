@@ -39,32 +39,31 @@ function anchorContext(body: string, quote: string) {
   };
 }
 
-// readSelectionWithin returns the trimmed selected text when the selection sits
-// inside the given container (the editor), else "".
-function readSelectionWithin(container: HTMLElement | null): string {
-  if (!container) return "";
-  const sel = window.getSelection();
-  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return "";
-  const range = sel.getRangeAt(0);
-  if (!container.contains(range.commonAncestorContainer)) return "";
-  return sel.toString().trim();
-}
-
 // NoteCommentsPanel (Wave 3 / G1): the margin. Lists comment + suggestion
 // threads for a note, lets anyone who can see the note comment/suggest on a
 // text selection, reply, and resolve; the note owner can accept/reject a
 // suggestion (which splices into the body server-side).
+//
+// The text selection being commented on (`draftQuote`) and which thread is
+// "active" (`activeAnchorId`) are owned by NoteEditor so the orange highlight
+// in the body and the panel stay in sync (TECH-3637).
 export function NoteCommentsPanel({
   noteId,
   noteBody,
   isOwner,
-  editorContainerRef,
+  draftQuote,
+  activeAnchorId,
+  onClearDraft,
+  onSelectThread,
   onClose,
 }: {
   noteId: string;
   noteBody: string;
   isOwner: boolean;
-  editorContainerRef: React.RefObject<HTMLElement | null>;
+  draftQuote: string | null;
+  activeAnchorId: string | null;
+  onClearDraft: () => void;
+  onSelectThread: (id: string | null) => void;
   onClose: () => void;
 }) {
   const wsId = useWorkspaceId();
@@ -76,7 +75,6 @@ export function NoteCommentsPanel({
 
   const [mode, setMode] = React.useState<"comment" | "suggestion">("comment");
   const [draft, setDraft] = React.useState("");
-  const [quote, setQuote] = React.useState("");
 
   const threads = React.useMemo(() => buildThreads(comments), [comments]);
   const open = threads.filter((t) => !t.root.resolved);
@@ -86,21 +84,16 @@ export function NoteCommentsPanel({
     return members.find((m) => m.user_id === id)?.name ?? "Unknown";
   }
 
-  function captureSelection() {
-    const q = readSelectionWithin(editorContainerRef.current);
-    if (q) setQuote(q);
-  }
-
   function submit() {
     const text = draft.trim();
     if (!text) return;
-    const ctx = quote ? anchorContext(noteBody, quote) : null;
+    const ctx = draftQuote ? anchorContext(noteBody, draftQuote) : null;
     create.mutate(
       {
         kind: mode,
         body: mode === "suggestion" ? "Suggested edit" : text,
         suggestion_text: mode === "suggestion" ? text : undefined,
-        anchor_quote: quote || undefined,
+        anchor_quote: draftQuote || undefined,
         anchor_prefix: ctx?.prefix || undefined,
         anchor_suffix: ctx?.suffix || undefined,
         anchor_start: ctx?.start ?? undefined,
@@ -109,7 +102,7 @@ export function NoteCommentsPanel({
       {
         onSuccess: () => {
           setDraft("");
-          setQuote("");
+          onClearDraft();
         },
       },
     );
@@ -146,19 +139,25 @@ export function NoteCommentsPanel({
             Suggest edit
           </Button>
         </div>
-        <button
-          type="button"
-          onClick={captureSelection}
-          className="mb-2 block w-full rounded border border-dashed px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/50"
-        >
-          {quote ? (
-            <span className="line-clamp-2">
-              <CornerDownRight className="mr-1 inline size-3" />“{quote}”
-            </span>
-          ) : (
-            "Select text in the note, then click here to attach it"
-          )}
-        </button>
+        {draftQuote ? (
+          <div className="mb-2 flex items-start gap-1 rounded border border-orange-400/60 bg-orange-400/10 px-2 py-1 text-xs">
+            <CornerDownRight className="mt-0.5 inline size-3 shrink-0 text-orange-600" />
+            <span className="line-clamp-2 flex-1">“{draftQuote}”</span>
+            <button
+              type="button"
+              onClick={onClearDraft}
+              className="shrink-0 text-muted-foreground hover:text-destructive"
+              aria-label="Clear selection"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        ) : (
+          <p className="mb-2 rounded border border-dashed px-2 py-1.5 text-xs text-muted-foreground">
+            Select text in the note — a “Comment” button appears above the
+            selection to attach it here.
+          </p>
+        )}
         <Textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -170,20 +169,19 @@ export function NoteCommentsPanel({
           className="min-h-[60px] text-sm"
         />
         <div className="mt-2 flex items-center justify-end gap-2">
-          {quote && (
-            <Button size="sm" variant="ghost" onClick={() => setQuote("")}>
-              Clear selection
-            </Button>
-          )}
           <Button
             size="sm"
             onClick={submit}
-            disabled={create.isPending || !draft.trim() || (mode === "suggestion" && !quote)}
+            disabled={
+              create.isPending ||
+              !draft.trim() ||
+              (mode === "suggestion" && !draftQuote)
+            }
           >
             {mode === "suggestion" ? "Suggest" : "Comment"}
           </Button>
         </div>
-        {mode === "suggestion" && !quote && (
+        {mode === "suggestion" && !draftQuote && (
           <p className="mt-1 text-[11px] text-muted-foreground">
             A suggestion needs attached text to replace.
           </p>
@@ -205,6 +203,10 @@ export function NoteCommentsPanel({
               myId={myId}
               isOwner={isOwner}
               nameFor={nameFor}
+              active={activeAnchorId === t.root.id}
+              onSelect={() =>
+                onSelectThread(t.root.anchor_quote ? t.root.id : null)
+              }
               onAfterDecide={() =>
                 qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
               }
@@ -223,6 +225,10 @@ export function NoteCommentsPanel({
                   myId={myId}
                   isOwner={isOwner}
                   nameFor={nameFor}
+                  active={activeAnchorId === t.root.id}
+                  onSelect={() =>
+                    onSelectThread(t.root.anchor_quote ? t.root.id : null)
+                  }
                   onAfterDecide={() =>
                     qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
                   }
@@ -242,6 +248,8 @@ function ThreadView({
   myId,
   isOwner,
   nameFor,
+  active,
+  onSelect,
   onAfterDecide,
 }: {
   thread: NoteThread;
@@ -249,6 +257,8 @@ function ThreadView({
   myId: string | undefined;
   isOwner: boolean;
   nameFor: (id: string) => string;
+  active: boolean;
+  onSelect: () => void;
   onAfterDecide: () => void;
 }) {
   const { root, replies } = thread;
@@ -263,9 +273,24 @@ function ThreadView({
   const pending = isSuggestion && root.suggestion_state === "pending";
 
   return (
-    <div className={cn("p-3", root.resolved && "opacity-70")}>
+    <div
+      onClick={onSelect}
+      className={cn(
+        "p-3",
+        root.resolved && "opacity-70",
+        root.anchor_quote && "cursor-pointer",
+        active && "bg-orange-400/10",
+      )}
+    >
       {root.anchor_quote && (
-        <div className="mb-1.5 border-l-2 border-amber-500/60 pl-2 text-xs italic text-muted-foreground line-clamp-2">
+        <div
+          className={cn(
+            "mb-1.5 border-l-2 pl-2 text-xs italic line-clamp-2",
+            active
+              ? "border-orange-500 text-orange-700"
+              : "border-amber-500/60 text-muted-foreground",
+          )}
+        >
           “{root.anchor_quote}”
         </div>
       )}

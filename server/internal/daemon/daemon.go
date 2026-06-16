@@ -157,6 +157,8 @@ type Daemon struct {
 
 	// CEREBRO-PATCH(daemon-account-identity-cache): JEH-997 identity-probe cache.
 	accountIdentities *accountIdentityCache
+	// CEREBRO-PATCH(daemon-version-probe-cache): TECH-3647 version-probe cache+timeout+cap.
+	versionProbes *versionProbeCache
 	// CEREBRO-PATCH(daemon-runtime-tool-scan-state): JEH-1710 per-runtime
 	toolScanState      *runtimeToolScanState
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
@@ -199,6 +201,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		accountIdentities:         newAccountIdentityCache(),
+		versionProbes:             newVersionProbeCache(), // CEREBRO-PATCH(daemon-version-probe-cache): TECH-3647
 		toolScanState:             newRuntimeToolScanState(),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
@@ -620,7 +623,8 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 func (d *Daemon) refreshAgentVersions(ctx context.Context) map[string]string {
 	out := map[string]string{}
 	for name, entry := range d.cfg.Agents {
-		v, err := agent.DetectVersion(ctx, entry.Path)
+		// CEREBRO-PATCH(daemon-version-probe-cache): TECH-3647 cached+bounded+capped probe.
+		v, err := d.detectAgentVersionCached(ctx, name, entry.Path)
 		if err != nil {
 			d.logger.Debug("refreshAgentVersions: detect failed", "provider", name, "error", err)
 			continue
@@ -797,7 +801,8 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]any
 	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
+		// CEREBRO-PATCH(daemon-version-probe-cache): TECH-3647 cached+bounded+capped probe.
+		version, err := d.detectAgentVersionCached(ctx, name, entry.Path)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
 			continue

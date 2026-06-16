@@ -52,6 +52,7 @@
     "@multica/cerebro-ui": "workspace:*",
     "@multica/cerebro-workflows": "workspace:*",
     "@multica/cerebro-users": "workspace:*",
+    "@multica/cerebro-web-fetch-policy": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",

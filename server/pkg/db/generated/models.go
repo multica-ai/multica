@@ -167,6 +167,7 @@ type ArtifactFolder struct {
 	Name        string             `json:"name"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Kind        string             `json:"kind"`
 }
 
 type Attachment struct {
@@ -925,6 +926,14 @@ type CerebroUserInfisicalIdentity struct {
 	ScopedPathsHash        string             `json:"scoped_paths_hash"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroWebFetchPolicy struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Mode        string             `json:"mode"`
+	HostRules   []byte             `json:"host_rules"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
 }
 
 type CerebroWorkflow struct {

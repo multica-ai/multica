@@ -54,6 +54,7 @@ import { WorkspaceRouteLayout } from "./components/workspace-route-layout";
 import { DesktopRouteErrorPage } from "./components/route-error-page";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
+import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { useCerebroToolPolicySettingsTabs } from "@multica/cerebro-tool-policy/views";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
@@ -113,6 +114,7 @@ function SettingsRoute() {
         },
         agentCapabilitiesSettingsTab,
         ...cerebroCostOptimizationTabs,
+        ...cerebroNotesSettingsTabs,
         ...cerebroFeatureFlagTabs,
         ...toolPolicyTabs,
       ]}

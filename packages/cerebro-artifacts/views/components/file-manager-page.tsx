@@ -487,7 +487,11 @@ function NewFolderDialog({
 
   const handleCreate = async () => {
     if (!name.trim()) return;
-    await create.mutateAsync({ name: name.trim(), parent_id: parentId });
+    await create.mutateAsync({
+      name: name.trim(),
+      parent_id: parentId,
+      kind: "document",
+    });
     onOpenChange(false);
   };
 
@@ -592,7 +596,9 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
     setSelectedArtifacts(new Set());
   }, [folderId]);
 
-  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  const { data: folders = [] } = useQuery(
+    artifactFoldersOptions(wsId, { kind: "document" }),
+  );
   const { data: allArtifacts = [], isLoading } = useQuery(
     artifactSearchOptions(wsId, {
       q: query.trim() || undefined,

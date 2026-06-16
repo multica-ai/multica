@@ -1,7 +1,7 @@
 -- CEREBRO-PATCH(sqlc-artifact-folder): cerebro modification of upstream file
 -- name: CreateArtifactFolder :one
-INSERT INTO artifact_folder (id, workspace_id, parent_id, name)
-VALUES ($1, $2, sqlc.narg(parent_id), $3)
+INSERT INTO artifact_folder (id, workspace_id, parent_id, name, kind)
+VALUES ($1, $2, sqlc.narg(parent_id), $3, $4)
 RETURNING *;
 
 -- name: GetArtifactFolder :one
@@ -9,8 +9,11 @@ SELECT * FROM artifact_folder
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListArtifactFoldersByWorkspace :many
+-- CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter scopes
+-- the folder list to one surface so notes and documents don't mix.
 SELECT * FROM artifact_folder
 WHERE workspace_id = $1
+  AND (sqlc.narg('kind')::text IS NULL OR kind = sqlc.narg('kind'))
 ORDER BY name ASC;
 
 -- name: ListArtifactFoldersByParent :many
