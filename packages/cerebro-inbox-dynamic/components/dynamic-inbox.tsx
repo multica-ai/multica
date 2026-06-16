@@ -22,6 +22,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import {
   ResizablePanelGroup,
@@ -151,6 +153,9 @@ function SortableSection({
 
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
+  // TECH-3618 — read sidebar "New message" intent off the URL (see effect below).
+  const { searchParams, replace, replaceSilent } = useNavigation();
+  const paths = useWorkspacePaths();
   const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
@@ -364,6 +369,61 @@ export function DynamicInbox() {
     setSelectedSnapshot(null);
     setNewChat({ agentId, sessionId: null });
   };
+
+  // TECH-3618 — the sidebar "New message" button opens the GLOBAL picker, which
+  // hands its result to the inbox via URL params: ?chat=new-chat&agent=<id> for
+  // an agent chat, ?issue=<id> for a freshly created DM/channel. The classic
+  // inbox reads these params directly; the dynamic inbox owns selection in local
+  // state, so we consume the intent here — translate the param into a selection,
+  // then strip it (silently) so it can't re-fire. Channel/chat rows wait until
+  // the just-created conversation lands in `entries` after its query refetch.
+  const urlChat = searchParams.get("chat") ?? "";
+  const urlIssue = searchParams.get("issue") ?? "";
+  const urlAgent = searchParams.get("agent") ?? "";
+  // `replaceSilent` strips the param via history.replaceState without a re-read
+  // of searchParams, so a ref (not the URL) is what guarantees a given intent is
+  // applied exactly once — even while we wait for `entries` to include a
+  // just-created conversation.
+  const consumedIntentRef = useRef<string>("");
+  useEffect(() => {
+    const intent = urlChat
+      ? `chat:${urlChat}:${urlAgent}`
+      : urlIssue
+        ? `issue:${urlIssue}`
+        : "";
+    if (!intent) {
+      consumedIntentRef.current = "";
+      return;
+    }
+    if (consumedIntentRef.current === intent) return;
+    const consume = () => {
+      consumedIntentRef.current = intent;
+      (replaceSilent ?? replace)(paths.inbox());
+    };
+    if (urlChat === "new-chat" && urlAgent) {
+      handleAgentChatStarted(urlAgent);
+      consume();
+      return;
+    }
+    if (urlChat) {
+      const entry = entries.find((e) => e.kind === "chat" && e.id === urlChat);
+      if (entry) {
+        onSelect(entry);
+        consume();
+      }
+      return;
+    }
+    const entry = entries.find(
+      (e) =>
+        (e.kind === "channel" && e.id === urlIssue) ||
+        (e.kind === "notif" && (e.item.issue_id ?? e.item.id) === urlIssue),
+    );
+    if (entry) {
+      onSelect(entry);
+      consume();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlChat, urlIssue, urlAgent, entries, replace, replaceSilent, paths]);
 
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>

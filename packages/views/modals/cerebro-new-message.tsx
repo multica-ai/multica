@@ -17,7 +17,8 @@ export function CerebroNewMessageModal() {
 
   const handleCreated = (channel: Channel) => {
     close();
-    push(p.issueDetail(channel.id));
+    // CEREBRO-PATCH(sidebar-new-message-open-in-inbox): TECH-3618 open the new DM/channel inside the inbox (classic renders ?issue= in-place; dynamic consumes it), not the standalone issue route.
+    push(`${p.inbox()}?issue=${encodeURIComponent(channel.id)}`);
   };
 
   const handleAgentChatStarted = (agentId: string) => {

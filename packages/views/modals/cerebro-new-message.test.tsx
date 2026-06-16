@@ -31,12 +31,19 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("../channels", () => ({
   NewMessageModal: ({
     onAgentChatStarted,
+    onCreated,
   }: {
     onAgentChatStarted: (agentId: string) => void;
+    onCreated: (channel: { id: string }) => void;
   }) => (
-    <button type="button" onClick={() => onAgentChatStarted("agent-123")}>
-      Start agent chat
-    </button>
+    <>
+      <button type="button" onClick={() => onAgentChatStarted("agent-123")}>
+        Start agent chat
+      </button>
+      <button type="button" onClick={() => onCreated({ id: "chan-456" })}>
+        Create DM
+      </button>
+    </>
   ),
 }));
 
@@ -57,5 +64,14 @@ describe("CerebroNewMessageModal", () => {
     expect(mockSetSelectedAgentId).toHaveBeenCalledWith("agent-123");
     expect(mockClose).toHaveBeenCalled();
     expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=new-chat&agent=agent-123");
+  });
+
+  it("opens a created DM/channel inside the inbox, not the standalone issue route", async () => {
+    render(<CerebroNewMessageModal />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Create DM" }));
+
+    expect(mockClose).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?issue=chan-456");
   });
 });
