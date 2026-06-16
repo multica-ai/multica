@@ -462,21 +462,8 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
-	if agent.MaxRunsPerDay > 0 {
-		todayCount, derr := s.Queries.CountTodayAgentTasks(ctx, agent.ID)
-		if derr != nil {
-			slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", derr)
-			return db.AgentTaskQueue{}, fmt.Errorf("count today agent tasks: %w", derr)
-		}
-		if todayCount >= int64(agent.MaxRunsPerDay) {
-			slog.Warn("task enqueue blocked: agent daily run budget exceeded",
-				"issue_id", util.UUIDToString(issue.ID),
-				"agent_id", util.UUIDToString(agent.ID),
-				"today_count", todayCount,
-				"max_runs_per_day", agent.MaxRunsPerDay,
-			)
-			return db.AgentTaskQueue{}, fmt.Errorf("agent daily run budget exceeded (%d/%d)", todayCount, agent.MaxRunsPerDay)
-		}
+	if err := s.checkAgentDailyBudget(ctx, agent); err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
@@ -541,21 +528,8 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
-	if agent.MaxRunsPerDay > 0 {
-		todayCount, derr := s.Queries.CountTodayAgentTasks(ctx, agent.ID)
-		if derr != nil {
-			slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", derr)
-			return db.AgentTaskQueue{}, fmt.Errorf("count today agent tasks: %w", derr)
-		}
-		if todayCount >= int64(agent.MaxRunsPerDay) {
-			slog.Warn("mention task enqueue blocked: agent daily run budget exceeded",
-				"issue_id", util.UUIDToString(issue.ID),
-				"agent_id", util.UUIDToString(agentID),
-				"today_count", todayCount,
-				"max_runs_per_day", agent.MaxRunsPerDay,
-			)
-			return db.AgentTaskQueue{}, fmt.Errorf("agent daily run budget exceeded (%d/%d)", todayCount, agent.MaxRunsPerDay)
-		}
+	if err := s.checkAgentDailyBudget(ctx, agent); err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
@@ -578,6 +552,28 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+// checkAgentDailyBudget returns an error if the agent has exceeded its daily
+// run budget (max_runs_per_day). Returns nil if the limit is 0 (unlimited)
+// or the count is under the cap.
+func (s *TaskService) checkAgentDailyBudget(ctx context.Context, agent db.Agent) error {
+	if agent.MaxRunsPerDay <= 0 {
+		return nil
+	}
+	todayCount, err := s.Queries.CountTodayAgentTasks(ctx, agent.ID)
+	if err != nil {
+		return fmt.Errorf("count today agent tasks: %w", err)
+	}
+	if todayCount >= int64(agent.MaxRunsPerDay) {
+		slog.Warn("task enqueue blocked: agent daily run budget exceeded",
+			"agent_id", util.UUIDToString(agent.ID),
+			"today_count", todayCount,
+			"max_runs_per_day", agent.MaxRunsPerDay,
+		)
+		return fmt.Errorf("agent daily run budget exceeded (%d/%d)", todayCount, agent.MaxRunsPerDay)
+	}
+	return nil
 }
 
 // QuickCreateContext is the JSON payload stored on a quick-create task's
