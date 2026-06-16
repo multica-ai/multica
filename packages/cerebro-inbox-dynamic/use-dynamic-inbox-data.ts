@@ -20,7 +20,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useInboxWakeupStates, useInboxPinnedMatcher } from "@multica/cerebro-inbox";
 import type { InboxActionContext } from "@multica/cerebro-inbox";
-import type { Channel, Project, ProjectTreeItem } from "@multica/core/types";
+import type { Channel, InboxItem, Project, ProjectTreeItem } from "@multica/core/types";
 import type { DynInboxEntry, SectionFilterContext } from "./section-filter";
 import { useInboxFavorites } from "./use-favorites";
 
@@ -33,6 +33,10 @@ function taskStatusToRunState(status: string): "active" | "queued" {
 
 export interface DynamicInboxData {
   entries: DynInboxEntry[];
+  /** TECH-3598 #3 — raw inbox items, needed to snapshot the unread comment_id
+   * for a selected channel so ChannelDetail can open at the unread thread
+   * (classic parity, see inbox-architecture.md "Deep-link contract"). */
+  items: InboxItem[];
   filterContext: SectionFilterContext;
   projectMap: Map<string, Project>;
   projects: Project[];
@@ -179,6 +183,7 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
 
   return {
     entries,
+    items,
     filterContext,
     projectMap,
     projects,

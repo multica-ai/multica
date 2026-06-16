@@ -62,9 +62,12 @@ import {
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import {
   GlobalInboxReminderDialog,
+  formatPlannedDateTime,
   useInboxActionGroupLabels,
   useSetInboxMode,
 } from "@multica/cerebro-inbox";
+import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useModalStore } from "@multica/core/modals";
 import { IssueDetail } from "@multica/views/issues/components";
 import { ChannelDetail, NewMessageModal } from "@multica/views/channels";
 import { InboxChatPanel } from "@multica/views/inbox/components/inbox-list-item";
@@ -72,7 +75,7 @@ import { useTypeLabels } from "@multica/views/inbox/components/inbox-detail-labe
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
-import type { Channel } from "@multica/core/types";
+import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
@@ -154,11 +157,11 @@ function SortableSection({
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
   // TECH-3618 — read sidebar "New message" intent off the URL (see effect below).
-  const { searchParams, replace, replaceSilent } = useNavigation();
+  const { searchParams, replace, replaceSilent, push } = useNavigation();
   const paths = useWorkspacePaths();
   const notesEnabled = useFeatureFlag("cerebro_notes");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
-  const { entries, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
+  const { entries, items, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
     useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const typeLabels = useTypeLabels();
@@ -254,21 +257,49 @@ export function DynamicInbox() {
     setNewChat(null);
   }, [secretarySelectedKey]);
 
+  // TECH-3598 #2 — deep-link parity for notifications that carry no issue_id.
+  // Skill change-requests open the skill detail with the proposal focused;
+  // note @-mentions open the note. Mirrors the classic inbox's handleSelect
+  // (inbox-page.tsx) so clicking the row lands on what it is about instead of
+  // the empty "Select a message" pane. Returns true when it routed away.
+  const routeNonIssueNotif = useCallback(
+    (item: InboxItem): boolean => {
+      if (
+        (item.type === "skill_change_request_created" ||
+          item.type === "skill_change_request_reviewed") &&
+        item.details?.skill_id
+      ) {
+        const cr = item.details.change_request_id;
+        push(`${paths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`);
+        return true;
+      }
+      if (item.details?.note_id) {
+        push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
+        return true;
+      }
+      return false;
+    },
+    [push, paths],
+  );
+
   const onSelect = (entry: DynInboxEntry) => {
+    // TECH-3413 #7 — selecting never auto-advances to the next row; we only
+    // ever set the row the user clicked.
+    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+    // TECH-3598 #2 — non-issue notifs deep-link away instead of opening the pane.
+    if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(null);
     setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
-    // TECH-3413 #7 — selecting never auto-advances to the next row; we only
-    // ever set the row the user clicked.
-    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
   const onSecretarySelect = (entry: DynInboxEntry) => {
+    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
+    if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(secretaryEntryKey(entry));
     setNewChat(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
-    if (entry.kind === "notif" && !entry.item.read) markRead.mutate(entry.item.id);
   };
   // TECH-3489 — issues and channels still archive via their host mutations.
   // Chat rows own archive/unarchive/delete inside CerebroChatSessionRowActions;
@@ -496,6 +527,26 @@ export function DynamicInbox() {
     setSavePresetOpen(false);
   };
 
+  // TECH-3598 #3 — snapshot the most recent unread notification's comment_id
+  // for the selected channel so ChannelDetail opens at the unread thread, not
+  // the top. Keyed on the channel id (a stable string), NOT on `items`: once
+  // the channel opens its notifications get marked read and `items` gets a
+  // fresh reference, which would recompute against the now-read items and clear
+  // the id before ChannelDetail's auto-open effect runs. Mirrors the classic
+  // inbox's selectedChannelCommentId (inbox-page.tsx). selectedChannelId is
+  // already derived above.
+  const selectedChannelCommentId = useMemo<string | undefined>(() => {
+    if (!selectedChannelId) return undefined;
+    const relevant = items
+      .filter(
+        (i) =>
+          !i.read && !i.archived && i.issue_id === selectedChannelId && i.details?.comment_id,
+      )
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    return relevant[0]?.details?.comment_id ?? undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedChannelId]);
+
   const detail = useMemo(() => {
     // JEH-901 — a freshly started agent chat (from "new message"). No session
     // exists until the first message is sent; InboxChatPanel owns that, then
@@ -522,6 +573,8 @@ export function DynamicInbox() {
             key={selected.channel.id}
             channelId={selected.channel.id}
             initialChannel={selected.channel}
+            // TECH-3598 #3 — open at the unread thread, classic parity.
+            initialCommentId={selectedChannelCommentId}
             onArchive={clearSelection}
           />
         </ErrorBoundary>
@@ -536,6 +589,9 @@ export function DynamicInbox() {
             seedFromIssueList={false}
             defaultSidebarOpen={false}
             layoutId="multica_inbox_dynamic_issue_detail_layout"
+            // TECH-3598 #1 — scroll to + highlight the comment that triggered
+            // the notification instead of landing at the top, classic parity.
+            highlightCommentId={selected.item.details?.comment_id ?? undefined}
             linkSelfInBreadcrumb
             onDelete={clearSelection}
             // TECH-3549 — reuse the classic inbox's mark-done/archive toolbar
@@ -557,13 +613,70 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
+    // TECH-3598 #2 — a notification with no issue_id that wasn't routed away
+    // (reminder, quick-create-failed, runtime-auto-paused, private-agent run
+    // request, …). Classic renders a real detail pane for these instead of the
+    // empty placeholder; mirror it so the row opens something. Skill change
+    // requests and note mentions never reach here — they deep-link in onSelect.
+    if (selected.kind === "notif") {
+      const item = selected.item;
+      return (
+        <div className="p-3 sm:p-6">
+          <h2 className="text-lg font-semibold">{item.title}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">{typeLabels[item.type]}</p>
+          {item.body && (
+            <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-foreground/80">
+              {item.body}
+            </div>
+          )}
+          {item.type === "reminder" && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              {formatPlannedDateTime(item.details?.planned_at ?? item.muted_until) ?? ""}
+            </p>
+          )}
+          {item.type === "quick_create_failed" && item.details?.original_prompt && (
+            <div className="mt-4 rounded-md border bg-muted/40 p-3">
+              <p className="text-xs font-medium text-muted-foreground">Original input</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm">{item.details.original_prompt}</p>
+            </div>
+          )}
+          <div className="mt-4 flex gap-2">
+            {item.type === "quick_create_failed" && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  // Seed the advanced create-issue form with the original
+                  // prompt so the user recovers their input instead of
+                  // retyping; the agent hint becomes the assignee candidate.
+                  const prompt = item.details?.original_prompt ?? "";
+                  const agentId = item.details?.agent_id;
+                  useIssueDraftStore.getState().setDraft({
+                    description: prompt,
+                    ...(agentId
+                      ? { assigneeType: "agent" as const, assigneeId: agentId }
+                      : {}),
+                  });
+                  useModalStore.getState().open("create-issue");
+                }}
+              >
+                Edit as advanced form
+              </Button>
+            )}
+            <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>
+              <Archive className="mr-1.5 h-3.5 w-3.5" />
+              Archive
+            </Button>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
         <Inbox className="mb-3 h-10 w-10 text-muted-foreground/30" />
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection, newChat, onArchive]);
+  }, [selected, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
