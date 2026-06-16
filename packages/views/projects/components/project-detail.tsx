@@ -350,7 +350,7 @@ export function ProjectIssuesSurface({
   const serverFilter = useMemo<IssueListFilter>(
     () => {
       const base: IssueListFilter = { ...filter };
-      if (showArchived) base.include_archived = true;
+      if (showArchived) base.archived = true;
       return buildIssueListServerFilter(
         base,
         {
@@ -377,16 +377,29 @@ export function ProjectIssuesSurface({
     ],
   );
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...filter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      label_ids: scopedLabelFilters,
-    }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, scopedLabelFilters, priorityFilters, statusFilters],
+    () => {
+      const f: AssigneeGroupedIssuesFilter = {
+        ...filter,
+        statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+        priorities: priorityFilters,
+        assignee_filters: assigneeFilters,
+        include_no_assignee: includeNoAssignee,
+        creator_filters: creatorFilters,
+        label_ids: scopedLabelFilters,
+      };
+      if (showArchived) f.archived = true;
+      return f;
+    },
+    [
+      assigneeFilters,
+      creatorFilters,
+      filter,
+      includeNoAssignee,
+      scopedLabelFilters,
+      priorityFilters,
+      statusFilters,
+      showArchived,
+    ],
   );
 
   useEffect(() => {

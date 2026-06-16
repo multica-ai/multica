@@ -57,7 +57,7 @@ export function IssuesPage() {
     const base: IssueListFilter = {};
     if (scope === "members") base.assignee_types = ["member"];
     if (scope === "agents") base.assignee_types = ["agent", "squad"];
-    if (showArchived) base.include_archived = true;
+    if (showArchived) base.archived = true;
     return buildIssueListServerFilter(
       base,
       {
@@ -122,8 +122,20 @@ export function IssuesPage() {
     };
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
+    if (showArchived) filter.archived = true;
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, priorityFilters, projectFilters, scope, statusFilters]);
+  }, [
+    assigneeFilters,
+    creatorFilters,
+    includeNoAssignee,
+    includeNoProject,
+    labelFilters,
+    priorityFilters,
+    projectFilters,
+    scope,
+    statusFilters,
+    showArchived,
+  ]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
   const statusIssuesQuery = useQuery({

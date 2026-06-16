@@ -1468,6 +1468,14 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		))
 	}
 
+	if r.URL.Query().Get("include_archived") == "true" {
+		// No filter — show both archived and non-archived.
+	} else if r.URL.Query().Get("archived") == "true" {
+		where = append(where, "i.archived_at IS NOT NULL")
+	} else {
+		where = append(where, "i.archived_at IS NULL")
+	}
+
 	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
 		if groupAssigneeType == "none" {
 			where = append(where, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")

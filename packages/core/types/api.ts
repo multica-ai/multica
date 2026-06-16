@@ -121,6 +121,8 @@ export interface ListGroupedIssuesParams {
   group_assignee_id?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
+  archived?: boolean;
+  include_archived?: boolean;
 }
 
 /** Raw backend response shape for `GET /api/issues`. */
