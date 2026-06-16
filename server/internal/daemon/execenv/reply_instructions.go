@@ -171,7 +171,7 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
 				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
 				"    # 2. Post the comment:\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+				"    multica issue comment add %s --parent %s --content-file ./reply.md --require-task-token\n"+
 				"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
 				"    Remove-Item ./reply.md\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
@@ -197,7 +197,7 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
 			"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
 			"    # 2. Post the comment:\n"+
-			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+			"    multica issue comment add %s --parent %s --content-file ./reply.md --require-task-token\n"+
 			"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
 			"    rm ./reply.md\n\n"+
 			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",

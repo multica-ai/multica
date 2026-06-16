@@ -15,9 +15,11 @@ var codexSymlinkedDirs = []string{
 	"sessions",
 }
 
-// Optional directories to symlink from the shared ~/.codex/ into the per-task
+// Optional directories to expose from the shared ~/.codex/ into the per-task
 // CODEX_HOME. Missing sources are skipped so environments without Codex hooks
-// do not get empty hook directories.
+// do not get empty hook directories. Codex does not discover this directory
+// by itself, but hooks.json commonly references helper scripts stored there
+// (for example via $CODEX_HOME/hooks/...).
 var codexOptionalSymlinkedDirs = []string{
 	"hooks",
 }
@@ -28,9 +30,10 @@ var codexSymlinkedFiles = []string{
 	"auth.json",
 }
 
-// Optional files to symlink from the shared ~/.codex/ into the per-task
+// Optional files to expose from the shared ~/.codex/ into the per-task
 // CODEX_HOME. Missing or invalid sources clear any stale per-task copy/link
-// so removed hook configuration does not survive workspace reuse.
+// so removed hook configuration does not survive workspace reuse. Codex
+// discovers hooks.json next to the active CODEX_HOME config layer.
 var codexOptionalSymlinkedFiles = []string{
 	"hooks.json",
 }
@@ -85,7 +88,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
-	// Symlink optional shared directories only when they already exist.
+	// Expose optional shared directories only when they already exist.
 	for _, name := range codexOptionalSymlinkedDirs {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
@@ -103,7 +106,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
-	// Symlink optional hook config only when the shared source is valid.
+	// Expose optional hook config only when the shared source is valid.
 	for _, name := range codexOptionalSymlinkedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)

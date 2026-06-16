@@ -1987,6 +1987,45 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHomeExposesSharedHooks(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedHooksJSON := `{"hooks":{"SessionStart":[{"matcher":"startup","hooks":[{"type":"command","command":"python3 ~/.codex/hooks/session_start.py"}]}]}}`
+	if err := os.WriteFile(filepath.Join(sharedHome, "hooks.json"), []byte(sharedHooksJSON), 0o644); err != nil {
+		t.Fatalf("write shared hooks.json: %v", err)
+	}
+	sharedHooksDir := filepath.Join(sharedHome, "hooks")
+	if err := os.MkdirAll(sharedHooksDir, 0o755); err != nil {
+		t.Fatalf("create shared hooks dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHooksDir, "session_start.py"), []byte("print('session')"), 0o755); err != nil {
+		t.Fatalf("write shared hook script: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(codexHome, "hooks.json"))
+	if err != nil {
+		t.Fatalf("read per-task hooks.json: %v", err)
+	}
+	if string(data) != sharedHooksJSON {
+		t.Fatalf("per-task hooks.json content = %q, want shared content", data)
+	}
+
+	data, err = os.ReadFile(filepath.Join(codexHome, "hooks", "session_start.py"))
+	if err != nil {
+		t.Fatalf("read per-task hook script: %v", err)
+	}
+	if string(data) != "print('session')" {
+		t.Fatalf("per-task hook script content = %q, want shared content", data)
+	}
+}
+
 // Regression test for #1753 — Codex Desktop writes plugin-backed
 // `[[skills.config]]` entries without a `path` field, and the CLI's TOML
 // parser rejects them with `missing field path`. prepareCodexHome must drop
@@ -2322,6 +2361,48 @@ env_key = "OLD_API_KEY"
 	} {
 		if !strings.Contains(s, marker) {
 			t.Errorf("daemon-managed marker %q missing after shared source removed, got:\n%s", marker, s)
+		}
+	}
+}
+
+func TestPrepareCodexHome_DropsSharedHooksWhenSourceRemoved(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "hooks.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"true"}]}]}}`), 0o644); err != nil {
+		t.Fatalf("seed shared hooks.json: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(sharedHome, "hooks"), 0o755); err != nil {
+		t.Fatalf("seed shared hooks dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "hooks", "stop.sh"), []byte("#!/bin/sh\ntrue\n"), 0o755); err != nil {
+		t.Fatalf("seed shared hook script: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("first prepareCodexHome: %v", err)
+	}
+	for _, name := range []string{"hooks.json", "hooks"} {
+		if _, err := os.Stat(filepath.Join(codexHome, name)); err != nil {
+			t.Fatalf("first prepare did not expose per-task %s: %v", name, err)
+		}
+	}
+
+	if err := os.Remove(filepath.Join(sharedHome, "hooks.json")); err != nil {
+		t.Fatalf("remove shared hooks.json: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(sharedHome, "hooks")); err != nil {
+		t.Fatalf("remove shared hooks dir: %v", err)
+	}
+
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("second prepareCodexHome: %v", err)
+	}
+	for _, name := range []string{"hooks.json", "hooks"} {
+		if _, err := os.Lstat(filepath.Join(codexHome, name)); !os.IsNotExist(err) {
+			t.Fatalf("per-task %s still exists after shared source removed (lstat err = %v)", name, err)
 		}
 	}
 }

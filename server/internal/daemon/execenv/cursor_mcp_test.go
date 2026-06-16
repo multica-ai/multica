@@ -119,6 +119,18 @@ func TestPrepareCursorMcpConfigManagedEmptySet(t *testing.T) {
 	}
 }
 
+func TestCursorProjectRootStopsAtTempRootGit(t *testing.T) {
+	t.Parallel()
+
+	workDir := filepath.Join(t.TempDir(), "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workDir: %v", err)
+	}
+	if got := cursorProjectRoot(workDir); got != workDir {
+		t.Fatalf("cursorProjectRoot(%q) = %q, want workDir when only os.TempDir has .git", workDir, got)
+	}
+}
+
 func TestPrepareCursorMcpConfigNilDoesNotTakeOwnership(t *testing.T) {
 	t.Parallel()
 
