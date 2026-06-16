@@ -8,12 +8,12 @@
 // an archived chat be reopened ("unarchive") so the conversation can continue.
 //
 // The component owns every action through the shared chat mutations
-// (mark-as-read, rename, convert-to-issue, archive, unarchive, delete); the
-// host only supplies `isArchivedView` (so the menu offers "reopen" instead of
-// "archive") and an `onCleared` callback to drop the row from the host's
-// selection after archive/unarchive/delete. Snooze ("remind me") and
-// mark-as-unread are intentionally absent — chat sessions have no backend
-// support for either today (see TECH-3489).
+// (mark-as-read, mark-as-unread, rename, convert-to-issue, archive, unarchive);
+// the host only supplies `isArchivedView` (so the menu offers "reopen" instead
+// of "archive") and an `onCleared` callback to drop the row from the host's
+// selection after archive/unarchive. TECH-3664 — there is intentionally NO
+// delete action: a 1-to-1 agent chat can only be archived, never destroyed, so
+// history is permanent (the backend DELETE endpoint also archives instead).
 import { useState, type ReactNode } from "react";
 import {
   Archive,
@@ -25,12 +25,13 @@ import {
   MailOpen,
   MoreHorizontal,
   Pencil,
-  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { ChatSession } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useMarkChatSessionRead, useDeleteChatSession } from "@multica/core/chat/mutations";
+// TECH-3664 — agent chats are archive-only; the hard-delete action was removed
+// so a 1-to-1 conversation can never be destroyed (history is permanent).
+import { useMarkChatSessionRead } from "@multica/core/chat/mutations";
 import { useNavigation } from "@multica/views/navigation";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -104,12 +105,11 @@ export function CerebroChatSessionRowActions({
   const markUnread = useMarkChatUnread();
   const mute = useMuteChat();
   const unmute = useUnmuteChat();
-  const remove = useDeleteChatSession();
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const [confirm, setConfirm] = useState<"convert" | "delete" | null>(null);
+  const [confirm, setConfirm] = useState<"convert" | null>(null);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [customReminder, setCustomReminder] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
@@ -193,19 +193,6 @@ export function CerebroChatSessionRowActions({
     });
   }
 
-  function onDeleteConfirm() {
-    remove.mutate(session.id, {
-      onSuccess: () => {
-        setConfirm(null);
-        onCleared?.();
-      },
-      onError: () => {
-        setConfirm(null);
-        toast.error(s.toast_delete_failed);
-      },
-    });
-  }
-
   // Long-press drawer (mobile) — the same action set as the desktop dropdown,
   // rendered as full-width buttons so it matches issue/channel/DM rows exactly.
   const drawerMenu = (close: () => void) => (
@@ -242,9 +229,6 @@ export function CerebroChatSessionRowActions({
           <Archive className="size-4" /> {s.archive}
         </DrawerButton>
       )}
-      <DrawerButton onClick={() => { close(); setConfirm("delete"); }}>
-        <Trash2 className="size-4" /> {s.delete}
-      </DrawerButton>
     </div>
   );
 
@@ -320,9 +304,6 @@ export function CerebroChatSessionRowActions({
                 <Archive className="size-4" /> {s.archive}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem variant="destructive" onClick={() => setConfirm("delete")}>
-              <Trash2 className="size-4" /> {s.delete}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -382,30 +363,6 @@ export function CerebroChatSessionRowActions({
             <AlertDialogCancel disabled={convert.isPending}>{s.cancel}</AlertDialogCancel>
             <AlertDialogAction onClick={onConvertConfirm} disabled={convert.isPending}>
               {convert.isPending ? s.convert_confirming : s.convert_confirm}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog
-        open={confirm === "delete"}
-        onOpenChange={(o) => {
-          if (!o && !remove.isPending) setConfirm(null);
-        }}
-      >
-        <AlertDialogContent onClick={(e) => e.stopPropagation()}>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{s.delete_dialog_title}</AlertDialogTitle>
-            <AlertDialogDescription>{s.delete_dialog_description}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={remove.isPending}>{s.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={onDeleteConfirm}
-              disabled={remove.isPending}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {remove.isPending ? s.delete_confirming : s.delete_confirm}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

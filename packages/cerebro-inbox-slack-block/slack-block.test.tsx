@@ -19,6 +19,9 @@ const presenceState = vi.hoisted(() => ({
 // activity. Tests seed it before render; empty by default (no agent unread).
 const chatState = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>> }));
 
+// TECH-3664 — member user IDs the mocked useChannelTyping reports as typing.
+const typingState = vi.hoisted(() => ({ ids: new Set<string>() }));
+
 // Mutable favorites set + spy for the starring tests.
 const favState = vi.hoisted(() => ({
   keys: [] as string[],
@@ -235,6 +238,13 @@ vi.mock("@multica/core/presence", () => ({
     online_user_ids: Array.from(presenceState.online),
   }),
   postTyping: vi.fn(async () => {}),
+  // TECH-3664 — channel/DM typing hook now lives in core/presence. Return the
+  // seeded set so the slack-block render path can be tested in isolation; the
+  // WS-event → set logic is the hook's own concern (tested in core).
+  useChannelTyping: () => ({
+    typingUserIds: typingState.ids,
+    notifyTyping: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/views/common/actor-avatar", () => ({
@@ -279,6 +289,7 @@ describe("SlackBlock", () => {
     favState.keys = [];
     favState.toggle.mockClear();
     wsHandlers.clear();
+    typingState.ids = new Set();
   });
 
   it("renders a green online dot for a member in the online set, red otherwise", async () => {
@@ -316,20 +327,19 @@ describe("SlackBlock", () => {
     );
   });
 
-  it("shows 'typing…' when a typing event arrives for a member's selected DM", async () => {
+  it("shows 'typing…' for a member typing in the selected DM", async () => {
+    // No one typing → no indicator.
     await act(async () => {
       renderBlock({ selectedChannelId: "dm-alice" });
     });
-
     expect(screen.queryByText("typing…")).not.toBeInTheDocument();
+    cleanup();
 
+    // Seed the hook's reported set, then render → indicator shows on the row.
+    typingState.ids = new Set(["alice"]);
     await act(async () => {
-      wsHandlers.get("cerebro:typing")?.({
-        channel_id: "dm-alice",
-        user_id: "alice",
-      });
+      renderBlock({ selectedChannelId: "dm-alice" });
     });
-
     expect(screen.getByText("typing…")).toBeInTheDocument();
   });
 
@@ -488,6 +498,21 @@ describe("SlackBlock", () => {
     expect(screen.queryByText("general")).not.toBeInTheDocument();
     // Old per-group scroll container is gone.
     expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
+  });
+
+  // TECH-3665 — when grouped by type, the limit is per kind so the Channels
+  // group is always shown by default. A single global cap of 1 sorted by name
+  // would keep only "Alice" and drop the channel entirely; per-kind keeps one
+  // person AND the channel.
+  it("applies the limit per kind when grouped by type so channels still show", async () => {
+    await act(async () => {
+      renderBlock({ limit: 1, groupBy: "type", sort: "name", unreadFirst: false });
+    });
+    // Channel kept (would be dropped by a single global cap of 1).
+    expect(screen.getByText("general")).toBeInTheDocument();
+    // People still capped to 1: Alice in, Bob out.
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
   });
 
   it("picking a limit from settings calls onSetLimit", async () => {

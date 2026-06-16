@@ -829,6 +829,7 @@ function SessionDropdown({
           />
         ) : null}
         {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
+        {/* CEREBRO-PATCH(chat-no-hard-delete): TECH-3664 — agent chats are archive-only; the per-row delete affordance is hidden so a 1-to-1 conversation can never be destroyed (archive lives in the inbox row menu + header; history is permanent). */}
         <button
           type="button"
           onClick={(e) => {
@@ -836,7 +837,7 @@ function SessionDropdown({
             e.preventDefault();
             setPendingDelete(session);
           }}
-          className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+          className="hidden shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
           aria-label={t(($) => $.session_history.row_delete_aria)}
         >
           <Trash2 className="size-3.5" />
