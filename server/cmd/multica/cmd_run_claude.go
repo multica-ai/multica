@@ -271,6 +271,7 @@ type claudeTranscriptTracker struct {
 	currentTurnReply      bool
 	lastAssistantText     string
 	lastAssistantFinalKey string
+	totalActiveMs         int64 // cumulative turn_duration ms, guarded by mu
 	done                  chan struct{}
 	stopped               chan struct{}
 	startOnce             sync.Once
@@ -324,6 +325,9 @@ func (t *claudeTranscriptTracker) Close() {
 	t.closeOnce.Do(func() {
 		close(t.done)
 		<-t.stopped
+		if t.reporter != nil {
+			t.reporter.SetActiveMs(t.TotalActiveMs())
+		}
 	})
 }
 
@@ -537,10 +541,20 @@ func (t *claudeTranscriptTracker) mapSystemLineLocked(raw map[string]any) {
 	if stringValue(raw["subtype"]) != "turn_duration" || !t.currentTurnReply || isTrue(raw["isMeta"]) {
 		return
 	}
+	if ms, ok := raw["durationMs"].(float64); ok && ms > 0 {
+		t.totalActiveMs += int64(ms)
+	}
 	if t.lastAssistantText == "" || isStatusOnly(t.lastAssistantText) {
 		return
 	}
 	t.postClaudeFinalLocked(t.lastAssistantText, t.lastAssistantFinalKey)
+}
+
+// TotalActiveMs returns the cumulative active time in milliseconds from turn_duration events.
+func (t *claudeTranscriptTracker) TotalActiveMs() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.totalActiveMs
 }
 
 func (t *claudeTranscriptTracker) postClaudeFinalLocked(content, sourceKey string) {
