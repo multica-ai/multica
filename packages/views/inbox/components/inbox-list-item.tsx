@@ -244,7 +244,8 @@ export function ChannelListItem({
           <span
             className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
           >
-            {timeAgo(channel.updated_at)}
+            {/* CEREBRO-PATCH(channel-row-last-message-time): TECH-3619 — show time since the last message, not the channel/DM's updated_at (which doesn't bump on new messages). */}
+            {timeAgo(channel.last_message?.created_at ?? channel.updated_at)}
           </span>
         </div>
         {showParticipants && (
