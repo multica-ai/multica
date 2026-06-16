@@ -2800,11 +2800,11 @@ func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTas
 }
 
 
-const countTodayAgentTasks = \`-- name: CountTodayAgentTasks :one
+const countTodayAgentTasks = `-- name: CountTodayAgentTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1
   AND created_at >= date_trunc('day', now())
-\`
+`
 
 func (q *Queries) CountTodayAgentTasks(ctx context.Context, agentID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countTodayAgentTasks, agentID)
