@@ -352,7 +352,7 @@ export class ApiClient {
       ...((init?.headers as Record<string, string>) ?? {}),
     };
 
-    this.logger.info(`→ ${method} ${path}`, { rid });
+    this.logger.debug(`→ ${method} ${path}`, { rid });
 
     const res = await fetch(`${this.baseUrl}${path}`, {
       ...init,
@@ -368,7 +368,7 @@ export class ApiClient {
       throw new ApiError(message, res.status, res.statusText, body);
     }
 
-    this.logger.info(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
+    this.logger.debug(`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms` });
     return res;
   }
 
@@ -1392,7 +1392,7 @@ export class ApiClient {
 
     const rid = createRequestId();
     const start = Date.now();
-    this.logger.info("→ POST /api/upload-file", { rid });
+    this.logger.debug("→ POST /api/upload-file", { rid });
 
     const res = await fetch(`${this.baseUrl}/api/upload-file`, {
       method: "POST",
@@ -1408,7 +1408,7 @@ export class ApiClient {
       throw new Error(message);
     }
 
-    this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
+    this.logger.debug(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });
     const raw = (await res.json()) as unknown;
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
