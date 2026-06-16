@@ -354,6 +354,7 @@
       "add_action": "Add skill",
       "empty_title": "No skills assigned",
       "empty_hint": "Add workspace skills to share team knowledge with this agent.",
+      "remove_aria": "Remove skill",
       "remove_failed_toast": "Failed to remove skill",
       "add_dialog_title": "Add skill",
       "add_dialog_description": "Select a workspace skill to assign to this agent.",

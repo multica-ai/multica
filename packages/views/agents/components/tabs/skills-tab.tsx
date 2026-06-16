@@ -7,11 +7,13 @@ import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import {
   skillListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
+import { AppLink } from "../../../navigation";
 import { SkillAddDialog } from "../skill-add-dialog";
 import { useT } from "../../../i18n";
 
@@ -23,6 +25,7 @@ export function SkillsTab({
   const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
   // Same query the SkillAddDialog uses (TanStack Query dedupes by key, so
   // this isn't an extra request) — used here only to grey out the "Add
   // skill" button when the workspace has zero skills total. When skills
@@ -92,23 +95,34 @@ export function SkillsTab({
           {agent.skills.map((skill) => (
             <li
               key={skill.id}
-              className="flex items-center gap-2.5 rounded-md border px-3 py-2"
+              className="group/skill-row relative rounded-md transition-colors hover:bg-accent/40 focus-within:bg-accent/40"
             >
-              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{skill.name}</div>
-                {skill.description && (
-                  <div className="truncate text-xs text-muted-foreground">
-                    {skill.description}
-                  </div>
-                )}
-              </div>
+              <AppLink
+                href={paths.skillDetail(skill.id)}
+                className="flex min-w-0 items-center gap-2.5 rounded-md px-2 py-2 pr-8 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <span
+                  className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
+                  aria-hidden="true"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium">{skill.name}</div>
+                  {skill.description && (
+                    <div className="truncate text-xs text-muted-foreground">
+                      {skill.description}
+                    </div>
+                  )}
+                </div>
+              </AppLink>
               <Button
                 variant="ghost"
                 size="icon-sm"
+                aria-label={t(($) => $.tab_body.skills.remove_aria)}
                 onClick={() => handleRemove(skill.id)}
                 disabled={removing}
-                className="text-muted-foreground hover:text-destructive"
+                className="absolute right-1.5 top-1/2 z-10 -translate-y-1/2 bg-transparent text-muted-foreground/0 opacity-0 transition-opacity hover:bg-transparent hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:opacity-100 group-hover/skill-row:text-muted-foreground group-hover/skill-row:opacity-100 group-focus-within/skill-row:text-muted-foreground group-focus-within/skill-row:opacity-100"
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>

@@ -347,6 +347,7 @@
       "add_action": "添加 skill",
       "empty_title": "尚未分配 skill",
       "empty_hint": "添加工作区 skill，把团队知识共享给这个智能体。",
+      "remove_aria": "移除 skill",
       "remove_failed_toast": "移除 skill 失败",
       "add_dialog_title": "添加 skill",
       "add_dialog_description": "选择一个工作区 skill 分配给该智能体。",

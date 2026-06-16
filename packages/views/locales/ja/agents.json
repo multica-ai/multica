@@ -339,6 +339,7 @@
       "add_action": "スキルを追加",
       "empty_title": "割り当てられたスキルがありません",
       "empty_hint": "ワークスペースのスキルを追加して、チームの知識をこのエージェントと共有しましょう。",
+      "remove_aria": "スキルを削除",
       "remove_failed_toast": "スキルを削除できませんでした",
       "add_dialog_title": "スキルを追加",
       "add_dialog_description": "このエージェントに割り当てるワークスペースのスキルを選択してください。",

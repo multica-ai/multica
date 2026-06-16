@@ -354,6 +354,7 @@
       "add_action": "스킬 추가",
       "empty_title": "할당된 스킬이 없습니다",
       "empty_hint": "워크스페이스 스킬을 추가해 이 에이전트와 팀 지식을 공유하세요.",
+      "remove_aria": "스킬 제거",
       "remove_failed_toast": "스킬을 제거하지 못했습니다",
       "add_dialog_title": "스킬 추가",
       "add_dialog_description": "이 에이전트에 할당할 워크스페이스 스킬을 선택하세요.",

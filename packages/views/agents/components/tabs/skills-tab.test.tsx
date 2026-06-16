@@ -2,15 +2,18 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { NavigationProvider, type NavigationAdapter } from "../../../navigation";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 const mockListSkills = vi.hoisted(() => vi.fn());
+const mockSetAgentSkills = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -19,7 +22,7 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     listSkills: (...args: unknown[]) => mockListSkills(...args),
-    setAgentSkills: vi.fn(),
+    setAgentSkills: (...args: unknown[]) => mockSetAgentSkills(...args),
   },
 }));
 
@@ -32,7 +35,7 @@ vi.mock("sonner", () => ({
 
 import { SkillsTab } from "./skills-tab";
 
-const agent: Agent = {
+const baseAgent: Agent = {
   id: "agent-1",
   workspace_id: "ws-1",
   runtime_id: "runtime-1",
@@ -55,7 +58,7 @@ const agent: Agent = {
   archived_by: null,
 };
 
-function renderSkillsTab() {
+function renderSkillsTab(agent: Agent = baseAgent) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -63,20 +66,35 @@ function renderSkillsTab() {
       },
     },
   });
+  const navigation: NavigationAdapter = {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/test/agents/agent-1",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: (path) => path,
+  };
 
-  return render(
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <QueryClientProvider client={queryClient}>
-        <SkillsTab agent={agent} />
-      </QueryClientProvider>
+      <WorkspaceSlugProvider slug="test">
+        <NavigationProvider value={navigation}>
+          <QueryClientProvider client={queryClient}>
+            <SkillsTab agent={agent} />
+          </QueryClientProvider>
+        </NavigationProvider>
+      </WorkspaceSlugProvider>
     </I18nProvider>,
   );
+
+  return { ...view, navigation };
 }
 
 describe("SkillsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockListSkills.mockResolvedValue([]);
+    mockSetAgentSkills.mockResolvedValue(undefined);
   });
 
   it("does not render the inline Local Runtime Skills section even for local-runtime agents", async () => {
@@ -106,5 +124,46 @@ describe("SkillsTab", () => {
     // already deleted from the mock setup above; this assertion is
     // implicit — the test file would fail to import if the component
     // still referenced runtimeListOptions / runtimeLocalSkillsOptions.)
+  });
+
+  it("navigates to the skill detail page when an assigned skill is clicked", () => {
+    const { navigation } = renderSkillsTab({
+      ...baseAgent,
+      skills: [
+        {
+          id: "skill-1",
+          name: "Review skill",
+          description: "Review pull requests",
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("link", { name: /Review skill/i }));
+
+    expect(navigation.push).toHaveBeenCalledWith("/test/skills/skill-1");
+  });
+
+  it("does not navigate when removing an assigned skill", async () => {
+    const { navigation } = renderSkillsTab({
+      ...baseAgent,
+      skills: [
+        {
+          id: "skill-1",
+          name: "Review skill",
+          description: "Review pull requests",
+        },
+      ],
+    });
+    const removeButton = screen.getByRole("button", { name: /Remove skill/i });
+
+    fireEvent.click(removeButton);
+
+    await waitFor(() => {
+      expect(mockSetAgentSkills).toHaveBeenCalledWith("agent-1", {
+        skill_ids: [],
+      });
+    });
+    await waitFor(() => expect(removeButton).not.toBeDisabled());
+    expect(navigation.push).not.toHaveBeenCalled();
   });
 });
