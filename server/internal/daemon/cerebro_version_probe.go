@@ -40,11 +40,18 @@ const (
 	// reported version is harmless; the win is collapsing thousands of process
 	// spawns to a handful per host. Within the 5-15 min band the issue asked for.
 	versionProbeTTL = 10 * time.Minute
-	// versionProbeTimeout caps a single `--version` exec. A healthy CLI answers
-	// in well under a second; this deadline exists so a hung probe (the 14s
-	// hermes case) can never block a heartbeat tick. On timeout the last cached
-	// value is served, so a tight bound never costs us a real version.
-	versionProbeTimeout = 3 * time.Second
+	// versionProbeTimeout caps a single `--version` exec. The deadline exists so
+	// a hung probe (the pathological ~14s hermes case under SQLite contention)
+	// can never block a heartbeat tick. It is deliberately generous: a healthy
+	// hermes `--version` measured ~2.8s quiet on sara.local (Python startup +
+	// state.db read), and mild contention pushes that higher, so a tight 2-3s
+	// bound would time out a legitimate probe — freezing the reported version on
+	// its first value (store() never runs) and, worse, failing the cold-cache
+	// probe at registration (an errored probe skips registering the runtime).
+	// 8s clears the real worst case with headroom while still being well under
+	// both the 14s pile-up and the 15s heartbeat interval. On timeout the last
+	// cached value is served, so the cap is a backstop, not the primary defence.
+	versionProbeTimeout = 8 * time.Second
 	// versionProbeConcurrency is the daemon-wide cap on simultaneous probes.
 	// One means probes never stack — the property whose absence caused the load
 	// storm. Because results are cached for versionProbeTTL the serialisation is
