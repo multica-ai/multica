@@ -344,25 +344,9 @@ export function ActiveTaskRow({
     setConfirmOpen(true);
   };
 
-  // Watching a live run is the headline new capability and is time-sensitive,
-  // so the entry control stays persistently visible on a running row (hover
-  // reveal would hide it, and hover doesn't exist on touch). Dispatched rows
-  // keep it in the hover actions — there's no live stream to watch yet.
-  const persistentWatch = showTranscript && task.status === "running";
-
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
-      {persistentWatch && (
-        <TranscriptButton
-          task={task}
-          agentName=""
-          isLive
-          onOpen={onOpenRun}
-          className="shrink-0"
-          title={t(($) => $.execution_log.transcript_tooltip)}
-        />
-      )}
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
@@ -374,7 +358,7 @@ export function ActiveTaskRow({
         )}
       </RowStatus>
       <RowActions>
-        {showTranscript && !persistentWatch && (
+        {showTranscript && (
           <TranscriptButton
             task={task}
             agentName=""
@@ -565,7 +549,9 @@ function TaskStatusIcon({ status }: { status: AgentTask["status"] }) {
 }
 
 // Action slot — visible by default for touch devices. On hover-capable
-// surfaces, it replaces the status column in place on row hover.
+// surfaces, it replaces the status column in place on row hover. No
+// absolute/gradient needed: the status is removed (not covered), so nothing
+// shows through underneath.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-7 items-center gap-0.5 [@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover/execution-log-row:flex">
