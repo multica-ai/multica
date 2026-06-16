@@ -175,6 +175,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			grokHome = filepath.Join(home, ".grok")
 		}
 		providerRoot = filepath.Join(grokHome, "skills")
+	case "droid":
+		providerRoot = filepath.Join(home, ".factory", "skills")
 	default:
 		return nil, false, nil
 	}

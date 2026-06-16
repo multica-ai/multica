@@ -404,6 +404,10 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "droid":
+		// Factory Droid auto-discovers project skills from .factory/skills/
+		// in the workdir. See https://docs.factory.ai/cli/configuration/skills
+		return filepath.Join(workDir, ".factory", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

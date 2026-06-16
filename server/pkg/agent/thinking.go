@@ -673,6 +673,15 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium": true,
 		"high":   true,
 	},
+	"droid": {
+		"off":    true,
+		"none":   true,
+		"low":    true,
+		"medium": true,
+		"high":   true,
+		"xhigh":  true,
+		"max":    true,
+	},
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort
