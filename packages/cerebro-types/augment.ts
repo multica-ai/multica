@@ -24,6 +24,24 @@ declare module "@multica/core/types/agent" {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
     metadata?: SkillMetadata | null;
   }
+  interface Agent {
+    // TECH-3670: per-surface discovery visibility. Orthogonal to `visibility`
+    // (which gates assign/trigger). Keys are discovery surfaces; a value of
+    // false means "hidden from non-owner members on this surface". A missing
+    // key defaults to visible; null/undefined = visible everywhere (legacy).
+    // Owner + workspace admins always see the agent regardless. Server omits
+    // the field when unset, so always optional-chain + default to visible.
+    surface_visibility?: Record<string, boolean> | null;
+  }
+  interface CreateAgentRequest {
+    // TECH-3670: optional per-surface discovery visibility at create time.
+    surface_visibility?: Record<string, boolean> | null;
+  }
+  interface UpdateAgentRequest {
+    // TECH-3670: per-surface discovery visibility. Send {} to make the agent
+    // visible everywhere again; omit to leave unchanged.
+    surface_visibility?: Record<string, boolean> | null;
+  }
 }
 
 // FIR-2580: per-workspace logo. avatar_url is now in the upstream Workspace

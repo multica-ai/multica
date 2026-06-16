@@ -28,6 +28,8 @@ import { useChannelFavoritesStore, actorKey } from "@multica/cerebro-channels";
 import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 import type { Channel } from "@multica/core/types";
 import { canAssignAgent } from "../../issues/components";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from the chat picker.
+import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
 import { ActorAvatar } from "../../common/actor-avatar";
 
 type ActorType = "member" | "agent";
@@ -94,6 +96,8 @@ export function NewMessageModal({
       .map((m) => ({ type: "member", id: m.user_id, name: m.name }));
     const agentActors: Actor[] = agents
       .filter((a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole))
+      // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents hidden from chat.
+      .filter((a) => !isAgentHiddenOnSurface(a, "chat", { userId: user?.id ?? null, role: memberRole ?? null }))
       .map((a) => ({
         type: "agent",
         id: a.id,

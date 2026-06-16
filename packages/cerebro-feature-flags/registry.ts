@@ -81,6 +81,8 @@ export type CerebroFlagKey =
   | "cerebro_agent_avatar"
   // FIR-2385: private agents visible-but-locked + tag → run-request to owner.
   | "cerebro_private_agent_requests"
+  // TECH-3670: per-surface agent discovery visibility ("Skjult" + advanced).
+  | "cerebro_agent_surface_visibility"
   // FIR-2412: notify the assignee when an issue's start/due date arrives.
   | "cerebro_date_reminders"
   // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
@@ -246,6 +248,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // into a run-request in the owner's inbox. Off restores the old behavior
   // (private agents hidden, tags silently dropped).
   cerebro_private_agent_requests: true,
+  // TECH-3670: on by default. Lets an agent owner hide a personal agent from
+  // non-owner members on specific discovery surfaces (lists, @-mention, chat,
+  // channels) — or all of them ("Skjult"). Off makes every agent visible
+  // everywhere again (the legacy behavior); owner + admins always see it.
+  cerebro_agent_surface_visibility: true,
   // FIR-2412: on by default — the assignee gets an inbox + push reminder when
   // a start/due date arrives. Off hides the settings rows and the UI control.
   cerebro_date_reminders: true,
@@ -762,6 +769,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Show private agents you don't own as visible-but-locked in the agent list and @-picker (name + description only). Tagging one no longer silently drops — it sends a run-request to the agent's owner, who can run it from their inbox. The owner stays in control; server-side foreign-trigger blocking is unchanged. FIR-2385.",
+  },
+  {
+    key: "cerebro_agent_surface_visibility",
+    label: "Agent surface visibility",
+    group: "permissions",
+    description:
+      "Let an agent's owner hide a personal agent from non-owner members on specific discovery surfaces — agent lists & assignee picker, @-mention autocomplete, chat picker, channel pickers — or all of them at once ('Skjult'). The agent still appears on public issues it already participates in. Owner + workspace admins always see it. Off makes every agent visible everywhere (legacy). TECH-3670.",
   },
   {
     key: "cerebro_date_reminders",
