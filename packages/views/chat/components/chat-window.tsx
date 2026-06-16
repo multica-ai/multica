@@ -42,7 +42,7 @@ import {
   useMarkChatSessionRead,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { useChatStore, type ChatQuotedContext } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
@@ -55,6 +55,26 @@ import { useT } from "../../i18n";
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+
+function escapeHtmlComment(value: string) {
+  return value.replace(/-->/g, "--&gt;");
+}
+
+function withQuotedContext(content: string, quotedContext: ChatQuotedContext | null) {
+  if (!quotedContext) return content;
+  return [
+    "<!-- multica-quoted-context",
+    `type: ${escapeHtmlComment(quotedContext.type)}`,
+    `id: ${escapeHtmlComment(quotedContext.id)}`,
+    `label: ${escapeHtmlComment(quotedContext.label)}`,
+    quotedContext.subtitle ? `subtitle: ${escapeHtmlComment(quotedContext.subtitle)}` : null,
+    "body:",
+    escapeHtmlComment(quotedContext.body),
+    "-->",
+    "",
+    content,
+  ].filter((line): line is string => line !== null).join("\n");
+}
 
 function seedChatMessagesPageCache(
   qc: ReturnType<typeof useQueryClient>,
@@ -81,9 +101,11 @@ export function ChatWindow() {
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
+  const quotedContext = useChatStore((s) => s.quotedContext);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
+  const clearQuotedContext = useChatStore((s) => s.clearQuotedContext);
   const user = useAuthStore((s) => s.user);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -284,7 +306,7 @@ export function ChatWindow() {
         return;
       }
 
-      const finalContent = content;
+      const finalContent = withQuotedContext(content, quotedContext);
 
       const isNewSession = !activeSessionId;
 
@@ -296,7 +318,7 @@ export function ChatWindow() {
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
-      const sessionId = await ensureSession(finalContent);
+      const sessionId = await ensureSession(content);
       if (!sessionId) {
         apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
         return;
@@ -340,6 +362,7 @@ export function ChatWindow() {
       // Cache primed → safe to publish the new active session. Idempotent
       // when the session was already active (existing-conversation send).
       setActiveSession(sessionId);
+      clearQuotedContext();
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
       const result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
@@ -365,6 +388,8 @@ export function ChatWindow() {
       ensureSession,
       qc,
       setActiveSession,
+      clearQuotedContext,
+      quotedContext,
     ],
   );
 

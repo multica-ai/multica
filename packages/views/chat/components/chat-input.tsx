@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useRef, useState } from "react";
+import { Quote, X } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -87,6 +88,8 @@ export function ChatInput({
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
+  const quotedContext = useChatStore((s) => s.quotedContext);
+  const clearQuotedContext = useChatStore((s) => s.clearQuotedContext);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
@@ -222,6 +225,30 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
+        {quotedContext && (
+          <div className="mx-2 mt-2 flex min-w-0 items-center gap-2 rounded-md border border-brand/25 bg-brand/5 px-2.5 py-2 text-xs">
+            <Quote className="size-3.5 shrink-0 text-brand" />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span className="shrink-0 font-medium text-brand">引用节点</span>
+                <span className="truncate font-medium text-foreground">{quotedContext.label}</span>
+              </div>
+              {quotedContext.subtitle && (
+                <div className="mt-0.5 truncate text-muted-foreground">
+                  {quotedContext.subtitle}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground"
+              aria-label="移除引用节点"
+              onClick={clearQuotedContext}
+            >
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey

@@ -67,10 +67,19 @@ export interface ChatTimelineItem {
   created_at?: string;
 }
 
+export interface ChatQuotedContext {
+  type: "ug_node";
+  id: string;
+  label: string;
+  subtitle?: string;
+  body: string;
+}
+
 export interface ChatState {
   isOpen: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
+  quotedContext: ChatQuotedContext | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Raw user-chosen size — no clamp applied. UI layer clamps at render time. */
@@ -81,6 +90,8 @@ export interface ChatState {
   toggle: () => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
+  setQuotedContext: (context: ChatQuotedContext | null) => void;
+  clearQuotedContext: () => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   clearInputDraft: (sessionId: string) => void;
@@ -111,6 +122,7 @@ export function createChatStore(options: ChatStoreOptions) {
     isOpen: initialIsOpen,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
+    quotedContext: null,
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
     chatHeight: Number(storage.getItem(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
@@ -139,6 +151,18 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
       storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
       set({ selectedAgentId: id });
+    },
+    setQuotedContext: (context) => {
+      logger.info("setQuotedContext", {
+        type: context?.type ?? null,
+        id: context?.id ?? null,
+      });
+      set({ quotedContext: context });
+    },
+    clearQuotedContext: () => {
+      if (!get().quotedContext) return;
+      logger.info("clearQuotedContext");
+      set({ quotedContext: null });
     },
     setInputDraft: (sessionId, draft) => {
       // Debug level — onUpdate fires on every keystroke.
@@ -192,6 +216,7 @@ export function createChatStore(options: ChatStoreOptions) {
     store.setState({
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
+      quotedContext: null,
       inputDrafts: nextDrafts,
     });
   });

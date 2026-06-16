@@ -17,7 +17,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
-import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy } from "lucide-react";
+import { ChevronRight, ChevronDown, Brain, AlertCircle, AlertTriangle, Copy, Quote } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { Markdown } from "@multica/views/common/markdown";
@@ -32,6 +32,49 @@ import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { useT } from "../../i18n";
+
+interface ParsedQuotedContext {
+  content: string;
+  quote?: {
+    label: string;
+    subtitle?: string;
+  };
+}
+
+const QUOTED_CONTEXT_PATTERN = /^<!-- multica-quoted-context\n([\s\S]*?)\n-->\n*/;
+
+function unescapeCommentValue(value: string) {
+  return value.replace(/--&gt;/g, "-->");
+}
+
+function parseQuotedContextMessage(content: string): ParsedQuotedContext {
+  const match = content.match(QUOTED_CONTEXT_PATTERN);
+  if (!match) return { content };
+
+  const rawContext = match[1] ?? "";
+  const bodyIndex = rawContext.indexOf("\nbody:\n");
+  const metadataText = bodyIndex >= 0 ? rawContext.slice(0, bodyIndex) : rawContext;
+  const metadata = new Map<string, string>();
+
+  for (const line of metadataText.split("\n")) {
+    const separatorIndex = line.indexOf(":");
+    if (separatorIndex <= 0) continue;
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+    metadata.set(key, unescapeCommentValue(value));
+  }
+
+  const label = metadata.get("label");
+  return {
+    content: content.slice(match[0].length).trimStart(),
+    quote: label
+      ? {
+          label,
+          subtitle: metadata.get("subtitle"),
+        }
+      : undefined,
+  };
+}
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -190,19 +233,37 @@ export function ChatMessageSkeleton() {
 
 function MessageBubble({ message, isPending }: { message: ChatMessage; isPending: boolean }) {
   if (message.role === "user") {
+    const parsed = parseQuotedContextMessage(message.content);
+
     return (
       <div className="flex justify-end">
         <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm max-w-[80%] break-words">
+          {parsed.quote && (
+            <div className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-brand/20 bg-background/60 px-2.5 py-2 text-xs">
+              <Quote className="size-3.5 shrink-0 text-brand" />
+              <div className="min-w-0">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="shrink-0 font-medium text-brand">引用节点</span>
+                  <span className="truncate font-medium text-foreground">{parsed.quote.label}</span>
+                </div>
+                {parsed.quote.subtitle && (
+                  <div className="mt-0.5 truncate text-muted-foreground">
+                    {parsed.quote.subtitle}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {/* User messages are authored as markdown in ContentEditor, so
            * render them through the same pipeline as assistant replies.
            * Neutralise prose's leading/trailing margin so single-line
            * bubbles stay as compact as the plain-text version used to. */}
           <div className="prose prose-sm dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-            <Markdown attachments={message.attachments}>{message.content}</Markdown>
+            <Markdown attachments={message.attachments}>{parsed.content}</Markdown>
           </div>
           <AttachmentList
             attachments={message.attachments}
-            content={message.content}
+            content={parsed.content}
             className="mt-1.5"
           />
         </div>

@@ -1165,6 +1165,7 @@ type codexClient struct {
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
 	completedTurnIDs     map[string]bool
+	agentMessageDeltas   map[string]string
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
@@ -1584,6 +1585,21 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
 	}
+	if method == "item/agentMessage/delta" {
+		if delta := extractCodexDeltaText(params); delta != "" {
+			c.recordAgentMessageDelta(itemID, delta)
+			if c.onMessage != nil {
+				c.onMessage(Message{Type: MessageText, Content: delta})
+			}
+		}
+		return
+	}
+	if isCodexThinkingDelta(method, itemType) {
+		if delta := extractCodexDeltaText(params); delta != "" && c.onMessage != nil {
+			c.onMessage(Message{Type: MessageThinking, Content: delta})
+		}
+		return
+	}
 	if item == nil {
 		return
 	}
@@ -1629,10 +1645,33 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			})
 		}
 
+	case method == "item/started" && isCodexToolCallItem(itemType):
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolUse,
+				Tool:   codexToolName(item, itemType),
+				CallID: itemID,
+				Input:  codexToolInput(item),
+			})
+		}
+
+	case method == "item/completed" && isCodexToolCallItem(itemType):
+		output, _ := item["output"].(string)
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolResult,
+				Tool:   codexToolName(item, itemType),
+				CallID: itemID,
+				Output: output,
+			})
+		}
+
 	case method == "item/completed" && itemType == "agentMessage":
 		text, _ := item["text"].(string)
 		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text})
+			if suffix := c.agentMessageFinalSuffix(itemID, text); suffix != "" {
+				c.onMessage(Message{Type: MessageText, Content: suffix})
+			}
 		}
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" && c.turnStarted {
@@ -1641,6 +1680,104 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			}
 		}
 	}
+}
+
+func (c *codexClient) recordAgentMessageDelta(itemID, delta string) {
+	if itemID == "" {
+		itemID = "__default_agent_message__"
+	}
+	if c.agentMessageDeltas == nil {
+		c.agentMessageDeltas = map[string]string{}
+	}
+	c.agentMessageDeltas[itemID] += delta
+}
+
+func (c *codexClient) agentMessageFinalSuffix(itemID, final string) string {
+	if itemID == "" {
+		itemID = "__default_agent_message__"
+	}
+	if c.agentMessageDeltas == nil {
+		return final
+	}
+	streamed := c.agentMessageDeltas[itemID]
+	if streamed == "" {
+		return final
+	}
+	if strings.HasPrefix(final, streamed) {
+		return strings.TrimPrefix(final, streamed)
+	}
+	if final == streamed {
+		return ""
+	}
+	return ""
+}
+
+func extractCodexDeltaText(params map[string]any) string {
+	for _, key := range []string{"delta", "text", "content"} {
+		if s, ok := params[key].(string); ok {
+			return s
+		}
+	}
+	for _, key := range []string{"delta", "text", "content"} {
+		if m, ok := params[key].(map[string]any); ok {
+			if s := firstStringField(m, "text", "content", "value"); s != "" {
+				return s
+			}
+		}
+	}
+	if s := firstStringField(params, "message", "summary"); s != "" {
+		return s
+	}
+	return ""
+}
+
+func isCodexThinkingDelta(method, itemType string) bool {
+	if !(strings.Contains(method, "delta") || strings.Contains(method, "Delta")) {
+		return false
+	}
+	method = strings.ToLower(method)
+	itemType = strings.ToLower(itemType)
+	return strings.Contains(method, "reason") ||
+		strings.Contains(method, "think") ||
+		strings.Contains(itemType, "reason") ||
+		strings.Contains(itemType, "think")
+}
+
+func isCodexToolCallItem(itemType string) bool {
+	switch itemType {
+	case "mcpToolCall", "customToolCall", "functionCall", "toolCall":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexToolName(item map[string]any, itemType string) string {
+	if s := firstStringField(item, "name", "tool", "toolName", "serverName"); s != "" {
+		return s
+	}
+	if itemType != "" {
+		return itemType
+	}
+	return "tool"
+}
+
+func codexToolInput(item map[string]any) map[string]any {
+	for _, key := range []string{"input", "arguments", "args"} {
+		if m, ok := item[key].(map[string]any); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+func firstStringField(m map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if s, ok := m[key].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func isCodexItemProgressActivity(method string) bool {
