@@ -960,3 +960,16 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// Eidetix per-project config. Token is write-only server-side and never
+// present in this response. Lenient per the API-compatibility rule.
+export const EidetixConfigSchema = z.object({
+  configured: z.boolean(),
+  enabled: z.boolean(),
+  endpoint_url: z.string().optional().default(""),
+  graph_label: z.string().optional().default(""),
+}).loose();
+export type EidetixConfig = z.infer<typeof EidetixConfigSchema>;
+export const EMPTY_EIDETIX_CONFIG: EidetixConfig = {
+  configured: false, enabled: false, endpoint_url: "", graph_label: "",
+};

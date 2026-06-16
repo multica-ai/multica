@@ -4,6 +4,7 @@ import { projectKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import type { Project, CreateProjectRequest, UpdateProjectRequest, ListProjectsResponse } from "../types";
+import type { EidetixConfig } from "../api/schemas";
 
 export function useCreateProject() {
   const qc = useQueryClient();
@@ -74,6 +75,51 @@ export function useDeleteProject() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+    },
+  });
+}
+
+export function useSetProjectEidetix(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: { token: string; graph_label?: string }) =>
+      api.setProjectEidetix(projectId, data),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.eidetix(wsId, projectId) });
+    },
+  });
+}
+
+export function useToggleProjectEidetix(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (enabled: boolean) => api.toggleProjectEidetix(projectId, enabled),
+    onMutate: async (enabled) => {
+      await qc.cancelQueries({ queryKey: projectKeys.eidetix(wsId, projectId) });
+      const prev = qc.getQueryData<EidetixConfig>(projectKeys.eidetix(wsId, projectId));
+      qc.setQueryData<EidetixConfig>(projectKeys.eidetix(wsId, projectId), (old) =>
+        old ? { ...old, enabled } : old,
+      );
+      return { prev };
+    },
+    onError: (_err, _enabled, ctx) => {
+      if (ctx?.prev) qc.setQueryData(projectKeys.eidetix(wsId, projectId), ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.eidetix(wsId, projectId) });
+    },
+  });
+}
+
+export function useClearProjectEidetix(projectId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.clearProjectEidetix(projectId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.eidetix(wsId, projectId) });
     },
   });
 }

@@ -193,6 +193,9 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  EidetixConfigSchema,
+  EMPTY_EIDETIX_CONFIG,
+  type EidetixConfig,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -1809,6 +1812,41 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
       method: "DELETE",
     });
+  }
+
+  // Project Eidetix config (owner/admin only; token is write-only).
+  async getProjectEidetix(projectId: string): Promise<EidetixConfig> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/eidetix`);
+    return parseWithFallback(raw, EidetixConfigSchema, EMPTY_EIDETIX_CONFIG, {
+      endpoint: "GET /api/projects/{id}/eidetix",
+    });
+  }
+
+  async setProjectEidetix(
+    projectId: string,
+    data: { token: string; graph_label?: string },
+  ): Promise<EidetixConfig> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/eidetix`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, EidetixConfigSchema, EMPTY_EIDETIX_CONFIG, {
+      endpoint: "PUT /api/projects/{id}/eidetix",
+    });
+  }
+
+  async toggleProjectEidetix(projectId: string, enabled: boolean): Promise<EidetixConfig> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/eidetix`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled }),
+    });
+    return parseWithFallback(raw, EidetixConfigSchema, EMPTY_EIDETIX_CONFIG, {
+      endpoint: "PATCH /api/projects/{id}/eidetix",
+    });
+  }
+
+  async clearProjectEidetix(projectId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/eidetix`, { method: "DELETE" });
   }
 
   // Labels
