@@ -129,30 +129,76 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
     return () => clearTimeout(t);
   }, [armed, active]);
 
-  // TECH-3579 (Jesper) — the star must follow the row when it's swiped. The
-  // mobile swipe handlers translate the *row element* imperatively via an
-  // inline `transform` (see cerebro-inbox-row-actions). This star is an overlay
-  // sibling of that row inside the `relative` wrapper, so without mirroring it
-  // would stay pinned while the avatar slides out from under it. Watch the row's
-  // inline style and copy its translateX onto the star, keeping the star's own
-  // vertical centering (translateY(-50%)) intact.
+  // TECH-3579 (Jesper) — the star overlay must sit *exactly* on top of the row's
+  // avatar, on every row kind and viewport. The earlier version hard-coded
+  // `left-4 top-1/2 size-7`, which assumed the avatar's geometry; on desktop the
+  // star drifted off the avatar (Jesper #1: "stjernerne har forrykket sig"), and
+  // because it no longer covered the avatar, clicking the avatar fell through to
+  // the avatar's own profile link and navigated to the agent page instead of
+  // flipping (Jesper #2). Measuring the avatar and overlaying it removes both
+  // failure modes by construction. The avatar is `data-slot="avatar"` (the
+  // shared ActorAvatar base). Layout offsets (offsetTop/Left) are
+  // transform-independent, so the base box is stable; the row's swipe transform
+  // is mirrored separately so the star still follows a mobile swipe.
   useEffect(() => {
     const button = buttonRef.current;
-    const row = button?.parentElement?.firstElementChild as HTMLElement | null;
-    if (!button || !row) return;
-    const sync = () => {
-      const rowTransform = row.style.transform;
-      button.style.transform = rowTransform
-        ? `${rowTransform} translateY(-50%)`
-        : "translateY(-50%)";
-      // Mirror the snap-back / settle transition so the star eases back in sync
-      // with the row instead of jumping.
-      button.style.transition = row.style.transition;
+    const wrapper = button?.parentElement;
+    if (!button || !wrapper) return;
+    const row = wrapper.firstElementChild as HTMLElement | null;
+
+    // The leading avatar is always the row's first in-flow child (the unread
+    // stripe is absolutely positioned, so it's skipped). This is more robust
+    // than a `[data-slot="avatar"]` query, which misses the plain-icon avatar
+    // that named-channel rows render.
+    const findAvatar = (): HTMLElement | null => {
+      if (!row) return null;
+      for (const child of Array.from(row.children)) {
+        const el = child as HTMLElement;
+        if (getComputedStyle(el).position === "absolute") continue;
+        return el;
+      }
+      return null;
     };
-    sync();
-    const observer = new MutationObserver(sync);
-    observer.observe(row, { attributes: true, attributeFilter: ["style"] });
-    return () => observer.disconnect();
+
+    const positionOverAvatar = () => {
+      const avatar = findAvatar();
+      if (!avatar) return;
+      // Sum layout offsets up to the wrapper (transform-independent).
+      let top = 0;
+      let left = 0;
+      let node: HTMLElement | null = avatar;
+      while (node && node !== wrapper) {
+        top += node.offsetTop;
+        left += node.offsetLeft;
+        node = node.offsetParent as HTMLElement | null;
+      }
+      // Square box matching the round avatar, anchored to the avatar's top-left.
+      const size = avatar.offsetHeight;
+      button.style.left = `${left}px`;
+      button.style.top = `${top}px`;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+    };
+
+    // Mirror the row's swipe transform/transition so the star slides with the
+    // avatar during a mobile swipe and eases back in sync on release.
+    const syncSwipe = () => {
+      if (!row) return;
+      button.style.transform = row.style.transform || "";
+      button.style.transition = row.style.transition || "";
+    };
+
+    positionOverAvatar();
+    syncSwipe();
+
+    const ro = new ResizeObserver(() => positionOverAvatar());
+    ro.observe(wrapper);
+    const mo = row ? new MutationObserver(syncSwipe) : null;
+    if (row) mo!.observe(row, { attributes: true, attributeFilter: ["style"] });
+    return () => {
+      ro.disconnect();
+      mo?.disconnect();
+    };
   }, []);
 
   // Armed but not yet favorited → give the user a full 5s to click, then flip
@@ -183,10 +229,11 @@ function FavoriteStar({ active, onToggle }: { active: boolean; onToggle: () => v
         onToggle();
         if (active) setArmed(false); // removed → flip back to the avatar
       }}
-      className="absolute left-4 top-1/2 z-10 size-7 -translate-y-1/2 [perspective:600px]"
+      // Position/size are set imperatively to overlay the avatar (see effect).
+      className="absolute z-10 size-7 [perspective:600px]"
     >
       <span
-        className={`relative block size-7 transition-transform duration-300 [transform-style:preserve-3d] ${
+        className={`relative block size-full transition-transform duration-300 [transform-style:preserve-3d] ${
           showStar ? "[transform:rotateY(180deg)]" : ""
         }`}
       >

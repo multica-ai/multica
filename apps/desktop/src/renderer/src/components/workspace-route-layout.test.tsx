@@ -29,6 +29,17 @@ vi.mock("@multica/core/platform", () => ({
   setCurrentWorkspace: vi.fn(),
 }));
 
+// MemberPresenceProvider (CEREBRO-PATCH member-presence-dot) subscribes to
+// WS events via useWSEvent → useWS, which throws outside a WSProvider. This
+// test renders the layout without the realtime stack, so stub the provider
+// to a passthrough — the test asserts SourceBackfillModal mounting, not
+// presence wiring.
+vi.mock("@multica/core/presence", () => ({
+  MemberPresenceProvider: ({ children }: { children: React.ReactNode }) => (
+    <>{children}</>
+  ),
+}));
+
 vi.mock("@multica/core/workspace", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/workspace")>(
     "@multica/core/workspace",

@@ -249,6 +249,11 @@ function formatActivity(
       return details.fire_at
         ? t(($) => $.activity.wakeup_scheduled_for, { date: formatWakeupFireAt(details.fire_at) })
         : t(($) => $.activity.wakeup_scheduled);
+    // CEREBRO-PATCH(approval-system-activity): TECH-3533 cross-actor private-agent run-request timeline labels.
+    case "agent_run_requested":
+      return t(($) => $.activity.agent_run_requested, { agent: details.agent_name ?? "" });
+    case "agent_run_approved":
+      return t(($) => $.activity.agent_run_approved, { agent: details.agent_name ?? "" });
     default:
       return entry.action ?? "";
   }

@@ -24,6 +24,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/sysactivity"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -137,7 +138,7 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 		AuthorType:  "member",
 		AuthorID:    ownerUUID,
 		Content: fmt.Sprintf(
-			"✅ Kør-anmodning godkendt — [@%s](mention://agent/%s) sættes i gang.",
+			"✅ Run request approved — [@%s](mention://agent/%s) is starting now.",
 			agent.Name, util.UUIDToString(agentID),
 		),
 		Type:     "comment",
@@ -172,6 +173,15 @@ func (h *Handler) RunPrivateAgentRequest(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to start agent")
 			return
 		}
+		// Record the approval as a visible System Activity timeline event — this
+		// is the "approve → system activity that triggers the agent" half of the
+		// model. Best-effort; never blocks the run that just started.
+		sysactivity.Record(r.Context(), h.Upstream, h.Bus, wsUUID, issue.ID, ownerUUID, "member", sysactivity.ActionAgentRunApproved, map[string]any{
+			"agent_id":     util.UUIDToString(agentID),
+			"agent_name":   agent.Name,
+			"requester_id": util.UUIDToString(item.ActorID),
+			"comment_id":   util.UUIDToString(commentID),
+		})
 	}
 
 	// The request is fulfilled — take it out of the active inbox.

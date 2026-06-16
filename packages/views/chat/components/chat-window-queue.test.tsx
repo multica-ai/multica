@@ -175,6 +175,12 @@ vi.mock("@multica/core/logger", () => ({
     warn: () => {},
     error: () => {},
   }),
+  noopLogger: {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+  },
 }));
 
 import { ChatWindow } from "./chat-window";

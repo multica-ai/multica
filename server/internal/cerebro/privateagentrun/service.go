@@ -18,8 +18,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/sysactivity"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -29,14 +31,16 @@ const flagKey = "cerebro_private_agent_requests"
 
 // Service creates private-agent run-requests in the owner's inbox.
 type Service struct {
+	Queries *db.Queries
 	Cerebro *cerebrodb.Queries
 	Bus     *events.Bus
 }
 
 // New constructs the service. The router wires it onto the upstream Handler
-// seam (handler.PrivateAgentRunRequesterInvoker).
-func New(cerebro *cerebrodb.Queries, bus *events.Bus) *Service {
-	return &Service{Cerebro: cerebro, Bus: bus}
+// seam (handler.PrivateAgentRunRequesterInvoker). queries is the upstream sqlc
+// querier used to record the System Activity timeline event (TECH-3533).
+func New(queries *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus) *Service {
+	return &Service{Queries: queries, Cerebro: cerebro, Bus: bus}
 }
 
 // RequestPrivateAgentRun implements handler.PrivateAgentRunRequesterInvoker.
@@ -100,6 +104,14 @@ func (s *Service) RequestPrivateAgentRun(ctx context.Context, workspaceID string
 		return err
 	}
 	s.publishInboxNew(item, workspaceID)
+	// Record the request as a visible System Activity timeline event — the
+	// "request → system activity + inbox message" half of the model. Best-effort.
+	sysactivity.Record(ctx, s.Queries, s.Bus, wsUUID, issueID, requesterID, "member", sysactivity.ActionAgentRunRequested, map[string]any{
+		"agent_id":   agentIDStr,
+		"agent_name": agentName,
+		"owner_id":   util.UUIDToString(ownerID),
+		"comment_id": commentIDStr,
+	})
 	return nil
 }
 
