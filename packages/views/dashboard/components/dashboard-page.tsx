@@ -476,33 +476,44 @@ function LlmLimitGauge({
   isFetching: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useT("usage");
   const cards = [
-    { label: "세션 (5h)", pct: data.five_hour_pct },
-    { label: "주간 전체모델 (7d)", pct: data.seven_day_pct },
-    { label: "Sonnet만", pct: data.sonnet_pct },
-    { label: "GPT 5h limit", pct: data.gpt_five_hour_pct },
-    { label: "GPT 7d limit", pct: data.gpt_seven_day_pct },
+    { label: t(($) => $.llm_gauge.cards.session_5h), pct: data.five_hour_pct },
+    { label: t(($) => $.llm_gauge.cards.weekly_all_models_7d), pct: data.seven_day_pct },
+    { label: t(($) => $.llm_gauge.cards.sonnet_only), pct: data.sonnet_pct },
+    { label: t(($) => $.llm_gauge.cards.gpt_5h_limit), pct: data.gpt_five_hour_pct },
+    { label: t(($) => $.llm_gauge.cards.gpt_7d_limit), pct: data.gpt_seven_day_pct },
   ];
+  const weekdays = [
+    t(($) => $.llm_gauge.weekdays.fri),
+    t(($) => $.llm_gauge.weekdays.sat),
+    t(($) => $.llm_gauge.weekdays.sun),
+    t(($) => $.llm_gauge.weekdays.mon),
+    t(($) => $.llm_gauge.weekdays.tue),
+    t(($) => $.llm_gauge.weekdays.wed),
+    t(($) => $.llm_gauge.weekdays.thu),
+  ];
+  const updatedAtLabel = t(($) => $.llm_gauge.last_updated, {
+    time: data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : "-",
+  });
 
   return (
     <section
       className="rounded-lg border bg-card p-4"
       data-llm-refresh-interval-ms="60000"
-      aria-label="LLM 잔량 게이지"
+      aria-label={t(($) => $.llm_gauge.aria)}
     >
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">LLM 잔량 게이지</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            마지막 갱신 {data.updated_at ? new Date(data.updated_at).toLocaleTimeString() : "-"}
-          </p>
+          <h2 className="text-sm font-semibold">{t(($) => $.llm_gauge.title)}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{updatedAtLabel}</p>
         </div>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
           data-acceptance="llm-gauge-manual-refresh"
-          aria-label="LLM 잔량 게이지 새로고침"
+          aria-label={t(($) => $.llm_gauge.refresh_aria)}
           onClick={onRefresh}
         >
           <RefreshCw className={isFetching ? "animate-spin" : ""} />
@@ -521,18 +532,20 @@ function LlmLimitGauge({
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-muted">
                 <div className="h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
               </div>
-              <p className="mt-2 text-xs text-muted-foreground">잔량 {remaining}%</p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {t(($) => $.llm_gauge.remaining, { remaining })}
+              </p>
             </div>
           );
         })}
       </div>
       <div className="mt-4">
         <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-          <span>주간 진행률</span>
+          <span>{t(($) => $.llm_gauge.weekly_progress)}</span>
           <span className="tabular-nums">{clampPct(data.weekly_progress_pct)}%</span>
         </div>
         <div className="grid grid-cols-7 gap-1">
-          {["금", "토", "일", "월", "화", "수", "목"].map((day, index) => (
+          {weekdays.map((day, index) => (
             <div key={day} className="space-y-1">
               <div className="h-2 rounded-full bg-muted">
                 <div

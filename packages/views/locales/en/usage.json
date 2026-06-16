@@ -54,5 +54,29 @@
   },
   "duration": {
     "less_than_minute": "<1m"
+  },
+  "llm_gauge": {
+    "title": "LLM 잔량 게이지",
+    "aria": "LLM 잔량 게이지",
+    "last_updated": "마지막 갱신 {{time}}",
+    "refresh_aria": "LLM 잔량 게이지 새로고침",
+    "remaining": "잔량 {{remaining}}%",
+    "weekly_progress": "주간 진행률",
+    "cards": {
+      "session_5h": "세션 (5h)",
+      "weekly_all_models_7d": "주간 전체모델 (7d)",
+      "sonnet_only": "Sonnet만",
+      "gpt_5h_limit": "GPT 5h limit",
+      "gpt_7d_limit": "GPT 7d limit"
+    },
+    "weekdays": {
+      "fri": "금",
+      "sat": "토",
+      "sun": "일",
+      "mon": "월",
+      "tue": "화",
+      "wed": "수",
+      "thu": "목"
+    }
   }
 }

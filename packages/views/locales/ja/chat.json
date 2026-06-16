@@ -117,5 +117,10 @@
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
     }
+  },
+  "token_badges": {
+    "aria": "채팅 LLM 잔량",
+    "claude": "Claude 잔량 49%",
+    "gpt": "GPT 잔량 100%"
   }
 }

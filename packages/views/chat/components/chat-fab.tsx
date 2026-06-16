@@ -68,15 +68,21 @@ export function ChatFab() {
 }
 
 function ChatFabTokenBadges() {
+  const { t } = useT("chat");
+
   return (
     <div
       data-acceptance="chat-token-remaining-badge"
       className="absolute bottom-2 right-14 z-50 hidden items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-[11px] text-muted-foreground shadow-sm sm:flex"
-      aria-label="채팅 LLM 잔량"
+      aria-label={t(($) => $.token_badges.aria)}
     >
-      <span data-acceptance="chat-claude-token-remaining-badge">Claude 잔량 49%</span>
+      <span data-acceptance="chat-claude-token-remaining-badge">
+        {t(($) => $.token_badges.claude)}
+      </span>
       <span className="text-border">·</span>
-      <span data-acceptance="chat-gpt-token-remaining-badge">GPT 잔량 100%</span>
+      <span data-acceptance="chat-gpt-token-remaining-badge">
+        {t(($) => $.token_badges.gpt)}
+      </span>
     </div>
   );
 }
