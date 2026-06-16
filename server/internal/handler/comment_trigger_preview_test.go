@@ -49,7 +49,7 @@ func createCommentTriggerPreviewIssue(t *testing.T, title string, assigneeType, 
 	return issueID
 }
 
-func previewCommentTriggersForTest(t *testing.T, issueID string, body map[string]any) CommentTriggerPreviewResponse {
+func previewCommentTriggersForTest(t *testing.T, issueID string, body any) CommentTriggerPreviewResponse {
 	t.Helper()
 
 	w := httptest.NewRecorder()
@@ -83,6 +83,20 @@ func postCommentForTriggerPreviewTest(t *testing.T, issueID string, body map[str
 		t.Fatalf("decode created comment: %v", err)
 	}
 	return resp.ID
+}
+
+func insertMemberRootCommentForTriggerPreviewTest(t *testing.T, issueID, content string) string {
+	t.Helper()
+
+	var commentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID, content).Scan(&commentID); err != nil {
+		t.Fatalf("insert member root comment: %v", err)
+	}
+	return commentID
 }
 
 func updateCommentForTriggerPreviewTest(t *testing.T, commentID string, body map[string]any) {
@@ -140,6 +154,53 @@ func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, w
 		if _, ok := got[want]; !ok {
 			t.Fatalf("preview agents = %+v, missing id %s", preview.Agents, want)
 		}
+	}
+}
+
+func TestPreviewCommentTriggers_MatchesCreateForInheritedParentMention(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	waltID := createHandlerTestAgent(t, "Preview Inherit Walt", nil)
+	kimID := createHandlerTestAgent(t, "Preview Inherit Kim", nil)
+	issueID := createCommentTriggerPreviewIssue(t, "comment trigger preview inherits parent mention", "agent", waltID)
+
+	topLevelPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+		Content: "hello from the root composer",
+	})
+	requirePreviewAgents(t, topLevelPreview, waltID)
+
+	rootContent := fmt.Sprintf("[@Kim](mention://agent/%s) can you inspect this?", kimID)
+	rootID := insertMemberRootCommentForTriggerPreviewTest(t, issueID, rootContent)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
+		t.Fatalf("fixture queued Kim tasks = %d, want 0", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 0 {
+		t.Fatalf("fixture queued Walt tasks = %d, want 0", got)
+	}
+
+	replyContent := "plain reply with no mention"
+	replyParentID := rootID
+	replyBody := map[string]any{
+		"content":   replyContent,
+		"parent_id": rootID,
+	}
+	replyPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
+		Content:  replyContent,
+		ParentID: &replyParentID,
+	})
+	requirePreviewAgents(t, replyPreview, kimID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
+		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceMentionAgent)
+	}
+
+	postCommentForTriggerPreviewTest(t, issueID, replyBody)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
+		t.Fatalf("plain reply queued Kim tasks = %d, want 1", got)
+	}
+	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 0 {
+		t.Fatalf("plain reply queued Walt tasks = %d, want 0", got)
 	}
 }
 

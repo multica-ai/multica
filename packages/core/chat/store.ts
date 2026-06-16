@@ -11,6 +11,16 @@ const SESSION_STORAGE_KEY = "multica:chat:activeSessionId";
 const DRAFTS_KEY = "multica:chat:drafts";
 /** Placeholder sessionId for a chat that hasn't been created yet. */
 export const DRAFT_NEW_SESSION = "__new__";
+
+/**
+ * Draft storage key for an as-yet-uncreated chat with the given agent.
+ * Shared by ChatInput (which writes the draft) and ensureSession (which
+ * migrates it onto the real session id the moment the session is created),
+ * so the two never disagree on the slot name.
+ */
+export function newSessionDraftKey(selectedAgentId: string | null): string {
+  return `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
+}
 const CHAT_WIDTH_KEY = "multica:chat:width";
 const CHAT_HEIGHT_KEY = "multica:chat:height";
 const CHAT_EXPANDED_KEY = "multica:chat:expanded";
@@ -84,6 +94,14 @@ export interface ChatState {
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   clearInputDraft: (sessionId: string) => void;
+  /**
+   * Move a draft from one key to another, deleting the source. Used when a
+   * chat session is lazily created: the `__new__:agent` draft is migrated
+   * onto the real sessionId so it isn't stranded under the abandoned key
+   * (which would resurface as a stale draft the next time a new chat opens
+   * for that agent).
+   */
+  migrateInputDraft: (from: string, to: string) => void;
   /** Persist raw size and auto-exit expanded mode. */
   setChatSize: (width: number, height: number) => void;
   setExpanded: (expanded: boolean) => void;
@@ -156,6 +174,19 @@ export function createChatStore(options: ChatStoreOptions) {
       logger.info("clearInputDraft", { sessionId });
       const next = { ...current };
       delete next[sessionId];
+      writeDrafts(storage, wsKey(DRAFTS_KEY), next);
+      set({ inputDrafts: next });
+    },
+    migrateInputDraft: (from, to) => {
+      if (from === to) return;
+      const current = get().inputDrafts;
+      if (!(from in current)) {
+        logger.debug("migrateInputDraft skipped (no source draft)", { from, to });
+        return;
+      }
+      logger.info("migrateInputDraft", { from, to });
+      const next = { ...current, [to]: current[from]! };
+      delete next[from];
       writeDrafts(storage, wsKey(DRAFTS_KEY), next);
       set({ inputDrafts: next });
     },

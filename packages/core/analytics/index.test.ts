@@ -9,6 +9,7 @@ vi.mock("posthog-js", () => {
     reset: vi.fn(),
     identify: vi.fn(),
     capture: vi.fn(),
+    captureException: vi.fn(),
   };
   return { default: mock };
 });
@@ -22,10 +23,12 @@ async function loadModule() {
     init: ReturnType<typeof vi.fn>;
     register: ReturnType<typeof vi.fn>;
     reset: ReturnType<typeof vi.fn>;
+    captureException: ReturnType<typeof vi.fn>;
   };
   posthog.init.mockClear();
   posthog.register.mockClear();
   posthog.reset.mockClear();
+  posthog.captureException.mockClear();
   return { analytics, posthog };
 }
 
@@ -181,5 +184,35 @@ describe("capturePageview", () => {
     analytics.resetAnalytics();
     analytics.capturePageview("/acme/inbox");
     expect(capture).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("captureException", () => {
+  it("buffers a pre-init exception and flushes it on init", async () => {
+    const { analytics, posthog } = await loadModule();
+    const err = new Error("boom");
+
+    // Before init: buffered, nothing sent yet.
+    analytics.captureException(err, { source: "global-error" });
+    expect(posthog.captureException).not.toHaveBeenCalled();
+
+    // Init flushes the buffer in order.
+    analytics.initAnalytics({ key: "k", host: "" });
+    expect(posthog.captureException).toHaveBeenCalledTimes(1);
+    expect(posthog.captureException).toHaveBeenCalledWith(
+      err,
+      expect.objectContaining({ source: "global-error" }),
+    );
+  });
+
+  it("sends immediately once initialized", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    posthog.captureException.mockClear();
+
+    const err = new Error("later");
+    analytics.captureException(err);
+    expect(posthog.captureException).toHaveBeenCalledTimes(1);
+    expect(posthog.captureException).toHaveBeenCalledWith(err, expect.any(Object));
   });
 });

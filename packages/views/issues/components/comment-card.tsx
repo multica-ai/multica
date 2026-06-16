@@ -283,6 +283,10 @@ function useEditAttachmentState(
     return result;
   }, [uploadWithToast, issueId]);
 
+  useEffect(() => {
+    setSuppressedAgentIds(new Set());
+  }, [issueId, entry.id, entry.parent_id]);
+
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
     enabled: editing,
@@ -560,33 +564,33 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {edit.standaloneEditAttachments.length > 0 && (
-                <AttachmentList
-                  attachments={edit.standaloneEditAttachments}
-                  className="max-w-full"
-                  onRemove={(attachmentId) =>
-                    edit.setRetainedStandaloneIds((ids) => {
-                      const next = new Set(ids ?? []);
-                      next.delete(attachmentId);
-                      return next;
-                    })
-                  }
-                  />
-                )}
+          {edit.standaloneEditAttachments.length > 0 && (
+            <AttachmentList
+              attachments={edit.standaloneEditAttachments}
+              className="mt-2 max-w-full"
+              onRemove={(attachmentId) =>
+                edit.setRetainedStandaloneIds((ids) => {
+                  const next = new Set(ids ?? []);
+                  next.delete(attachmentId);
+                  return next;
+                })
+              }
+            />
+          )}
+          <div className="flex items-center justify-between gap-2 mt-2">
+            <div className="min-w-0 flex-1">
               <CommentTriggerChips
                 agents={edit.triggerPreview.agents}
                 suppressedAgentIds={edit.suppressedAgentIds}
                 onToggle={edit.toggleSuppressedAgent}
               />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
               <FileUploadButton
                 size="sm"
                 multiple
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
-            </div>
-            <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
               <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
