@@ -15,13 +15,19 @@ import { api } from "@multica/core/api";
 export type InboxMode = "classic" | "dynamic";
 
 export const INBOX_MODE_KEY = "cerebro_inbox_mode";
-export const DEFAULT_INBOX_MODE: InboxMode = "classic";
+// TECH-3413 (Jesper) — the dynamic inbox is now the default surface where the
+// `cerebro_inbox_dynamic` flag is available: a user who has never picked a mode
+// lands in dynamic. An EXPLICIT "classic" choice is still honoured (so the
+// "Switch to classic" toggle keeps working and sticks across devices) — only an
+// absent/garbage preference falls through to this default.
+export const DEFAULT_INBOX_MODE: InboxMode = "dynamic";
 
 export function toInboxMode(value: unknown): InboxMode {
-  return value === "dynamic" ? "dynamic" : DEFAULT_INBOX_MODE;
+  // Honour an explicit classic choice; everything else (incl. unset) → default.
+  return value === "classic" ? "classic" : DEFAULT_INBOX_MODE;
 }
 
-/** The user's chosen inbox mode (server-synced preference). Default: classic. */
+/** The user's chosen inbox mode (server-synced preference). Default: dynamic. */
 export function useInboxMode(): InboxMode {
   const user = useAuthStore((s) => s.user);
   return toInboxMode(user?.preferences?.[INBOX_MODE_KEY]);
