@@ -53,6 +53,10 @@ POLL_S = int(os.environ.get("EVAL_POLL_S", "10"))
 
 TERMINAL = {"done", "completed", "failed", "cancelled"}
 
+# Telemetry reads go through psql. Host psql is often absent; default to the
+# dockerized Postgres. Override with EVAL_PSQL (space-separated argv) if needed.
+PSQL = os.environ.get("EVAL_PSQL", "docker exec -i multica-postgres-1 psql -U multica -d multica").split()
+
 
 def die(msg: str) -> None:
     print(f"ERROR: {msg}", file=sys.stderr)
@@ -107,7 +111,7 @@ def telemetry(issue_id: str) -> dict:
     WHERE atq.issue_id = $1
     ORDER BY atq.created_at DESC LIMIT 1;
     """
-    p = subprocess.run(["psql", DATABASE_URL, "-tA", "-F", "\t", "-v", "ON_ERROR_STOP=1",
+    p = subprocess.run([*PSQL, "-tA", "-F", "\t", "-v", "ON_ERROR_STOP=1",
                         "-c", q.replace("$1", f"'{issue_id}'")],
                        capture_output=True, text=True)
     if p.returncode != 0 or not p.stdout.strip():

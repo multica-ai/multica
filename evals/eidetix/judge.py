@@ -28,7 +28,10 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import statistics
+import subprocess
+import tempfile
 from collections import defaultdict
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -63,18 +66,53 @@ def load():
 
 
 def get_judge():
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return None
-    try:
-        import anthropic
-    except ImportError:
-        print("WARN: `pip install anthropic` for LLM scoring; skipping quality/grounding/pairwise.")
-        return None
-    return anthropic.Anthropic()
+    """Return an ask(prompt)->str callable, or None if no backend.
+
+    Prefers the Anthropic SDK when ANTHROPIC_API_KEY is set; otherwise falls
+    back to the local `claude` CLI (already logged in — no API key needed),
+    which is the usual case on a dev box. The CLI runs with an empty,
+    strict mcp-config so no tools/personal MCP servers load — the judge just
+    reads + scores.
+    """
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic
+            c = anthropic.Anthropic()
+
+            def ask_sdk(prompt: str, max_tokens: int = 400) -> str:
+                m = c.messages.create(model=JUDGE_MODEL, max_tokens=max_tokens,
+                                      messages=[{"role": "user", "content": prompt}])
+                return m.content[0].text
+            print(f"judge: using Anthropic SDK ({JUDGE_MODEL})")
+            return ask_sdk
+        except ImportError:
+            print("WARN: anthropic SDK missing; trying the claude CLI instead.")
+
+    claude_bin = os.environ.get("MULTICA_CLAUDE_PATH") or shutil.which("claude") \
+        or os.path.expanduser("~/.local/bin/claude")
+    if claude_bin and os.path.exists(claude_bin):
+        empty = os.path.join(tempfile.gettempdir(), "eidetix-judge-empty-mcp.json")
+        with open(empty, "w") as f:
+            f.write('{"mcpServers":{}}')
+
+        def ask_cli(prompt: str, max_tokens: int = 400) -> str:
+            p = subprocess.run(
+                [claude_bin, "-p", prompt, "--output-format", "json",
+                 "--strict-mcp-config", "--mcp-config", empty, "--max-turns", "1"],
+                capture_output=True, text=True, timeout=240)
+            if p.returncode != 0:
+                raise RuntimeError(p.stderr.strip()[:200])
+            return json.loads(p.stdout).get("result", "")
+        print(f"judge: using claude CLI at {claude_bin} (no API key needed)")
+        return ask_cli
+
+    print("WARN: no judge backend (set ANTHROPIC_API_KEY or install claude); "
+          "skipping quality/grounding/pairwise.")
+    return None
 
 
-def score_one(client, desc, facts, output):
-    """Blind absolute scoring of a single output. Returns (quality 1-5, grounding 0-1)."""
+def score_one(ask, desc, facts, output):
+    """Blind absolute scoring of a single output. Returns (quality 1-5, grounding 0-1) or None."""
     key = "\n".join(f"- {f}" for f in facts) if facts else "(none — generic task)"
     prompt = (
         "You are grading a marketing deliverable. You do NOT know how it was produced.\n\n"
@@ -85,25 +123,28 @@ def score_one(client, desc, facts, output):
         "of the ground-truth facts correctly used minus any contradiction of them; if there "
         "are no facts, grounding = 1.0 when the output is reasonable."
     )
-    msg = client.messages.create(model=JUDGE_MODEL, max_tokens=300,
-                                 messages=[{"role": "user", "content": prompt}])
-    txt = msg.content[0].text
-    m = re.search(r"\{.*\}", txt, re.S)
-    d = json.loads(m.group(0))
-    return float(d["quality"]), float(d["grounding"])
+    try:
+        m = re.search(r"\{.*\}", ask(prompt), re.S)
+        d = json.loads(m.group(0))
+        return float(d["quality"]), float(d["grounding"])
+    except Exception as e:  # noqa: BLE001 — a flaky judge call must not kill the report
+        print(f"  (score_one skipped: {type(e).__name__}: {str(e)[:80]})")
+        return None
 
 
-def pairwise(client, desc, a_out, b_out):
-    """Blind preference between two outputs. Returns 'A' or 'B'."""
+def pairwise(ask, desc, a_out, b_out):
+    """Blind preference between two outputs. Returns 'A', 'B', or None."""
     prompt = (
         f"TASK:\n{desc}\n\nOUTPUT A:\n{a_out}\n\nOUTPUT B:\n{b_out}\n\n"
         "Which output is better for this team's marketing? Reply STRICT JSON only: "
         "{\"winner\": \"A\"|\"B\", \"why\": \"<=20 words\"}."
     )
-    msg = client.messages.create(model=JUDGE_MODEL, max_tokens=200,
-                                 messages=[{"role": "user", "content": prompt}])
-    m = re.search(r"\{.*\}", msg.content[0].text, re.S)
-    return json.loads(m.group(0))["winner"].strip().upper()
+    try:
+        m = re.search(r"\{.*\}", ask(prompt), re.S)
+        return json.loads(m.group(0))["winner"].strip().upper()
+    except Exception as e:  # noqa: BLE001
+        print(f"  (pairwise skipped: {type(e).__name__}: {str(e)[:80]})")
+        return None
 
 
 def main() -> int:
@@ -152,12 +193,16 @@ def main() -> int:
             tq_w, tg_w, tq_wo, tg_wo = [], [], [], []
             for r in w:
                 if r.get("output"):
-                    q, g = score_one(client, descs[task_id], facts.get(task_id, []), r["output"])
-                    tq_w.append(q); tg_w.append(g); q_with.append(q); g_with.append(g)
+                    res = score_one(client, descs[task_id], facts.get(task_id, []), r["output"])
+                    if res:
+                        q, g = res
+                        tq_w.append(q); tg_w.append(g); q_with.append(q); g_with.append(g)
             for r in wo:
                 if r.get("output"):
-                    q, g = score_one(client, descs[task_id], facts.get(task_id, []), r["output"])
-                    tq_wo.append(q); tg_wo.append(g); q_without.append(q); g_without.append(g)
+                    res = score_one(client, descs[task_id], facts.get(task_id, []), r["output"])
+                    if res:
+                        q, g = res
+                        tq_wo.append(q); tg_wo.append(g); q_without.append(q); g_without.append(g)
             entry["quality_with"] = round(statistics.mean(tq_w), 3) if tq_w else None
             entry["quality_without"] = round(statistics.mean(tq_wo), 3) if tq_wo else None
             entry["grounding_with"] = round(statistics.mean(tg_w), 3) if tg_w else None
@@ -171,6 +216,8 @@ def main() -> int:
                 with_is_A = (a["trial"] % 2 == 0)
                 first, second = (a, b) if with_is_A else (b, a)
                 winner = pairwise(client, descs[task_id], first["output"], second["output"])
+                if winner not in ("A", "B"):
+                    continue
                 with_won = (winner == "A") == with_is_A
                 wins_total += 1
                 wins_with += 1 if with_won else 0
