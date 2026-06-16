@@ -38,8 +38,10 @@ import {
   getMoveUpdates,
 } from "../utils/drag-utils";
 import type { BoardColumnGroup } from "./board-column";
+import { buildHierarchy, type RenderItem } from "../utils/hierarchy";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
+const EMPTY_CHILDREN_MAP = new Map<string, Issue[]>();
 const EMPTY_IDS: string[] = [];
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
@@ -55,6 +57,7 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
+  childrenMap = EMPTY_CHILDREN_MAP,
   myIssuesScope,
   myIssuesFilter,
   projectId,
@@ -64,6 +67,7 @@ export function ListView({
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
+  childrenMap?: Map<string, Issue[]>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
   projectId?: string;
@@ -83,6 +87,21 @@ export function ListView({
   const sortLabel = sortBy !== "position"
     ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
     : null;
+
+  // Track which parent issues have their children expanded in the list view.
+  const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
+
+  const toggleExpandParent = useCallback((parentId: string) => {
+    setExpandedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  }, []);
 
   const expandedStatuses = useMemo(
     () =>
@@ -306,6 +325,9 @@ export function ListView({
             issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
+            childrenMap={childrenMap}
+            expandedParents={expandedParents}
+            onToggleExpand={toggleExpandParent}
             myIssuesOpts={myIssuesOpts}
             projectId={projectId}
             dragEnabled={dragEnabled}
@@ -355,6 +377,9 @@ function StatusAccordionItem({
   issueIds,
   issueMap,
   childProgressMap,
+  childrenMap,
+  expandedParents,
+  onToggleExpand,
   myIssuesOpts,
   projectId,
   dragEnabled,
@@ -366,6 +391,9 @@ function StatusAccordionItem({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
+  childrenMap: Map<string, Issue[]>;
+  expandedParents: ReadonlySet<string>;
+  onToggleExpand: (parentId: string) => void;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   projectId?: string;
   dragEnabled: boolean;
@@ -389,6 +417,34 @@ function StatusAccordionItem({
       return issue ? [issue] : [];
     }),
     [issueIds, issueMap],
+  );
+
+  // Build the set of issue IDs in this status group (for hierarchy resolution).
+  const statusIssueIds = useMemo(
+    () => new Set(issueIds),
+    [issueIds],
+  );
+
+  // Build a parent-id → identifier map for resolving cross-status parent references.
+  const parentIdentifierMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const issue of issues) {
+      if (childProgressMap.has(issue.id)) {
+        map.set(issue.id, issue.identifier);
+      }
+    }
+    return map;
+  }, [issues, childProgressMap]);
+
+  // Build hierarchical render items for this status group.
+  const renderItems = useMemo(
+    () => buildHierarchy(issues, childrenMap, statusIssueIds, expandedParents, parentIdentifierMap),
+    [issues, childrenMap, statusIssueIds, expandedParents, parentIdentifierMap],
+  );
+
+  const allRenderIds = useMemo(
+    () => renderItems.map((r) => r.issue.id),
+    [renderItems],
   );
 
   const selectedCount = issueIds.filter((id) => selectedIds.has(id)).length;
@@ -455,15 +511,21 @@ function StatusAccordionItem({
         </div>
       </Accordion.Header>
       <Accordion.Panel>
-        {issues.length > 0 ? (
+        {renderItems.length > 0 ? (
           dragEnabled ? (
-            <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {issues.map((issue) => (
+            <SortableContext items={allRenderIds} strategy={verticalListSortingStrategy}>
+              {renderItems.map((item) => (
                 <DraggableListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  disableSorting={disableSorting}
+                  key={item.issue.id}
+                  issue={item.issue}
+                  childProgress={childProgressMap.get(item.issue.id)}
+                  disableSorting={disableSorting || item.indent > 0}
+                  indent={item.indent}
+                  isParent={item.isParent}
+                  isExpanded={expandedParents.has(item.issue.id)}
+                  childCount={item.childCount}
+                  onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
+                  parentIdentifier={item.parentIdentifier}
                 />
               ))}
               {hasMore && (
@@ -472,8 +534,18 @@ function StatusAccordionItem({
             </SortableContext>
           ) : (
             <>
-              {issues.map((issue) => (
-                <ListRow key={issue.id} issue={issue} childProgress={childProgressMap.get(issue.id)} />
+              {renderItems.map((item) => (
+                <ListRow
+                  key={item.issue.id}
+                  issue={item.issue}
+                  childProgress={childProgressMap.get(item.issue.id)}
+                  indent={item.indent}
+                  isParent={item.isParent}
+                  isExpanded={expandedParents.has(item.issue.id)}
+                  childCount={item.childCount}
+                  onToggleChildren={item.isParent ? () => onToggleExpand(item.issue.id) : undefined}
+                  parentIdentifier={item.parentIdentifier}
+                />
               ))}
               {hasMore && (
                 <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { ChevronRight, CornerDownRight } from "lucide-react";
 import { AppLink } from "../../navigation";
 import type { Issue } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
@@ -38,6 +39,12 @@ function ListRowContent({
   containerStyle,
   containerProps,
   checkboxProps,
+  indent = 0,
+  isParent = false,
+  isExpanded = false,
+  childCount = 0,
+  onToggleChildren,
+  parentIdentifier,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
@@ -46,6 +53,12 @@ function ListRowContent({
   containerStyle?: React.CSSProperties;
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
+  indent?: number;
+  isParent?: boolean;
+  isExpanded?: boolean;
+  childCount?: number;
+  onToggleChildren?: () => void;
+  parentIdentifier?: string;
 }) {
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
@@ -72,10 +85,37 @@ function ListRowContent({
         ref={containerRef}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
+        className={`group/row flex h-9 items-center gap-2 pr-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
           selected ? "bg-accent/30" : ""
         } ${isDragging ? "opacity-30" : ""}`}
+        role="row"
       >
+        {/* Indent spacer for child rows */}
+        {indent > 0 && (
+          <div style={{ width: indent * 24 }} className="shrink-0" />
+        )}
+        {/* Expand / collapse toggle for parent rows (replaces priority icon slot) */}
+        {isParent ? (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onToggleChildren?.();
+            }}
+            className="flex shrink-0 items-center justify-center w-4 h-4 rounded-sm hover:bg-muted cursor-pointer transition-transform"
+            style={{ transform: isExpanded ? "rotate(90deg)" : undefined }}
+            aria-label={isExpanded ? "Collapse sub-issues" : "Expand sub-issues"}
+          >
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+          </button>
+        ) : indent > 0 ? (
+          /* Branch indicator for child rows */
+          <div className="flex shrink-0 items-center justify-center w-4 h-4">
+            <CornerDownRight className="size-3.5 text-muted-foreground/50" />
+          </div>
+        ) : null}
+        {/* Priority icon + checkbox */}
         <div
           className="relative flex shrink-0 items-center justify-center w-4 h-4"
           {...checkboxProps}
@@ -104,6 +144,16 @@ function ListRowContent({
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
+            {isParent && childCount > 0 && (
+              <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">
+                ({childCount})
+              </span>
+            )}
+            {parentIdentifier && (
+              <span className="shrink-0 text-[11px] text-muted-foreground/70 truncate max-w-[120px]">
+                &larr; {parentIdentifier}
+              </span>
+            )}
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
@@ -158,11 +208,34 @@ function ListRowContent({
 export const ListRow = memo(function ListRow({
   issue,
   childProgress,
+  indent,
+  isParent,
+  isExpanded,
+  childCount,
+  onToggleChildren,
+  parentIdentifier,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
+  indent?: number;
+  isParent?: boolean;
+  isExpanded?: boolean;
+  childCount?: number;
+  onToggleChildren?: () => void;
+  parentIdentifier?: string;
 }) {
-  return <ListRowContent issue={issue} childProgress={childProgress} />;
+  return (
+    <ListRowContent
+      issue={issue}
+      childProgress={childProgress}
+      indent={indent}
+      isParent={isParent}
+      isExpanded={isExpanded}
+      childCount={childCount}
+      onToggleChildren={onToggleChildren}
+      parentIdentifier={parentIdentifier}
+    />
+  );
 });
 
 const animateLayoutChanges: AnimateLayoutChanges = (args) => {
@@ -179,10 +252,22 @@ export const DraggableListRow = memo(function DraggableListRow({
   issue,
   childProgress,
   disableSorting,
+  indent,
+  isParent,
+  isExpanded,
+  childCount,
+  onToggleChildren,
+  parentIdentifier,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   disableSorting?: boolean;
+  indent?: number;
+  isParent?: boolean;
+  isExpanded?: boolean;
+  childCount?: number;
+  onToggleChildren?: () => void;
+  parentIdentifier?: string;
 }) {
   const {
     attributes,
@@ -212,6 +297,12 @@ export const DraggableListRow = memo(function DraggableListRow({
       containerStyle={style}
       containerProps={{ ...attributes, ...listeners }}
       checkboxProps={{ onClick: stopDrag, onMouseDown: stopDrag, onPointerDown: stopDrag }}
+      indent={indent}
+      isParent={isParent}
+      isExpanded={isExpanded}
+      childCount={childCount}
+      onToggleChildren={onToggleChildren}
+      parentIdentifier={parentIdentifier}
     />
   );
 });
