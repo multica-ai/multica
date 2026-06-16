@@ -275,15 +275,10 @@
       "base_family": "ベースプロトコルファミリー",
       "command": "コマンド",
       "description": "説明",
-      "visibility": "公開範囲",
       "no_description": "説明なし",
       "edit": "編集",
       "delete": "削除",
       "select_hint": "ランタイムを選択すると詳細が表示されます。"
-    },
-    "visibility": {
-      "workspace": "ワークスペース",
-      "private": "プライベート"
     },
     "form": {
       "create_title": "新しいカスタムランタイム",
@@ -299,9 +294,6 @@
       "command_name_placeholder": "claude",
       "description_label": "説明",
       "description_placeholder": "任意 — このランタイムの用途",
-      "visibility_label": "公開範囲",
-      "visibility_workspace_hint": "ワークスペースの全メンバーがこのランタイムを使用できます。",
-      "visibility_private_hint": "あなたとワークスペース管理者のみがこのランタイムを使用できます。",
       "error_display_name_required": "表示名は必須です。",
       "error_command_required": "コマンドは必須です。",
       "back": "戻る",

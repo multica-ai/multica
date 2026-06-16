@@ -275,15 +275,10 @@
       "base_family": "基础协议类型",
       "command": "命令",
       "description": "描述",
-      "visibility": "可见性",
       "no_description": "无描述",
       "edit": "编辑",
       "delete": "删除",
       "select_hint": "选择一个运行时以查看详情。"
-    },
-    "visibility": {
-      "workspace": "工作区",
-      "private": "私有"
     },
     "form": {
       "create_title": "新建自定义运行时",
@@ -299,9 +294,6 @@
       "command_name_placeholder": "claude",
       "description_label": "描述",
       "description_placeholder": "可选 — 此运行时的用途",
-      "visibility_label": "可见性",
-      "visibility_workspace_hint": "任何工作区成员都可以使用此运行时。",
-      "visibility_private_hint": "只有你和工作区管理员可以使用此运行时。",
       "error_display_name_required": "显示名称为必填项。",
       "error_command_required": "命令为必填项。",
       "back": "返回",

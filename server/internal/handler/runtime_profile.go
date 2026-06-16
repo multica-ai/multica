@@ -69,10 +69,15 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 	}
 }
 
-// validRuntimeProfileVisibility mirrors the CHECK in migration 120.
-func validRuntimeProfileVisibility(v string) bool {
-	return v == "workspace" || v == "private"
-}
+// NOTE: runtime_profile.visibility is intentionally NOT user-settable in v1.
+// The column exists and the API still returns it, but creation always forces
+// 'workspace': the daemon-pull, DaemonRegister and ListRuntimeProfiles read
+// paths do not yet enforce 'private', so accepting 'private' from a client
+// would silently leak a "private" profile's name/command to other members and
+// let other machines' daemons register it (lateral data leak). Re-expose a
+// visibility control only once those read paths enforce creator visibility.
+// Follow-up: MUL-3308.
+const runtimeProfileDefaultVisibility = "workspace"
 
 // marshalFixedArgs validates and JSON-encodes the fixed_args list. Each entry
 // must be a non-empty string; the column defaults to an empty array.
@@ -98,7 +103,6 @@ type createRuntimeProfileRequest struct {
 	CommandName    string   `json:"command_name"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
-	Visibility     string   `json:"visibility"`
 	Enabled        *bool    `json:"enabled"`
 }
 
@@ -124,7 +128,6 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	req.ProtocolFamily = strings.TrimSpace(req.ProtocolFamily)
 	req.CommandName = strings.TrimSpace(req.CommandName)
-	req.Visibility = strings.TrimSpace(req.Visibility)
 
 	if req.DisplayName == "" {
 		writeError(w, http.StatusBadRequest, "display_name is required")
@@ -136,13 +139,6 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommandName == "" {
 		writeError(w, http.StatusBadRequest, "command_name is required")
-		return
-	}
-	if req.Visibility == "" {
-		req.Visibility = "workspace"
-	}
-	if !validRuntimeProfileVisibility(req.Visibility) {
-		writeError(w, http.StatusBadRequest, "visibility must be 'workspace' or 'private'")
 		return
 	}
 	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
@@ -162,7 +158,7 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		CommandName:    req.CommandName,
 		Description:    ptrToText(req.Description),
 		FixedArgs:      fixedArgs,
-		Visibility:     req.Visibility,
+		Visibility:     runtimeProfileDefaultVisibility,
 		CreatedBy:      member.UserID,
 		Enabled:        enabled,
 	})
@@ -238,7 +234,6 @@ type updateRuntimeProfileRequest struct {
 	CommandName *string   `json:"command_name"`
 	Description *string   `json:"description"`
 	FixedArgs   *[]string `json:"fixed_args"`
-	Visibility  *string   `json:"visibility"`
 	Enabled     *bool     `json:"enabled"`
 }
 
@@ -293,14 +288,6 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.FixedArgs = fixedArgs
-	}
-	if req.Visibility != nil {
-		vis := strings.TrimSpace(*req.Visibility)
-		if !validRuntimeProfileVisibility(vis) {
-			writeError(w, http.StatusBadRequest, "visibility must be 'workspace' or 'private'")
-			return
-		}
-		params.Visibility = strToText(vis)
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
