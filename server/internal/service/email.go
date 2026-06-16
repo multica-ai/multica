@@ -52,12 +52,23 @@ func (a smtpClientAdapter) Extension(name string) (bool, string) {
 	return a.client.Extension(name)
 }
 
+func isLocalhost(name string) bool {
+	return name == "localhost" || name == "127.0.0.1" || name == "::1"
+}
+
 type loginAuth struct {
 	username string
 	password string
+	host     string
 }
 
 func (a *loginAuth) Start(server *smtp.ServerInfo) (string, []byte, error) {
+	if !server.TLS && !isLocalhost(server.Name) {
+		return "", nil, fmt.Errorf("unencrypted connection")
+	}
+	if server.Name != a.host {
+		return "", nil, fmt.Errorf("wrong host name: %q does not match expected %q", server.Name, a.host)
+	}
 	return "LOGIN", nil, nil
 }
 
@@ -235,10 +246,10 @@ func NewEmailService() *EmailService {
 // Set SMTP_TLS_INSECURE=true for self-signed or private CA certificates.
 func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	c, err := s.openSMTPClient()
-	defer c.Close()
 	if err != nil {
 		return err
 	}
+	defer c.Close()
 
 	if s.smtpUsername != "" {
 		fallbackToLogin, authErr := smtpAuthWithFallback(smtpClientAdapter{client: c}, s.smtpHost, s.smtpUsername, s.smtpPassword)
@@ -254,7 +265,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 			}
 			defer c.Close()
 
-			if err = c.Auth(&loginAuth{username: s.smtpUsername, password: s.smtpPassword}); err != nil {
+			if err = c.Auth(&loginAuth{username: s.smtpUsername, password: s.smtpPassword, host: s.smtpHost}); err != nil {
 				return fmt.Errorf("smtp auth: plain auth failed (%v); login auth fallback failed: %w", authErr, err)
 			}
 		}
