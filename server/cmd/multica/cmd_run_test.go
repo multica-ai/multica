@@ -206,8 +206,8 @@ func TestRunLocalCLIRejectsUnsupportedLocalAgent(t *testing.T) {
 }
 
 func TestSupportsLocalRunAgentIncludesProviderRegistry(t *testing.T) {
-	if !supportsLocalRunAgent("codex") || !supportsLocalRunAgent("claude") {
-		t.Fatalf("expected codex and claude providers to be supported")
+	if !supportsLocalRunAgent("codex") || !supportsLocalRunAgent("claude") || !supportsLocalRunAgent("agy") {
+		t.Fatalf("expected codex, claude, and agy providers to be supported")
 	}
 	if supportsLocalRunAgent("sh") {
 		t.Fatalf("unexpected support for shell without a provider")
@@ -224,6 +224,27 @@ func newRunCommandForTest() *cobra.Command {
 	cmd.Flags().Bool("no-status-update", false, "")
 	cmd.Flags().String("comments", "thread", "")
 	return cmd
+}
+
+func TestValidateAgyLocalRunArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "empty", args: nil, wantErr: false},
+		{name: "normal flags", args: []string{"--model", "gemini-2.5-pro"}, wantErr: false},
+		{name: "blocked -i", args: []string{"-i"}, wantErr: true},
+		{name: "blocked --prompt-interactive", args: []string{"--prompt-interactive"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAgyLocalRunArgs(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateAgyLocalRunArgs(%v) error = %v, wantErr %v", tt.args, err, tt.wantErr)
+			}
+		})
+	}
 }
 
 func TestInferCLIName(t *testing.T) {
