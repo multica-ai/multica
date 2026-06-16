@@ -694,7 +694,7 @@ function TrendBlock({
             : t(($) => $.daily.title_tasks);
 
   return (
-    <div className="rounded-lg border bg-card p-4">
+    <div className="rounded-lg border bg-card p-4" data-testid="usage-weekly-token-tracker">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <h4 className="text-sm font-semibold">{title}</h4>
         <Segmented
