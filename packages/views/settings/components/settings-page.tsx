@@ -8,9 +8,11 @@ import {
   Settings,
   Users,
   FolderGit2,
-  FlaskConical,
+  // Hidden per 2026-06-16 product decision.
+  // FlaskConical,
   Bell,
-  Plug,
+  // Hidden per 2026-06-16 product decision.
+  // Plug,
   Workflow,
   GitBranch,
 } from "lucide-react";
@@ -26,8 +28,9 @@ import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
 import { GitlabTab } from "./gitlab-tab";
-import { IntegrationsTab } from "./integrations-tab";
-import { LabsTab } from "./labs-tab";
+// Hidden per 2026-06-16 product decision.
+// import { IntegrationsTab } from "./integrations-tab";
+// import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { WorkflowAdminsTab } from "./workflow-admins-tab";
 import { useWorkflowAdmins } from "@multica/core/workflows/queries";
@@ -48,8 +51,9 @@ const WORKSPACE_TAB_KEYS = [
   "repositories",
   "github",
   "gitlab",
-  "integrations",
-  "labs",
+  // Hidden per 2026-06-16 product decision.
+  // "integrations",
+  // "labs",
   "members",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
@@ -57,8 +61,9 @@ const WORKSPACE_TAB_VALUES = {
   repositories: "repositories",
   github: "github",
   gitlab: "gitlab",
-  integrations: "integrations",
-  labs: "labs",
+  // Hidden per 2026-06-16 product decision.
+  // integrations: "integrations",
+  // labs: "labs",
   members: "members",
 } as const;
 const WORKSPACE_TAB_ICONS = {
@@ -66,8 +71,9 @@ const WORKSPACE_TAB_ICONS = {
   repositories: FolderGit2,
   github: GitHubMark,
   gitlab: GitBranch,
-  integrations: Plug,
-  labs: FlaskConical,
+  // Hidden per 2026-06-16 product decision.
+  // integrations: Plug,
+  // labs: FlaskConical,
   members: Users,
 } as const;
 
@@ -192,8 +198,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="github"><GitHubTab /></TabsContent>
           <TabsContent value="gitlab"><GitlabTab /></TabsContent>
-          <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
-          <TabsContent value="labs"><LabsTab /></TabsContent>
+          {/* Hidden per 2026-06-16 product decision. */}
+          {/* <TabsContent value="integrations"><IntegrationsTab /></TabsContent> */}
+          {/* <TabsContent value="labs"><LabsTab /></TabsContent> */}
           <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
