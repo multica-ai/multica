@@ -10,6 +10,9 @@ const mockCreateChannel = vi.hoisted(() => vi.fn());
 // over it without a temporal-dead-zone error.
 const presenceState = vi.hoisted(() => ({
   online: new Set<string>(),
+  // agentId → AgentPresenceDetail-like object the mocked presence map returns.
+  // Tests seed availability before render; absent agents read as offline.
+  agents: new Map<string, { availability: string }>(),
 }));
 
 // Mutable favorites set + spy for the starring tests.
@@ -141,6 +144,16 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["workspaces", "ws", "agents"] }),
 }));
 
+// Agent presence map — mocked so tests control each agent's availability
+// without wiring runtime/snapshot queries. Mirrors useWorkspacePresenceMap's
+// shape: { byAgent: Map<agentId, { availability }>, loading }.
+vi.mock("@multica/core/agents", () => ({
+  useWorkspacePresenceMap: () => ({
+    byAgent: presenceState.agents,
+    loading: false,
+  }),
+}));
+
 vi.mock("@multica/core/chat/queries", () => ({
   chatSessionsOptions: () => ({ queryKey: ["chat-sessions", "ws"] }),
 }));
@@ -256,6 +269,7 @@ describe("SlackBlock", () => {
     mockCreateChannel.mockReset();
     mockCreateChannel.mockResolvedValue(aliceDm);
     presenceState.online = new Set();
+    presenceState.agents = new Map();
     favState.keys = [];
     favState.toggle.mockClear();
     wsHandlers.clear();
@@ -359,6 +373,32 @@ describe("SlackBlock", () => {
     expect(screen.getByText("Sara - CTO")).toBeInTheDocument();
     // Archived agent is filtered out.
     expect(screen.queryByText("Old Bot")).not.toBeInTheDocument();
+  });
+
+  // TECH-3655 — agents carry an online/offline presence dot like people do.
+  it("renders a green dot for an online agent and red for an offline one", async () => {
+    presenceState.agents = new Map([
+      ["agent-sara", { availability: "online" }],
+    ]);
+    await act(async () => {
+      renderBlock({ showAgents: true });
+    });
+
+    expect(onlineDot("agent-sara").className).toContain("bg-success");
+    expect(onlineDot("agent-sara")).toHaveAttribute("data-online", "true");
+  });
+
+  it("renders a red dot for an agent that is offline/unstable/paused", async () => {
+    // unstable is not "online" → must read as the red offline dot (binary).
+    presenceState.agents = new Map([
+      ["agent-sara", { availability: "unstable" }],
+    ]);
+    await act(async () => {
+      renderBlock({ showAgents: true });
+    });
+
+    expect(onlineDot("agent-sara").className).toContain("bg-destructive");
+    expect(onlineDot("agent-sara")).toHaveAttribute("data-online", "false");
   });
 
   it("clicking an agent row opens that agent's chat", async () => {
