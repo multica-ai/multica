@@ -38,7 +38,7 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react"; // CEREBRO-PATCH(content-editor-on-editor-ready): expose Editor type for onEditorReady (TECH-3637).
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -129,6 +129,10 @@ interface ContentEditorProps {
    * dialog keeps focus.
    */
   autoFocus?: boolean;
+  // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637 — fires once the
+  // editor instance exists, so cerebro can register decoration plugins (e.g.
+  // note comment-anchor highlights) without owning the editor lifecycle.
+  onEditorReady?: (editor: Editor) => void;
 }
 
 interface ContentEditorRef {
@@ -173,6 +177,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
+      onEditorReady, // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637.
     },
     ref,
   ) {
@@ -237,6 +242,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           }
         }
         lastEmittedRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        onEditorReady?.(ed); // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637.
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked

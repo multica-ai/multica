@@ -2374,6 +2374,9 @@ importers:
 
   packages/cerebro-notes:
     dependencies:
+      '@multica/cerebro-artifacts':
+        specifier: workspace:*
+        version: link:../cerebro-artifacts
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -2389,6 +2392,12 @@ importers:
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.14(react@19.2.3)
+      '@tiptap/pm':
+        specifier: ^3.22.1
+        version: 3.23.6
+      '@tiptap/react':
+        specifier: ^3.22.1
+        version: 3.23.6(@floating-ui/dom@1.7.6)(@tiptap/core@3.23.6(@tiptap/pm@3.23.6))(@tiptap/pm@3.23.6)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       lucide-react:
         specifier: 'catalog:'
         version: 1.16.0(react@19.2.3)

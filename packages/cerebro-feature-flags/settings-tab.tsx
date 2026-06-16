@@ -32,7 +32,10 @@ const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
   cerebro_inbox_secretary: SecretaryCriteriaSettings,
 };
 
-function FlagRow({
+// Exported so a feature can render its own toggles in a dedicated settings tab
+// (e.g. the Notes tab, TECH-3637) with the same personal/workspace 3-way
+// control instead of duplicating the logic.
+export function FlagRow({
   flagKey,
   label,
   description,

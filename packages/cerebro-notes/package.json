@@ -7,6 +7,7 @@
     ".": "./index.ts",
     "./views": "./views/index.ts",
     "./views/notes-nav-item": "./views/notes-nav-item.tsx",
+    "./settings-tabs": "./views/notes-settings-tabs.tsx",
     "./core": "./core/index.ts"
   },
   "scripts": {
@@ -14,10 +15,13 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/views": "workspace:*",
+    "@tiptap/pm": "^3.22.1",
+    "@tiptap/react": "^3.22.1"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

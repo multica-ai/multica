@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from "react";
 import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
+import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
 import { useCerebroDisplayCurrencyTabs } from "@multica/cerebro-display-currency/settings-tabs";
 import { SettingsPage, type ExtraSettingsTab } from "@multica/views/settings";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
@@ -22,6 +23,7 @@ import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/
 const extraAccountTabs: ExtraSettingsTab[] = [
   agentCapabilitiesSettingsTab,
   ...cerebroCostOptimizationTabs,
+  ...cerebroNotesSettingsTabs,
   ...cerebroFeatureFlagTabs,
 ];
 

@@ -12,10 +12,22 @@ import {
   Globe,
   NotebookPen,
   ChevronLeft,
+  Repeat,
+  Folder,
+  FolderPlus,
+  Inbox,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Badge } from "@multica/ui/components/ui/badge";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@multica/ui/components/ui/sheet";
+import { NoteTypesPanel } from "@multica/cerebro-artifacts/views/components";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -27,7 +39,7 @@ import {
   DropdownMenuCheckboxItem,
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { History, MessageSquare } from "lucide-react";
+import { History, MessageSquare, MessageSquarePlus } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import {
@@ -39,6 +51,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import type { Editor } from "@tiptap/react";
 import {
   notesListOptions,
   useCreateNote,
@@ -47,14 +60,32 @@ import {
   useSetNotePin,
   useSetNoteVisibility,
   useNoteEditLock,
+  useNoteComments,
+  useSetNoteFolder,
   firstLineTitle,
   VISIBILITY_LABELS,
 } from "../core";
 import type { Note, NoteVisibility } from "../core";
+import {
+  artifactFoldersOptions,
+  useCreateArtifactFolder,
+} from "@multica/cerebro-artifacts/core";
+import type { ArtifactFolder } from "@multica/core/types";
 import { NoteReferences } from "./note-references";
 import { NoteLockBanner } from "./note-lock-banner";
 import { NoteCommentsPanel } from "./note-comments-panel";
 import { NoteVersionsDialog } from "./note-versions-dialog";
+import { useCommentAnchors } from "./use-comment-anchors";
+import {
+  DRAFT_ANCHOR_ID,
+  type CommentAnchor,
+} from "./comment-anchor-plugin";
+import { useEditorSelectionButton } from "./use-editor-selection-button";
+
+// Rail sentinel for "notes in no folder" (distinct from null = all notes).
+const UNFILED = "__unfiled__";
+// drag-and-drop payload type for moving a note row onto a folder.
+const NOTE_DND_TYPE = "application/x-note-id";
 
 const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
   private: <Lock className="size-3" />,
@@ -72,6 +103,16 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   const [selectedId, setSelectedId] = React.useState<string | null>(
     initialNoteId ?? null,
   );
+  // Recurring notes ("Note types") used to live only inside the Documents file
+  // manager, so they were hard to find (TECH-3637). Surface the same panel here.
+  const noteTypesEnabled = useFeatureFlag("cerebro_note_types");
+  const [showRecurring, setShowRecurring] = React.useState(false);
+  // Folders (TECH-3637). Notes are artifacts, so they share the artifact
+  // folders. `folderFilter` is the rail selection: null = all notes, "unfiled"
+  // = notes in no folder, or a folder id.
+  const [folderFilter, setFolderFilter] = React.useState<string | null>(null);
+  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  const setNoteFolder = useSetNoteFolder();
 
   const { data: notes = [] } = useQuery(
     notesListOptions(wsId, { q: search.trim() || undefined }),
@@ -84,11 +125,24 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
     [notes, selectedId],
   );
 
-  const pinned = notes.filter((n) => n.pinned);
-  const rest = notes.filter((n) => !n.pinned);
+  const visibleNotes = React.useMemo(() => {
+    if (folderFilter === null) return notes;
+    if (folderFilter === UNFILED) return notes.filter((n) => !n.folder_id);
+    return notes.filter((n) => n.folder_id === folderFilter);
+  }, [notes, folderFilter]);
+
+  const pinned = visibleNotes.filter((n) => n.pinned);
+  const rest = visibleNotes.filter((n) => !n.pinned);
+
+  function dropNoteInFolder(noteId: string, folderId: string | null) {
+    setNoteFolder.mutate({ id: noteId, folderId });
+  }
 
   async function handleNew() {
-    const note = await createNote.mutateAsync({ visibility: "private" });
+    const note = await createNote.mutateAsync({
+      visibility: "private",
+      folder_id: folderFilter && folderFilter !== UNFILED ? folderFilter : null,
+    });
     if (note) setSelectedId(note.id);
   }
 
@@ -112,6 +166,17 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
               className="h-8 w-full pl-8 sm:w-56"
             />
           </div>
+          {noteTypesEnabled && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowRecurring(true)}
+              className="shrink-0"
+            >
+              <Repeat className="size-4" />
+              <span className="hidden sm:inline">Recurring</span>
+            </Button>
+          )}
           <Button
             size="sm"
             onClick={handleNew}
@@ -133,9 +198,20 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
             selectedId ? "hidden" : "block",
           )}
         >
+          <FolderRail
+            folders={folders}
+            notes={notes}
+            selected={folderFilter}
+            onSelect={setFolderFilter}
+            onDropNote={dropNoteInFolder}
+          />
           {notes.length === 0 ? (
             <p className="p-6 text-sm text-muted-foreground">
               No notes yet. Tap “New note” to capture a thought.
+            </p>
+          ) : visibleNotes.length === 0 ? (
+            <p className="p-6 text-sm text-muted-foreground">
+              No notes in this folder yet. Drag a note here, or tap “New note”.
             </p>
           ) : (
             <>
@@ -179,6 +255,178 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
           )}
         </div>
       </div>
+
+      {noteTypesEnabled && (
+        <Sheet open={showRecurring} onOpenChange={setShowRecurring}>
+          <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+            <SheetHeader>
+              <SheetTitle>Recurring notes</SheetTitle>
+              <SheetDescription>
+                Templates for notes that recur on a schedule — e.g. a weekly
+                business review. Create one here, then it appears on its cadence.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="px-4 pb-6">
+              <NoteTypesPanel />
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+// FolderRail (TECH-3637): the folder list at the top of the notes rail. Each
+// row filters the list, and is a drop target so a note row can be dragged into
+// it. "Unfiled" un-files a dropped note; "New folder" creates one inline.
+function FolderRail({
+  folders,
+  notes,
+  selected,
+  onSelect,
+  onDropNote,
+}: {
+  folders: ArtifactFolder[];
+  notes: Note[];
+  selected: string | null;
+  onSelect: (id: string | null) => void;
+  onDropNote: (noteId: string, folderId: string | null) => void;
+}) {
+  const createFolder = useCreateArtifactFolder();
+  const [adding, setAdding] = React.useState(false);
+  const [name, setName] = React.useState("");
+  const [dragOver, setDragOver] = React.useState<string | null>(null);
+
+  const unfiledCount = notes.filter((n) => !n.folder_id).length;
+  const countFor = (id: string) => notes.filter((n) => n.folder_id === id).length;
+
+  function submitFolder() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    createFolder.mutate(
+      { name: trimmed, parent_id: null },
+      { onSuccess: () => { setName(""); setAdding(false); } },
+    );
+  }
+
+  function dropHandlers(key: string, folderId: string | null) {
+    return {
+      onDragOver: (e: React.DragEvent) => {
+        if (e.dataTransfer.types.includes(NOTE_DND_TYPE)) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDragOver(key);
+        }
+      },
+      onDragLeave: () => setDragOver((k) => (k === key ? null : k)),
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(null);
+        const noteId = e.dataTransfer.getData(NOTE_DND_TYPE);
+        if (noteId) onDropNote(noteId, folderId);
+      },
+    };
+  }
+
+  // A plain render function (not a nested component) so rows aren't remounted on
+  // every render — remounting a drop target mid-drag would drop the drop event.
+  const row = (opts: {
+    rowKey: string;
+    active: boolean;
+    droppable?: { folderId: string | null };
+    onClick: () => void;
+    icon: React.ReactNode;
+    label: string;
+    count?: number;
+  }) => (
+    <button
+      key={opts.rowKey}
+      onClick={opts.onClick}
+      {...(opts.droppable
+        ? dropHandlers(opts.rowKey, opts.droppable.folderId)
+        : {})}
+      className={cn(
+        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-muted/50",
+        opts.active && "bg-muted font-medium",
+        dragOver === opts.rowKey && "ring-2 ring-primary ring-inset",
+      )}
+    >
+      {opts.icon}
+      <span className="flex-1 truncate">{opts.label}</span>
+      {opts.count !== undefined && opts.count > 0 && (
+        <span className="text-[11px] text-muted-foreground">{opts.count}</span>
+      )}
+    </button>
+  );
+
+  return (
+    <div className="space-y-0.5 border-b p-2">
+      {row({
+        rowKey: "all",
+        active: selected === null,
+        onClick: () => onSelect(null),
+        icon: <NotebookPen className="size-3.5 text-muted-foreground" />,
+        label: "All notes",
+        count: notes.length,
+      })}
+      {row({
+        rowKey: "unfiled",
+        active: selected === UNFILED,
+        droppable: { folderId: null },
+        onClick: () => onSelect(UNFILED),
+        icon: <Inbox className="size-3.5 text-muted-foreground" />,
+        label: "Unfiled",
+        count: unfiledCount,
+      })}
+      {folders.map((f) =>
+        row({
+          rowKey: f.id,
+          active: selected === f.id,
+          droppable: { folderId: f.id },
+          onClick: () => onSelect(f.id),
+          icon: (
+            <Folder
+              className={cn(
+                "size-3.5",
+                selected === f.id ? "text-amber-500" : "text-muted-foreground",
+              )}
+            />
+          ),
+          label: f.name,
+          count: countFor(f.id),
+        }),
+      )}
+      {adding ? (
+        <div className="flex items-center gap-1 px-2 py-1">
+          <Input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitFolder();
+              if (e.key === "Escape") { setAdding(false); setName(""); }
+            }}
+            placeholder="Folder name"
+            className="h-7 text-xs"
+          />
+          <Button
+            size="sm"
+            className="h-7 shrink-0"
+            onClick={submitFolder}
+            disabled={createFolder.isPending || !name.trim()}
+          >
+            Add
+          </Button>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
+        >
+          <FolderPlus className="size-3.5" />
+          New folder
+        </button>
+      )}
     </div>
   );
 }
@@ -206,8 +454,13 @@ function NoteListSection({
         <button
           key={n.id}
           onClick={() => onSelect(n.id)}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData(NOTE_DND_TYPE, n.id);
+            e.dataTransfer.effectAllowed = "move";
+          }}
           className={cn(
-            "block w-full border-b px-4 py-2.5 text-left hover:bg-muted/50",
+            "block w-full cursor-grab border-b px-4 py-2.5 text-left hover:bg-muted/50 active:cursor-grabbing",
             selectedId === n.id && "bg-muted",
           )}
         >
@@ -251,6 +504,9 @@ function NoteEditor({
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
+  const [editor, setEditor] = React.useState<Editor | null>(null);
+  const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
+  const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
   const editorRef = React.useRef<ContentEditorRef>(null);
   const editorContainerRef = React.useRef<HTMLDivElement>(null);
 
@@ -263,6 +519,44 @@ function NoteEditor({
   const readOnly = lockEnabled && editLock.blockedByOther;
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: comments = [] } = useNoteComments(note.id);
+  const { data: folders = [] } = useQuery(artifactFoldersOptions(wsId));
+  const setNoteFolder = useSetNoteFolder();
+  const currentFolder = folders.find((f) => f.id === note.folder_id) ?? null;
+
+  // Comment anchors paint an orange highlight over the quoted span (TECH-3637):
+  // every root comment/suggestion that has a quote, plus the in-progress draft
+  // selection. Only while the comments panel is open, so the editor isn't
+  // permanently tinted. The active one (clicked, or the live draft) glows
+  // brighter and is scrolled into view.
+  const commentAnchors = React.useMemo<CommentAnchor[]>(() => {
+    if (!commentsEnabled || !showComments) return [];
+    const list: CommentAnchor[] = comments
+      .filter((c) => !c.thread_root_id && c.anchor_quote)
+      .map((c) => ({ id: c.id, quote: c.anchor_quote as string }));
+    if (draftQuote) list.push({ id: DRAFT_ANCHOR_ID, quote: draftQuote });
+    return list;
+  }, [commentsEnabled, showComments, comments, draftQuote]);
+
+  const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
+  useCommentAnchors(editor, commentAnchors, activeAnchor);
+
+  const { selection: textSelection, dismiss: dismissSelection } =
+    useEditorSelectionButton(editorContainerRef, commentsEnabled && !readOnly);
+
+  function startCommentOnSelection() {
+    if (!textSelection) return;
+    setDraftQuote(textSelection.text);
+    setActiveAnchorId(null);
+    setShowComments(true);
+    dismissSelection();
+  }
+
+  function closeComments() {
+    setShowComments(false);
+    setDraftQuote(null);
+    setActiveAnchorId(null);
+  }
 
   function saveTitle() {
     if (title !== note.title) updateNote.mutate({ id: note.id, title });
@@ -371,6 +665,34 @@ function NoteEditor({
           </span>
         </Button>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            nativeButton={false}
+            render={
+              <Badge variant="outline" className="cursor-pointer gap-1.5">
+                <Folder className="size-3" />
+                {currentFolder ? currentFolder.name : "No folder"}
+              </Badge>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuRadioGroup
+              value={note.folder_id ?? ""}
+              onValueChange={(v) =>
+                setNoteFolder.mutate({ id: note.id, folderId: v || null })
+              }
+            >
+              <DropdownMenuLabel>Folder</DropdownMenuLabel>
+              <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
+              {folders.map((f) => (
+                <DropdownMenuRadioItem key={f.id} value={f.id}>
+                  {f.name}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         {versionsEnabled && (
           <Button
             size="sm"
@@ -386,7 +708,7 @@ function NoteEditor({
           <Button
             size="sm"
             variant={showComments ? "secondary" : "ghost"}
-            onClick={() => setShowComments((v) => !v)}
+            onClick={() => (showComments ? closeComments() : setShowComments(true))}
           >
             <MessageSquare className="size-4" />
             <span className="hidden sm:inline">Comments</span>
@@ -429,6 +751,7 @@ function NoteEditor({
                 defaultValue={note.body}
                 onUpdate={saveBody}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
+                onEditorReady={setEditor}
                 placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
                 className="min-h-[50vh] flex-1"
               />
@@ -442,12 +765,39 @@ function NoteEditor({
               noteId={note.id}
               noteBody={note.body}
               isOwner={isOwner}
-              editorContainerRef={editorContainerRef}
-              onClose={() => setShowComments(false)}
+              draftQuote={draftQuote}
+              activeAnchorId={activeAnchorId}
+              onClearDraft={() => setDraftQuote(null)}
+              onSelectThread={(id) => {
+                setDraftQuote(null);
+                setActiveAnchorId(id);
+              }}
+              onClose={closeComments}
             />
           </div>
         )}
       </div>
+
+      {/* Floating "comment on selection" affordance: appears above a text
+          selection inside the editor and opens the comments panel with that
+          selection attached + highlighted (TECH-3637). */}
+      {commentsEnabled && !readOnly && textSelection && (
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={startCommentOnSelection}
+          style={{
+            position: "fixed",
+            top: textSelection.top - 40,
+            left: textSelection.left,
+            transform: "translateX(-50%)",
+            zIndex: 50,
+          }}
+          className="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 text-xs font-medium text-background shadow-md hover:opacity-90"
+        >
+          <MessageSquarePlus className="size-3.5" /> Comment
+        </button>
+      )}
 
       {versionsEnabled && (
         <NoteVersionsDialog
