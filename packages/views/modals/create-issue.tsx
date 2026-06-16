@@ -53,6 +53,8 @@ import { useT } from "../i18n";
 import { DuplicateCheckPanel } from "@multica/cerebro-duplicate-check/views";
 // CEREBRO-PATCH(create-issue-sprint-assign-import): TECH-3620 assign new issue to a sprint when created from a sprint board.
 import { useAssignIssueToSprint } from "@multica/cerebro-sprints/core";
+// CEREBRO-PATCH(create-issue-sprint-field-import): TECH-3684 sprint selector in the create modal.
+import { SprintSelectField } from "@multica/cerebro-sprints/views";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -121,6 +123,10 @@ export function ManualCreatePanel({
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
+  );
+  // CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 user-picked sprint for the new task.
+  const [sprintId, setSprintId] = useState<string>(
+    typeof data?.sprint_id === "string" ? data.sprint_id : "",
   );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
@@ -217,8 +223,7 @@ export function ManualCreatePanel({
         project_id: projectId,
       });
 
-      // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620 join the sprint the board was filtered to.
-      const sprintId = typeof data?.sprint_id === "string" ? data.sprint_id : "";
+      // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620/TECH-3684 join the sprint (board preset or user-picked).
       if (sprintId) {
         try {
           await assignIssueToSprintMutation.mutateAsync({ issueId: issue.id, sprintId });
@@ -493,6 +498,8 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+              {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint. */}
+              <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" />
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field

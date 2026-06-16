@@ -3035,6 +3035,9 @@ importers:
       '@multica/ui':
         specifier: workspace:*
         version: link:../ui
+      '@multica/views':
+        specifier: workspace:*
+        version: link:../views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.14(react@19.2.3)

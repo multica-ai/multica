@@ -11,6 +11,7 @@ import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ChannelDetailPage } from "./pages/channel-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
+import { SprintDetailPage } from "./pages/sprint-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
 import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
@@ -226,6 +227,11 @@ export const appRoutes: RouteObject[] = [
             path: "projects/:id",
             element: <ProjectDetailPage />,
             handle: { title: "Project" },
+          },
+          {
+            path: "sprints/:sprintId",
+            element: <SprintDetailPage />,
+            handle: { title: "Sprint" },
           },
           {
             path: "autopilots",

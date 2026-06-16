@@ -46,8 +46,21 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
   if (sprintsQuery.isLoading) {
     return <div className={className}>Loading sprint…</div>;
   }
+  // TECH-3684: stay visible even with no sprints yet, so the field never
+  // disappears from the issue side panel — show a disabled "No sprints yet".
   if (sprints.length === 0) {
-    return null;
+    return (
+      <div className={className}>
+        <Select value={NONE} disabled>
+          <SelectTrigger>
+            <SelectValue placeholder="No sprints yet" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>No sprints yet</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
   }
 
   return (
