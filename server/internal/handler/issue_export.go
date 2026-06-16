@@ -20,10 +20,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"golang.org/x/net/html"
 )
 
 var renderSemaphore = make(chan struct{}, 5)
+
+// mdConverter is a goldmark instance with table + strikethrough extensions enabled.
+var mdConverter = goldmark.New(
+	goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+)
 
 const spacerGIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
@@ -141,8 +147,8 @@ func (h *Handler) processHTMLImages(ctx context.Context, workspaceID pgtype.UUID
 								key := h.Storage.KeyFromURL(att.Url)
 								reader, err := h.Storage.GetReader(ctx, key)
 								if err == nil {
-									defer reader.Close()
 									data, err := io.ReadAll(reader)
+									reader.Close()
 									if err == nil {
 										mime := att.ContentType
 										if mime == "" {
@@ -397,7 +403,7 @@ func (h *Handler) ExportIssue(w http.ResponseWriter, r *http.Request) {
 	if issue.Description.Valid {
 		descStr = issue.Description.String
 	}
-	if err := goldmark.Convert([]byte(descStr), &issueBodyHTML); err != nil {
+	if err := mdConverter.Convert([]byte(descStr), &issueBodyHTML); err != nil {
 		slog.Error("failed to compile issue description markdown", "issue_id", uuidToString(issue.ID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to compile markdown")
 		return
@@ -417,7 +423,7 @@ func (h *Handler) ExportIssue(w http.ResponseWriter, r *http.Request) {
 		pdfData.Comments = make([]pdfCommentData, len(comments))
 		for i, c := range comments {
 			var commentHTML bytes.Buffer
-			if err := goldmark.Convert([]byte(c.Content), &commentHTML); err != nil {
+			if err := mdConverter.Convert([]byte(c.Content), &commentHTML); err != nil {
 				slog.Error("failed to compile comment markdown", "comment_id", uuidToString(c.ID), "error", err)
 				continue
 			}
