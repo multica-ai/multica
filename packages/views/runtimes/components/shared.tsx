@@ -35,13 +35,13 @@ export function ProviderChip({ provider }: { provider: string }) {
 // Paused uses the brand tone (not warning) because it's an intentional
 // state, not an anomaly — visually distinct from amber 'recently_lost'.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
-  online: { dot: "bg-success", tone: "bg-success/10 text-success" },
-  // CEREBRO-PATCH(status-red-green): paused/offline read red, not brand/grey,
-  // so online (green) vs not-online (red) is unmistakable.
-  paused: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
-  recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
-  offline: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
-  about_to_gc: { dot: "bg-destructive", tone: "bg-destructive/10 text-destructive" },
+  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
+  // state; inactive states are hollow (empty centre) with a muted (not red) tone.
+  online: { dot: "bg-success border border-muted-foreground", tone: "bg-success/10 text-success" },
+  paused: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
+  recently_lost: { dot: "bg-warning border border-muted-foreground", tone: "bg-warning/10 text-warning" },
+  offline: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
+  about_to_gc: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
 };
 
 export function HealthDot({

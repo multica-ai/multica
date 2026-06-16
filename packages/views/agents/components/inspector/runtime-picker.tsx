@@ -79,8 +79,8 @@ export function RuntimePicker({
         </span>
         {selected && (
           <span
-            className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-              isOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
+            className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground ${
+              isOnline ? "bg-success" : "bg-background" /* CEREBRO-PATCH(status-slack-dot): offline = hollow grey ring (Slack), not red */
             }`}
           />
         )}
@@ -131,8 +131,8 @@ export function RuntimePicker({
           <span className="min-w-0 truncate font-mono">{triggerLabel}</span>
           {selected && (
             <span
-              className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
-                isOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
+              className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground ${
+                isOnline ? "bg-success" : "bg-background" /* CEREBRO-PATCH(status-slack-dot): offline = hollow grey ring (Slack), not red */
               }`}
             />
           )}
@@ -230,8 +230,8 @@ export function RuntimePicker({
                 </div>
               </div>
               <span
-                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                  rtOnline ? "bg-success" : "bg-destructive" /* CEREBRO-PATCH(status-red-green): offline red, not grey */
+                className={`h-1.5 w-1.5 shrink-0 rounded-full border border-muted-foreground ${
+                  rtOnline ? "bg-success" : "bg-background" /* CEREBRO-PATCH(status-slack-dot): offline = hollow grey ring (Slack), not red */
                 }`}
                 aria-label={rtOnline ? t(($) => $.pickers.runtime_online) : t(($) => $.pickers.runtime_offline)}
               />

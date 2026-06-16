@@ -214,11 +214,11 @@ export function RuntimePicker({
                   </div>
                 </div>
                 <span
-                  className={`h-2 w-2 shrink-0 rounded-full ${
+                  className={`h-2 w-2 shrink-0 rounded-full border border-muted-foreground ${
                     device.status === "online"
                       ? "bg-success"
-                      // CEREBRO-PATCH(status-red-green): offline red, not grey
-                      : "bg-destructive"
+                      // CEREBRO-PATCH(status-slack-dot): offline = hollow grey ring (Slack), not red
+                      : "bg-background"
                   }`}
                 />
               </button>

@@ -300,7 +300,8 @@ describe("SlackBlock", () => {
 
     expect(onlineDot("alice").className).toContain("bg-success");
     expect(onlineDot("alice")).toHaveAttribute("data-online", "true");
-    expect(onlineDot("bob").className).toContain("bg-destructive");
+    // Offline = Slack-style hollow dot (empty centre on grey ring), not red (TECH-3686).
+    expect(onlineDot("bob").className).toContain("bg-background");
     expect(onlineDot("bob")).toHaveAttribute("data-online", "false");
   });
 
@@ -413,7 +414,7 @@ describe("SlackBlock", () => {
       renderBlock({ showAgents: true });
     });
 
-    expect(onlineDot("agent-sara").className).toContain("bg-destructive");
+    expect(onlineDot("agent-sara").className).toContain("bg-background");
     expect(onlineDot("agent-sara")).toHaveAttribute("data-online", "false");
   });
 

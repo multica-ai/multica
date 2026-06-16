@@ -39,13 +39,13 @@ const HEALTH_ORDER: HealthFilter[] = [
 
 // Dot tokens stay in code — labels/descriptions flow through useT.
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
-  online: "bg-success",
-  // CEREBRO-PATCH(status-red-green): paused/offline read red, not brand/grey,
-  // so online (green) vs not-online (red) is unmistakable.
-  paused: "bg-destructive",
-  recently_lost: "bg-warning",
-  offline: "bg-destructive",
-  about_to_gc: "bg-destructive",
+  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
+  // state; inactive (paused/offline/about_to_gc) is hollow (empty centre), not red.
+  online: "bg-success border border-muted-foreground",
+  paused: "bg-background border border-muted-foreground",
+  recently_lost: "bg-warning border border-muted-foreground",
+  offline: "bg-background border border-muted-foreground",
+  about_to_gc: "bg-background border border-muted-foreground",
 };
 
 interface RuntimesPageProps {

@@ -221,16 +221,19 @@ function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
 }
 
 // CEREBRO-PATCH(member-presence-dot): TECH-3583 — human presence dot, mirroring
-// AgentStatusDot. Green = online, red = offline, matching the agent
-// availabilityConfig red/green convention so the binary read ("green = here,
-// red = not") is identical across people and agents. Renders nothing while
-// presence is unknown (no MemberPresenceProvider mounted, e.g. isolated tests)
-// rather than misreporting an offline dot.
+// AgentStatusDot. Mirrors the agent availabilityConfig Slack-style dot so the
+// read ("green = here, hollow = not") is identical across people and agents.
+// Renders nothing while presence is unknown (no MemberPresenceProvider mounted,
+// e.g. isolated tests) rather than misreporting an offline dot.
 function MemberStatusDot({ userId, size }: { userId: string; size?: number }) {
   const online = useMemberOnline(userId);
   if (online === null) return null;
 
-  const dotClass = online ? "bg-success" : "bg-destructive";
+  // CEREBRO-PATCH(status-slack-dot): offline = hollow grey-ringed dot (Slack away
+  // style), not red; online keeps the same grey ring so both read clearly (TECH-3686).
+  const dotClass = online
+    ? "bg-success border border-muted-foreground"
+    : "bg-background border border-muted-foreground";
   const label = online ? "Online" : "Offline";
   const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 

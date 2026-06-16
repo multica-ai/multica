@@ -31,9 +31,10 @@ export interface DaemonPrefs {
 
 export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   running: "bg-emerald-500",
-  // Stopped daemon reads red, not grey, so running (green) vs stopped (red)
-  // is unmistakable — matches the cli_not_found / auth_expired red below.
-  stopped: "bg-red-500",
+  // Stopped daemon = hollow grey-ringed dot (Slack away style, TECH-3686), not
+  // red. Red is kept for the genuine error states (cli_not_found / auth_expired)
+  // below — those need attention; a stopped daemon is just inactive.
+  stopped: "bg-transparent border border-muted-foreground",
   starting: "bg-amber-500 animate-pulse",
   stopping: "bg-amber-500 animate-pulse",
   installing_cli: "bg-sky-500 animate-pulse",

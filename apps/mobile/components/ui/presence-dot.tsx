@@ -1,16 +1,16 @@
 /**
  * Three-state presence dot — drives the agent availability indicator across
- * the app. Mirror of web's AgentStatusDot (`packages/views/common/actor-avatar.tsx:188`)
- * with one platform tweak: React Native has no `ring-*` utility, so the
- * "cut out the avatar background" effect uses `border-2 border-background`
- * (visually equivalent — 1.5–2 px solid border in the background colour).
+ * the app. Mirror of web's AgentStatusDot (`packages/views/common/actor-avatar.tsx`)
+ * and its `availabilityConfig` (`packages/views/agents/presence.ts`).
  *
- * Color mapping is identical to the web `availabilityConfig`
- * (`packages/views/agents/presence.ts:46`):
- *   online   → success         (green)
- *   paused   → brand           (brand tone) — runtime intentionally paused
- *   unstable → warning         (amber) — runtime offline < 5 min
- *   offline  → muted/40        (gray)
+ * Slack-style dot (TECH-3686): every state is a filled centre on a thin grey
+ * outline ring (`border-2 border-muted-foreground`). State reads from the
+ * centre fill, not an alarming colour — inactive is hollow, never red:
+ *   online   → success    (green centre, grey ring)
+ *   unstable → warning    (amber centre, grey ring) — runtime offline < 5 min
+ *   paused   → background  (empty/hollow centre, grey ring) — intentionally paused
+ *   offline  → background  (empty/hollow centre, grey ring)
+ *   archived → background  (empty/hollow centre, grey ring) — retired agent
  *
  * Pure presentation. Caller passes the already-derived `AgentAvailability`
  * (typically from `useAgentPresence`). Loading states are handled at the
@@ -28,14 +28,13 @@ interface Props {
 
 const DOT_CLASS: Record<AgentAvailability, string> = {
   online: "bg-success",
-  // Inactive states (paused/offline/archived) read red, not brand/grey, so
-  // online (green) vs not-online (red) is unmistakable. Mirrors web's
+  // Inactive states (paused/offline/archived) are hollow — an empty (background)
+  // centre on the shared grey ring, the Slack away look. No red. Mirrors web's
   // availabilityConfig in packages/views/agents/presence.ts.
-  paused: "bg-destructive",
+  paused: "bg-background",
   unstable: "bg-warning",
-  offline: "bg-destructive",
-  // Retired agent (agent.archived_at set) — red, mirrors web's archived dot.
-  archived: "bg-destructive",
+  offline: "bg-background",
+  archived: "bg-background",
 };
 
 export function PresenceDot({ availability, size = 8 }: Props) {
@@ -43,7 +42,7 @@ export function PresenceDot({ availability, size = 8 }: Props) {
     <View
       style={{ width: size, height: size, borderRadius: size / 2 }}
       className={cn(
-        "border-2 border-background",
+        "border-2 border-muted-foreground",
         DOT_CLASS[availability],
       )}
     />
