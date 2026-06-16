@@ -7,11 +7,20 @@ import "encoding/json"
 // untouched (the operator is presumed to know what they are doing).
 const eidetixServerName = "eidetix"
 
-// buildEidetixServerEntry returns the Claude-style MCP server entry for the
-// remote Eidetix SSE endpoint. transport "streamable-http" + a url makes it a
-// remote HTTP/SSE server (as opposed to a stdio `command` server).
+// buildEidetixServerEntry returns the MCP server entry for the remote Eidetix
+// endpoint. It is a cross-provider remote (HTTP/SSE) entry: backends key off
+// different fields, so we emit both and let each ignore the other.
+//
+//   - Claude Code's `--mcp-config` parser requires `type: "http"` to load a
+//     remote server. It does NOT understand `transport`; without `type` it
+//     silently skips the server and the agent runs with no eidetix tools
+//     (verified against claude 2.1.x). It tolerates the extra `transport` key.
+//   - OpenClaw keys off `transport: "streamable-http"` and tolerates `type`.
+//
+// One entry therefore serves both. `url` (vs a stdio `command`) marks it remote.
 func buildEidetixServerEntry(endpointURL, token string) map[string]any {
 	return map[string]any{
+		"type":      "http",
 		"url":       endpointURL,
 		"transport": "streamable-http",
 		"headers": map[string]any{

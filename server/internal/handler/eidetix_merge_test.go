@@ -16,6 +16,7 @@ func TestMergeEidetixServer_EmptyConfig(t *testing.T) {
 
 	var got struct {
 		McpServers map[string]struct {
+			Type      string            `json:"type"`
 			URL       string            `json:"url"`
 			Transport string            `json:"transport"`
 			Headers   map[string]string `json:"headers"`
@@ -31,8 +32,13 @@ func TestMergeEidetixServer_EmptyConfig(t *testing.T) {
 	if e.URL != "https://eidetix.example/mcp/sse" {
 		t.Errorf("url = %q, want the endpoint", e.URL)
 	}
+	// type:"http" is what Claude Code's --mcp-config parser requires to load a
+	// remote server; without it the eidetix tools never connect.
+	if e.Type != "http" {
+		t.Errorf("type = %q, want http (Claude Code remote-MCP requirement)", e.Type)
+	}
 	if e.Transport != "streamable-http" {
-		t.Errorf("transport = %q, want streamable-http", e.Transport)
+		t.Errorf("transport = %q, want streamable-http (OpenClaw)", e.Transport)
 	}
 	if e.Headers["Authorization"] != "Bearer tok-abc" {
 		t.Errorf("Authorization = %q, want Bearer tok-abc", e.Headers["Authorization"])
