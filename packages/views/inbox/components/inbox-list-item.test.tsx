@@ -109,6 +109,14 @@ vi.mock("../../i18n", () => ({
       const dict = {
         list: {
           archive_tooltip: "Archive",
+          // useTimeAgo() resolves these; the mock ignores the {count} arg, so
+          // each bucket renders a stable marker the tests can assert on.
+          time: {
+            just_now: "just now",
+            minutes: "Xm",
+            hours: "Xh",
+            days: "Xd",
+          },
         },
         types: {
           reminder: "Reminder",
@@ -339,6 +347,48 @@ describe("ChannelListItem", () => {
     );
     // Names from the mocked getActorName ("User-alic", "User-bob ") joined.
     expect(screen.getByText(/User-alic, User-bob/)).toBeInTheDocument();
+  });
+
+  // TECH-3619 — the row timestamp must track the last message, not the
+  // channel/DM's updated_at (which doesn't bump when a new message lands, so
+  // an unread DM was showing a 39-days-ago time instead of "just now").
+  it("shows time since the last message, not updated_at", () => {
+    const fortyDaysAgo = new Date(
+      Date.now() - 40 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    render(
+      <ChannelListItem
+        channel={makeChannel({
+          updated_at: fortyDaysAgo,
+          last_message: {
+            author_type: "member",
+            author_id: "alice",
+            content: "latest message",
+            created_at: new Date().toISOString(),
+          },
+        })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    expect(screen.getByText("just now")).toBeInTheDocument();
+    expect(screen.queryByText("Xd")).toBeNull();
+  });
+
+  it("falls back to updated_at when the channel has no messages yet", () => {
+    const fortyDaysAgo = new Date(
+      Date.now() - 40 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    render(
+      <ChannelListItem
+        channel={makeChannel({ updated_at: fortyDaysAgo, last_message: null })}
+        isSelected={false}
+        onClick={() => {}}
+        onArchive={() => {}}
+      />,
+    );
+    expect(screen.getByText("Xd")).toBeInTheDocument();
   });
 
   it("does not show participant names line for DMs", () => {
