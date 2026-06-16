@@ -150,9 +150,17 @@ describe("projectGanttIssuesOptions", () => {
     expect(data).toHaveLength(1);
   });
 
-  it("uses the project-scoped Gantt cache key", () => {
-    const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
-    expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  it("uses the sprint-scoped Gantt cache key", () => {
+    // TECH-3620: the gantt query is cached per sprint. The unfiltered call
+    // carries an empty sprint segment; selecting a sprint changes the key so a
+    // filtered fetch does not reuse the unfiltered cache entry.
+    expect(projectGanttIssuesOptions(WS_ID, PROJECT_ID).queryKey).toEqual([
+      ...issueKeys.projectGantt(WS_ID, PROJECT_ID),
+      "",
+    ]);
+    expect(
+      projectGanttIssuesOptions(WS_ID, PROJECT_ID, "sprint-1").queryKey,
+    ).toEqual([...issueKeys.projectGantt(WS_ID, PROJECT_ID), "sprint-1"]);
   });
 });
 
