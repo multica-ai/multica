@@ -104,6 +104,32 @@ func ConfigFromEnv(workspacesRoot string) Config {
 	return c
 }
 
+// ConfigFromValues builds a Config from explicit endpoint/key values supplied
+// by the server's trace-config endpoint (TECH-3621 fleet rollout) instead of
+// the local environment. This is the path that turns trace upload on for the
+// whole fleet from a single server-side setting, without the ingest key ever
+// landing in plaintext on each machine's daemon env. workspacesRoot supplies
+// the StateDir; maxAgeHours <= 0 keeps DefaultMaxAge. Enabled is forced true so
+// NewManager runs — callers MUST only call this when endpoint and apiKey are
+// both non-empty (an empty pair means the server has the feature off).
+func ConfigFromValues(workspacesRoot, endpoint, apiKey string, maxAgeHours int) Config {
+	c := Config{
+		Enabled:                   true,
+		Endpoint:                  strings.TrimSpace(endpoint),
+		APIKey:                    strings.TrimSpace(apiKey),
+		MaxConcurrentPerWorkspace: DefaultMaxConcurrentPerWorkspace,
+		MaxAge:                    DefaultMaxAge,
+		Backoff:                   DefaultBackoff,
+	}
+	if workspacesRoot != "" {
+		c.StateDir = workspacesRoot + string(os.PathSeparator) + ".trace-upload"
+	}
+	if maxAgeHours > 0 {
+		c.MaxAge = time.Duration(maxAgeHours) * time.Hour
+	}
+	return c
+}
+
 // parseBool treats 1/true/yes/on (case-insensitive) as true; everything else
 // (including empty) is false, so the flag is off unless explicitly enabled.
 func parseBool(v string) bool {

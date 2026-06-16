@@ -166,7 +166,8 @@ type Daemon struct {
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
 
-	traceUploader *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
+	traceUploader   *traceupload.Manager // CEREBRO-PATCH(daemon-trace-upload): Fase 2 registry trace sender; nil when flag off
+	traceUploaderMu sync.Mutex           // CEREBRO-PATCH(daemon-trace-upload-fleet-fetch): guards traceUploader (async server-config fetch can set it after boot)
 
 	// CEREBRO-PATCH(daemon-ws-write-accessor): expose write channel for cerebro term frames.
 	wsWrites atomic.Pointer[chan []byte]
