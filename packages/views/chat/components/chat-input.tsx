@@ -297,7 +297,7 @@ export function ChatInput({
           )}
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={(!isRunning && (isEmpty || isSubmitting)) || !!disabled || !!noAgent || pendingUploads > 0}
             running={isRunning}
             onStop={onStop}
             allowSubmitWhileRunning
