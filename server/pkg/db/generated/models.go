@@ -719,7 +719,8 @@ type Squad struct {
 	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
-	Instructions string             `json:"instructions"`
+	Instructions        string             `json:"instructions"`
+	MaxConcurrentTasks  int32              `json:"max_concurrent_tasks"`
 }
 
 type SquadMember struct {

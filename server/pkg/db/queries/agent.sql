@@ -730,3 +730,9 @@ SET status = CASE WHEN EXISTS (
     updated_at = now()
 WHERE a.id = $1
 RETURNING *;
+
+-- name: ReleaseTaskToQueued :execrows
+-- Return a dispatched task back to the queued pool. Used when a
+-- post-claim capacity check (e.g. squad concurrency) rejects the task.
+UPDATE agent_task_queue SET status = 'queued', dispatched_at = NULL
+WHERE id = $1 AND status = 'dispatched';

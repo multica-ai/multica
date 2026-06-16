@@ -701,3 +701,19 @@ func (q *Queries) UpdateSquadMemberRole(ctx context.Context, arg UpdateSquadMemb
 	)
 	return i, err
 }
+
+
+const countRunningSquadTasks = \`-- name: CountRunningSquadTasks :one
+SELECT count(*) FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.assignee_type = 'squad'
+  AND i.assignee_id = $1
+  AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
+\`
+
+func (q *Queries) CountRunningSquadTasks(ctx context.Context, squadID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countRunningSquadTasks, squadID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}

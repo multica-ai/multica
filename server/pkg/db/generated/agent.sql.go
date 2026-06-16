@@ -2973,3 +2973,14 @@ func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTas
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err
 }
+
+
+const releaseTaskToQueued = \`-- name: ReleaseTaskToQueued :execrows
+UPDATE agent_task_queue SET status = 'queued', dispatched_at = NULL
+WHERE id = $1 AND status = 'dispatched'
+\`
+
+func (q *Queries) ReleaseTaskToQueued(ctx context.Context, id pgtype.UUID) (int64, error) {
+	tag, err := q.db.Exec(ctx, releaseTaskToQueued, id)
+	return tag.RowsAffected(), err
+}
