@@ -144,8 +144,8 @@ type ListArtifactFoldersByWorkspaceParams struct {
 	Kind        pgtype.Text `json:"kind"`
 }
 
-// kind is optional: NULL returns every folder (back-compat), otherwise the
-// list is scoped to one surface (TECH-3637) so notes and documents don't mix.
+// CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter scopes
+// the folder list to one surface so notes and documents don't mix.
 func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, arg ListArtifactFoldersByWorkspaceParams) ([]ArtifactFolder, error) {
 	rows, err := q.db.Query(ctx, listArtifactFoldersByWorkspace, arg.WorkspaceID, arg.Kind)
 	if err != nil {

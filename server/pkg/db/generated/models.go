@@ -928,6 +928,14 @@ type CerebroUserInfisicalIdentity struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroWebFetchPolicy struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Mode        string             `json:"mode"`
+	HostRules   []byte             `json:"host_rules"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy   pgtype.UUID        `json:"updated_by"`
+}
+
 type CerebroWorkflow struct {
 	ID                    pgtype.UUID        `json:"id"`
 	WorkspaceID           pgtype.UUID        `json:"workspace_id"`

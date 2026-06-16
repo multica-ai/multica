@@ -68,6 +68,7 @@ export type CerebroFlagKey =
   | "cerebro_grants"
   | "cerebro_tool_policy"
   | "cerebro_simple_tool_policy"
+  | "cerebro_web_fetch_policy"
   | "cerebro_platform_capabilities"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
@@ -219,6 +220,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_grants: false,
   cerebro_tool_policy: true,
   cerebro_simple_tool_policy: true,
+  cerebro_web_fetch_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
@@ -689,6 +691,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
+  },
+  {
+    key: "cerebro_web_fetch_policy",
+    label: "Web fetch URL policy",
+    group: "permissions",
+    description:
+      "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
   },
   {
     key: "cerebro_platform_capabilities",

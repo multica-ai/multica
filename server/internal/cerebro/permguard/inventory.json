@@ -1475,6 +1475,10 @@
     {
       "id": "PUT /api/workspaces/{id}/wakeup-settings",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/workspaces/{id}/web-fetch-policy",
+      "gate": "workspace_admin"
     }
   ],
   "mcp": [

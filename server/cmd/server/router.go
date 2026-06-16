@@ -105,6 +105,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler import
+	cerebrowebfetchpolicy "github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 Agent Vault broker module import
 	cerebroagentvault "github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -550,6 +552,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
+	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
+	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	if avMod, avOK := cerebroagentvault.NewModule(pool); avOK {
@@ -1042,6 +1046,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection reads (any member).
 					r.Get("/connections", cerebroConnectionsHandler.List)
 					r.Get("/connections/{connId}", cerebroConnectionsHandler.Get)
+					// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 web_fetch policy read (any member).
+					r.Get("/web-fetch-policy", cerebroWebFetchPolicyHandler.Get)
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access read (any member).
 					r.Get("/agentvault/access", cerebroAgentVaultHandler.List)
 					// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 workspace-scoped MCP endpoint for Connections.
@@ -1086,6 +1092,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy writes (admin/owner only).
 					r.Put("/tool-policy", cerebroToolPolicyHandler.Set)
 					r.Delete("/tool-policy", cerebroToolPolicyHandler.Clear)
+					// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 web_fetch policy write (admin/owner only).
+					r.Put("/web-fetch-policy", cerebroWebFetchPolicyHandler.Set)
 					// CEREBRO-PATCH(connections-manage-policy-gate): TECH-3513 connection writes moved to the manage_connections capability gate below.
 					// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent Agent Vault access writes (admin/owner only).
 					r.Put("/agentvault/access", cerebroAgentVaultHandler.Set)

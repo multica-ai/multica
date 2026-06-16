@@ -3962,6 +3962,17 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-web-fetch-policy-client): TECH-3522 per-workspace web_fetch policy methods.
+  async getCerebroWebFetchPolicy<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/web-fetch-policy`); // CEREBRO-PATCH(cerebro-web-fetch-policy-client)
+  }
+  async updateCerebroWebFetchPolicy<T = unknown>(wsId: string, body: unknown): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/web-fetch-policy`, { // CEREBRO-PATCH(cerebro-web-fetch-policy-client)
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-agentvault-client): TECH-3196 per-agent Agent Vault access-table methods.
   async listCerebroAgentVaultAccess<T = unknown>(wsId: string, agentId: string): Promise<T> {
     return this.fetch<T>(

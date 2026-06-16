@@ -1251,7 +1251,15 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		systemText = strings.TrimRight(systemText, "\n") +
 			"\n\nYou have the following tools available: " + strings.Join(toolNames, ", ") + "." +
 			" Use them to accomplish the task. Post your final answer as a comment when asked."
-		// TODO(persona): enforce persona policy-engine when ready.
+		// TECH-3522: when web_fetch is available, surface the active per-workspace
+		// URL policy so the agent can fetch the right hosts and explain to the
+		// user why a blocked host was rejected, instead of failing opaquely.
+		for _, name := range toolNames {
+			if name == "web_fetch" {
+				systemText += "\n\n" + webFetchPolicyHint(ctx, e.cerebro, tctx.WorkspaceID)
+				break
+			}
+		}
 	}
 
 	history := ConvertGatewayMessagesToAnthropic(initialMessages[msgStart:])

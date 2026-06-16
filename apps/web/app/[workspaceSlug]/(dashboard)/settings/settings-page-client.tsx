@@ -14,6 +14,8 @@ import {
 } from "@multica/cerebro-tool-policy/views";
 // CEREBRO-PATCH(cerebro-connections-settings-tab): TECH-3108 workspace connections tab.
 import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/views";
+// TECH-3522: web_fetch URL policy tab.
+import { useCerebroWebFetchPolicySettingsTabs } from "@multica/cerebro-web-fetch-policy/views";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -46,9 +48,19 @@ export function SettingsPageClient({
   // TECH-3108: the workspace Connections tab, present only when the
   // cerebro_connections flag is on.
   const connectionsTabs = useCerebroConnectionsSettingsTabs();
+  // TECH-3522: the workspace Web fetch tab, present only when the
+  // cerebro_web_fetch_policy flag is on.
+  const webFetchPolicyTabs = useCerebroWebFetchPolicySettingsTabs();
   const accountTabs = useMemo(
-    () => [...extraAccountTabs, ...toolPolicyTabs, ...agentTriggerTabs, ...displayCurrencyTabs, ...connectionsTabs],
-    [toolPolicyTabs, agentTriggerTabs, displayCurrencyTabs, connectionsTabs],
+    () => [
+      ...extraAccountTabs,
+      ...toolPolicyTabs,
+      ...agentTriggerTabs,
+      ...displayCurrencyTabs,
+      ...connectionsTabs,
+      ...webFetchPolicyTabs,
+    ],
+    [toolPolicyTabs, agentTriggerTabs, displayCurrencyTabs, connectionsTabs, webFetchPolicyTabs],
   );
 
   return (
