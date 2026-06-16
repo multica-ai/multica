@@ -130,7 +130,18 @@ export function ChatMessageList({
         customScrollParent={scrollContainerEl}
         data={messages}
         firstItemIndex={firstIndex}
-        initialTopMostItemIndex={initialTopMostItemIndex}
+        // Only pass `initialTopMostItemIndex` when a caller actually anchors the
+        // list (the read-only terminal run view). Passing it as `undefined`
+        // still registers the prop, and react-virtuoso then resolves it to its
+        // default index `0` and tries to anchor there — which, for the live
+        // chat's large `firstItemIndex` base (1_000_000 − older), is ~1M rows
+        // out of range. That reads `.index` off a non-existent sized record and
+        // throws on mount ("undefined is not an object (evaluating 'e.index')"),
+        // white-screening every page that mounts the chat. Omitting the prop
+        // restores the pure bottom-anchor + followOutput behavior.
+        {...(initialTopMostItemIndex !== undefined
+          ? { initialTopMostItemIndex }
+          : {})}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={120}
         atBottomStateChange={setIsNearBottom}
