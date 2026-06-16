@@ -248,6 +248,13 @@ const MODEL_PRICING: Record<
   "cursor":             { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
+const MODEL_ALIASES: Record<string, string> = {
+  // Codex emits this internal label for the auto-review subagent / guardian
+  // path. It is not a public model SKU, so map it to OpenAI's published
+  // GPT-5.4 mini tier for coding / computer-use / subagent work.
+  "codex-auto-review": "gpt-5.4-mini",
+};
+
 // Resolve a model string to its pricing tier. Exact match, with four
 // tolerances applied in order:
 //
@@ -297,6 +304,10 @@ function canonicalCandidates(model: string): string[] {
     seen.add(s);
     out.push(s);
   };
+  const pushAlias = (s: string) => {
+    const alias = MODEL_ALIASES[s];
+    if (alias) push(alias);
+  };
   const stripDate = (s: string) =>
     s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
   const stripProvider = (s: string) => {
@@ -325,6 +336,9 @@ function canonicalCandidates(model: string): string[] {
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+  for (const candidate of [...out]) {
+    pushAlias(candidate);
+  }
   return out;
 }
 

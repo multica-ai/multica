@@ -224,6 +224,23 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
+  it("prices Codex auto-review's internal alias at the GPT-5.4 mini tier", () => {
+    // Codex OTel usage can report the auto-review subagent as
+    // `codex-auto-review`, which is an internal routing label rather than a
+    // public price-card SKU. Keep it as an explicit alias so the dashboard
+    // includes those tokens without adding a broad Codex fallback.
+    expect(isModelPriced("codex-auto-review")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "codex-auto-review",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(0.75 + 4.5 + 0.075, 5);
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
