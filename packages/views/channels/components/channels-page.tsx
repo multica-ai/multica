@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 
 import { useAuthStore } from "@multica/core/auth";
+import { useModalStore } from "@multica/core/modals";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -70,6 +71,7 @@ import type {
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -1038,13 +1040,18 @@ function MessageList({
   });
 
   const convertMutation = useMutation({
-    mutationFn: (messageId: string) => api.convertMessageToIssue(channelId, messageId),
+    mutationFn: ({ messageId, title, description }: { messageId: string; title?: string; description?: string }) =>
+      api.convertMessageToIssue(channelId, messageId, { title, description }),
     onSuccess: (data) => {
       toast.success(`已创建 Issue #${data.issue_number}`);
+      setConvertTarget(null);
       nav.push(paths.issueDetail(data.issue_id));
     },
     onError: () => toast.error("转换失败"),
   });
+
+  const [convertTarget, setConvertTarget] = useState<ChannelMessage | null>(null);
+  const openModal = useModalStore((s) => s.open);
 
   const handleSend = useCallback(() => {
     const content = editorRef.current?.getMarkdown().trim();
@@ -1079,8 +1086,8 @@ function MessageList({
                 key={msg.id}
                 message={msg}
                 onOpenReplies={onOpenReplies}
-                onConvert={(id) => convertMutation.mutate(id)}
-                converting={convertMutation.isPending}
+                onConvertManual={(m) => setConvertTarget(m)}
+                onConvertAgent={(m) => openModal("quick-create-issue", { description: m.content })}
               />
             ))}
             <div ref={bottomRef} />
@@ -1144,6 +1151,17 @@ function MessageList({
           </p>
         </div>
       )}
+
+      {convertTarget && (
+        <ConvertToIssueDialog
+          message={convertTarget}
+          isPending={convertMutation.isPending}
+          onConfirm={(title, description) =>
+            convertMutation.mutate({ messageId: convertTarget.id, title, description })
+          }
+          onClose={() => setConvertTarget(null)}
+        />
+      )}
     </>
   );
 }
@@ -1151,13 +1169,13 @@ function MessageList({
 function MessageRow({
   message,
   onOpenReplies,
-  onConvert,
-  converting,
+  onConvertManual,
+  onConvertAgent,
 }: {
   message: ChannelMessage;
   onOpenReplies: (id: string) => void;
-  onConvert: (id: string) => void;
-  converting: boolean;
+  onConvertManual: (msg: ChannelMessage) => void;
+  onConvertAgent: (msg: ChannelMessage) => void;
 }) {
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
@@ -1212,9 +1230,13 @@ function MessageRow({
           <MessageCircleReply className="mr-2 h-4 w-4" />
           回复
         </ContextMenuItem>
-        <ContextMenuItem onClick={() => onConvert(message.id)} disabled={converting}>
+        <ContextMenuItem onClick={() => onConvertManual(message)}>
           <FileText className="mr-2 h-4 w-4" />
           转换为 Issue
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onConvertAgent(message)}>
+          <Bot className="mr-2 h-4 w-4" />
+          由 Agent 转为 Issue
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -1710,6 +1732,55 @@ function CreateChannelDialog({
           <Button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}>
             {createMutation.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
             创建
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConvertToIssueDialog({
+  message,
+  isPending,
+  onConfirm,
+  onClose,
+}: {
+  message: ChannelMessage;
+  isPending: boolean;
+  onConfirm: (title: string, description: string) => void;
+  onClose: () => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState(message.content);
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>转换为 Issue</DialogTitle>
+          <DialogDescription>将消息转换为一个新的 Issue，可编辑标题和描述。</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 py-2">
+          <Input
+            placeholder="Issue 标题（留空则自动截取消息内容）"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            autoFocus
+          />
+          <Textarea
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            rows={6}
+            className="resize-none"
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button onClick={() => onConfirm(title, description)} disabled={isPending}>
+            {isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
+            创建 Issue
           </Button>
         </DialogFooter>
       </DialogContent>
