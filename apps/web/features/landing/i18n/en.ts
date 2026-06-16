@@ -295,7 +295,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.23",
         date: "2026-06-16",
-        title: "Issue Date Filters, Safer Comments, and More Reliable Agents",
+        title: "Issue Date Filters and More Stable Agent Runs",
         changes: [],
         features: [
           "Issues can now be filtered by created or updated date, with quick ranges and custom date selections",
@@ -305,7 +305,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         improvements: [
           "Web and desktop failures are now easier to investigate with clearer reports for errors, freezes, and crashes",
           "Project rows, comment previews, and comment composers are more consistent and easier to use",
-          "Codex and Cursor documentation now reflects working session resume support",
         ],
         fixes: [
           "Reply and edit previews now show the right agents or squads before a comment is saved",

@@ -295,7 +295,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.23",
         date: "2026-06-16",
-        title: "Issue 日期筛选、更安全的评论和更稳定的智能体",
+        title: "Issue 日期筛选和提高智能体运行稳定性",
         changes: [],
         features: [
           "Issue 现在可以按创建时间或更新时间筛选，支持快捷时间范围和自定义日期",
@@ -305,7 +305,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         improvements: [
           "网页端和桌面端的错误、卡顿和崩溃现在更容易定位，问题反馈会带上更清楚的信息",
           "项目列表行、评论预览和评论编辑器体验更一致，导航和附件操作更顺手",
-          "Codex 和 Cursor 文档已更新，说明现在可以恢复已有会话",
         ],
         fixes: [
           "回复和编辑评论前，现在会更准确地预览哪些智能体或小队会开始运行",

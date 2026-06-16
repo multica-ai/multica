@@ -271,7 +271,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.23",
           date: "2026-06-16",
-          title: "Issue の日付フィルター、安全なコメント、安定したエージェント",
+          title: "Issue の日付フィルターとエージェント実行の安定性向上",
           changes: [],
           features: [
             "Issue を作成日または更新日で絞り込めるようになり、クイック期間やカスタム日付を選べます。",
@@ -281,7 +281,6 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           improvements: [
             "Web とデスクトップのエラー、フリーズ、クラッシュ報告が分かりやすくなり、原因調査がしやすくなりました。",
             "プロジェクト行、コメントのプレビュー、コメント作成まわりの操作がより一貫して使いやすくなりました。",
-            "Codex と Cursor のドキュメントを更新し、既存セッションの再開サポートを反映しました。",
           ],
           fixes: [
             "返信やコメント編集を保存する前に、どのエージェントやスクワッドが動き始めるかをより正確に確認できます。",

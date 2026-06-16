@@ -270,7 +270,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.3.23",
           date: "2026-06-16",
-          title: "Issue 날짜 필터, 더 안전한 댓글, 더 안정적인 에이전트",
+          title: "Issue 날짜 필터와 더 안정적인 에이전트 실행",
           changes: [],
           features: [
             "Issue를 생성일 또는 수정일 기준으로 필터링할 수 있으며, 빠른 기간과 사용자 지정 날짜를 선택할 수 있습니다.",
@@ -280,7 +280,6 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           improvements: [
             "웹과 데스크톱의 오류, 멈춤, 충돌 보고가 더 명확해져 문제를 조사하기 쉬워졌습니다.",
             "프로젝트 행, 댓글 미리보기, 댓글 작성기가 더 일관되고 사용하기 쉬워졌습니다.",
-            "Codex와 Cursor 문서가 기존 세션 이어받기 지원을 반영하도록 업데이트되었습니다.",
           ],
           fixes: [
             "답글과 댓글 편집을 저장하기 전에 어떤 에이전트나 스쿼드가 실행될지 더 정확하게 미리 보여줍니다.",
