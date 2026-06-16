@@ -31,6 +31,9 @@ const NONE = "__none__";
 export function SprintSelectField({ workspaceId, projectId, value, onChange, className }: Props) {
   const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId ?? ""));
   const sprints = sprintsQuery.data?.sprints ?? [];
+  // TECH-3684: map the selected id to its sprint name for the trigger label —
+  // Base UI's <SelectValue> otherwise renders the raw value (the sprint UUID).
+  const currentSprint = sprints.find((s) => s.id === value);
 
   if (!projectId) return null;
   if (sprintsQuery.isLoading || sprints.length === 0) return null;
@@ -42,7 +45,9 @@ export function SprintSelectField({ workspaceId, projectId, value, onChange, cla
         onValueChange={(v) => onChange(v === NONE || v == null ? "" : v)}
       >
         <SelectTrigger>
-          <SelectValue placeholder="No sprint" />
+          <SelectValue placeholder="No sprint">
+            {() => currentSprint?.name ?? "No sprint"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>No sprint</SelectItem>
