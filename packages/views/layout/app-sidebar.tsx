@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
-import { HelpLauncher } from "./help-launcher";
+// Hidden per 2026-06-16 product decision.
+// import { HelpLauncher } from "./help-launcher";
 import {
   DndContext,
   PointerSensor,
@@ -30,9 +31,11 @@ import {
   SquarePen,
   CircleUser,
   FolderKanban,
-  BarChart3,
+  // Hidden per 2026-06-16 product decision.
+  // BarChart3,
   X,
-  Zap,
+  // Hidden per 2026-06-16 product decision.
+  // Zap,
   Users,
   GitBranch,
 } from "lucide-react";
@@ -141,11 +144,13 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
   { key: "projects", labelKey: "projects", icon: FolderKanban },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
+  // Hidden per 2026-06-16 product decision.
+  // { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "workflows", labelKey: "workflows", icon: GitBranch },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
-  { key: "usage", labelKey: "usage", icon: BarChart3 },
+  // Hidden per 2026-06-16 product decision.
+  // { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
 const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -737,7 +742,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
 
         <SidebarFooter className="p-2">
           <div className="flex justify-end">
-            <HelpLauncher />
+            {/* Hidden per 2026-06-16 product decision. */}
+            {/* <HelpLauncher /> */}
           </div>
         </SidebarFooter>
         <SidebarRail />
