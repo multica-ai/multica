@@ -5,18 +5,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	pgvector "github.com/pgvector/pgvector-go"
 )
 
 const KnowledgeEmbeddingDimensions = 1536
+
+var knowledgeSlugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
 var (
 	ErrKnowledgeValidation = errors.New("knowledge validation failed")
@@ -77,6 +82,7 @@ type KnowledgeUpdateParams struct {
 	ConfidenceStatus    pgtype.Text
 	LifecycleStatus     pgtype.Text
 	ReviewedBy          pgtype.UUID
+	UpdatedBy           pgtype.UUID
 }
 
 type KnowledgeSearchFilters struct {
@@ -107,8 +113,54 @@ type KnowledgeSearchResult struct {
 type KnowledgeDetail struct {
 	Item            db.KnowledgeItem
 	Sources         []db.KnowledgeSource
+	SourceSummary   KnowledgeSourceSummary
+	PublishTargets  []db.KnowledgePublishTarget
 	Embeddings      []db.ListKnowledgeEmbeddingMetadataRow
 	FeedbackSummary []db.GetKnowledgeFeedbackSummaryRow
+}
+
+type KnowledgeSourceSummary struct {
+	Count              int
+	Types              []string
+	PrimarySourceType  string
+	PrimarySourceID    pgtype.UUID
+	PrimarySourceTitle string
+}
+
+type KnowledgeSourceDetail struct {
+	Source        db.KnowledgeSource
+	ResolvedTitle pgtype.Text
+	ResolvedURL   pgtype.Text
+	ResolvedNote  pgtype.Text
+}
+
+type KnowledgePublishWikiParams struct {
+	WorkspaceID pgtype.UUID
+	ItemID      pgtype.UUID
+	ActorID     pgtype.UUID
+	ActorUserID pgtype.UUID
+	WikiPageID  pgtype.UUID
+	ParentID    pgtype.UUID
+	Title       string
+	Content     string
+}
+
+type KnowledgePublishSkillParams struct {
+	WorkspaceID      pgtype.UUID
+	ItemID           pgtype.UUID
+	ActorID          pgtype.UUID
+	ActorUserID      pgtype.UUID
+	SkillID          pgtype.UUID
+	Name             string
+	Description      string
+	Content          string
+	IncludeSourceMap bool
+	SupportingFiles  []KnowledgeSkillFileInput
+}
+
+type KnowledgeSkillFileInput struct {
+	Path    string
+	Content string
 }
 
 type KnowledgeFeedbackParams struct {
@@ -172,7 +224,56 @@ func (s *KnowledgeService) GetDetail(ctx context.Context, workspaceID, itemID pg
 	if err != nil {
 		return KnowledgeDetail{}, err
 	}
-	return KnowledgeDetail{Item: item, Sources: sources, Embeddings: embeddings, FeedbackSummary: feedback}, nil
+	targets, err := s.Queries.ListKnowledgePublishTargets(ctx, db.ListKnowledgePublishTargetsParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	return KnowledgeDetail{Item: item, Sources: sources, SourceSummary: summarizeKnowledgeSources(sources), PublishTargets: targets, Embeddings: embeddings, FeedbackSummary: feedback}, nil
+}
+
+func (s *KnowledgeService) GetSourceDetails(ctx context.Context, workspaceID, itemID pgtype.UUID) ([]KnowledgeSourceDetail, error) {
+	if _, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: itemID, WorkspaceID: workspaceID}); err != nil {
+		return nil, knowledgeItemLookupErr(err)
+	}
+	sources, err := s.Queries.ListKnowledgeSources(ctx, db.ListKnowledgeSourcesParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return nil, err
+	}
+	details := make([]KnowledgeSourceDetail, 0, len(sources))
+	for _, source := range sources {
+		detail := KnowledgeSourceDetail{
+			Source:        source,
+			ResolvedTitle: source.SourceTitle,
+			ResolvedURL:   source.SourceUrl,
+			ResolvedNote:  source.SourceExcerpt,
+		}
+		if source.SourceID.Valid {
+			switch source.SourceType {
+			case "issue":
+				issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
+				if err == nil {
+					detail.ResolvedTitle = pgtype.Text{String: issue.Title, Valid: true}
+					detail.ResolvedURL = pgtype.Text{String: fmt.Sprintf("/issues/%d", issue.Number), Valid: true}
+				}
+			case "comment":
+				comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
+				if err == nil {
+					detail.ResolvedTitle = pgtype.Text{String: "Comment " + util.UUIDToString(comment.ID), Valid: true}
+					detail.ResolvedURL = pgtype.Text{String: "/issues/" + util.UUIDToString(comment.IssueID) + "?comment=" + util.UUIDToString(comment.ID), Valid: true}
+					detail.ResolvedNote = pgtype.Text{String: truncateKnowledgeText(comment.Content, 240), Valid: true}
+				}
+			case "agent_task":
+				task, err := s.Queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
+				if err == nil {
+					detail.ResolvedTitle = pgtype.Text{String: "Agent task " + util.UUIDToString(task.ID), Valid: true}
+					detail.ResolvedURL = pgtype.Text{String: "/issues/" + util.UUIDToString(task.IssueID) + "/tasks/" + util.UUIDToString(task.ID), Valid: true}
+					detail.ResolvedNote = pgtype.Text{String: "status: " + task.Status, Valid: true}
+				}
+			}
+		}
+		details = append(details, detail)
+	}
+	return details, nil
 }
 
 func (s *KnowledgeService) Create(ctx context.Context, p KnowledgeCreateParams) (KnowledgeDetail, error) {
@@ -265,18 +366,7 @@ func (s *KnowledgeService) Update(ctx context.Context, p KnowledgeUpdateParams) 
 		return db.KnowledgeItem{}, validationError("invalid confidence_status")
 	}
 	if p.LifecycleStatus.Valid {
-		if !validKnowledgeLifecycleStatus(p.LifecycleStatus.String) {
-			return db.KnowledgeItem{}, validationError("invalid lifecycle_status")
-		}
-		if p.LifecycleStatus.String == "published" {
-			count, err := s.Queries.CountKnowledgeSources(ctx, db.CountKnowledgeSourcesParams{KnowledgeItemID: p.ID, WorkspaceID: p.WorkspaceID})
-			if err != nil {
-				return db.KnowledgeItem{}, err
-			}
-			if count == 0 {
-				return db.KnowledgeItem{}, validationError("published knowledge requires at least one source")
-			}
-		}
+		return db.KnowledgeItem{}, validationError("use lifecycle action endpoints")
 	}
 	if err := validateOptionalKnowledgeFilters(ctx, s.Queries, p.WorkspaceID, p.ProjectID, p.AgentID); err != nil {
 		return db.KnowledgeItem{}, err
@@ -298,8 +388,7 @@ func (s *KnowledgeService) Update(ctx context.Context, p KnowledgeUpdateParams) 
 		AntiPatterns:        p.AntiPatterns,
 		Applicability:       p.Applicability,
 		ConfidenceStatus:    p.ConfidenceStatus,
-		LifecycleStatus:     p.LifecycleStatus,
-		ReviewedBy:          p.ReviewedBy,
+		UpdatedBy:           p.UpdatedBy,
 		ID:                  p.ID,
 		WorkspaceID:         p.WorkspaceID,
 	})
@@ -312,15 +401,269 @@ func (s *KnowledgeService) Update(ctx context.Context, p KnowledgeUpdateParams) 
 	return item, nil
 }
 
-func (s *KnowledgeService) Archive(ctx context.Context, workspaceID, itemID pgtype.UUID) (db.KnowledgeItem, error) {
-	item, err := s.Queries.ArchiveKnowledgeItem(ctx, db.ArchiveKnowledgeItemParams{ID: itemID, WorkspaceID: workspaceID})
+func (s *KnowledgeService) Review(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (db.KnowledgeItem, error) {
+	return s.setLifecycleStatus(ctx, s.Queries, workspaceID, itemID, actorID, "reviewed")
+}
+
+func (s *KnowledgeService) Publish(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (KnowledgeDetail, error) {
+	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return db.KnowledgeItem{}, ErrKnowledgeNotFound
-		}
-		return db.KnowledgeItem{}, err
+		return KnowledgeDetail{}, err
 	}
-	return item, nil
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	if _, err := s.setLifecycleStatus(ctx, qtx, workspaceID, itemID, actorID, "published"); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	if _, err := qtx.UpsertKnowledgePublishTarget(ctx, db.UpsertKnowledgePublishTargetParams{
+		KnowledgeItemID: itemID,
+		WorkspaceID:     workspaceID,
+		TargetType:      "rag",
+		TargetTitle:     pgtype.Text{String: "Default RAG retrieval", Valid: true},
+		CreatedBy:       actorID,
+	}); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	return s.GetDetail(ctx, workspaceID, itemID)
+}
+
+func (s *KnowledgeService) Archive(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (db.KnowledgeItem, error) {
+	return s.setLifecycleStatus(ctx, s.Queries, workspaceID, itemID, actorID, "archived")
+}
+
+func (s *KnowledgeService) Deprecate(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (db.KnowledgeItem, error) {
+	return s.setLifecycleStatus(ctx, s.Queries, workspaceID, itemID, actorID, "deprecated")
+}
+
+func (s *KnowledgeService) Restore(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (db.KnowledgeItem, error) {
+	item, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return db.KnowledgeItem{}, knowledgeItemLookupErr(err)
+	}
+	if item.LifecycleStatus != "archived" && item.LifecycleStatus != "deprecated" {
+		return db.KnowledgeItem{}, validationError("only archived or deprecated knowledge can be restored")
+	}
+	targetStatus := "draft"
+	if item.ReviewedBy.Valid {
+		targetStatus = "reviewed"
+	}
+	return s.setLifecycleStatus(ctx, s.Queries, workspaceID, itemID, actorID, targetStatus)
+}
+
+func (s *KnowledgeService) PublishToWiki(ctx context.Context, p KnowledgePublishWikiParams) (KnowledgeDetail, error) {
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	item, err := s.setLifecycleStatus(ctx, qtx, p.WorkspaceID, p.ItemID, p.ActorID, "published")
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	title := strings.TrimSpace(p.Title)
+	if title == "" {
+		title = item.Title
+	}
+	content := p.Content
+	if strings.TrimSpace(content) == "" {
+		content = knowledgeWikiContent(item)
+	}
+	if p.ParentID.Valid {
+		parent, err := qtx.GetWikiPage(ctx, db.GetWikiPageParams{ID: p.ParentID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			return KnowledgeDetail{}, validationError("parent wiki page not found")
+		}
+		if parent.Type != "folder" {
+			return KnowledgeDetail{}, validationError("parent must be a folder")
+		}
+	}
+	pageID := p.WikiPageID
+	if !pageID.Valid {
+		if existing, err := qtx.GetKnowledgePublishTargetByType(ctx, db.GetKnowledgePublishTargetByTypeParams{
+			KnowledgeItemID: p.ItemID,
+			WorkspaceID:     p.WorkspaceID,
+			TargetType:      "wiki",
+		}); err == nil && existing.TargetID.Valid {
+			pageID = existing.TargetID
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDetail{}, err
+		}
+	}
+	var page db.WikiPage
+	if pageID.Valid {
+		page, err = qtx.UpdateWikiPage(ctx, db.UpdateWikiPageParams{
+			ID:          pageID,
+			WorkspaceID: p.WorkspaceID,
+			Title:       pgtype.Text{String: title, Valid: true},
+			Content:     pgtype.Text{String: content, Valid: true},
+			ParentID:    p.ParentID,
+			UpdatedBy:   p.ActorUserID,
+		})
+		if err != nil {
+			return KnowledgeDetail{}, knowledgePublishTargetErr(err, "wiki page not found")
+		}
+	} else {
+		position, err := qtx.GetMaxWikiPagePosition(ctx, db.GetMaxWikiPagePositionParams{WorkspaceID: p.WorkspaceID, ParentID: p.ParentID})
+		if err != nil {
+			return KnowledgeDetail{}, err
+		}
+		baseSlug := knowledgeSlugFromTitle(title)
+		for attempt := 1; attempt <= 20; attempt++ {
+			page, err = qtx.CreateWikiPage(ctx, db.CreateWikiPageParams{
+				WorkspaceID: p.WorkspaceID,
+				ParentID:    p.ParentID,
+				Title:       title,
+				Slug:        knowledgeSlugWithSuffix(baseSlug, attempt),
+				Content:     pgtype.Text{String: content, Valid: true},
+				Type:        pgtype.Text{String: "page", Valid: true},
+				Position:    position + 1,
+				CreatedBy:   p.ActorUserID,
+				UpdatedBy:   p.ActorUserID,
+			})
+			if err == nil {
+				break
+			}
+			if !isPgUniqueViolation(err) {
+				return KnowledgeDetail{}, err
+			}
+		}
+		if err != nil {
+			return KnowledgeDetail{}, validationError("wiki page slug already exists")
+		}
+	}
+	if _, err := qtx.UpsertKnowledgePublishTarget(ctx, db.UpsertKnowledgePublishTargetParams{
+		KnowledgeItemID: p.ItemID,
+		WorkspaceID:     p.WorkspaceID,
+		TargetType:      "wiki",
+		TargetID:        page.ID,
+		TargetUrl:       pgtype.Text{String: "/wiki/" + util.UUIDToString(page.ID), Valid: true},
+		TargetTitle:     pgtype.Text{String: page.Title, Valid: true},
+		CreatedBy:       p.ActorID,
+	}); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	return s.GetDetail(ctx, p.WorkspaceID, p.ItemID)
+}
+
+func (s *KnowledgeService) PublishToSkill(ctx context.Context, p KnowledgePublishSkillParams) (KnowledgeDetail, error) {
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	item, err := s.setLifecycleStatus(ctx, qtx, p.WorkspaceID, p.ItemID, p.ActorID, "published")
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = knowledgeSlugFromTitle(item.Title)
+	}
+	description := strings.TrimSpace(p.Description)
+	if description == "" {
+		description = strings.TrimSpace(item.ProblemPattern)
+		if description == "" {
+			description = "Knowledge published from " + item.Title
+		}
+	}
+	content := p.Content
+	if strings.TrimSpace(content) == "" {
+		content = knowledgeSkillContent(item, name, description)
+	}
+	skillID := p.SkillID
+	if !skillID.Valid {
+		if existing, err := qtx.GetKnowledgePublishTargetByType(ctx, db.GetKnowledgePublishTargetByTypeParams{
+			KnowledgeItemID: p.ItemID,
+			WorkspaceID:     p.WorkspaceID,
+			TargetType:      "skill",
+		}); err == nil && existing.TargetID.Valid {
+			skillID = existing.TargetID
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDetail{}, err
+		}
+	}
+	if !skillID.Valid {
+		if existing, err := qtx.GetSkillByWorkspaceAndName(ctx, db.GetSkillByWorkspaceAndNameParams{WorkspaceID: p.WorkspaceID, Name: name}); err == nil {
+			skillID = existing.ID
+		} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDetail{}, err
+		}
+	}
+	config := []byte("{}")
+	var skill db.Skill
+	if skillID.Valid {
+		skill, err = qtx.UpdateSkill(ctx, db.UpdateSkillParams{
+			ID:          skillID,
+			Name:        pgtype.Text{String: name, Valid: true},
+			Description: pgtype.Text{String: description, Valid: true},
+			Content:     pgtype.Text{String: content, Valid: true},
+			Config:      config,
+		})
+		if err != nil {
+			return KnowledgeDetail{}, knowledgePublishTargetErr(err, "skill not found")
+		}
+		if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
+			return KnowledgeDetail{}, err
+		}
+	} else {
+		skill, err = qtx.CreateSkill(ctx, db.CreateSkillParams{
+			WorkspaceID: p.WorkspaceID,
+			Name:        name,
+			Description: description,
+			Content:     content,
+			Config:      config,
+			CreatedBy:   p.ActorUserID,
+		})
+		if err != nil {
+			if isPgUniqueViolation(err) {
+				return KnowledgeDetail{}, validationError("skill name already exists")
+			}
+			return KnowledgeDetail{}, err
+		}
+	}
+	files := append([]KnowledgeSkillFileInput{}, p.SupportingFiles...)
+	if p.IncludeSourceMap {
+		files = append(files, KnowledgeSkillFileInput{
+			Path:    "references/source-map.md",
+			Content: knowledgeSourceMapContent(item, p.ItemID),
+		})
+	}
+	for _, file := range files {
+		path := strings.TrimSpace(file.Path)
+		if path == "" || skillpkg.IsReservedContentPath(path) {
+			continue
+		}
+		if _, err := qtx.UpsertSkillFile(ctx, db.UpsertSkillFileParams{
+			SkillID: skill.ID,
+			Path:    path,
+			Content: file.Content,
+		}); err != nil {
+			return KnowledgeDetail{}, err
+		}
+	}
+	if _, err := qtx.UpsertKnowledgePublishTarget(ctx, db.UpsertKnowledgePublishTargetParams{
+		KnowledgeItemID: p.ItemID,
+		WorkspaceID:     p.WorkspaceID,
+		TargetType:      "skill",
+		TargetID:        skill.ID,
+		TargetUrl:       pgtype.Text{String: "/skills/" + util.UUIDToString(skill.ID), Valid: true},
+		TargetTitle:     pgtype.Text{String: skill.Name, Valid: true},
+		CreatedBy:       p.ActorID,
+	}); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return KnowledgeDetail{}, err
+	}
+	return s.GetDetail(ctx, p.WorkspaceID, p.ItemID)
 }
 
 func (s *KnowledgeService) UpsertEmbedding(ctx context.Context, itemID, workspaceID pgtype.UUID, provider, model, contentHash string, embedding []float32) (db.UpsertKnowledgeEmbeddingRow, error) {
@@ -1013,6 +1356,8 @@ func knowledgeItemFromTextRow(row db.SearchKnowledgeTextRow) db.KnowledgeItem {
 		ArchivedAt:          row.ArchivedAt,
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
+		UpdatedBy:           row.UpdatedBy,
+		DeprecatedAt:        row.DeprecatedAt,
 	}
 }
 
@@ -1040,5 +1385,206 @@ func knowledgeItemFromVectorRow(row db.SearchKnowledgeVectorRow) db.KnowledgeIte
 		ArchivedAt:          row.ArchivedAt,
 		CreatedAt:           row.CreatedAt,
 		UpdatedAt:           row.UpdatedAt,
+		UpdatedBy:           row.UpdatedBy,
+		DeprecatedAt:        row.DeprecatedAt,
 	}
+}
+
+func (s *KnowledgeService) setLifecycleStatus(ctx context.Context, q *db.Queries, workspaceID, itemID, actorID pgtype.UUID, next string) (db.KnowledgeItem, error) {
+	if !validKnowledgeLifecycleStatus(next) {
+		return db.KnowledgeItem{}, validationError("invalid lifecycle_status")
+	}
+	item, err := q.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return db.KnowledgeItem{}, knowledgeItemLookupErr(err)
+	}
+	if item.LifecycleStatus == next {
+		return item, nil
+	}
+	if err := validateKnowledgeLifecycleTransition(ctx, q, item, next); err != nil {
+		return db.KnowledgeItem{}, err
+	}
+	var reviewedBy pgtype.UUID
+	if next == "reviewed" {
+		reviewedBy = actorID
+	}
+	updated, err := q.SetKnowledgeLifecycleStatus(ctx, db.SetKnowledgeLifecycleStatusParams{
+		ID:              itemID,
+		WorkspaceID:     workspaceID,
+		LifecycleStatus: next,
+		ReviewedBy:      reviewedBy,
+		UpdatedBy:       actorID,
+	})
+	if err != nil {
+		return db.KnowledgeItem{}, knowledgeItemLookupErr(err)
+	}
+	return updated, nil
+}
+
+func validateKnowledgeLifecycleTransition(ctx context.Context, q *db.Queries, item db.KnowledgeItem, next string) error {
+	current := item.LifecycleStatus
+	switch next {
+	case "draft":
+		if current != "archived" && current != "deprecated" {
+			return validationError("only archived or deprecated knowledge can be restored")
+		}
+	case "reviewed":
+		if current != "draft" && current != "archived" && current != "deprecated" {
+			return validationError("knowledge can only be reviewed from draft or restored from inactive")
+		}
+	case "published":
+		if current != "reviewed" {
+			return validationError("knowledge must be reviewed before publishing")
+		}
+		if !item.ReviewedBy.Valid || !item.ReviewedAt.Valid {
+			return validationError("published knowledge requires human review")
+		}
+		count, err := q.CountKnowledgeSources(ctx, db.CountKnowledgeSourcesParams{KnowledgeItemID: item.ID, WorkspaceID: item.WorkspaceID})
+		if err != nil {
+			return err
+		}
+		if count == 0 {
+			return validationError("published knowledge requires at least one source")
+		}
+	case "archived":
+		if current == "deprecated" {
+			return validationError("deprecated knowledge must be restored before archiving")
+		}
+	case "deprecated":
+		if current != "reviewed" && current != "published" {
+			return validationError("only reviewed or published knowledge can be deprecated")
+		}
+	default:
+		return validationError("invalid lifecycle_status")
+	}
+	return nil
+}
+
+func knowledgeItemLookupErr(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrKnowledgeNotFound
+	}
+	return err
+}
+
+func knowledgePublishTargetErr(err error, notFound string) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return validationError(notFound)
+	}
+	return err
+}
+
+func summarizeKnowledgeSources(sources []db.KnowledgeSource) KnowledgeSourceSummary {
+	summary := KnowledgeSourceSummary{Count: len(sources)}
+	seen := map[string]bool{}
+	for i, source := range sources {
+		if !seen[source.SourceType] {
+			seen[source.SourceType] = true
+			summary.Types = append(summary.Types, source.SourceType)
+		}
+		if i == 0 {
+			summary.PrimarySourceType = source.SourceType
+			summary.PrimarySourceID = source.SourceID
+			if source.SourceTitle.Valid {
+				summary.PrimarySourceTitle = source.SourceTitle.String
+			}
+		}
+	}
+	sort.Strings(summary.Types)
+	return summary
+}
+
+func knowledgeWikiContent(item db.KnowledgeItem) string {
+	var b strings.Builder
+	b.WriteString("# ")
+	b.WriteString(item.Title)
+	b.WriteString("\n\n")
+	writeKnowledgeSection(&b, "Problem Pattern", item.ProblemPattern)
+	writeKnowledgeSection(&b, "Trigger Conditions", item.TriggerConditions)
+	writeKnowledgeSection(&b, "Diagnostic Steps", item.DiagnosticSteps)
+	writeKnowledgeSection(&b, "Recommended Practice", item.RecommendedPractice)
+	writeKnowledgeSection(&b, "Anti-patterns", item.AntiPatterns)
+	writeKnowledgeSection(&b, "Applicability", item.Applicability)
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func knowledgeSkillContent(item db.KnowledgeItem, name, description string) string {
+	var b strings.Builder
+	b.WriteString("---\n")
+	b.WriteString("name: ")
+	b.WriteString(name)
+	b.WriteString("\n")
+	b.WriteString("description: ")
+	b.WriteString(strings.ReplaceAll(description, "\n", " "))
+	b.WriteString("\n---\n\n")
+	b.WriteString("# ")
+	b.WriteString(item.Title)
+	b.WriteString("\n\n")
+	writeKnowledgeSection(&b, "When To Use", item.TriggerConditions)
+	writeKnowledgeSection(&b, "Problem Pattern", item.ProblemPattern)
+	writeKnowledgeSection(&b, "Diagnostic Steps", item.DiagnosticSteps)
+	writeKnowledgeSection(&b, "Recommended Practice", item.RecommendedPractice)
+	writeKnowledgeSection(&b, "Anti-patterns", item.AntiPatterns)
+	writeKnowledgeSection(&b, "Applicability", item.Applicability)
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func knowledgeSourceMapContent(item db.KnowledgeItem, itemID pgtype.UUID) string {
+	var b strings.Builder
+	b.WriteString("# Source Map\n\n")
+	b.WriteString("- knowledge_item_id: ")
+	b.WriteString(util.UUIDToString(itemID))
+	b.WriteString("\n")
+	b.WriteString("- title: ")
+	b.WriteString(item.Title)
+	b.WriteString("\n")
+	b.WriteString("- lifecycle_status: ")
+	b.WriteString(item.LifecycleStatus)
+	b.WriteString("\n")
+	return b.String()
+}
+
+func writeKnowledgeSection(b *strings.Builder, title, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	b.WriteString("## ")
+	b.WriteString(title)
+	b.WriteString("\n\n")
+	b.WriteString(value)
+	b.WriteString("\n\n")
+}
+
+func truncateKnowledgeText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	if limit <= 3 {
+		return value[:limit]
+	}
+	return strings.TrimSpace(value[:limit-3]) + "..."
+}
+
+func knowledgeSlugFromTitle(title string) string {
+	slug := strings.ToLower(strings.TrimSpace(title))
+	slug = knowledgeSlugNonAlnum.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return "knowledge"
+	}
+	return slug
+}
+
+func knowledgeSlugWithSuffix(base string, attempt int) string {
+	if attempt <= 1 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, attempt)
+}
+
+func isPgUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

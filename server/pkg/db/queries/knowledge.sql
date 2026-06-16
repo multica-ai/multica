@@ -62,28 +62,37 @@ UPDATE knowledge_item SET
     anti_patterns = COALESCE(sqlc.narg('anti_patterns'), anti_patterns),
     applicability = COALESCE(sqlc.narg('applicability'), applicability),
     confidence_status = COALESCE(sqlc.narg('confidence_status'), confidence_status),
-    lifecycle_status = COALESCE(sqlc.narg('lifecycle_status'), lifecycle_status),
-    reviewed_by = COALESCE(sqlc.narg('reviewed_by'), reviewed_by),
+    updated_by = COALESCE(sqlc.narg('updated_by'), updated_by),
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: SetKnowledgeLifecycleStatus :one
+UPDATE knowledge_item SET
+    lifecycle_status = sqlc.arg('lifecycle_status'),
+    reviewed_by = CASE
+        WHEN sqlc.narg('reviewed_by')::uuid IS NOT NULL THEN sqlc.narg('reviewed_by')::uuid
+        ELSE reviewed_by
+    END,
     reviewed_at = CASE
         WHEN sqlc.narg('reviewed_by')::uuid IS NOT NULL THEN now()
         ELSE reviewed_at
     END,
     published_at = CASE
-        WHEN sqlc.narg('lifecycle_status')::text = 'published' AND published_at IS NULL THEN now()
+        WHEN sqlc.arg('lifecycle_status')::text = 'published' AND published_at IS NULL THEN now()
         ELSE published_at
     END,
     archived_at = CASE
-        WHEN sqlc.narg('lifecycle_status')::text = 'archived' AND archived_at IS NULL THEN now()
+        WHEN sqlc.arg('lifecycle_status')::text = 'archived' AND archived_at IS NULL THEN now()
+        WHEN sqlc.arg('lifecycle_status')::text NOT IN ('archived', 'deprecated') THEN NULL
         ELSE archived_at
     END,
-    updated_at = now()
-WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
-RETURNING *;
-
--- name: ArchiveKnowledgeItem :one
-UPDATE knowledge_item SET
-    lifecycle_status = 'archived',
-    archived_at = COALESCE(archived_at, now()),
+    deprecated_at = CASE
+        WHEN sqlc.arg('lifecycle_status')::text = 'deprecated' AND deprecated_at IS NULL THEN now()
+        WHEN sqlc.arg('lifecycle_status')::text NOT IN ('archived', 'deprecated') THEN NULL
+        ELSE deprecated_at
+    END,
+    updated_by = sqlc.arg('updated_by'),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
@@ -111,6 +120,39 @@ INSERT INTO knowledge_source (
 )
 RETURNING *;
 
+-- name: ListKnowledgePublishTargets :many
+SELECT *
+FROM knowledge_publish_target
+WHERE knowledge_item_id = sqlc.arg('knowledge_item_id')
+  AND workspace_id = sqlc.arg('workspace_id')
+ORDER BY created_at ASC;
+
+-- name: GetKnowledgePublishTargetByType :one
+SELECT *
+FROM knowledge_publish_target
+WHERE knowledge_item_id = sqlc.arg('knowledge_item_id')
+  AND workspace_id = sqlc.arg('workspace_id')
+  AND target_type = sqlc.arg('target_type');
+
+-- name: UpsertKnowledgePublishTarget :one
+INSERT INTO knowledge_publish_target (
+    knowledge_item_id, workspace_id, target_type, target_id,
+    target_url, target_title, metadata, created_by
+) VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('target_type'),
+    sqlc.narg('target_id'), sqlc.narg('target_url'), sqlc.narg('target_title'),
+    COALESCE(sqlc.narg('metadata'), '{}'::jsonb), sqlc.narg('created_by')
+)
+ON CONFLICT (knowledge_item_id, target_type)
+DO UPDATE SET
+    target_id = EXCLUDED.target_id,
+    target_url = EXCLUDED.target_url,
+    target_title = EXCLUDED.target_title,
+    metadata = EXCLUDED.metadata,
+    created_by = COALESCE(EXCLUDED.created_by, knowledge_publish_target.created_by),
+    updated_at = now()
+RETURNING *;
+
 -- name: ListKnowledgeEmbeddingMetadata :many
 SELECT id, knowledge_item_id, workspace_id, provider, model, content_hash, embedded_at, created_at
 FROM knowledge_embedding
@@ -131,26 +173,40 @@ RETURNING id, knowledge_item_id, workspace_id, provider, model, content_hash, em
 
 -- name: SearchKnowledgeText :many
 WITH candidates AS (
-    SELECT *,
+    SELECT ki.*,
         (
-            CASE WHEN LOWER(title) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 4 ELSE 0 END +
-            CASE WHEN LOWER(problem_pattern) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 3 ELSE 0 END +
-            CASE WHEN LOWER(recommended_practice) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 3 ELSE 0 END +
-            CASE WHEN LOWER(anti_patterns) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 2 ELSE 0 END +
-            CASE WHEN LOWER(trigger_conditions) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(diagnostic_steps) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(applicability) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END
+            CASE WHEN LOWER(ki.title) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 4 ELSE 0 END +
+            CASE WHEN LOWER(ki.problem_pattern) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 3 ELSE 0 END +
+            CASE WHEN LOWER(ki.recommended_practice) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 3 ELSE 0 END +
+            CASE WHEN LOWER(ki.anti_patterns) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 2 ELSE 0 END +
+            CASE WHEN LOWER(ki.trigger_conditions) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
+            CASE WHEN LOWER(ki.diagnostic_steps) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END +
+            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER(sqlc.arg('query')::text) || '%' THEN 1 ELSE 0 END
         )::float8 AS text_score
-    FROM knowledge_item
-    WHERE workspace_id = sqlc.arg('workspace_id')
-      AND lifecycle_status NOT IN ('archived', 'deprecated')
-      AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR type = ANY(sqlc.narg('types')::text[]))
-      AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
-      AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-      AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id'))
+    FROM knowledge_item ki
+    WHERE ki.workspace_id = sqlc.arg('workspace_id')
+      AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+      AND (
+          COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+          OR ki.lifecycle_status = 'published'
+      )
+      AND (
+          COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+          OR EXISTS (
+              SELECT 1
+              FROM knowledge_publish_target kpt
+              WHERE kpt.knowledge_item_id = ki.id
+                AND kpt.workspace_id = ki.workspace_id
+                AND kpt.target_type = 'rag'
+          )
+      )
+      AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR ki.type = ANY(sqlc.narg('types')::text[]))
+      AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR ki.lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
       AND (
           COALESCE(cardinality(sqlc.narg('labels')::text[]), 0) = 0
-          OR domain_labels && sqlc.narg('labels')::text[]
+          OR ki.domain_labels && sqlc.narg('labels')::text[]
       )
 )
 SELECT *
@@ -167,6 +223,20 @@ FROM knowledge_item ki
 JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
 WHERE ki.workspace_id = sqlc.arg('workspace_id')
   AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
   AND (COALESCE(cardinality(sqlc.narg('types')::text[]), 0) = 0 OR ki.type = ANY(sqlc.narg('types')::text[]))
   AND (COALESCE(cardinality(sqlc.narg('statuses')::text[]), 0) = 0 OR ki.lifecycle_status = ANY(sqlc.narg('statuses')::text[]))
   AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))

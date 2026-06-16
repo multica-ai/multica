@@ -37,6 +37,7 @@ func TestKnowledgeLifecycleListSearchFeedbackAndArchive(t *testing.T) {
 			"source_url":  "https://example.com/commit/deadlock-fix",
 		}},
 	})
+	created = publishKnowledgeForRAG(t, created.Item.ID)
 
 	searchKnowledgeAndExpectFirst(t, "deadlock", created.Item.ID)
 	searchKnowledgeAndExpectFirst(t, "short batches", created.Item.ID)
@@ -48,8 +49,8 @@ func TestKnowledgeLifecycleListSearchFeedbackAndArchive(t *testing.T) {
 	})
 	req = withURLParam(req, "id", created.Item.ID)
 	testHandler.UpdateKnowledge(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateKnowledge publish: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("UpdateKnowledge lifecycle change: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
@@ -126,11 +127,17 @@ func TestKnowledgeRejectsInvalidEnumsAndPublishingWithoutSource(t *testing.T) {
 	})
 
 	w = httptest.NewRecorder()
-	req = newRequest("PATCH", "/api/knowledge/"+itemID, map[string]any{
-		"lifecycle_status": "published",
-	})
+	req = newRequest("POST", "/api/knowledge/"+itemID+"/review", nil)
 	req = withURLParam(req, "id", itemID)
-	testHandler.UpdateKnowledge(w, req)
+	testHandler.ReviewKnowledge(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("review source-less knowledge: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/knowledge/"+itemID+"/publish", nil)
+	req = withURLParam(req, "id", itemID)
+	testHandler.PublishKnowledge(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("publish without source: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
@@ -146,6 +153,7 @@ func TestKnowledgeWorkspaceIsolation(t *testing.T) {
 			"source_url":  "https://example.com/commit/visible",
 		}},
 	})
+	created = publishKnowledgeForRAG(t, created.Item.ID)
 
 	otherWorkspaceID := createOtherWorkspaceKnowledge(t, "hidden-workspace-token")
 
@@ -176,6 +184,90 @@ func TestKnowledgeWorkspaceIsolation(t *testing.T) {
 	}
 }
 
+func TestKnowledgePublishWikiSkillTargetsAndSourceDetails(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge source issue", "done", "medium")
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Android App Links verification",
+		"type":                 "playbook",
+		"problem_pattern":      "Android App Links can open the browser when assetlinks.json does not match the installed certificate.",
+		"trigger_conditions":   "Use this when https issue links do not open the installed app.",
+		"diagnostic_steps":     "Check pm get-app-links and dumpsys package.",
+		"recommended_practice": "Compare installed signing certificate with the live assetlinks.json response.",
+		"sources": []map[string]any{{
+			"source_type":  "issue",
+			"source_id":    issueID,
+			"source_title": "Original App Links issue",
+		}},
+	})
+	reviewKnowledge(t, created.Item.ID)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+created.Item.ID+"/publish/wiki", map[string]any{})
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.PublishKnowledgeToWiki(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PublishKnowledgeToWiki: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var wikiResp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&wikiResp); err != nil {
+		t.Fatalf("decode wiki publish: %v", err)
+	}
+	if wikiResp.Item.LifecycleStatus != "published" {
+		t.Fatalf("wiki publish lifecycle = %q, want published", wikiResp.Item.LifecycleStatus)
+	}
+	if !hasPublishTarget(wikiResp.PublishTargets, "wiki") {
+		t.Fatalf("wiki publish targets = %#v, want wiki target", wikiResp.PublishTargets)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/knowledge/"+created.Item.ID+"/publish/skill", map[string]any{
+		"name": "android-app-links-verification",
+	})
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.PublishKnowledgeToSkill(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PublishKnowledgeToSkill: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var skillResp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&skillResp); err != nil {
+		t.Fatalf("decode skill publish: %v", err)
+	}
+	if !hasPublishTarget(skillResp.PublishTargets, "wiki") || !hasPublishTarget(skillResp.PublishTargets, "skill") {
+		t.Fatalf("skill publish targets = %#v, want wiki and skill targets", skillResp.PublishTargets)
+	}
+	var sourceMapCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM skill_file sf
+		JOIN knowledge_publish_target kpt ON kpt.target_id = sf.skill_id
+		WHERE kpt.knowledge_item_id = $1
+		  AND kpt.target_type = 'skill'
+		  AND sf.path = 'references/source-map.md'
+	`, created.Item.ID).Scan(&sourceMapCount); err != nil {
+		t.Fatalf("count skill source map: %v", err)
+	}
+	if sourceMapCount != 1 {
+		t.Fatalf("source map files = %d, want 1", sourceMapCount)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/knowledge/"+created.Item.ID+"/sources", nil)
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.GetKnowledgeSources(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetKnowledgeSources: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var sourcesResp struct {
+		Sources []KnowledgeSourceDetailResponse `json:"sources"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&sourcesResp); err != nil {
+		t.Fatalf("decode sources: %v", err)
+	}
+	if len(sourcesResp.Sources) != 1 || sourcesResp.Sources[0].ResolvedTitle == nil || *sourcesResp.Sources[0].ResolvedTitle != "Knowledge source issue" {
+		t.Fatalf("source details = %#v, want resolved issue title", sourcesResp.Sources)
+	}
+}
+
 func TestKnowledgeVectorSearchOrdersByCosineSimilarity(t *testing.T) {
 	first := createKnowledgeFixture(t, map[string]any{
 		"title": "Vector first",
@@ -193,6 +285,8 @@ func TestKnowledgeVectorSearchOrdersByCosineSimilarity(t *testing.T) {
 			"source_url":  "https://example.com/commit/vector-second",
 		}},
 	})
+	first = publishKnowledgeForRAG(t, first.Item.ID)
+	second = publishKnowledgeForRAG(t, second.Item.ID)
 
 	firstVector := make([]float32, service.KnowledgeEmbeddingDimensions)
 	firstVector[0] = 1
@@ -231,6 +325,15 @@ func TestKnowledgeVectorSearchOrdersByCosineSimilarity(t *testing.T) {
 	if results[0].VectorScore <= results[1].VectorScore {
 		t.Fatalf("vector scores not ordered: %f <= %f", results[0].VectorScore, results[1].VectorScore)
 	}
+}
+
+func hasPublishTarget(targets []KnowledgePublishTargetResponse, targetType string) bool {
+	for _, target := range targets {
+		if target.TargetType == targetType && target.TargetID != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func TestKnowledgeCandidateManualEvaluateAcceptedAndDeduped(t *testing.T) {
@@ -521,6 +624,39 @@ func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailRe
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
 	})
+	return resp
+}
+
+func reviewKnowledge(t *testing.T, itemID string) KnowledgeItemResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+itemID+"/review", nil)
+	req = withURLParam(req, "id", itemID)
+	testHandler.ReviewKnowledge(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReviewKnowledge: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeItemResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode ReviewKnowledge: %v", err)
+	}
+	return resp
+}
+
+func publishKnowledgeForRAG(t *testing.T, itemID string) KnowledgeDetailResponse {
+	t.Helper()
+	reviewKnowledge(t, itemID)
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+itemID+"/publish", nil)
+	req = withURLParam(req, "id", itemID)
+	testHandler.PublishKnowledge(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PublishKnowledge: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode PublishKnowledge: %v", err)
+	}
 	return resp
 }
 

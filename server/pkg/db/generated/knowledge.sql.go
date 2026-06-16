@@ -12,50 +12,6 @@ import (
 	pgvector "github.com/pgvector/pgvector-go"
 )
 
-const archiveKnowledgeItem = `-- name: ArchiveKnowledgeItem :one
-UPDATE knowledge_item SET
-    lifecycle_status = 'archived',
-    archived_at = COALESCE(archived_at, now()),
-    updated_at = now()
-WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at
-`
-
-type ArchiveKnowledgeItemParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) ArchiveKnowledgeItem(ctx context.Context, arg ArchiveKnowledgeItemParams) (KnowledgeItem, error) {
-	row := q.db.QueryRow(ctx, archiveKnowledgeItem, arg.ID, arg.WorkspaceID)
-	var i KnowledgeItem
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.ProjectID,
-		&i.AgentID,
-		&i.Title,
-		&i.Type,
-		&i.DomainLabels,
-		&i.ProblemPattern,
-		&i.TriggerConditions,
-		&i.DiagnosticSteps,
-		&i.RecommendedPractice,
-		&i.AntiPatterns,
-		&i.Applicability,
-		&i.ConfidenceStatus,
-		&i.LifecycleStatus,
-		&i.CreatedBy,
-		&i.ReviewedBy,
-		&i.ReviewedAt,
-		&i.PublishedAt,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const countIssueTaskOutcomesForKnowledgeCandidate = `-- name: CountIssueTaskOutcomesForKnowledgeCandidate :one
 SELECT
     COUNT(*)::bigint AS task_count,
@@ -156,7 +112,7 @@ INSERT INTO knowledge_item (
     COALESCE($11, ''), COALESCE($12, ''),
     $13, $14, $15
 )
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
 `
 
 type CreateKnowledgeItemParams struct {
@@ -219,6 +175,8 @@ func (q *Queries) CreateKnowledgeItem(ctx context.Context, arg CreateKnowledgeIt
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
 	)
 	return i, err
 }
@@ -391,7 +349,7 @@ func (q *Queries) GetKnowledgeFeedbackSummary(ctx context.Context, arg GetKnowle
 }
 
 const getKnowledgeItem = `-- name: GetKnowledgeItem :one
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
 FROM knowledge_item
 WHERE id = $1 AND workspace_id = $2
 `
@@ -425,6 +383,41 @@ func (q *Queries) GetKnowledgeItem(ctx context.Context, arg GetKnowledgeItemPara
 		&i.ReviewedAt,
 		&i.PublishedAt,
 		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
+	)
+	return i, err
+}
+
+const getKnowledgePublishTargetByType = `-- name: GetKnowledgePublishTargetByType :one
+SELECT id, knowledge_item_id, workspace_id, target_type, target_id, target_url, target_title, metadata, created_by, created_at, updated_at
+FROM knowledge_publish_target
+WHERE knowledge_item_id = $1
+  AND workspace_id = $2
+  AND target_type = $3
+`
+
+type GetKnowledgePublishTargetByTypeParams struct {
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	TargetType      string      `json:"target_type"`
+}
+
+func (q *Queries) GetKnowledgePublishTargetByType(ctx context.Context, arg GetKnowledgePublishTargetByTypeParams) (KnowledgePublishTarget, error) {
+	row := q.db.QueryRow(ctx, getKnowledgePublishTargetByType, arg.KnowledgeItemID, arg.WorkspaceID, arg.TargetType)
+	var i KnowledgePublishTarget
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.TargetUrl,
+		&i.TargetTitle,
+		&i.Metadata,
+		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -707,7 +700,7 @@ func (q *Queries) ListKnowledgeEmbeddingMetadata(ctx context.Context, arg ListKn
 }
 
 const listKnowledgeItems = `-- name: ListKnowledgeItems :many
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
 FROM knowledge_item
 WHERE workspace_id = $1
   AND (
@@ -792,6 +785,53 @@ func (q *Queries) ListKnowledgeItems(ctx context.Context, arg ListKnowledgeItems
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgePublishTargets = `-- name: ListKnowledgePublishTargets :many
+SELECT id, knowledge_item_id, workspace_id, target_type, target_id, target_url, target_title, metadata, created_by, created_at, updated_at
+FROM knowledge_publish_target
+WHERE knowledge_item_id = $1
+  AND workspace_id = $2
+ORDER BY created_at ASC
+`
+
+type ListKnowledgePublishTargetsParams struct {
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ListKnowledgePublishTargets(ctx context.Context, arg ListKnowledgePublishTargetsParams) ([]KnowledgePublishTarget, error) {
+	rows, err := q.db.Query(ctx, listKnowledgePublishTargets, arg.KnowledgeItemID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgePublishTarget{}
+	for rows.Next() {
+		var i KnowledgePublishTarget
+		if err := rows.Scan(
+			&i.ID,
+			&i.KnowledgeItemID,
+			&i.WorkspaceID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetUrl,
+			&i.TargetTitle,
+			&i.Metadata,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -848,29 +888,43 @@ func (q *Queries) ListKnowledgeSources(ctx context.Context, arg ListKnowledgeSou
 
 const searchKnowledgeText = `-- name: SearchKnowledgeText :many
 WITH candidates AS (
-    SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at,
+    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at,
         (
-            CASE WHEN LOWER(title) LIKE '%' || LOWER($2::text) || '%' THEN 4 ELSE 0 END +
-            CASE WHEN LOWER(problem_pattern) LIKE '%' || LOWER($2::text) || '%' THEN 3 ELSE 0 END +
-            CASE WHEN LOWER(recommended_practice) LIKE '%' || LOWER($2::text) || '%' THEN 3 ELSE 0 END +
-            CASE WHEN LOWER(anti_patterns) LIKE '%' || LOWER($2::text) || '%' THEN 2 ELSE 0 END +
-            CASE WHEN LOWER(trigger_conditions) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(diagnostic_steps) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
-            CASE WHEN LOWER(applicability) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END
+            CASE WHEN LOWER(ki.title) LIKE '%' || LOWER($2::text) || '%' THEN 4 ELSE 0 END +
+            CASE WHEN LOWER(ki.problem_pattern) LIKE '%' || LOWER($2::text) || '%' THEN 3 ELSE 0 END +
+            CASE WHEN LOWER(ki.recommended_practice) LIKE '%' || LOWER($2::text) || '%' THEN 3 ELSE 0 END +
+            CASE WHEN LOWER(ki.anti_patterns) LIKE '%' || LOWER($2::text) || '%' THEN 2 ELSE 0 END +
+            CASE WHEN LOWER(ki.trigger_conditions) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
+            CASE WHEN LOWER(ki.diagnostic_steps) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END +
+            CASE WHEN LOWER(ki.applicability) LIKE '%' || LOWER($2::text) || '%' THEN 1 ELSE 0 END
         )::float8 AS text_score
-    FROM knowledge_item
-    WHERE workspace_id = $3
-      AND lifecycle_status NOT IN ('archived', 'deprecated')
-      AND (COALESCE(cardinality($4::text[]), 0) = 0 OR type = ANY($4::text[]))
-      AND (COALESCE(cardinality($5::text[]), 0) = 0 OR lifecycle_status = ANY($5::text[]))
-      AND ($6::uuid IS NULL OR project_id = $6)
-      AND ($7::uuid IS NULL OR agent_id = $7)
+    FROM knowledge_item ki
+    WHERE ki.workspace_id = $3
+      AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+      AND (
+          COALESCE(cardinality($4::text[]), 0) > 0
+          OR ki.lifecycle_status = 'published'
+      )
+      AND (
+          COALESCE(cardinality($4::text[]), 0) > 0
+          OR EXISTS (
+              SELECT 1
+              FROM knowledge_publish_target kpt
+              WHERE kpt.knowledge_item_id = ki.id
+                AND kpt.workspace_id = ki.workspace_id
+                AND kpt.target_type = 'rag'
+          )
+      )
+      AND (COALESCE(cardinality($5::text[]), 0) = 0 OR ki.type = ANY($5::text[]))
+      AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.lifecycle_status = ANY($4::text[]))
+      AND ($6::uuid IS NULL OR ki.project_id = $6)
+      AND ($7::uuid IS NULL OR ki.agent_id = $7)
       AND (
           COALESCE(cardinality($8::text[]), 0) = 0
-          OR domain_labels && $8::text[]
+          OR ki.domain_labels && $8::text[]
       )
 )
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, text_score
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, text_score
 FROM candidates
 WHERE text_score > 0
 ORDER BY text_score DESC, updated_at DESC
@@ -881,8 +935,8 @@ type SearchKnowledgeTextParams struct {
 	Limit       int32       `json:"limit"`
 	Query       string      `json:"query"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Types       []string    `json:"types"`
 	Statuses    []string    `json:"statuses"`
+	Types       []string    `json:"types"`
 	ProjectID   pgtype.UUID `json:"project_id"`
 	AgentID     pgtype.UUID `json:"agent_id"`
 	Labels      []string    `json:"labels"`
@@ -911,6 +965,8 @@ type SearchKnowledgeTextRow struct {
 	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
 	TextScore           float64            `json:"text_score"`
 }
 
@@ -919,8 +975,8 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 		arg.Limit,
 		arg.Query,
 		arg.WorkspaceID,
-		arg.Types,
 		arg.Statuses,
+		arg.Types,
 		arg.ProjectID,
 		arg.AgentID,
 		arg.Labels,
@@ -955,6 +1011,8 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
 			&i.TextScore,
 		); err != nil {
 			return nil, err
@@ -969,14 +1027,28 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 
 const searchKnowledgeVector = `-- name: SearchKnowledgeVector :many
 SELECT
-    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at,
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at,
     (1 - MIN(ke.embedding <=> $1::vector))::float8 AS vector_score
 FROM knowledge_item ki
 JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
 WHERE ki.workspace_id = $2
   AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
-  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR ki.type = ANY($3::text[]))
-  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.lifecycle_status = ANY($4::text[]))
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR ki.lifecycle_status = 'published'
+  )
+  AND (
+      COALESCE(cardinality($3::text[]), 0) > 0
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_publish_target kpt
+          WHERE kpt.knowledge_item_id = ki.id
+            AND kpt.workspace_id = ki.workspace_id
+            AND kpt.target_type = 'rag'
+      )
+  )
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR ki.type = ANY($4::text[]))
+  AND (COALESCE(cardinality($3::text[]), 0) = 0 OR ki.lifecycle_status = ANY($3::text[]))
   AND ($5::uuid IS NULL OR ki.project_id = $5)
   AND ($6::uuid IS NULL OR ki.agent_id = $6)
   AND (
@@ -991,8 +1063,8 @@ LIMIT $8
 type SearchKnowledgeVectorParams struct {
 	Embedding   pgvector.Vector `json:"embedding"`
 	WorkspaceID pgtype.UUID     `json:"workspace_id"`
-	Types       []string        `json:"types"`
 	Statuses    []string        `json:"statuses"`
+	Types       []string        `json:"types"`
 	ProjectID   pgtype.UUID     `json:"project_id"`
 	AgentID     pgtype.UUID     `json:"agent_id"`
 	Labels      []string        `json:"labels"`
@@ -1022,6 +1094,8 @@ type SearchKnowledgeVectorRow struct {
 	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
 	VectorScore         float64            `json:"vector_score"`
 }
 
@@ -1029,8 +1103,8 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 	rows, err := q.db.Query(ctx, searchKnowledgeVector,
 		arg.Embedding,
 		arg.WorkspaceID,
-		arg.Types,
 		arg.Statuses,
+		arg.Types,
 		arg.ProjectID,
 		arg.AgentID,
 		arg.Labels,
@@ -1066,6 +1140,8 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
 			&i.VectorScore,
 		); err != nil {
 			return nil, err
@@ -1076,6 +1152,83 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 		return nil, err
 	}
 	return items, nil
+}
+
+const setKnowledgeLifecycleStatus = `-- name: SetKnowledgeLifecycleStatus :one
+UPDATE knowledge_item SET
+    lifecycle_status = $1,
+    reviewed_by = CASE
+        WHEN $2::uuid IS NOT NULL THEN $2::uuid
+        ELSE reviewed_by
+    END,
+    reviewed_at = CASE
+        WHEN $2::uuid IS NOT NULL THEN now()
+        ELSE reviewed_at
+    END,
+    published_at = CASE
+        WHEN $1::text = 'published' AND published_at IS NULL THEN now()
+        ELSE published_at
+    END,
+    archived_at = CASE
+        WHEN $1::text = 'archived' AND archived_at IS NULL THEN now()
+        WHEN $1::text NOT IN ('archived', 'deprecated') THEN NULL
+        ELSE archived_at
+    END,
+    deprecated_at = CASE
+        WHEN $1::text = 'deprecated' AND deprecated_at IS NULL THEN now()
+        WHEN $1::text NOT IN ('archived', 'deprecated') THEN NULL
+        ELSE deprecated_at
+    END,
+    updated_by = $3,
+    updated_at = now()
+WHERE id = $4 AND workspace_id = $5
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+`
+
+type SetKnowledgeLifecycleStatusParams struct {
+	LifecycleStatus string      `json:"lifecycle_status"`
+	ReviewedBy      pgtype.UUID `json:"reviewed_by"`
+	UpdatedBy       pgtype.UUID `json:"updated_by"`
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SetKnowledgeLifecycleStatus(ctx context.Context, arg SetKnowledgeLifecycleStatusParams) (KnowledgeItem, error) {
+	row := q.db.QueryRow(ctx, setKnowledgeLifecycleStatus,
+		arg.LifecycleStatus,
+		arg.ReviewedBy,
+		arg.UpdatedBy,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.AgentID,
+		&i.Title,
+		&i.Type,
+		&i.DomainLabels,
+		&i.ProblemPattern,
+		&i.TriggerConditions,
+		&i.DiagnosticSteps,
+		&i.RecommendedPractice,
+		&i.AntiPatterns,
+		&i.Applicability,
+		&i.ConfidenceStatus,
+		&i.LifecycleStatus,
+		&i.CreatedBy,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
+	)
+	return i, err
 }
 
 const updateKnowledgeCandidateDraftState = `-- name: UpdateKnowledgeCandidateDraftState :one
@@ -1139,23 +1292,10 @@ UPDATE knowledge_item SET
     anti_patterns = COALESCE($10, anti_patterns),
     applicability = COALESCE($11, applicability),
     confidence_status = COALESCE($12, confidence_status),
-    lifecycle_status = COALESCE($13, lifecycle_status),
-    reviewed_by = COALESCE($14, reviewed_by),
-    reviewed_at = CASE
-        WHEN $14::uuid IS NOT NULL THEN now()
-        ELSE reviewed_at
-    END,
-    published_at = CASE
-        WHEN $13::text = 'published' AND published_at IS NULL THEN now()
-        ELSE published_at
-    END,
-    archived_at = CASE
-        WHEN $13::text = 'archived' AND archived_at IS NULL THEN now()
-        ELSE archived_at
-    END,
+    updated_by = COALESCE($13, updated_by),
     updated_at = now()
-WHERE id = $15 AND workspace_id = $16
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at
+WHERE id = $14 AND workspace_id = $15
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
 `
 
 type UpdateKnowledgeItemParams struct {
@@ -1171,8 +1311,7 @@ type UpdateKnowledgeItemParams struct {
 	AntiPatterns        pgtype.Text `json:"anti_patterns"`
 	Applicability       pgtype.Text `json:"applicability"`
 	ConfidenceStatus    pgtype.Text `json:"confidence_status"`
-	LifecycleStatus     pgtype.Text `json:"lifecycle_status"`
-	ReviewedBy          pgtype.UUID `json:"reviewed_by"`
+	UpdatedBy           pgtype.UUID `json:"updated_by"`
 	ID                  pgtype.UUID `json:"id"`
 	WorkspaceID         pgtype.UUID `json:"workspace_id"`
 }
@@ -1191,8 +1330,7 @@ func (q *Queries) UpdateKnowledgeItem(ctx context.Context, arg UpdateKnowledgeIt
 		arg.AntiPatterns,
 		arg.Applicability,
 		arg.ConfidenceStatus,
-		arg.LifecycleStatus,
-		arg.ReviewedBy,
+		arg.UpdatedBy,
 		arg.ID,
 		arg.WorkspaceID,
 	)
@@ -1220,6 +1358,8 @@ func (q *Queries) UpdateKnowledgeItem(ctx context.Context, arg UpdateKnowledgeIt
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
 	)
 	return i, err
 }
@@ -1368,6 +1508,65 @@ func (q *Queries) UpsertKnowledgeEmbedding(ctx context.Context, arg UpsertKnowle
 		&i.ContentHash,
 		&i.EmbeddedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgePublishTarget = `-- name: UpsertKnowledgePublishTarget :one
+INSERT INTO knowledge_publish_target (
+    knowledge_item_id, workspace_id, target_type, target_id,
+    target_url, target_title, metadata, created_by
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    COALESCE($7, '{}'::jsonb), $8
+)
+ON CONFLICT (knowledge_item_id, target_type)
+DO UPDATE SET
+    target_id = EXCLUDED.target_id,
+    target_url = EXCLUDED.target_url,
+    target_title = EXCLUDED.target_title,
+    metadata = EXCLUDED.metadata,
+    created_by = COALESCE(EXCLUDED.created_by, knowledge_publish_target.created_by),
+    updated_at = now()
+RETURNING id, knowledge_item_id, workspace_id, target_type, target_id, target_url, target_title, metadata, created_by, created_at, updated_at
+`
+
+type UpsertKnowledgePublishTargetParams struct {
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	TargetType      string      `json:"target_type"`
+	TargetID        pgtype.UUID `json:"target_id"`
+	TargetUrl       pgtype.Text `json:"target_url"`
+	TargetTitle     pgtype.Text `json:"target_title"`
+	Metadata        interface{} `json:"metadata"`
+	CreatedBy       pgtype.UUID `json:"created_by"`
+}
+
+func (q *Queries) UpsertKnowledgePublishTarget(ctx context.Context, arg UpsertKnowledgePublishTargetParams) (KnowledgePublishTarget, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgePublishTarget,
+		arg.KnowledgeItemID,
+		arg.WorkspaceID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.TargetUrl,
+		arg.TargetTitle,
+		arg.Metadata,
+		arg.CreatedBy,
+	)
+	var i KnowledgePublishTarget
+	err := row.Scan(
+		&i.ID,
+		&i.KnowledgeItemID,
+		&i.WorkspaceID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.TargetUrl,
+		&i.TargetTitle,
+		&i.Metadata,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -579,6 +579,22 @@ type KnowledgeItem struct {
 	ArchivedAt          pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+}
+
+type KnowledgePublishTarget struct {
+	ID              pgtype.UUID        `json:"id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	TargetType      string             `json:"target_type"`
+	TargetID        pgtype.UUID        `json:"target_id"`
+	TargetUrl       pgtype.Text        `json:"target_url"`
+	TargetTitle     pgtype.Text        `json:"target_title"`
+	Metadata        []byte             `json:"metadata"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type KnowledgeRetrievalEvent struct {

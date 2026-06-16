@@ -35,6 +35,8 @@ type KnowledgeItemResponse struct {
 	ReviewedAt          *string  `json:"reviewed_at"`
 	PublishedAt         *string  `json:"published_at"`
 	ArchivedAt          *string  `json:"archived_at"`
+	UpdatedBy           *string  `json:"updated_by"`
+	DeprecatedAt        *string  `json:"deprecated_at"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
 }
@@ -49,6 +51,35 @@ type KnowledgeSourceResponse struct {
 	SourceTitle     *string `json:"source_title"`
 	SourceExcerpt   *string `json:"source_excerpt"`
 	CreatedAt       string  `json:"created_at"`
+}
+
+type KnowledgeSourceSummaryResponse struct {
+	Count              int      `json:"count"`
+	Types              []string `json:"types"`
+	PrimarySourceType  string   `json:"primary_source_type"`
+	PrimarySourceID    *string  `json:"primary_source_id"`
+	PrimarySourceTitle string   `json:"primary_source_title"`
+}
+
+type KnowledgeSourceDetailResponse struct {
+	KnowledgeSourceResponse
+	ResolvedTitle *string `json:"resolved_title"`
+	ResolvedURL   *string `json:"resolved_url"`
+	ResolvedNote  *string `json:"resolved_note"`
+}
+
+type KnowledgePublishTargetResponse struct {
+	ID              string  `json:"id"`
+	KnowledgeItemID string  `json:"knowledge_item_id"`
+	WorkspaceID     string  `json:"workspace_id"`
+	TargetType      string  `json:"target_type"`
+	TargetID        *string `json:"target_id"`
+	TargetURL       *string `json:"target_url"`
+	TargetTitle     *string `json:"target_title"`
+	Metadata        any     `json:"metadata"`
+	CreatedBy       *string `json:"created_by"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
 }
 
 type KnowledgeEmbeddingMetadataResponse struct {
@@ -91,6 +122,8 @@ type KnowledgeCandidateResponse struct {
 type KnowledgeDetailResponse struct {
 	Item            KnowledgeItemResponse                `json:"item"`
 	Sources         []KnowledgeSourceResponse            `json:"sources"`
+	SourceSummary   KnowledgeSourceSummaryResponse       `json:"source_summary"`
+	PublishTargets  []KnowledgePublishTargetResponse     `json:"publish_targets"`
 	Embeddings      []KnowledgeEmbeddingMetadataResponse `json:"embeddings"`
 	FeedbackSummary []KnowledgeFeedbackSummaryResponse   `json:"feedback_summary"`
 }
@@ -142,6 +175,27 @@ type knowledgeSourceInput struct {
 	SourceURL     *string `json:"source_url"`
 	SourceTitle   *string `json:"source_title"`
 	SourceExcerpt *string `json:"source_excerpt"`
+}
+
+type publishKnowledgeWikiRequest struct {
+	WikiPageID *string `json:"wiki_page_id"`
+	ParentID   *string `json:"parent_id"`
+	Title      *string `json:"title"`
+	Content    *string `json:"content"`
+}
+
+type publishKnowledgeSkillRequest struct {
+	SkillID          *string                   `json:"skill_id"`
+	Name             *string                   `json:"name"`
+	Description      *string                   `json:"description"`
+	Content          *string                   `json:"content"`
+	IncludeSourceMap *bool                     `json:"include_source_map"`
+	Files            []knowledgeSkillFileInput `json:"files"`
+}
+
+type knowledgeSkillFileInput struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
 }
 
 type searchKnowledgeRequest struct {
@@ -343,6 +397,7 @@ func (h *Handler) UpdateKnowledge(w http.ResponseWriter, r *http.Request) {
 		ConfidenceStatus:    textFromPtr(req.ConfidenceStatus),
 		LifecycleStatus:     textFromPtr(req.LifecycleStatus),
 		ReviewedBy:          reviewedBy,
+		UpdatedBy:           member.ID,
 	})
 	if err != nil {
 		h.writeKnowledgeError(w, err, "failed to update knowledge")
@@ -356,11 +411,205 @@ func (h *Handler) DeleteKnowledge(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.KnowledgeService.Archive(r.Context(), wsUUID, itemID); err != nil {
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	if _, err := h.KnowledgeService.Archive(r.Context(), wsUUID, itemID, member.ID); err != nil {
 		h.writeKnowledgeError(w, err, "failed to archive knowledge")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ReviewKnowledge(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	item, err := h.KnowledgeService.Review(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to review knowledge")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
+}
+
+func (h *Handler) PublishKnowledge(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	detail, err := h.KnowledgeService.Publish(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to publish knowledge")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) ArchiveKnowledge(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	item, err := h.KnowledgeService.Archive(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to archive knowledge")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
+}
+
+func (h *Handler) DeprecateKnowledge(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	item, err := h.KnowledgeService.Deprecate(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to deprecate knowledge")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
+}
+
+func (h *Handler) RestoreKnowledge(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	item, err := h.KnowledgeService.Restore(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to restore knowledge")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
+}
+
+func (h *Handler) PublishKnowledgeToWiki(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	var req publishKnowledgeWikiRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	wikiPageID, ok := parseOptionalUUIDPtr(w, req.WikiPageID, "wiki_page_id")
+	if !ok {
+		return
+	}
+	parentID, ok := parseOptionalUUIDPtr(w, req.ParentID, "parent_id")
+	if !ok {
+		return
+	}
+	detail, err := h.KnowledgeService.PublishToWiki(r.Context(), service.KnowledgePublishWikiParams{
+		WorkspaceID: wsUUID,
+		ItemID:      itemID,
+		ActorID:     member.ID,
+		ActorUserID: member.UserID,
+		WikiPageID:  wikiPageID,
+		ParentID:    parentID,
+		Title:       stringFromPtr(req.Title),
+		Content:     stringFromPtr(req.Content),
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to publish knowledge to wiki")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) PublishKnowledgeToSkill(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	var req publishKnowledgeSkillRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	skillID, ok := parseOptionalUUIDPtr(w, req.SkillID, "skill_id")
+	if !ok {
+		return
+	}
+	files := make([]service.KnowledgeSkillFileInput, 0, len(req.Files))
+	for _, file := range req.Files {
+		files = append(files, service.KnowledgeSkillFileInput{Path: file.Path, Content: file.Content})
+	}
+	includeSourceMap := true
+	if req.IncludeSourceMap != nil {
+		includeSourceMap = *req.IncludeSourceMap
+	}
+	detail, err := h.KnowledgeService.PublishToSkill(r.Context(), service.KnowledgePublishSkillParams{
+		WorkspaceID:      wsUUID,
+		ItemID:           itemID,
+		ActorID:          member.ID,
+		ActorUserID:      member.UserID,
+		SkillID:          skillID,
+		Name:             stringFromPtr(req.Name),
+		Description:      stringFromPtr(req.Description),
+		Content:          stringFromPtr(req.Content),
+		IncludeSourceMap: includeSourceMap,
+		SupportingFiles:  files,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to publish knowledge to skill")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) GetKnowledgeSources(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	sources, err := h.KnowledgeService.GetSourceDetails(r.Context(), wsUUID, itemID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to get knowledge sources")
+		return
+	}
+	resp := make([]KnowledgeSourceDetailResponse, len(sources))
+	for i, source := range sources {
+		resp[i] = knowledgeSourceDetailToResponse(source)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sources": resp, "total": len(resp)})
 }
 
 func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -633,9 +882,15 @@ func knowledgeDetailToResponse(detail service.KnowledgeDetail) KnowledgeDetailRe
 	for i, row := range detail.FeedbackSummary {
 		feedback[i] = KnowledgeFeedbackSummaryResponse{Value: row.Value, Count: row.Count}
 	}
+	targets := make([]KnowledgePublishTargetResponse, len(detail.PublishTargets))
+	for i, target := range detail.PublishTargets {
+		targets[i] = knowledgePublishTargetToResponse(target)
+	}
 	return KnowledgeDetailResponse{
 		Item:            knowledgeItemToResponse(detail.Item),
 		Sources:         sources,
+		SourceSummary:   knowledgeSourceSummaryToResponse(detail.SourceSummary),
+		PublishTargets:  targets,
 		Embeddings:      embeddings,
 		FeedbackSummary: feedback,
 	}
@@ -663,6 +918,8 @@ func knowledgeItemToResponse(item db.KnowledgeItem) KnowledgeItemResponse {
 		ReviewedAt:          timestampPtr(item.ReviewedAt),
 		PublishedAt:         timestampPtr(item.PublishedAt),
 		ArchivedAt:          timestampPtr(item.ArchivedAt),
+		UpdatedBy:           uuidToPtr(item.UpdatedBy),
+		DeprecatedAt:        timestampPtr(item.DeprecatedAt),
 		CreatedAt:           timestampToString(item.CreatedAt),
 		UpdatedAt:           timestampToString(item.UpdatedAt),
 	}
@@ -679,6 +936,47 @@ func knowledgeSourceToResponse(source db.KnowledgeSource) KnowledgeSourceRespons
 		SourceTitle:     textToPtr(source.SourceTitle),
 		SourceExcerpt:   textToPtr(source.SourceExcerpt),
 		CreatedAt:       timestampToString(source.CreatedAt),
+	}
+}
+
+func knowledgeSourceSummaryToResponse(summary service.KnowledgeSourceSummary) KnowledgeSourceSummaryResponse {
+	return KnowledgeSourceSummaryResponse{
+		Count:              summary.Count,
+		Types:              summary.Types,
+		PrimarySourceType:  summary.PrimarySourceType,
+		PrimarySourceID:    uuidToPtr(summary.PrimarySourceID),
+		PrimarySourceTitle: summary.PrimarySourceTitle,
+	}
+}
+
+func knowledgeSourceDetailToResponse(detail service.KnowledgeSourceDetail) KnowledgeSourceDetailResponse {
+	return KnowledgeSourceDetailResponse{
+		KnowledgeSourceResponse: knowledgeSourceToResponse(detail.Source),
+		ResolvedTitle:           textToPtr(detail.ResolvedTitle),
+		ResolvedURL:             textToPtr(detail.ResolvedURL),
+		ResolvedNote:            textToPtr(detail.ResolvedNote),
+	}
+}
+
+func knowledgePublishTargetToResponse(target db.KnowledgePublishTarget) KnowledgePublishTargetResponse {
+	var metadata any = map[string]any{}
+	if len(target.Metadata) > 0 {
+		if err := json.Unmarshal(target.Metadata, &metadata); err != nil {
+			metadata = map[string]any{}
+		}
+	}
+	return KnowledgePublishTargetResponse{
+		ID:              uuidToString(target.ID),
+		KnowledgeItemID: uuidToString(target.KnowledgeItemID),
+		WorkspaceID:     uuidToString(target.WorkspaceID),
+		TargetType:      target.TargetType,
+		TargetID:        uuidToPtr(target.TargetID),
+		TargetURL:       textToPtr(target.TargetUrl),
+		TargetTitle:     textToPtr(target.TargetTitle),
+		Metadata:        metadata,
+		CreatedBy:       uuidToPtr(target.CreatedBy),
+		CreatedAt:       timestampToString(target.CreatedAt),
+		UpdatedAt:       timestampToString(target.UpdatedAt),
 	}
 }
 
@@ -799,6 +1097,13 @@ func textFromPtr(value *string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: strings.TrimSpace(*value), Valid: true}
+}
+
+func stringFromPtr(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func timestampPtr(ts pgtype.Timestamptz) *string {
