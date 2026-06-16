@@ -400,6 +400,13 @@ export function DynamicInbox() {
     setSelectedSnapshot(null);
     setNewChat({ agentId, sessionId: null });
   };
+  // TECH-3664 — opening an EXISTING (unread) agent session from the Chat block:
+  // find its chat entry and select it so the unread conversation opens in the
+  // detail panel (where it gets marked read), instead of a blank new chat.
+  const handleOpenAgentSession = (sessionId: string) => {
+    const entry = entries.find((e) => e.kind === "chat" && e.id === sessionId);
+    if (entry) onSelect(entry);
+  };
 
   // TECH-3618 — the sidebar "New message" button opens the GLOBAL picker, which
   // hands its result to the inbox via URL params: ?chat=new-chat&agent=<id> for
@@ -939,6 +946,7 @@ export function DynamicInbox() {
                             showAgents={section.showAgents}
                             onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
                             onOpenAgentChat={handleAgentChatStarted}
+                            onOpenAgentSession={handleOpenAgentSession}
                             onRemove={() => removeSection(section.id)}
                           />
                         </div>
