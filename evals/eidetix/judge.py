@@ -35,8 +35,9 @@ import tempfile
 from collections import defaultdict
 
 HERE = pathlib.Path(__file__).resolve().parent
-RUNS_FILE = HERE / "results" / "runs.jsonl"
-REPORT_FILE = HERE / "results" / "report.json"
+RUNS_FILE = pathlib.Path(os.environ.get("EVAL_RUNS_FILE", str(HERE / "results" / "runs.jsonl")))
+REPORT_FILE = pathlib.Path(os.environ.get("EVAL_REPORT_FILE", str(HERE / "results" / "report.json")))
+TASKS_FILE = pathlib.Path(os.environ.get("EVAL_TASKS_FILE", str(HERE / "tasks.json")))
 JUDGE_MODEL = os.environ.get("EVAL_JUDGE_MODEL", "claude-opus-4-8")
 
 _WORD = re.compile(r"[a-z0-9]+")
@@ -57,7 +58,7 @@ def load():
     if not RUNS_FILE.exists():
         raise SystemExit(f"no runs at {RUNS_FILE}; run run_eval.py first")
     rows = [json.loads(l) for l in RUNS_FILE.read_text().splitlines() if l.strip()]
-    suite = json.loads((HERE / "tasks.json").read_text())
+    suite = json.loads(TASKS_FILE.read_text())
     facts = {t["id"]: t.get("graph_facts_expected", []) for t in suite["tasks"]}
     relevant = {t["id"]: t.get("graph_relevant", True) for t in suite["tasks"]}
     titles = {t["id"]: t["title"] for t in suite["tasks"]}

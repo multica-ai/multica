@@ -48,6 +48,17 @@ copy to X because Y." Not worth writing: "Ran a draft, will revise." Avoid
 duplicating an entry the graph already holds — if `recall`/`search` already
 surfaced the fact, do not re-ingest it.
 
+## Deliver clean output — keep the recall process internal
+
+Recall and reasoning are how you *prepare*, not what you *deliver*. When you
+post your result to the issue, post **only the finished deliverable** — the copy,
+the brief, the rewrite. Do NOT paste your recall queries, the graph snippets you
+read, or a narration of which brand rules you applied ("I recalled the brand
+gates, which say…"). That process belongs in your working notes, not the issue
+comment. The reader wants the artifact, not the trail that produced it. A
+deliverable wrapped in meta-commentary reads worse and buries the work — let the
+output stand on its own, and let any required citation be brief and inline.
+
 ## Boundaries
 
 - The graph is shared across every agent on this project. Write facts, not

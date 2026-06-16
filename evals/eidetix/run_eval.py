@@ -41,7 +41,9 @@ import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 RESULTS = HERE / "results"
-RUNS_FILE = RESULTS / "runs.jsonl"
+# Override for isolated re-runs (e.g. a subset after a skill change).
+RUNS_FILE = pathlib.Path(os.environ.get("EVAL_RUNS_FILE", str(RESULTS / "runs.jsonl")))
+TASKS_FILE = pathlib.Path(os.environ.get("EVAL_TASKS_FILE", str(HERE / "tasks.json")))
 
 MULTICA_BIN = os.environ.get("MULTICA_BIN", str(HERE.parent.parent / "server" / "bin" / "multica"))
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgres://multica:multica@localhost:5432/multica?sslmode=disable")
@@ -90,6 +92,9 @@ def create_issue(task: dict, status: str) -> str:
              "--status", status,
              "--assignee-id", AGENT_ID,
              "--project", PROJECT,
+             # The eval reuses identical titles across arms/trials by design;
+             # bypass the active-duplicate guard.
+             "--allow-duplicate",
              "--output", "json")
     issue_id = res.get("id") if isinstance(res, dict) else None
     if not issue_id:
@@ -155,7 +160,7 @@ def main() -> int:
         die("set EVAL_PROJECT and EVAL_AGENT_ID")
     if not pathlib.Path(MULTICA_BIN).exists():
         die(f"multica binary not found at {MULTICA_BIN} (run `make build`)")
-    suite = json.loads((HERE / "tasks.json").read_text())
+    suite = json.loads(TASKS_FILE.read_text())
     status = suite.get("status", "todo")
     tasks = suite["tasks"]
     RESULTS.mkdir(exist_ok=True)
@@ -171,9 +176,23 @@ def main() -> int:
     # rotate by trial to interleave arms/tasks rather than batching
     plan.sort(key=lambda x: (x[2], (0 if x[1] == "with" else 1) ^ (x[2] % 2)))
 
-    print(f"==> {len(plan)} runs planned ({len(tasks)} tasks x 2 arms x {TRIALS} trials)")
+    # Resume: skip (task, arm, trial) cells already recorded in runs.jsonl so a
+    # re-launch after a mid-run failure continues instead of duplicating work.
+    done = set()
+    if RUNS_FILE.exists():
+        for line in RUNS_FILE.read_text().splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            done.add((r["task_id"], r["arm"], r["trial"]))
+
+    print(f"==> {len(plan)} runs planned ({len(tasks)} tasks x 2 arms x {TRIALS} trials); "
+          f"{len(done)} already done, {len(plan) - len(done)} to run")
     with RUNS_FILE.open("a") as fh:
         for i, (task, arm, trial) in enumerate(plan, 1):
+            if (task["id"], arm, trial) in done:
+                print(f"[{i}/{len(plan)}] task={task['id']} arm={arm} trial={trial} — skip (done)")
+                continue
             print(f"[{i}/{len(plan)}] task={task['id']} arm={arm} trial={trial} ...", flush=True)
             set_arm(arm == "with")
             issue_id = create_issue(task, status)
