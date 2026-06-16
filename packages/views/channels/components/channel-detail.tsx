@@ -44,6 +44,9 @@ import { EditChannelDialog } from "./edit-channel-dialog";
 import { ChannelListenersPanel } from "./channel-listeners-panel";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
 import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-typing): TECH-3664 — "X is typing…" line + typing ping.
+import { ChannelTypingIndicator } from "@multica/cerebro-channels";
+import { useChannelTyping } from "@multica/core/presence";
 // CEREBRO-PATCH(channel-cost-chip-import): FIR-39 channel-wide total cost chip in the header.
 import { ChannelCostChip } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
@@ -99,6 +102,9 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // for new messages that arrive while the conversation is already open.
   // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — see cerebro-channels.
   useChannelAutoMarkRead(channelId, channel?.unread_count);
+
+  // CEREBRO-PATCH(channel-typing): TECH-3664 — live "is typing…" for this channel/DM.
+  const { typingUserIds, notifyTyping } = useChannelTyping(channelId);
 
   // CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — produce {topLevel,
   // repliesByParent} for SlackMessageView + ThreadSidePanel.
@@ -406,10 +412,13 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             {/* CEREBRO-PATCH(channels-favorites-cycle-break): inject ActorAvatar so cerebro-channels stays free of an @multica/views dep (JEH-718). */}
             <ChannelAgentInlineRow channelId={channelId} AvatarComponent={ActorAvatar} />
           </div>
+          {/* CEREBRO-PATCH(channel-typing): TECH-3664 — "X is typing…" above composer. */}
+          <ChannelTypingIndicator typingUserIds={typingUserIds} />
           <div className="shrink-0 border-t px-4 py-3">
             {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
                 chat-like; entering one should land the caret in the input. */}
-            <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus />
+            {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}
+            <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus onTyping={notifyTyping} />
           </div>
         </div>
 

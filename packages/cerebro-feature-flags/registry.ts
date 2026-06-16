@@ -23,6 +23,7 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
+  | "cerebro_typing_indicators"
   | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
   | "cerebro_inbox_wakeup_running"
@@ -186,6 +187,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
+  cerebro_typing_indicators: true,
   cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
   cerebro_inbox_wakeup_running: true,
@@ -523,6 +525,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
+  },
+  {
+    key: "cerebro_typing_indicators",
+    label: "Typing indicators",
+    group: "inbox",
+    description:
+      "Show a Slack-style \"is typing…\" line inside a channel or direct-message conversation when another person is composing a reply, and surface when an agent is generating its response. The other person's composer sends a lightweight typing ping (throttled); the indicator clears after a few seconds of silence.",
   },
   {
     key: "cerebro_chat_row_actions",

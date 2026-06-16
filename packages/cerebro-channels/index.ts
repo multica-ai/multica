@@ -2,6 +2,9 @@
 // that lives outside the upstream zone so the validate-cerebro-patches gate
 // stays clean. See docs/cerebro-patches.md (`cerebro-channels-favorites`).
 export { ChannelAgentInlineRow } from "./channel-agent-inline-row";
+// TECH-3664 — in-conversation "is typing…" line for channels/DMs.
+export { ChannelTypingIndicator } from "./channel-typing-indicator";
+export type { ChannelTypingIndicatorProps } from "./channel-typing-indicator";
 export { useChannelFavoritesStore, actorKey, channelKey } from "./favorites-store";
 export type { ActorKey, ChannelKey, FavoriteKey } from "./favorites-store";
 export { useArchiveChannel, useUnarchiveChannel } from "./archive-mutations";
