@@ -74,7 +74,7 @@ export function WeeklyCostChart({ data }: { data: WeeklyCostStackData[] }) {
                   <div className="flex items-center justify-between gap-2 font-medium">
                     <span>{t(($) => $.charts.tooltip_total)}</span>
                     <span className="font-mono tabular-nums">
-                      ${total.toFixed(2)}
+                      {total.toFixed(2)}
                     </span>
                   </div>
                 );
