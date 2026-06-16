@@ -57,28 +57,17 @@ export function buildRuntimeCatalog(
   return [...builtins, ...customs];
 }
 
-// Splits a multi-line textarea value into the `fixed_args` string array —
-// one arg per non-blank line, trimmed. Returns `undefined` when there are no
-// args so the caller can omit the key entirely (the server then applies its
-// own default), per the brief's "if omitted, do not send the key".
-export function parseFixedArgs(raw: string): string[] | undefined {
-  const args = raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  return args.length > 0 ? args : undefined;
-}
-
-// Joins a `fixed_args` array back into the textarea value for the edit form.
-export function fixedArgsToText(args: string[] | null | undefined): string {
-  return (args ?? []).join("\n");
-}
+// NOTE: `fixed_args` is intentionally NOT exposed in the v1 UI. The server
+// still carries the column, but the daemon does not yet splice these args into
+// the agent launch command, so surfacing an input/display here would promise
+// admins a behavior that does not exist. Re-introduce the parse/format helpers
+// and the form field only once the daemon actually passes them to the backend
+// (proven by a test). See TODO(MUL-3284) in server/internal/daemon/daemon.go.
 
 export interface ProfileFormValues {
   displayName: string;
   commandName: string;
   description: string;
-  fixedArgs: string;
 }
 
 export type ProfileFormErrorField = "displayName" | "commandName";

@@ -36,7 +36,6 @@ func newProfileCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("description", "", "")
-	cmd.Flags().StringArray("fixed-arg", nil, "")
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
@@ -48,7 +47,6 @@ func newProfileUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("description", "", "")
-	cmd.Flags().StringArray("fixed-arg", nil, "")
 	cmd.Flags().String("visibility", "", "")
 	cmd.Flags().Bool("enabled", true, "")
 	cmd.Flags().String("output", "json", "")
@@ -146,8 +144,6 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	_ = cmd.Flags().Set("protocol-family", "codex")
 	_ = cmd.Flags().Set("command-name", "company-codex")
 	_ = cmd.Flags().Set("display-name", "Company Codex")
-	_ = cmd.Flags().Set("fixed-arg", "--foo")
-	_ = cmd.Flags().Set("fixed-arg", "--bar")
 	_ = cmd.Flags().Set("visibility", "workspace")
 
 	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
@@ -162,9 +158,10 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if gotBody["protocol_family"] != "codex" || gotBody["command_name"] != "company-codex" || gotBody["display_name"] != "Company Codex" {
 		t.Errorf("unexpected body: %#v", gotBody)
 	}
-	args, ok := gotBody["fixed_args"].([]any)
-	if !ok || len(args) != 2 || args[0] != "--foo" || args[1] != "--bar" {
-		t.Errorf("fixed_args = %#v, want [--foo --bar]", gotBody["fixed_args"])
+	// fixed_args is intentionally NOT exposed by the CLI in v1 (the daemon does
+	// not yet wire it into the launch command), so it must never be sent.
+	if _, present := gotBody["fixed_args"]; present {
+		t.Errorf("fixed_args must not be sent by the CLI, got %#v", gotBody["fixed_args"])
 	}
 	if gotBody["visibility"] != "workspace" {
 		t.Errorf("visibility = %v, want workspace", gotBody["visibility"])

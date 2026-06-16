@@ -40,8 +40,6 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   PROTOCOL_FAMILIES,
   buildRuntimeCatalog,
-  fixedArgsToText,
-  parseFixedArgs,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -328,7 +326,6 @@ function DetailPanel({
   }
 
   const profile = entry.profile;
-  const fixedArgs = profile.fixed_args ?? [];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -365,17 +362,6 @@ function DetailPanel({
             ) : (
               <span className="text-muted-foreground">
                 {t(($) => $.profiles.detail.no_description)}
-              </span>
-            )}
-          </DetailRow>
-          <DetailRow label={t(($) => $.profiles.detail.fixed_args)}>
-            {fixedArgs.length > 0 ? (
-              <code className="block whitespace-pre-wrap rounded-md bg-muted px-2 py-1 font-mono text-xs">
-                {fixedArgs.join("\n")}
-              </code>
-            ) : (
-              <span className="text-muted-foreground">
-                {t(($) => $.profiles.detail.no_fixed_args)}
               </span>
             )}
           </DetailRow>
@@ -549,7 +535,6 @@ function ProfileDetailsForm({
     displayName: profile?.display_name ?? "",
     commandName: profile?.command_name ?? "",
     description: profile?.description ?? "",
-    fixedArgs: fixedArgsToText(profile?.fixed_args),
   });
   const [visibility, setVisibility] = useState<RuntimeProfileVisibility>(
     profile?.visibility ?? "workspace",
@@ -573,7 +558,6 @@ function ProfileDetailsForm({
     setErrors(validationErrors);
     if (validationErrors.length > 0) return;
 
-    const fixedArgs = parseFixedArgs(values.fixedArgs);
     const description = values.description.trim();
 
     try {
@@ -583,7 +567,6 @@ function ProfileDetailsForm({
           protocol_family: family,
           command_name: values.commandName.trim(),
           ...(description ? { description } : {}),
-          ...(fixedArgs ? { fixed_args: fixedArgs } : {}),
           visibility,
         });
         toast.success(t(($) => $.profiles.form.toast_created));
@@ -595,7 +578,6 @@ function ProfileDetailsForm({
             display_name: values.displayName.trim(),
             command_name: values.commandName.trim(),
             description: description ? description : null,
-            fixed_args: fixedArgs ?? [],
             visibility,
           },
         });
@@ -724,24 +706,11 @@ function ProfileDetailsForm({
           />
         </div>
 
-        <div className="space-y-1.5">
-          <Label
-            htmlFor={`${idPrefix}-fixed-args`}
-            className="text-xs text-muted-foreground"
-          >
-            {t(($) => $.profiles.form.fixed_args_label)}
-          </Label>
-          <Textarea
-            id={`${idPrefix}-fixed-args`}
-            value={values.fixedArgs}
-            onChange={(e) => setField("fixedArgs", e.target.value)}
-            placeholder={t(($) => $.profiles.form.fixed_args_placeholder)}
-            className="min-h-16 font-mono text-sm"
-          />
-          <p className="text-[11px] text-muted-foreground">
-            {t(($) => $.profiles.form.fixed_args_hint)}
-          </p>
-        </div>
+        {/* NOTE: a `fixed_args` input is intentionally omitted in v1 — the
+            daemon does not yet pass these args to the agent launch command, so
+            exposing the field would promise admins a no-op. Re-add only once
+            it's wired end-to-end. See TODO(MUL-3284) in
+            server/internal/daemon/daemon.go. */}
 
         <fieldset className="space-y-1.5">
           <legend className="text-xs text-muted-foreground">

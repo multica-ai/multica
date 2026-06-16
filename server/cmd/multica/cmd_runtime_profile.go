@@ -94,7 +94,6 @@ func init() {
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
-	runtimeProfileCreateCmd.Flags().StringArray("fixed-arg", nil, "Launch argument every agent on this runtime inherits (repeatable)")
 	runtimeProfileCreateCmd.Flags().String("visibility", "", "Visibility: workspace or private")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -102,7 +101,11 @@ func init() {
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
 	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
-	runtimeProfileUpdateCmd.Flags().StringArray("fixed-arg", nil, "Replace launch arguments (repeatable; pass once per arg)")
+	// NOTE: a --fixed-arg flag is intentionally NOT exposed in v1. The server
+	// carries the fixed_args column, but the daemon does not yet pass these
+	// args to the agent launch command, so a CLI flag would promise admins a
+	// no-op. Re-add once it's wired end-to-end (TODO(MUL-3284), see
+	// server/internal/daemon/daemon.go).
 	runtimeProfileUpdateCmd.Flags().String("visibility", "", "New visibility: workspace or private")
 	runtimeProfileUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the profile")
 	runtimeProfileUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -172,7 +175,6 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	commandName, _ := cmd.Flags().GetString("command-name")
 	displayName, _ := cmd.Flags().GetString("display-name")
 	description, _ := cmd.Flags().GetString("description")
-	fixedArgs, _ := cmd.Flags().GetStringArray("fixed-arg")
 	visibility, _ := cmd.Flags().GetString("visibility")
 
 	if strings.TrimSpace(family) == "" {
@@ -208,9 +210,6 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	if description != "" {
 		body["description"] = description
 	}
-	if len(fixedArgs) > 0 {
-		body["fixed_args"] = fixedArgs
-	}
 	if visibility != "" {
 		body["visibility"] = visibility
 	}
@@ -241,10 +240,6 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("fixed-arg") {
-		v, _ := cmd.Flags().GetStringArray("fixed-arg")
-		body["fixed_args"] = v
-	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		if err := validateVisibility(v); err != nil {
@@ -258,7 +253,7 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --fixed-arg, --visibility, --enabled")
+		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --visibility, --enabled")
 	}
 
 	client, err := newAPIClient(cmd)
