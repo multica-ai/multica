@@ -20,6 +20,9 @@
     "toast_deleted": "已删除 issue",
     "toast_delete_failed": "删除 issue 失败"
   },
+  "issue_detail": {
+    "title": "Issue 详情"
+  },
   "feedback": {
     "title": "反馈",
     "placeholder": "聊聊你的体验、遇到的 bug，或想看到的功能...",

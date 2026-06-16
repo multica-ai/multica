@@ -14,7 +14,13 @@ import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import {
+  issueAssigneeGroupsOptions,
+  issueGraphOptions,
+  issueListOptions,
+  childIssueProgressOptions,
+  type AssigneeGroupedIssuesFilter,
+} from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -22,6 +28,7 @@ import { PageHeader } from "../../layout/page-header";
 import { IssuesHeader } from "./issues-header";
 import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
+import { IssueGraphView } from "./issue-graph-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useT } from "../../i18n";
 
@@ -43,6 +50,7 @@ export function IssuesPage() {
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesGraph = viewMode === "graph";
 
   // Derive the set of issue ids that currently have at least one
   // `running` agent task. Used by the workspace agents-working filter
@@ -78,15 +86,22 @@ export function IssuesPage() {
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter);
   const statusIssuesQuery = useQuery({
     ...issueListOptions(wsId),
-    enabled: !usesAssigneeBoard,
+    enabled: !usesAssigneeBoard && !usesGraph,
+  });
+  const graphIssuesQuery = useQuery({
+    ...issueGraphOptions(wsId),
+    enabled: usesGraph,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
   const allIssues = useMemo(
-    () => statusIssuesQuery.data ?? [],
-    [statusIssuesQuery.data],
+    () =>
+      usesGraph
+        ? graphIssuesQuery.data ?? []
+        : statusIssuesQuery.data ?? [],
+    [graphIssuesQuery.data, statusIssuesQuery.data, usesGraph],
   );
   const assigneeIssues = useMemo(
     () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
@@ -94,6 +109,8 @@ export function IssuesPage() {
   );
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
+    : usesGraph
+    ? graphIssuesQuery.isLoading
     : statusIssuesQuery.isLoading;
 
   // Clear filter state when switching between workspaces (URL-driven).
@@ -117,6 +134,10 @@ export function IssuesPage() {
   const issues = useMemo(
     () => filterIssues(scopedIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds }),
     [scopedIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
+  );
+  const matchedIssueIds = useMemo(
+    () => new Set(issues.map((issue) => issue.id)),
+    [issues],
   );
 
   // Fetch sub-issue progress from the backend so counts are accurate
@@ -205,7 +226,7 @@ export function IssuesPage() {
 
       <ViewStoreProvider store={useIssueViewStore}>
         {/* Header 2: Scope tabs + filters */}
-        <IssuesHeader scopedIssues={headerIssues} />
+        <IssuesHeader scopedIssues={headerIssues} allowGraph />
 
         {/* Content: scrollable */}
         {headerIssues.length === 0 ? (
@@ -225,6 +246,12 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 hiddenStatuses={hiddenStatuses}
                 onMoveIssue={handleMoveIssue}
+                childProgressMap={childProgressMap}
+              />
+            ) : viewMode === "graph" ? (
+              <IssueGraphView
+                issues={scopedIssues}
+                matchedIssueIds={matchedIssueIds}
                 childProgressMap={childProgressMap}
               />
             ) : (

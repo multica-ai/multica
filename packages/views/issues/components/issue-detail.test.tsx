@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
+import { forwardRef, useRef, useState, useImperativeHandle, type ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -456,12 +456,15 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(
+  issueId = "issue-1",
+  props: Partial<ComponentProps<typeof IssueDetail>> = {},
+) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail issueId={issueId} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -549,6 +552,17 @@ describe("IssueDetail (shared)", () => {
     // After the URL-driven workspace refactor, issue paths are scoped under
     // /<workspaceSlug>/issues.
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
+  });
+
+  it("renders workspace breadcrumb as text when issue links open in modal", async () => {
+    renderIssueDetail("issue-1", { openIssueLinksInModal: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Test WS")).toBeInTheDocument();
+    });
+
+    const workspaceCrumb = screen.getByText("Test WS");
+    expect(workspaceCrumb.closest("a")).toBeNull();
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {

@@ -20,6 +20,9 @@
     "toast_deleted": "Issue deleted",
     "toast_delete_failed": "Failed to delete issue"
   },
+  "issue_detail": {
+    "title": "Issue details"
+  },
   "feedback": {
     "title": "Feedback",
     "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",

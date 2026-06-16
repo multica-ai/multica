@@ -8,11 +8,12 @@ import type {
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
-import { BOARD_STATUSES } from "./config";
+import { ALL_STATUSES, BOARD_STATUSES } from "./config";
 
 export const issueKeys = {
   all: (wsId: string) => ["issues", wsId] as const,
   list: (wsId: string) => [...issueKeys.all(wsId), "list"] as const,
+  graph: (wsId: string) => [...issueKeys.all(wsId), "graph"] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -80,6 +81,7 @@ export const ISSUE_PAGE_SIZE = 50;
 
 /** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
 export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+export const GRAPH_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
@@ -103,6 +105,27 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}): Promise<ListIssuesC
     byStatus[status] = { issues: res.issues, total: res.total };
   });
   return { byStatus };
+}
+
+async function fetchAllIssues(): Promise<Issue[]> {
+  const buckets = await Promise.all(
+    GRAPH_STATUSES.map(async (status) => {
+      const issues: Issue[] = [];
+      let offset = 0;
+      while (true) {
+        const response = await api.listIssues({
+          status,
+          limit: ISSUE_PAGE_SIZE,
+          offset,
+        });
+        issues.push(...response.issues);
+        offset += response.issues.length;
+        if (response.issues.length === 0 || offset >= response.total) break;
+      }
+      return issues;
+    }),
+  );
+  return buckets.flat();
 }
 
 /**
@@ -215,6 +238,18 @@ export function issueListOptions(wsId: string) {
     queryKey: issueKeys.list(wsId),
     queryFn: () => fetchFirstPages(),
     select: flattenIssueBuckets,
+  });
+}
+
+/**
+ * Complete workspace issue set for relationship rendering. Unlike the
+ * board/list query, this walks every status page so graph edges never point
+ * at nodes omitted by first-page pagination.
+ */
+export function issueGraphOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.graph(wsId),
+    queryFn: fetchAllIssues,
   });
 }
 

@@ -77,6 +77,7 @@ interface CommentCardProps {
   onCollapseResolved?: () => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  openIssueLinksInModal?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +171,7 @@ function CommentRow({
   onEdit,
   onDelete,
   onToggleReaction,
+  openIssueLinksInModal = false,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -178,6 +180,7 @@ function CommentRow({
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
+  openIssueLinksInModal?: boolean;
 }) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -379,7 +382,11 @@ function CommentRow({
       ) : (
         <>
           <div className="mt-1.5 pl-8 text-sm leading-relaxed text-foreground/85">
-            <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            <ReadonlyContent
+              content={entry.content ?? ""}
+              attachments={entry.attachments}
+              openIssueLinksInModal={openIssueLinksInModal}
+            />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
           {!isTemp && (
@@ -415,6 +422,7 @@ function CommentCardImpl({
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
+  openIssueLinksInModal = false,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
@@ -677,7 +685,11 @@ function CommentCardImpl({
             ) : (
               <>
                 <div className="pl-10 text-sm leading-relaxed text-foreground/85">
-                  <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  <ReadonlyContent
+                    content={entry.content ?? ""}
+                    attachments={entry.attachments}
+                    openIssueLinksInModal={openIssueLinksInModal}
+                  />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
                 {!isTemp && (
@@ -705,6 +717,7 @@ function CommentCardImpl({
                 onEdit={onEdit}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                openIssueLinksInModal={openIssueLinksInModal}
               />
             </div>
           ))}
