@@ -490,6 +490,21 @@ describe("SlackBlock", () => {
     expect(screen.queryByTestId("people-list")).not.toBeInTheDocument();
   });
 
+  // TECH-3665 — when grouped by type, the limit is per kind so the Channels
+  // group is always shown by default. A single global cap of 1 sorted by name
+  // would keep only "Alice" and drop the channel entirely; per-kind keeps one
+  // person AND the channel.
+  it("applies the limit per kind when grouped by type so channels still show", async () => {
+    await act(async () => {
+      renderBlock({ limit: 1, groupBy: "type", sort: "name", unreadFirst: false });
+    });
+    // Channel kept (would be dropped by a single global cap of 1).
+    expect(screen.getByText("general")).toBeInTheDocument();
+    // People still capped to 1: Alice in, Bob out.
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.queryByText("Bob")).not.toBeInTheDocument();
+  });
+
   it("picking a limit from settings calls onSetLimit", async () => {
     const onSetLimit = vi.fn();
     const user = userEvent.setup();

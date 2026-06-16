@@ -7,10 +7,11 @@
 // the parent so it opens the conversation in its detail panel; this component
 // never navigates itself.
 //
-// TECH-3494 — the list is unified: a single total limit applies across all
-// three kinds, the default sort is "most recent conversation" across all kinds,
-// and the user picks whether to group by type or see one flat list. No
-// per-group scroll. All UI text is English.
+// TECH-3494 — the list is unified: the default sort is "most recent
+// conversation" across all kinds, and the user picks whether to group by type
+// or see one flat list. No per-group scroll. All UI text is English.
+// TECH-3665 — the row limit is per kind when grouped by type (so the Channels
+// group is always shown by default) and a single shared total when flat.
 //
 // Styling: light-mode, Tailwind semantic tokens only (bg-card,
 // text-muted-foreground, bg-success for the online dot, etc.). No hardcoded
@@ -56,7 +57,8 @@ export interface SlackBlockProps {
   wsId: string;
   selectedChannelId: string | null;
   onOpenChannel: (channel: Channel) => void;
-  /** Total rows to show across channels + people + agents. 0 = all. Default 10. */
+  /** Rows to show. Per kind when grouped by type, a shared total when flat.
+   *  0 = all. Default 10. */
   limit?: number;
   onSetLimit: (n: number) => void;
   /** Sort order across all kinds. Starred float to the top. Default "recent". */
@@ -315,8 +317,23 @@ export function SlackBlock({
       return a.name.localeCompare(b.name);
     });
     const effective = limit == null ? DEFAULT_LIMIT : limit;
-    return effective > 0 ? sorted.slice(0, effective) : sorted;
-  }, [allItems, normalizedSearch, unreadFirst, sort, limit]);
+    if (effective <= 0) return sorted;
+    // TECH-3665 — when grouped by type (the default), the limit is applied PER
+    // KIND so the Channels group is always shown by default. With a single
+    // global cap, busier People/DM rows ranked higher by recency could push
+    // every channel past the cap, leaving the Channels group empty even though
+    // the workspace has channels. The flat list keeps one shared total cap.
+    if (groupBy === "type") {
+      const perKind = new Map<ChatItem["kind"], number>();
+      return sorted.filter((it) => {
+        const taken = perKind.get(it.kind) ?? 0;
+        if (taken >= effective) return false;
+        perKind.set(it.kind, taken + 1);
+        return true;
+      });
+    }
+    return sorted.slice(0, effective);
+  }, [allItems, normalizedSearch, unreadFirst, sort, limit, groupBy]);
 
   const onlineCount = useMemo(
     () =>
