@@ -99,15 +99,17 @@ type KnowledgeSearchParams struct {
 	Query       string
 	Embedding   []float32
 	Limit       int32
+	Issue       *db.Issue
 	Filters     KnowledgeSearchFilters
 }
 
 type KnowledgeSearchResult struct {
-	Item        db.KnowledgeItem
-	TextScore   float64
-	VectorScore float64
-	FinalScore  float64
-	MatchReason string
+	Item          db.KnowledgeItem
+	SourceSummary KnowledgeSourceSummary
+	TextScore     float64
+	VectorScore   float64
+	FinalScore    float64
+	MatchReason   string
 }
 
 type KnowledgeTaskClaimParams struct {
@@ -786,7 +788,7 @@ func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTa
 }
 
 func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeSearchParams) ([]KnowledgeSearchResult, db.KnowledgeRetrievalEvent, error) {
-	query := strings.TrimSpace(p.Query)
+	query := buildInteractiveKnowledgeSearchQuery(p)
 	if p.Limit <= 0 {
 		p.Limit = 10
 	}
@@ -877,6 +879,16 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 	})
 	if int32(len(results)) > p.Limit {
 		results = results[:p.Limit]
+	}
+	for i := range results {
+		sources, err := s.Queries.ListKnowledgeSources(ctx, db.ListKnowledgeSourcesParams{
+			KnowledgeItemID: results[i].Item.ID,
+			WorkspaceID:     p.WorkspaceID,
+		})
+		if err != nil {
+			return nil, db.KnowledgeRetrievalEvent{}, err
+		}
+		results[i].SourceSummary = summarizeKnowledgeSources(sources)
 	}
 	retrieval, err := s.recordRetrieval(ctx, p, query, results)
 	if err != nil {
@@ -1247,6 +1259,29 @@ func buildTaskClaimKnowledgeQuery(p KnowledgeTaskClaimParams) string {
 	}
 	add("Last task error", p.LastTaskError)
 	add("Last task failure reason", p.LastTaskFailureReason)
+	return truncateKnowledgeText(strings.Join(parts, "\n"), 6000)
+}
+
+func buildInteractiveKnowledgeSearchQuery(p KnowledgeSearchParams) string {
+	if p.Issue == nil {
+		return strings.TrimSpace(p.Query)
+	}
+	var parts []string
+	add := func(label, value string) {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			parts = append(parts, label+": "+value)
+		}
+	}
+	add("Query", p.Query)
+	if p.Issue != nil {
+		add("Issue title", p.Issue.Title)
+		if p.Issue.Description.Valid {
+			add("Issue description", p.Issue.Description.String)
+		}
+		add("Issue status", p.Issue.Status)
+		add("Issue priority", p.Issue.Priority)
+	}
 	return truncateKnowledgeText(strings.Join(parts, "\n"), 6000)
 }
 

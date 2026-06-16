@@ -48,6 +48,7 @@ func init() {
 	repoCmd.GroupID = groupCore
 	previewCmd.GroupID = groupRuntime
 	skillCmd.GroupID = groupCore
+	knowledgeCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 	wikiCmd.GroupID = groupCore
 	notifyCmd.GroupID = groupCore
@@ -78,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(previewCmd)
 	rootCmd.AddCommand(skillCmd)
+	rootCmd.AddCommand(knowledgeCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(wikiCmd)
 	rootCmd.AddCommand(notifyCmd)

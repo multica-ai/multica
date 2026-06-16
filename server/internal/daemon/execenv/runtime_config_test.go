@@ -70,6 +70,7 @@ func TestBuildMetaSkillContentRelevantKnowledge(t *testing.T) {
 		"Recommended action: Add a .native.ts adapter",
 		"Avoid: Do not force Metro",
 		"Used knowledge: KNO-123",
+		"multica knowledge search",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in Relevant Knowledge section:\n%s", want, out)
@@ -82,6 +83,9 @@ func TestBuildMetaSkillContentOmitsRelevantKnowledgeWhenEmpty(t *testing.T) {
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-empty-knowledge"})
 	if strings.Contains(out, "## Relevant Knowledge") {
 		t.Fatalf("Relevant Knowledge should be omitted when empty:\n%s", out)
+	}
+	if !strings.Contains(out, "multica knowledge search") {
+		t.Fatalf("missing proactive knowledge search command:\n%s", out)
 	}
 }
 

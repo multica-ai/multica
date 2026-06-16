@@ -129,11 +129,12 @@ type KnowledgeDetailResponse struct {
 }
 
 type KnowledgeSearchResultResponse struct {
-	Item        KnowledgeItemResponse `json:"item"`
-	TextScore   float64               `json:"text_score"`
-	VectorScore float64               `json:"vector_score"`
-	FinalScore  float64               `json:"final_score"`
-	MatchReason string                `json:"match_reason"`
+	Item          KnowledgeItemResponse          `json:"item"`
+	SourceSummary KnowledgeSourceSummaryResponse `json:"source_summary"`
+	TextScore     float64                        `json:"text_score"`
+	VectorScore   float64                        `json:"vector_score"`
+	FinalScore    float64                        `json:"final_score"`
+	MatchReason   string                         `json:"match_reason"`
 }
 
 type createKnowledgeRequest struct {
@@ -200,6 +201,7 @@ type knowledgeSkillFileInput struct {
 
 type searchKnowledgeRequest struct {
 	Query     string                 `json:"query"`
+	IssueID   *string                `json:"issue_id"`
 	Embedding []float32              `json:"embedding"`
 	Limit     int32                  `json:"limit"`
 	Filters   searchKnowledgeFilters `json:"filters"`
@@ -634,12 +636,21 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var issue *db.Issue
+	if req.IssueID != nil && strings.TrimSpace(*req.IssueID) != "" {
+		loaded, ok := h.loadIssueForUser(w, r, strings.TrimSpace(*req.IssueID))
+		if !ok {
+			return
+		}
+		issue = &loaded
+	}
 	results, err := h.KnowledgeService.Search(r.Context(), service.KnowledgeSearchParams{
 		WorkspaceID: wsUUID,
 		MemberID:    member.ID,
 		Query:       req.Query,
 		Embedding:   req.Embedding,
 		Limit:       req.Limit,
+		Issue:       issue,
 		Filters: service.KnowledgeSearchFilters{
 			ProjectID: projectID,
 			AgentID:   agentID,
@@ -655,11 +666,12 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 	resp := make([]KnowledgeSearchResultResponse, len(results))
 	for i, result := range results {
 		resp[i] = KnowledgeSearchResultResponse{
-			Item:        knowledgeItemToResponse(result.Item),
-			TextScore:   result.TextScore,
-			VectorScore: result.VectorScore,
-			FinalScore:  result.FinalScore,
-			MatchReason: result.MatchReason,
+			Item:          knowledgeItemToResponse(result.Item),
+			SourceSummary: knowledgeSourceSummaryToResponse(result.SourceSummary),
+			TextScore:     result.TextScore,
+			VectorScore:   result.VectorScore,
+			FinalScore:    result.FinalScore,
+			MatchReason:   result.MatchReason,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": resp, "total": len(resp)})
