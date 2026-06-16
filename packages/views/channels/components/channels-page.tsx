@@ -390,6 +390,7 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
               hasMore={hasNextPage}
               loadMore={fetchNextPage}
               loadingMore={isFetchingNextPage}
+              canPost={activeChannel.access_mode === "open" || activeChannel.is_member}
             />
           </div>
         ) : (
@@ -975,6 +976,7 @@ function MessageList({
   hasMore,
   loadMore,
   loadingMore,
+  canPost = true,
 }: {
   messages: ChannelMessage[];
   loading: boolean;
@@ -986,6 +988,7 @@ function MessageList({
   hasMore?: boolean;
   loadMore?: () => void;
   loadingMore?: boolean;
+  canPost?: boolean;
 }) {
   const editorRef = useRef<ContentEditorRef>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -1084,55 +1087,63 @@ function MessageList({
           </ul>
         )}
       </div>
-      <div className="border-t px-4 py-3">
-        <div
-          {...dropZoneProps}
-          className="relative flex min-h-16 max-h-44 flex-col rounded-lg border bg-card pb-9 focus-within:border-brand"
-        >
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
-            <ContentEditor
-              ref={editorRef}
-              placeholder="输入消息，支持 Markdown、图片和 @提及"
-              onUpdate={(md) => setIsEmpty(!md.trim())}
-              onSubmit={handleSend}
-              onUploadFile={(file) => uploadWithToast(file)}
-              debounceMs={100}
-              showBubbleMenu={false}
-              mentionScope={{ memberIds }}
-            />
-          </div>
-          <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-              onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
-            />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={handleSend}
-                    disabled={isEmpty || sendMutation.isPending}
-                  >
-                    {sendMutation.isPending ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Send className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                }
+      {canPost ? (
+        <div className="border-t px-4 py-3">
+          <div
+            {...dropZoneProps}
+            className="relative flex min-h-16 max-h-44 flex-col rounded-lg border bg-card pb-9 focus-within:border-brand"
+          >
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+              <ContentEditor
+                ref={editorRef}
+                placeholder="输入消息，支持 Markdown、图片和 @提及"
+                onUpdate={(md) => setIsEmpty(!md.trim())}
+                onSubmit={handleSend}
+                onUploadFile={(file) => uploadWithToast(file)}
+                debounceMs={100}
+                showBubbleMenu={false}
+                mentionScope={{ memberIds }}
               />
-              <TooltipContent side="top">
-                发送 · {formatShortcut(modKey, enterKey)}
-              </TooltipContent>
-            </Tooltip>
+            </div>
+            <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+              <FileUploadButton
+                size="sm"
+                multiple
+                onSelect={(file) => editorRef.current?.uploadFile(file)}
+                onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
+              />
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={handleSend}
+                      disabled={isEmpty || sendMutation.isPending}
+                    >
+                      {sendMutation.isPending ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipContent side="top">
+                  发送 · {formatShortcut(modKey, enterKey)}
+                </TooltipContent>
+              </Tooltip>
+            </div>
+            {isDragOver && <FileDropOverlay />}
           </div>
-          {isDragOver && <FileDropOverlay />}
         </div>
-      </div>
+      ) : (
+        <div className="border-t px-4 py-3">
+          <p className="text-center text-sm text-muted-foreground">
+            仅受邀成员可在此频道发送消息
+          </p>
+        </div>
+      )}
     </>
   );
 }
@@ -1488,33 +1499,38 @@ function ChannelMembersPanel({
     [query, workspaceMembers],
   );
 
+  const isInviteMode = channel.access_mode === "invite";
+
   return (
     <div className="flex h-full min-w-0 flex-col border-l bg-background shadow-sm">
-      <PanelHeader title="成员与设置" onClose={onClose} />
+      <PanelHeader title={isInviteMode ? "成员与设置" : "参与者"} onClose={onClose} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <section className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-medium">频道性质</h3>
-              <p className="text-xs text-muted-foreground">控制成员是否需要被添加后才能进入。</p>
-            </div>
-            <Select
-              value={channel.access_mode}
-              onValueChange={(value) => updateMutation.mutate(value as "open" | "invite")}
-              disabled={!canManage || updateMutation.isPending}
-            >
-              <SelectTrigger size="sm" className="w-24">
-                <SelectValue>{channel.access_mode === "open" ? "公开" : "邀请"}</SelectValue>
-              </SelectTrigger>
-              <SelectContent alignItemWithTrigger={false}>
-                <SelectItem value="open">公开</SelectItem>
-                <SelectItem value="invite">邀请</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </section>
-
-        <div className="my-4 h-px bg-border" />
+        {isInviteMode && (
+          <>
+            <section className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">频道性质</h3>
+                  <p className="text-xs text-muted-foreground">控制成员是否需要被添加后才能进入。</p>
+                </div>
+                <Select
+                  value={channel.access_mode}
+                  onValueChange={(value) => updateMutation.mutate(value as "open" | "invite")}
+                  disabled={!canManage || updateMutation.isPending}
+                >
+                  <SelectTrigger size="sm" className="w-24">
+                    <SelectValue>{channel.access_mode === "open" ? "公开" : "邀请"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectItem value="open">公开</SelectItem>
+                    <SelectItem value="invite">邀请</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </section>
+            <div className="my-4 h-px bg-border" />
+          </>
+        )}
 
         <section className="space-y-2">
           <div className="flex items-center justify-between">
@@ -1538,7 +1554,7 @@ function ChannelMembersPanel({
                     </div>
                     <Badge variant="outline" className="shrink-0 text-[10px]">{member.role}</Badge>
                   </div>
-                  {disableRemove ? (
+                  {isInviteMode && (disableRemove ? (
                     <Tooltip>
                       <TooltipTrigger
                         render={
@@ -1562,61 +1578,65 @@ function ChannelMembersPanel({
                     >
                       移除
                     </Button>
-                  )}
+                  ))}
                 </li>
               );
             })}
           </ul>
         </section>
 
-        <div className="my-4 h-px bg-border" />
+        {isInviteMode && (
+          <>
+            <div className="my-4 h-px bg-border" />
 
-        <section className="space-y-2">
-          <div>
-            <h3 className="text-sm font-medium">添加成员</h3>
-            <p className="text-xs text-muted-foreground">按姓名、邮箱或拼音搜索 Workspace 成员。</p>
-          </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索成员"
-              className="h-8 pl-7 text-sm"
-            />
-          </div>
-          <ul className="space-y-1.5">
-            {candidates.map((member) => {
-              const alreadyInChannel = memberUserIds.has(member.user_id);
-              return (
-                <li
-                  key={member.user_id}
-                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <ActorAvatar actorType="member" actorId={member.user_id} size={28} enableHoverCard />
-                    <div className="min-w-0">
-                      <div className="truncate text-sm">{member.name || member.email}</div>
-                      <div className="truncate text-xs text-muted-foreground">{member.email}</div>
-                    </div>
-                  </div>
-                  <Button
-                    variant={alreadyInChannel ? "outline" : "secondary"}
-                    size="sm"
-                    className="h-7 text-xs"
-                    disabled={!canManage || alreadyInChannel || addMutation.isPending}
-                    onClick={() => addMutation.mutate(member.user_id)}
-                  >
-                    {alreadyInChannel ? "已添加" : "添加"}
-                  </Button>
-                </li>
-              );
-            })}
-            {candidates.length === 0 && (
-              <li className="py-6 text-center text-xs text-muted-foreground">没有匹配成员</li>
-            )}
-          </ul>
-        </section>
+            <section className="space-y-2">
+              <div>
+                <h3 className="text-sm font-medium">添加成员</h3>
+                <p className="text-xs text-muted-foreground">按姓名、邮箱或拼音搜索 Workspace 成员。</p>
+              </div>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="搜索成员"
+                  className="h-8 pl-7 text-sm"
+                />
+              </div>
+              <ul className="space-y-1.5">
+                {candidates.map((member) => {
+                  const alreadyInChannel = memberUserIds.has(member.user_id);
+                  return (
+                    <li
+                      key={member.user_id}
+                      className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/50"
+                    >
+                      <div className="flex min-w-0 items-center gap-2">
+                        <ActorAvatar actorType="member" actorId={member.user_id} size={28} enableHoverCard />
+                        <div className="min-w-0">
+                          <div className="truncate text-sm">{member.name || member.email}</div>
+                          <div className="truncate text-xs text-muted-foreground">{member.email}</div>
+                        </div>
+                      </div>
+                      <Button
+                        variant={alreadyInChannel ? "outline" : "secondary"}
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={!canManage || alreadyInChannel || addMutation.isPending}
+                        onClick={() => addMutation.mutate(member.user_id)}
+                      >
+                        {alreadyInChannel ? "已添加" : "添加"}
+                      </Button>
+                    </li>
+                  );
+                })}
+                {candidates.length === 0 && (
+                  <li className="py-6 text-center text-xs text-muted-foreground">没有匹配成员</li>
+                )}
+              </ul>
+            </section>
+          </>
+        )}
       </div>
     </div>
   );
