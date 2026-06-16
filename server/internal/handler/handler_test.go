@@ -4003,6 +4003,22 @@ func TestResolveActorActAsMember(t *testing.T) {
 		adminUserID   = "44444444-4444-4444-4444-444444444444"
 	)
 
+	// member.user_id has a FK to "user"(id), so the referenced users must exist
+	// before they can be added to the workspace. nonMemberID is created as a
+	// real user but deliberately NOT added to member, exercising the
+	// "target is a user but not a workspace member" path.
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO "user" (id, name, email) VALUES
+			($1, 'act-as target', 'act-as-target@e2e.test'),
+			($2, 'act-as nonpriv', 'act-as-nonpriv@e2e.test'),
+			($3, 'act-as nonmember', 'act-as-nonmember@e2e.test'),
+			($4, 'act-as admin', 'act-as-admin@e2e.test')
+		ON CONFLICT (id) DO NOTHING`,
+		targetUserID, nonPrivUserID, nonMemberID, adminUserID,
+	); err != nil {
+		t.Fatalf("failed to seed users: %v", err)
+	}
+
 	if _, err := testPool.Exec(ctx,
 		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member'), ($1, $3, 'member'), ($1, $4, 'admin')`,
 		testWorkspaceID, targetUserID, nonPrivUserID, adminUserID,
@@ -4010,8 +4026,11 @@ func TestResolveActorActAsMember(t *testing.T) {
 		t.Fatalf("failed to seed members: %v", err)
 	}
 	t.Cleanup(func() {
+		// Delete members first (they FK-reference the users), then the users.
 		testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = ANY($2)`,
 			testWorkspaceID, []string{targetUserID, nonPrivUserID, adminUserID})
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = ANY($1)`,
+			[]string{targetUserID, nonPrivUserID, nonMemberID, adminUserID})
 	})
 
 	tests := []struct {
