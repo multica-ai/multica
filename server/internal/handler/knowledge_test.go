@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -63,7 +64,6 @@ func TestKnowledgeLifecycleListSearchFeedbackAndArchive(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateKnowledgeFeedback: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-
 	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/knowledge/"+created.Item.ID, nil)
 	req = withURLParam(req, "id", created.Item.ID)
@@ -181,6 +181,134 @@ func TestKnowledgeWorkspaceIsolation(t *testing.T) {
 	}
 	if hiddenCount != 1 {
 		t.Fatalf("other workspace fixture missing")
+	}
+}
+
+func TestKnowledgeUsageFeedbackAndAnalytics(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Knowledge analytics runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Knowledge analytics agent")
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Knowledge analytics playbook",
+		"type":                 "lesson",
+		"confidence_status":    "high",
+		"problem_pattern":      "Analytics task should cite reusable knowledge.",
+		"recommended_practice": "Cite the knowledge ID when it was useful.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   issueID,
+		}},
+	})
+	created = publishKnowledgeForRAG(t, created.Item.ID)
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '10 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert running task: %v", err)
+	}
+	result, _ := json.Marshal(TaskCompleteRequest{Output: "Done.\nUsed knowledge: " + created.Item.ID})
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+		VALUES ($1, 'test', 'unit', 100, 50, 10, 5)
+	`, taskID); err != nil {
+		t.Fatalf("insert task usage: %v", err)
+	}
+
+	var missingTimeTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, completed_at)
+		VALUES ($1, $2, $3, 'completed', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&missingTimeTaskID); err != nil {
+		t.Fatalf("insert missing-time task: %v", err)
+	}
+	if _, err := testHandler.KnowledgeService.RecordUsage(ctx, service.KnowledgeUsageParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		KnowledgeItemID: parseUUID(created.Item.ID),
+		AgentTaskID:     parseUUID(missingTimeTaskID),
+		UsageSource:     "agent_reference",
+		ReferenceText:   "Used knowledge: " + created.Item.ID,
+		TaskStatus:      "completed",
+	}); err != nil {
+		t.Fatalf("record missing-time usage: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+created.Item.ID+"/feedback", map[string]any{
+		"value":         "helpful",
+		"agent_task_id": taskID,
+	})
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.CreateKnowledgeFeedback(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateKnowledgeFeedback: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/knowledge/search", map[string]any{
+		"query": "Knowledge analytics playbook",
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	testHandler.SearchKnowledge(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SearchKnowledge as agent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testHandler.KnowledgeService.ListAnalytics(ctx, service.KnowledgeAnalyticsParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		KnowledgeItemID: parseUUID(created.Item.ID),
+		Since:           time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC),
+		Until:           time.Now().Add(24 * time.Hour),
+		IncludeZero:     true,
+		Limit:           50,
+	}); err != nil {
+		t.Fatalf("ListAnalytics direct: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/knowledge/"+created.Item.ID+"/analytics?since=2000-01-01&include_zero=true", nil)
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.GetKnowledgeAnalytics(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetKnowledgeAnalytics: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Items []KnowledgeAnalyticsRowResponse `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode analytics: %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("analytics items = %d, want 1: %#v", len(resp.Items), resp.Items)
+	}
+	got := resp.Items[0]
+	if got.UsageCount != 3 || got.AgentReferenceCount != 2 || got.ActiveSearchCount != 1 {
+		t.Fatalf("usage counts = (%d, %d, %d), want (3, 2, 1): %#v", got.UsageCount, got.AgentReferenceCount, got.ActiveSearchCount, got)
+	}
+	if got.RetrievalCount < 1 {
+		t.Fatalf("retrieval_count = %d, want at least 1: %#v", got.RetrievalCount, got)
+	}
+	if got.HelpfulCount != 1 {
+		t.Fatalf("helpful_count = %d, want 1: %#v", got.HelpfulCount, got)
+	}
+	if got.SuccessfulTaskCount != 2 {
+		t.Fatalf("successful_task_count = %d, want 2: %#v", got.SuccessfulTaskCount, got)
+	}
+	if got.TotalTaskSeconds < 590 || got.TotalTaskSeconds > 610 {
+		t.Fatalf("total_task_seconds = %d, want only the 10-minute task counted: %#v", got.TotalTaskSeconds, got)
+	}
+	if got.TotalTokens != 165 {
+		t.Fatalf("total_tokens = %d, want 165: %#v", got.TotalTokens, got)
 	}
 }
 

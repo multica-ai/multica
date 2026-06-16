@@ -1252,6 +1252,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 	s.evaluateKnowledgeCandidateForCompletedTask(ctx, task, result)
+	if s.Knowledge != nil {
+		if count, err := s.Knowledge.RecordUsageFromTaskResult(ctx, task, result); err != nil {
+			slog.Warn("record task knowledge usage failed",
+				"task_id", util.UUIDToString(task.ID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"error", err,
+			)
+		} else if count > 0 {
+			slog.Info("task knowledge usage recorded",
+				"task_id", util.UUIDToString(task.ID),
+				"knowledge_count", count,
+			)
+		}
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run

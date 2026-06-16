@@ -277,8 +277,11 @@ ORDER BY vector_score DESC, ki.updated_at DESC
 LIMIT sqlc.arg('limit');
 
 -- name: CreateKnowledgeFeedback :one
-INSERT INTO knowledge_feedback (knowledge_item_id, workspace_id, member_id, value, note)
-VALUES (sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('member_id'), sqlc.arg('value'), sqlc.narg('note'))
+INSERT INTO knowledge_feedback (knowledge_item_id, workspace_id, member_id, agent_task_id, value, note)
+VALUES (
+    sqlc.arg('knowledge_item_id'), sqlc.arg('workspace_id'), sqlc.arg('member_id'),
+    sqlc.narg('agent_task_id'), sqlc.arg('value'), sqlc.narg('note')
+)
 RETURNING *;
 
 -- name: GetKnowledgeFeedbackSummary :many
@@ -291,21 +294,190 @@ ORDER BY value ASC;
 
 -- name: CreateKnowledgeRetrievalEvent :one
 INSERT INTO knowledge_retrieval_event (
-    workspace_id, member_id, query, retrieval_mode, filters, result_count, top_knowledge_item_ids
+    workspace_id, member_id, agent_task_id, query, query_source, retrieval_mode,
+    filters, result_count, top_knowledge_item_ids, result_scores
 ) VALUES (
-    sqlc.arg('workspace_id'), sqlc.narg('member_id'), sqlc.narg('query'), sqlc.arg('retrieval_mode'),
-    COALESCE(sqlc.narg('filters'), '{}'::jsonb), sqlc.arg('result_count'), COALESCE(sqlc.narg('top_knowledge_item_ids')::uuid[], '{}')
+    sqlc.arg('workspace_id'), sqlc.narg('member_id'), sqlc.narg('agent_task_id'),
+    sqlc.narg('query'), sqlc.arg('query_source'), sqlc.arg('retrieval_mode'),
+    COALESCE(sqlc.narg('filters'), '{}'::jsonb), sqlc.arg('result_count'),
+    COALESCE(sqlc.narg('top_knowledge_item_ids')::uuid[], '{}'),
+    COALESCE(sqlc.narg('result_scores'), '[]'::jsonb)
 )
 RETURNING *;
 
 -- name: CreateKnowledgeInjectionEvent :one
 INSERT INTO knowledge_injection_event (
-    workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id
+    workspace_id, knowledge_item_id, agent_task_id, injection_target,
+    retrieval_event_id, rank, score, injection_reason, token_budget, discarded_reason
 ) VALUES (
     sqlc.arg('workspace_id'), sqlc.arg('knowledge_item_id'), sqlc.narg('agent_task_id'),
-    sqlc.arg('injection_target'), sqlc.narg('retrieval_event_id')
+    sqlc.arg('injection_target'), sqlc.narg('retrieval_event_id'), sqlc.narg('rank'),
+    sqlc.narg('score'), sqlc.narg('injection_reason'), sqlc.narg('token_budget'),
+    sqlc.narg('discarded_reason')
 )
 RETURNING *;
+
+-- name: CreateKnowledgeUsageEvent :one
+INSERT INTO knowledge_usage_event (
+    workspace_id, knowledge_item_id, agent_task_id, usage_source,
+    reference_text, task_status, task_result
+) VALUES (
+    sqlc.arg('workspace_id'), sqlc.arg('knowledge_item_id'), sqlc.narg('agent_task_id'),
+    sqlc.arg('usage_source'), sqlc.narg('reference_text'), sqlc.narg('task_status'),
+    sqlc.narg('task_result')
+)
+RETURNING *;
+
+-- name: ListKnowledgeItemsByIDs :many
+SELECT *
+FROM knowledge_item
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = ANY(sqlc.arg('ids')::uuid[]);
+
+-- name: ListKnowledgeAnalytics :many
+WITH filtered_items AS (
+    SELECT ki.*
+    FROM knowledge_item ki
+    WHERE ki.workspace_id = sqlc.arg('workspace_id')
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR ki.id = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
+),
+retrieval AS (
+    SELECT kid AS knowledge_item_id, COUNT(*)::bigint AS retrieval_count
+    FROM knowledge_retrieval_event kre
+    CROSS JOIN LATERAL unnest(kre.top_knowledge_item_ids) AS kid
+    LEFT JOIN agent_task_queue atq ON atq.id = kre.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kre.workspace_id = sqlc.arg('workspace_id')
+      AND kre.created_at >= sqlc.arg('since')::timestamptz
+      AND kre.created_at < sqlc.arg('until')::timestamptz
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR kid = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+    GROUP BY kid
+),
+injection AS (
+    SELECT knowledge_item_id,
+        COUNT(*)::bigint AS injection_count,
+        COUNT(DISTINCT agent_task_id) FILTER (WHERE agent_task_id IS NOT NULL)::bigint AS injected_task_count
+    FROM knowledge_injection_event kie
+    LEFT JOIN agent_task_queue atq ON atq.id = kie.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kie.workspace_id = sqlc.arg('workspace_id')
+      AND kie.created_at >= sqlc.arg('since')::timestamptz
+      AND kie.created_at < sqlc.arg('until')::timestamptz
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR kie.knowledge_item_id = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+    GROUP BY knowledge_item_id
+),
+usage AS (
+    SELECT knowledge_item_id,
+        COUNT(*)::bigint AS usage_count,
+        COUNT(*) FILTER (WHERE usage_source = 'agent_reference')::bigint AS agent_reference_count,
+        COUNT(*) FILTER (WHERE usage_source = 'active_search')::bigint AS active_search_count
+    FROM knowledge_usage_event kue
+    LEFT JOIN agent_task_queue atq ON atq.id = kue.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kue.workspace_id = sqlc.arg('workspace_id')
+      AND kue.created_at >= sqlc.arg('since')::timestamptz
+      AND kue.created_at < sqlc.arg('until')::timestamptz
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR kue.knowledge_item_id = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+    GROUP BY knowledge_item_id
+),
+feedback AS (
+    SELECT knowledge_item_id,
+        COUNT(*) FILTER (WHERE value = 'helpful')::bigint AS helpful_count,
+        COUNT(*) FILTER (WHERE value = 'not_helpful')::bigint AS not_helpful_count,
+        COUNT(*) FILTER (WHERE value = 'misleading')::bigint AS misleading_count,
+        COUNT(*) FILTER (WHERE value = 'outdated')::bigint AS outdated_count,
+        MAX(kf.created_at) FILTER (WHERE value IN ('not_helpful', 'misleading', 'outdated'))::timestamptz AS latest_negative_feedback_at
+    FROM knowledge_feedback kf
+    LEFT JOIN agent_task_queue atq ON atq.id = kf.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kf.workspace_id = sqlc.arg('workspace_id')
+      AND kf.created_at >= sqlc.arg('since')::timestamptz
+      AND kf.created_at < sqlc.arg('until')::timestamptz
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR kf.knowledge_item_id = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+    GROUP BY knowledge_item_id
+),
+task_edges AS (
+    SELECT knowledge_item_id, agent_task_id
+    FROM knowledge_injection_event
+    WHERE workspace_id = sqlc.arg('workspace_id') AND agent_task_id IS NOT NULL
+    UNION
+    SELECT knowledge_item_id, agent_task_id
+    FROM knowledge_usage_event
+    WHERE workspace_id = sqlc.arg('workspace_id') AND agent_task_id IS NOT NULL
+),
+task_token AS (
+    SELECT
+        task_id,
+        SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens)::bigint AS total_tokens
+    FROM task_usage
+    GROUP BY task_id
+),
+task_outcome AS (
+    SELECT te.knowledge_item_id,
+        COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'completed')::bigint AS successful_task_count,
+        COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::bigint AS failed_task_count,
+        COALESCE(SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at))) FILTER (
+            WHERE atq.status IN ('completed', 'failed')
+              AND atq.started_at IS NOT NULL
+              AND atq.completed_at IS NOT NULL
+        ), 0)::bigint AS total_task_seconds,
+        COALESCE(SUM(tt.total_tokens), 0)::bigint AS total_tokens
+    FROM task_edges te
+    JOIN agent_task_queue atq ON atq.id = te.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    LEFT JOIN task_token tt ON tt.task_id = atq.id
+    WHERE atq.completed_at >= sqlc.arg('since')::timestamptz
+      AND atq.completed_at < sqlc.arg('until')::timestamptz
+      AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR te.knowledge_item_id = sqlc.narg('knowledge_item_id'))
+      AND (sqlc.narg('agent_id')::uuid IS NULL OR atq.agent_id = sqlc.narg('agent_id'))
+      AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+    GROUP BY te.knowledge_item_id
+)
+SELECT
+    fi.id AS knowledge_item_id,
+    fi.title,
+    fi.type,
+    fi.lifecycle_status,
+    COALESCE(r.retrieval_count, 0)::bigint AS retrieval_count,
+    COALESCE(i.injection_count, 0)::bigint AS injection_count,
+    COALESCE(i.injected_task_count, 0)::bigint AS injected_task_count,
+    COALESCE(u.usage_count, 0)::bigint AS usage_count,
+    COALESCE(u.agent_reference_count, 0)::bigint AS agent_reference_count,
+    COALESCE(u.active_search_count, 0)::bigint AS active_search_count,
+    COALESCE(f.helpful_count, 0)::bigint AS helpful_count,
+    COALESCE(f.not_helpful_count, 0)::bigint AS not_helpful_count,
+    COALESCE(f.misleading_count, 0)::bigint AS misleading_count,
+    COALESCE(f.outdated_count, 0)::bigint AS outdated_count,
+    f.latest_negative_feedback_at,
+    COALESCE(t.successful_task_count, 0)::bigint AS successful_task_count,
+    COALESCE(t.failed_task_count, 0)::bigint AS failed_task_count,
+    COALESCE(t.total_task_seconds, 0)::bigint AS total_task_seconds,
+    COALESCE(t.total_tokens, 0)::bigint AS total_tokens
+FROM filtered_items fi
+LEFT JOIN retrieval r ON r.knowledge_item_id = fi.id
+LEFT JOIN injection i ON i.knowledge_item_id = fi.id
+LEFT JOIN usage u ON u.knowledge_item_id = fi.id
+LEFT JOIN feedback f ON f.knowledge_item_id = fi.id
+LEFT JOIN task_outcome t ON t.knowledge_item_id = fi.id
+WHERE (
+    sqlc.arg('include_zero')::boolean
+    OR COALESCE(r.retrieval_count, 0) > 0
+    OR COALESCE(i.injection_count, 0) > 0
+    OR COALESCE(u.usage_count, 0) > 0
+    OR COALESCE(f.helpful_count, 0) + COALESCE(f.not_helpful_count, 0) + COALESCE(f.misleading_count, 0) + COALESCE(f.outdated_count, 0) > 0
+)
+ORDER BY usage_count DESC, injection_count DESC, retrieval_count DESC, fi.updated_at DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: UpsertKnowledgeCandidate :one
 INSERT INTO knowledge_candidate (

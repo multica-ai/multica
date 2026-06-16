@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -96,6 +98,28 @@ type KnowledgeEmbeddingMetadataResponse struct {
 type KnowledgeFeedbackSummaryResponse struct {
 	Value string `json:"value"`
 	Count int64  `json:"count"`
+}
+
+type KnowledgeAnalyticsRowResponse struct {
+	KnowledgeItemID          string  `json:"knowledge_item_id"`
+	Title                    string  `json:"title"`
+	Type                     string  `json:"type"`
+	LifecycleStatus          string  `json:"lifecycle_status"`
+	RetrievalCount           int64   `json:"retrieval_count"`
+	InjectionCount           int64   `json:"injection_count"`
+	InjectedTaskCount        int64   `json:"injected_task_count"`
+	UsageCount               int64   `json:"usage_count"`
+	AgentReferenceCount      int64   `json:"agent_reference_count"`
+	ActiveSearchCount        int64   `json:"active_search_count"`
+	HelpfulCount             int64   `json:"helpful_count"`
+	NotHelpfulCount          int64   `json:"not_helpful_count"`
+	MisleadingCount          int64   `json:"misleading_count"`
+	OutdatedCount            int64   `json:"outdated_count"`
+	LatestNegativeFeedbackAt *string `json:"latest_negative_feedback_at"`
+	SuccessfulTaskCount      int64   `json:"successful_task_count"`
+	FailedTaskCount          int64   `json:"failed_task_count"`
+	TotalTaskSeconds         int64   `json:"total_task_seconds"`
+	TotalTokens              int64   `json:"total_tokens"`
 }
 
 type KnowledgeCandidateResponse struct {
@@ -216,8 +240,9 @@ type searchKnowledgeFilters struct {
 }
 
 type createKnowledgeFeedbackRequest struct {
-	Value string  `json:"value"`
-	Note  *string `json:"note"`
+	Value       string  `json:"value"`
+	Note        *string `json:"note"`
+	AgentTaskID *string `json:"agent_task_id"`
 }
 
 type evaluateKnowledgeCandidateRequest struct {
@@ -644,10 +669,21 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 		}
 		issue = &loaded
 	}
+	agentTaskID := pgtype.UUID{}
+	querySource := "interactive"
+	actorType, _ := h.resolveActor(r, uuidToString(member.UserID), h.resolveWorkspaceID(r))
+	if actorType == "agent" {
+		if taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID")); err == nil {
+			agentTaskID = taskID
+			querySource = "agent_search"
+		}
+	}
 	results, err := h.KnowledgeService.Search(r.Context(), service.KnowledgeSearchParams{
 		WorkspaceID: wsUUID,
 		MemberID:    member.ID,
+		AgentTaskID: agentTaskID,
 		Query:       req.Query,
+		QuerySource: querySource,
 		Embedding:   req.Embedding,
 		Limit:       req.Limit,
 		Issue:       issue,
@@ -675,6 +711,74 @@ func (h *Handler) SearchKnowledge(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"results": resp, "total": len(resp)})
+}
+
+func (h *Handler) GetKnowledgeAnalytics(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r)); !ok {
+		return
+	}
+	q := r.URL.Query()
+	limit, ok := parseLimitQuery(w, q.Get("limit"), 50, 100)
+	if !ok {
+		return
+	}
+	offset, ok := parseOffsetQuery(w, q.Get("offset"))
+	if !ok {
+		return
+	}
+	projectID, ok := parseOptionalUUIDQuery(w, q.Get("project_id"), "project_id")
+	if !ok {
+		return
+	}
+	agentID, ok := parseOptionalUUIDQuery(w, q.Get("agent_id"), "agent_id")
+	if !ok {
+		return
+	}
+	itemID := pgtype.UUID{}
+	if rawID := strings.TrimSpace(chi.URLParam(r, "id")); rawID != "" {
+		itemID, ok = parseUUIDOrBadRequest(w, rawID, "knowledge id")
+		if !ok {
+			return
+		}
+	} else if rawID := strings.TrimSpace(q.Get("knowledge_item_id")); rawID != "" {
+		itemID, ok = parseUUIDOrBadRequest(w, rawID, "knowledge_item_id")
+		if !ok {
+			return
+		}
+	}
+	since, ok := parseKnowledgeTimeQuery(w, q.Get("since"), time.Now().AddDate(0, 0, -30))
+	if !ok {
+		return
+	}
+	until, ok := parseKnowledgeTimeQuery(w, q.Get("until"), time.Now().Add(24*time.Hour))
+	if !ok {
+		return
+	}
+	includeZero := q.Get("include_zero") == "true" || itemID.Valid
+	rows, err := h.KnowledgeService.ListAnalytics(r.Context(), service.KnowledgeAnalyticsParams{
+		WorkspaceID:     wsUUID,
+		KnowledgeItemID: itemID,
+		ProjectID:       projectID,
+		AgentID:         agentID,
+		Since:           since,
+		Until:           until,
+		IncludeZero:     includeZero,
+		Limit:           limit,
+		Offset:          offset,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to get knowledge analytics")
+		return
+	}
+	resp := make([]KnowledgeAnalyticsRowResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = knowledgeAnalyticsRowToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": resp, "total": len(resp)})
 }
 
 func (h *Handler) ListKnowledgeCandidates(w http.ResponseWriter, r *http.Request) {
@@ -831,10 +935,15 @@ func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	agentTaskID, ok := parseOptionalUUIDPtr(w, req.AgentTaskID, "agent_task_id")
+	if !ok {
+		return
+	}
 	feedback, err := h.KnowledgeService.AddFeedback(r.Context(), service.KnowledgeFeedbackParams{
 		KnowledgeItemID: itemID,
 		WorkspaceID:     wsUUID,
 		MemberID:        member.ID,
+		AgentTaskID:     agentTaskID,
 		Value:           req.Value,
 		Note:            textFromPtr(req.Note),
 	})
@@ -847,6 +956,7 @@ func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request
 		"knowledge_item_id": uuidToString(feedback.KnowledgeItemID),
 		"workspace_id":      uuidToString(feedback.WorkspaceID),
 		"member_id":         uuidToString(feedback.MemberID),
+		"agent_task_id":     uuidToPtr(feedback.AgentTaskID),
 		"value":             feedback.Value,
 		"note":              textToPtr(feedback.Note),
 		"created_at":        timestampToString(feedback.CreatedAt),
@@ -1034,6 +1144,30 @@ func knowledgeCandidateToResponse(candidate db.KnowledgeCandidate) KnowledgeCand
 	}
 }
 
+func knowledgeAnalyticsRowToResponse(row db.ListKnowledgeAnalyticsRow) KnowledgeAnalyticsRowResponse {
+	return KnowledgeAnalyticsRowResponse{
+		KnowledgeItemID:          uuidToString(row.KnowledgeItemID),
+		Title:                    row.Title,
+		Type:                     row.Type,
+		LifecycleStatus:          row.LifecycleStatus,
+		RetrievalCount:           row.RetrievalCount,
+		InjectionCount:           row.InjectionCount,
+		InjectedTaskCount:        row.InjectedTaskCount,
+		UsageCount:               row.UsageCount,
+		AgentReferenceCount:      row.AgentReferenceCount,
+		ActiveSearchCount:        row.ActiveSearchCount,
+		HelpfulCount:             row.HelpfulCount,
+		NotHelpfulCount:          row.NotHelpfulCount,
+		MisleadingCount:          row.MisleadingCount,
+		OutdatedCount:            row.OutdatedCount,
+		LatestNegativeFeedbackAt: timestampPtr(row.LatestNegativeFeedbackAt),
+		SuccessfulTaskCount:      row.SuccessfulTaskCount,
+		FailedTaskCount:          row.FailedTaskCount,
+		TotalTaskSeconds:         row.TotalTaskSeconds,
+		TotalTokens:              row.TotalTokens,
+	}
+}
+
 func parseKnowledgeSources(w http.ResponseWriter, inputs []knowledgeSourceInput) ([]service.KnowledgeSourceInput, bool) {
 	out := make([]service.KnowledgeSourceInput, 0, len(inputs))
 	for _, input := range inputs {
@@ -1094,6 +1228,21 @@ func parseOffsetQuery(w http.ResponseWriter, raw string) (int32, bool) {
 		return 0, false
 	}
 	return int32(n), true
+}
+
+func parseKnowledgeTimeQuery(w http.ResponseWriter, raw string, fallback time.Time) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback.UTC(), true
+	}
+	if ts, err := time.Parse(time.RFC3339, raw); err == nil {
+		return ts.UTC(), true
+	}
+	if date, err := time.Parse("2006-01-02", raw); err == nil {
+		return date.UTC(), true
+	}
+	writeError(w, http.StatusBadRequest, "invalid time")
+	return time.Time{}, false
 }
 
 func textFromString(value string) pgtype.Text {

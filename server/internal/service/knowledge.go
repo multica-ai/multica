@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -21,7 +22,11 @@ import (
 
 const KnowledgeEmbeddingDimensions = 1536
 
-var knowledgeSlugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+var (
+	knowledgeSlugNonAlnum     = regexp.MustCompile(`[^a-z0-9]+`)
+	knowledgeReferenceUUIDRe  = regexp.MustCompile(`(?i)\b(?:KNO-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`)
+	knowledgeUsedLineKeywords = []string{"used knowledge", "knowledge used"}
+)
 
 var (
 	ErrKnowledgeValidation = errors.New("knowledge validation failed")
@@ -96,7 +101,9 @@ type KnowledgeSearchFilters struct {
 type KnowledgeSearchParams struct {
 	WorkspaceID pgtype.UUID
 	MemberID    pgtype.UUID
+	AgentTaskID pgtype.UUID
 	Query       string
+	QuerySource string
 	Embedding   []float32
 	Limit       int32
 	Issue       *db.Issue
@@ -210,8 +217,31 @@ type KnowledgeFeedbackParams struct {
 	KnowledgeItemID pgtype.UUID
 	WorkspaceID     pgtype.UUID
 	MemberID        pgtype.UUID
+	AgentTaskID     pgtype.UUID
 	Value           string
 	Note            pgtype.Text
+}
+
+type KnowledgeUsageParams struct {
+	WorkspaceID     pgtype.UUID
+	KnowledgeItemID pgtype.UUID
+	AgentTaskID     pgtype.UUID
+	UsageSource     string
+	ReferenceText   string
+	TaskStatus      string
+	TaskResult      []byte
+}
+
+type KnowledgeAnalyticsParams struct {
+	WorkspaceID     pgtype.UUID
+	KnowledgeItemID pgtype.UUID
+	ProjectID       pgtype.UUID
+	AgentID         pgtype.UUID
+	Since           time.Time
+	Until           time.Time
+	IncludeZero     bool
+	Limit           int32
+	Offset          int32
 }
 
 type KnowledgeCandidateEvaluateParams struct {
@@ -752,14 +782,16 @@ func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTa
 	results, retrieval, err := s.searchWithRetrieval(ctx, KnowledgeSearchParams{
 		WorkspaceID: p.WorkspaceID,
 		MemberID:    p.MemberID,
+		AgentTaskID: p.AgentTaskID,
 		Query:       query,
+		QuerySource: "task_claim",
 		Limit:       limit,
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]KnowledgeContextItem, 0, len(results))
-	for _, result := range results {
+	for idx, result := range results {
 		if result.Item.ConfidenceStatus != "high" {
 			continue
 		}
@@ -780,6 +812,9 @@ func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTa
 			AgentTaskID:      p.AgentTaskID,
 			InjectionTarget:  "daemon_brief",
 			RetrievalEventID: retrieval.ID,
+			Rank:             pgtype.Int4{Int32: int32(idx + 1), Valid: true},
+			Score:            pgtype.Float8{Float64: result.FinalScore, Valid: true},
+			InjectionReason:  pgtype.Text{String: item.Reason, Valid: item.Reason != ""},
 		}); err != nil {
 			return nil, err
 		}
@@ -894,6 +929,23 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 	if err != nil {
 		return nil, db.KnowledgeRetrievalEvent{}, err
 	}
+	if p.QuerySource == "agent_search" && p.AgentTaskID.Valid {
+		for _, result := range results {
+			if _, err := s.RecordUsage(ctx, KnowledgeUsageParams{
+				WorkspaceID:     p.WorkspaceID,
+				KnowledgeItemID: result.Item.ID,
+				AgentTaskID:     p.AgentTaskID,
+				UsageSource:     "active_search",
+				ReferenceText:   query,
+			}); err != nil {
+				slog.Warn("record knowledge active-search usage failed",
+					"knowledge_item_id", util.UUIDToString(result.Item.ID),
+					"agent_task_id", util.UUIDToString(p.AgentTaskID),
+					"error", err,
+				)
+			}
+		}
+	}
 	return results, retrieval, nil
 }
 
@@ -907,10 +959,19 @@ func (s *KnowledgeService) AddFeedback(ctx context.Context, p KnowledgeFeedbackP
 		}
 		return db.KnowledgeFeedback{}, err
 	}
+	if p.AgentTaskID.Valid {
+		if _, err := s.Queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: p.AgentTaskID, WorkspaceID: p.WorkspaceID}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.KnowledgeFeedback{}, validationError("agent_task_id not found")
+			}
+			return db.KnowledgeFeedback{}, err
+		}
+	}
 	return s.Queries.CreateKnowledgeFeedback(ctx, db.CreateKnowledgeFeedbackParams{
 		KnowledgeItemID: p.KnowledgeItemID,
 		WorkspaceID:     p.WorkspaceID,
 		MemberID:        p.MemberID,
+		AgentTaskID:     p.AgentTaskID,
 		Value:           p.Value,
 		Note:            p.Note,
 	})
@@ -1186,10 +1247,23 @@ func (s *KnowledgeService) recordRetrieval(ctx context.Context, p KnowledgeSearc
 		mode = "hybrid"
 	}
 	topIDs := make([]pgtype.UUID, 0, len(results))
-	for _, result := range results {
+	resultScores := make([]map[string]any, 0, len(results))
+	for idx, result := range results {
 		topIDs = append(topIDs, result.Item.ID)
+		resultScores = append(resultScores, map[string]any{
+			"knowledge_item_id": util.UUIDToString(result.Item.ID),
+			"rank":              idx + 1,
+			"text_score":        result.TextScore,
+			"vector_score":      result.VectorScore,
+			"final_score":       result.FinalScore,
+			"match_reason":      result.MatchReason,
+		})
 	}
 	filters, err := json.Marshal(p.Filters)
+	if err != nil {
+		return db.KnowledgeRetrievalEvent{}, err
+	}
+	scores, err := json.Marshal(resultScores)
 	if err != nil {
 		return db.KnowledgeRetrievalEvent{}, err
 	}
@@ -1197,14 +1271,106 @@ func (s *KnowledgeService) recordRetrieval(ctx context.Context, p KnowledgeSearc
 	if query != "" {
 		queryText = pgtype.Text{String: query, Valid: true}
 	}
+	querySource := strings.TrimSpace(p.QuerySource)
+	if querySource == "" {
+		querySource = "interactive"
+	}
 	return s.Queries.CreateKnowledgeRetrievalEvent(ctx, db.CreateKnowledgeRetrievalEventParams{
 		WorkspaceID:         p.WorkspaceID,
 		MemberID:            p.MemberID,
+		AgentTaskID:         p.AgentTaskID,
 		Query:               queryText,
+		QuerySource:         querySource,
 		RetrievalMode:       mode,
 		Filters:             filters,
 		ResultCount:         int32(len(results)),
 		TopKnowledgeItemIds: topIDs,
+		ResultScores:        scores,
+	})
+}
+
+func (s *KnowledgeService) RecordUsage(ctx context.Context, p KnowledgeUsageParams) (db.KnowledgeUsageEvent, error) {
+	if p.UsageSource != "agent_reference" && p.UsageSource != "active_search" {
+		return db.KnowledgeUsageEvent{}, validationError("invalid usage_source")
+	}
+	if _, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: p.KnowledgeItemID, WorkspaceID: p.WorkspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.KnowledgeUsageEvent{}, ErrKnowledgeNotFound
+		}
+		return db.KnowledgeUsageEvent{}, err
+	}
+	return s.Queries.CreateKnowledgeUsageEvent(ctx, db.CreateKnowledgeUsageEventParams{
+		WorkspaceID:     p.WorkspaceID,
+		KnowledgeItemID: p.KnowledgeItemID,
+		AgentTaskID:     p.AgentTaskID,
+		UsageSource:     p.UsageSource,
+		ReferenceText:   pgtype.Text{String: strings.TrimSpace(p.ReferenceText), Valid: strings.TrimSpace(p.ReferenceText) != ""},
+		TaskStatus:      pgtype.Text{String: strings.TrimSpace(p.TaskStatus), Valid: strings.TrimSpace(p.TaskStatus) != ""},
+		TaskResult:      p.TaskResult,
+	})
+}
+
+func (s *KnowledgeService) RecordUsageFromTaskResult(ctx context.Context, task db.AgentTaskQueue, result []byte) (int, error) {
+	workspaceID, err := s.taskWorkspaceID(ctx, task)
+	if err != nil {
+		return 0, err
+	}
+	referenceText := extractKnowledgeReferenceText(result)
+	ids := extractReferencedKnowledgeIDs(referenceText)
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	items, err := s.Queries.ListKnowledgeItemsByIDs(ctx, db.ListKnowledgeItemsByIDsParams{
+		WorkspaceID: workspaceID,
+		Ids:         ids,
+	})
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, item := range items {
+		if _, err := s.RecordUsage(ctx, KnowledgeUsageParams{
+			WorkspaceID:     workspaceID,
+			KnowledgeItemID: item.ID,
+			AgentTaskID:     task.ID,
+			UsageSource:     "agent_reference",
+			ReferenceText:   referenceText,
+			TaskStatus:      task.Status,
+			TaskResult:      result,
+		}); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (s *KnowledgeService) ListAnalytics(ctx context.Context, p KnowledgeAnalyticsParams) ([]db.ListKnowledgeAnalyticsRow, error) {
+	if p.Since.IsZero() {
+		p.Since = time.Now().AddDate(0, 0, -30)
+	}
+	if p.Until.IsZero() {
+		p.Until = time.Now().Add(24 * time.Hour)
+	}
+	if !p.Until.After(p.Since) {
+		return nil, validationError("until must be after since")
+	}
+	if p.Limit <= 0 {
+		p.Limit = 50
+	}
+	if p.Limit > 100 {
+		p.Limit = 100
+	}
+	return s.Queries.ListKnowledgeAnalytics(ctx, db.ListKnowledgeAnalyticsParams{
+		WorkspaceID:     p.WorkspaceID,
+		KnowledgeItemID: p.KnowledgeItemID,
+		ProjectID:       p.ProjectID,
+		AgentID:         p.AgentID,
+		Since:           pgtype.Timestamptz{Time: p.Since, Valid: true},
+		Until:           pgtype.Timestamptz{Time: p.Until, Valid: true},
+		IncludeZero:     p.IncludeZero,
+		Limit:           p.Limit,
+		Offset:          p.Offset,
 	})
 }
 
@@ -1801,6 +1967,50 @@ func truncateKnowledgeText(value string, limit int) string {
 		return value[:limit]
 	}
 	return strings.TrimSpace(value[:limit-3]) + "..."
+}
+
+func extractKnowledgeReferenceText(result []byte) string {
+	var payload struct {
+		Output string `json:"output"`
+	}
+	if len(result) > 0 && json.Unmarshal(result, &payload) == nil && strings.TrimSpace(payload.Output) != "" {
+		return payload.Output
+	}
+	return string(result)
+}
+
+func extractReferencedKnowledgeIDs(text string) []pgtype.UUID {
+	seen := map[string]struct{}{}
+	var ids []pgtype.UUID
+	for _, line := range strings.Split(text, "\n") {
+		lower := strings.ToLower(line)
+		shouldScan := false
+		for _, keyword := range knowledgeUsedLineKeywords {
+			if strings.Contains(lower, keyword) {
+				shouldScan = true
+				break
+			}
+		}
+		if !shouldScan {
+			continue
+		}
+		for _, match := range knowledgeReferenceUUIDRe.FindAllStringSubmatch(line, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			id, err := util.ParseUUID(match[1])
+			if err != nil {
+				continue
+			}
+			key := util.UUIDToString(id)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 func knowledgeSlugFromTitle(title string) string {

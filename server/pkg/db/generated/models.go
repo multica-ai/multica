@@ -544,6 +544,7 @@ type KnowledgeFeedback struct {
 	Value           string             `json:"value"`
 	Note            pgtype.Text        `json:"note"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
 }
 
 type KnowledgeInjectionEvent struct {
@@ -554,6 +555,11 @@ type KnowledgeInjectionEvent struct {
 	InjectionTarget  string             `json:"injection_target"`
 	RetrievalEventID pgtype.UUID        `json:"retrieval_event_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	Rank             pgtype.Int4        `json:"rank"`
+	Score            pgtype.Float8      `json:"score"`
+	InjectionReason  pgtype.Text        `json:"injection_reason"`
+	TokenBudget      pgtype.Int4        `json:"token_budget"`
+	DiscardedReason  pgtype.Text        `json:"discarded_reason"`
 }
 
 type KnowledgeItem struct {
@@ -607,6 +613,9 @@ type KnowledgeRetrievalEvent struct {
 	ResultCount         int32              `json:"result_count"`
 	TopKnowledgeItemIds []pgtype.UUID      `json:"top_knowledge_item_ids"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	AgentTaskID         pgtype.UUID        `json:"agent_task_id"`
+	QuerySource         string             `json:"query_source"`
+	ResultScores        []byte             `json:"result_scores"`
 }
 
 type KnowledgeSource struct {
@@ -618,6 +627,18 @@ type KnowledgeSource struct {
 	SourceUrl       pgtype.Text        `json:"source_url"`
 	SourceTitle     pgtype.Text        `json:"source_title"`
 	SourceExcerpt   pgtype.Text        `json:"source_excerpt"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type KnowledgeUsageEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
+	UsageSource     string             `json:"usage_source"`
+	ReferenceText   pgtype.Text        `json:"reference_text"`
+	TaskStatus      pgtype.Text        `json:"task_status"`
+	TaskResult      []byte             `json:"task_result"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 

@@ -64,15 +64,19 @@ func (q *Queries) CountKnowledgeSources(ctx context.Context, arg CountKnowledgeS
 }
 
 const createKnowledgeFeedback = `-- name: CreateKnowledgeFeedback :one
-INSERT INTO knowledge_feedback (knowledge_item_id, workspace_id, member_id, value, note)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, knowledge_item_id, workspace_id, member_id, value, note, created_at
+INSERT INTO knowledge_feedback (knowledge_item_id, workspace_id, member_id, agent_task_id, value, note)
+VALUES (
+    $1, $2, $3,
+    $4, $5, $6
+)
+RETURNING id, knowledge_item_id, workspace_id, member_id, value, note, created_at, agent_task_id
 `
 
 type CreateKnowledgeFeedbackParams struct {
 	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
 	WorkspaceID     pgtype.UUID `json:"workspace_id"`
 	MemberID        pgtype.UUID `json:"member_id"`
+	AgentTaskID     pgtype.UUID `json:"agent_task_id"`
 	Value           string      `json:"value"`
 	Note            pgtype.Text `json:"note"`
 }
@@ -82,6 +86,7 @@ func (q *Queries) CreateKnowledgeFeedback(ctx context.Context, arg CreateKnowled
 		arg.KnowledgeItemID,
 		arg.WorkspaceID,
 		arg.MemberID,
+		arg.AgentTaskID,
 		arg.Value,
 		arg.Note,
 	)
@@ -94,26 +99,35 @@ func (q *Queries) CreateKnowledgeFeedback(ctx context.Context, arg CreateKnowled
 		&i.Value,
 		&i.Note,
 		&i.CreatedAt,
+		&i.AgentTaskID,
 	)
 	return i, err
 }
 
 const createKnowledgeInjectionEvent = `-- name: CreateKnowledgeInjectionEvent :one
 INSERT INTO knowledge_injection_event (
-    workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id
+    workspace_id, knowledge_item_id, agent_task_id, injection_target,
+    retrieval_event_id, rank, score, injection_reason, token_budget, discarded_reason
 ) VALUES (
     $1, $2, $3,
-    $4, $5
+    $4, $5, $6,
+    $7, $8, $9,
+    $10
 )
-RETURNING id, workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id, created_at
+RETURNING id, workspace_id, knowledge_item_id, agent_task_id, injection_target, retrieval_event_id, created_at, rank, score, injection_reason, token_budget, discarded_reason
 `
 
 type CreateKnowledgeInjectionEventParams struct {
-	WorkspaceID      pgtype.UUID `json:"workspace_id"`
-	KnowledgeItemID  pgtype.UUID `json:"knowledge_item_id"`
-	AgentTaskID      pgtype.UUID `json:"agent_task_id"`
-	InjectionTarget  string      `json:"injection_target"`
-	RetrievalEventID pgtype.UUID `json:"retrieval_event_id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	KnowledgeItemID  pgtype.UUID   `json:"knowledge_item_id"`
+	AgentTaskID      pgtype.UUID   `json:"agent_task_id"`
+	InjectionTarget  string        `json:"injection_target"`
+	RetrievalEventID pgtype.UUID   `json:"retrieval_event_id"`
+	Rank             pgtype.Int4   `json:"rank"`
+	Score            pgtype.Float8 `json:"score"`
+	InjectionReason  pgtype.Text   `json:"injection_reason"`
+	TokenBudget      pgtype.Int4   `json:"token_budget"`
+	DiscardedReason  pgtype.Text   `json:"discarded_reason"`
 }
 
 func (q *Queries) CreateKnowledgeInjectionEvent(ctx context.Context, arg CreateKnowledgeInjectionEventParams) (KnowledgeInjectionEvent, error) {
@@ -123,6 +137,11 @@ func (q *Queries) CreateKnowledgeInjectionEvent(ctx context.Context, arg CreateK
 		arg.AgentTaskID,
 		arg.InjectionTarget,
 		arg.RetrievalEventID,
+		arg.Rank,
+		arg.Score,
+		arg.InjectionReason,
+		arg.TokenBudget,
+		arg.DiscardedReason,
 	)
 	var i KnowledgeInjectionEvent
 	err := row.Scan(
@@ -133,6 +152,11 @@ func (q *Queries) CreateKnowledgeInjectionEvent(ctx context.Context, arg CreateK
 		&i.InjectionTarget,
 		&i.RetrievalEventID,
 		&i.CreatedAt,
+		&i.Rank,
+		&i.Score,
+		&i.InjectionReason,
+		&i.TokenBudget,
+		&i.DiscardedReason,
 	)
 	return i, err
 }
@@ -222,33 +246,43 @@ func (q *Queries) CreateKnowledgeItem(ctx context.Context, arg CreateKnowledgeIt
 
 const createKnowledgeRetrievalEvent = `-- name: CreateKnowledgeRetrievalEvent :one
 INSERT INTO knowledge_retrieval_event (
-    workspace_id, member_id, query, retrieval_mode, filters, result_count, top_knowledge_item_ids
+    workspace_id, member_id, agent_task_id, query, query_source, retrieval_mode,
+    filters, result_count, top_knowledge_item_ids, result_scores
 ) VALUES (
-    $1, $2, $3, $4,
-    COALESCE($5, '{}'::jsonb), $6, COALESCE($7::uuid[], '{}')
+    $1, $2, $3,
+    $4, $5, $6,
+    COALESCE($7, '{}'::jsonb), $8,
+    COALESCE($9::uuid[], '{}'),
+    COALESCE($10, '[]'::jsonb)
 )
-RETURNING id, workspace_id, member_id, query, retrieval_mode, filters, result_count, top_knowledge_item_ids, created_at
+RETURNING id, workspace_id, member_id, query, retrieval_mode, filters, result_count, top_knowledge_item_ids, created_at, agent_task_id, query_source, result_scores
 `
 
 type CreateKnowledgeRetrievalEventParams struct {
 	WorkspaceID         pgtype.UUID   `json:"workspace_id"`
 	MemberID            pgtype.UUID   `json:"member_id"`
+	AgentTaskID         pgtype.UUID   `json:"agent_task_id"`
 	Query               pgtype.Text   `json:"query"`
+	QuerySource         string        `json:"query_source"`
 	RetrievalMode       string        `json:"retrieval_mode"`
 	Filters             interface{}   `json:"filters"`
 	ResultCount         int32         `json:"result_count"`
 	TopKnowledgeItemIds []pgtype.UUID `json:"top_knowledge_item_ids"`
+	ResultScores        interface{}   `json:"result_scores"`
 }
 
 func (q *Queries) CreateKnowledgeRetrievalEvent(ctx context.Context, arg CreateKnowledgeRetrievalEventParams) (KnowledgeRetrievalEvent, error) {
 	row := q.db.QueryRow(ctx, createKnowledgeRetrievalEvent,
 		arg.WorkspaceID,
 		arg.MemberID,
+		arg.AgentTaskID,
 		arg.Query,
+		arg.QuerySource,
 		arg.RetrievalMode,
 		arg.Filters,
 		arg.ResultCount,
 		arg.TopKnowledgeItemIds,
+		arg.ResultScores,
 	)
 	var i KnowledgeRetrievalEvent
 	err := row.Scan(
@@ -261,6 +295,9 @@ func (q *Queries) CreateKnowledgeRetrievalEvent(ctx context.Context, arg CreateK
 		&i.ResultCount,
 		&i.TopKnowledgeItemIds,
 		&i.CreatedAt,
+		&i.AgentTaskID,
+		&i.QuerySource,
+		&i.ResultScores,
 	)
 	return i, err
 }
@@ -306,6 +343,53 @@ func (q *Queries) CreateKnowledgeSource(ctx context.Context, arg CreateKnowledge
 		&i.SourceUrl,
 		&i.SourceTitle,
 		&i.SourceExcerpt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createKnowledgeUsageEvent = `-- name: CreateKnowledgeUsageEvent :one
+INSERT INTO knowledge_usage_event (
+    workspace_id, knowledge_item_id, agent_task_id, usage_source,
+    reference_text, task_status, task_result
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    $7
+)
+RETURNING id, workspace_id, knowledge_item_id, agent_task_id, usage_source, reference_text, task_status, task_result, created_at
+`
+
+type CreateKnowledgeUsageEventParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	AgentTaskID     pgtype.UUID `json:"agent_task_id"`
+	UsageSource     string      `json:"usage_source"`
+	ReferenceText   pgtype.Text `json:"reference_text"`
+	TaskStatus      pgtype.Text `json:"task_status"`
+	TaskResult      []byte      `json:"task_result"`
+}
+
+func (q *Queries) CreateKnowledgeUsageEvent(ctx context.Context, arg CreateKnowledgeUsageEventParams) (KnowledgeUsageEvent, error) {
+	row := q.db.QueryRow(ctx, createKnowledgeUsageEvent,
+		arg.WorkspaceID,
+		arg.KnowledgeItemID,
+		arg.AgentTaskID,
+		arg.UsageSource,
+		arg.ReferenceText,
+		arg.TaskStatus,
+		arg.TaskResult,
+	)
+	var i KnowledgeUsageEvent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeItemID,
+		&i.AgentTaskID,
+		&i.UsageSource,
+		&i.ReferenceText,
+		&i.TaskStatus,
+		&i.TaskResult,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -619,6 +703,236 @@ func (q *Queries) ListIssueCommentsForKnowledgeDraft(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listKnowledgeAnalytics = `-- name: ListKnowledgeAnalytics :many
+WITH filtered_items AS (
+    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at
+    FROM knowledge_item ki
+    WHERE ki.workspace_id = $4
+      AND ($5::uuid IS NULL OR ki.id = $5)
+      AND ($6::uuid IS NULL OR ki.project_id = $6)
+      AND ($7::uuid IS NULL OR ki.agent_id = $7)
+),
+retrieval AS (
+    SELECT kid AS knowledge_item_id, COUNT(*)::bigint AS retrieval_count
+    FROM knowledge_retrieval_event kre
+    CROSS JOIN LATERAL unnest(kre.top_knowledge_item_ids) AS kid
+    LEFT JOIN agent_task_queue atq ON atq.id = kre.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kre.workspace_id = $4
+      AND kre.created_at >= $8::timestamptz
+      AND kre.created_at < $9::timestamptz
+      AND ($5::uuid IS NULL OR kid = $5)
+      AND ($7::uuid IS NULL OR atq.agent_id = $7)
+      AND ($6::uuid IS NULL OR i.project_id = $6)
+    GROUP BY kid
+),
+injection AS (
+    SELECT knowledge_item_id,
+        COUNT(*)::bigint AS injection_count,
+        COUNT(DISTINCT agent_task_id) FILTER (WHERE agent_task_id IS NOT NULL)::bigint AS injected_task_count
+    FROM knowledge_injection_event kie
+    LEFT JOIN agent_task_queue atq ON atq.id = kie.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kie.workspace_id = $4
+      AND kie.created_at >= $8::timestamptz
+      AND kie.created_at < $9::timestamptz
+      AND ($5::uuid IS NULL OR kie.knowledge_item_id = $5)
+      AND ($7::uuid IS NULL OR atq.agent_id = $7)
+      AND ($6::uuid IS NULL OR i.project_id = $6)
+    GROUP BY knowledge_item_id
+),
+usage AS (
+    SELECT knowledge_item_id,
+        COUNT(*)::bigint AS usage_count,
+        COUNT(*) FILTER (WHERE usage_source = 'agent_reference')::bigint AS agent_reference_count,
+        COUNT(*) FILTER (WHERE usage_source = 'active_search')::bigint AS active_search_count
+    FROM knowledge_usage_event kue
+    LEFT JOIN agent_task_queue atq ON atq.id = kue.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kue.workspace_id = $4
+      AND kue.created_at >= $8::timestamptz
+      AND kue.created_at < $9::timestamptz
+      AND ($5::uuid IS NULL OR kue.knowledge_item_id = $5)
+      AND ($7::uuid IS NULL OR atq.agent_id = $7)
+      AND ($6::uuid IS NULL OR i.project_id = $6)
+    GROUP BY knowledge_item_id
+),
+feedback AS (
+    SELECT knowledge_item_id,
+        COUNT(*) FILTER (WHERE value = 'helpful')::bigint AS helpful_count,
+        COUNT(*) FILTER (WHERE value = 'not_helpful')::bigint AS not_helpful_count,
+        COUNT(*) FILTER (WHERE value = 'misleading')::bigint AS misleading_count,
+        COUNT(*) FILTER (WHERE value = 'outdated')::bigint AS outdated_count,
+        MAX(kf.created_at) FILTER (WHERE value IN ('not_helpful', 'misleading', 'outdated'))::timestamptz AS latest_negative_feedback_at
+    FROM knowledge_feedback kf
+    LEFT JOIN agent_task_queue atq ON atq.id = kf.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    WHERE kf.workspace_id = $4
+      AND kf.created_at >= $8::timestamptz
+      AND kf.created_at < $9::timestamptz
+      AND ($5::uuid IS NULL OR kf.knowledge_item_id = $5)
+      AND ($7::uuid IS NULL OR atq.agent_id = $7)
+      AND ($6::uuid IS NULL OR i.project_id = $6)
+    GROUP BY knowledge_item_id
+),
+task_edges AS (
+    SELECT knowledge_item_id, agent_task_id
+    FROM knowledge_injection_event
+    WHERE workspace_id = $4 AND agent_task_id IS NOT NULL
+    UNION
+    SELECT knowledge_item_id, agent_task_id
+    FROM knowledge_usage_event
+    WHERE workspace_id = $4 AND agent_task_id IS NOT NULL
+),
+task_token AS (
+    SELECT
+        task_id,
+        SUM(input_tokens + output_tokens + cache_read_tokens + cache_write_tokens)::bigint AS total_tokens
+    FROM task_usage
+    GROUP BY task_id
+),
+task_outcome AS (
+    SELECT te.knowledge_item_id,
+        COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'completed')::bigint AS successful_task_count,
+        COUNT(DISTINCT atq.id) FILTER (WHERE atq.status = 'failed')::bigint AS failed_task_count,
+        COALESCE(SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at))) FILTER (
+            WHERE atq.status IN ('completed', 'failed')
+              AND atq.started_at IS NOT NULL
+              AND atq.completed_at IS NOT NULL
+        ), 0)::bigint AS total_task_seconds,
+        COALESCE(SUM(tt.total_tokens), 0)::bigint AS total_tokens
+    FROM task_edges te
+    JOIN agent_task_queue atq ON atq.id = te.agent_task_id
+    LEFT JOIN issue i ON i.id = atq.issue_id
+    LEFT JOIN task_token tt ON tt.task_id = atq.id
+    WHERE atq.completed_at >= $8::timestamptz
+      AND atq.completed_at < $9::timestamptz
+      AND ($5::uuid IS NULL OR te.knowledge_item_id = $5)
+      AND ($7::uuid IS NULL OR atq.agent_id = $7)
+      AND ($6::uuid IS NULL OR i.project_id = $6)
+    GROUP BY te.knowledge_item_id
+)
+SELECT
+    fi.id AS knowledge_item_id,
+    fi.title,
+    fi.type,
+    fi.lifecycle_status,
+    COALESCE(r.retrieval_count, 0)::bigint AS retrieval_count,
+    COALESCE(i.injection_count, 0)::bigint AS injection_count,
+    COALESCE(i.injected_task_count, 0)::bigint AS injected_task_count,
+    COALESCE(u.usage_count, 0)::bigint AS usage_count,
+    COALESCE(u.agent_reference_count, 0)::bigint AS agent_reference_count,
+    COALESCE(u.active_search_count, 0)::bigint AS active_search_count,
+    COALESCE(f.helpful_count, 0)::bigint AS helpful_count,
+    COALESCE(f.not_helpful_count, 0)::bigint AS not_helpful_count,
+    COALESCE(f.misleading_count, 0)::bigint AS misleading_count,
+    COALESCE(f.outdated_count, 0)::bigint AS outdated_count,
+    f.latest_negative_feedback_at,
+    COALESCE(t.successful_task_count, 0)::bigint AS successful_task_count,
+    COALESCE(t.failed_task_count, 0)::bigint AS failed_task_count,
+    COALESCE(t.total_task_seconds, 0)::bigint AS total_task_seconds,
+    COALESCE(t.total_tokens, 0)::bigint AS total_tokens
+FROM filtered_items fi
+LEFT JOIN retrieval r ON r.knowledge_item_id = fi.id
+LEFT JOIN injection i ON i.knowledge_item_id = fi.id
+LEFT JOIN usage u ON u.knowledge_item_id = fi.id
+LEFT JOIN feedback f ON f.knowledge_item_id = fi.id
+LEFT JOIN task_outcome t ON t.knowledge_item_id = fi.id
+WHERE (
+    $1::boolean
+    OR COALESCE(r.retrieval_count, 0) > 0
+    OR COALESCE(i.injection_count, 0) > 0
+    OR COALESCE(u.usage_count, 0) > 0
+    OR COALESCE(f.helpful_count, 0) + COALESCE(f.not_helpful_count, 0) + COALESCE(f.misleading_count, 0) + COALESCE(f.outdated_count, 0) > 0
+)
+ORDER BY usage_count DESC, injection_count DESC, retrieval_count DESC, fi.updated_at DESC
+LIMIT $3 OFFSET $2
+`
+
+type ListKnowledgeAnalyticsParams struct {
+	IncludeZero     bool               `json:"include_zero"`
+	Offset          int32              `json:"offset"`
+	Limit           int32              `json:"limit"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Since           pgtype.Timestamptz `json:"since"`
+	Until           pgtype.Timestamptz `json:"until"`
+}
+
+type ListKnowledgeAnalyticsRow struct {
+	KnowledgeItemID          pgtype.UUID        `json:"knowledge_item_id"`
+	Title                    string             `json:"title"`
+	Type                     string             `json:"type"`
+	LifecycleStatus          string             `json:"lifecycle_status"`
+	RetrievalCount           int64              `json:"retrieval_count"`
+	InjectionCount           int64              `json:"injection_count"`
+	InjectedTaskCount        int64              `json:"injected_task_count"`
+	UsageCount               int64              `json:"usage_count"`
+	AgentReferenceCount      int64              `json:"agent_reference_count"`
+	ActiveSearchCount        int64              `json:"active_search_count"`
+	HelpfulCount             int64              `json:"helpful_count"`
+	NotHelpfulCount          int64              `json:"not_helpful_count"`
+	MisleadingCount          int64              `json:"misleading_count"`
+	OutdatedCount            int64              `json:"outdated_count"`
+	LatestNegativeFeedbackAt pgtype.Timestamptz `json:"latest_negative_feedback_at"`
+	SuccessfulTaskCount      int64              `json:"successful_task_count"`
+	FailedTaskCount          int64              `json:"failed_task_count"`
+	TotalTaskSeconds         int64              `json:"total_task_seconds"`
+	TotalTokens              int64              `json:"total_tokens"`
+}
+
+func (q *Queries) ListKnowledgeAnalytics(ctx context.Context, arg ListKnowledgeAnalyticsParams) ([]ListKnowledgeAnalyticsRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeAnalytics,
+		arg.IncludeZero,
+		arg.Offset,
+		arg.Limit,
+		arg.WorkspaceID,
+		arg.KnowledgeItemID,
+		arg.ProjectID,
+		arg.AgentID,
+		arg.Since,
+		arg.Until,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnowledgeAnalyticsRow{}
+	for rows.Next() {
+		var i ListKnowledgeAnalyticsRow
+		if err := rows.Scan(
+			&i.KnowledgeItemID,
+			&i.Title,
+			&i.Type,
+			&i.LifecycleStatus,
+			&i.RetrievalCount,
+			&i.InjectionCount,
+			&i.InjectedTaskCount,
+			&i.UsageCount,
+			&i.AgentReferenceCount,
+			&i.ActiveSearchCount,
+			&i.HelpfulCount,
+			&i.NotHelpfulCount,
+			&i.MisleadingCount,
+			&i.OutdatedCount,
+			&i.LatestNegativeFeedbackAt,
+			&i.SuccessfulTaskCount,
+			&i.FailedTaskCount,
+			&i.TotalTaskSeconds,
+			&i.TotalTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeCandidates = `-- name: ListKnowledgeCandidates :many
 SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
 FROM knowledge_candidate
@@ -794,6 +1108,63 @@ func (q *Queries) ListKnowledgeItems(ctx context.Context, arg ListKnowledgeItems
 		arg.Offset,
 		arg.Limit,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeItem{}
+	for rows.Next() {
+		var i KnowledgeItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeItemsByIDs = `-- name: ListKnowledgeItemsByIDs :many
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+FROM knowledge_item
+WHERE workspace_id = $1
+  AND id = ANY($2::uuid[])
+`
+
+type ListKnowledgeItemsByIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Ids         []pgtype.UUID `json:"ids"`
+}
+
+func (q *Queries) ListKnowledgeItemsByIDs(ctx context.Context, arg ListKnowledgeItemsByIDsParams) ([]KnowledgeItem, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeItemsByIDs, arg.WorkspaceID, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
