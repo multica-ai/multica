@@ -871,23 +871,6 @@ export class ApiClient {
     return res.blob();
   }
 
-  /**
-   * Export an issue to PDF by sending the rendered HTML from the frontend preview.
-   * This produces a PDF that closely matches the browser preview quality.
-   */
-  async exportIssueHTML(
-    id: string,
-    htmlContent: string,
-  ): Promise<Blob> {
-    const res = await this.fetchRaw(`/api/issues/${id}/export-html`, {
-      method: "POST",
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-      body: htmlContent,
-    });
-    return res.blob();
-  }
-
-
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
       method: "POST",
