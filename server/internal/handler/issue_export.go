@@ -26,9 +26,9 @@ import (
 
 var renderSemaphore = make(chan struct{}, 5)
 
-// mdConverter is a goldmark instance with table + strikethrough extensions enabled.
+// mdConverter is a goldmark instance with GFM extensions enabled.
 var mdConverter = goldmark.New(
-	goldmark.WithExtensions(extension.Table, extension.Strikethrough),
+	goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.TaskList, extension.Linkify),
 )
 
 const spacerGIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
@@ -281,6 +281,31 @@ blockquote {
 img {
     max-width: 100%;
     height: auto;
+}
+del {
+    text-decoration: line-through;
+    color: #57606a;
+}
+ul:has(input[type="checkbox"]) {
+    list-style: none;
+    padding-left: 0;
+}
+ul:has(input[type="checkbox"]) li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4em;
+}
+input[type="checkbox"] {
+    width: 1em;
+    height: 1em;
+    accent-color: #1f883d;
+}
+a {
+    color: #0969da;
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
 }
 @page {
     size: A4;
