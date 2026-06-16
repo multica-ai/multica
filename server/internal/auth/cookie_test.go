@@ -58,28 +58,6 @@ func TestCookieDomain(t *testing.T) {
 	}
 }
 
-func TestSetAuthCookies_UsesConfiguredSessionLifetime(t *testing.T) {
-	t.Setenv("FRONTEND_ORIGIN", "https://app.example.com")
-	t.Setenv("COOKIE_DOMAIN", "app.example.com")
-	t.Setenv("MULTICA_SESSION_TTL", "24h")
-
-	rec := httptest.NewRecorder()
-	before := time.Now().Add(24 * time.Hour)
-	if err := SetAuthCookies(rec, "test-token"); err != nil {
-		t.Fatalf("SetAuthCookies: %v", err)
-	}
-	after := time.Now().Add(24 * time.Hour)
-
-	for _, c := range rec.Result().Cookies() {
-		if c.MaxAge != 24*60*60 {
-			t.Errorf("cookie %q MaxAge = %d, want 86400", c.Name, c.MaxAge)
-		}
-		if c.Expires.Before(before.Add(-time.Second)) || c.Expires.After(after.Add(time.Second)) {
-			t.Errorf("cookie %q Expires = %s, want around 24h from now", c.Name, c.Expires)
-		}
-	}
-}
-
 // TestSetAuthCookies_HTTPSelfHost covers the exact misconfiguration that
 // shipped to users on LAN self-host: COOKIE_DOMAIN=<ip> + HTTP FRONTEND_ORIGIN.
 // The cookie must land with no Domain attribute and Secure=false so browsers

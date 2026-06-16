@@ -107,7 +107,6 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | Variable | Description |
 |----------|-------------|
 | `COOKIE_DOMAIN` | Optional `Domain` attribute for session + CloudFront cookies. **Leave empty** for single-host deployments (localhost, LAN IP, or a single hostname). Only set it when the frontend and backend sit on different subdomains of one registered domain (e.g. `.example.com`). **Do not use an IP literal** — RFC 6265 forbids IP addresses in the cookie `Domain` attribute and browsers will drop such `Set-Cookie` headers. |
-| `MULTICA_SESSION_TTL` | Browser session lifetime for the JWT, `multica_auth`, and `multica_csrf` cookies. Uses Go duration syntax. | `720h` |
 
 The `Secure` flag on session cookies is derived automatically from the scheme of `FRONTEND_ORIGIN`: HTTPS origins get `Secure` cookies; plain-HTTP origins (LAN / private-network self-host) get non-secure cookies so the browser can actually store them.
 
