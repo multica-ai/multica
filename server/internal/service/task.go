@@ -1033,7 +1033,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	// back to queued so another agent in the squad can claim it later.
 	if claimed.IssueID.Valid {
 		if released, releaseReason := s.maybeReleaseSquadTask(ctx, *claimed); released {
-			slog.Debug("task claim: squad at capacity, task released back to queued",
+			slog.Info("task claim: squad at capacity, task released back to queued",
 				"task_id", util.UUIDToString(claimed.ID),
 				"agent_id", util.UUIDToString(agentID),
 				"reason", releaseReason,
