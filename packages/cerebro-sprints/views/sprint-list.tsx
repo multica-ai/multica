@@ -18,6 +18,11 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths } from "@multica/core/paths";
+// Imported as a leaf primitive WITHOUT declaring `@multica/views` in this
+// package's package.json — `views` already depends on `@multica/cerebro-sprints`,
+// so declaring the reverse edge creates a turbo build cycle (broke all frontend
+// CI on main, #1352). Same phantom-import pattern as cerebro-groups. Do not add
+// `@multica/views` to dependencies here.
 import { AppLink } from "@multica/views/navigation";
 
 import { projectSprintsOptions, useCreateSprint, useDeleteSprint } from "../core/queries";
