@@ -5,6 +5,7 @@ import {
   Bell,
   Inbox,
   Mail,
+  MessageSquare,
   Monitor,
   Smartphone,
   UserPlus,
@@ -24,6 +25,7 @@ import {
   getAutoSubscribe,
   getChannelChoice,
   getChannelTransport,
+  getDMExcerpt,
   getNotifyAllMobileInbox,
   type RoutingKey,
   type AutoSubscribeReason,
@@ -75,6 +77,20 @@ const ROW_GROUPS: RowGroup[] = [
         routingKey: "reaction_added",
         label: "Reaction on your content",
         hint: "Someone reacted to a comment or issue you own.",
+      },
+    ],
+  },
+  {
+    // FIR-308: direct messages (person-to-person DMs) get their own row so
+    // their push can be kept on while issue-comment chatter is muted, and vice
+    // versa. On by default for Mobile and Desktop so a DM reaches both phone
+    // and browser out of the box.
+    title: "Direct messages",
+    rows: [
+      {
+        routingKey: "dm_message",
+        label: "Direct message",
+        hint: "Someone sent you a direct message (DM). Keep this on for Mobile and Desktop to get a push on your phone and in your browser.",
       },
     ],
   },
@@ -288,6 +304,8 @@ export function NotificationsTab() {
   const [savingAutoSub, setSavingAutoSub] =
     useState<AutoSubscribeReason | null>(null);
   const [savingNotifyAllMobile, setSavingNotifyAllMobile] = useState(false);
+  // FIR-308: whether the DM push reveals the message excerpt or just the sender.
+  const [savingDMExcerpt, setSavingDMExcerpt] = useState(false);
   // CEREBRO-PATCH(web-push-flag-gate): drop the Mobile (Web Push) channel row when disabled
   const webPushEnabled = useFeatureFlag("cerebro_web_push");
   // The "Turn on" subscribe controls the device you're on right now, so it
@@ -418,6 +436,31 @@ export function NotificationsTab() {
     await handleChannelToggle("mobile", "reminder", next ? "on" : "off");
   };
 
+  // FIR-308: persist the DM excerpt preference under notifications.dm_excerpt.
+  // Default off (privacy): the push shows only the sender's name until the user
+  // opts in to showing the start of the message.
+  const handleDMExcerptToggle = async (next: boolean) => {
+    if (!user) return;
+    setSavingDMExcerpt(true);
+    try {
+      const notifBlock =
+        ((user.preferences?.notifications as Record<string, unknown>) ?? {});
+      const updated = await api.updateMyPreferences({
+        notifications: {
+          ...notifBlock,
+          dm_excerpt: next,
+        },
+      });
+      setUser(updated);
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : "Failed to update preference",
+      );
+    } finally {
+      setSavingDMExcerpt(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <section className="space-y-3">
@@ -440,6 +483,12 @@ export function NotificationsTab() {
         user={user}
         savingReason={savingAutoSub}
         onChange={handleAutoSubscribeChange}
+      />
+
+      <DirectMessageSection
+        user={user}
+        saving={savingDMExcerpt}
+        onChange={handleDMExcerptToggle}
       />
 
       {channelMeta.map((meta) => (
@@ -482,6 +531,59 @@ export function NotificationsTab() {
         />
       ))}
     </div>
+  );
+}
+
+interface DirectMessageSectionProps {
+  user: ReturnType<typeof useAuthStore.getState>["user"];
+  saving: boolean;
+  onChange: (next: boolean) => void | Promise<void>;
+}
+
+// FIR-308: Direct-message notification preferences. The on/off-per-channel for
+// DMs lives in the channel matrix below (the "Direct message" row under Mobile
+// and Desktop); this section owns the one cross-channel choice — whether the
+// push reveals the message text or only the sender's name. Privacy default: off.
+function DirectMessageSection({
+  user,
+  saving,
+  onChange,
+}: DirectMessageSectionProps) {
+  const checked = getDMExcerpt(
+    user?.preferences as Record<string, unknown> | undefined,
+  );
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">Direct messages</h3>
+        <span className="text-xs text-muted-foreground">
+          — Push when someone sends you a DM
+        </span>
+      </div>
+      <Card>
+        <CardContent className="px-4 py-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <Label className="text-sm font-medium">
+                Show message text in the notification
+              </Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Off shows only the sender — &ldquo;New message from Anna
+                Berg&rdquo;. On adds the start of the message. Applies to both
+                phone and browser push. Turn direct-message push on or off per
+                device in the matrix below.
+              </p>
+            </div>
+            <Switch
+              checked={checked}
+              disabled={saving || !user}
+              onCheckedChange={(next) => void onChange(next)}
+            />
+          </div>
+        </CardContent>
+      </Card>
+    </section>
   );
 }
 

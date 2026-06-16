@@ -169,11 +169,21 @@ func dispatchToMember(
 		}
 	}
 
+	// CEREBRO-PATCH(dm-push): FIR-308 — a direct message gets a recipient-
+	// localized push ("Ny besked fra <navn>") whose body carries the message
+	// excerpt only when the recipient opted in via dm_excerpt. The inbox row
+	// keeps the full content (d.Title/d.Body); only the push surfaces are
+	// excerpt-gated, and the gate applies equally to phone and browser push.
+	pushTitle, pushBody := d.Title, d.Body
+	if d.NotifType == "dm_message" {
+		pushTitle, pushBody = dmPushContent(ctx, queries, d.RecipientID, d.Actor.ActorType, d.Actor.ActorID, d.Body)
+	}
+
 	// Mobile push fires only when something landed in the user's inbox or
 	// notifications page — push is a bell-ring on top of an existing item,
 	// not a standalone notification. Targets the user's phone-class devices.
 	if created && !d.SuppressMobilePush && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
-		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body, service.DeviceClassMobile, channelMobile)
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassMobile, channelMobile)
 	}
 
 	// Desktop channel fires under the same "must have a real item to open"
@@ -181,7 +191,7 @@ func dispatchToMember(
 	// browsers (so it works with the tab closed) AND the in-app banner that
 	// rides the WS hub via EventDesktopNotify for the Electron desktop app.
 	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) {
-		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, d.Title, d.Body, service.DeviceClassDesktop, channelDesktop)
+		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassDesktop, channelDesktop)
 		bus.Publish(events.Event{
 			Type:        protocol.EventDesktopNotify,
 			WorkspaceID: d.WorkspaceID,
@@ -191,8 +201,8 @@ func dispatchToMember(
 				"recipient_id": d.RecipientID,
 				"type":         d.NotifType,
 				"severity":     d.Severity,
-				"title":        d.Title,
-				"body":         d.Body,
+				"title":        pushTitle,
+				"body":         pushBody,
 				"issue_id":     d.IssueID,
 				"issue_status": d.IssueStatus,
 			},
@@ -1038,10 +1048,15 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		// Look up the issue to know who the current assignee is — needed for
 		// split-type routing on subscribers (new_comment isn't split, but we
 		// pass it for consistency and so future split types Just Work).
+		// CEREBRO-PATCH(dm-push): FIR-308 — also capture the issue kind so a
+		// comment on a kind='dm' issue (a direct message) routes under the
+		// dedicated "dm_message" key instead of generic comment traffic.
 		commentAssigneeMemberID := ""
+		issueKind := ""
 		if issueID != "" {
 			if iss, err := queries.GetIssue(ctx, parseUUID(issueID)); err == nil {
 				commentAssigneeMemberID = issueAssigneeMemberID(iss)
+				issueKind = iss.Kind
 			}
 		}
 
@@ -1054,6 +1069,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 
 		// CEREBRO-PATCH(agent-comment-tag-split): TECH-2961 — agent-authored comments fan out to three routing keys based on who they tag, so users can mute monologues without losing hand-offs.
 		newCommentKey := pickAgentCommentRoutingKey(authorType, mentions)
+		// CEREBRO-PATCH(dm-push): FIR-308 — direct messages route under their own key.
+		if issueKind == "dm" {
+			newCommentKey = "dm_message"
+		}
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,
 			nil, newCommentKey, "info",
 			issueTitle, commentContent,

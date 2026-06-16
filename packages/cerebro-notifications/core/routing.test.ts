@@ -5,6 +5,7 @@ import {
   DEFAULT_CHANNEL_TRANSPORT,
   getChannelChoice,
   getChannelTransport,
+  getDMExcerpt,
   getNotifyAllMobileInbox,
 } from "./routing";
 
@@ -17,6 +18,11 @@ describe("getChannelChoice", () => {
     );
     expect(getChannelChoice(undefined, "inbox", "new_comment")).toBe("on");
     expect(getChannelChoice(undefined, "mobile", "new_comment")).toBe("on");
+    // FIR-308: DM push fires on phone + browser by default, never on mail.
+    expect(getChannelChoice(undefined, "mobile", "dm_message")).toBe("on");
+    expect(getChannelChoice(undefined, "desktop", "dm_message")).toBe("on");
+    expect(getChannelChoice(undefined, "inbox", "dm_message")).toBe("on");
+    expect(getChannelChoice(undefined, "mail", "dm_message")).toBe("off");
     expect(getChannelChoice(undefined, "mail", "issue_assigned")).toBe("off");
     expect(getChannelChoice(undefined, "inbox", "system_notification")).toBe(
       "on",
@@ -149,5 +155,20 @@ describe("getNotifyAllMobileInbox", () => {
         notifications: { notify_all_mobile_inbox: true },
       }),
     ).toBe(true);
+  });
+});
+
+describe("getDMExcerpt", () => {
+  test("defaults to false (privacy) when prefs or toggle are missing", () => {
+    expect(getDMExcerpt(undefined)).toBe(false);
+    expect(getDMExcerpt({})).toBe(false);
+    expect(getDMExcerpt({ other: 1 })).toBe(false);
+    expect(getDMExcerpt({ notifications: {} })).toBe(false);
+    expect(getDMExcerpt({ notifications: { dm_excerpt: "true" } })).toBe(false);
+    expect(getDMExcerpt({ notifications: { dm_excerpt: false } })).toBe(false);
+  });
+
+  test("returns true only for the literal boolean true", () => {
+    expect(getDMExcerpt({ notifications: { dm_excerpt: true } })).toBe(true);
   });
 });

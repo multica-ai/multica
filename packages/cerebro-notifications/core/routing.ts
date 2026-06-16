@@ -62,6 +62,9 @@ export type RoutingKey =
   | "unassigned"
   | "reaction_added"
   | "new_comment"
+  // FIR-308: direct messages route under their own key so DM push can be
+  // controlled independently of issue-comment traffic.
+  | "dm_message"
   | "assignee_changed"
   | "status_changed"
   | "due_date_changed.assignee"
@@ -93,6 +96,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     unassigned: "on",
     reaction_added: "off",
     new_comment: "on", // TECH-3001: default to Jesper's preference
+    dm_message: "on", // FIR-308: direct message push, independent of issue comments
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "on",
@@ -114,6 +118,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     unassigned: "off",
     reaction_added: "on",
     new_comment: "on",
+    dm_message: "on", // FIR-308: direct message push, independent of issue comments
     assignee_changed: "on",
     status_changed: "on",
     "due_date_changed.assignee": "off",
@@ -135,6 +140,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     unassigned: "off",
     reaction_added: "off",
     new_comment: "on", // TECH-3001: default to Jesper's preference
+    dm_message: "on", // FIR-308: direct message push, independent of issue comments
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "on",
@@ -156,6 +162,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     unassigned: "off",
     reaction_added: "off",
     new_comment: "off",
+    dm_message: "on", // FIR-308: direct message push, independent of issue comments
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "on",
@@ -179,6 +186,7 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     unassigned: "off",
     reaction_added: "off",
     new_comment: "off",
+    dm_message: "off", // FIR-308: direct message push, independent of issue comments
     assignee_changed: "off",
     status_changed: "off",
     "due_date_changed.assignee": "off",
@@ -222,6 +230,18 @@ export function getNotifyAllMobileInbox(
 ): boolean {
   const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
   return notif.notify_all_mobile_inbox === true;
+}
+
+// FIR-308: read the "show the message excerpt in DM push notifications" toggle.
+// When false (the default), a DM push reveals only the sender's name; when
+// true, the push body carries the start of the message. Mirror of the JSON
+// path `preferences.notifications.dm_excerpt` and the server-side
+// `resolveDMExcerpt` in server/cmd/server/notification_routing.go.
+export function getDMExcerpt(
+  prefs: Record<string, unknown> | undefined,
+): boolean {
+  const notif = (prefs?.notifications ?? {}) as Record<string, unknown>;
+  return notif.dm_excerpt === true;
 }
 
 // Pull a user's per-channel choice out of the preferences blob, falling
