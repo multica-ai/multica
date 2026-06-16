@@ -149,9 +149,10 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	workspacesRoot := t.TempDir()
 
 	taskCtx := TaskContextForEnv{
-		IssueID:      "11111111-2222-3333-4444-555555555555",
-		ProjectID:    "22222222-3333-4444-5555-666666666666",
-		ProjectTitle: "Agent UX 2026",
+		IssueID:            "11111111-2222-3333-4444-555555555555",
+		ProjectID:          "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:       "Agent UX 2026",
+		ProjectDescription: "Use the project description as agent context.",
 		ProjectResources: []ProjectResourceForEnv{
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
@@ -213,6 +214,8 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	for _, want := range []string{
 		"## Project Context",
 		"Agent UX 2026",
+		"Project description:",
+		"Use the project description as agent context.",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
 		"default branch: `main`",

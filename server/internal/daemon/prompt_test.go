@@ -154,6 +154,48 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 }
 
+func TestBuildPromptsIncludeProjectDescriptionContext(t *testing.T) {
+	task := Task{
+		IssueID:            "issue-123",
+		ProjectTitle:       "Web App",
+		ProjectDescription: "Prefer the React app conventions.\nKeep API changes minimal.",
+	}
+	for name, out := range map[string]string{
+		"assignment": BuildPrompt(task, "claude"),
+		"comment": BuildPrompt(Task{
+			IssueID:               task.IssueID,
+			ProjectTitle:          task.ProjectTitle,
+			ProjectDescription:    task.ProjectDescription,
+			TriggerCommentID:      "comment-123",
+			TriggerCommentContent: "please continue",
+		}, "claude"),
+		"quick-create": buildQuickCreatePrompt(Task{
+			QuickCreatePrompt:  "fix the nav",
+			ProjectID:          "11111111-2222-3333-4444-555555555555",
+			ProjectTitle:       task.ProjectTitle,
+			ProjectDescription: task.ProjectDescription,
+		}),
+	} {
+		if !strings.Contains(out, "Project context from \"Web App\"") {
+			t.Errorf("%s prompt missing project context heading:\n%s", name, out)
+		}
+		if !strings.Contains(out, task.ProjectDescription) {
+			t.Errorf("%s prompt missing project description:\n%s", name, out)
+		}
+	}
+}
+
+func TestBuildPromptSkipsBlankProjectDescriptionContext(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID:            "issue-123",
+		ProjectTitle:       "Web App",
+		ProjectDescription: " \n\t",
+	}, "claude")
+	if strings.Contains(out, "Project context") {
+		t.Errorf("blank project description should not render project context prompt, got:\n%s", out)
+	}
+}
+
 // TestBuildQuickCreatePromptParentPinning verifies that when the user
 // opened quick-create from "Add sub issue" on an existing issue, the prompt
 // instructs the agent to pass `--parent <uuid>` so the new issue is filed

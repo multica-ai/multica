@@ -1777,9 +1777,10 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// Project + project_resource(github_repo) with a URL that is NOT in the
 	// workspace's repos list.
 	var projectID string
+	const projectDescription = "Agents should treat this project description as project context."
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, "Claim project repo override").Scan(&projectID); err != nil {
+		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
+	`, testWorkspaceID, "Claim project repo override", projectDescription).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
@@ -1834,9 +1835,10 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	var resp struct {
 		Task *struct {
-			Repos            []RepoData            `json:"repos"`
-			ProjectID        string                `json:"project_id"`
-			ProjectResources []ProjectResourceData `json:"project_resources"`
+			Repos              []RepoData            `json:"repos"`
+			ProjectID          string                `json:"project_id"`
+			ProjectDescription string                `json:"project_description"`
+			ProjectResources   []ProjectResourceData `json:"project_resources"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -1847,6 +1849,9 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	}
 	if resp.Task.ProjectID != projectID {
 		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectDescription != projectDescription {
+		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
 	}
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
 		t.Fatalf("expected resp.Repos to contain only the project repo URL, got %+v", resp.Task.Repos)
@@ -2440,6 +2445,9 @@ type claimRuntimeGuardTask struct {
 	PriorWorkDir             string   `json:"prior_work_dir"`
 	ChatMessage              string   `json:"chat_message"`
 	ThreadName               string   `json:"thread_name"`
+	ProjectID                string   `json:"project_id"`
+	ProjectTitle             string   `json:"project_title"`
+	ProjectDescription       string   `json:"project_description"`
 	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
 }
 
@@ -3089,11 +3097,23 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 
 	quickPrompt := "create a follow-up issue for Codex session titles"
 	attachmentID := "019ec09d-6222-722b-bdfa-427b105d80be"
+	projectDescription := "Use this description as the quick-create project context."
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, description)
+		VALUES ($1, 'Quick-create Project', $2)
+		RETURNING id
+	`, testWorkspaceID, projectDescription).Scan(&projectID); err != nil {
+		t.Fatalf("setup: create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
 	quickContext, _ := json.Marshal(map[string]any{
 		"type":           "quick_create",
 		"prompt":         quickPrompt,
 		"requester_id":   testUserID,
 		"workspace_id":   testWorkspaceID,
+		"project_id":     projectID,
 		"attachment_ids": []string{attachmentID},
 	})
 
@@ -3107,6 +3127,15 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ThreadName != quickPrompt {
 		t.Fatalf("quick-create task thread_name = %q, want prompt", task.ThreadName)
+	}
+	if task.ProjectID != projectID {
+		t.Fatalf("quick-create task project_id = %q, want %q", task.ProjectID, projectID)
+	}
+	if task.ProjectTitle != "Quick-create Project" {
+		t.Fatalf("quick-create task project_title = %q, want Quick-create Project", task.ProjectTitle)
+	}
+	if task.ProjectDescription != projectDescription {
+		t.Fatalf("quick-create task project_description = %q, want %q", task.ProjectDescription, projectDescription)
 	}
 	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
 		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)

@@ -554,13 +554,21 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\nThe checkout command creates a git worktree with a dedicated branch. You can check out one or more repos as needed, and can pass `--ref` for review/QA on a non-default branch or commit.\n\n")
 	}
 
-	// Inject project-scoped context (resources attached to the issue's project).
-	// The full structured payload is also available at .multica/project/resources.json
-	// so skills can consume it programmatically.
-	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+	// Inject project-scoped context. The project description is the unified
+	// human-facing and agent-facing project context; resources are pointers
+	// attached to the same project. The full structured resource payload is
+	// also available at .multica/project/resources.json so skills can consume
+	// it programmatically.
+	projectDescription := strings.TrimRight(ctx.ProjectDescription, " \t\r\n")
+	if ctx.ProjectID != "" || projectDescription != "" || len(ctx.ProjectResources) > 0 {
 		b.WriteString("## Project Context\n\n")
 		if ctx.ProjectTitle != "" {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		}
+		if projectDescription != "" {
+			b.WriteString("Project description:\n\n")
+			b.WriteString(projectDescription)
+			b.WriteString("\n\n")
 		}
 		if len(ctx.ProjectResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
