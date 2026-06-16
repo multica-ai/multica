@@ -201,6 +201,27 @@
     "secret_ref_label": "Secret reference",
     "secret_ref_placeholder": "secret://workspace/knowledge-curator",
     "secret_ref_hint": "Store a reference to a server-side secret, not the secret value itself.",
+    "rag_auto_inject_label": "Auto-inject relevant knowledge",
+    "rag_auto_inject_description": "Inject a small ranked knowledge context into agent task claims when the workspace policy allows it.",
+    "rag_limit_label": "Injection limit",
+    "rag_confidence_label": "Minimum confidence",
+    "rag_confidence": {
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "rag_runtime_policy_label": "Curator runtime policy",
+    "rag_runtime_policy": {
+      "workspace_default": "Workspace default",
+      "cloud": "Prefer cloud",
+      "local": "Prefer local"
+    },
+    "rag_type_filters_label": "Knowledge types",
+    "rag_types": {
+      "lesson": "Lessons",
+      "playbook": "Playbooks",
+      "reference": "References"
+    },
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update Curator settings.",

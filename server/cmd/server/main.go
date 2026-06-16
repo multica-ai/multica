@@ -367,6 +367,7 @@ func main() {
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 	go runUsageHourlyRollup(sweepCtx, pool)
 	go runIssueAutoArchive(sweepCtx, queries, bus)
+	go runKnowledgeGovernance(sweepCtx, queries)
 	go h.RunLocalCLIMessageOutbox(sweepCtx, time.Second)
 
 	// Lark inbound supervisor: holds the §4.4 WS lease per installation

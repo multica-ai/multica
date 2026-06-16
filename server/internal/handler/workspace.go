@@ -98,6 +98,15 @@ func settingsIncludesKnowledgeCurator(settings any) bool {
 	return ok
 }
 
+func settingsIncludesKnowledgeRAG(settings any) bool {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = settingsMap["knowledge_rag"]
+	return ok
+}
+
 func validateKnowledgeCuratorSettings(settings any) error {
 	settingsMap, ok := settings.(map[string]any)
 	if !ok {
@@ -139,6 +148,87 @@ func validateKnowledgeCuratorSettings(settings any) error {
 		return fmt.Errorf("knowledge_curator.provider cannot be empty")
 	}
 	return nil
+}
+
+func validateKnowledgeRAGSettings(settings any) error {
+	settingsMap, ok := settings.(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := settingsMap["knowledge_rag"]
+	if !ok || raw == nil {
+		return nil
+	}
+	policy, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("knowledge_rag must be an object")
+	}
+	if v, ok := policy["auto_inject"]; ok {
+		if _, ok := v.(bool); !ok {
+			return fmt.Errorf("knowledge_rag.auto_inject must be a boolean")
+		}
+	}
+	if v, ok := policy["limit"]; ok && v != nil {
+		limit, ok := jsonNumberToFloat(v)
+		if !ok || limit < 1 || limit > 8 || limit != float64(int(limit)) {
+			return fmt.Errorf("knowledge_rag.limit must be an integer between 1 and 8")
+		}
+	}
+	if v, ok := policy["confidence_threshold"]; ok && v != nil {
+		threshold, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("knowledge_rag.confidence_threshold must be a string")
+		}
+		switch threshold {
+		case "low", "medium", "high":
+		default:
+			return fmt.Errorf("knowledge_rag.confidence_threshold is invalid")
+		}
+	}
+	if v, ok := policy["curator_runtime_policy"]; ok && v != nil {
+		runtimePolicy, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("knowledge_rag.curator_runtime_policy must be a string")
+		}
+		switch runtimePolicy {
+		case "workspace_default", "cloud", "local":
+		default:
+			return fmt.Errorf("knowledge_rag.curator_runtime_policy is invalid")
+		}
+	}
+	if v, ok := policy["type_filters"]; ok && v != nil {
+		values, ok := v.([]any)
+		if !ok {
+			return fmt.Errorf("knowledge_rag.type_filters must be an array")
+		}
+		for _, rawType := range values {
+			itemType, ok := rawType.(string)
+			if !ok {
+				return fmt.Errorf("knowledge_rag.type_filters must contain strings")
+			}
+			switch itemType {
+			case "lesson", "playbook", "reference":
+			default:
+				return fmt.Errorf("knowledge_rag.type_filters contains an invalid type")
+			}
+		}
+	}
+	return nil
+}
+
+func jsonNumberToFloat(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	default:
+		return 0, false
+	}
 }
 
 func instructionsFromSettingsJSON(raw []byte) (string, bool) {
@@ -363,7 +453,8 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Settings != nil {
 		includesAgentDefaults := settingsIncludesAgentDefaults(req.Settings)
 		includesKnowledgeCurator := settingsIncludesKnowledgeCurator(req.Settings)
-		if includesAgentDefaults || includesKnowledgeCurator {
+		includesKnowledgeRAG := settingsIncludesKnowledgeRAG(req.Settings)
+		if includesAgentDefaults || includesKnowledgeCurator || includesKnowledgeRAG {
 			actor, ok := h.requireWorkspaceRole(w, r, id, "workspace not found", "owner", "admin")
 			if !ok {
 				return
@@ -375,6 +466,12 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		if includesKnowledgeCurator {
 			if err := validateKnowledgeCuratorSettings(req.Settings); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+		if includesKnowledgeRAG {
+			if err := validateKnowledgeRAGSettings(req.Settings); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error())
 				return
 			}

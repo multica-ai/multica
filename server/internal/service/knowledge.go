@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"math/big"
 	"regexp"
 	"sort"
 	"strings"
@@ -142,6 +144,8 @@ type KnowledgeTaskClaimParams struct {
 	LastTaskError           string
 	LastTaskFailureReason   string
 	Limit                   int32
+	TypeFilters             []string
+	ConfidenceThreshold     string
 }
 
 type KnowledgeTaskProjectResource struct {
@@ -242,6 +246,17 @@ type KnowledgeAnalyticsParams struct {
 	IncludeZero     bool
 	Limit           int32
 	Offset          int32
+}
+
+type KnowledgeGovernanceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+type KnowledgeGovernanceResult struct {
+	Checked      int
+	ReviewNeeded int
+	Conflicts    int
 }
 
 type KnowledgeCandidateEvaluateParams struct {
@@ -786,13 +801,16 @@ func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTa
 		Query:       query,
 		QuerySource: "task_claim",
 		Limit:       limit,
+		Filters: KnowledgeSearchFilters{
+			Types: p.TypeFilters,
+		},
 	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]KnowledgeContextItem, 0, len(results))
 	for idx, result := range results {
-		if result.Item.ConfidenceStatus != "high" {
+		if !eligibleForTaskClaimKnowledge(result.Item, p.ConfidenceThreshold) {
 			continue
 		}
 		item := KnowledgeContextItem{
@@ -904,6 +922,7 @@ func (s *KnowledgeService) searchWithRetrieval(ctx context.Context, p KnowledgeS
 
 	results := make([]KnowledgeSearchResult, 0, len(resultMap))
 	for _, result := range resultMap {
+		result.FinalScore = applyKnowledgeGovernanceScore(result.Item, result.FinalScore)
 		results = append(results, *result)
 	}
 	sort.SliceStable(results, func(i, j int) bool {
@@ -1374,6 +1393,45 @@ func (s *KnowledgeService) ListAnalytics(ctx context.Context, p KnowledgeAnalyti
 	})
 }
 
+func (s *KnowledgeService) RunGovernance(ctx context.Context, p KnowledgeGovernanceParams) (KnowledgeGovernanceResult, error) {
+	if p.Limit <= 0 {
+		p.Limit = 250
+	}
+	if p.Limit > 1000 {
+		p.Limit = 1000
+	}
+	rows, err := s.Queries.ListKnowledgeGovernanceCandidates(ctx, db.ListKnowledgeGovernanceCandidatesParams{
+		WorkspaceID: p.WorkspaceID,
+		Limit:       p.Limit,
+	})
+	if err != nil {
+		return KnowledgeGovernanceResult{}, err
+	}
+	conflicts := detectKnowledgeConflicts(rows)
+	result := KnowledgeGovernanceResult{Checked: len(rows)}
+	for _, row := range rows {
+		assessment := assessKnowledgeGovernance(row, conflicts[util.UUIDToString(row.ID)])
+		if assessment.reviewReason != "" {
+			result.ReviewNeeded++
+		}
+		if assessment.conflictGroup != "" {
+			result.Conflicts++
+		}
+		if _, err := s.Queries.UpdateKnowledgeGovernance(ctx, db.UpdateKnowledgeGovernanceParams{
+			ID:                 row.ID,
+			WorkspaceID:        row.WorkspaceID,
+			StaleScore:         numericFromFloat(assessment.staleScore),
+			EffectivenessScore: numericFromFloat(assessment.effectivenessScore),
+			ConflictGroup:      governanceText(assessment.conflictGroup),
+			ReviewReason:       governanceText(assessment.reviewReason),
+			UpdateSuggestion:   governanceText(assessment.updateSuggestion),
+		}); err != nil {
+			return result, err
+		}
+	}
+	return result, nil
+}
+
 func buildTaskClaimKnowledgeQuery(p KnowledgeTaskClaimParams) string {
 	var parts []string
 	add := func(label, value string) {
@@ -1490,6 +1548,199 @@ func taskClaimInjectionReason(result KnowledgeSearchResult) string {
 		return "matched task claim context"
 	}
 	return "matched task claim context via " + result.MatchReason
+}
+
+type knowledgeGovernanceAssessment struct {
+	staleScore         float64
+	effectivenessScore float64
+	conflictGroup      string
+	reviewReason       string
+	updateSuggestion   string
+}
+
+func assessKnowledgeGovernance(row db.ListKnowledgeGovernanceCandidatesRow, conflictGroup string) knowledgeGovernanceAssessment {
+	negative := row.NotHelpfulCount + row.MisleadingCount + row.OutdatedCount
+	totalFeedback := row.HelpfulCount + negative
+	staleScore := math.Min(100, float64(row.OutdatedCount)*35)
+	if row.LatestNegativeFeedbackAt.Valid && row.LatestNegativeFeedbackAt.Time.After(row.UpdatedAt.Time) {
+		staleScore = math.Max(staleScore, 35)
+	}
+	if row.UpdatedAt.Valid && time.Since(row.UpdatedAt.Time) > 180*24*time.Hour {
+		staleScore = math.Min(100, staleScore+20)
+	}
+
+	effectiveness := 100.0
+	if totalFeedback > 0 {
+		effectiveness -= (float64(negative) / float64(totalFeedback)) * 55
+	}
+	if row.MisleadingCount > 0 {
+		effectiveness -= math.Min(30, float64(row.MisleadingCount)*15)
+	}
+	if row.InjectionCount >= 5 && row.UsageCount == 0 {
+		effectiveness = math.Min(effectiveness, 60)
+	}
+	if row.InjectionCount >= 10 && row.HelpfulCount == 0 && negative > 0 {
+		effectiveness = math.Min(effectiveness, 45)
+	}
+	effectiveness = clampFloat(effectiveness, 0, 100)
+
+	var reasons []string
+	var suggestions []string
+	if conflictGroup != "" {
+		reasons = append(reasons, "conflict_detected")
+		suggestions = append(suggestions, "Review conflicting knowledge before publishing an update; do not automatically overwrite the current item.")
+	}
+	if staleScore >= 70 {
+		reasons = append(reasons, "stale_feedback")
+		suggestions = append(suggestions, "Ask the Curator to draft an updated version from the latest successful source before this item is injected again.")
+	}
+	if effectiveness <= 50 && negative >= 2 {
+		reasons = append(reasons, "low_effectiveness")
+		suggestions = append(suggestions, "Lower default injection priority and inspect negative feedback before re-publishing.")
+	}
+	if row.MisleadingCount > 0 {
+		reasons = append(reasons, "misleading_feedback")
+	}
+	return knowledgeGovernanceAssessment{
+		staleScore:         staleScore,
+		effectivenessScore: effectiveness,
+		conflictGroup:      conflictGroup,
+		reviewReason:       strings.Join(uniqueSignals(reasons), ","),
+		updateSuggestion:   strings.Join(uniqueSignals(suggestions), " "),
+	}
+}
+
+func detectKnowledgeConflicts(rows []db.ListKnowledgeGovernanceCandidatesRow) map[string]string {
+	type candidate struct {
+		id             string
+		recommendation string
+	}
+	groups := map[string][]candidate{}
+	for _, row := range rows {
+		if row.LifecycleStatus != "published" && row.LifecycleStatus != "reviewed" {
+			continue
+		}
+		key := knowledgeConflictSignature(row)
+		if key == "" {
+			continue
+		}
+		groups[key] = append(groups[key], candidate{
+			id:             util.UUIDToString(row.ID),
+			recommendation: normalizeGovernanceText(row.RecommendedPractice),
+		})
+	}
+	out := map[string]string{}
+	for key, candidates := range groups {
+		if len(candidates) < 2 {
+			continue
+		}
+		distinct := map[string]bool{}
+		for _, candidate := range candidates {
+			if candidate.recommendation != "" {
+				distinct[candidate.recommendation] = true
+			}
+		}
+		if len(distinct) < 2 {
+			continue
+		}
+		groupID := "conflict:" + truncateKnowledgeText(key, 80)
+		for _, candidate := range candidates {
+			out[candidate.id] = groupID
+		}
+	}
+	return out
+}
+
+func knowledgeConflictSignature(row db.ListKnowledgeGovernanceCandidatesRow) string {
+	base := firstNonEmpty(row.ProblemPattern, row.TriggerConditions, row.Title)
+	base = normalizeGovernanceText(base)
+	if len(base) < 20 {
+		return ""
+	}
+	labels := append([]string{}, row.DomainLabels...)
+	sort.Strings(labels)
+	if len(labels) > 3 {
+		labels = labels[:3]
+	}
+	return row.Type + ":" + strings.Join(labels, ",") + ":" + truncateKnowledgeText(base, 120)
+}
+
+func normalizeGovernanceText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = knowledgeSlugNonAlnum.ReplaceAllString(value, " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func applyKnowledgeGovernanceScore(item db.KnowledgeItem, score float64) float64 {
+	effectiveness := numericToFloat(item.EffectivenessScore, 100)
+	multiplier := clampFloat(effectiveness/100, 0.2, 1)
+	if item.ReviewNeededAt.Valid {
+		switch {
+		case item.ConflictGroup.Valid && strings.TrimSpace(item.ConflictGroup.String) != "":
+			multiplier *= 0.25
+		case numericToFloat(item.StaleScore, 0) >= 80:
+			multiplier *= 0.35
+		default:
+			multiplier *= 0.6
+		}
+	}
+	return score * multiplier
+}
+
+func eligibleForTaskClaimKnowledge(item db.KnowledgeItem, threshold string) bool {
+	if item.LifecycleStatus != "published" || !knowledgeConfidenceAtLeast(item.ConfidenceStatus, threshold) {
+		return false
+	}
+	if item.ConflictGroup.Valid && strings.TrimSpace(item.ConflictGroup.String) != "" {
+		return false
+	}
+	if item.ReviewNeededAt.Valid && numericToFloat(item.StaleScore, 0) >= 80 {
+		return false
+	}
+	return true
+}
+
+func knowledgeConfidenceAtLeast(actual, threshold string) bool {
+	if threshold == "" {
+		threshold = "high"
+	}
+	rank := map[string]int{"low": 1, "medium": 2, "high": 3}
+	minRank, ok := rank[threshold]
+	if !ok {
+		minRank = rank["high"]
+	}
+	return rank[actual] >= minRank
+}
+
+func numericFromFloat(value float64) pgtype.Numeric {
+	value = clampFloat(value, 0, 100)
+	return pgtype.Numeric{Int: big.NewInt(int64(math.Round(value * 100))), Exp: -2, Valid: true}
+}
+
+func numericToFloat(value pgtype.Numeric, fallback float64) float64 {
+	if !value.Valid {
+		return fallback
+	}
+	f, err := value.Float64Value()
+	if err != nil || !f.Valid {
+		return fallback
+	}
+	return f.Float64
+}
+
+func governanceText(value string) pgtype.Text {
+	value = strings.TrimSpace(value)
+	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+func clampFloat(value, minValue, maxValue float64) float64 {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }
 
 func firstNonEmpty(values ...string) string {
@@ -1760,6 +2011,13 @@ func knowledgeItemFromTextRow(row db.SearchKnowledgeTextRow) db.KnowledgeItem {
 		UpdatedAt:           row.UpdatedAt,
 		UpdatedBy:           row.UpdatedBy,
 		DeprecatedAt:        row.DeprecatedAt,
+		StaleScore:          row.StaleScore,
+		EffectivenessScore:  row.EffectivenessScore,
+		ConflictGroup:       row.ConflictGroup,
+		ReviewReason:        row.ReviewReason,
+		UpdateSuggestion:    row.UpdateSuggestion,
+		ReviewNeededAt:      row.ReviewNeededAt,
+		GovernanceCheckedAt: row.GovernanceCheckedAt,
 	}
 }
 
@@ -1789,6 +2047,13 @@ func knowledgeItemFromVectorRow(row db.SearchKnowledgeVectorRow) db.KnowledgeIte
 		UpdatedAt:           row.UpdatedAt,
 		UpdatedBy:           row.UpdatedBy,
 		DeprecatedAt:        row.DeprecatedAt,
+		StaleScore:          row.StaleScore,
+		EffectivenessScore:  row.EffectivenessScore,
+		ConflictGroup:       row.ConflictGroup,
+		ReviewReason:        row.ReviewReason,
+		UpdateSuggestion:    row.UpdateSuggestion,
+		ReviewNeededAt:      row.ReviewNeededAt,
+		GovernanceCheckedAt: row.GovernanceCheckedAt,
 	}
 }
 

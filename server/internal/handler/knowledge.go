@@ -39,6 +39,13 @@ type KnowledgeItemResponse struct {
 	ArchivedAt          *string  `json:"archived_at"`
 	UpdatedBy           *string  `json:"updated_by"`
 	DeprecatedAt        *string  `json:"deprecated_at"`
+	StaleScore          float64  `json:"stale_score"`
+	EffectivenessScore  float64  `json:"effectiveness_score"`
+	ConflictGroup       *string  `json:"conflict_group"`
+	ReviewReason        *string  `json:"review_reason"`
+	UpdateSuggestion    *string  `json:"update_suggestion"`
+	ReviewNeededAt      *string  `json:"review_needed_at"`
+	GovernanceCheckedAt *string  `json:"governance_checked_at"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
 }
@@ -1042,6 +1049,13 @@ func knowledgeItemToResponse(item db.KnowledgeItem) KnowledgeItemResponse {
 		ArchivedAt:          timestampPtr(item.ArchivedAt),
 		UpdatedBy:           uuidToPtr(item.UpdatedBy),
 		DeprecatedAt:        timestampPtr(item.DeprecatedAt),
+		StaleScore:          numericToFloat(item.StaleScore, 0),
+		EffectivenessScore:  numericToFloat(item.EffectivenessScore, 100),
+		ConflictGroup:       textToPtr(item.ConflictGroup),
+		ReviewReason:        textToPtr(item.ReviewReason),
+		UpdateSuggestion:    textToPtr(item.UpdateSuggestion),
+		ReviewNeededAt:      timestampPtr(item.ReviewNeededAt),
+		GovernanceCheckedAt: timestampPtr(item.GovernanceCheckedAt),
 		CreatedAt:           timestampToString(item.CreatedAt),
 		UpdatedAt:           timestampToString(item.UpdatedAt),
 	}
@@ -1273,6 +1287,17 @@ func timestampPtr(ts pgtype.Timestamptz) *string {
 	}
 	value := timestampToString(ts)
 	return &value
+}
+
+func numericToFloat(n pgtype.Numeric, fallback float64) float64 {
+	if !n.Valid {
+		return fallback
+	}
+	value, err := n.Float64Value()
+	if err != nil || !value.Valid {
+		return fallback
+	}
+	return value.Float64
 }
 
 func splitCSV(value string) []string {

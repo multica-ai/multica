@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -25,6 +26,9 @@ import { memberListOptions, workspaceKeys } from "@multica/core/workspace/querie
 import { useT } from "../../i18n";
 
 type CuratorRuntimeMode = "local" | "cloud" | "external";
+type KnowledgeTypeFilter = "lesson" | "playbook" | "reference";
+type RAGConfidenceThreshold = "low" | "medium" | "high";
+type RAGCuratorRuntimePolicy = "workspace_default" | "cloud" | "local";
 
 interface KnowledgeCuratorSettings {
   enabled: boolean;
@@ -36,6 +40,14 @@ interface KnowledgeCuratorSettings {
   secret_ref: string;
 }
 
+interface KnowledgeRAGSettings {
+  auto_inject: boolean;
+  limit: number;
+  type_filters: KnowledgeTypeFilter[];
+  confidence_threshold: RAGConfidenceThreshold;
+  curator_runtime_policy: RAGCuratorRuntimePolicy;
+}
+
 const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
   enabled: false,
   provider: "",
@@ -44,6 +56,14 @@ const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
   runtime_mode: "external",
   base_url: "",
   secret_ref: "",
+};
+
+const DEFAULT_RAG_SETTINGS: KnowledgeRAGSettings = {
+  auto_inject: true,
+  limit: 5,
+  type_filters: [],
+  confidence_threshold: "high",
+  curator_runtime_policy: "workspace_default",
 };
 
 function readCuratorSettings(settings: Record<string, unknown> | undefined): KnowledgeCuratorSettings {
@@ -66,7 +86,38 @@ function readCuratorSettings(settings: Record<string, unknown> | undefined): Kno
   };
 }
 
+function readRAGSettings(settings: Record<string, unknown> | undefined): KnowledgeRAGSettings {
+  const raw = settings?.knowledge_rag;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return DEFAULT_RAG_SETTINGS;
+  }
+  const data = raw as Record<string, unknown>;
+  const threshold = data.confidence_threshold === "low" || data.confidence_threshold === "medium" || data.confidence_threshold === "high"
+    ? data.confidence_threshold
+    : DEFAULT_RAG_SETTINGS.confidence_threshold;
+  const runtimePolicy = data.curator_runtime_policy === "cloud" || data.curator_runtime_policy === "local" || data.curator_runtime_policy === "workspace_default"
+    ? data.curator_runtime_policy
+    : DEFAULT_RAG_SETTINGS.curator_runtime_policy;
+  const typeFilters = Array.isArray(data.type_filters)
+    ? data.type_filters.filter((value): value is KnowledgeTypeFilter =>
+      value === "lesson" || value === "playbook" || value === "reference",
+    )
+    : DEFAULT_RAG_SETTINGS.type_filters;
+  const rawLimit = typeof data.limit === "number" ? data.limit : DEFAULT_RAG_SETTINGS.limit;
+  return {
+    auto_inject: data.auto_inject !== false,
+    limit: Math.max(1, Math.min(8, Math.round(rawLimit))),
+    type_filters: typeFilters,
+    confidence_threshold: threshold,
+    curator_runtime_policy: runtimePolicy,
+  };
+}
+
 function sameSettings(a: KnowledgeCuratorSettings, b: KnowledgeCuratorSettings): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function sameRAGSettings(a: KnowledgeRAGSettings, b: KnowledgeRAGSettings): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -81,16 +132,22 @@ export function CuratorTab() {
     () => readCuratorSettings(workspace?.settings as Record<string, unknown> | undefined),
     [workspace?.settings],
   );
+  const savedRAGSettings = useMemo(
+    () => readRAGSettings(workspace?.settings as Record<string, unknown> | undefined),
+    [workspace?.settings],
+  );
   const [settings, setSettings] = useState<KnowledgeCuratorSettings>(savedSettings);
+  const [ragSettings, setRAGSettings] = useState<KnowledgeRAGSettings>(savedRAGSettings);
   const [saving, setSaving] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
-  const dirty = !sameSettings(settings, savedSettings);
+  const dirty = !sameSettings(settings, savedSettings) || !sameRAGSettings(ragSettings, savedRAGSettings);
 
   useEffect(() => {
     setSettings(savedSettings);
-  }, [savedSettings]);
+    setRAGSettings(savedRAGSettings);
+  }, [savedSettings, savedRAGSettings]);
 
   async function handleSave() {
     if (!workspace || !dirty || saving) return;
@@ -99,6 +156,7 @@ export function CuratorTab() {
       const merged = {
         ...((workspace.settings as Record<string, unknown>) ?? {}),
         knowledge_curator: settings,
+        knowledge_rag: ragSettings,
       };
       const updated = await api.updateWorkspace(workspace.id, { settings: merged });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
@@ -113,6 +171,15 @@ export function CuratorTab() {
   }
 
   if (!workspace) return null;
+
+  const toggleTypeFilter = (type: KnowledgeTypeFilter, checked: boolean) => {
+    setRAGSettings((s) => ({
+      ...s,
+      type_filters: checked
+        ? Array.from(new Set([...s.type_filters, type]))
+        : s.type_filters.filter((value) => value !== type),
+    }));
+  };
 
   return (
     <div className="space-y-8">
@@ -217,20 +284,107 @@ export function CuratorTab() {
               </label>
             </div>
 
-            {canManageWorkspace ? (
-              <div className="flex justify-end">
-                <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
-                  <Save className="h-3 w-3" />
-                  {saving ? t(($) => $.curator.saving) : t(($) => $.curator.save)}
-                </Button>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {t(($) => $.curator.manage_hint)}
-              </p>
-            )}
           </CardContent>
         </Card>
+        <Card>
+          <CardContent className="space-y-5">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="rag-auto-inject" className="text-sm font-medium">
+                  {t(($) => $.curator.rag_auto_inject_label)}
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  {t(($) => $.curator.rag_auto_inject_description)}
+                </p>
+              </div>
+              <Switch
+                id="rag-auto-inject"
+                checked={ragSettings.auto_inject}
+                onCheckedChange={(auto_inject) => setRAGSettings((s) => ({ ...s, auto_inject }))}
+                disabled={!canManageWorkspace || saving}
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium">{t(($) => $.curator.rag_limit_label)}</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={ragSettings.limit}
+                  onChange={(e) => setRAGSettings((s) => ({ ...s, limit: Math.max(1, Math.min(8, Number(e.target.value) || 1)) }))}
+                  disabled={!canManageWorkspace || saving}
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs font-medium">{t(($) => $.curator.rag_confidence_label)}</span>
+                <Select
+                  value={ragSettings.confidence_threshold}
+                  onValueChange={(confidence_threshold) =>
+                    setRAGSettings((s) => ({ ...s, confidence_threshold: confidence_threshold as RAGConfidenceThreshold }))
+                  }
+                  disabled={!canManageWorkspace || saving}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue>{t(($) => $.curator.rag_confidence[ragSettings.confidence_threshold])}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">{t(($) => $.curator.rag_confidence.high)}</SelectItem>
+                    <SelectItem value="medium">{t(($) => $.curator.rag_confidence.medium)}</SelectItem>
+                    <SelectItem value="low">{t(($) => $.curator.rag_confidence.low)}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="space-y-1.5 md:col-span-2">
+                <span className="text-xs font-medium">{t(($) => $.curator.rag_runtime_policy_label)}</span>
+                <Select
+                  value={ragSettings.curator_runtime_policy}
+                  onValueChange={(curator_runtime_policy) =>
+                    setRAGSettings((s) => ({ ...s, curator_runtime_policy: curator_runtime_policy as RAGCuratorRuntimePolicy }))
+                  }
+                  disabled={!canManageWorkspace || saving}
+                >
+                  <SelectTrigger size="sm">
+                    <SelectValue>{t(($) => $.curator.rag_runtime_policy[ragSettings.curator_runtime_policy])}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="workspace_default">{t(($) => $.curator.rag_runtime_policy.workspace_default)}</SelectItem>
+                    <SelectItem value="cloud">{t(($) => $.curator.rag_runtime_policy.cloud)}</SelectItem>
+                    <SelectItem value="local">{t(($) => $.curator.rag_runtime_policy.local)}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="space-y-2 md:col-span-2">
+                <span className="text-xs font-medium">{t(($) => $.curator.rag_type_filters_label)}</span>
+                <div className="flex flex-wrap gap-3">
+                  {(["lesson", "playbook", "reference"] as KnowledgeTypeFilter[]).map((type) => (
+                    <label key={type} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={ragSettings.type_filters.includes(type)}
+                        onCheckedChange={(checked) => toggleTypeFilter(type, checked === true)}
+                        disabled={!canManageWorkspace || saving}
+                      />
+                      {t(($) => $.curator.rag_types[type])}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+        {canManageWorkspace ? (
+          <div className="flex justify-end">
+            <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>
+              <Save className="h-3 w-3" />
+              {saving ? t(($) => $.curator.saving) : t(($) => $.curator.save)}
+            </Button>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {t(($) => $.curator.manage_hint)}
+          </p>
+        )}
       </section>
     </div>
   );

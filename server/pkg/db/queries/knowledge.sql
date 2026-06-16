@@ -24,7 +24,10 @@ WHERE workspace_id = sqlc.arg('workspace_id')
       OR LOWER(anti_patterns) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
       OR LOWER(applicability) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
   )
-ORDER BY updated_at DESC, created_at DESC
+ORDER BY
+    CASE WHEN review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
+    updated_at DESC,
+    created_at DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: GetKnowledgeItem :one
@@ -239,7 +242,16 @@ candidates AS (
 SELECT *
 FROM candidates
 WHERE text_score > 0
-ORDER BY text_score DESC, updated_at DESC
+ORDER BY
+    (text_score * GREATEST(0.2, LEAST(1, effectiveness_score / 100.0)) *
+        CASE
+            WHEN review_needed_at IS NULL THEN 1
+            WHEN conflict_group IS NOT NULL THEN 0.25
+            WHEN stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    updated_at DESC
 LIMIT sqlc.arg('limit');
 
 -- name: SearchKnowledgeVector :many
@@ -273,7 +285,16 @@ WHERE ki.workspace_id = sqlc.arg('workspace_id')
       OR ki.domain_labels && sqlc.narg('labels')::text[]
   )
 GROUP BY ki.id
-ORDER BY vector_score DESC, ki.updated_at DESC
+ORDER BY
+    ((1 - MIN(ke.embedding <=> sqlc.arg('embedding')::vector)) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
 LIMIT sqlc.arg('limit');
 
 -- name: CreateKnowledgeFeedback :one
@@ -522,6 +543,73 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   AND (sqlc.narg('issue_id')::uuid IS NULL OR issue_id = sqlc.narg('issue_id'))
 ORDER BY score DESC, updated_at DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+
+-- name: ListKnowledgeGovernanceCandidates :many
+WITH feedback AS (
+    SELECT knowledge_item_id,
+        COUNT(*) FILTER (WHERE value = 'helpful')::bigint AS helpful_count,
+        COUNT(*) FILTER (WHERE value = 'not_helpful')::bigint AS not_helpful_count,
+        COUNT(*) FILTER (WHERE value = 'misleading')::bigint AS misleading_count,
+        COUNT(*) FILTER (WHERE value = 'outdated')::bigint AS outdated_count,
+        MAX(created_at) FILTER (WHERE value IN ('not_helpful', 'misleading', 'outdated'))::timestamptz AS latest_negative_feedback_at
+    FROM knowledge_feedback
+    WHERE workspace_id = sqlc.arg('workspace_id')
+    GROUP BY knowledge_item_id
+),
+retrieval AS (
+    SELECT kid AS knowledge_item_id, COUNT(*)::bigint AS retrieval_count
+    FROM knowledge_retrieval_event kre
+    CROSS JOIN LATERAL unnest(kre.top_knowledge_item_ids) AS kid
+    WHERE kre.workspace_id = sqlc.arg('workspace_id')
+    GROUP BY kid
+),
+injection AS (
+    SELECT knowledge_item_id, COUNT(*)::bigint AS injection_count
+    FROM knowledge_injection_event
+    WHERE workspace_id = sqlc.arg('workspace_id')
+    GROUP BY knowledge_item_id
+),
+usage AS (
+    SELECT knowledge_item_id, COUNT(*)::bigint AS usage_count
+    FROM knowledge_usage_event
+    WHERE workspace_id = sqlc.arg('workspace_id')
+    GROUP BY knowledge_item_id
+)
+SELECT
+    ki.*,
+    COALESCE(f.helpful_count, 0)::bigint AS helpful_count,
+    COALESCE(f.not_helpful_count, 0)::bigint AS not_helpful_count,
+    COALESCE(f.misleading_count, 0)::bigint AS misleading_count,
+    COALESCE(f.outdated_count, 0)::bigint AS outdated_count,
+    f.latest_negative_feedback_at,
+    COALESCE(r.retrieval_count, 0)::bigint AS retrieval_count,
+    COALESCE(i.injection_count, 0)::bigint AS injection_count,
+    COALESCE(u.usage_count, 0)::bigint AS usage_count
+FROM knowledge_item ki
+LEFT JOIN feedback f ON f.knowledge_item_id = ki.id
+LEFT JOIN retrieval r ON r.knowledge_item_id = ki.id
+LEFT JOIN injection i ON i.knowledge_item_id = ki.id
+LEFT JOIN usage u ON u.knowledge_item_id = ki.id
+WHERE ki.workspace_id = sqlc.arg('workspace_id')
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+ORDER BY ki.updated_at DESC
+LIMIT sqlc.arg('limit');
+
+-- name: UpdateKnowledgeGovernance :one
+UPDATE knowledge_item SET
+    stale_score = sqlc.arg('stale_score'),
+    effectiveness_score = sqlc.arg('effectiveness_score'),
+    conflict_group = sqlc.arg('conflict_group'),
+    review_reason = sqlc.arg('review_reason'),
+    update_suggestion = sqlc.arg('update_suggestion'),
+    review_needed_at = CASE
+        WHEN NULLIF(btrim(sqlc.arg('review_reason')::text), '') IS NULL THEN NULL
+        ELSE COALESCE(review_needed_at, now())
+    END,
+    governance_checked_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
 
 -- name: GetKnowledgeCandidate :one
 SELECT *

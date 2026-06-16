@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Archive,
   BookOpenCheck,
   CheckCircle2,
+  Clock3,
   ExternalLink,
   FileText,
   History,
@@ -134,6 +136,23 @@ function feedbackLabel(value: string, t: ReturnType<typeof useT<"knowledge">>["t
   }
 }
 
+function governanceBadges(item: KnowledgeItem, t: ReturnType<typeof useT<"knowledge">>["t"]) {
+  const badges: Array<{ key: string; label: string; variant: "outline" | "secondary" | "destructive" }> = [];
+  if (item.conflict_group) {
+    badges.push({ key: "conflict", label: t(($) => $.governance.conflict), variant: "destructive" });
+  }
+  if (item.stale_score >= 70) {
+    badges.push({ key: "stale", label: t(($) => $.governance.stale), variant: "outline" });
+  }
+  if (item.effectiveness_score <= 50) {
+    badges.push({ key: "low_effectiveness", label: t(($) => $.governance.low_effectiveness), variant: "outline" });
+  }
+  if (item.review_needed_at && badges.length === 0) {
+    badges.push({ key: "review_needed", label: t(($) => $.governance.review_needed), variant: "secondary" });
+  }
+  return badges;
+}
+
 function KnowledgeListSkeleton() {
   return (
     <div className="space-y-2 p-3">
@@ -157,6 +176,7 @@ function KnowledgeListItem({
   href: string;
 }) {
   const { t } = useT("knowledge");
+  const badges = governanceBadges(item, t);
   return (
     <AppLink
       href={href}
@@ -177,6 +197,9 @@ function KnowledgeListItem({
       </p>
       <div className="mt-2 flex flex-wrap gap-1">
         <Badge variant="outline">{t(($) => $.type[item.type] ?? item.type)}</Badge>
+        {badges.slice(0, 2).map((badge) => (
+          <Badge key={badge.key} variant={badge.variant}>{badge.label}</Badge>
+        ))}
         {item.domain_labels.slice(0, 3).map((label) => (
           <Badge key={label} variant="secondary">{label}</Badge>
         ))}
@@ -227,6 +250,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
 
   const item = detail.item;
   const isInactive = item.lifecycle_status === "archived" || item.lifecycle_status === "deprecated";
+  const governance = governanceBadges(item, t);
   const setField = <K extends keyof UpdateKnowledgeRequest>(key: K, value: UpdateKnowledgeRequest[K]) => {
     setDraft((prev) => ({ ...prev, [key]: value }));
   };
@@ -259,6 +283,9 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
               {t(($) => $.status[item.lifecycle_status] ?? item.lifecycle_status)}
             </Badge>
             <Badge variant="outline">{t(($) => $.type[item.type] ?? item.type)}</Badge>
+            {governance.map((badge) => (
+              <Badge key={badge.key} variant={badge.variant}>{badge.label}</Badge>
+            ))}
             {statusTimestamp(item) && (
               <span className="text-xs text-muted-foreground">
                 {new Date(statusTimestamp(item)!).toLocaleString(i18n.language)}
@@ -375,6 +402,50 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
           </div>
 
           <Separator />
+
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+              <h3 className="text-sm font-semibold">{t(($) => $.governance.title)}</h3>
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-lg border px-3 py-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  {t(($) => $.governance.stale_score)}
+                </div>
+                <p className="mt-1 text-lg font-semibold">{Math.round(item.stale_score)}</p>
+              </div>
+              <div className="rounded-lg border px-3 py-2">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {t(($) => $.governance.effectiveness_score)}
+                </div>
+                <p className="mt-1 text-lg font-semibold">{Math.round(item.effectiveness_score)}</p>
+              </div>
+              <div className="rounded-lg border px-3 py-2">
+                <div className="text-xs text-muted-foreground">{t(($) => $.governance.review_reason)}</div>
+                <p className="mt-1 truncate text-sm font-medium">
+                  {item.review_reason || t(($) => $.governance.no_review_reason)}
+                </p>
+              </div>
+            </div>
+            {(item.conflict_group || item.update_suggestion || item.review_needed_at) && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+                {item.conflict_group && (
+                  <p className="font-medium">{t(($) => $.governance.conflict_group, { group: item.conflict_group ?? "" })}</p>
+                )}
+                {item.update_suggestion && (
+                  <p className="mt-1 text-muted-foreground">{item.update_suggestion}</p>
+                )}
+                {item.review_needed_at && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t(($) => $.governance.review_needed_since, { date: new Date(item.review_needed_at).toLocaleString(i18n.language) })}
+                  </p>
+                )}
+              </div>
+            )}
+          </section>
 
           <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
             <div>

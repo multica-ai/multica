@@ -1694,13 +1694,21 @@ func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *Agen
 		return
 	}
 	workspaceID := parseUUID(resp.WorkspaceID)
+	workspace, workspaceErr := h.Queries.GetWorkspace(ctx, workspaceID)
+	policy := readKnowledgeRAGPolicy(nil)
+	if workspaceErr == nil {
+		policy = readKnowledgeRAGPolicy(workspace.Settings)
+	}
+	if !policy.AutoInject {
+		return
+	}
 	var issue *db.Issue
 	issueIdentifier := ""
 	if task.IssueID.Valid {
 		if row, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: task.IssueID, WorkspaceID: workspaceID}); err == nil {
 			issue = &row
-			if ws, err := h.Queries.GetWorkspace(ctx, workspaceID); err == nil && ws.IssuePrefix != "" {
-				issueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(row.Number))
+			if workspaceErr == nil && workspace.IssuePrefix != "" {
+				issueIdentifier = workspace.IssuePrefix + "-" + strconv.Itoa(int(row.Number))
 			}
 		}
 	}
@@ -1735,7 +1743,9 @@ func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *Agen
 		LastTaskResult:          lastResult,
 		LastTaskError:           lastError,
 		LastTaskFailureReason:   lastFailure,
-		Limit:                   5,
+		Limit:                   policy.Limit,
+		TypeFilters:             policy.TypeFilters,
+		ConfidenceThreshold:     policy.ConfidenceThreshold,
 	})
 	if err != nil {
 		slog.Warn("task claim: failed to inject knowledge context",
@@ -1746,6 +1756,57 @@ func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *Agen
 		return
 	}
 	resp.KnowledgeContext = items
+}
+
+type knowledgeRAGPolicy struct {
+	AutoInject          bool
+	Limit               int32
+	TypeFilters         []string
+	ConfidenceThreshold string
+}
+
+func readKnowledgeRAGPolicy(raw []byte) knowledgeRAGPolicy {
+	policy := knowledgeRAGPolicy{
+		AutoInject:          true,
+		Limit:               5,
+		ConfidenceThreshold: "high",
+	}
+	if len(raw) == 0 {
+		return policy
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(raw, &settings); err != nil {
+		return policy
+	}
+	rag, ok := settings["knowledge_rag"].(map[string]any)
+	if !ok {
+		return policy
+	}
+	if v, ok := rag["auto_inject"].(bool); ok {
+		policy.AutoInject = v
+	}
+	if v, ok := rag["limit"].(float64); ok && v >= 0 && v <= 8 {
+		policy.Limit = int32(v)
+	}
+	if v, ok := rag["confidence_threshold"].(string); ok {
+		switch v {
+		case "low", "medium", "high":
+			policy.ConfidenceThreshold = v
+		}
+	}
+	if values, ok := rag["type_filters"].([]any); ok {
+		for _, rawType := range values {
+			itemType, ok := rawType.(string)
+			if !ok {
+				continue
+			}
+			switch itemType {
+			case "lesson", "playbook", "reference":
+				policy.TypeFilters = append(policy.TypeFilters, itemType)
+			}
+		}
+	}
+	return policy
 }
 
 func (h *Handler) issueLabelNamesForClaim(ctx context.Context, workspaceID, issueID pgtype.UUID) []string {

@@ -19,6 +19,19 @@
     "applicability": "Applicability"
   },
   "feedback": { "helpful": "Helpful", "not_helpful": "Not helpful", "misleading": "Misleading", "outdated": "Outdated" },
+  "governance": {
+    "title": "Governance",
+    "review_needed": "Review needed",
+    "conflict": "Conflict",
+    "stale": "Stale",
+    "low_effectiveness": "Low effect",
+    "stale_score": "Stale score",
+    "effectiveness_score": "Effectiveness",
+    "review_reason": "Review reason",
+    "no_review_reason": "No review needed",
+    "conflict_group": "Conflict group: {{group}}",
+    "review_needed_since": "Review requested {{date}}"
+  },
   "list": { "empty_title": "No knowledge found", "empty_body": "Try another status or search query.", "no_summary": "No summary yet." },
   "detail": {
     "empty_title": "Select knowledge",

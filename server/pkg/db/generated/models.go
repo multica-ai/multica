@@ -587,6 +587,13 @@ type KnowledgeItem struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	UpdatedBy           pgtype.UUID        `json:"updated_by"`
 	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
 }
 
 type KnowledgePublishTarget struct {

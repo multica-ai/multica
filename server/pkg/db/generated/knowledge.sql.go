@@ -175,7 +175,7 @@ INSERT INTO knowledge_item (
     COALESCE($11, ''), COALESCE($12, ''),
     $13, $14, $15
 )
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 `
 
 type CreateKnowledgeItemParams struct {
@@ -240,6 +240,13 @@ func (q *Queries) CreateKnowledgeItem(ctx context.Context, arg CreateKnowledgeIt
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
 	)
 	return i, err
 }
@@ -472,7 +479,7 @@ func (q *Queries) GetKnowledgeFeedbackSummary(ctx context.Context, arg GetKnowle
 }
 
 const getKnowledgeItem = `-- name: GetKnowledgeItem :one
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 FROM knowledge_item
 WHERE id = $1 AND workspace_id = $2
 `
@@ -510,6 +517,13 @@ func (q *Queries) GetKnowledgeItem(ctx context.Context, arg GetKnowledgeItemPara
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
 	)
 	return i, err
 }
@@ -705,7 +719,7 @@ func (q *Queries) ListIssueCommentsForKnowledgeDraft(ctx context.Context, arg Li
 
 const listKnowledgeAnalytics = `-- name: ListKnowledgeAnalytics :many
 WITH filtered_items AS (
-    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at
+    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at
     FROM knowledge_item ki
     WHERE ki.workspace_id = $4
       AND ($5::uuid IS NULL OR ki.id = $5)
@@ -1052,8 +1066,167 @@ func (q *Queries) ListKnowledgeEmbeddingMetadata(ctx context.Context, arg ListKn
 	return items, nil
 }
 
+const listKnowledgeGovernanceCandidates = `-- name: ListKnowledgeGovernanceCandidates :many
+WITH feedback AS (
+    SELECT knowledge_item_id,
+        COUNT(*) FILTER (WHERE value = 'helpful')::bigint AS helpful_count,
+        COUNT(*) FILTER (WHERE value = 'not_helpful')::bigint AS not_helpful_count,
+        COUNT(*) FILTER (WHERE value = 'misleading')::bigint AS misleading_count,
+        COUNT(*) FILTER (WHERE value = 'outdated')::bigint AS outdated_count,
+        MAX(created_at) FILTER (WHERE value IN ('not_helpful', 'misleading', 'outdated'))::timestamptz AS latest_negative_feedback_at
+    FROM knowledge_feedback
+    WHERE workspace_id = $1
+    GROUP BY knowledge_item_id
+),
+retrieval AS (
+    SELECT kid AS knowledge_item_id, COUNT(*)::bigint AS retrieval_count
+    FROM knowledge_retrieval_event kre
+    CROSS JOIN LATERAL unnest(kre.top_knowledge_item_ids) AS kid
+    WHERE kre.workspace_id = $1
+    GROUP BY kid
+),
+injection AS (
+    SELECT knowledge_item_id, COUNT(*)::bigint AS injection_count
+    FROM knowledge_injection_event
+    WHERE workspace_id = $1
+    GROUP BY knowledge_item_id
+),
+usage AS (
+    SELECT knowledge_item_id, COUNT(*)::bigint AS usage_count
+    FROM knowledge_usage_event
+    WHERE workspace_id = $1
+    GROUP BY knowledge_item_id
+)
+SELECT
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
+    COALESCE(f.helpful_count, 0)::bigint AS helpful_count,
+    COALESCE(f.not_helpful_count, 0)::bigint AS not_helpful_count,
+    COALESCE(f.misleading_count, 0)::bigint AS misleading_count,
+    COALESCE(f.outdated_count, 0)::bigint AS outdated_count,
+    f.latest_negative_feedback_at,
+    COALESCE(r.retrieval_count, 0)::bigint AS retrieval_count,
+    COALESCE(i.injection_count, 0)::bigint AS injection_count,
+    COALESCE(u.usage_count, 0)::bigint AS usage_count
+FROM knowledge_item ki
+LEFT JOIN feedback f ON f.knowledge_item_id = ki.id
+LEFT JOIN retrieval r ON r.knowledge_item_id = ki.id
+LEFT JOIN injection i ON i.knowledge_item_id = ki.id
+LEFT JOIN usage u ON u.knowledge_item_id = ki.id
+WHERE ki.workspace_id = $1
+  AND ki.lifecycle_status NOT IN ('archived', 'deprecated')
+ORDER BY ki.updated_at DESC
+LIMIT $2
+`
+
+type ListKnowledgeGovernanceCandidatesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+type ListKnowledgeGovernanceCandidatesRow struct {
+	ID                       pgtype.UUID        `json:"id"`
+	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
+	ProjectID                pgtype.UUID        `json:"project_id"`
+	AgentID                  pgtype.UUID        `json:"agent_id"`
+	Title                    string             `json:"title"`
+	Type                     string             `json:"type"`
+	DomainLabels             []string           `json:"domain_labels"`
+	ProblemPattern           string             `json:"problem_pattern"`
+	TriggerConditions        string             `json:"trigger_conditions"`
+	DiagnosticSteps          string             `json:"diagnostic_steps"`
+	RecommendedPractice      string             `json:"recommended_practice"`
+	AntiPatterns             string             `json:"anti_patterns"`
+	Applicability            string             `json:"applicability"`
+	ConfidenceStatus         string             `json:"confidence_status"`
+	LifecycleStatus          string             `json:"lifecycle_status"`
+	CreatedBy                pgtype.UUID        `json:"created_by"`
+	ReviewedBy               pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	PublishedAt              pgtype.Timestamptz `json:"published_at"`
+	ArchivedAt               pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                pgtype.UUID        `json:"updated_by"`
+	DeprecatedAt             pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore               pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore       pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup            pgtype.Text        `json:"conflict_group"`
+	ReviewReason             pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion         pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt           pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt      pgtype.Timestamptz `json:"governance_checked_at"`
+	HelpfulCount             int64              `json:"helpful_count"`
+	NotHelpfulCount          int64              `json:"not_helpful_count"`
+	MisleadingCount          int64              `json:"misleading_count"`
+	OutdatedCount            int64              `json:"outdated_count"`
+	LatestNegativeFeedbackAt pgtype.Timestamptz `json:"latest_negative_feedback_at"`
+	RetrievalCount           int64              `json:"retrieval_count"`
+	InjectionCount           int64              `json:"injection_count"`
+	UsageCount               int64              `json:"usage_count"`
+}
+
+func (q *Queries) ListKnowledgeGovernanceCandidates(ctx context.Context, arg ListKnowledgeGovernanceCandidatesParams) ([]ListKnowledgeGovernanceCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeGovernanceCandidates, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnowledgeGovernanceCandidatesRow{}
+	for rows.Next() {
+		var i ListKnowledgeGovernanceCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
+			&i.HelpfulCount,
+			&i.NotHelpfulCount,
+			&i.MisleadingCount,
+			&i.OutdatedCount,
+			&i.LatestNegativeFeedbackAt,
+			&i.RetrievalCount,
+			&i.InjectionCount,
+			&i.UsageCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeItems = `-- name: ListKnowledgeItems :many
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 FROM knowledge_item
 WHERE workspace_id = $1
   AND (
@@ -1078,7 +1251,10 @@ WHERE workspace_id = $1
       OR LOWER(anti_patterns) LIKE '%' || LOWER($8::text) || '%'
       OR LOWER(applicability) LIKE '%' || LOWER($8::text) || '%'
   )
-ORDER BY updated_at DESC, created_at DESC
+ORDER BY
+    CASE WHEN review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
+    updated_at DESC,
+    created_at DESC
 LIMIT $10 OFFSET $9
 `
 
@@ -1140,6 +1316,13 @@ func (q *Queries) ListKnowledgeItems(ctx context.Context, arg ListKnowledgeItems
 			&i.UpdatedAt,
 			&i.UpdatedBy,
 			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1152,7 +1335,7 @@ func (q *Queries) ListKnowledgeItems(ctx context.Context, arg ListKnowledgeItems
 }
 
 const listKnowledgeItemsByIDs = `-- name: ListKnowledgeItemsByIDs :many
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 FROM knowledge_item
 WHERE workspace_id = $1
   AND id = ANY($2::uuid[])
@@ -1197,6 +1380,13 @@ func (q *Queries) ListKnowledgeItemsByIDs(ctx context.Context, arg ListKnowledge
 			&i.UpdatedAt,
 			&i.UpdatedBy,
 			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1306,7 +1496,7 @@ WITH query_terms AS (
     ) q
 ),
 candidates AS (
-    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at,
+    SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
         (
             CASE WHEN LOWER(ki.title) LIKE '%' || LOWER($2::text) || '%' THEN 4 ELSE 0 END +
             CASE WHEN LOWER(ki.problem_pattern) LIKE '%' || LOWER($2::text) || '%' THEN 3 ELSE 0 END +
@@ -1361,10 +1551,19 @@ candidates AS (
           OR ki.domain_labels && $8::text[]
       )
 )
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, text_score
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at, text_score
 FROM candidates
 WHERE text_score > 0
-ORDER BY text_score DESC, updated_at DESC
+ORDER BY
+    (text_score * GREATEST(0.2, LEAST(1, effectiveness_score / 100.0)) *
+        CASE
+            WHEN review_needed_at IS NULL THEN 1
+            WHEN conflict_group IS NOT NULL THEN 0.25
+            WHEN stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    updated_at DESC
 LIMIT $1
 `
 
@@ -1404,6 +1603,13 @@ type SearchKnowledgeTextRow struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	UpdatedBy           pgtype.UUID        `json:"updated_by"`
 	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
 	TextScore           float64            `json:"text_score"`
 }
 
@@ -1450,6 +1656,13 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 			&i.UpdatedAt,
 			&i.UpdatedBy,
 			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
 			&i.TextScore,
 		); err != nil {
 			return nil, err
@@ -1464,7 +1677,7 @@ func (q *Queries) SearchKnowledgeText(ctx context.Context, arg SearchKnowledgeTe
 
 const searchKnowledgeVector = `-- name: SearchKnowledgeVector :many
 SELECT
-    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at,
+    ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at,
     (1 - MIN(ke.embedding <=> $1::vector))::float8 AS vector_score
 FROM knowledge_item ki
 JOIN knowledge_embedding ke ON ke.knowledge_item_id = ki.id AND ke.workspace_id = ki.workspace_id
@@ -1493,7 +1706,16 @@ WHERE ki.workspace_id = $2
       OR ki.domain_labels && $7::text[]
   )
 GROUP BY ki.id
-ORDER BY vector_score DESC, ki.updated_at DESC
+ORDER BY
+    ((1 - MIN(ke.embedding <=> $1::vector)) * GREATEST(0.2, LEAST(1, ki.effectiveness_score / 100.0)) *
+        CASE
+            WHEN ki.review_needed_at IS NULL THEN 1
+            WHEN ki.conflict_group IS NOT NULL THEN 0.25
+            WHEN ki.stale_score >= 80 THEN 0.35
+            ELSE 0.6
+        END
+    ) DESC,
+    ki.updated_at DESC
 LIMIT $8
 `
 
@@ -1533,6 +1755,13 @@ type SearchKnowledgeVectorRow struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	UpdatedBy           pgtype.UUID        `json:"updated_by"`
 	DeprecatedAt        pgtype.Timestamptz `json:"deprecated_at"`
+	StaleScore          pgtype.Numeric     `json:"stale_score"`
+	EffectivenessScore  pgtype.Numeric     `json:"effectiveness_score"`
+	ConflictGroup       pgtype.Text        `json:"conflict_group"`
+	ReviewReason        pgtype.Text        `json:"review_reason"`
+	UpdateSuggestion    pgtype.Text        `json:"update_suggestion"`
+	ReviewNeededAt      pgtype.Timestamptz `json:"review_needed_at"`
+	GovernanceCheckedAt pgtype.Timestamptz `json:"governance_checked_at"`
 	VectorScore         float64            `json:"vector_score"`
 }
 
@@ -1579,6 +1808,13 @@ func (q *Queries) SearchKnowledgeVector(ctx context.Context, arg SearchKnowledge
 			&i.UpdatedAt,
 			&i.UpdatedBy,
 			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
 			&i.VectorScore,
 		); err != nil {
 			return nil, err
@@ -1619,7 +1855,7 @@ UPDATE knowledge_item SET
     updated_by = $3,
     updated_at = now()
 WHERE id = $4 AND workspace_id = $5
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 `
 
 type SetKnowledgeLifecycleStatusParams struct {
@@ -1664,6 +1900,13 @@ func (q *Queries) SetKnowledgeLifecycleStatus(ctx context.Context, arg SetKnowle
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
 	)
 	return i, err
 }
@@ -1715,6 +1958,80 @@ func (q *Queries) UpdateKnowledgeCandidateDraftState(ctx context.Context, arg Up
 	return i, err
 }
 
+const updateKnowledgeGovernance = `-- name: UpdateKnowledgeGovernance :one
+UPDATE knowledge_item SET
+    stale_score = $1,
+    effectiveness_score = $2,
+    conflict_group = $3,
+    review_reason = $4,
+    update_suggestion = $5,
+    review_needed_at = CASE
+        WHEN NULLIF(btrim($4::text), '') IS NULL THEN NULL
+        ELSE COALESCE(review_needed_at, now())
+    END,
+    governance_checked_at = now(),
+    updated_at = now()
+WHERE id = $6 AND workspace_id = $7
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
+`
+
+type UpdateKnowledgeGovernanceParams struct {
+	StaleScore         pgtype.Numeric `json:"stale_score"`
+	EffectivenessScore pgtype.Numeric `json:"effectiveness_score"`
+	ConflictGroup      pgtype.Text    `json:"conflict_group"`
+	ReviewReason       pgtype.Text    `json:"review_reason"`
+	UpdateSuggestion   pgtype.Text    `json:"update_suggestion"`
+	ID                 pgtype.UUID    `json:"id"`
+	WorkspaceID        pgtype.UUID    `json:"workspace_id"`
+}
+
+func (q *Queries) UpdateKnowledgeGovernance(ctx context.Context, arg UpdateKnowledgeGovernanceParams) (KnowledgeItem, error) {
+	row := q.db.QueryRow(ctx, updateKnowledgeGovernance,
+		arg.StaleScore,
+		arg.EffectivenessScore,
+		arg.ConflictGroup,
+		arg.ReviewReason,
+		arg.UpdateSuggestion,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.AgentID,
+		&i.Title,
+		&i.Type,
+		&i.DomainLabels,
+		&i.ProblemPattern,
+		&i.TriggerConditions,
+		&i.DiagnosticSteps,
+		&i.RecommendedPractice,
+		&i.AntiPatterns,
+		&i.Applicability,
+		&i.ConfidenceStatus,
+		&i.LifecycleStatus,
+		&i.CreatedBy,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
+	)
+	return i, err
+}
+
 const updateKnowledgeItem = `-- name: UpdateKnowledgeItem :one
 UPDATE knowledge_item SET
     project_id = COALESCE($1, project_id),
@@ -1732,7 +2049,7 @@ UPDATE knowledge_item SET
     updated_by = COALESCE($13, updated_by),
     updated_at = now()
 WHERE id = $14 AND workspace_id = $15
-RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 `
 
 type UpdateKnowledgeItemParams struct {
@@ -1797,6 +2114,13 @@ func (q *Queries) UpdateKnowledgeItem(ctx context.Context, arg UpdateKnowledgeIt
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
 	)
 	return i, err
 }

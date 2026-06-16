@@ -31,6 +31,13 @@ export interface KnowledgeItem {
   archived_at: string | null;
   updated_by: string | null;
   deprecated_at: string | null;
+  stale_score: number;
+  effectiveness_score: number;
+  conflict_group: string | null;
+  review_reason: string | null;
+  update_suggestion: string | null;
+  review_needed_at: string | null;
+  governance_checked_at: string | null;
   created_at: string;
   updated_at: string;
 }

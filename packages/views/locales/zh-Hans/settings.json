@@ -201,6 +201,27 @@
     "secret_ref_label": "Secret 引用",
     "secret_ref_placeholder": "secret://workspace/knowledge-curator",
     "secret_ref_hint": "这里保存服务端 secret 的引用，不保存密钥明文。",
+    "rag_auto_inject_label": "自动注入相关 Knowledge",
+    "rag_auto_inject_description": "在工作区策略允许时，把少量排序后的 Knowledge 上下文注入到智能体任务 claim 中。",
+    "rag_limit_label": "注入数量上限",
+    "rag_confidence_label": "最低置信度",
+    "rag_confidence": {
+      "high": "高",
+      "medium": "中",
+      "low": "低"
+    },
+    "rag_runtime_policy_label": "Curator runtime 策略",
+    "rag_runtime_policy": {
+      "workspace_default": "使用工作区默认",
+      "cloud": "优先云端",
+      "local": "优先本地"
+    },
+    "rag_type_filters_label": "Knowledge 类型",
+    "rag_types": {
+      "lesson": "Lessons",
+      "playbook": "Playbooks",
+      "reference": "References"
+    },
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以更新 Curator 设置。",

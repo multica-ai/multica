@@ -19,6 +19,19 @@
     "applicability": "适用范围"
   },
   "feedback": { "helpful": "有帮助", "not_helpful": "没帮助", "misleading": "误导", "outdated": "已过期" },
+  "governance": {
+    "title": "治理",
+    "review_needed": "待复审",
+    "conflict": "冲突",
+    "stale": "疑似过期",
+    "low_effectiveness": "低效",
+    "stale_score": "过期分",
+    "effectiveness_score": "效果分",
+    "review_reason": "复审原因",
+    "no_review_reason": "无需复审",
+    "conflict_group": "冲突组：{{group}}",
+    "review_needed_since": "{{date}} 请求复审"
+  },
   "list": { "empty_title": "没有匹配的 Knowledge", "empty_body": "换一个状态或搜索词试试。", "no_summary": "还没有摘要。" },
   "detail": {
     "empty_title": "选择一条 Knowledge",

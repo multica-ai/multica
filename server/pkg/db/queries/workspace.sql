@@ -7,6 +7,11 @@ JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
+-- name: ListAllWorkspaceIDs :many
+SELECT id
+FROM workspace
+ORDER BY created_at ASC;
+
 -- name: GetWorkspace :one
 SELECT * FROM workspace
 WHERE id = $1;
