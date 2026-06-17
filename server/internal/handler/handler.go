@@ -91,12 +91,17 @@ type cloudRuntimeProxy interface {
 	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
 }
 
+type RuntimeProfileRefreshNotifier interface {
+	NotifyRuntimeProfilesChanged(workspaceID, profileID string)
+}
+
 type Handler struct {
 	Queries               *db.Queries
 	DB                    dbExecutor
 	TxStarter             txStarter
 	Hub                   *realtime.Hub
 	DaemonHub             *daemonws.Hub
+	DaemonProfileRefresh  RuntimeProfileRefreshNotifier
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
 	IssueService          *service.IssueService
@@ -181,6 +186,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if len(daemonHubs) > 0 {
 		daemonHub = daemonHubs[0]
 	}
+	var daemonProfileRefresh RuntimeProfileRefreshNotifier
+	if daemonHub != nil {
+		daemonProfileRefresh = daemonHub
+	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
@@ -190,6 +199,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TxStarter:             txStarter,
 		Hub:                   hub,
 		DaemonHub:             daemonHub,
+		DaemonProfileRefresh:  daemonProfileRefresh,
 		Bus:                   bus,
 		TaskService:           taskSvc,
 		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),

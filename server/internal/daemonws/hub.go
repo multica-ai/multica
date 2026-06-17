@@ -294,21 +294,36 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		M.WakeupDeliveredMiss.Add(1)
 		return
 	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
+	switch msg.Type {
+	case protocol.EventDaemonTaskAvailable:
+		var payload protocol.TaskAvailablePayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonRuntimeProfilesChanged:
+		var payload protocol.RuntimeProfilesChangedPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.WorkspaceID == "" {
+			slog.Debug("daemon websocket relay: invalid runtime_profiles_changed payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyWorkspaceFrame(payload.WorkspaceID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	default:
 		M.WakeupDeliveredMiss.Add(1)
 		return
-	}
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
-		slog.Debug("daemon websocket relay: invalid task_available payload", "error", err, "scope_id", scopeID, "event_id", eventID)
-		M.WakeupDeliveredMiss.Add(1)
-		return
-	}
-	delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
-	if delivered {
-		M.WakeupDeliveredHit.Add(1)
-	} else if !deduped {
-		M.WakeupDeliveredMiss.Add(1)
 	}
 }
 

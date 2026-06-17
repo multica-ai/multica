@@ -483,8 +483,8 @@ func (h *Handler) DaemonListRuntimeProfiles(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handler) requestDaemonRuntimeProfileRefresh(workspaceID, profileID string) {
-	if h.DaemonHub == nil {
+	if h.DaemonProfileRefresh == nil {
 		return
 	}
-	h.DaemonHub.NotifyRuntimeProfilesChanged(workspaceID, profileID)
+	h.DaemonProfileRefresh.NotifyRuntimeProfilesChanged(workspaceID, profileID)
 }

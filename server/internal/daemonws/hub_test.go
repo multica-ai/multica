@@ -223,6 +223,44 @@ func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
 	}
 }
 
+func TestRelayNotifierPublishesRuntimeProfilesChanged(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	relay := &recordingRelayPublisher{}
+	notifier := NewRelayNotifier(nil, relay)
+
+	notifier.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+
+	if relay.scopeType != realtime.ScopeDaemonRuntime {
+		t.Fatalf("scopeType = %q, want %q", relay.scopeType, realtime.ScopeDaemonRuntime)
+	}
+	if relay.scopeID != "ws-1" {
+		t.Fatalf("scopeID = %q, want workspace shard key", relay.scopeID)
+	}
+	if relay.eventID == "" {
+		t.Fatal("expected event id")
+	}
+	if M.WakeupPublishedTotal.Load() != 1 {
+		t.Fatalf("published metric = %d, want 1", M.WakeupPublishedTotal.Load())
+	}
+
+	var msg protocol.Message
+	if err := json.Unmarshal(relay.frame, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonRuntimeProfilesChanged {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonRuntimeProfilesChanged)
+	}
+	var payload protocol.RuntimeProfilesChangedPayload
+	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if payload.WorkspaceID != "ws-1" || payload.RuntimeProfileID != "profile-1" {
+		t.Fatalf("payload = %+v, want workspace/profile IDs", payload)
+	}
+}
+
 func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
 	M.Reset()
 	defer M.Reset()
@@ -253,6 +291,42 @@ func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
 	}
 	if M.WakeupDeliveredHit.Load() != 1 {
 		t.Fatalf("delivered hit metric after loopback = %d, want 1", M.WakeupDeliveredHit.Load())
+	}
+	if M.WakeupDeliveredMiss.Load() != 0 {
+		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func TestRelayNotifierDedupsRuntimeProfilesChangedLoopback(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonWorkspaceTestClient(hub, "ws-1")
+	relay := &localFirstDaemonRelayPublisher{t: t, client: client}
+	notifier := NewRelayNotifier(hub, relay)
+
+	notifier.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+
+	if !relay.called {
+		t.Fatal("expected relay publish to be invoked")
+	}
+	if relay.eventID == "" {
+		t.Fatal("expected event id")
+	}
+	if M.WakeupDeliveredHit.Load() != 0 {
+		t.Fatalf("delivered hit metric = %d, want 0 before redis relay delivery", M.WakeupDeliveredHit.Load())
+	}
+
+	hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+
+	select {
+	case duplicate := <-client.send:
+		t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if M.WakeupDeliveredHit.Load() != 0 {
+		t.Fatalf("delivered hit metric after loopback = %d, want 0", M.WakeupDeliveredHit.Load())
 	}
 	if M.WakeupDeliveredMiss.Load() != 0 {
 		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
@@ -459,6 +533,21 @@ func attachDaemonTestClient(hub *Hub, runtimeID string) *client {
 	hub.mu.Lock()
 	hub.clients[c] = true
 	hub.byRuntime[runtimeID] = map[*client]bool{c: true}
+	hub.mu.Unlock()
+
+	return c
+}
+
+func attachDaemonWorkspaceTestClient(hub *Hub, workspaceID string) *client {
+	c := &client{
+		send:     make(chan []byte, 2),
+		identity: ClientIdentity{WorkspaceIDs: []string{workspaceID}},
+		runtimes: map[string]struct{}{},
+	}
+
+	hub.mu.Lock()
+	hub.clients[c] = true
+	hub.byWorkspace[workspaceID] = map[*client]bool{c: true}
 	hub.mu.Unlock()
 
 	return c
