@@ -85,7 +85,6 @@
     "all_runtimes": "All runtimes",
     "read_only": "Read-only",
     "delete_button": "Delete runtime",
-    "delete_disabled_tooltip": "This runtime is managed by a running local daemon and will re-register itself within seconds. Stop the daemon process to remove it permanently.",
     "last_seen": "last seen {{when}}",
     "fact_owner": "Owner",
     "fact_device": "Device",
@@ -111,6 +110,7 @@
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
     "delete_dialog": {
+      "self_heal_notice": "This runtime is managed by a running local daemon. Deleting it will succeed, but the daemon will re-register a fresh runtime within seconds — stop the daemon process first to remove it permanently.",
       "light": {
         "title": "Delete Runtime?",
         "description": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
@@ -131,7 +131,6 @@
         "confirm_one": "Archive {{count}} agent and delete runtime",
         "confirm_other": "Archive {{count}} agents and delete runtime",
         "submitting": "Archiving and deleting...",
-        "self_healing_blocked_toast": "This runtime is managed by a running local daemon and will re-register itself.",
         "delete_failed_toast": "Failed to delete runtime",
         "table": {
           "header_agent": "Agent",
