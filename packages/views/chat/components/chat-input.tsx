@@ -11,7 +11,7 @@ import {
 } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
+import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -85,8 +85,7 @@ export function ChatInput({
   // user would see the image flash on then disappear. Keeping editor
   // identity stable across the lazy-create event is what makes
   // first-upload-creates-session work the same as second-upload.
-  const draftKey =
-    activeSessionId ?? `${DRAFT_NEW_SESSION}:${selectedAgentId ?? ""}`;
+  const draftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const setInputDraft = useChatStore((s) => s.setInputDraft);

@@ -3,7 +3,17 @@
     "title": "스쿼드",
     "new_button": "새 스쿼드",
     "empty_no_squads": "아직 스쿼드가 없습니다. 하나 만들어 시작하세요.",
-    "empty_no_match": "필터와 일치하는 스쿼드가 없습니다."
+    "empty_no_match": "필터와 일치하는 스쿼드가 없습니다.",
+    "table": {
+      "name": "스쿼드",
+      "leader": "리더",
+      "members": "멤버",
+      "creator": "생성자",
+      "created": "생성일"
+    },
+    "no_matches": "일치하는 스쿼드가 없습니다",
+    "row_menu": "스쿼드 작업",
+    "archive_action": "보관"
   },
   "inspector": {
     "details_section": "세부 정보",
@@ -14,7 +24,8 @@
     "description": "\"{{name}}\"이(가) 보관됩니다. 현재 이 스쿼드에 할당된 이슈는 리더에게 이전됩니다. 이 작업은 되돌릴 수 없습니다. 라우팅을 다시 쓰려면 새 스쿼드를 만드세요.",
     "cancel": "취소",
     "confirm": "보관",
-    "archiving": "보관하는 중..."
+    "archiving": "보관하는 중...",
+    "success": "스쿼드를 보관했습니다"
   },
   "name_editor": {
     "cancel": "취소"
@@ -72,5 +83,21 @@
     "description": "스쿼드에 할당된 이슈를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 작업 합의, 매 작업마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
     "unsaved_changes": "저장하지 않은 변경사항",
     "save_button": "저장"
+  },
+  "scope": {
+    "mine": "내 스쿼드",
+    "all": "전체"
+  },
+  "toolbar": {
+    "display": "표시",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열",
+    "result_count_title": "일치하는 스쿼드 / 전체 스쿼드",
+    "filter_label": "필터",
+    "filter_active_count_one": "필터 {{count}}개",
+    "filter_active_count_other": "필터 {{count}}개",
+    "clear_filters": "필터 지우기"
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { Attachment } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -6,12 +6,13 @@ import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 const mockFocus = vi.hoisted(() => vi.fn());
 const mockSetContent = vi.hoisted(() => vi.fn());
 const mockSetTextSelection = vi.hoisted(() => vi.fn());
-const mockDispatch = vi.hoisted(() => vi.fn());
 const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
   markdown: "",
-  hasActiveUploads: false,
+  // Nodes the mocked doc reports via `descendants`. The content-sync effect
+  // walks these to detect in-flight uploads; default empty = nothing uploading.
+  uploadingNodes: [] as Array<{ attrs: { uploading?: boolean } }>,
 }));
 
 // Records the attachments[] prop the provider received on its most recent
@@ -30,14 +31,6 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("./extensions", () => ({
   createEditorExtensions: () => [],
-}));
-
-vi.mock("@tiptap/core", () => ({
-  Extension: {
-    create: (definition: unknown) => ({
-      configure: () => definition,
-    }),
-  },
 }));
 
 vi.mock("./extensions/file-upload", () => ({
@@ -67,12 +60,16 @@ vi.mock("./attachment-download-context", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+const latestEditorOptions = vi.hoisted<{
+  current?: { onUpdate?: (args: { editor: unknown }) => void };
+}>(() => ({}));
 
 vi.mock("@tiptap/react", () => ({
   useEditor: (options: {
     onCreate?: (args: { editor: unknown }) => void;
     onUpdate?: (args: { editor: unknown }) => void;
   }) => {
+    latestEditorOptions.current = options;
     if (!editorRef.current) {
       editorRef.current = {
         get isFocused() {
@@ -88,20 +85,17 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
-        view: {
-          dispatch: mockDispatch,
-        },
         state: {
           doc: {
             content: { size: 0 },
-            descendants: (callback: (node: { attrs: { uploading?: boolean } }) => boolean | undefined) => {
-              callback({ attrs: { uploading: editorState.hasActiveUploads } });
+            descendants: (cb: (node: { attrs: { uploading?: boolean } }) => boolean | void) => {
+              for (const node of editorState.uploadingNodes) {
+                if (cb(node) === false) break;
+              }
             },
           },
           selection: { empty: true, from: 0, to: 0 },
-          tr: { setMeta: vi.fn(() => ({})) },
         },
-        __triggerUpdate: () => options?.onUpdate?.({ editor: editorRef.current }),
       };
     }
     if (!onCreateFired.value) {
@@ -125,11 +119,15 @@ describe("ContentEditor", () => {
     editorState.isFocused = false;
     editorState.isDestroyed = false;
     editorState.markdown = "";
-    editorState.hasActiveUploads = false;
+    editorState.uploadingNodes = [];
     editorRef.current = null;
     onCreateFired.value = false;
-    vi.useRealTimers();
+    latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("focuses the editor when clicking the empty container area", () => {
@@ -166,6 +164,25 @@ describe("ContentEditor", () => {
       "new content from server",
       expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
     );
+  });
+
+  it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
+    editorState.markdown = "old content";
+    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+
+    // A file is uploading: the doc holds a node with attrs.uploading. An
+    // external defaultValue change (e.g. chat lazy-creating a session mid-upload
+    // flips the draft key → defaultValue) must NOT setContent over it, or the
+    // uploading node is wiped and the upload's finalize can't find it.
+    editorState.uploadingNodes = [{ attrs: { uploading: true } }];
+    rerender(<ContentEditor defaultValue="" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    // Once the upload settles (no uploading node), a later external change syncs.
+    editorState.uploadingNodes = [];
+    rerender(<ContentEditor defaultValue="new content from server" />);
+    expect(mockSetContent).toHaveBeenCalledTimes(1);
   });
 
   it("does not sync when editor is focused and has unsaved local edits", () => {
@@ -240,14 +257,108 @@ describe("ContentEditor", () => {
     vi.useFakeTimers();
     const onUpdate = vi.fn();
     editorState.markdown = "!file[claude-code-main.zip]()";
-    editorState.hasActiveUploads = true;
+    editorState.uploadingNodes = [{ attrs: { uploading: true } }];
 
     render(<ContentEditor onUpdate={onUpdate} debounceMs={100} />);
 
-    (editorRef.current as { __triggerUpdate: () => void }).__triggerUpdate();
-    vi.advanceTimersByTime(100);
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
 
     expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("flushes a pending debounced update on unmount when flushPendingOnUnmount is set", () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "old content";
+    const { unmount } = render(
+      <ContentEditor
+        defaultValue="old content"
+        onUpdate={onUpdate}
+        debounceMs={1500}
+        flushPendingOnUnmount
+      />,
+    );
+
+    editorState.markdown = "old content\n\n![shot](/api/attachments/att-1/download)";
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+    });
+
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    // The flush must emit the copy cached at onUpdate time — by cleanup time
+    // Tiptap may already have torn the instance down, so reading the editor
+    // during unmount is not an option.
+    editorState.isDestroyed = true;
+    editorState.markdown = "";
+
+    unmount();
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate).toHaveBeenCalledWith(
+      "old content\n\n![shot](/api/attachments/att-1/download)",
+    );
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a pending debounced update on unmount by default", () => {
+    // Regression guard for draft resurrection: composers like comment edit
+    // cancel `clearDraft()` and then unmount this editor. A default unmount
+    // flush would re-emit the discarded markdown into onUpdate, which writes
+    // it straight back into the draft store.
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "edit draft the user cancelled";
+    const { unmount } = render(
+      <ContentEditor
+        defaultValue=""
+        onUpdate={onUpdate}
+        debounceMs={300}
+      />,
+    );
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    unmount();
+
+    expect(onUpdate).not.toHaveBeenCalled();
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it("does not re-emit on unmount when the debounce already fired", () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    const { unmount } = render(
+      <ContentEditor
+        defaultValue=""
+        onUpdate={onUpdate}
+        debounceMs={1500}
+        flushPendingOnUnmount
+      />,
+    );
+
+    editorState.markdown = "typed content";
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(1500);
+    });
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+
+    unmount();
+
+    expect(onUpdate).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -369,6 +480,44 @@ describe("ContentEditor — in-session attachment tracking (MUL-3192)", () => {
 
     expect(providerProps.attachments).toHaveLength(1);
     expect(providerProps.attachments?.[0]?.download_url).toContain("Signature=fresh");
+  });
+
+  it("backfills an empty caller download_url from the session upload on id collision", async () => {
+    // The create-issue draft persists attachment records with download_url
+    // stripped (the signed URL is response-scoped). While the upload session
+    // is still alive, the provider should hand back the signed URL so the
+    // just-pasted image first-paints from it instead of detouring through
+    // markdown_url.
+    const draftRecord = makeAttachment("draft-1", { download_url: "" });
+    const uploaded = makeAttachment("draft-1", {
+      download_url: "https://cdn.example/draft-1.png?Signature=fresh",
+    });
+    const onUploadFile = vi.fn(async () => asUploadResult(uploaded));
+    uploadAndInsertFileMock.mockImplementation(
+      async (_e: unknown, file: File, handler: (f: File) => Promise<unknown>) => {
+        await handler(file);
+      },
+    );
+
+    let imperativeRef: { uploadFile: (file: File) => void } | null = null;
+    render(
+      <ContentEditor
+        attachments={[draftRecord]}
+        onUploadFile={onUploadFile}
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+
+    await act(async () => {
+      imperativeRef?.uploadFile(new File(["x"], "draft-1.png", { type: "image/png" }));
+    });
+
+    expect(providerProps.attachments).toHaveLength(1);
+    expect(providerProps.attachments?.[0]?.download_url).toContain("Signature=fresh");
+    // Everything except the backfilled field still comes from the caller copy.
+    expect(providerProps.attachments?.[0]?.filename).toBe(draftRecord.filename);
   });
 
   it("does not append a duplicate when the same upload result returns twice (paste-then-drop the same blob)", async () => {

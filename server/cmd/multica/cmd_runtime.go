@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -43,11 +47,22 @@ var runtimeUpdateCmd = &cobra.Command{
 	RunE:  runRuntimeUpdate,
 }
 
+var runtimeDeleteCmd = &cobra.Command{
+	Use:   "delete <runtime-id>",
+	Short: "Delete a runtime from the workspace",
+	Long: "Delete a runtime registration from the workspace.\n\n" +
+		"By default this refuses when active agents are still bound to the runtime. " +
+		"Pass --cascade to archive those agents, cancel their queued/running tasks, and delete the runtime.",
+	Args: exactArgs(1),
+	RunE: runRuntimeDelete,
+}
+
 func init() {
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
 	runtimeCmd.AddCommand(runtimeUpdateCmd)
+	runtimeCmd.AddCommand(runtimeDeleteCmd)
 
 	// runtime list
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
@@ -63,6 +78,10 @@ func init() {
 	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
+
+	// runtime delete
+	runtimeDeleteCmd.Flags().Bool("cascade", false, "Archive active agents bound to the runtime, cancel their tasks, then delete the runtime")
+	runtimeDeleteCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -177,6 +196,49 @@ func runRuntimeActivity(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runRuntimeDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	runtimeID := args[0]
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	err = client.DeleteJSON(ctx, "/api/runtimes/"+runtimeID)
+	if err == nil {
+		return printRuntimeDeleteResult(cmd, map[string]any{
+			"id":      runtimeID,
+			"deleted": true,
+		})
+	}
+
+	conflict, ok := runtimeDeleteConflict(err)
+	if !ok {
+		return fmt.Errorf("delete runtime: %w", err)
+	}
+
+	cascade, _ := cmd.Flags().GetBool("cascade")
+	if !cascade {
+		return fmt.Errorf(
+			"delete runtime: runtime has active agents bound to it (%s); archive or reassign them first, or rerun with --cascade to archive them and delete the runtime",
+			strings.Join(conflict.AgentDisplays(), ", "),
+		)
+	}
+
+	body := map[string]any{
+		"expected_active_agent_ids": conflict.AgentIDs(),
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/runtimes/"+runtimeID+"/archive-agents-and-delete", body, &result); err != nil {
+		return fmt.Errorf("cascade delete runtime: %w", err)
+	}
+	result["id"] = runtimeID
+	result["deleted"] = true
+	return printRuntimeDeleteResult(cmd, result)
+}
+
 func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -237,4 +299,67 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+}
+
+type runtimeDeleteConflictPayload struct {
+	Code         string `json:"code"`
+	Error        string `json:"error"`
+	ActiveAgents []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"active_agents"`
+}
+
+func runtimeDeleteConflict(err error) (runtimeDeleteConflictPayload, bool) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return runtimeDeleteConflictPayload{}, false
+	}
+	var payload runtimeDeleteConflictPayload
+	if json.Unmarshal([]byte(httpErr.Body), &payload) != nil {
+		return runtimeDeleteConflictPayload{}, false
+	}
+	if payload.Code != "runtime_has_active_agents" || len(payload.ActiveAgents) == 0 {
+		return runtimeDeleteConflictPayload{}, false
+	}
+	return payload, true
+}
+
+func (p runtimeDeleteConflictPayload) AgentIDs() []string {
+	ids := make([]string, 0, len(p.ActiveAgents))
+	for _, agent := range p.ActiveAgents {
+		if agent.ID != "" {
+			ids = append(ids, agent.ID)
+		}
+	}
+	return ids
+}
+
+func (p runtimeDeleteConflictPayload) AgentDisplays() []string {
+	displays := make([]string, 0, len(p.ActiveAgents))
+	for _, agent := range p.ActiveAgents {
+		switch {
+		case agent.Name != "" && agent.ID != "":
+			displays = append(displays, fmt.Sprintf("%s (%s)", agent.Name, agent.ID))
+		case agent.Name != "":
+			displays = append(displays, agent.Name)
+		case agent.ID != "":
+			displays = append(displays, agent.ID)
+		}
+	}
+	return displays
+}
+
+func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if agentsArchived, ok := result["agents_archived"]; ok {
+		fmt.Fprintf(os.Stderr, "Runtime %s deleted; archived %v agent(s).\n", strVal(result, "id"), agentsArchived)
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))
+	return nil
 }

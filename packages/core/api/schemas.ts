@@ -36,6 +36,11 @@ import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  // True when the CDN domain serves private content via time-bounded signed
+  // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
+  // publicly fetchable and must not be used as native media sources
+  // (MUL-3254). Older servers omit the field; treat that as false.
+  cdn_signed?: boolean;
   allow_signup: boolean;
   google_client_id?: string;
   dingtalk_client_id?: string;
@@ -178,6 +183,7 @@ const BooleanWithDefaultSchema = (fallback: boolean) =>
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
   dingtalk_client_id: OptionalStringSchema,
@@ -193,6 +199,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
   dingtalk_client_id: "",
@@ -1000,7 +1007,11 @@ const AutopilotRunSchema = z.object({
 }).loose();
 
 export const ListAutopilotsResponseSchema = z.object({
-  autopilots: z.array(AutopilotSchema).default([]),
+  autopilots: z.array(AutopilotSchema.extend({
+    trigger_kinds: z.array(z.string()).optional(),
+    next_run_at: z.string().nullable().optional(),
+    last_run_status: z.string().nullable().optional(),
+  }).loose()).default([]),
   total: z.number().default(0),
 }).loose();
 

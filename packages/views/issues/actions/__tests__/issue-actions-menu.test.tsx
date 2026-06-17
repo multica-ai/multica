@@ -103,16 +103,20 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-const mockListTasksByIssue = vi.fn(() => Promise.resolve([]));
+const mockListTasksByIssue = vi.fn<(...args: unknown[]) => Promise<AgentTask[]>>(
+  () => Promise.resolve([]),
+);
 vi.mock("@multica/core/api", () => ({
   api: {
-    listTasksByIssue: (...args: any[]) => mockListTasksByIssue(...args),
+    listTasksByIssue: (...args: unknown[]) => mockListTasksByIssue(...args),
   },
 }));
 
-const mockCopyText = vi.fn(() => Promise.resolve(true));
+const mockCopyText = vi.fn<(text: string) => Promise<boolean>>(
+  () => Promise.resolve(true),
+);
 vi.mock("@multica/ui/lib/clipboard", () => ({
-  copyText: (...args: any[]) => mockCopyText(...args),
+  copyText: (text: string) => mockCopyText(text),
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({

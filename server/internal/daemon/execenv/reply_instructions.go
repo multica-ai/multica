@@ -119,28 +119,40 @@ func activeThreadID(triggerThreadID, triggerCommentID string) string {
 // because resumed Claude sessions keep prior turns' tool calls in context
 // and will otherwise copy the old --parent UUID forward.
 //
-// The template is platform-aware but provider-agnostic — the failure it
+// The template is platform-agnostic AND provider-agnostic — the failure it
 // guards against lives at the shell layer, so it cannot be scoped to one
-// provider (MUL-2904):
+// provider or one OS:
 //
-//   - Windows + any provider → write a UTF-8 file, post with `--content-file`.
-//     This is the only path that survives Windows shells (PowerShell 5.1
-//     defaults to ASCIIEncoding when piping to native commands and drops
-//     non-ASCII as `?`; cmd.exe is at the mercy of `chcp`). The original
-//     reports — #2198 (Chinese), #2236 (Chinese), #2376 (Cyrillic, observed
-//     on a non-Codex agent) — all match this signature.
-//   - Linux/macOS + any provider → `--content-stdin` with a QUOTED HEREDOC
-//     (`<<'COMMENT'`). The quoted delimiter stops the shell from expanding
-//     backticks, `$()`, or `$VAR` inside the body. Inlining `--content "..."`
-//     instead lets the shell rewrite the body BEFORE the CLI receives it: a
-//     backtick-wrapped token becomes a failed command substitution that is
-//     silently deleted, the stored comment no longer matches what the model
-//     intended, and a model that notices the mismatch can retry forever
-//     (MUL-2904 / OKK-497). It also sidesteps Codex's habit of emitting
-//     literal `\n` escapes inside `--content` (MUL-1467).
+//   - Inline `--content "..."` lets the shell rewrite the body BEFORE the CLI
+//     receives it: a backtick-wrapped token becomes a failed command
+//     substitution that is silently deleted, the stored comment no longer
+//     matches what the model intended, and a model that notices the mismatch
+//     can retry forever (MUL-2904 / OKK-497). It also lets Codex emit literal
+//     `\n` escapes inside `--content` (MUL-1467).
+//   - `--content-stdin` with a HEREDOC has TWO failure modes the model cannot
+//     see:
+//     1. On Windows, PowerShell 5.1's `$OutputEncoding` defaults to
+//     ASCIIEncoding when piping to native commands and drops non-ASCII as
+//     `?` before the bytes reach `multica.exe` (#2198 Chinese, #2236
+//     Chinese, #2376 Cyrillic).
+//     2. On any host, when the model emits a multi-flag command (e.g.
+//     `multica issue create --title ... --assignee-id ... --project ...`)
+//     the bash heredoc/flag boundary is fragile: a `BODY \` "terminator
+//     with trailing token" is not recognised as the heredoc end, so flag
+//     lines after it are swallowed into the description; or a clean
+//     terminator turns the trailing `--assignee ...` line into a separate
+//     shell statement that fails while the create already succeeded with
+//     no assignee. Both paths exit 0 with silently dropped flags. Github
+//     issue #4182 documents two confirmed cases (OXY-78, OXY-76).
+//
+// The single safe path is therefore: write the body to a UTF-8 file with
+// the file-write tool, post with `--content-file`, then remove the file.
+// All flags live on one shell-token line; the body never touches the shell;
+// no heredoc boundary exists for flags to leak across. This converges with
+// the long-standing Windows path so the cross-platform template is one shape.
 //
 // provider is retained for caller symmetry and future per-provider tweaks; the
-// guardrail itself is intentionally identical across providers.
+// guardrail itself is intentionally identical across providers and hosts.
 func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) string {
 	if triggerCommentID == "" {
 		return ""
@@ -154,30 +166,37 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string) s
 				"Do NOT use inline `--content`; it is easy to lose formatting or accidentally compress a structured reply into one line.\n\n"+
 				"Use this form, preserving the same issue ID and --parent value:\n\n"+
 				"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
-				"    # 2. Then run:\n"+
-				"    multica issue comment add %s --parent %s --content-file ./reply.md\n\n"+
+				"    # 2. Post the comment:\n"+
+				"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+				"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
+				"    Remove-Item ./reply.md\n\n"+
 				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 			issueID, triggerCommentID,
 		)
 	}
-	// Linux/macOS, any provider: `--content-stdin` with a quoted HEREDOC. The
-	// quoted delimiter (`<<'COMMENT'`) is what makes this safe — it stops the
-	// shell from running backtick / `$()` substitution or `$VAR` expansion on
-	// the body. Inlining `--content "..."` is what triggered the MUL-2904
-	// duplicate-comment loop, so it is banned for every provider here, not just
-	// Codex.
+	// Linux/macOS, any provider: `--content-file`. Switched from `--content-stdin` +
+	// HEREDOC to converge with the Windows path and close GitHub #4182. The
+	// HEREDOC pattern was safe for the trivial single-flag case, but as soon as
+	// the model wrapped extra flags around the heredoc (assignee, project on
+	// `issue create` / `issue update`) it became fragile to flag/heredoc
+	// boundary mistakes — flags either got swallowed into the body or executed
+	// as separate failing shell statements while the create succeeded with
+	// nulls. The file path eliminates that class of error: all flags live on
+	// one command line, the body never reaches the shell.
 	return fmt.Sprintf(
 		"If you decide to reply, post it as a comment — always use the trigger comment ID below, "+
 			"do NOT reuse --parent values from previous turns in this session.\n\n"+
-			"Always use `--content-stdin` with a HEREDOC for agent-authored issue comments, even when the reply is a single line. "+
-			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them, and it is easy to lose formatting or compress a structured reply into one line.\n\n"+
+			"Write the reply body to a UTF-8 file with your file-write tool first, then post it with `--content-file`. "+
+			"Do NOT use inline `--content`; the shell rewrites unescaped backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them. "+
+			"Do NOT use `--content-stdin` with a HEREDOC either — when extra flags (e.g. `--assignee`, `--project` on `multica issue create`) accompany the command, the bash heredoc/flag boundary is fragile and flags can be silently swallowed into the stdin stream while the command still exits 0 (see GitHub #4182, OXY-78 / OXY-76). "+
+			"It is also easy to lose formatting or compress a structured reply into one line with inline forms.\n\n"+
 			"Use this form, preserving the same issue ID and --parent value:\n\n"+
-			"    cat <<'COMMENT' | multica issue comment add %s --parent %s --content-stdin\n"+
-			"    First paragraph.\n"+
-			"\n"+
-			"    Second paragraph.\n"+
-			"    COMMENT\n\n"+
-			"Do NOT write literal `\\n` escapes to simulate line breaks; the HEREDOC preserves real newlines.\n",
+			"    # 1. Write the reply body to a UTF-8 file (e.g. reply.md) with your file-write tool.\n"+
+			"    # 2. Post the comment:\n"+
+			"    multica issue comment add %s --parent %s --content-file ./reply.md\n"+
+			"    # 3. Remove the temp file so a later run does not pick up stale content:\n"+
+			"    rm ./reply.md\n\n"+
+			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
 		issueID, triggerCommentID,
 	)
 }

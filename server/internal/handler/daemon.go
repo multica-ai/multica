@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -186,6 +187,11 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// ProfileID, when non-empty, marks this as an instance of a custom
+		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
+		// Type carries the protocol family for both built-in and custom rows
+		// so task routing (agent.New) is unchanged.
+		ProfileID string `json:"profile_id"`
 	} `json:"runtimes"`
 }
 
@@ -339,51 +345,125 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"health_port": req.HealthPort,
 		})
 
-		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    provider,
-			Status:      status,
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-		})
-		if err != nil {
-			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				req.DaemonID,
-				provider,
-				"registration_failed",
-				"db_error",
-				true,
-			))
-			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
-			return
-		}
+		var registered db.AgentRuntime
+		var inserted bool
+		isCustom := strings.TrimSpace(runtime.ProfileID) != ""
 
-		registered := db.AgentRuntime{
-			ID:             row.ID,
-			WorkspaceID:    row.WorkspaceID,
-			DaemonID:       row.DaemonID,
-			Name:           row.Name,
-			RuntimeMode:    row.RuntimeMode,
-			Provider:       row.Provider,
-			Status:         row.Status,
-			DeviceInfo:     row.DeviceInfo,
-			Metadata:       row.Metadata,
-			LastSeenAt:     row.LastSeenAt,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
-			OwnerID:        row.OwnerID,
-			LegacyDaemonID: row.LegacyDaemonID,
+		if isCustom {
+			profileUUID, pok := parseUUIDOrBadRequest(w, strings.TrimSpace(runtime.ProfileID), "profile_id")
+			if !pok {
+				return
+			}
+			// The profile must exist in this workspace and be enabled. Trust
+			// the profile's stored protocol_family over the daemon-sent type so
+			// the provider used for task routing cannot drift from the profile.
+			profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+				ID:          profileUUID,
+				WorkspaceID: wsUUID,
+			})
+			if perr != nil {
+				writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
+				return
+			}
+			if !profile.Enabled {
+				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			provider = profile.ProtocolFamily
+
+			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+				ProfileID:   profileUUID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = prow.Inserted
+			registered = db.AgentRuntime{
+				ID:             prow.ID,
+				WorkspaceID:    prow.WorkspaceID,
+				DaemonID:       prow.DaemonID,
+				Name:           prow.Name,
+				RuntimeMode:    prow.RuntimeMode,
+				Provider:       prow.Provider,
+				Status:         prow.Status,
+				DeviceInfo:     prow.DeviceInfo,
+				Metadata:       prow.Metadata,
+				LastSeenAt:     prow.LastSeenAt,
+				CreatedAt:      prow.CreatedAt,
+				UpdatedAt:      prow.UpdatedAt,
+				OwnerID:        prow.OwnerID,
+				LegacyDaemonID: prow.LegacyDaemonID,
+				Visibility:     prow.Visibility,
+				ProfileID:      prow.ProfileID,
+			}
+		} else {
+			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = row.Inserted
+			registered = db.AgentRuntime{
+				ID:             row.ID,
+				WorkspaceID:    row.WorkspaceID,
+				DaemonID:       row.DaemonID,
+				Name:           row.Name,
+				RuntimeMode:    row.RuntimeMode,
+				Provider:       row.Provider,
+				Status:         row.Status,
+				DeviceInfo:     row.DeviceInfo,
+				Metadata:       row.Metadata,
+				LastSeenAt:     row.LastSeenAt,
+				CreatedAt:      row.CreatedAt,
+				UpdatedAt:      row.UpdatedAt,
+				OwnerID:        row.OwnerID,
+				LegacyDaemonID: row.LegacyDaemonID,
+				Visibility:     row.Visibility,
+				ProfileID:      row.ProfileID,
+			}
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
-		if row.Inserted {
+		if inserted {
 			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
@@ -410,7 +490,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// (e.g. "host.local", "host", "host-staging"); for each match we
 		// reassign agents + tasks onto the new UUID-keyed row, then delete
 		// the stale row so there's only ever one runtime per machine.
-		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		//
+		// Only built-in runtimes participate: legacy rows predate custom
+		// profiles, so a profile-keyed instance never has a hostname-derived
+		// ancestor to merge, and mergeLegacyRuntimes scopes by provider alone
+		// (no profile_id), which could otherwise fold a built-in row into a
+		// custom one of the same provider.
+		if !isCustom {
+			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		}
 
 		resp = append(resp, runtimeToResponse(registered))
 	}
@@ -806,7 +894,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, fmt.Errorf("get agent runtime: %w", err)
 	}
-	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
+	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
@@ -1198,6 +1286,14 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if runtime.Provider == "codex" {
 			serviceTier = agent.ServiceTier.String
 		}
+		// runtime_config is stored as JSONB and may legitimately be the
+		// empty object `{}` for agents that haven't opted into any
+		// provider-specific tuning. Forward only non-empty payloads so the
+		// daemon's per-provider decoders treat absent-or-empty identically.
+		var runtimeConfig json.RawMessage
+		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+		}
 		resp.Agent = &TaskAgentData{
 			ID:            uuidToString(agent.ID),
 			Name:          agent.Name,
@@ -1212,7 +1308,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			Model:         agent.Model.String,
 			ThinkingLevel: agent.ThinkingLevel.String,
 			ServiceTier:   serviceTier,
-			RuntimeConfig: agent.RuntimeConfig,
+			RuntimeConfig: runtimeConfig,
 		}
 
 		// Resolve the runtime owner's profile description so the daemon can
@@ -1768,38 +1864,49 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
-	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
-	//
-	// Owner local runtimes must get this token. If an owner runtime claim
-	// response lacks it, the daemon refuses to spawn instead of falling back to
-	// its member/daemon credential. Token expires after the queue/runtime upper
-	// bound (24h) so it survives long-running tasks but cannot outlive a
-	// forgotten one. Ownerless legacy runtimes omit auth_token.
-	if runtime.OwnerID.Valid {
-		tokenStr, terr := auth.GenerateAgentTaskToken()
-		if terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to generate agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to mint task token")
-			return
+	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). Runtime
+	// owner is required because task tokens are still bound to an owning user;
+	// without one, fail the claim explicitly instead of letting the daemon
+	// fall back to a member/owner credential. MUL-3292.
+	// Token expires after the queue/runtime upper bound (24h) so it survives
+	// long-running tasks but cannot outlive a forgotten one.
+	if !runtime.OwnerID.Valid {
+		outcome = "error_token"
+		slog.Error("task claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"workspace_id", runtimeWorkspaceID,
+		)
+		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+			slog.Error("task claim: cancel after missing runtime owner failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
 		}
-		if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
-			TokenHash:   auth.HashToken(tokenStr),
-			TaskID:      task.ID,
-			AgentID:     task.AgentID,
-			WorkspaceID: parseUUID(resp.WorkspaceID),
-			UserID:      runtime.OwnerID,
-			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}); terr != nil {
-			outcome = "error_token"
-			slog.Error("task claim: failed to persist agent task token",
-				"task_id", uuidToString(task.ID), "error", terr)
-			writeError(w, http.StatusInternalServerError, "failed to persist task token")
-			return
-		}
-		resp.AuthToken = tokenStr
+		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
+		return
 	}
+	tokenStr, terr := auth.GenerateAgentTaskToken()
+	if terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to generate agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
+	}
+	if _, terr := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(tokenStr),
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		UserID:      runtime.OwnerID,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}); terr != nil {
+		outcome = "error_token"
+		slog.Error("task claim: failed to persist agent task token",
+			"task_id", uuidToString(task.ID), "error", terr)
+		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+		return
+	}
+	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

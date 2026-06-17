@@ -58,8 +58,8 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`visibility`, …) on the flag being `Changed` — so omitted flags fall through
-to server defaults rather than sending empty strings.
+`thinking-level`, `visibility`, …) on the flag being `Changed` — so omitted
+flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
@@ -92,6 +92,16 @@ happens in the CLI, not the create handler.
 literal returns 400, but a value that is valid for the provider yet
 unsupported for the chosen model is NOT rejected here — that gap surfaces as a
 daemon-side task error at execution time.
+
+Set it from the CLI with `--thinking-level` on `agent create` and `agent
+update`, mirroring `--model`: the flag is a thin pass-through to the top-level
+`thinking_level` field, and on update an empty string (`--thinking-level ""`)
+clears it back to the runtime default. The CLI deliberately does not enumerate
+the valid levels — they are runtime/model-specific (Claude
+`low|medium|high|xhigh|max`, Codex `none|minimal|low|medium|high|xhigh`, and
+others), so it forwards whatever you pass and lets the server's provider
+catalog accept or reject it. A runtime whose provider has no thinking concept
+rejects any non-empty value with a 400.
 
 ### model vs custom_args
 

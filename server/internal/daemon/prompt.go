@@ -22,9 +22,9 @@ func BuildPromptWithRunMode(task Task, runMode string) string {
 
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded
 // through to comment-triggered tasks' per-turn reply template; that template
-// is provider-agnostic now (Linux/macOS → quoted-HEREDOC stdin, Windows →
-// file) because the shell-layer corruption it guards against is not specific
-// to any one provider (MUL-2904).
+// is provider-agnostic AND host-agnostic now (every OS → write a UTF-8 file,
+// post with `--content-file`) because the shell-layer corruption it guards
+// against is not specific to any one provider or host (MUL-2904, #4182).
 func BuildPromptWithProvider(task Task, provider string) string {
 	return BuildPromptWithRunModeAndProvider(task, protocol.ResolveTaskRunMode(task.Context), provider)
 }

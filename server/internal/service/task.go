@@ -18,7 +18,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -2565,8 +2564,6 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	// Expand bare issue identifiers (e.g. MUL-117) into mention links.
-	content = mention.ExpandIssueIdentifiers(ctx, s.Queries, issue.WorkspaceID, content)
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issueID,
 		WorkspaceID: issue.WorkspaceID,

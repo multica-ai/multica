@@ -145,6 +145,17 @@ interface ContentEditorProps {
   attachments?: Attachment[];
   /** Optional actions for quoting the current editor selection into issue comments. */
   selectionQuoteActions?: SelectionQuoteActions;
+  /**
+   * Flush a pending debounced `onUpdate` when the editor unmounts instead of
+   * dropping it. Default false ON PURPOSE: most composers clear their draft
+   * and then unmount (comment edit cancel, create-issue / feedback submit),
+   * and a flush there would hand the discarded content right back to
+   * `onUpdate`, resurrecting the cleared draft. Opt in only where closing
+   * means "keep what the user last saw" — e.g. the issue-detail description
+   * editor, whose 1500ms debounce would otherwise drop a paste made just
+   * before the modal closes.
+   */
+  flushPendingOnUnmount?: boolean;
 }
 
 interface SelectionQuoteActions {
@@ -204,10 +215,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       slashCommandMode = "skill",
       attachments,
       selectionQuoteActions,
+      flushPendingOnUnmount = false,
     },
     ref,
   ) {
     const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+    const flushPendingOnUnmountRef = useRef(flushPendingOnUnmount);
+    // Markdown serialized at `onUpdate` time, awaiting its debounce fire. The
+    // unmount flush emits this cached copy — it runs mid-teardown and can't
+    // assume the editor instance is still readable.
+    const pendingFlushRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
@@ -262,20 +279,26 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // server) take precedence — we only append session uploads the caller
     // doesn't already have, so a parent re-render that includes the same record
     // doesn't end up with two copies.
+    //
+    // One exception on id collision: when the caller's copy has an EMPTY
+    // `download_url` (the create-issue draft strips the short-lived signed URL
+    // before persisting), backfill it from the session upload. The session copy
+    // holds the this-response signed URL, so the just-pasted image first-paints
+    // from it instead of taking an extra redirect hop through `markdown_url`.
     const providerAttachments = useMemo(() => {
       if (sessionUploads.length === 0) return attachments;
-      const seen = new Set<string>();
+      const sessionById = new Map(sessionUploads.map((a) => [a.id, a]));
       const merged: Attachment[] = [];
       for (const a of attachments ?? []) {
-        if (a.id) seen.add(a.id);
-        merged.push(a);
+        const session = a.id ? sessionById.get(a.id) : undefined;
+        if (session) sessionById.delete(a.id);
+        merged.push(
+          session && !a.download_url
+            ? { ...a, download_url: session.download_url }
+            : a,
+        );
       }
-      for (const a of sessionUploads) {
-        if (!seen.has(a.id)) {
-          seen.add(a.id);
-          merged.push(a);
-        }
-      }
+      merged.push(...sessionById.values());
       return merged;
     }, [attachments, sessionUploads]);
 
@@ -295,6 +318,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUploadFileRef.current = wrappedOnUploadFile;
     mentionScopeRef.current = mentionScope;
     mentionContextItemsRef.current = mentionContextItems ?? [];
+    flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
 
@@ -354,8 +378,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
+        if (flushPendingOnUnmountRef.current) {
+          pendingFlushRef.current = stripBlobUrls(ed.getMarkdown()).trimEnd();
+        }
         if (debounceRef.current) clearTimeout(debounceRef.current);
         debounceRef.current = setTimeout(() => {
+          debounceRef.current = undefined;
+          pendingFlushRef.current = null;
           if (hasActiveUploadsInEditor(ed)) return;
           const md = stripBlobUrls(ed.getMarkdown()).trimEnd();
           if (md === lastEmittedRef.current) return;
@@ -392,10 +421,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     });
 
-    // Cleanup debounce on unmount
+    // Cleanup on unmount. A pending debounced update is DROPPED by default,
+    // not flushed — see the `flushPendingOnUnmount` prop doc for why. When the
+    // owner opted in, emit the markdown cached at `onUpdate` time so a long
+    // debounce can't swallow the last edit when the surrounding modal closes.
     useEffect(() => {
       return () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
+        if (!debounceRef.current) return;
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+        if (!flushPendingOnUnmountRef.current) return;
+        const pending = pendingFlushRef.current;
+        pendingFlushRef.current = null;
+        if (pending === null || pending === lastEmittedRef.current) return;
+        lastEmittedRef.current = pending;
+        onUpdateRef.current?.(pending);
       };
     }, []);
 
@@ -405,6 +445,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // showing stale content until the issue is closed and reopened.
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
+
+      // Guard 0: never clobber an in-flight upload. An external `defaultValue`
+      // change can arrive mid-upload — e.g. chat lazy-creates a session on the
+      // first file upload, which flips `activeSessionId` → the draft key →
+      // `defaultValue`. If we `setContent` over a document that still holds an
+      // `uploading` image/fileCard node, that node is wiped and the upload's
+      // finalize can no longer find it (the file vanishes, leaving an empty
+      // `!file[name]()`). Like the dirty guards below, an uploading node is
+      // local state that an external sync must not overwrite.
+      let hasUploadingNode = false;
+      editor.state.doc.descendants((node) => {
+        if (node.attrs.uploading) hasUploadingNode = true;
+        return !hasUploadingNode;
+      });
+      if (hasUploadingNode) return;
 
       const current = stripBlobUrls(editor.getMarkdown()).trimEnd();
       // "Dirty" = user has local edits not yet flushed through the debounced

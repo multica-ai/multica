@@ -33,6 +33,9 @@ type AgentRuntimeResponse struct {
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
 	Visibility string  `json:"visibility"`
+	// ProfileID is set when this runtime is an instance of a custom
+	// runtime_profile (MUL-3284); null for built-in runtimes.
+	ProfileID  *string `json:"profile_id"`
 	LastSeenAt *string `json:"last_seen_at"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
@@ -60,6 +63,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		Metadata:     metadata,
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
+		ProfileID:    uuidToPtr(rt.ProfileID),
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),

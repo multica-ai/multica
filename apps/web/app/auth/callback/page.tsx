@@ -141,7 +141,17 @@ function CallbackContent() {
 
     const redirectUri = `${window.location.origin}/auth/callback`;
 
-    if (isDesktop || isMobile) {
+    if (cliCallback) {
+      api
+        .googleLogin(code, redirectUri)
+        .then(({ token }) => {
+          setLoggedInCookie();
+          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+    } else if (isDesktop || isMobile) {
       // Native flow: exchange code for token, then redirect via deep link.
       const callbackUrl = isMobile ? mobileAuthCallback : "multica://auth/callback";
       api
@@ -149,16 +159,6 @@ function CallbackContent() {
         .then(({ token }) => {
           setDesktopToken(token);
           window.location.href = `${callbackUrl}?token=${encodeURIComponent(token)}`;
-        })
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : "Login failed");
-        });
-    } else if (cliCallback) {
-      api
-        .googleLogin(code, redirectUri)
-        .then(({ token }) => {
-          setLoggedInCookie();
-          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");

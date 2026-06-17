@@ -14,10 +14,20 @@ import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import {
+  RENDERER_ROUTE_CONTEXT_CHANNEL,
+  sanitizeRendererRouteContext,
+  type RendererRouteContext,
+} from "../shared/renderer-route-context";
+import {
   createElectronReloadPrompt,
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import {
+  writeFreezeBreadcrumb,
+  readAndClearFreezeBreadcrumb,
+  clearFreezeBreadcrumb,
+} from "./freeze-breadcrumb";
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
@@ -61,7 +71,15 @@ if (process.platform !== "win32") {
 
 const PROTOCOL = "multica";
 
+// Where the main process parks a freeze/crash breadcrumb until the next
+// renderer boot flushes it to telemetry. Lives in userData so it survives a
+// force-quit. Resolved lazily — app.getPath is only valid after `ready`.
+function freezeBreadcrumbPath(): string {
+  return join(app.getPath("userData"), "last-client-failure.json");
+}
+
 let mainWindow: BrowserWindow | null = null;
+let latestRendererRouteContext: RendererRouteContext | null = null;
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -166,9 +184,13 @@ function createWindow(): void {
     },
   });
   const window = mainWindow;
+  latestRendererRouteContext = null;
 
   window.on("closed", () => {
-    if (mainWindow === window) mainWindow = null;
+    if (mainWindow === window) {
+      mainWindow = null;
+      latestRendererRouteContext = null;
+    }
   });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
@@ -204,10 +226,14 @@ function createWindow(): void {
 
   // Window-level keyboard shortcuts. Calling preventDefault here prevents
   // both the renderer keydown AND the application menu accelerator, so
-  // anything we own here (reload-block, zoom) is the sole handler for
-  // that combination — no double-fire with the macOS default View menu.
+  // anything we own here (reload-block, zoom, tab-close) is the sole handler
+  // for that combination — no double-fire with the macOS default View menu.
   window.webContents.on("before-input-event", (event, input) => {
-    if (handleAppShortcut(input, window.webContents)) {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result) {
       event.preventDefault();
     }
   });
@@ -255,6 +281,27 @@ function createWindow(): void {
     showReloadPrompt: createElectronReloadPrompt((options) =>
       dialog.showMessageBox(window, options),
     ),
+    getDiagnosticContext: () => ({
+      windowUrl: window.webContents.getURL(),
+      ...(latestRendererRouteContext
+        ? { desktopRoute: latestRendererRouteContext }
+        : {}),
+    }),
+    // Only persist in production: a true hang/crash can't report itself, so we
+    // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
+    // is excluded to keep field telemetry clean.
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
   });
 
   installContextMenu(window.webContents);
@@ -370,6 +417,11 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
+    // Renderer requests window close (e.g. Cmd+W on last tab).
+    ipcMain.on("window:close", () => {
+      mainWindow?.close();
+    });
+
     ipcMain.handle("file:download-url", (_event, url: string) => {
       if (!mainWindow) {
         console.warn("[download] ignored file:download-url — mainWindow torn down");
@@ -388,11 +440,26 @@ if (!gotTheLock) {
       event.returnValue = { version: getAppVersion(), os };
     });
 
+    // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
+    // session. The renderer flushes it to telemetry on boot (it couldn't be
+    // reported when it happened — the renderer was hung or gone). Read-and-
+    // clear so a failure reports exactly once.
+    ipcMain.on("freeze:get-last", (event) => {
+      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
     // Sync IPC: preload exposes the validated runtime config before renderer
     // boot. If desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
+      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      const sanitized = sanitizeRendererRouteContext(context);
+      if (!sanitized) return;
+      latestRendererRouteContext = sanitized;
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen

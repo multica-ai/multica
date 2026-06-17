@@ -23,6 +23,15 @@ type TaskAvailablePayload struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
+// RuntimeProfilesChangedPayload is sent from server to daemon as a wakeup hint
+// when a workspace custom runtime profile is created, edited, disabled, or
+// deleted. The daemon still fetches profiles and registers runtimes through the
+// existing HTTP endpoints.
+type RuntimeProfilesChangedPayload struct {
+	WorkspaceID      string `json:"workspace_id"`
+	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

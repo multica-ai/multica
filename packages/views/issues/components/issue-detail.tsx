@@ -124,6 +124,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 
 type PreviewWithPort = LocalPreview & { healthPort: number };
 
@@ -1777,7 +1778,9 @@ export function IssueDetail({
   // the description keeps rendering attachments inline at their markdown
   // positions.
   const [descPendingAttachments, setDescPendingAttachments] = useState<Attachment[]>([]);
+  const descPendingAttachmentsRef = useRef<Attachment[]>([]);
   useEffect(() => {
+    descPendingAttachmentsRef.current = [];
     setDescPendingAttachments([]);
   }, [resolvedId]);
   const descEditorAttachments = descPendingAttachments.length > 0
@@ -1791,7 +1794,11 @@ export function IssueDetail({
       // the node from the body before the debounced save fires.
       const result = await uploadWithToast(file, { issueId: resolvedId });
       if (result) {
-        setDescPendingAttachments((prev) => [...prev, result]);
+        descPendingAttachmentsRef.current = [
+          ...descPendingAttachmentsRef.current,
+          result,
+        ];
+        setDescPendingAttachments(descPendingAttachmentsRef.current);
       }
       return result;
     },
@@ -2021,6 +2028,13 @@ export function IssueDetail({
       toast.error(err instanceof Error ? err.message : t(($) => $.detail.clear_history_failed));
     }
   };
+
+  useIssueDetailScrollRestore({
+    restoreKey: `${wsId}:${id}`,
+    scrollContainerEl: scrollContainerRef.current,
+    ready: !!issue && !loading && !timelineLoading,
+    disabled: !!highlightCommentId,
+  });
 
   if (loading) {
     return (
@@ -2770,7 +2784,7 @@ export function IssueDetail({
                   // webview) — while still working on web via the cookie/proxy.
                   // This mirrors the comment/reply/chat composers, which already
                   // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
-                  const ids = descPendingAttachments
+                  const ids = descPendingAttachmentsRef.current
                     .filter((a) => contentReferencesAttachment(md, a))
                     .map((a) => a.id);
                   handleUpdateField({
@@ -2785,6 +2799,10 @@ export function IssueDetail({
                 onFocus={() => setIsEditingDescription(true)}
                 onBlur={() => setIsEditingDescription(false)}
                 debounceMs={1500}
+                // Closing the issue modal must save what the user last saw —
+                // without the flush, a paste followed by a quick close loses
+                // the image markdown and its attachment_ids bind (MUL-3254).
+                flushPendingOnUnmount
                 currentIssueId={resolvedId}
                 attachments={descEditorAttachments}
                 selectionQuoteActions={{

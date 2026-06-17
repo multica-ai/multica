@@ -407,6 +407,7 @@ install_cli() {
 
   if is_managed_install; then
     local current_ver
+    # `multica version` outputs "multica 0.3.23 (commit: ...)" — extract just the version.
     current_ver=$("$CLI_BIN_PATH" version 2>/dev/null | awk '{print $2}' || echo "unknown")
 
     local latest_ver

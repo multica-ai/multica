@@ -4,6 +4,7 @@ import { forwardRef, useRef, useState, useCallback, useEffect, useImperativeHand
 import { ArrowUp, Loader2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, type SelectionQuoteActions, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
@@ -118,6 +119,10 @@ const ReplyInput = forwardRef<ReplyInputRef, ReplyInputProps>(function ReplyInpu
   }), [clearDraft, draftKey, setDraft]);
 
   useEffect(() => {
+    setSuppressedAgentIds(new Set());
+  }, [issueId, parentId]);
+
+  useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
     setSuppressedAgentIds((prev) => {
       const next = new Set([...prev].filter((id) => visible.has(id)));
@@ -220,23 +225,19 @@ const ReplyInput = forwardRef<ReplyInputRef, ReplyInputProps>(function ReplyInpu
             onSelect={(file) => editorRef.current?.uploadFile(file)}
             onSelectMany={(files) => editorRef.current?.uploadFiles(files)}
           />
-          <button
+          <Button
             type="button"
+            variant={isEmpty ? "ghost" : "default"}
+            size="icon-xs"
             disabled={isEmpty || submitting}
             onClick={handleSubmit}
-            className={cn(
-              "inline-flex h-6 w-6 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-50",
-              isEmpty
-                ? "text-muted-foreground hover:bg-accent hover:text-foreground"
-                : "bg-primary text-primary-foreground hover:bg-primary/90",
-            )}
           >
             {submitting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <ArrowUp className="h-3.5 w-3.5" />
             )}
-          </button>
+          </Button>
         </div>
         {isDragOver && <FileDropOverlay />}
       </div>

@@ -25,6 +25,8 @@ export interface SystemNotificationPayload {
   itemId: string;
   /** `?issue=<…>` selector for the inbox page (issue id, else the item id). */
   issueKey: string;
+  /** Optional app-relative route for non-issue inbox items such as channels. */
+  targetPath?: string;
   title: string;
   body: string;
 }

@@ -6,7 +6,8 @@ import { ListTodo } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQuery } from "@tanstack/react-query";
-import { useIssueViewStore, useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
+import { useIssueViewStore, useClearFiltersOnWorkspaceChange, type IssueDateFilter } from "@multica/core/issues/stores/view-store";
+import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -28,12 +29,33 @@ import { filterIssues } from "../utils/filter";
 
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
 
+function issueDateFilterToApiParams(filter: IssueDateFilter | null) {
+  if (!filter) return {};
+
+  const from = dateOnlyToLocalDate(filter.from);
+  const to = dateOnlyToLocalDate(filter.to);
+  if (!from || !to) return {};
+
+  const start = from <= to ? from : to;
+  const endSource = from <= to ? to : from;
+  const end = new Date(endSource);
+  end.setDate(end.getDate() + 1);
+
+  return {
+    date_field: filter.field,
+    date_start: start.toISOString(),
+    date_end: end.toISOString(),
+  };
+}
+
 export function IssuesPage() {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
 
   const scope = useIssuesScopeStore((s) => s.scope);
   const viewMode = useIssueViewStore((s) => s.viewMode);
+  const dateFilter = useIssueViewStore((s) => s.dateFilter);
+  const setDateFilter = useIssueViewStore((s) => s.setDateFilter);
   const grouping = useIssueViewStore((s) => s.grouping);
   const statusFilters = useIssueViewStore((s) => s.statusFilters);
   const priorityFilters = useIssueViewStore((s) => s.priorityFilters);
@@ -93,6 +115,14 @@ export function IssuesPage() {
     } as const),
     [sortBy, sortDirection],
   );
+  const dateParams = useMemo(
+    () => issueDateFilterToApiParams(dateFilter),
+    [dateFilter],
+  );
+  const queryParams = useMemo(
+    () => ({ ...sort, ...dateParams }),
+    [dateParams, sort],
+  );
 
   // Derive the set of issue ids that currently have at least one
   // `running` agent task. Used by the workspace agents-working filter
@@ -137,9 +167,9 @@ export function IssuesPage() {
     showArchived,
   ]);
 
-  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, sort);
+  const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
   const statusIssuesQuery = useQuery({
-    ...issueListOptions(wsId, statusListFilter, sort),
+    ...issueListOptions(wsId, statusListFilter, queryParams),
     enabled: !usesAssigneeBoard,
   });
   const assigneeGroupsQuery = useQuery({
@@ -248,7 +278,11 @@ export function IssuesPage() {
       </PageHeader>
 
       <ViewStoreProvider store={useIssueViewStore}>
-        <IssuesHeader scopedIssues={headerIssues} />
+        <IssuesHeader
+          scopedIssues={headerIssues}
+          dateFilter={dateFilter}
+          onDateFilterChange={setDateFilter}
+        />
 
         {loading ? contentSkeleton : headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
@@ -269,7 +303,7 @@ export function IssuesPage() {
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 myIssuesFilter={statusListFilter}
-                sort={sort}
+                sort={queryParams}
               />
 	            ) : viewMode === "swimlane" ? (
 	              <SwimLaneView
@@ -281,7 +315,7 @@ export function IssuesPage() {
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 myIssuesFilter={statusListFilter}
-                sort={sort}
+                sort={queryParams}
               />
             ) : (
               <ListView
@@ -289,7 +323,7 @@ export function IssuesPage() {
                 visibleStatuses={visibleStatuses}
                 childProgressMap={childProgressMap}
                 myIssuesFilter={statusListFilter}
-                sort={sort}
+                sort={queryParams}
                 onMoveIssue={handleMoveIssue}
               />
             )}

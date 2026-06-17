@@ -51,29 +51,26 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-    const representative = group[0];
-    if (!representative) continue;
+    const newest = group[0];
+    if (!newest) continue;
 
     // If the newest notification has no comment anchor (e.g. task_completed),
-    // find the most recent notification in the group that does.  Without this,
-    // the inbox detail opens in "latest" mode (no around-mode) and can end up
-    // showing only recent activity entries while the user's chat messages are
-    // hidden behind a "show older" page load.
-    if (!representative.details?.comment_id) {
-      const withComment = group.find((i) => i.details?.comment_id);
-      if (withComment?.details?.comment_id) {
-        merged.push({
-          ...representative,
-          details: {
-            ...(representative.details ?? {}),
-            comment_id: withComment.details.comment_id,
-          },
-        });
-        continue;
-      }
+    // find the most recent notification in the group that does. Without this,
+    // the inbox detail can open in latest mode and hide the user's chat
+    // messages behind a "show older" page load.
+    const commentId =
+      newest.details?.comment_id ??
+      group.find((item) => item.details?.comment_id)?.details?.comment_id;
+
+    if (commentId && newest.details?.comment_id !== commentId) {
+      merged.push({
+        ...newest,
+        details: { ...(newest.details ?? {}), comment_id: commentId },
+      });
+      continue;
     }
 
-    merged.push(representative);
+    merged.push(newest);
   }
   return merged.sort(
     (a, b) =>

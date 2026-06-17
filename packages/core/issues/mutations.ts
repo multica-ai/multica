@@ -773,12 +773,13 @@ export function useUpdateComment(issueId: string) {
       commentId,
       content,
       attachmentIds,
+      suppressAgentIds,
     }: {
       commentId: string;
       content: string;
       attachmentIds?: string[];
-    }) =>
-      api.updateComment(commentId, content, attachmentIds),
+      suppressAgentIds?: string[];
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds),
     onMutate: async ({ commentId, content, attachmentIds = [] }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));

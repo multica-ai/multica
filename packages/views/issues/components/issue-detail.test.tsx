@@ -192,7 +192,15 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, onExternalSyncAccepted, onUploadFile, placeholder, hideAttachments }: any,
+    {
+      defaultValue,
+      onUpdate,
+      onExternalSyncAccepted,
+      onUploadFile,
+      placeholder,
+      hideAttachments,
+      flushPendingOnUnmount,
+    }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -228,6 +236,7 @@ vi.mock("../../editor", () => ({
         placeholder={placeholder}
         data-hide-attachments={hideAttachments ? "true" : "false"}
         data-testid="rich-text-editor"
+        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
       />
     );
   }),
@@ -939,6 +948,15 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("opts the description editor into the unmount flush", async () => {
+    // Closing the issue modal must save the description the user last saw;
+    // this pins the IssueDetail wiring while ContentEditor owns flush behavior.
+    renderIssueDetail();
+
+    const description = await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
   it("renders issue identifier in the breadcrumb", async () => {
     renderIssueDetail();
 
@@ -1404,6 +1422,26 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByText(/changed status/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
+  });
+
+  it("renders activity rows with unknown status values without crashing", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-unknown-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "mystery_status" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/from Todo to mystery_status/i)).toBeInTheDocument();
+    });
   });
 
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {

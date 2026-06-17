@@ -20,6 +20,11 @@ export type {
   AgentRuntime,
   RuntimeDevice,
   CopyAgentRequest,
+  RuntimeProfile,
+  RuntimeProtocolFamily,
+  RuntimeProfileVisibility,
+  CreateRuntimeProfileRequest,
+  UpdateRuntimeProfileRequest,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
@@ -84,8 +89,8 @@ export type {
   IssueUsageSummary,
   RuntimePingStatus,
   RuntimePing,
-
 } from "./agent";
+export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
 export type { Workspace, WorkspaceRepo, Member, MemberRole, User, MemberWithUser, Invitation, InviteLink, CreateInviteLinkRequest } from "./workspace";
 export type {
   NotificationChannel,

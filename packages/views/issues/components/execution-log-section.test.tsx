@@ -5,7 +5,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentTask } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
-import { ExecutionLogSection } from "./execution-log-section";
+import { ActiveTaskRow, ExecutionLogSection } from "./execution-log-section";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
@@ -74,6 +74,14 @@ function renderSection() {
       <QueryClientProvider client={createQueryClient()}>
         <ExecutionLogSection issueId="issue-1" />
       </QueryClientProvider>
+    </I18nProvider>,
+  );
+}
+
+function renderWithI18n(ui: React.ReactElement) {
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={createQueryClient()}>{ui}</QueryClientProvider>
     </I18nProvider>,
   );
 }
@@ -201,5 +209,22 @@ describe("ExecutionLogSection local CLI rows", () => {
     fireEvent.click(screen.getByText("Show past runs (1)"));
 
     expect(screen.queryByTestId("inline-task-trace-output")).not.toBeInTheDocument();
+  });
+
+  it("does not make transcript actions depend on hover-only rendering", () => {
+    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+
+    const transcriptButton = screen.getByRole("button", { name: "View transcript" });
+    const status = screen.getByText("5m 04s");
+
+    expect(status.parentElement?.className).toContain("flex h-7");
+    expect(status.parentElement?.className).toContain(
+      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
+    );
+    expect(transcriptButton.parentElement?.className).toContain("flex h-7");
+    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
+    expect(transcriptButton.parentElement?.className).toContain(
+      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
+    );
   });
 });

@@ -102,11 +102,11 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
 			workspace_id, daemon_id, name, runtime_mode, provider,
-			status, device_info, metadata, last_seen_at, visibility
+			status, device_info, metadata, last_seen_at, visibility, owner_id
 		)
-		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private')
+		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private', $3)
 		RETURNING id
-	`, testWorkspaceID, name).Scan(&runtimeID); err != nil {
+	`, testWorkspaceID, name, testUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
@@ -593,6 +593,49 @@ func TestClaimTaskByRuntime_PopulatesAgentDescription(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, last_seen_at, visibility
+		)
+		VALUES ($1, NULL, 'Missing owner claim runtime', 'cloud', 'handler_test_runtime', 'online', 'claim missing owner fixture', '{}'::jsonb, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Missing owner claim agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "missing-owner-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "runtime owner required to mint task token") {
+		t.Fatalf("ClaimTaskByRuntime body = %q, want runtime owner error", w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatalf("read task status: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("task status = %q, want cancelled", status)
+	}
+}
+
 func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -765,6 +808,51 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	}
 	if ack.RuntimeID != missingRuntime {
 		t.Fatalf("ack.RuntimeID = %q, want %q", ack.RuntimeID, missingRuntime)
+	}
+}
+
+func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	slug := "handler-ws-heartbeat-" + uuid.New().String()
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id
+	`, "WS Heartbeat Scope", slug, "Temporary workspace for WS heartbeat tests", "HWS").Scan(&workspaceID); err != nil {
+		t.Fatalf("setup: create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, workspaceID, "WS Heartbeat Runtime", "handler_test_runtime", "WS heartbeat runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID, workspaceID}},
+		runtimeID, false)
+	if err != nil {
+		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
+	}
+	if ack == nil || ack.RuntimeID != runtimeID {
+		t.Fatalf("ack = %+v, want runtime_id %q", ack, runtimeID)
 	}
 }
 
@@ -2728,10 +2816,12 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
+	setWorkspaceIssuePrefixForTest(t, "MUL")
+
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mul-1198 fixture', 'in_progress', 'none', $2, 'member', 81198, 0)
+		VALUES ($1, 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)
@@ -2761,7 +2851,10 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
-	const agentFinalOutput = "sure, will look into it shortly"
+	agentFinalOutput := fmt.Sprintf(
+		"sure, see MUL-3310, issue/MUL-3310, feature/MUL-3310, and [MUL-3310](mention://issue/%s)",
+		issueID,
+	)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -3186,6 +3279,9 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 	}
 	runtimeID = runtimes[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, testUserID, runtimeID); err != nil {
+		t.Fatalf("setup: set runtime owner: %v", err)
+	}
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (

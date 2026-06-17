@@ -100,6 +100,15 @@ func agentAllowedPrincipalToResponse(row db.ListAgentAllowedPrincipalsRow) Agent
 	}
 }
 
+// runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
+// any non-empty `runtime_config.gateway.token` (openclaw gateway mode, issue
+// #3260). The token is a bearer credential; surfacing the real value through
+// GET responses would let anyone with read access to the agent dump the
+// gateway secret. The mask is a sentinel — when the UI later PATCHes the
+// agent and submits the same mask verbatim under that field, the update
+// handler restores the persisted token instead of overwriting it.
+const runtimeConfigGatewayTokenMask = "***"
+
 func agentToResponse(a db.Agent) AgentResponse {
 	return agentToResponseForProvider(a, "")
 }
@@ -112,6 +121,7 @@ func agentToResponseForProvider(a db.Agent, provider string) AgentResponse {
 	if rc == nil {
 		rc = map[string]any{}
 	}
+	maskGatewayToken(rc)
 
 	// Compute env metadata WITHOUT exposing the values. We unmarshal here
 	// only to count keys; the map never reaches the response. A coarse
@@ -213,6 +223,62 @@ func copyCustomEnvForAgentCopy(src []byte, sourceOwnerID pgtype.UUID, userID str
 		return []byte("{}"), false
 	}
 	return append([]byte(nil), src...), false
+}
+
+// maskGatewayToken replaces runtime_config.gateway.token with the public
+// mask sentinel when a non-empty value is present. No-op for any other
+// shape so non-openclaw / non-gateway agents pass through untouched.
+func maskGatewayToken(rc any) {
+	root, ok := rc.(map[string]any)
+	if !ok {
+		return
+	}
+	gw, ok := root["gateway"].(map[string]any)
+	if !ok {
+		return
+	}
+	tok, _ := gw["token"].(string)
+	if tok == "" {
+		return
+	}
+	gw["token"] = runtimeConfigGatewayTokenMask
+}
+
+// preserveMaskedGatewayToken substitutes the previously persisted gateway
+// token back into an incoming runtime_config when the request submitted the
+// public mask sentinel under `gateway.token`. Without this the next PATCH
+// after a GET would round-trip the masked sentinel into the database and
+// silently destroy the real secret. The previous value is taken from the
+// agent row the handler has just loaded for ownership / scoping checks.
+func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
+	root, ok := incoming.(map[string]any)
+	if !ok {
+		return
+	}
+	gw, ok := root["gateway"].(map[string]any)
+	if !ok {
+		return
+	}
+	tok, _ := gw["token"].(string)
+	if tok != runtimeConfigGatewayTokenMask {
+		return
+	}
+	// The incoming token is the mask — fish the real one out of the row.
+	var prev struct {
+		Gateway struct {
+			Token string `json:"token"`
+		} `json:"gateway"`
+	}
+	if len(persistedRuntimeConfig) == 0 {
+		// No prior token to keep; the field becomes effectively empty.
+		delete(gw, "token")
+		return
+	}
+	if err := json.Unmarshal(persistedRuntimeConfig, &prev); err != nil || prev.Gateway.Token == "" {
+		delete(gw, "token")
+		return
+	}
+	gw["token"] = prev.Gateway.Token
 }
 
 // RepoData holds repository information included in claim responses so the
@@ -343,8 +409,9 @@ type AgentTaskResponse struct {
 	// this (agent_id, task_id) pair at claim time and treats any request
 	// authenticated with it as actor=agent, regardless of headers — so the
 	// agent process cannot use it to read another agent's secrets via the
-	// env-management endpoint. Empty only for legacy ownerless runtimes; local
-	// owner runtimes must receive a token or the daemon fails closed.
+	// env-management endpoint. Claim fails closed when the runtime has no
+	// owning user; the daemon must not fall back to its own credential. See
+	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
 }
 
@@ -363,20 +430,25 @@ type ChatAttachmentMeta struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID            string                   `json:"id"`
-	Name          string                   `json:"name"`
-	Description   string                   `json:"description,omitempty"`
-	Visibility    string                   `json:"visibility"`
-	OwnerID       string                   `json:"owner_id"`
-	Instructions  string                   `json:"instructions"`
-	Skills        []service.AgentSkillData `json:"skills,omitempty"`
-	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
-	CustomArgs    []string                 `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
-	Model         string                   `json:"model,omitempty"`
-	RuntimeConfig json.RawMessage          `json:"runtime_config,omitempty"`
-	ThinkingLevel string                   `json:"thinking_level,omitempty"`
-	ServiceTier   string                   `json:"service_tier,omitempty"`
+	ID           string                   `json:"id"`
+	Name         string                   `json:"name"`
+	Description  string                   `json:"description,omitempty"`
+	Visibility   string                   `json:"visibility"`
+	OwnerID      string                   `json:"owner_id"`
+	Instructions string                   `json:"instructions"`
+	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	CustomEnv    map[string]string        `json:"custom_env,omitempty"`
+	CustomArgs   []string                 `json:"custom_args,omitempty"`
+	McpConfig    json.RawMessage          `json:"mcp_config,omitempty"`
+	Model        string                   `json:"model,omitempty"`
+	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
+	// daemon decodes it per-provider — e.g. the openclaw backend reads
+	// `mode` + `gateway.*` to choose between embedded and gateway routing
+	// (issue #3260). Other providers ignore the payload entirely. Sent
+	// raw so the daemon can evolve its schema without a server roundtrip.
+	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
+	ThinkingLevel string          `json:"thinking_level,omitempty"`
+	ServiceTier   string          `json:"service_tier,omitempty"`
 }
 
 // taskToSlimResponse builds a response without the heavy Context and Result
@@ -932,6 +1004,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		isFirstAgent = len(existing) == 0
 	}
 
+	// A create has no prior token to restore, so if the caller submitted the
+	// public mask sentinel as gateway.token (e.g. replayed a masked GET body)
+	// drop it rather than persisting a literal "***" as a real bearer token.
+	preserveMaskedGatewayToken(req.RuntimeConfig, nil)
 	rc, _ := json.Marshal(req.RuntimeConfig)
 	if req.RuntimeConfig == nil {
 		rc = []byte("{}")
@@ -1308,6 +1384,13 @@ func canViewAgentEnv(agent db.Agent, userID string, memberRole string) bool {
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
 	redactMcpConfig(&out)
+	// Belt-and-suspenders: agentToResponse already masks gateway.token on
+	// every read, so by the time a response reaches this broadcast helper
+	// the field is already "***". Re-mask anyway so a future refactor that
+	// bypasses agentToResponse (e.g. constructing AgentResponse from raw
+	// db.Agent in a new handler) cannot silently leak the token to every
+	// WebSocket subscriber on the workspace, agent processes included.
+	maskGatewayToken(out.RuntimeConfig)
 	return out
 }
 
@@ -1405,6 +1488,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.AvatarUrl = pgtype.Text{String: *req.AvatarURL, Valid: true}
 	}
 	if req.RuntimeConfig != nil {
+		// Restore the persisted gateway token when the request submitted the
+		// public mask sentinel. Without this, a UI that GETs the agent and
+		// PATCHes the same payload back round-trips "***" into the database
+		// and silently destroys the real secret (issue #3260).
+		preserveMaskedGatewayToken(req.RuntimeConfig, existing.RuntimeConfig)
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
 	}
@@ -1473,9 +1561,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
+	} else if req.RuntimeID != nil && existing.Model.Valid && agent.ModelKnownIncompatibleWithProvider(targetRuntimeProvider, existing.Model.String) {
+		// Model is runtime-native. When moving an agent across known provider
+		// families and the caller did not choose a replacement model, clear the
+		// old value so the new runtime falls back to its own default instead of
+		// receiving an obvious foreign model ID (e.g. Claude Code -> Codex).
+		// Unknown/custom model strings are preserved by the helper.
+		params.Model = pgtype.Text{String: "", Valid: true}
 	}
 
-	targetProvider := func() (string, bool) {
+	resolveTargetProvider := func() (string, bool) {
 		if targetRuntimeProvider != "" {
 			return targetRuntimeProvider, true
 		}
@@ -1507,7 +1602,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// Need the target runtime's provider to validate. Re-fetch only when
 			// we haven't already loaded it above (i.e. the request didn't change
 			// runtime_id), to keep the no-change path one DB roundtrip.
-			provider, ok := targetProvider()
+			provider, ok := resolveTargetProvider()
 			if !ok {
 				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
 				return
@@ -1526,7 +1621,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// literal-invalid, never silently coerce. The caller can either
 		// pass `thinking_level: ""` to clear or pick a value valid for the
 		// new runtime.
-		provider, ok := targetProvider()
+		provider, ok := resolveTargetProvider()
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
 			return
@@ -1546,7 +1641,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	shouldClearServiceTier := false
 	if req.ServiceTier != nil {
 		value := *req.ServiceTier
-		provider, ok := targetProvider()
+		provider, ok := resolveTargetProvider()
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
 			return
@@ -1563,7 +1658,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			params.ServiceTier = pgtype.Text{String: value, Valid: true}
 		}
 	} else if req.RuntimeID != nil {
-		provider, ok := targetProvider()
+		provider, ok := resolveTargetProvider()
 		if !ok {
 			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
 			return
@@ -1608,7 +1703,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	provider, _ := targetProvider()
+	provider, _ := resolveTargetProvider()
 	resp := agentToResponseForProvider(updated, provider)
 	// agentToResponse always initialises Skills as []; junction-table rows
 	// are untouched by the SQL update, so we reload them here to keep the
