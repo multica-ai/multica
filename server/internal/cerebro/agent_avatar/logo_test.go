@@ -1,7 +1,6 @@
 package agentavatar
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,11 +34,7 @@ func TestBuildLogoPrompt(t *testing.T) {
 func logoGateway(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"b64_json": base64.StdEncoding.EncodeToString([]byte("png-bytes"))},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openRouterImageResponse([]byte("png-bytes")))
 	}))
 }
 

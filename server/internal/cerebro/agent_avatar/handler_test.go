@@ -17,6 +17,22 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// openRouterImageResponse builds the OpenAI-compatible chat-completions body
+// OpenRouter returns for image generation: the PNG is a base64 data URL in
+// choices[0].message.images[].image_url.url.
+func openRouterImageResponse(rawImage []byte) map[string]any {
+	dataURL := "data:image/png;base64," + base64.StdEncoding.EncodeToString(rawImage)
+	return map[string]any{
+		"choices": []map[string]any{
+			{"message": map[string]any{
+				"images": []map[string]any{
+					{"image_url": map[string]any{"url": dataURL}},
+				},
+			}},
+		},
+	}
+}
+
 func TestBuildPrompt(t *testing.T) {
 	t.Run("custom prompt is used verbatim", func(t *testing.T) {
 		got := buildPrompt("Sara", "a watercolor fox")
@@ -226,13 +242,12 @@ func TestGatewayConfigFromEnvUsesAvatarModelDefault(t *testing.T) {
 	}
 }
 
-func TestCallGatewayPostsToDataRegistryAndDecodesImage(t *testing.T) {
+func TestCallGatewayPostsToOpenRouterAndDecodesImage(t *testing.T) {
 	wantImage := []byte("png-bytes")
-	b64Image := base64.StdEncoding.EncodeToString(wantImage)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != gatewayImagesPath {
-			t.Fatalf("path = %q, want %q", r.URL.Path, gatewayImagesPath)
+		if r.URL.Path != gatewayChatPath {
+			t.Fatalf("path = %q, want %q", r.URL.Path, gatewayChatPath)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer rk_test" {
 			t.Fatalf("Authorization = %q", got)
@@ -248,18 +263,19 @@ func TestCallGatewayPostsToDataRegistryAndDecodesImage(t *testing.T) {
 		if body["model"] != defaultAvatarModel {
 			t.Fatalf("model = %v, want %v", body["model"], defaultAvatarModel)
 		}
-		if body["prompt"] != "make an avatar" {
-			t.Fatalf("prompt = %v", body["prompt"])
+		msgs, ok := body["messages"].([]any)
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("messages = %v, want one user message", body["messages"])
 		}
-		if body["output_format"] != "png" {
-			t.Fatalf("output_format = %v", body["output_format"])
+		if msg, _ := msgs[0].(map[string]any); msg["content"] != "make an avatar" {
+			t.Fatalf("message content = %v", msgs[0])
+		}
+		mods, ok := body["modalities"].([]any)
+		if !ok || len(mods) == 0 || mods[0] != "image" {
+			t.Fatalf("modalities = %v, want image listed", body["modalities"])
 		}
 
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"b64_json": b64Image},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openRouterImageResponse(wantImage))
 	}))
 	defer server.Close()
 
@@ -316,11 +332,7 @@ func (s *fakeAgentStore) UpdateAgent(_ context.Context, arg db.UpdateAgentParams
 func TestGenerateForAgentStoresAndUpdatesOnlyAvatarURL(t *testing.T) {
 	wantImage := []byte("png-bytes")
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"b64_json": base64.StdEncoding.EncodeToString(wantImage)},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openRouterImageResponse(wantImage))
 	}))
 	defer gateway.Close()
 
@@ -361,11 +373,7 @@ func TestGenerateForAgentStoresAndUpdatesOnlyAvatarURL(t *testing.T) {
 func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 	wantImage := []byte("png-bytes")
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"b64_json": base64.StdEncoding.EncodeToString(wantImage)},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openRouterImageResponse(wantImage))
 	}))
 	defer gateway.Close()
 
@@ -417,11 +425,7 @@ func TestBackfillStartsBackgroundJobAndTracksProgress(t *testing.T) {
 
 func TestBackfillForceRegeneratesAllExceptExcluded(t *testing.T) {
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]any{
-				{"b64_json": base64.StdEncoding.EncodeToString([]byte("png-bytes"))},
-			},
-		})
+		_ = json.NewEncoder(w).Encode(openRouterImageResponse([]byte("png-bytes")))
 	}))
 	defer gateway.Close()
 

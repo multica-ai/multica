@@ -25,8 +25,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const defaultAvatarModel = "gpt-image-1"
-const gatewayImagesPath = "/api/ai/proxy/openai/v1/images/generations"
+const defaultAvatarModel = "openai/gpt-5-image-mini"
+const gatewayChatPath = "/api/ai/proxy/openrouter/v1/chat/completions"
 
 // Avatar visual identity is derived deterministically from the agent name so
 // re-generations stay stable without storing a seed. The background colour is
@@ -158,7 +158,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 
 	cfg := h.gatewayConfig(r.Context(), wsID)
 	if cfg.baseURL == "" || cfg.apiKey == "" {
-		writeError(w, http.StatusServiceUnavailable, "image generation not configured: data registry AI gateway URL/key unset")
+		writeError(w, http.StatusServiceUnavailable, "image generation not configured: Firtal AI gateway URL/key unset")
 		return
 	}
 
@@ -344,7 +344,7 @@ func (h *Handler) BackfillStatus(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) generateAndStore(ctx context.Context, wsID, agentName, customPrompt, bgOverride string) (string, error) {
 	cfg := h.gatewayConfig(ctx, wsID)
 	if cfg.baseURL == "" || cfg.apiKey == "" {
-		return "", fmt.Errorf("image generation not configured: data registry AI gateway URL/key unset")
+		return "", fmt.Errorf("image generation not configured: Firtal AI gateway URL/key unset")
 	}
 	prompt := buildPromptWithBackground(agentName, customPrompt, bgOverride)
 	imgBytes, err := callGateway(ctx, h.httpClient, cfg, prompt)
@@ -675,10 +675,19 @@ func nameIndex(name, salt string, n int) int {
 	return int(h.Sum32() % uint32(n))
 }
 
-type imagesAPIResponse struct {
-	Data []struct {
-		B64JSON string `json:"b64_json"`
-	} `json:"data"`
+// chatImageResponse is the OpenAI-compatible chat-completions response shape
+// OpenRouter returns for image-generation models: the generated image arrives
+// as a base64 data URL in choices[0].message.images[].image_url.url.
+type chatImageResponse struct {
+	Choices []struct {
+		Message struct {
+			Images []struct {
+				ImageURL struct {
+					URL string `json:"url"`
+				} `json:"image_url"`
+			} `json:"images"`
+		} `json:"message"`
+	} `json:"choices"`
 }
 
 type gatewayConfig struct {
@@ -744,24 +753,25 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 	if client == nil {
 		client = http.DefaultClient
 	}
+	// OpenRouter serves image generation through the OpenAI-compatible
+	// chat-completions surface: an ordinary chat request whose model emits an
+	// image, with "image" listed in modalities. The generated PNG comes back as
+	// a base64 data URL in choices[0].message.images[]. We route through
+	// OpenRouter because the gateway's direct OpenAI proxy is BYOK-only (no
+	// managed OpenAI key), whereas OpenRouter has a managed key on the gateway.
 	body := map[string]any{
-		"model":  cfg.model,
-		"prompt": prompt,
-		"n":      1,
-		"size":   "1024x1024",
-		// output_format is the encoding of the returned image file (png/jpeg/webp),
-		// NOT the response envelope. gpt-image-1 always returns the image as base64
-		// in data[].b64_json regardless. The earlier "b64_json" here was the dall-e
-		// response_format value and is an invalid output_format enum for gpt-image-1,
-		// so OpenAI rejected every request with HTTP 400 ("image generation failed").
-		"output_format": "png",
+		"model": cfg.model,
+		"messages": []map[string]any{
+			{"role": "user", "content": prompt},
+		},
+		"modalities": []string{"image", "text"},
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.baseURL+gatewayImagesPath, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.baseURL+gatewayChatPath, bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
@@ -772,7 +782,7 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("call data registry AI gateway: %w", err)
+		return nil, fmt.Errorf("call Firtal AI gateway (OpenRouter): %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -781,19 +791,21 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("data registry AI gateway returned HTTP %d: %.512s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("Firtal AI gateway (OpenRouter) returned HTTP %d: %.512s", resp.StatusCode, string(respBody))
 	}
 
-	var parsed imagesAPIResponse
+	var parsed chatImageResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("parse response: %w", err)
 	}
-	if len(parsed.Data) == 0 || parsed.Data[0].B64JSON == "" {
-		return nil, fmt.Errorf("no image in data registry AI gateway response")
+	if len(parsed.Choices) == 0 || len(parsed.Choices[0].Message.Images) == 0 ||
+		parsed.Choices[0].Message.Images[0].ImageURL.URL == "" {
+		return nil, fmt.Errorf("no image in Firtal AI gateway (OpenRouter) response")
 	}
 
-	imgData := parsed.Data[0].B64JSON
-	// Strip "data:image/png;base64," prefix when present (defensive; b64_json is usually bare).
+	imgData := parsed.Choices[0].Message.Images[0].ImageURL.URL
+	// OpenRouter returns the image as a "data:image/png;base64,<...>" data URL —
+	// strip the prefix so only the base64 payload is decoded.
 	if idx := strings.Index(imgData, ","); idx != -1 {
 		imgData = imgData[idx+1:]
 	}
