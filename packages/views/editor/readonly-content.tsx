@@ -37,7 +37,7 @@ import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { ProjectChip } from "../projects/components/project-chip";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
-import { isAllowedFileCardHref } from "@multica/ui/markdown";
+import { isAllowedFileCardHref, rehypeReviewStatusBadges } from "@multica/ui/markdown";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -380,7 +380,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
             remarkBreaks,
             [remarkGfm, { singleTilde: false }],
           ]}
-          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+          rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeReviewStatusBadges, rehypeKatex]}
           urlTransform={urlTransform}
           components={components}
         >

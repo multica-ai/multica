@@ -242,6 +242,75 @@ describe("ReadonlyContent issue mention Markdown", () => {
   });
 });
 
+describe("ReadonlyContent review status badges", () => {
+  it("renders bracketed PASS and FAIL review markers as badges", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          "## **결론**",
+          "[FAIL] 코드/preview 동작은 확인됐지만, PR이 아직 merge-ready 상태가 아닙니다.",
+          "",
+          "## **Findings**",
+          "[PASS] 수정 필요 finding 없음",
+        ].join("\n")}
+      />,
+    );
+
+    const badges = Array.from(container.querySelectorAll(".review-status-badge"));
+    expect(badges.map((badge) => badge.textContent)).toEqual(["FAIL", "PASS"]);
+    expect(badges[0]).toHaveClass("review-status-badge-fail");
+    expect(badges[1]).toHaveClass("review-status-badge-pass");
+    expect(container.textContent).not.toContain("[FAIL]");
+    expect(container.textContent).not.toContain("[PASS]");
+  });
+
+  it("renders standalone PASS and FAIL summary/table values as badges", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={[
+          "Preview QA: PASS",
+          "Scope / Unrelated Changes: PASS",
+          "PR checks: FAIL (`Require Assignee`)",
+          "",
+          "| Check | Status |",
+          "| --- | --- |",
+          "| Preview | PASS |",
+          "| Checks | FAIL |",
+        ].join("\n")}
+      />,
+    );
+
+    const badges = Array.from(container.querySelectorAll(".review-status-badge"));
+    expect(badges.map((badge) => badge.textContent)).toEqual([
+      "PASS",
+      "PASS",
+      "FAIL",
+      "PASS",
+      "FAIL",
+    ]);
+  });
+
+  it("does not convert status words inside links or code", () => {
+    const { container, getByRole } = render(
+      <ReadonlyContent
+        content={[
+          "`PASS`",
+          "[PASS](https://example.com)",
+          "",
+          "```",
+          "FAIL",
+          "```",
+        ].join("\n")}
+      />,
+    );
+
+    expect(container.querySelector(".review-status-badge")).toBeNull();
+    expect(getByRole("link")).toHaveTextContent("PASS");
+    expect(container.querySelector("code")?.textContent).toBe("PASS");
+    expect(container.querySelector("pre code")?.textContent?.trim()).toBe("FAIL");
+  });
+});
+
 describe("ReadonlyContent code styling", () => {
   const literalCode = "uv run --extra dev pytest -q";
 

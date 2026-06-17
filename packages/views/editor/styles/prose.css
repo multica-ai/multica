@@ -373,6 +373,37 @@
   margin: 0 0.125rem;
 }
 
+/* Review report status badges - generated from standalone PASS / FAIL tokens. */
+.rich-text-editor .review-status-badge {
+  display: inline-flex;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  margin-inline: 0.125rem;
+  padding: 0 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 9999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: uppercase;
+  vertical-align: 0.1em;
+  white-space: nowrap;
+}
+
+.rich-text-editor .review-status-badge-pass {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 13%, transparent);
+  border-color: color-mix(in srgb, var(--success) 38%, transparent);
+}
+
+.rich-text-editor .review-status-badge-fail {
+  color: var(--destructive);
+  background: color-mix(in srgb, var(--destructive) 12%, transparent);
+  border-color: color-mix(in srgb, var(--destructive) 40%, transparent);
+}
+
 /* Strong / emphasis */
 .rich-text-editor strong {
   font-weight: 600;

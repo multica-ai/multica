@@ -13,6 +13,7 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { isAllowedFileCardHref, preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
 import { preprocessMentionShortcodes } from './mentions'
+import { rehypeReviewStatusBadges } from './status-badges'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
 
@@ -450,7 +451,7 @@ export function Markdown({
           remarkBreaks,
           [remarkGfm, { singleTilde: false }],
         ]}
-        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeKatex]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema], rehypeReviewStatusBadges, rehypeKatex]}
         urlTransform={urlTransform}
         components={components}
       >

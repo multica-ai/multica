@@ -89,4 +89,15 @@ describe("Markdown", () => {
     expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
     expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
   });
+
+  it("renders standalone review status words as badges", () => {
+    const { container } = render(
+      <Markdown>{"Preview QA: PASS\n\nPR checks: FAIL"}</Markdown>,
+    );
+
+    const badges = Array.from(container.querySelectorAll(".review-status-badge"));
+    expect(badges.map((badge) => badge.textContent)).toEqual(["PASS", "FAIL"]);
+    expect(badges[0]).toHaveClass("review-status-badge-pass");
+    expect(badges[1]).toHaveClass("review-status-badge-fail");
+  });
 });
