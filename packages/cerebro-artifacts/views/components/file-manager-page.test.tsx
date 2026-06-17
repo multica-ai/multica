@@ -217,6 +217,17 @@ describe("FileManagerPage drag-and-drop", () => {
     deleteFolderMutateAsync.mockReset().mockResolvedValue(undefined);
   });
 
+  it("renders the documents search as a browser search field with autofill disabled", () => {
+    renderPage();
+
+    const search = screen.getByPlaceholderText("Search documents…");
+
+    expect(search).toHaveAttribute("type", "search");
+    expect(search).toHaveAttribute("autocomplete", "off");
+    expect(search).toHaveAttribute("autocorrect", "off");
+    expect(search).toHaveAttribute("spellcheck", "false");
+  });
+
   it("dragging an artifact onto a folder row moves the artifact", () => {
     renderPage();
     const folderRow = rowFor("Sales");

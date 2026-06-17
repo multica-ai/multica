@@ -116,6 +116,43 @@ const AgentCapabilitySecretSetSchema = z
   })
   .loose();
 
+// TECH-3738 Bid B — one tool the agent was OBSERVED to actually invoke recently,
+// compared against its declared policy. `status` is the observed-vs-declared
+// verdict; `drift` flags use the declared model does not sanction (blocked or
+// unmapped). Enum drift on `status` downgrades to a neutral badge in the tab.
+const AgentCapabilityObservedToolSchema = z
+  .object({
+    name: z.string().default(""),
+    uses: z.number().default(0),
+    last_used: z.string().default(""),
+    permission: z.string().default(""),
+    status: z.string().default("unmapped"),
+    drift: z.boolean().default(false),
+  })
+  .loose();
+
+// The observed-access section: tools the agent actually used in the window.
+// `status` mirrors the secret-set discipline — known (we have run data),
+// not_configured (the agent logged nothing — genuinely empty), unknown (lookup
+// failed). It covers tools only; observed secret use is never claimed.
+const AgentCapabilityObservedAccessSchema = z
+  .object({
+    status: z.string().default("unknown"),
+    window_days: z.number().default(30),
+    task_count: z.number().default(0),
+    tools: z.array(AgentCapabilityObservedToolSchema).default([]),
+    drift_count: z.number().default(0),
+  })
+  .loose();
+
+const EMPTY_OBSERVED_ACCESS = {
+  status: "unknown",
+  window_days: 30,
+  task_count: 0,
+  tools: [],
+  drift_count: 0,
+};
+
 const EMPTY_AGENT_SECRET_SET = {
   source: "agent_custom_env",
   status: "not_configured",
@@ -153,6 +190,9 @@ export const AgentCapabilitiesSchema = z
     runtime_secrets: AgentCapabilitySecretSetSchema.default(
       EMPTY_RUNTIME_SECRET_SET,
     ),
+    observed_access: AgentCapabilityObservedAccessSchema.default(
+      EMPTY_OBSERVED_ACCESS,
+    ),
     limits: AgentCapabilityLimitsSchema.default({
       mcp_servers: [],
       has_mcp_config: false,
@@ -175,6 +215,12 @@ export type AgentCapabilityInfisicalSecret = z.infer<
 export type AgentCapabilitySecretSet = z.infer<
   typeof AgentCapabilitySecretSetSchema
 >;
+export type AgentCapabilityObservedTool = z.infer<
+  typeof AgentCapabilityObservedToolSchema
+>;
+export type AgentCapabilityObservedAccess = z.infer<
+  typeof AgentCapabilityObservedAccessSchema
+>;
 export type AgentCapabilityLimits = z.infer<typeof AgentCapabilityLimitsSchema>;
 export type AgentCapabilities = z.infer<typeof AgentCapabilitiesSchema>;
 
@@ -191,6 +237,7 @@ const EMPTY_CAPABILITIES: AgentCapabilities = {
   infisical_secrets: [],
   agent_secrets: EMPTY_AGENT_SECRET_SET,
   runtime_secrets: EMPTY_RUNTIME_SECRET_SET,
+  observed_access: EMPTY_OBSERVED_ACCESS,
   limits: { mcp_servers: [], has_mcp_config: false },
 };
 

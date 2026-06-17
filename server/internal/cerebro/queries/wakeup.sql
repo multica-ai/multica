@@ -196,3 +196,18 @@ WHERE agent_id = $1
   AND issue_id = $2
   AND state = 'pending'
   AND created_at > now() - make_interval(mins => @min_interval_minutes::int);
+
+-- name: HasActiveWakeupForAgentIssue :one
+-- TECH-3761: does this agent have a still-active self-wakeup on this issue?
+-- "Active" means pending or claimed (claimed is the transient state while the
+-- sweeper dispatches it). A dispatched / cancelled / failed wakeup no longer
+-- guarantees a future re-entry, so it does not count. The comment-target guard
+-- reads this to waive the recipient requirement when the agent has already
+-- scheduled its own follow-up (the wakeup is the action, so a human tag is not
+-- needed).
+SELECT count(*) > 0 AS has_active
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND state IN ('pending', 'claimed');

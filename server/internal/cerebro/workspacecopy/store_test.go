@@ -437,7 +437,7 @@ func TestCopyAgent_Parked_NameConflict(t *testing.T) {
 		srcAgent, srcWS, testUser); err != nil {
 		t.Fatalf("seed agent: %v", err)
 	}
-	res, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent)
+	res, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent, conflictSkip)
 	if err != nil {
 		t.Fatalf("CopyAgent (regression: the bug was a non-existent permission_policy column): %v", err)
 	}
@@ -451,18 +451,44 @@ func TestCopyAgent_Parked_NameConflict(t *testing.T) {
 		t.Fatalf("target agent runtime=%v status=%q name=%q, want null/offline/Karen", runtimeID.Valid, status, name)
 	}
 
-	// name conflict: a same-named agent already in the target must block the copy
-	if _, err := testPool.Exec(ctx, `INSERT INTO agent (id, workspace_id, name, runtime_mode) VALUES ($1,$2,'Kathrine','local')`,
-		newID(), tgtWS); err != nil {
-		t.Fatalf("seed target agent: %v", err)
+	// name conflict + policy. For each policy seed a target agent and a clashing
+	// source agent with the same name (a name can exist once per workspace).
+	mkClash := func(name string) (src, tgt pgtype.UUID) {
+		tgt = newID()
+		if _, err := testPool.Exec(ctx, `INSERT INTO agent (id, workspace_id, name, runtime_mode) VALUES ($1,$2,$3,'local')`,
+			tgt, tgtWS, name); err != nil {
+			t.Fatalf("seed target agent %q: %v", name, err)
+		}
+		src = newID()
+		if _, err := testPool.Exec(ctx, `INSERT INTO agent (id, workspace_id, name, runtime_mode) VALUES ($1,$2,$3,'local')`,
+			src, srcWS, name); err != nil {
+			t.Fatalf("seed source agent %q: %v", name, err)
+		}
+		return src, tgt
 	}
-	srcAgent2 := newID()
-	if _, err := testPool.Exec(ctx, `INSERT INTO agent (id, workspace_id, name, runtime_mode) VALUES ($1,$2,'Kathrine','local')`,
-		srcAgent2, srcWS); err != nil {
-		t.Fatalf("seed source agent2: %v", err)
+
+	// skip: reuse the existing target agent, create no new row.
+	skipSrc, skipTgt := mkClash("Kathrine")
+	skipRes, err := s.CopyAgent(ctx, newID(), tgtWS, skipSrc, conflictSkip)
+	if err != nil {
+		t.Fatalf("CopyAgent skip: %v", err)
 	}
-	if _, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent2); err == nil {
-		t.Fatalf("CopyAgent with name clash succeeded, want ErrNameConflict")
+	if skipRes.TargetID != skipTgt || !skipRes.AlreadyDone {
+		t.Fatalf("skip policy: target=%v alreadyDone=%v, want existing/true", skipRes.TargetID, skipRes.AlreadyDone)
+	}
+
+	// keep_both: create a new suffixed agent.
+	keepSrc, _ := mkClash("Kristian")
+	keepRes, err := s.CopyAgent(ctx, newID(), tgtWS, keepSrc, conflictKeepBoth)
+	if err != nil {
+		t.Fatalf("CopyAgent keep_both: %v", err)
+	}
+	var keepName string
+	if err := testPool.QueryRow(ctx, `SELECT name FROM agent WHERE id = $1`, keepRes.TargetID).Scan(&keepName); err != nil {
+		t.Fatalf("load keep_both agent: %v", err)
+	}
+	if keepName != "Kristian (2)" {
+		t.Fatalf("keep_both name=%q, want \"Kristian (2)\"", keepName)
 	}
 }
 
@@ -524,7 +550,7 @@ func TestCopyChat_RequiresAgentFirst(t *testing.T) {
 		t.Fatalf("CopyChat before agent succeeded, want ErrAgentNotCopied")
 	}
 	// copy the agent, then the chat carries all its messages
-	if _, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent); err != nil {
+	if _, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent, conflictSkip); err != nil {
 		t.Fatalf("CopyAgent: %v", err)
 	}
 	res, err := s.CopyChat(ctx, newID(), tgtWS, srcChat)
@@ -563,7 +589,7 @@ func TestCopyAutopilot_TriggersDisarmed(t *testing.T) {
 	}
 
 	// agent must be copied first so the assignee remaps
-	if _, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent); err != nil {
+	if _, err := s.CopyAgent(ctx, newID(), tgtWS, srcAgent, conflictSkip); err != nil {
 		t.Fatalf("CopyAgent: %v", err)
 	}
 	res, err := s.CopyAutopilot(ctx, newID(), tgtWS, srcAuto)

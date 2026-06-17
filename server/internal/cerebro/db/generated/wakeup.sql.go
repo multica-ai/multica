@@ -392,6 +392,35 @@ func (q *Queries) GetCerebroAgentWakeup(ctx context.Context, id pgtype.UUID) (Ce
 	return i, err
 }
 
+const hasActiveWakeupForAgentIssue = `-- name: HasActiveWakeupForAgentIssue :one
+SELECT count(*) > 0 AS has_active
+FROM cerebro_agent_wakeup
+WHERE workspace_id = $1
+  AND agent_id = $2
+  AND issue_id = $3
+  AND state IN ('pending', 'claimed')
+`
+
+type HasActiveWakeupForAgentIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+// TECH-3761: does this agent have a still-active self-wakeup on this issue?
+// "Active" means pending or claimed (claimed is the transient state while the
+// sweeper dispatches it). A dispatched / cancelled / failed wakeup no longer
+// guarantees a future re-entry, so it does not count. The comment-target guard
+// reads this to waive the recipient requirement when the agent has already
+// scheduled its own follow-up (the wakeup is the action, so a human tag is not
+// needed).
+func (q *Queries) HasActiveWakeupForAgentIssue(ctx context.Context, arg HasActiveWakeupForAgentIssueParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveWakeupForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const hasRecentPendingWakeupForAgentIssue = `-- name: HasRecentPendingWakeupForAgentIssue :one
 SELECT count(*) > 0 AS has_recent
 FROM cerebro_agent_wakeup

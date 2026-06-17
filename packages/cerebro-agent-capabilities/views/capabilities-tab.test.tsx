@@ -123,6 +123,16 @@ describe("CerebroCapabilitiesTab", () => {
         redacted: false,
         runtime_id: "runtime-1",
       },
+      observed_access: {
+        status: "known",
+        window_days: 30,
+        task_count: 4,
+        drift_count: 1,
+        tools: [
+          { name: "Bash", uses: 12, last_used: "2026-06-10T08:00:00Z", permission: "allow", status: "allowed", drift: false },
+          { name: "WebFetch", uses: 2, last_used: "", permission: "", status: "unmapped", drift: true },
+        ],
+      },
       limits: {
         sandbox: { network_allowlist: ["api.github.com:443"] },
         mcp_servers: ["multica"],
@@ -173,6 +183,13 @@ describe("CerebroCapabilitiesTab", () => {
 
     // Limits.
     expect(screen.getByText("multica")).toBeInTheDocument();
+
+    // Observed access (TECH-3738 Bid B): the used tools + the drift banner.
+    expect(screen.getByText("Observed access")).toBeInTheDocument();
+    expect(screen.getByText("WebFetch")).toBeInTheDocument();
+    expect(
+      screen.getByText(/used that the declared policy does not allow/i),
+    ).toBeInTheDocument();
   });
 
   it("redacts secret names for non-privileged callers but keeps the count", async () => {
@@ -208,6 +225,28 @@ describe("CerebroCapabilitiesTab", () => {
     // Runtime source could not be determined → explicit "unknown", not "none".
     expect(
       screen.getByText("Could not determine secrets for this source."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the observed-access empty state when the agent logged no tool use", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      observed_access: {
+        status: "not_configured",
+        window_days: 30,
+        task_count: 0,
+        drift_count: 0,
+        tools: [],
+      },
+    });
+
+    renderTab();
+
+    expect(await screen.findByText("Observed access")).toBeInTheDocument();
+    expect(
+      screen.getByText("No tool use recorded in this window."),
     ).toBeInTheDocument();
   });
 

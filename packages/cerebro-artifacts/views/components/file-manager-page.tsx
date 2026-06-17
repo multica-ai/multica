@@ -934,6 +934,7 @@ export function FileManagerPage({ initialFolderId }: FileManagerPageProps = {}) 
             <div className="relative flex-1 md:flex-initial">
               <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
+                type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search documents…"
