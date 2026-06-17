@@ -162,18 +162,19 @@ export function StatusIcon({
   className = "h-4 w-4",
   inheritColor = false,
 }: {
-  status: IssueStatus;
+  status: IssueStatus | string;
   className?: string;
   inheritColor?: boolean;
 }) {
-  const cfg = STATUS_CONFIG[status];
-  const Renderer = STATUS_RENDERERS[status];
+  const knownStatus = status in STATUS_RENDERERS ? (status as IssueStatus) : null;
+  const cfg = knownStatus ? STATUS_CONFIG[knownStatus] : null;
+  const Renderer = knownStatus ? STATUS_RENDERERS[knownStatus] : TodoIcon;
 
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg.iconColor} shrink-0`}
+      className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
     >
       <Renderer />
     </svg>
