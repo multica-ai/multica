@@ -30,6 +30,19 @@ import (
 // server refresh.
 var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace")
 
+// ErrNoRuntimesToRegister is returned by registerRuntimesForWorkspace when
+// the daemon has nothing to host on a workspace — typically a custom-only
+// daemon whose only enabled custom runtime profile was just disabled, leaving
+// zero built-in agents and zero resolvable profiles. Callers must
+// differentiate by intent: initial registration (syncWorkspacesFromAPI's
+// new-workspace branch) treats this as a config error and skips the
+// workspace until something changes; the profile-drift refresh path
+// (refreshWorkspaceRuntimeProfiles) treats it as a legitimate converged
+// state and explicitly deregisters the now-stale local runtime IDs so the
+// server marks them offline immediately instead of waiting on the 150 s
+// stale-heartbeat sweep.
+var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
+
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
@@ -484,13 +497,33 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 //
 // The workspaceState pointer is NEVER replaced (see syncWorkspacesFromAPI's
 // invariant about repoRefreshMu). Only fields are mutated.
-func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
-	resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
-	if err != nil {
-		return fmt.Errorf("register runtimes: %w", err)
-	}
-
-	newIDs := make([]string, 0, len(resp.Runtimes))
+// applyRegisterResponseInPlace folds a fresh /api/daemon/register response
+// back into the workspaceState and runtimeIndex without replacing the
+// workspaceState pointer (see syncWorkspacesFromAPI's invariant about
+// repoRefreshMu). It is the shared converger used by both the runtime_gone
+// recovery and the profile-drift refresh; the two callers differ only in
+// follow-up side effects (RecoverOrphans / Deregister), so those stay at the
+// call site.
+//
+// Returns:
+//   - newIDs:     the runtime IDs the server returned in this response, in
+//     the order they were returned. These are the daemon's authoritative
+//     current runtime set after the call.
+//   - droppedIDs: runtime IDs that were tracked before this call but did
+//     NOT survive the response. Drift callers Deregister these so the
+//     server marks them offline immediately instead of waiting on the 150 s
+//     stale-heartbeat sweep; the runtime_gone path can ignore them because
+//     those rows were already deleted server-side.
+//   - ok:         false when the workspace was forgotten between the
+//     register call and this apply (e.g. the user left the workspace and
+//     syncWorkspacesFromAPI removed it). The caller must abort silently in
+//     that case — there is no state left to update.
+//
+// profileSig is the digest captured during the register; an empty value is
+// the explicit "fetch failed, keep the previous signature" sentinel from
+// appendProfileRuntimes.
+func (d *Daemon) applyRegisterResponseInPlace(workspaceID string, resp *RegisterResponse, profileSig string) (newIDs, droppedIDs []string, ok bool) {
+	newIDs = make([]string, 0, len(resp.Runtimes))
 	newIDSet := make(map[string]struct{}, len(resp.Runtimes))
 	for _, rt := range resp.Runtimes {
 		newIDs = append(newIDs, rt.ID)
@@ -498,17 +531,19 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	}
 
 	d.mu.Lock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok {
-		d.mu.Unlock()
-		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+	defer d.mu.Unlock()
+	ws, exists := d.workspaces[workspaceID]
+	if !exists {
+		return nil, nil, false
 	}
 	// Drop runtimeIndex entries for prior runtime IDs that the server did not
 	// return — typically there are none for upsert-on-existing-provider, but
-	// a daemon config change (provider removed) would leak entries otherwise.
+	// a daemon config change (provider removed) or a profile disable would
+	// leak entries otherwise.
 	for _, oldID := range ws.runtimeIDs {
 		if _, kept := newIDSet[oldID]; !kept {
 			delete(d.runtimeIndex, oldID)
+			droppedIDs = append(droppedIDs, oldID)
 		}
 	}
 	for _, rt := range resp.Runtimes {
@@ -533,7 +568,19 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	if profileSig != "" {
 		ws.profileSetSig = profileSig
 	}
-	d.mu.Unlock()
+	return newIDs, droppedIDs, true
+}
+
+func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
+	resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("register runtimes: %w", err)
+	}
+
+	newIDs, _, ok := d.applyRegisterResponseInPlace(workspaceID, resp, profileSig)
+	if !ok {
+		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+	}
 
 	for _, rid := range newIDs {
 		d.logger.Info("re-registered runtime after server-side deletion",
@@ -543,6 +590,13 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 
 	// Tell the server about any tasks the previous (now-deleted) runtime
 	// was working on, mirroring the registration path's recover-orphans call.
+	// This is intentionally scoped to the runtime_gone recovery: the
+	// runtimes were truly gone server-side, so anything still in
+	// dispatched/running/waiting_local_directory on those rows is an orphan
+	// that needs to be failed-and-retried. The drift-refresh path (which
+	// also feeds applyRegisterResponseInPlace) deliberately skips this step
+	// because its surviving runtime IDs may still be actively executing
+	// tasks for the user (MUL-3332).
 	for _, rid := range newIDs {
 		if err := d.client.RecoverOrphans(ctx, rid); err != nil {
 			d.logger.Warn("recover-orphans after re-register failed",
@@ -874,7 +928,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes)
 
 	if len(runtimes) == 0 {
-		return nil, "", fmt.Errorf("no agent runtimes could be registered")
+		// profileSig is still meaningful even when nothing resolves: the
+		// drift-refresh path uses it to remember "we already converged on the
+		// disabled-everywhere state" so the next sync tick is a no-op instead
+		// of a re-empty-register loop. Initial-registration callers that don't
+		// care about the sig discard it via _.
+		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
 	req := map[string]any{
@@ -1258,11 +1317,26 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 // detect a real drift. A successfully-fetched-but-unchanged signature is the
 // expected steady state and short-circuits without any further work.
 //
-// On drift the function calls reregisterWorkspaceAfterRuntimeGone, which
-// re-runs registerRuntimesForWorkspace and updates the workspaceState
-// (including profileSetSig) in place. The pointer is never replaced, which
-// matches the invariant documented on syncWorkspacesFromAPI and
-// reregisterWorkspaceAfterRuntimeGone.
+// On drift the function takes a path that deliberately differs from
+// reregisterWorkspaceAfterRuntimeGone in two ways:
+//
+//  1. It does NOT call RecoverOrphans for the returned runtime IDs. The
+//     server's RecoverOrphanedTasksForRuntime hard-fails every
+//     dispatched/running/waiting_local_directory task on a runtime, which is
+//     the correct response when a runtime row was actually deleted server-
+//     side, but a catastrophic false positive on profile drift: a built-in
+//     runtime still actively executing tasks would have its work killed
+//     just because the user added a sibling custom profile.
+//
+//  2. It tolerates ErrNoRuntimesToRegister (custom-only daemon disables its
+//     only profile) by Deregistering the now-stale local runtime IDs and
+//     clearing local tracking. Without this, registerRuntimesForWorkspace
+//     would short-circuit on the empty list, the daemon would keep polling
+//     and heartbeating runtimes that should be offline, and the server
+//     would leave them online for the full 150 s stale-heartbeat window.
+//
+// The workspaceState pointer is never replaced (matches the invariant
+// documented on syncWorkspacesFromAPI and reregisterWorkspaceAfterRuntimeGone).
 func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceID string) error {
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -1293,16 +1367,96 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 		return nil
 	}
 
-	d.logger.Info("custom runtime profile set changed; re-registering workspace",
+	d.logger.Info("custom runtime profile set changed; refreshing workspace runtimes",
 		"workspace_id", workspaceID, "previous_sig", cached, "current_sig", live,
 		"profile_count", len(profiles))
-	// reregisterWorkspaceAfterRuntimeGone re-runs registerRuntimesForWorkspace
-	// (which re-fetches the profile list and refreshes profileSetSig on the
-	// workspaceState) and converges the daemon's runtime set on whatever the
-	// server now returns. It is also the same code path the runtime_gone
-	// recovery uses, so we get a single, well-tested converger for both
-	// triggers.
-	return d.reregisterWorkspaceAfterRuntimeGone(ctx, workspaceID)
+
+	regResp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNoRuntimesToRegister) {
+			// Convergence-to-zero: a custom-only daemon's only enabled
+			// profile was just disabled / deleted, and there are no built-in
+			// agents to fall back on. Drop the daemon's local tracking and
+			// proactively Deregister the orphaned server-side rows so the
+			// runtime list converges to empty without waiting on the 150 s
+			// stale-heartbeat sweep.
+			return d.convergeWorkspaceRuntimesToZero(ctx, workspaceID, profileSig)
+		}
+		return err
+	}
+
+	newIDs, droppedIDs, ok := d.applyRegisterResponseInPlace(workspaceID, regResp, profileSig)
+	if !ok {
+		return fmt.Errorf("workspace %s no longer tracked", workspaceID)
+	}
+
+	for _, rid := range newIDs {
+		d.logger.Info("re-registered runtime after profile drift",
+			"workspace_id", workspaceID, "runtime_id", rid)
+	}
+	d.notifyRuntimeSetChanged()
+
+	// Drift may have shrunk the runtime set (a profile got disabled while
+	// other runtimes survive). Eagerly mark those server-side rows offline
+	// so the runtime list reflects reality immediately; a 5xx blip here is
+	// fine because the server's stale-heartbeat sweep will pick them up
+	// within ~150 s as a backstop.
+	if len(droppedIDs) > 0 {
+		if err := d.client.Deregister(ctx, droppedIDs); err != nil {
+			d.logger.Warn("deregister of dropped runtimes after profile drift failed",
+				"workspace_id", workspaceID, "runtime_ids", droppedIDs, "error", err)
+		}
+	}
+
+	// Intentionally NO RecoverOrphans here: see method doc.
+	return nil
+}
+
+// convergeWorkspaceRuntimesToZero handles the drift-refresh case where
+// registerRuntimesForWorkspace would have short-circuited because the daemon
+// has nothing to host on this workspace anymore. It Deregisters the
+// previously-tracked runtime IDs (best-effort) and clears the daemon's local
+// tracking so taskWakeup / heartbeat / poll loops stop attempting work
+// against runtimes that should now be offline.
+//
+// The workspaceState pointer is preserved: the workspace itself is still a
+// valid workspace the user belongs to, just one with no agents on this
+// daemon for the moment. If the user re-enables a profile or installs a
+// built-in agent, the next sync tick's profile-drift detection (or a daemon
+// restart) will register it again.
+func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		return nil
+	}
+	oldRuntimeIDs := append([]string(nil), ws.runtimeIDs...)
+	for _, rid := range oldRuntimeIDs {
+		delete(d.runtimeIndex, rid)
+	}
+	ws.runtimeIDs = nil
+	if profileSig != "" {
+		// Cache the converged-empty signature so we don't loop into
+		// re-converging on every subsequent sync tick.
+		ws.profileSetSig = profileSig
+	}
+	d.mu.Unlock()
+
+	d.logger.Info("custom runtime profile drift converged to zero; clearing local tracking",
+		"workspace_id", workspaceID, "deregistered_runtime_ids", oldRuntimeIDs)
+
+	if len(oldRuntimeIDs) > 0 {
+		if err := d.client.Deregister(ctx, oldRuntimeIDs); err != nil {
+			// Best-effort: the server's stale-heartbeat sweep marks the rows
+			// offline within ~150 s as a backstop, and on the daemon side
+			// we have already stopped heartbeating them.
+			d.logger.Warn("deregister after zero-runtime convergence failed",
+				"workspace_id", workspaceID, "runtime_ids", oldRuntimeIDs, "error", err)
+		}
+	}
+	d.notifyRuntimeSetChanged()
+	return nil
 }
 
 func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -201,7 +202,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 
 // TestRegisterRuntimes_SkipsProfileNotOnPath verifies a profile whose command
 // is missing on this host is skipped, and that a host with no built-in agents
-// and no resolvable profiles fails registration (len==0 guard preserved).
+// and no resolvable profiles fails registration with the documented sentinel
+// (the drift-refresh path keys off ErrNoRuntimesToRegister to take the
+// convergence-to-zero branch instead of treating it as a hard error).
 func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{}) // nothing resolves
@@ -218,9 +221,12 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
-	if err == nil {
-		t.Fatalf("expected error when no runtimes resolve, got nil")
+	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if !errors.Is(err, ErrNoRuntimesToRegister) {
+		t.Fatalf("expected ErrNoRuntimesToRegister, got %v", err)
+	}
+	if sig == "" {
+		t.Errorf("profileSig must still be returned even when registration short-circuits, so the drift path can cache the converged-empty signature")
 	}
 	if _, ok := d.profileCommandPaths["prof-1"]; ok {
 		t.Errorf("profileCommandPaths should not record an unresolved profile")

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 )
@@ -96,13 +97,18 @@ func TestProfileSetSignature_DetectsRegistrationAffectingChanges(t *testing.T) {
 
 // driftFixture wires a Daemon against a fake server whose runtime-profiles
 // response can be swapped at runtime. It also tracks how many times the
-// server saw a /api/daemon/register call so tests can assert that drift
-// detection actually triggered (or didn't).
+// server saw a /api/daemon/register, /api/daemon/runtimes/:id/recover-orphans,
+// and /api/daemon/deregister call so tests can assert exactly which side
+// effects the drift refresh triggered (or didn't).
 type driftFixture struct {
-	daemon          *Daemon
-	server          *httptest.Server
-	registerCalls   atomic.Int32
-	currentProfiles []RuntimeProfile
+	daemon              *Daemon
+	server              *httptest.Server
+	registerCalls       atomic.Int32
+	recoverOrphansCalls []string // runtime IDs the server received recover-orphans for, in order
+	recoverOrphansMu    sync.Mutex
+	deregisterCalls     [][]string // each entry is one Deregister call's runtime_ids payload, in order
+	deregisterMu        sync.Mutex
+	currentProfiles     []RuntimeProfile
 }
 
 // setProfiles swaps the profile set returned by the fake server. The
@@ -112,6 +118,30 @@ type driftFixture struct {
 // daemon background work.
 func (fx *driftFixture) setProfiles(profiles []RuntimeProfile) {
 	fx.currentProfiles = profiles
+}
+
+// recordedRecoverOrphans returns a copy of the runtime IDs the fake server
+// received /recover-orphans calls for since the fixture was created.
+func (fx *driftFixture) recordedRecoverOrphans() []string {
+	fx.recoverOrphansMu.Lock()
+	defer fx.recoverOrphansMu.Unlock()
+	out := make([]string, len(fx.recoverOrphansCalls))
+	copy(out, fx.recoverOrphansCalls)
+	return out
+}
+
+// recordedDeregisters returns a copy of every Deregister call's runtime_ids
+// payload, in the order the fake server received them.
+func (fx *driftFixture) recordedDeregisters() [][]string {
+	fx.deregisterMu.Lock()
+	defer fx.deregisterMu.Unlock()
+	out := make([][]string, len(fx.deregisterCalls))
+	for i, ids := range fx.deregisterCalls {
+		cp := make([]string, len(ids))
+		copy(cp, ids)
+		out[i] = cp
+	}
+	return out
 }
 
 func newDriftFixture(t *testing.T, initial []RuntimeProfile) *driftFixture {
@@ -136,6 +166,26 @@ func newDriftFixture(t *testing.T, initial []RuntimeProfile) *driftFixture {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(resp)
+		case strings.HasPrefix(r.URL.Path, "/api/daemon/runtimes/") && strings.HasSuffix(r.URL.Path, "/recover-orphans"):
+			// /api/daemon/runtimes/<id>/recover-orphans
+			parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/daemon/runtimes/"), "/")
+			runtimeID := parts[0]
+			fx.recoverOrphansMu.Lock()
+			fx.recoverOrphansCalls = append(fx.recoverOrphansCalls, runtimeID)
+			fx.recoverOrphansMu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"orphaned":0,"retried":0}`))
+		case r.URL.Path == "/api/daemon/deregister":
+			var body struct {
+				RuntimeIDs []string `json:"runtime_ids"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fx.deregisterMu.Lock()
+			ids := make([]string, len(body.RuntimeIDs))
+			copy(ids, body.RuntimeIDs)
+			fx.deregisterCalls = append(fx.deregisterCalls, ids)
+			fx.deregisterMu.Unlock()
+			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/runtime-profiles"):
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(RuntimeProfilesResponse{
@@ -269,6 +319,256 @@ func TestRefreshWorkspaceRuntimeProfiles_NewProfileTriggersReregister(t *testing
 	}
 	if got := fx.registerCalls.Load(); got != stableCalls {
 		t.Errorf("steady-state refresh must not re-register; before=%d after=%d", stableCalls, got)
+	}
+
+	// MUL-3332 review (concern 1): the drift path MUST NOT call recover-
+	// orphans on any returned runtime. Recover-orphans hard-fails every
+	// dispatched/running task on a runtime, so calling it for a built-in
+	// runtime that the user had been actively running tasks on would kill
+	// real work just because they added an unrelated sibling profile. The
+	// runtime_gone recovery path keeps recover-orphans because those rows
+	// were truly deleted server-side; drift surfaces existing runtimes.
+	if got := fx.recordedRecoverOrphans(); len(got) != 0 {
+		t.Errorf("drift path must not trigger recover-orphans for any runtime; got %v", got)
+	}
+}
+
+// TestRefreshWorkspaceRuntimeProfiles_DriftWithRunningRuntimeSkipsOrphanRecovery
+// is the targeted regression for MUL-3332 review concern #1: a daemon that
+// is actively executing tasks on its existing runtime (built-in or
+// previously-registered profile) must NOT have those tasks killed when
+// the user adds a *new* sibling profile. Adding a profile must surface as
+// a re-register that includes the new profile while LEAVING the existing
+// runtime IDs untouched and recover-orphans untriggered.
+func TestRefreshWorkspaceRuntimeProfiles_DriftWithRunningRuntimeSkipsOrphanRecovery(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{
+		"company-codex": "/opt/bin/company-codex",
+		"team-claude":   "/opt/bin/team-claude",
+	})
+	// Mixed setup: one built-in runtime (claude) plus one custom profile,
+	// the closest analogue of "a daemon that is running real work and the
+	// user just added another profile". Profile drift fires next.
+	initial := []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+		ProtocolFamily: "codex", CommandName: "company-codex",
+		Visibility: "workspace", Enabled: true,
+	}}
+	fx := newDriftFixture(t, initial)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
+
+	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("initial register: %v", err)
+	}
+	ids := make([]string, 0, len(resp.Runtimes))
+	for _, rt := range resp.Runtimes {
+		ids = append(ids, rt.ID)
+		d.runtimeIndex[rt.ID] = rt
+	}
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", ids, "", nil, nil)
+	d.workspaces["ws-1"].profileSetSig = profileSig
+	if len(ids) < 2 {
+		t.Fatalf("setup expected at least 2 runtimes (built-in + custom); got %d", len(ids))
+	}
+
+	// User adds a second profile.
+	fx.setProfiles([]RuntimeProfile{
+		{ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+			ProtocolFamily: "codex", CommandName: "company-codex",
+			Visibility: "workspace", Enabled: true},
+		{ID: "prof-2", WorkspaceID: "ws-1", DisplayName: "Team Claude",
+			ProtocolFamily: "claude", CommandName: "team-claude",
+			Visibility: "workspace", Enabled: true},
+	})
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	// Hard regression: zero recover-orphans calls for ANY runtime ID.
+	// The whole point of MUL-3332 review concern #1 is that adding a
+	// profile must not nuke in-flight work on existing runtimes.
+	if got := fx.recordedRecoverOrphans(); len(got) != 0 {
+		t.Errorf("drift refresh leaked recover-orphans calls (would fail running tasks on existing runtimes): %v", got)
+	}
+}
+
+// TestRefreshWorkspaceRuntimeProfiles_DisableConvergesCustomOnlyDaemon is the
+// targeted regression for MUL-3332 review concern #2: when a custom-only
+// daemon (no built-in agents) has its only enabled profile disabled, the
+// daemon must converge to a zero-runtime state — clear local tracking AND
+// tell the server to mark the orphaned runtime row offline immediately,
+// rather than leaving the daemon polling/heartbeating a runtime the user
+// can no longer use.
+func TestRefreshWorkspaceRuntimeProfiles_DisableConvergesCustomOnlyDaemon(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+	initial := []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+		ProtocolFamily: "codex", CommandName: "company-codex",
+		Visibility: "workspace", Enabled: true,
+	}}
+	fx := newDriftFixture(t, initial)
+	d := fx.daemon
+	// Custom-only daemon: no built-in agents at all.
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	// Initial register: one custom runtime.
+	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("initial register: %v", err)
+	}
+	if len(resp.Runtimes) != 1 {
+		t.Fatalf("setup expected exactly one runtime; got %d", len(resp.Runtimes))
+	}
+	initialRuntimeID := resp.Runtimes[0].ID
+	d.runtimeIndex[initialRuntimeID] = resp.Runtimes[0]
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", []string{initialRuntimeID}, "", nil, nil)
+	d.workspaces["ws-1"].profileSetSig = profileSig
+
+	// User disables the only profile: server's daemon-facing list now
+	// returns zero enabled profiles.
+	fx.setProfiles(nil)
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	// Local tracking must be empty: the daemon stops polling/heartbeating
+	// runtimes that no longer represent anything the user can run.
+	d.mu.Lock()
+	gotRuntimeIDs := append([]string(nil), d.workspaces["ws-1"].runtimeIDs...)
+	_, stillIndexed := d.runtimeIndex[initialRuntimeID]
+	gotSig := d.workspaces["ws-1"].profileSetSig
+	d.mu.Unlock()
+	if len(gotRuntimeIDs) != 0 {
+		t.Errorf("workspaceState.runtimeIDs must be empty after convergence-to-zero; got %v", gotRuntimeIDs)
+	}
+	if stillIndexed {
+		t.Errorf("runtimeIndex must drop the previously-tracked runtime %q after convergence-to-zero", initialRuntimeID)
+	}
+	if gotSig != profileSetSignature(nil) {
+		t.Errorf("converged signature must match the empty-profile-list digest so the next sync tick is a no-op; got %q want %q", gotSig, profileSetSignature(nil))
+	}
+
+	// Server-side cleanup: the daemon must Deregister the orphaned runtime
+	// ID so the runtime row goes offline immediately instead of waiting
+	// 150 s for the stale-heartbeat sweep.
+	deregs := fx.recordedDeregisters()
+	if len(deregs) == 0 {
+		t.Fatalf("expected one Deregister call for the orphaned runtime ID; got none")
+	}
+	var sawInitial bool
+	for _, ids := range deregs {
+		for _, id := range ids {
+			if id == initialRuntimeID {
+				sawInitial = true
+			}
+		}
+	}
+	if !sawInitial {
+		t.Errorf("Deregister payload must include the initial runtime ID %q; got %v", initialRuntimeID, deregs)
+	}
+
+	// Convergence-to-zero must NOT call recover-orphans either: the daemon
+	// has nothing actively running for the user once they disabled the
+	// profile, but if it had, killing those tasks for a profile DISABLE
+	// (vs delete) would still be wrong — the user might re-enable.
+	if got := fx.recordedRecoverOrphans(); len(got) != 0 {
+		t.Errorf("convergence-to-zero must not trigger recover-orphans; got %v", got)
+	}
+
+	// Steady state: a follow-up refresh with the same (empty) profile set
+	// is a no-op. No new register / deregister / recover-orphans calls.
+	stableRegisters := fx.registerCalls.Load()
+	stableDeregs := len(fx.recordedDeregisters())
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("second refresh after convergence: %v", err)
+	}
+	if got := fx.registerCalls.Load(); got != stableRegisters {
+		t.Errorf("converged steady state must not re-register; before=%d after=%d", stableRegisters, got)
+	}
+	if got := len(fx.recordedDeregisters()); got != stableDeregs {
+		t.Errorf("converged steady state must not deregister again; before=%d after=%d", stableDeregs, got)
+	}
+}
+
+// TestRefreshWorkspaceRuntimeProfiles_DisableOneOfManyDeregistersDroppedID
+// covers the partial-drift case: a daemon hosting both a built-in runtime
+// and a custom profile has its custom profile disabled. The built-in
+// survives (Register call carries it forward), the daemon's runtime set
+// converges to just the built-in, and the dropped custom runtime ID is
+// Deregistered so the server marks it offline immediately.
+func TestRefreshWorkspaceRuntimeProfiles_DisableOneOfManyDeregistersDroppedID(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
+	initial := []RuntimeProfile{{
+		ID: "prof-1", WorkspaceID: "ws-1", DisplayName: "Company Codex",
+		ProtocolFamily: "codex", CommandName: "company-codex",
+		Visibility: "workspace", Enabled: true,
+	}}
+	fx := newDriftFixture(t, initial)
+	d := fx.daemon
+	// Mixed: one built-in + one custom.
+	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
+
+	resp, profileSig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("initial register: %v", err)
+	}
+	if len(resp.Runtimes) != 2 {
+		t.Fatalf("setup expected 2 runtimes; got %d (%+v)", len(resp.Runtimes), resp.Runtimes)
+	}
+	var customID string
+	for _, rt := range resp.Runtimes {
+		d.runtimeIndex[rt.ID] = rt
+		if rt.ProfileID == "prof-1" {
+			customID = rt.ID
+		}
+	}
+	if customID == "" {
+		t.Fatalf("setup expected a runtime for prof-1; got %+v", resp.Runtimes)
+	}
+	initialIDs := []string{resp.Runtimes[0].ID, resp.Runtimes[1].ID}
+	d.workspaces["ws-1"] = newWorkspaceState("ws-1", initialIDs, "", nil, nil)
+	d.workspaces["ws-1"].profileSetSig = profileSig
+
+	// User disables the custom profile.
+	fx.setProfiles(nil)
+
+	if err := d.refreshWorkspaceRuntimeProfiles(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("refreshWorkspaceRuntimeProfiles: %v", err)
+	}
+
+	// The custom runtime ID must be Deregistered.
+	deregs := fx.recordedDeregisters()
+	var sawCustom bool
+	for _, ids := range deregs {
+		for _, id := range ids {
+			if id == customID {
+				sawCustom = true
+			}
+		}
+	}
+	if !sawCustom {
+		t.Errorf("Deregister payload must include the dropped custom runtime ID %q; got %v", customID, deregs)
+	}
+
+	// Surviving built-in must NOT be in any deregister payload.
+	for _, ids := range deregs {
+		for _, id := range ids {
+			if id != customID {
+				t.Errorf("Deregister leaked surviving runtime ID %q (only %q should be deregistered)", id, customID)
+			}
+		}
+	}
+
+	// And the still-surviving built-in must NOT have recover-orphans called
+	// against it (concern #1 again, partial-drift flavour).
+	if got := fx.recordedRecoverOrphans(); len(got) != 0 {
+		t.Errorf("partial-drift refresh leaked recover-orphans calls: %v", got)
 	}
 }
 
