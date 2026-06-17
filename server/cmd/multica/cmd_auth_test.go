@@ -1,8 +1,8 @@
 package main
 
 import (
-	"path/filepath"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 

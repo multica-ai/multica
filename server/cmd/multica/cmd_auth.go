@@ -73,13 +73,35 @@ func init() {
 }
 
 func resolveToken(cmd *cobra.Command) string {
+	token, _ := resolveTokenStrict(cmd)
+	return token
+}
+
+func resolveTokenStrict(cmd *cobra.Command) (string, error) {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
-		return v
+		return v, nil
+	}
+	if inAgentExecutionContext() {
+		return "", fmt.Errorf("MULTICA_TOKEN is required in agent execution context; daemon did not inject a task token")
 	}
 	profile := resolveProfile(cmd)
 	configPath := resolveConfigPath(cmd)
 	cfg, _ := cli.LoadCLIConfigForInstance(profile, configPath)
-	return cfg.Token
+	return cfg.Token, nil
+}
+
+func requireAgentTaskTokenForAuditWrite(cmd *cobra.Command) error {
+	if !inAgentExecutionContext() {
+		return nil
+	}
+	token, err := resolveTokenStrict(cmd)
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task token (mat_) for issue comment and attachment writes")
+	}
+	return nil
 }
 
 func resolveAppURL(cmd *cobra.Command) string {

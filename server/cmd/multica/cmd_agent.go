@@ -259,7 +259,10 @@ func resolveConfigPath(cmd *cobra.Command) string {
 func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	serverURL := resolveServerURL(cmd)
 	workspaceID := resolveWorkspaceID(cmd)
-	token := resolveToken(cmd)
+	token, err := resolveTokenStrict(cmd)
+	if err != nil {
+		return nil, err
+	}
 
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")

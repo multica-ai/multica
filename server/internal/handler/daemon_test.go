@@ -147,6 +147,64 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 	return agentID, issueID
 }
 
+func createOwnedDirectTaskClaimFixture(t *testing.T, ctx context.Context, name string) (runtimeID, agentID, issueID, taskID string) {
+	t.Helper()
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at, visibility
+		)
+		VALUES ($1, $2, $3, 'local', 'handler_test_runtime', 'online', 'owned direct claim fixture', '{}'::jsonb, $4, now(), 'private')
+		RETURNING id
+	`, testWorkspaceID, "owned-direct-"+name, name+" runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("setup: create owned runtime: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, name+" agent", runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("setup: create owned agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			assignee_type, assignee_id, number, position
+		)
+		VALUES (
+			$1, $2, 'todo', 'medium', $3, 'member',
+			'agent', $4,
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, name+" issue", testUserID, agentID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create assigned issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority
+		)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create direct task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	return runtimeID, agentID, issueID, taskID
+}
+
 func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID, dispatchedAge string, started bool) string {
 	t.Helper()
 
@@ -304,6 +362,73 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
+	}
+}
+
+func TestClaimTaskByRuntime_DirectAgentTaskReturnsTaskToken(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID, agentID, _, taskID := createOwnedDirectTaskClaimFixture(t, ctx, "task token")
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "direct-task-token-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID          string `json:"id"`
+			AgentID     string `json:"agent_id"`
+			WorkspaceID string `json:"workspace_id"`
+			Kind        string `json:"kind"`
+			AuthToken   string `json:"auth_token"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected claimed direct task, got nil: %s", w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.Kind != "direct" {
+		t.Fatalf("claim task kind = %q, want direct", resp.Task.Kind)
+	}
+	if resp.Task.AgentID != agentID {
+		t.Fatalf("claim task agent_id = %s, want %s", resp.Task.AgentID, agentID)
+	}
+	if resp.Task.WorkspaceID != testWorkspaceID {
+		t.Fatalf("claim task workspace_id = %s, want %s", resp.Task.WorkspaceID, testWorkspaceID)
+	}
+	if !strings.HasPrefix(resp.Task.AuthToken, "mat_") {
+		t.Fatalf("claim task auth_token = %q, want mat_ task token", resp.Task.AuthToken)
+	}
+
+	token, err := testHandler.Queries.GetTaskTokenByHash(ctx, auth.HashToken(resp.Task.AuthToken))
+	if err != nil {
+		t.Fatalf("load persisted task token: %v", err)
+	}
+	if uuidToString(token.TaskID) != taskID {
+		t.Fatalf("task_token.task_id = %s, want %s", uuidToString(token.TaskID), taskID)
+	}
+	if uuidToString(token.AgentID) != agentID {
+		t.Fatalf("task_token.agent_id = %s, want %s", uuidToString(token.AgentID), agentID)
+	}
+	if uuidToString(token.WorkspaceID) != testWorkspaceID {
+		t.Fatalf("task_token.workspace_id = %s, want %s", uuidToString(token.WorkspaceID), testWorkspaceID)
+	}
+	if uuidToString(token.UserID) != testUserID {
+		t.Fatalf("task_token.user_id = %s, want %s", uuidToString(token.UserID), testUserID)
 	}
 }
 
@@ -1251,10 +1376,11 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	}
 }
 
-// TestListTasksByIssue_FiltersRunsByOwner verifies that the task-runs list
-// only returns agent tasks whose agent is owned by the requesting user (or has
-// no owner) and local CLI runs owned by the requesting user.
-func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
+// TestListTasksByIssue_ReturnsExecutionHistoryAcrossOwners verifies that the
+// issue execution log is issue-scoped, not owner-scoped. Dashboard run lists
+// keep owner filtering; /api/issues/{id}/task-runs must show the full issue
+// history across agent owners and local CLI run owners.
+func TestListTasksByIssue_ReturnsExecutionHistoryAcrossOwners(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -1269,11 +1395,11 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 
 	// -- Agent tasks --
 
-	// 1. Agent owned by testUserID → should appear.
+	// 1. Agent owned by testUserID -> should appear.
 	ownedAgentID := createHandlerTestAgent(t, "owned-agent", nil)
 	ownedTaskID := createHandlerTestTaskForAgentOnIssue(t, ownedAgentID, issue.ID)
 
-	// 2. Agent owned by otherUserID → should NOT appear.
+	// 2. Agent owned by otherUserID -> should also appear.
 	var otherAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
@@ -1296,7 +1422,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID) })
 
-	// 3. Agent with NULL owner_id (workspace agent) → should appear.
+	// 3. Agent with NULL owner_id (workspace agent) -> should appear.
 	var wsAgentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
@@ -1313,7 +1439,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 
 	// -- Local CLI runs --
 
-	// 4. local_cli_run owned by testUserID → should appear.
+	// 4. local_cli_run owned by testUserID -> should appear.
 	var ownedRunID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
@@ -1324,7 +1450,7 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, ownedRunID) })
 
-	// 5. local_cli_run owned by otherUserID → should NOT appear.
+	// 5. local_cli_run owned by otherUserID -> should also appear.
 	var otherRunID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
@@ -1357,17 +1483,111 @@ func TestListTasksByIssue_FiltersRunsByOwner(t *testing.T) {
 		}
 	}
 
-	// Should include: owned task, workspace agent task, owned local run
-	for _, id := range []string{ownedTaskID, wsTaskID, ownedRunID} {
+	// Should include all same-issue execution history, regardless of owner.
+	for _, id := range []string{ownedTaskID, otherTaskID, wsTaskID, ownedRunID, otherRunID} {
 		if !gotIDs[id] {
 			t.Errorf("expected id %s in response, not found", id)
 		}
 	}
+}
 
-	// Should NOT include: other-owner task, other-owner local run
+func TestListMyTasksByIssue_ReturnsOnlyCurrentUserTraceRuns(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	otherUserID := createWorkspaceMemberUser(t, "Other Trace Owner", "other-trace-owner@test.multica.ai")
+	issue := createIssueWithStatusForCommentTest(t, "todo")
+
+	ownedAgentID := createHandlerTestAgent(t, "trace-owned-agent", nil)
+	ownedTaskID := createHandlerTestTaskForAgentOnIssue(t, ownedAgentID, issue.ID)
+
+	var otherAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'trace-other-owner-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, otherUserID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("create other-owner agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, otherAgentID) })
+
+	var otherTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, started_at)
+		VALUES ($1, $2, 'running', 0, $3, now())
+		RETURNING id
+	`, otherAgentID, runtimeID, issue.ID).Scan(&otherTaskID); err != nil {
+		t.Fatalf("create other-owner task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, otherTaskID) })
+
+	var workspaceAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config)
+		VALUES ($1, 'trace-workspace-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, NULL, '', '{}'::jsonb, '[]'::jsonb, NULL)
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&workspaceAgentID); err != nil {
+		t.Fatalf("create workspace agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, workspaceAgentID) })
+	workspaceTaskID := createHandlerTestTaskForAgentOnIssue(t, workspaceAgentID, issue.ID)
+
+	var ownedRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, testUserID).Scan(&ownedRunID); err != nil {
+		t.Fatalf("create owned local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, ownedRunID) })
+
+	var otherRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO local_cli_run (workspace_id, issue_id, owner_id, cli_name, status, completed_at)
+		VALUES ($1, $2, $3, 'codex', 'completed', now())
+		RETURNING id
+	`, testWorkspaceID, issue.ID, otherUserID).Scan(&otherRunID); err != nil {
+		t.Fatalf("create other-owner local run: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM local_cli_run WHERE id = $1`, otherRunID) })
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issue.ID+"/my-task-runs", nil)
+	req = withURLParam(req, "id", issue.ID)
+
+	testHandler.ListMyTasksByIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var result []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	gotIDs := map[string]bool{}
+	for _, item := range result {
+		if id, ok := item["id"].(string); ok {
+			gotIDs[id] = true
+		}
+	}
+
+	for _, id := range []string{ownedTaskID, workspaceTaskID, ownedRunID} {
+		if !gotIDs[id] {
+			t.Errorf("expected current-user trace run %s in response", id)
+		}
+	}
 	for _, id := range []string{otherTaskID, otherRunID} {
 		if gotIDs[id] {
-			t.Errorf("unexpected id %s in response (should be filtered)", id)
+			t.Errorf("unexpected other-owner trace run %s in response", id)
 		}
 	}
 }

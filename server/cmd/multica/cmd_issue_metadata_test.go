@@ -3,10 +3,8 @@ package main
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -60,31 +58,6 @@ func newIssueMetadataDeleteTestCmd() *cobra.Command {
 	c.Flags().String("output", "json", "")
 	c.Flags().String("key", "", "")
 	return c
-}
-
-// captureStdout redirects os.Stdout for the duration of fn and returns
-// everything written together with fn's own error, so callers can assert on
-// the command's stdout (e.g. the `{}` 404-degradation output) and its exit
-// status in one shot.
-func captureStdout(t *testing.T, fn func() error) (string, error) {
-	t.Helper()
-	old := os.Stdout
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("pipe stdout: %v", err)
-	}
-	os.Stdout = w
-	defer func() { os.Stdout = old }()
-
-	runErr := fn()
-	if err := w.Close(); err != nil {
-		t.Fatalf("close stdout writer: %v", err)
-	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	return string(out), runErr
 }
 
 // metadataTestServer wires a minimal fake backend that answers the

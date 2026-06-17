@@ -1,5 +1,26 @@
 import type { IssueStatus } from "./issue";
 
+export type InboxDetails = Record<string, unknown> & {
+  comment_id?: string;
+  identifier?: string;
+  original_prompt?: string;
+  error?: string;
+  source_type?: string;
+  channel_id?: string;
+  channel_name?: string;
+  message_id?: string;
+  thread_id?: string;
+  reply_to_id?: string;
+  link?: string;
+  to?: string;
+  from?: string;
+  emoji?: string;
+  agent_id?: string;
+  new_assignee_id?: string;
+  new_assignee_type?: string;
+  actor?: unknown;
+};
+
 export type InboxSeverity = "action_required" | "attention" | "info";
 
 export type InboxItemType =
@@ -37,5 +58,5 @@ export interface InboxItem {
   read: boolean;
   archived: boolean;
   created_at: string;
-  details: Record<string, string> | null;
+  details: InboxDetails | null;
 }

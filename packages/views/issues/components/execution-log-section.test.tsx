@@ -33,6 +33,10 @@ vi.mock("../../common/task-transcript", () => ({
   TranscriptButton: () => <button data-testid="transcript-button">transcript</button>,
 }));
 
+vi.mock("./task-trace-output", () => ({
+  TaskTraceOutput: () => <div data-testid="inline-task-trace-output" />,
+}));
+
 vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
 }));
@@ -174,5 +178,28 @@ describe("ExecutionLogSection local CLI rows", () => {
     await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
 
     expect(screen.getByRole("button", { name: "Cancel task" })).toBeInTheDocument();
+  });
+
+  it("does not render inline task trace output inside execution log rows", async () => {
+    mockApi.listTasksByIssue.mockResolvedValue([
+      makeTask({
+        id: "task-running",
+        status: "running",
+        trigger_summary: "Running task",
+        completed_at: null,
+      }),
+      makeTask({
+        id: "task-failed",
+        status: "failed",
+        trigger_summary: "Failed task",
+      }),
+    ]);
+
+    renderSection();
+
+    await waitFor(() => expect(screen.getByText("Execution log")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Show past runs (1)"));
+
+    expect(screen.queryByTestId("inline-task-trace-output")).not.toBeInTheDocument();
   });
 });

@@ -416,12 +416,14 @@ if (!gotTheLock) {
           slug,
           itemId,
           issueKey,
+          targetPath,
           title,
           body,
         }: {
           slug: string;
           itemId: string;
           issueKey: string;
+          targetPath?: string;
           title: string;
           body: string;
         },
@@ -440,6 +442,7 @@ if (!gotTheLock) {
             slug,
             itemId,
             issueKey,
+            targetPath,
           });
         });
         notification.show();

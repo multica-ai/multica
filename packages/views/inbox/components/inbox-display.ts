@@ -1,7 +1,8 @@
 import type { InboxItem } from "@multica/core/types";
+import { getChannelInboxTarget } from "@multica/core/inbox/channel";
 
-function singleLine(value: string | null | undefined): string {
-  return (value ?? "").replace(/\s+/g, " ").trim();
+function singleLine(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
 }
 
 function escapeRegExp(value: string): string {
@@ -26,6 +27,11 @@ export function stripQuickCreatePrefix(title: string, identifier?: string): stri
 
 export function getInboxDisplayTitle(item: InboxItem): string {
   const details = item.details ?? {};
+  const channelTarget = getChannelInboxTarget(item);
+  if (channelTarget) {
+    const channelName = singleLine(details.channel_name);
+    if (channelName) return `#${channelName}`;
+  }
 
   if (item.type === "quick_create_done") {
     const cleanedTitle = stripQuickCreatePrefix(item.title, details.identifier);

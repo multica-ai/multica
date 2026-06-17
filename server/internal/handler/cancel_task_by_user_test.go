@@ -110,28 +110,9 @@ func createForeignWorkspaceAgent(t *testing.T) string {
 	return agentID
 }
 
-// createWorkspaceMemberUserForCancel adds a plain (non-owner/admin) member to the test
-// workspace and returns the user ID. The member row cascades when the user is
-// deleted (member.user_id ON DELETE CASCADE).
-func createWorkspaceMemberUserForCancel(t *testing.T, name, email string) string {
-	t.Helper()
-	ctx := context.Background()
-
-	var userID string
-	if err := testPool.QueryRow(ctx,
-		`INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`, name, email,
-	).Scan(&userID); err != nil {
-		t.Fatalf("create user %s: %v", email, err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID) })
-
-	if _, err := testPool.Exec(ctx,
-		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, userID,
-	); err != nil {
-		t.Fatalf("add member %s: %v", email, err)
-	}
-	return userID
-}
+// createWorkspaceMemberUser is shared with agent_access_test.go (same package),
+// which owns the canonical definition; it adds a plain (non-owner/admin) member
+// to the test workspace and returns the user ID.
 
 func cancelTaskByUserRequest(t *testing.T, userID, taskID string) *http.Request {
 	t.Helper()
@@ -292,7 +273,7 @@ func TestCancelTaskByUser_ChatTask_NonCreator_Returns403(t *testing.T) {
 
 	agentID := createHandlerTestAgent(t, "CancelChatAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID) // creator = testUserID
-	otherUserID := createWorkspaceMemberUserForCancel(t, "Chat Bystander", "cancel-chat-bystander@multica.test")
+	otherUserID := createWorkspaceMemberUser(t, "Chat Bystander", "cancel-chat-bystander@multica.test")
 
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `

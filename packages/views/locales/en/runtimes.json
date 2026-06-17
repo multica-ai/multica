@@ -169,6 +169,8 @@
   "connect": {
     "title": "Add a computer",
     "description": "Run these two commands on the computer you want to add. We'll detect it the moment the daemon comes online.",
+    "platform_mac": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "Install the Multica CLI",
     "step2_label": "Start the daemon",
     "step2_hint": "Opens a browser to sign in, then keeps the daemon running in the background.",

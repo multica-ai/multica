@@ -180,7 +180,9 @@
   "labs": {
     "section_placeholder_title": "No experiments yet",
     "section_placeholder_description": "Experimental settings will land here as they ship. Today this tab is intentionally empty.",
-    "toast_failed": "Failed to update setting"
+    "toast_failed": "Failed to update setting",
+    "channels_title": "Channel",
+    "channels_description": "Enable Channel in the sidebar for team messaging and agent collaboration."
   },
   "integrations": {
     "section_title": "Integrations",

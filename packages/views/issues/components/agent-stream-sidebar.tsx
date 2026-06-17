@@ -28,8 +28,8 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
   const timeAgo = useTimeAgo();
 
   const { data: tasks = [] } = useQuery({
-    queryKey: issueKeys.tasks(issueId),
-    queryFn: () => api.listTasksByIssue(issueId),
+    queryKey: issueKeys.myTaskRuns(issueId),
+    queryFn: () => api.listMyTasksByIssue(issueId),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -54,21 +54,24 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
     [chronologicalTasks],
   );
 
-  // Selection logic: active runs take focus, while the current active run stays stable across refreshes.
+  // Selection logic: active runs take initial focus, but a manual run selection
+  // must stay stable across refreshes while that run still exists.
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [manualSelection, setManualSelection] = useState(false);
 
   useEffect(() => {
     const selectedTask = selectedId
       ? allSorted.find((task) => task.id === selectedId) ?? null
       : null;
 
-    if (selectedTask && ACTIVE_STATUSES.has(selectedTask.status)) return;
+    if (selectedTask && (manualSelection || ACTIVE_STATUSES.has(selectedTask.status))) return;
 
     const candidate = activeTasks[0] ?? selectedTask ?? recentTasks[0] ?? null;
     if ((candidate?.id ?? null) !== selectedId) {
       setSelectedId(candidate?.id ?? null);
+      setManualSelection(false);
     }
-  }, [activeTasks, recentTasks, allSorted, selectedId]);
+  }, [activeTasks, recentTasks, allSorted, selectedId, manualSelection]);
 
   const selectedTask = useMemo(
     () => allSorted.find((t) => t.id === selectedId) ?? allSorted[0] ?? null,
@@ -127,10 +130,12 @@ export function AgentStreamSidebar({ issueId, onHighlightComment }: AgentStreamS
 
   const handleSelect = useCallback((id: string) => {
     setSelectedId(id);
+    setManualSelection(true);
   }, []);
 
   const handleSelectAndClose = useCallback((id: string) => {
     setSelectedId(id);
+    setManualSelection(true);
     setSelectorOpen(false);
   }, []);
 

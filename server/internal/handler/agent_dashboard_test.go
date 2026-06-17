@@ -82,9 +82,9 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 	createRun(otherAgentID)
 	createRun(myAgentID)
 
-	t.Run("owner_id narrows all dashboard rollups to that member's agents", func(t *testing.T) {
+	t.Run("defaults to the current owner when no owner filter is provided", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1&owner_id="+otherOwnerID, nil))
+		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1", nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -93,10 +93,36 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 			t.Fatalf("decode response: %v", err)
 		}
 		if resp.Summary.TotalRuns != 1 {
-			t.Fatalf("expected only the selected owner's run, got %d", resp.Summary.TotalRuns)
+			t.Fatalf("expected only the current user's run by default, got %d", resp.Summary.TotalRuns)
 		}
-		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != otherAgentID {
-			t.Fatalf("expected only agent %s, got %#v", otherAgentID, resp.Agents)
+		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
+			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		}
+	})
+
+	t.Run("current owner_id remains scoped to the current owner", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1&owner_id="+testUserID, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp AgentRunDashboardResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp.Summary.TotalRuns != 1 {
+			t.Fatalf("expected only the current owner's run, got %d", resp.Summary.TotalRuns)
+		}
+		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
+			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		}
+	})
+
+	t.Run("other owner_id is rejected", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1&owner_id="+otherOwnerID, nil))
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 
@@ -115,11 +141,29 @@ func TestAgentRunDashboardOwnerFilter(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid owner_id is rejected", func(t *testing.T) {
+	t.Run("owner=all is treated as the current owner for stale clients", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?days=1&owner=all", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp AgentRunDashboardResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if resp.Summary.TotalRuns != 1 {
+			t.Fatalf("expected owner=all to stay scoped to the current user, got %d", resp.Summary.TotalRuns)
+		}
+		if len(resp.Agents) != 1 || resp.Agents[0].AgentID != myAgentID {
+			t.Fatalf("expected only current user's agent %s, got %#v", myAgentID, resp.Agents)
+		}
+	})
+
+	t.Run("malformed owner_id is rejected before broadening scope", func(t *testing.T) {
 		w := httptest.NewRecorder()
 		testHandler.GetAgentRunDashboard(w, newRequest("GET", "/api/dashboard/agent-runs?owner_id=not-a-uuid", nil))
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 }

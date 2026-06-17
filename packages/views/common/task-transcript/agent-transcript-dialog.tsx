@@ -286,13 +286,14 @@ export function AgentTranscriptDialog({
   // Copy all events as text. Use the displayed order so users get the same
   // sequence they see on screen — matters when sort is set to newest-first.
   const handleCopyWorkdir = useCallback(() => {
-    if (!task.relative_work_dir) return;
-    void copyText(task.relative_work_dir).then((ok) => {
+    const pathToCopy = task.work_dir || task.relative_work_dir;
+    if (!pathToCopy) return;
+    void copyText(pathToCopy).then((ok) => {
       if (!ok) return;
       setCopiedWorkdir(true);
       setTimeout(() => setCopiedWorkdir(false), 2000);
     });
-  }, [task.relative_work_dir]);
+  }, [task.work_dir, task.relative_work_dir]);
 
   const handleCopyAll = useCallback(() => {
     const text = displayItems
@@ -505,7 +506,7 @@ export function AgentTranscriptDialog({
               <button
                 type="button"
                 onClick={handleCopyWorkdir}
-                title={task.relative_work_dir}
+                title={task.work_dir || task.relative_work_dir}
                 className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 {copiedWorkdir ? (

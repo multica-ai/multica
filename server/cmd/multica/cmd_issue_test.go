@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1776,6 +1777,312 @@ func newIssueCommentListTestCmd() *cobra.Command {
 	cmd.Flags().String("before", "", "")
 	cmd.Flags().String("before-id", "", "")
 	return cmd
+}
+
+func newIssueCommentAddTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "add"}
+	cmd.Flags().String("content", "", "")
+	cmd.Flags().Bool("content-stdin", false, "")
+	cmd.Flags().String("content-file", "", "")
+	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newIssueAttachmentReplaceTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "replace"}
+	cmd.Flags().String("file", "", "")
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func TestRunIssueCommentAddAttachmentUsesTaskTokenInAgentContext(t *testing.T) {
+	attachmentPath := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(attachmentPath, []byte("report"), 0o644); err != nil {
+		t.Fatalf("write attachment: %v", err)
+	}
+
+	var uploadAuth, uploadAgent, uploadTask string
+	var commentAuth, commentAgent, commentTask string
+	var sawUpload, sawComment bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/OPE-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":         "issue-1",
+				"identifier": "OPE-1",
+			})
+		case "/api/attachments/upload/initiate":
+			sawUpload = true
+			uploadAuth = r.Header.Get("Authorization")
+			uploadAgent = r.Header.Get("X-Agent-ID")
+			uploadTask = r.Header.Get("X-Task-ID")
+			json.NewEncoder(w).Encode(map[string]any{
+				"attachment_id": "attachment-1",
+				"object_key":    "object-1",
+				"upload_url":    "http://" + r.Host + "/upload",
+				"upload_token":  "upload-token-1",
+			})
+		case "/upload":
+			if r.Method != http.MethodPut {
+				t.Errorf("upload method = %s, want PUT", r.Method)
+			}
+			w.WriteHeader(http.StatusOK)
+		case "/api/attachments/upload/complete":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":  "attachment-1",
+				"url": "https://cdn.example.test/report.md",
+			})
+		case "/api/issues/issue-1/comments":
+			sawComment = true
+			commentAuth = r.Header.Get("Authorization")
+			commentAgent = r.Header.Get("X-Agent-ID")
+			commentTask = r.Header.Get("X-Task-ID")
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":      "comment-1",
+				"content": "done",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+	t.Setenv("MULTICA_TOKEN", "mat_task_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	_ = cmd.Flags().Set("attachment", attachmentPath)
+	if err := runIssueCommentAdd(cmd, []string{"OPE-1"}); err != nil {
+		t.Fatalf("runIssueCommentAdd: %v", err)
+	}
+
+	if !sawUpload || !sawComment {
+		t.Fatalf("expected upload and comment requests, saw upload=%v comment=%v", sawUpload, sawComment)
+	}
+	for name, got := range map[string]string{
+		"upload Authorization":  uploadAuth,
+		"comment Authorization": commentAuth,
+	} {
+		if got != "Bearer mat_task_token" {
+			t.Fatalf("%s = %q, want task token", name, got)
+		}
+	}
+	for name, got := range map[string]string{
+		"upload X-Agent-ID":  uploadAgent,
+		"comment X-Agent-ID": commentAgent,
+	} {
+		if got != "agent-123" {
+			t.Fatalf("%s = %q, want agent id", name, got)
+		}
+	}
+	for name, got := range map[string]string{
+		"upload X-Task-ID":  uploadTask,
+		"comment X-Task-ID": commentTask,
+	} {
+		if got != "task-456" {
+			t.Fatalf("%s = %q, want task id", name, got)
+		}
+	}
+}
+
+func TestRunIssueCommentAddAgentContextMissingTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected missing token error")
+	}
+	if !strings.Contains(err.Error(), "MULTICA_TOKEN is required in agent execution context") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite missing agent task token")
+	}
+}
+
+func TestRunIssueCommentAddAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueCommentAddTestCmd()
+	_ = cmd.Flags().Set("content", "done")
+	err := runIssueCommentAdd(cmd, []string{"OPE-1"})
+	if err == nil {
+		t.Fatal("runIssueCommentAdd: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueCommentAdd called API despite non-task token in agent context")
+	}
+}
+
+func TestRunIssueAttachmentRemoveAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	err := runIssueAttachmentRemove(testCmd(), []string{"OPE-1", "attachment-1"})
+	if err == nil {
+		t.Fatal("runIssueAttachmentRemove: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueAttachmentRemove called API despite non-task token in agent context")
+	}
+}
+
+func TestRunIssueAttachmentReplaceAgentContextMemberTokenDoesNotCallAPI(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "replacement.md")
+	if err := os.WriteFile(filePath, []byte("replacement"), 0o644); err != nil {
+		t.Fatalf("write replacement: %v", err)
+	}
+
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "agent-123")
+	t.Setenv("MULTICA_TASK_ID", "task-456")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	cmd := newIssueAttachmentReplaceTestCmd()
+	_ = cmd.Flags().Set("file", filePath)
+	err := runIssueAttachmentReplace(cmd, []string{"OPE-1", "attachment-1"})
+	if err == nil {
+		t.Fatal("runIssueAttachmentReplace: expected task-token error")
+	}
+	if !strings.Contains(err.Error(), "task token (mat_)") {
+		t.Fatalf("error = %q", err.Error())
+	}
+	if called {
+		t.Fatal("runIssueAttachmentReplace called API despite non-task token in agent context")
+	}
+}
+
+func TestRunIssueAttachmentRemoveAndReplaceMemberContextUnaffected(t *testing.T) {
+	filePath := filepath.Join(t.TempDir(), "replacement.md")
+	if err := os.WriteFile(filePath, []byte("replacement"), 0o644); err != nil {
+		t.Fatalf("write replacement: %v", err)
+	}
+
+	var sawRemoveDelete, sawReplaceUpload, sawReplaceDelete bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/OPE-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "issue-1",
+				"identifier":  "OPE-1",
+				"description": "No attachment reference.",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "issue-1",
+				"identifier":  "OPE-1",
+				"description": "No attachment reference.",
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/attachments/remove-1":
+			sawRemoveDelete = true
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/attachments/old-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":       "old-1",
+				"filename": "old.md",
+				"url":      "https://cdn.example.test/old.md",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/attachments/upload/initiate":
+			sawReplaceUpload = true
+			json.NewEncoder(w).Encode(map[string]any{
+				"attachment_id": "new-1",
+				"object_key":    "object-1",
+				"upload_url":    "http://" + r.Host + "/upload",
+				"upload_token":  "upload-token-1",
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/upload":
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/attachments/upload/complete":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":  "new-1",
+				"url": "https://cdn.example.test/new.md",
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/attachments/old-1":
+			sawReplaceDelete = true
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv("MULTICA_TOKEN", "mul_member_token")
+
+	if err := runIssueAttachmentRemove(testCmd(), []string{"OPE-1", "remove-1"}); err != nil {
+		t.Fatalf("runIssueAttachmentRemove member context: %v", err)
+	}
+
+	cmd := newIssueAttachmentReplaceTestCmd()
+	_ = cmd.Flags().Set("file", filePath)
+	if err := runIssueAttachmentReplace(cmd, []string{"OPE-1", "old-1"}); err != nil {
+		t.Fatalf("runIssueAttachmentReplace member context: %v", err)
+	}
+
+	if !sawRemoveDelete {
+		t.Fatal("member attachment remove did not call delete API")
+	}
+	if !sawReplaceUpload || !sawReplaceDelete {
+		t.Fatalf("member attachment replace did not complete expected calls: upload=%v delete=%v", sawReplaceUpload, sawReplaceDelete)
+	}
 }
 
 // TestRunIssueCommentListFlagGuards locks the CLI-side flag combination

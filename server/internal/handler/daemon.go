@@ -1493,6 +1493,86 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if task.ChannelID.Valid {
+		resp.ChannelID = uuidToString(task.ChannelID)
+		resp.ChannelMessageID = uuidToString(task.ChannelMessageID)
+		resp.ChannelThreadID = uuidToString(task.ChannelThreadID)
+		resp.ChannelReplyToID = uuidToString(task.ChannelReplyToID)
+		var chCtx service.ChannelMentionContext
+		if task.Context != nil {
+			_ = json.Unmarshal(task.Context, &chCtx)
+		}
+		if chCtx.Type == service.ChannelMentionContextType {
+			resp.WorkspaceID = chCtx.WorkspaceID
+			resp.ChannelName = chCtx.ChannelName
+			resp.ChannelTriggerContent = chCtx.TriggerContent
+			resp.ChannelMentionType = chCtx.MentionType
+			resp.ChannelThreadRootMsgID = chCtx.ThreadRootMessageID
+		}
+		if resp.WorkspaceID == "" || resp.ChannelName == "" {
+			workspaceID := parseUUID(resp.WorkspaceID)
+			if !workspaceID.Valid && task.ChannelMessageID.Valid {
+				if msg, err := h.Queries.GetChannelMessage(r.Context(), task.ChannelMessageID); err == nil {
+					workspaceID = msg.WorkspaceID
+					if resp.WorkspaceID == "" {
+						resp.WorkspaceID = uuidToString(msg.WorkspaceID)
+					}
+					if resp.ChannelTriggerContent == "" {
+						resp.ChannelTriggerContent = msg.Content
+					}
+				}
+			}
+			if workspaceID.Valid {
+				if channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{ID: task.ChannelID, WorkspaceID: workspaceID}); err == nil {
+					if resp.ChannelName == "" {
+						resp.ChannelName = channel.Name
+					}
+					if resp.WorkspaceID == "" {
+						resp.WorkspaceID = uuidToString(channel.WorkspaceID)
+					}
+				}
+			}
+		}
+		if resp.WorkspaceID != "" && len(resp.Repos) == 0 {
+			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+		if resp.Agent != nil && chCtx.SquadID != "" {
+			if wsUUID, wsErr := util.ParseUUID(resp.WorkspaceID); wsErr == nil {
+				if squadUUID, sqErr := util.ParseUUID(chCtx.SquadID); sqErr == nil {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          squadUUID,
+						WorkspaceID: wsUUID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						h.appendSquadLeaderBriefing(r.Context(), &resp, squad, "channel-mention")
+					}
+				}
+			}
+		}
+		if !task.ForceFreshSession {
+			// Scope resume to the message's context lane: the channel main
+			// timeline (ChannelThreadID invalid → NULL) is the parent lane,
+			// each thread its own child lane. Two unrelated threads never
+			// inherit each other's session/workdir.
+			if prior, err := h.Queries.GetLastChannelTaskSession(r.Context(), db.GetLastChannelTaskSessionParams{
+				AgentID:         task.AgentID,
+				ChannelID:       task.ChannelID,
+				ChannelThreadID: task.ChannelThreadID,
+			}); err == nil && prior.SessionID.Valid {
+				if prior.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = prior.SessionID.String
+				}
+				if prior.WorkDir.Valid {
+					resp.PriorWorkDir = prior.WorkDir.String
+				}
+			}
+		}
+	}
+
 	// Autopilot run_only task: resolve workspace from autopilot_run →
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.
@@ -1690,11 +1770,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// recognized server-side as actor=agent, closing the lateral-movement
 	// path on owner-only endpoints (e.g. `/api/agents/{id}/env`). MUL-2600.
 	//
-	// Skip silently when the runtime has no owning user (cloud / system
-	// runtimes installed before this PR) — the response carries no
-	// `auth_token`, and the daemon falls back to its existing credential.
-	// Token expires after the queue/runtime upper bound (24h) so it survives
-	// long-running tasks but cannot outlive a forgotten one.
+	// Owner local runtimes must get this token. If an owner runtime claim
+	// response lacks it, the daemon refuses to spawn instead of falling back to
+	// its member/daemon credential. Token expires after the queue/runtime upper
+	// bound (24h) so it survives long-running tasks but cannot outlive a
+	// forgotten one. Ownerless legacy runtimes omit auth_token.
 	if runtime.OwnerID.Valid {
 		tokenStr, terr := auth.GenerateAgentTaskToken()
 		if terr != nil {
@@ -2401,9 +2481,46 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
 }
 
-// ListTasksByIssue returns tasks for an issue that belong to agents owned by
-// the requesting user (or agents with no owner). Used for execution history.
+// ListTasksByIssue returns the issue-level execution history. This endpoint is
+// intentionally not owner-scoped; owner filtering belongs to dashboard run
+// list endpoints such as /api/dashboard/agent-runs.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
+	issueID := chi.URLParam(r, "id")
+	issue, ok := h.loadIssueForUser(w, r, issueID)
+	if !ok {
+		return
+	}
+
+	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list tasks")
+		return
+	}
+
+	resp := make([]AgentTaskResponse, len(tasks))
+	for i, t := range tasks {
+		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
+	}
+	localRuns, err := h.listLocalCLIRunsByIssue(r, issue)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list local runs")
+		return
+	}
+	combined := make([]any, 0, len(resp)+len(localRuns))
+	for _, task := range resp {
+		combined = append(combined, task)
+	}
+	for _, run := range localRuns {
+		combined = append(combined, localCLIRunToResponse(run))
+	}
+
+	writeJSON(w, http.StatusOK, combined)
+}
+
+// ListMyTasksByIssue returns the issue runs whose traces are scoped to the
+// requesting user. The issue-level execution log endpoint intentionally remains
+// all-owner; this endpoint is for the right-side Runs/Trace viewer.
+func (h *Handler) ListMyTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
 	if !ok {
@@ -2425,7 +2542,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToSlimResponse(t, uuidToString(issue.WorkspaceID))
 	}
-	localRuns, err := h.listLocalCLIRunsByIssue(r, issue, userID)
+	localRuns, err := h.listLocalCLIRunsByIssueForOwner(r, issue, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list local runs")
 		return

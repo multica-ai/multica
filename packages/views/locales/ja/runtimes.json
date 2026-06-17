@@ -157,6 +157,8 @@
   "connect": {
     "title": "コンピュータを追加",
     "description": "追加したいコンピュータで、この 2 つのコマンドを実行してください。デーモンがオンラインになった瞬間に検出します。",
+    "platform_mac": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "Multica CLI をインストール",
     "step2_label": "デーモンを起動",
     "step2_hint": "サインインのためにブラウザを開き、その後デーモンをバックグラウンドで実行し続けます。",

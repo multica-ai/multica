@@ -161,6 +161,7 @@ export function ProjectIssuesContent({
   const labelFilters = useViewStore((s) => s.labelFilters);
   const effectiveLabelFilters = scopedLabelFilters ?? labelFilters;
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
+  const showArchived = useViewStore((s) => s.showArchived);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const runningIssueIds = useMemo(() => {
@@ -172,14 +173,14 @@ export function ProjectIssuesContent({
   }, [snapshot]);
 
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived }),
+    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived }),
+    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived],
   );
 
   const activeFilters = useMemo(() => ({
@@ -204,8 +205,8 @@ export function ProjectIssuesContent({
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters: effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived }),
+    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, effectiveLabelFilters, agentRunningFilter, runningIssueIds, showArchived],
   );
 
   const filteredAssigneeGroups = useMemo(
@@ -369,7 +370,7 @@ export function ProjectIssuesSurface({
   const serverFilter = useMemo<IssueListFilter>(
     () => {
       const base: IssueListFilter = { ...filter };
-      if (showArchived) base.include_archived = true;
+      if (showArchived) base.archived = true;
       return buildIssueListServerFilter(
         base,
         {
@@ -396,16 +397,29 @@ export function ProjectIssuesSurface({
     ],
   );
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
-    () => ({
-      ...filter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
-      priorities: priorityFilters,
-      assignee_filters: assigneeFilters,
-      include_no_assignee: includeNoAssignee,
-      creator_filters: creatorFilters,
-      label_ids: scopedLabelFilters,
-    }),
-    [assigneeFilters, creatorFilters, filter, includeNoAssignee, scopedLabelFilters, priorityFilters, statusFilters],
+    () => {
+      const f: AssigneeGroupedIssuesFilter = {
+        ...filter,
+        statuses: statusFilters.length > 0 ? statusFilters : [...BOARD_STATUSES],
+        priorities: priorityFilters,
+        assignee_filters: assigneeFilters,
+        include_no_assignee: includeNoAssignee,
+        creator_filters: creatorFilters,
+        label_ids: scopedLabelFilters,
+      };
+      if (showArchived) f.archived = true;
+      return f;
+    },
+    [
+      assigneeFilters,
+      creatorFilters,
+      filter,
+      includeNoAssignee,
+      scopedLabelFilters,
+      priorityFilters,
+      statusFilters,
+      showArchived,
+    ],
   );
 
   useEffect(() => {

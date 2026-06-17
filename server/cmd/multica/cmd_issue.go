@@ -674,6 +674,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if title == "" {
 		return fmt.Errorf("--title is required")
 	}
+	attachments, _ := cmd.Flags().GetStringSlice("attachment")
+	if len(attachments) > 0 {
+		if err := requireAgentTaskTokenForAuditWrite(cmd); err != nil {
+			return err
+		}
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -682,7 +688,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
 	timeout := cli.APITimeout()
-	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
 		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
@@ -878,6 +883,13 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	attachments, _ := cmd.Flags().GetStringSlice("attachment")
+	if len(attachments) > 0 {
+		if err := requireAgentTaskTokenForAuditWrite(cmd); err != nil {
+			return err
+		}
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -885,7 +897,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
 	timeout := 15 * time.Second
-	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
 		timeout = 60 * time.Second
 	}
@@ -1285,6 +1296,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	if !hasContent {
 		return fmt.Errorf("--content, --content-stdin, or --content-file is required")
+	}
+	if err := requireAgentTaskTokenForAuditWrite(cmd); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)
@@ -2177,6 +2191,10 @@ func runIssueAttachmentList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueAttachmentRemove(cmd *cobra.Command, args []string) error {
+	if err := requireAgentTaskTokenForAuditWrite(cmd); err != nil {
+		return err
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -2207,6 +2225,10 @@ func runIssueAttachmentRemove(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
+	if err := requireAgentTaskTokenForAuditWrite(cmd); err != nil {
+		return err
+	}
+
 	filePath, _ := cmd.Flags().GetString("file")
 
 	client, err := newAPIClient(cmd)
@@ -2276,12 +2298,12 @@ func runIssueAttachmentReplace(cmd *cobra.Command, args []string) error {
 
 		output, _ := cmd.Flags().GetString("output")
 		result := map[string]any{
-			"issue_id":        issueRef.ID,
-			"issue_key":       issueRef.Display,
-			"new_attachment":  newAttID,
-			"old_attachment":  oldAttID,
-			"file":            filePath,
-			"desc_rewritten":  false,
+			"issue_id":       issueRef.ID,
+			"issue_key":      issueRef.Display,
+			"new_attachment": newAttID,
+			"old_attachment": oldAttID,
+			"file":           filePath,
+			"desc_rewritten": false,
 		}
 		if output == "table" {
 			headers := []string{"ISSUE", "OLD ATTACHMENT", "NEW ATTACHMENT", "FILE"}
@@ -2407,7 +2429,7 @@ func rewriteAttachmentURLInDesc(desc, oldURL, oldFilename, newURL, newFilename s
 		if sub == nil {
 			return match
 		}
-		prefix := sub[1]   // "!file", "!", or ""
+		prefix := sub[1] // "!file", "!", or ""
 		displayName := sub[2]
 
 		// Update display name when the file was renamed and the old name was shown.

@@ -491,6 +491,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.ChannelID != "" {
+		return renderChannelMentionContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -516,6 +519,37 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+func renderChannelMentionContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Channel Mention\n\n")
+	b.WriteString("**Trigger:** Channel message mention\n\n")
+	fmt.Fprintf(&b, "**Channel ID:** `%s`\n", ctx.ChannelID)
+	if ctx.ChannelName != "" {
+		fmt.Fprintf(&b, "**Channel:** %s\n", ctx.ChannelName)
+	}
+	if ctx.ChannelMessageID != "" {
+		fmt.Fprintf(&b, "**Triggering message ID:** `%s`\n", ctx.ChannelMessageID)
+	}
+	if ctx.ChannelThreadID != "" {
+		fmt.Fprintf(&b, "**Thread ID:** `%s`\n", ctx.ChannelThreadID)
+	}
+	if ctx.ChannelReplyToID != "" {
+		fmt.Fprintf(&b, "**Reply-to message ID:** `%s`\n", ctx.ChannelReplyToID)
+	}
+	b.WriteString("\n## Triggering Message (User's Request)\n\n")
+	b.WriteString("> ")
+	b.WriteString(ctx.ChannelTriggerContent)
+	b.WriteString("\n\n")
+	if len(ctx.AgentSkills) > 0 {
+		b.WriteString("## Agent Skills\n\n")
+		for _, skill := range ctx.AgentSkills {
+			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

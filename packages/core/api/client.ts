@@ -151,6 +151,23 @@ import type {
   CreateWikiPageRequest,
   UpdateWikiPageRequest,
   ReorderWikiPagesRequest,
+  ListChannelsResponse,
+  ChannelSummary,
+  ListChannelMembersResponse,
+  ListChannelThreadsResponse,
+  ChannelThreadSummary,
+  ListThreadMessagesResponse,
+  ListChannelMessagesResponse,
+  MessageThreadResponse,
+  ChannelContextResponse,
+  ConvertMessageToIssueRequest,
+  ConvertMessageToIssueResponse,
+  ChannelMessage,
+  ChannelGroup,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  CreateChannelThreadRequest,
+  CreateChannelMessageRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
@@ -834,6 +851,8 @@ export class ApiClient {
     if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
     if (params.sort_by) search.set("sort", params.sort_by);
     if (params.sort_direction) search.set("direction", params.sort_direction);
+    if (params.archived) search.set("archived", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
@@ -875,23 +894,6 @@ export class ApiClient {
     });
     return res.blob();
   }
-
-  /**
-   * Export an issue to PDF by sending the rendered HTML from the frontend preview.
-   * This produces a PDF that closely matches the browser preview quality.
-   */
-  async exportIssueHTML(
-    id: string,
-    htmlContent: string,
-  ): Promise<Blob> {
-    const res = await this.fetchRaw(`/api/issues/${id}/export-html`, {
-      method: "POST",
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-      body: htmlContent,
-    });
-    return res.blob();
-  }
-
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
@@ -1945,6 +1947,10 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/task-runs`);
   }
 
+  async listMyTasksByIssue(issueId: string): Promise<AgentTask[]> {
+    return this.fetch(`/api/issues/${issueId}/my-task-runs`);
+  }
+
   async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
     return this.fetch(`/api/issues/${issueId}/usage`);
   }
@@ -2124,6 +2130,182 @@ export class ApiClient {
 
   async listWikiPageActivities(pageId: string, limit = 50): Promise<ListWikiPageActivitiesResponse> {
     return this.fetch(`/api/wiki-pages/${pageId}/activity?limit=${limit}`);
+  }
+
+  // Channels (OPE-1943)
+  async listChannels(): Promise<ListChannelsResponse> {
+    return this.fetch("/api/channels");
+  }
+
+  async getChannel(id: string): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`);
+  }
+
+  async createChannel(data: CreateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChannel(id: string, data: UpdateChannelRequest): Promise<ChannelSummary> {
+    return this.fetch(`/api/channels/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannel(id: string): Promise<{ deleted: boolean; channel_id: string }> {
+    return this.fetch(`/api/channels/${id}`, { method: "DELETE" });
+  }
+
+  async joinChannel(id: string): Promise<{ joined: boolean }> {
+    return this.fetch(`/api/channels/${id}/join`, { method: "POST" });
+  }
+
+  async leaveChannel(id: string): Promise<{ left: boolean }> {
+    return this.fetch(`/api/channels/${id}/leave`, { method: "POST" });
+  }
+
+  async markChannelRead(id: string): Promise<{ marked: boolean }> {
+    return this.fetch(`/api/channels/${id}/read`, { method: "POST" });
+  }
+
+  async listChannelMembers(id: string): Promise<ListChannelMembersResponse> {
+    return this.fetch(`/api/channels/${id}/members`);
+  }
+
+  async addChannelMember(channelId: string, data: { user_id: string; role?: string }): Promise<{ channel_id: string; user_id: string; role: string }> {
+    return this.fetch(`/api/channels/${channelId}/members`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listChannelThreads(channelId: string): Promise<ListChannelThreadsResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads`);
+  }
+
+  async createChannelThread(
+    channelId: string,
+    data: CreateChannelThreadRequest,
+  ): Promise<ChannelThreadSummary> {
+    return this.fetch(`/api/channels/${channelId}/threads`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteChannelThread(
+    channelId: string,
+    threadId: string,
+  ): Promise<{ deleted: boolean; thread_id: string }> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listThreadMessages(
+    channelId: string,
+    threadId: string,
+  ): Promise<ListThreadMessagesResponse> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`);
+  }
+
+  async createChannelMessage(
+    channelId: string,
+    threadId: string,
+    data: CreateChannelMessageRequest,
+  ): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/threads/${threadId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Channel V2 — flat messages
+  async listChannelMessages(
+    channelId: string,
+    params: { limit?: number; before?: string; around?: string } = {},
+  ): Promise<ListChannelMessagesResponse> {
+    const query = new URLSearchParams();
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.before) query.set("before", params.before);
+    if (params.around) query.set("around", params.around);
+    const qs = query.toString();
+    return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
+  }
+
+  async sendChannelMessage(channelId: string, data: CreateChannelMessageRequest): Promise<ChannelMessage> {
+    return this.fetch(`/api/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async replyToMessage(channelId: string, messageId: string, data: CreateChannelMessageRequest): Promise<{ message: ChannelMessage; thread: ChannelThreadSummary }> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/reply`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getMessageThread(channelId: string, messageId: string): Promise<MessageThreadResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/thread`);
+  }
+
+  async convertMessageToIssue(channelId: string, messageId: string, data?: ConvertMessageToIssueRequest): Promise<ConvertMessageToIssueResponse> {
+    return this.fetch(`/api/channels/${channelId}/messages/${messageId}/convert-issue`, {
+      method: "POST",
+      body: JSON.stringify(data ?? {}),
+    });
+  }
+
+  async removeChannelMember(channelId: string, userId: string): Promise<{ removed: boolean }> {
+    return this.fetch(`/api/channels/${channelId}/members/${userId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getChannelContext(channelId: string, recent = 20): Promise<ChannelContextResponse> {
+    return this.fetch(`/api/channels/${channelId}/context?recent=${recent}`);
+  }
+
+  // Channel Groups
+  async listChannelGroups(): Promise<ChannelGroup[]> {
+    return this.fetch("/api/channels/groups");
+  }
+
+  async createChannelGroup(name: string): Promise<ChannelGroup> {
+    return this.fetch("/api/channels/groups", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async updateChannelGroup(groupId: string, name: string): Promise<ChannelGroup> {
+    return this.fetch(`/api/channels/groups/${groupId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteChannelGroup(groupId: string): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}`, { method: "DELETE" });
+  }
+
+  async updateChannelGroupPosition(groupId: string, position: number): Promise<void> {
+    return this.fetch(`/api/channels/groups/${groupId}/position`, {
+      method: "PATCH",
+      body: JSON.stringify({ position }),
+    });
+  }
+
+  async moveChannelToGroup(channelId: string, groupId: string | null, position: number): Promise<void> {
+    return this.fetch("/api/channels/move", {
+      method: "PATCH",
+      body: JSON.stringify({ channel_id: channelId, group_id: groupId, position }),
+    });
   }
 
   // Members

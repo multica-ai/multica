@@ -27,11 +27,14 @@ import {
   Plus,
   MessageSquare,
   MessageSquareReply,
+  MessagesSquare,
   Square,
   Terminal,
   Tag,
   Trash2,
   Users,
+  FoldVertical,
+  UnfoldVertical,
 } from "lucide-react";
 import { MarkdownPreviewDrawer } from "./markdown-preview-drawer";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
@@ -98,13 +101,13 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useRecentIssuesStore, useIssueDetailCollapseStore } from "@multica/core/issues/stores";
 import { useActiveIssueContextStore } from "@multica/core/issues/stores/active-issue-context-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -767,16 +770,25 @@ function ActivityBlock({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
               {isReferencedBy ? (
-                <span className="truncate">
-                  {"referenced by "}
-                  <AppLink
-                    href={paths.issueDetail(details.source_issue_id ?? "")}
-                    className="font-medium text-foreground hover:underline"
-                  >
-                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
-                  </AppLink>
-                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
-                </span>
+                details.source_type === "channel_message" ? (
+                  <span className="truncate">
+                    {"mentioned in channel "}
+                    <span className="font-medium text-foreground">
+                      {details.source_channel_name || "channel"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {"referenced by "}
+                    <AppLink
+                      href={paths.issueDetail(details.source_issue_id ?? "")}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                    </AppLink>
+                    {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                  </span>
+                )
               ) : (
                 <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
               )}
@@ -981,7 +993,6 @@ export function IssueDetail({
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1162,16 +1173,8 @@ export function IssueDetail({
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
-  // Issue data from TQ — uses detail query, seeded from list cache if available.
-  // Only seed when description is present; list API omits it, and ContentEditor
-  // reads defaultValue on mount only — seeding null description shows an empty editor.
-  const { data: issue = null, isLoading: issueLoading } = useQuery({
-    ...issueDetailOptions(wsId, id),
-    initialData: () => {
-      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
-      return cached?.description != null ? cached : undefined;
-    },
-  });
+  // Issue data from TQ — single detail fetch (no full-list pull).
+  const { data: issue = null, isLoading: issueLoading } = useQuery(issueDetailOptions(wsId, id));
   const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
   const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
   useEffect(() => {
@@ -1556,7 +1559,6 @@ export function IssueDetail({
   const { data: parentIssue = null } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
-    initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
   // Project segment in the breadcrumb. The issue's project_id is the source of
@@ -1576,7 +1578,55 @@ export function IssueDetail({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const isDescriptionCollapsedState = useIssueDetailCollapseStore((s) =>
+    s.isDescriptionCollapsed(resolvedId, true)
+  );
+  const setDescriptionCollapsed = useIssueDetailCollapseStore((s) => s.setDescriptionCollapsed);
+  const isDescriptionCollapsed = !isEditingDescription && isDescriptionCollapsedState;
+
+  const descriptionContainerRef = useRef<HTMLDivElement>(null);
+  const [descriptionHeight, setDescriptionHeight] = useState(0);
+
+  useEffect(() => {
+    const element = descriptionContainerRef.current;
+    if (!element) return;
+
+    const observer = new ResizeObserver(() => {
+      setDescriptionHeight(element.scrollHeight);
+    });
+
+    observer.observe(element);
+    setDescriptionHeight(element.scrollHeight);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [id, issue?.description]);
+
+  const showCollapseToggle = descriptionHeight > 400 && !isEditingDescription;
+
+  const defaultSubIssuesCollapsed = useMemo(() => {
+    if (childIssues.length === 0) return false;
+    return childIssues.every((c) => c.status === "done" || c.status === "cancelled");
+  }, [childIssues]);
+
+  const subIssuesCollapsed = useIssueDetailCollapseStore((s) =>
+    s.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed)
+  );
+  const setSubIssuesCollapsed = useCallback((collapsed: boolean | ((prev: boolean) => boolean)) => {
+    const store = useIssueDetailCollapseStore.getState();
+    const current = store.isSubIssuesCollapsed(resolvedId, defaultSubIssuesCollapsed);
+    const next = typeof collapsed === "function" ? collapsed(current) : collapsed;
+    store.setSubIssuesCollapsed(resolvedId, next);
+  }, [resolvedId, defaultSubIssuesCollapsed]);
+
+  const isIssueCollapsed = isDescriptionCollapsedState && subIssuesCollapsed;
+
+  const handleToggleAllSections = useCallback(() => {
+    const nextCollapsed = !isIssueCollapsed;
+    useIssueDetailCollapseStore.getState().toggleAllSections(resolvedId, nextCollapsed);
+  }, [isIssueCollapsed, resolvedId]);
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched.
@@ -2588,6 +2638,29 @@ export function IssueDetail({
                     variant="ghost"
                     size="icon-sm"
                     className="text-muted-foreground"
+                    onClick={handleToggleAllSections}
+                  >
+                    {isIssueCollapsed ? (
+                      <UnfoldVertical className="h-4 w-4" />
+                    ) : (
+                      <FoldVertical className="h-4 w-4" />
+                    )}
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">
+                {isIssueCollapsed
+                  ? t(($) => $.detail.expand_issue)
+                  : t(($) => $.detail.collapse_issue)}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
                     onClick={() => setMarkdownPreviewOpen(true)}
                   >
                     <Eye className="h-4 w-4" />
@@ -2659,51 +2732,95 @@ export function IssueDetail({
             </AppLink>
           )}
 
+          {issue.source_channel_id && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5" />
+              <span>来自频道讨论</span>
+            </div>
+          )}
+
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
-            <ContentEditor
-              ref={descEditorRef}
-              key={id}
-              defaultValue={issue.description || ""}
-              placeholder={t(($) => $.detail.desc_placeholder)}
-              onUpdate={(md) => {
-                // Bind any pending uploads still referenced in the markdown
-                // so they appear in `issueAttachments` after refresh and the
-                // editor's text/code preview keeps working past reload.
-                //
-                // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
-                // the editor persists the durable `markdownLink`
-                // (`/api/attachments/<id>/download` / `markdown_url`) into the
-                // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
-                // therefore never matches, so the upload is never linked via
-                // `attachment_ids`. After reload it's absent from
-                // `issueAttachments`, the renderer can't resolve it to a
-                // freshly-signed `download_url`, and the persisted auth-gated
-                // download endpoint fails to load as a native <img> on clients
-                // whose origin isn't the API host (Desktop/Electron, mobile
-                // webview) — while still working on web via the cookie/proxy.
-                // This mirrors the comment/reply/chat composers, which already
-                // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
-                const ids = descPendingAttachments
-                  .filter((a) => contentReferencesAttachment(md, a))
-                  .map((a) => a.id);
-                handleUpdateField({
-                  description: md,
-                  attachment_ids: ids.length > 0 ? ids : undefined,
-                  description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
-                  description_base_value: descBaseValueRef.current ?? undefined,
-                });
-              }}
-              onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
-              onUploadFile={handleDescriptionUpload}
-              debounceMs={1500}
-              currentIssueId={resolvedId}
-              attachments={descEditorAttachments}
-              selectionQuoteActions={{
-                onQuoteToNewComment: handleEditorQuoteToNewComment,
-                onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
-                replyTargets: selectionQuoteReplyTargets,
-              }}
-            />
+            <div
+              ref={descriptionContainerRef}
+              className={cn(
+                "transition-all duration-300 relative",
+                isDescriptionCollapsed && "max-h-[400px] overflow-hidden"
+              )}
+            >
+              <ContentEditor
+                ref={descEditorRef}
+                key={id}
+                defaultValue={issue.description || ""}
+                placeholder={t(($) => $.detail.desc_placeholder)}
+                onUpdate={(md) => {
+                  // Bind any pending uploads still referenced in the markdown
+                  // so they appear in `issueAttachments` after refresh and the
+                  // editor's text/code preview keeps working past reload.
+                  //
+                  // Match with `contentReferencesAttachment`, NOT `md.includes(a.url)`:
+                  // the editor persists the durable `markdownLink`
+                  // (`/api/attachments/<id>/download` / `markdown_url`) into the
+                  // body, never the raw storage `a.url`. A bare `md.includes(a.url)`
+                  // therefore never matches, so the upload is never linked via
+                  // `attachment_ids`. After reload it's absent from
+                  // `issueAttachments`, the renderer can't resolve it to a
+                  // freshly-signed `download_url`, and the persisted auth-gated
+                  // download endpoint fails to load as a native <img> on clients
+                  // whose origin isn't the API host (Desktop/Electron, mobile
+                  // webview) — while still working on web via the cookie/proxy.
+                  // This mirrors the comment/reply/chat composers, which already
+                  // bind via `contentReferencesAttachment` (MUL-3130 / MUL-3192).
+                  const ids = descPendingAttachments
+                    .filter((a) => contentReferencesAttachment(md, a))
+                    .map((a) => a.id);
+                  handleUpdateField({
+                    description: md,
+                    attachment_ids: ids.length > 0 ? ids : undefined,
+                    description_base_updated_at: descBaseUpdatedAtRef.current || undefined,
+                    description_base_value: descBaseValueRef.current ?? undefined,
+                  });
+                }}
+                onExternalSyncAccepted={handleDescriptionExternalSyncAccepted}
+                onUploadFile={handleDescriptionUpload}
+                onFocus={() => setIsEditingDescription(true)}
+                onBlur={() => setIsEditingDescription(false)}
+                debounceMs={1500}
+                currentIssueId={resolvedId}
+                attachments={descEditorAttachments}
+                selectionQuoteActions={{
+                  onQuoteToNewComment: handleEditorQuoteToNewComment,
+                  onQuoteToReplyTarget: handleEditorQuoteToReplyTarget,
+                  replyTargets: selectionQuoteReplyTargets,
+                }}
+              />
+              {isDescriptionCollapsed && showCollapseToggle && (
+                <div className="absolute bottom-0 left-0 right-0 h-24 bg-gradient-to-t from-background via-background/80 to-transparent pointer-events-none flex items-end justify-center pb-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="pointer-events-auto shadow-sm border"
+                    onClick={() => setDescriptionCollapsed(resolvedId, false)}
+                  >
+                    {t(($) => $.detail.expand_description)}
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {!isDescriptionCollapsed && showCollapseToggle && (
+              <div className="flex justify-center mt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setDescriptionCollapsed(resolvedId, true)}
+                >
+                  {t(($) => $.detail.collapse_description)}
+                </Button>
+              </div>
+            )}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar

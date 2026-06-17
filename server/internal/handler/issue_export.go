@@ -20,10 +20,16 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
 	"golang.org/x/net/html"
 )
 
 var renderSemaphore = make(chan struct{}, 5)
+
+// mdConverter is a goldmark instance with GFM extensions enabled.
+var mdConverter = goldmark.New(
+	goldmark.WithExtensions(extension.Table, extension.Strikethrough, extension.TaskList, extension.Linkify),
+)
 
 const spacerGIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 
@@ -39,7 +45,11 @@ func RenderPDF(ctx context.Context, htmlContent string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "weasyprint", "-", "-")
+	// Force UTF-8 input decoding. The HTML we feed weasyprint may lack a
+	// <meta charset> (e.g. processHTMLImages re-renders fragments into a bare
+	// <html> document without one), and weasyprint would otherwise fall back
+	// to latin-1 and mojibake any non-ASCII text.
+	cmd := exec.CommandContext(ctx, "weasyprint", "--encoding", "utf-8", "-", "-")
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -137,8 +147,8 @@ func (h *Handler) processHTMLImages(ctx context.Context, workspaceID pgtype.UUID
 								key := h.Storage.KeyFromURL(att.Url)
 								reader, err := h.Storage.GetReader(ctx, key)
 								if err == nil {
-									defer reader.Close()
 									data, err := io.ReadAll(reader)
+									reader.Close()
 									if err == nil {
 										mime := att.ContentType
 										if mime == "" {
@@ -272,6 +282,31 @@ img {
     max-width: 100%;
     height: auto;
 }
+del {
+    text-decoration: line-through;
+    color: #57606a;
+}
+ul:has(input[type="checkbox"]) {
+    list-style: none;
+    padding-left: 0;
+}
+ul:has(input[type="checkbox"]) li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4em;
+}
+input[type="checkbox"] {
+    width: 1em;
+    height: 1em;
+    accent-color: #1f883d;
+}
+a {
+    color: #0969da;
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
 @page {
     size: A4;
     margin: 20mm;
@@ -393,7 +428,7 @@ func (h *Handler) ExportIssue(w http.ResponseWriter, r *http.Request) {
 	if issue.Description.Valid {
 		descStr = issue.Description.String
 	}
-	if err := goldmark.Convert([]byte(descStr), &issueBodyHTML); err != nil {
+	if err := mdConverter.Convert([]byte(descStr), &issueBodyHTML); err != nil {
 		slog.Error("failed to compile issue description markdown", "issue_id", uuidToString(issue.ID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to compile markdown")
 		return
@@ -413,7 +448,7 @@ func (h *Handler) ExportIssue(w http.ResponseWriter, r *http.Request) {
 		pdfData.Comments = make([]pdfCommentData, len(comments))
 		for i, c := range comments {
 			var commentHTML bytes.Buffer
-			if err := goldmark.Convert([]byte(c.Content), &commentHTML); err != nil {
+			if err := mdConverter.Convert([]byte(c.Content), &commentHTML); err != nil {
 				slog.Error("failed to compile comment markdown", "comment_id", uuidToString(c.ID), "error", err)
 				continue
 			}
@@ -451,198 +486,4 @@ func (h *Handler) ExportIssue(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"issue-%s.pdf\"", identifier))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
-}
-
-// ExportIssueHTML handler implements POST /api/issues/{id}/export-html.
-// It accepts an HTML body from the frontend preview and converts it to PDF,
-// producing output that matches the browser preview exactly.
-func (h *Handler) ExportIssueHTML(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	issue, ok := h.loadIssueForUser(w, r, id)
-	if !ok {
-		return
-	}
-
-	// Limit request body to 10 MB
-	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read request body")
-		return
-	}
-
-	htmlContent := string(body)
-	if strings.TrimSpace(htmlContent) == "" {
-		writeError(w, http.StatusBadRequest, "empty HTML content")
-		return
-	}
-
-	// Process images: replace private attachment URLs with base64 data URIs
-	htmlContent = h.processHTMLImages(r.Context(), issue.WorkspaceID, htmlContent)
-
-	// Wrap in a minimal HTML document with print-optimized CSS if not already a full document
-	if !strings.Contains(htmlContent, "<html") {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-		identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
-		htmlContent = wrapHTMLForPrint(htmlContent, issue.Title, identifier)
-	}
-
-	pdfBytes, err := RenderPDF(r.Context(), htmlContent)
-	if err != nil {
-		slog.Error("failed to render pdf from html", "issue_id", uuidToString(issue.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to render pdf: %v", err))
-		return
-	}
-
-	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
-	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
-
-	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"issue-%s.pdf\"", identifier))
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(pdfBytes)
-}
-
-// wrapHTMLForPrint wraps an HTML fragment in a full document with print-friendly CSS
-// that closely mirrors the frontend ReadonlyContent appearance.
-func wrapHTMLForPrint(bodyHTML, title, identifier string) string {
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>%s</title>
-<style>
-/* Reset & base */
-*, *::before, *::after { box-sizing: border-box; }
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-    background: #ffffff;
-    color: #1f2328;
-    line-height: 1.6;
-    font-size: 14px;
-    max-width: 100%%;
-    padding: 0;
-    margin: 0;
-    word-wrap: break-word;
-}
-
-/* Headings */
-h1, h2, h3, h4, h5, h6 {
-    color: #1f2328;
-    font-weight: 600;
-    line-height: 1.25;
-    margin-top: 24px;
-    margin-bottom: 16px;
-    break-after: avoid;
-    page-break-after: avoid;
-}
-h1 { font-size: 2em; padding-bottom: 0.3em; border-bottom: 1px solid #d1d9e0; }
-h2 { font-size: 1.5em; padding-bottom: 0.3em; border-bottom: 1px solid #d1d9e0; }
-h3 { font-size: 1.25em; }
-h4 { font-size: 1em; }
-
-/* Paragraphs & inline */
-p { margin-top: 0; margin-bottom: 16px; }
-a { color: #0969da; text-decoration: none; }
-strong { font-weight: 600; }
-
-/* Lists */
-ul, ol { padding-left: 2em; margin-top: 0; margin-bottom: 16px; }
-li + li { margin-top: 0.25em; }
-ul ul, ul ol, ol ul, ol ol { margin-bottom: 0; }
-
-/* Task lists */
-input[type="checkbox"] { margin-right: 0.5em; }
-
-/* Code */
-code {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    background-color: rgba(175,184,193,0.2);
-    padding: 0.2em 0.4em;
-    border-radius: 6px;
-    font-size: 85%%;
-}
-pre {
-    background-color: #f6f8fa;
-    border: 1px solid #d0d7de;
-    border-radius: 6px;
-    padding: 16px;
-    overflow: auto;
-    font-size: 85%%;
-    line-height: 1.45;
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
-pre code {
-    background: transparent;
-    padding: 0;
-    border-radius: 0;
-    font-size: 100%%;
-}
-
-/* Tables */
-table {
-    border-collapse: collapse;
-    width: 100%%;
-    margin: 16px 0;
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
-th, td {
-    border: 1px solid #d0d7de;
-    padding: 6px 13px;
-    text-align: left;
-}
-th { font-weight: 600; background-color: #f6f8fa; }
-tr:nth-child(2n) { background-color: #f6f8fa; }
-
-/* Blockquote */
-blockquote {
-    border-left: 0.25em solid #d0d7de;
-    color: #656d76;
-    padding: 0 1em;
-    margin: 0 0 16px 0;
-}
-
-/* Images */
-img {
-    max-width: 100%%;
-    height: auto;
-    break-inside: avoid;
-    page-break-inside: avoid;
-}
-
-/* HR */
-hr {
-    border: 0;
-    border-top: 1px solid #d1d9e0;
-    margin: 24px 0;
-}
-
-/* Print page setup */
-@page {
-    size: A4;
-    margin: 15mm 20mm;
-    @top-center {
-        content: "Multica Issue [%s]";
-        font-family: sans-serif;
-        font-size: 9pt;
-        color: #888;
-        border-bottom: 1px solid #ddd;
-        padding-bottom: 5px;
-        margin-bottom: 10px;
-    }
-    @bottom-center {
-        content: "第 " counter(page) " 页，共 " counter(pages) " 页";
-        font-family: sans-serif;
-        font-size: 9pt;
-        color: #888;
-    }
-}
-</style>
-</head>
-<body>
-%s
-</body>
-</html>`, template.HTMLEscapeString(title), identifier, bodyHTML)
 }

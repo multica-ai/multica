@@ -38,7 +38,7 @@ import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
-import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
+import { createMentionSuggestion, type MentionItem, type MentionSuggestionScope } from "./mention-suggestion";
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import { CodeBlockView } from "./code-block-view";
@@ -133,6 +133,7 @@ export interface EditorExtensionsOptions {
    * system prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  mentionScope?: MentionSuggestionScope;
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
@@ -203,7 +204,13 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? {
+              suggestion: createMentionSuggestion(options.queryClient, {
+                mode: options.mentionMode,
+                getContextItems: options.getMentionContextItems,
+                scope: options.mentionScope,
+              }),
+            }
           : {}),
     }),
     SlashCommandExtension.configure({

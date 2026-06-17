@@ -171,6 +171,12 @@ type Daemon struct {
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
 	runUpdateFn func(targetVersion string) (string, error)
+
+	// zdotdirOnce guards lazy setup of the managed ZDOTDIR (see
+	// agent_shell_env.go). zdotdirPath is the resulting directory, or "" when
+	// setup is unsupported (Windows) or failed.
+	zdotdirOnce sync.Once
+	zdotdirPath string
 }
 
 // New creates a new Daemon instance.
@@ -2805,6 +2811,17 @@ func taskAgentName(task Task) string {
 	return "Agent"
 }
 
+func agentTaskCredential(task Task) (string, error) {
+	token := strings.TrimSpace(task.AuthToken)
+	if token == "" {
+		return "", fmt.Errorf("refusing to spawn agent: task has no task-scoped auth_token (task_id=%s)", task.ID)
+	}
+	if !strings.HasPrefix(token, "mat_") {
+		return "", fmt.Errorf("refusing to spawn agent: task auth_token is not a task token (task_id=%s)", task.ID)
+	}
+	return token, nil
+}
+
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
 	d.taskProviders.Store(task.ID, provider)
 	defer d.taskProviders.Delete(task.ID)
@@ -2864,6 +2881,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
+		ChannelID:                        task.ChannelID,
+		ChannelName:                      task.ChannelName,
+		ChannelMessageID:                 task.ChannelMessageID,
+		ChannelThreadID:                  task.ChannelThreadID,
+		ChannelReplyToID:                 task.ChannelReplyToID,
+		ChannelThreadRootMsgID:           task.ChannelThreadRootMsgID,
+		ChannelTriggerContent:            task.ChannelTriggerContent,
+		ChannelMentionType:               task.ChannelMentionType,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -3020,24 +3045,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskStart := time.Now()
 	traceRunID := newTraceRunID(taskStart)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// Pass task-scoped credentials and context so the spawned agent CLI can call
+	// the Multica API and the local daemon (e.g. `multica repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
-	// MULTICA_TOKEN is the credential the agent process will use to call the
-	// Multica API. Prefer the task-scoped token the server minted at claim
-	// time — that token is bound to (agent, task) and the auth middleware
-	// rejects it on owner-only endpoints (e.g. `/api/agents/{id}/env`), so
-	// the agent cannot use it to read another agent's secrets. Falls back
-	// to the daemon's own credential only when the server returned no
-	// auth_token (older server, or cloud / system runtime with no owner) —
-	// in that legacy mode lateral-movement protection relies on the
-	// runtime not handing the daemon a workspace-owner PAT in the first
-	// place. See MUL-2600.
-	agentToken := task.AuthToken
-	if agentToken == "" {
-		agentToken = d.client.Token()
+	// MULTICA_TOKEN must be the task-scoped token minted by the server at
+	// claim time. It is bound to (agent, task, workspace, owner), and the auth
+	// middleware derives agent identity from that binding. Never fall back to
+	// the daemon/member credential here: doing so makes agent CLI writes look
+	// like member writes in audit records.
+	agentToken, err := agentTaskCredential(task)
+	if err != nil {
+		return TaskResult{}, err
 	}
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        agentToken,
@@ -3077,6 +3097,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if selfBin, err := os.Executable(); err == nil {
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
+	}
+	// PATH ordering in the inherited env is not enough: coding agents run their
+	// shell tool-calls through a login zsh, which re-sources the user's
+	// ~/.zprofile and re-prepends Homebrew's bin (shadowing our binDir with a
+	// stale brew-installed multica). Point zsh at a daemon-managed ZDOTDIR that
+	// sources the user's real rc files and then re-prepends binDir last, so the
+	// daemon's own multica always wins. No-op for non-zsh / Windows.
+	if zdotdir := d.managedZdotdir(); zdotdir != "" {
+		agentEnv["ZDOTDIR"] = zdotdir
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -4090,7 +4119,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "CODEX_HOME",
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "ZDOTDIR", "CODEX_HOME",
 		"OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS",
 		"OPENCLAW_HOME", "OPENCLAW_STATE_DIR", "OPENCLAW_GATEWAY_PORT":
 		return true

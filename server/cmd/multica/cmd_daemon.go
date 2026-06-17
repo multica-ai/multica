@@ -137,6 +137,15 @@ func daemonLogPathForInstance(profile, configPath string) string {
 	return filepath.Join(daemonDirForInstance(profile, configPath), "daemon.log")
 }
 
+// daemonStartupErrorPathForInstance returns the path to a sentinel file the
+// foreground child writes when it fails during startup (e.g. "no agent CLI
+// found"). The background parent polls this file during its readiness wait so a
+// fatal startup failure is surfaced immediately instead of after the full
+// startupTimeout.
+func daemonStartupErrorPathForInstance(profile, configPath string) string {
+	return filepath.Join(daemonDirForInstance(profile, configPath), "startup_error")
+}
+
 // healthPortForInstance returns the health check port for the given instance.
 // Default profile uses the standard port (19514). Other instances get a
 // deterministic offset derived from the profile or explicit config path.
@@ -254,8 +263,24 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	deadline := time.Now().Add(startupTimeout)
 	started := false
 	lastStatus := ""
+	startupErrPath := daemonStartupErrorPathForInstance(profile, configPath)
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
+		// The foreground child writes a sentinel when it fails before binding
+		// the health port (e.g. "no agent CLI found"). Surface it immediately
+		// rather than waiting out the full timeout.
+		if data, err := os.ReadFile(startupErrPath); err == nil {
+			os.Remove(startupErrPath)
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "❌  Daemon failed to start.")
+			fmt.Fprintln(os.Stderr, "")
+			if msg := strings.TrimSpace(string(data)); msg != "" {
+				fmt.Fprintln(os.Stderr, msg)
+				fmt.Fprintln(os.Stderr, "")
+			}
+			fmt.Fprintf(os.Stderr, "Logs: %s\n", logPath)
+			return nil
+		}
 		hctx, hcancel := context.WithTimeout(context.Background(), 2*time.Second)
 		health = checkDaemonHealthOnPort(hctx, healthPort)
 		hcancel()
@@ -265,11 +290,21 @@ func runDaemonBackground(cmd *cobra.Command) error {
 			break
 		}
 	}
+	// Clean up a stale sentinel if the daemon did come up (or timed out) — a
+	// previous crashed run could have left one behind.
+	os.Remove(startupErrPath)
 	if !started {
 		if lastStatus == "starting" {
 			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
 		} else {
 			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+		}
+		// Tail the log file to surface actionable errors (e.g. "no agent CLI
+		// found") directly in the terminal so users don't have to hunt for
+		// the log file.
+		if tail, err := tailLogForUser(logPath, 12); err == nil && tail != "" {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, tail)
 		}
 		return nil
 	}
@@ -383,6 +418,21 @@ func runDaemonForeground(cmd *cobra.Command) error {
 
 	cfg, err := daemon.LoadConfig(overrides)
 	if err != nil {
+		// Write a sentinel the background parent polls for, so a fatal startup
+		// failure is surfaced immediately instead of after the full 45s
+		// readiness wait. Best-effort: a write failure must not mask the real
+		// error.
+		if dir := daemonDirForInstance(profile, configPath); dir != "" {
+			_ = os.WriteFile(daemonStartupErrorPathForInstance(profile, configPath), []byte(err.Error()), 0o644)
+		}
+		if strings.Contains(err.Error(), "no agent CLI found") {
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, "❌  Cannot start daemon — no AI agent CLI detected.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(os.Stderr, "")
+			return fmt.Errorf("no agent CLI found")
+		}
 		return err
 	}
 	cfg.CLIVersion = version
@@ -705,6 +755,22 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 func flagString(cmd *cobra.Command, name string) string {
 	val, _ := cmd.Flags().GetString(name)
 	return val
+}
+
+// tailLogForUser reads the last n lines from a log file and returns them as a
+// formatted string suitable for stderr output. Returns empty string on any
+// error (missing file, unreadable, etc.) — this is a best-effort convenience,
+// not a critical path.
+func tailLogForUser(path string, n int) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // --- daemon disk-usage ---

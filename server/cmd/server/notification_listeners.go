@@ -826,14 +826,6 @@ func latestAgentCommentForTask(
 	return comment.Content, util.UUIDToString(comment.ID)
 }
 
-// parentBubbleNotifTypes is the allowlist of inbox notification types that
-// bubble up from a sub-issue to subscribers of its parent. Other event types
-// only notify subscribers of the sub-issue itself, to keep parent watchers'
-// inboxes focused on the signal that matters most: status transitions.
-var parentBubbleNotifTypes = map[string]bool{
-	"status_changed": true,
-}
-
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
@@ -1059,9 +1051,6 @@ func archiveStaleTaskFailedInbox(
 // notifySubscribers queries the subscriber table for an issue, excludes the
 // actor and any extra IDs, and creates inbox items for each remaining member
 // subscriber. Publishes an inbox:new event for each notification.
-// If the issue has a parent and the notification type is in the bubble
-// allowlist, parent issue subscribers are also notified (deduplicated
-// against direct subscribers).
 // Returns the set of member IDs that were notified.
 func notifySubscribers(
 	ctx context.Context,
@@ -1079,51 +1068,13 @@ func notifySubscribers(
 	commentID string,
 	details []byte,
 ) map[string]bool {
-	notified := notifyIssueSubscribers(ctx, queries, bus,
+	return notifyIssueSubscribers(ctx, queries, bus,
 		issueID, issueID, issueStatus, workspaceID, e, exclude,
 		notifType, severity, title, body, commentID, details)
-
-	// Only a small allowlist of event types bubbles to parent subscribers.
-	if !parentBubbleNotifTypes[notifType] {
-		return notified
-	}
-
-	// Also notify parent issue subscribers if this is a sub-issue.
-	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
-	if err != nil {
-		slog.Error("failed to get issue for parent notification",
-			"issue_id", issueID, "error", err)
-		return notified
-	}
-	if !issue.ParentIssueID.Valid {
-		return notified
-	}
-
-	// Merge already-notified IDs into exclude set for parent subscribers.
-	parentExclude := make(map[string]bool, len(exclude)+len(notified))
-	for id := range exclude {
-		parentExclude[id] = true
-	}
-	for id := range notified {
-		parentExclude[id] = true
-	}
-
-	// Query subscribers from the parent issue, but the inbox item still
-	// points to the sub-issue so the user navigates to the actual change.
-	parentID := util.UUIDToString(issue.ParentIssueID)
-	parentNotified := notifyIssueSubscribers(ctx, queries, bus,
-		parentID, issueID, issueStatus, workspaceID, e, parentExclude,
-		notifType, severity, title, body, commentID, details)
-	for id := range parentNotified {
-		notified[id] = true
-	}
-	return notified
 }
 
 // notifyIssueSubscribers sends inbox notifications to subscribers of
 // subscriberIssueID, but creates inbox items pointing to targetIssueID.
-// This allows querying subscribers from a parent issue while the notification
-// links to the sub-issue where the change actually occurred.
 // Returns the set of member IDs that were notified.
 func notifyIssueSubscribers(
 	ctx context.Context,

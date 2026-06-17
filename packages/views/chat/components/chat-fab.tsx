@@ -13,6 +13,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 const logger = createLogger("chat.ui");
 
@@ -21,9 +22,11 @@ export function ChatFab() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const toggle = useChatStore((s) => s.toggle);
+  const { pathname } = useNavigation();
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
 
+  if (/^\/[^/]+\/channels(?:\/|$)?/.test(pathname)) return null;
   if (isOpen) return null;
 
   const unreadSessionCount = sessions.filter((s) => s.has_unread).length;

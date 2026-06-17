@@ -60,6 +60,38 @@ func createDaemonTestRepo(t *testing.T) string {
 	return dir
 }
 
+func TestAgentTaskCredentialRequiresTaskToken(t *testing.T) {
+	t.Run("task token passes", func(t *testing.T) {
+		got, err := agentTaskCredential(Task{ID: "task-1", AuthToken: "mat_task_token"})
+		if err != nil {
+			t.Fatalf("agentTaskCredential(): %v", err)
+		}
+		if got != "mat_task_token" {
+			t.Fatalf("agentTaskCredential() = %q, want task token", got)
+		}
+	})
+
+	t.Run("missing token fails closed", func(t *testing.T) {
+		_, err := agentTaskCredential(Task{ID: "task-1"})
+		if err == nil {
+			t.Fatal("agentTaskCredential(): expected error")
+		}
+		if !strings.Contains(err.Error(), "no task-scoped auth_token") {
+			t.Fatalf("error = %q", err.Error())
+		}
+	})
+
+	t.Run("member token fails closed", func(t *testing.T) {
+		_, err := agentTaskCredential(Task{ID: "task-1", AuthToken: "mul_member_token"})
+		if err == nil {
+			t.Fatal("agentTaskCredential(): expected error")
+		}
+		if !strings.Contains(err.Error(), "not a task token") {
+			t.Fatalf("error = %q", err.Error())
+		}
+	})
+}
+
 func TestNormalizeServerBaseURL(t *testing.T) {
 	t.Parallel()
 

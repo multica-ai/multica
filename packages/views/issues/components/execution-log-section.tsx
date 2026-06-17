@@ -532,62 +532,68 @@ function PastRow({
   };
 
   return (
-    <RowShell task={task} runIndex={runIndex} colorClass={colorClass}>
-      <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => void retryTask()}
-                  disabled={retrying}
-                  aria-label={t(($) => $.execution_log.retry_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCw className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={() => setRetryWithNoteOpen(true)}
-                  disabled={retrying}
-                  aria-label={t(($) => $.retry_with_note.action)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <MessageSquarePlus className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.retry_with_note.action)}</TooltipContent>
-          </Tooltip>
-        )}
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-      </RowActions>
-      <RetryWithNoteDialog
-        open={retryWithNoteOpen}
-        pending={retrying}
-        onOpenChange={setRetryWithNoteOpen}
-        onSubmit={(note) => retryTask(note)}
-      />
-    </RowShell>
+    <div className="flex flex-col">
+      <RowShell
+        task={task}
+        runIndex={runIndex}
+        colorClass={colorClass}
+      >
+        <TriggerText text={trigger} fullText={task.trigger_summary} onClick={handleTriggerClick} />
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{exitCodeText ?? failureLabel ?? label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => void retryTask()}
+                    disabled={retrying}
+                    aria-label={t(($) => $.execution_log.retry_task_aria)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCw className="h-3.5 w-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => setRetryWithNoteOpen(true)}
+                    disabled={retrying}
+                    aria-label={t(($) => $.retry_with_note.action)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <MessageSquarePlus className="h-3.5 w-3.5" />
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.retry_with_note.action)}</TooltipContent>
+            </Tooltip>
+          )}
+          <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        </RowActions>
+        <RetryWithNoteDialog
+          open={retryWithNoteOpen}
+          pending={retrying}
+          onOpenChange={setRetryWithNoteOpen}
+          onSubmit={(note) => retryTask(note)}
+        />
+      </RowShell>
+    </div>
   );
 }
 

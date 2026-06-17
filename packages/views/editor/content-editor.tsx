@@ -42,6 +42,7 @@ import {
 import { useEditor, EditorContent } from "@tiptap/react";
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { MentionSuggestionScope } from "./extensions/mention-suggestion";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
 import type { Attachment } from "@multica/core/types";
@@ -100,6 +101,7 @@ interface ContentEditorProps {
   debounceMs?: number;
   onSubmit?: () => void;
   onBlur?: () => void;
+  onFocus?: () => void;
   onExternalSyncAccepted?: (markdown: string) => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
@@ -120,6 +122,7 @@ interface ContentEditorProps {
    * prompts) but *preserving* an existing one still matters.
    */
   disableMentions?: boolean;
+  mentionScope?: MentionSuggestionScope;
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
@@ -187,12 +190,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       debounceMs = 300,
       onSubmit,
       onBlur,
+      onFocus,
       onExternalSyncAccepted,
       onUploadFile,
       showBubbleMenu = true,
       submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
+      mentionScope,
       mentionMode = "default",
       mentionContextItems,
       enableSlashCommands = false,
@@ -206,10 +211,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onFocusRef = useRef(onFocus);
     const onExternalSyncAcceptedRef = useRef(onExternalSyncAccepted);
     const onUploadFileRef = useRef<
       ((file: File) => Promise<UploadResult | null>) | undefined
     >(undefined);
+    const mentionScopeRef = useRef(mentionScope);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
     // When the editor fires onUpdate (debounced save), we set this flag to
@@ -283,8 +290,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onFocusRef.current = onFocus;
     onExternalSyncAcceptedRef.current = onExternalSyncAccepted;
     onUploadFileRef.current = wrappedOnUploadFile;
+    mentionScopeRef.current = mentionScope;
     mentionContextItemsRef.current = mentionContextItems ?? [];
 
     const queryClient = useQueryClient();
@@ -335,6 +344,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onUploadFileRef,
         submitOnEnter,
         disableMentions,
+        mentionScope: {
+          getMemberIds: () => mentionScopeRef.current?.memberIds,
+        },
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
@@ -351,6 +363,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           suppressSyncRef.current = true;
           onUpdateRef.current?.(md);
         }, debounceMs);
+      },
+      onFocus: () => {
+        onFocusRef.current?.();
       },
       onBlur: () => {
         onBlurRef.current?.();
