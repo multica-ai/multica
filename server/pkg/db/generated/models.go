@@ -45,6 +45,7 @@ type Agent struct {
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
 	PersonaSandbox     pgtype.Text        `json:"persona_sandbox"`
+	SurfaceVisibility  []byte             `json:"surface_visibility"`
 }
 
 type AgentBudgetOverride struct {

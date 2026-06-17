@@ -48,6 +48,8 @@ import { getMentionAccessContext } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(private-agent-owner-only-trigger): owner-only @mention trigger
 // rule — flags private agents a non-owner can see but cannot wake (FIR-2349).
 import { canTriggerPrivateAgentMention } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from @-mention autocomplete.
+import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
 import { Lock } from "lucide-react";
 import { createSuggestionPopupRender } from "./suggestion-popup";
 
@@ -624,6 +626,9 @@ export function createMentionSuggestion(
         (a) =>
           !a.archived_at &&
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
+          // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents the
+          // owner hid from @-mention (owner/admin still see their own).
+          !isAgentHiddenOnSurface(a, "mention", { userId, role: myRole }) &&
           // CEREBRO-PATCH(private-agent-visible-but-locked): FIR-2385 — a private
           // agent the member can't assign still appears (locked, wontTrigger) so a
           // tag turns into a run-request to the owner. The backend only returns it

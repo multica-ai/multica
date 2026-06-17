@@ -5,25 +5,73 @@
 // "New note" capture, without leaving the inbox; clicking a note (or creating
 // one) opens the full Notes surface deep-linked to that note. Self-contained:
 // owns its own data + chrome so the dynamic inbox only has to mount it.
+//
+// TECH-3690 (Jesper) — the box was the only inbox block without a settings
+// menu. It now has one (Settings2 dropdown), mirroring the Chat/Team block:
+// how many notes to show, pinned-only, sort (pinned-first / latest changed /
+// newest), and which visibilities to include (private / shared / workspace).
+// All filtering is client-side over a fetch window so no API/server change is
+// needed — the box is a top-N widget, not a full browser.
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { NotebookPen, Pin, Plus, X } from "lucide-react";
+import { NotebookPen, Pin, Plus, Settings2, X } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { cn } from "@multica/ui/lib/utils";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuGroup,
+  DropdownMenuSeparator,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
+  applyBoxSettings,
   firstLineTitle,
-  recentNotesOptions,
+  notesListOptions,
   useCreateNote,
   type Note,
+  type NotesBoxSort,
+  type NoteVisibility,
 } from "../core";
+
+export type { NotesBoxSort } from "../core";
+
+const DEFAULT_LIMIT = 6;
+
+const LIMIT_OPTIONS: number[] = [3, 6, 10, 15, 20];
+
+const SORT_OPTIONS: Array<{ label: string; value: NotesBoxSort }> = [
+  { label: "Pinned first", value: "pinned" },
+  { label: "Latest changed", value: "updated" },
+  { label: "Newest", value: "created" },
+];
+
+const VISIBILITY_OPTIONS: Array<{ label: string; value: NoteVisibility }> = [
+  { label: "Private", value: "private" },
+  { label: "Shared", value: "shared" },
+  { label: "Workspace", value: "workspace" },
+];
 
 export interface NotesInboxBoxProps {
   title?: string;
   onRemove: () => void;
   /** Max notes to show; defaults to 6. */
   limit?: number;
+  /** TECH-3690 — only show pinned notes. Default false. */
+  pinnedOnly?: boolean;
+  /** TECH-3690 — sort order. Default "pinned". */
+  sort?: NotesBoxSort;
+  /** TECH-3690 — which visibilities to include. undefined / empty = all. */
+  visibility?: NoteVisibility[];
+  /** TECH-3690 — settings callbacks; when all omitted, the gear is hidden. */
+  onSetLimit?: (n: number) => void;
+  onSetPinnedOnly?: (v: boolean) => void;
+  onSetSort?: (s: NotesBoxSort) => void;
+  onSetVisibility?: (v: NoteVisibility[]) => void;
   /** Drag handle injected by the dynamic inbox's sortable wrapper. */
   dragHandle?: ReactNode;
 }
@@ -31,14 +79,37 @@ export interface NotesInboxBoxProps {
 export function NotesInboxBox({
   title,
   onRemove,
-  limit = 6,
+  limit = DEFAULT_LIMIT,
+  pinnedOnly = false,
+  sort = "pinned",
+  visibility,
+  onSetLimit,
+  onSetPinnedOnly,
+  onSetSort,
+  onSetVisibility,
   dragHandle,
 }: NotesInboxBoxProps) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const { push } = useNavigation();
-  const { data: notes = [] } = useQuery(recentNotesOptions(wsId, limit));
+  // Fetch a generous window, then filter/sort/slice client-side. The window is
+  // bounded so the box stays a lightweight top-N widget.
+  const fetchWindow = Math.min(100, Math.max(50, limit));
+  const { data: allNotes = [] } = useQuery(
+    notesListOptions(wsId, { limit: fetchWindow }),
+  );
   const createNote = useCreateNote();
+
+  const notes = applyBoxSettings(allNotes, {
+    limit,
+    pinnedOnly,
+    sort,
+    visibility,
+  });
+
+  const hasSettings = Boolean(
+    onSetLimit || onSetPinnedOnly || onSetSort || onSetVisibility,
+  );
 
   const openNote = (id: string) =>
     push(`${paths.notes()}?note=${encodeURIComponent(id)}`);
@@ -47,6 +118,15 @@ export function NotesInboxBox({
     const note = await createNote.mutateAsync({ visibility: "private" });
     if (note) openNote(note.id);
     else push(paths.notes());
+  };
+
+  const toggleVisibility = (v: NoteVisibility) => {
+    if (!onSetVisibility) return;
+    const current = visibility ?? [];
+    const next = current.includes(v)
+      ? current.filter((x) => x !== v)
+      : [...current, v];
+    onSetVisibility(next);
   };
 
   return (
@@ -69,6 +149,85 @@ export function NotesInboxBox({
             <Plus className="size-3.5" />
             New
           </button>
+          {hasSettings && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    className="rounded p-1 hover:bg-muted"
+                    title="Settings"
+                  />
+                }
+              >
+                <Settings2 className="size-3.5" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-56">
+                {onSetSort && (
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                    {SORT_OPTIONS.map((opt) => (
+                      <DropdownMenuItem
+                        key={opt.value}
+                        onClick={() => onSetSort(opt.value)}
+                      >
+                        {opt.label} {sort === opt.value ? "✓" : ""}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                )}
+                {onSetPinnedOnly && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuItem
+                        onClick={() => onSetPinnedOnly(!pinnedOnly)}
+                      >
+                        Pinned only {pinnedOnly ? "✓" : ""}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  </>
+                )}
+                {onSetVisibility && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Show</DropdownMenuLabel>
+                      {VISIBILITY_OPTIONS.map((opt) => {
+                        // undefined / empty = all visibilities are shown.
+                        const all = !visibility || visibility.length === 0;
+                        const active = all || visibility.includes(opt.value);
+                        return (
+                          <DropdownMenuItem
+                            key={opt.value}
+                            onClick={() => toggleVisibility(opt.value)}
+                          >
+                            {opt.label} {active ? "✓" : ""}
+                          </DropdownMenuItem>
+                        );
+                      })}
+                    </DropdownMenuGroup>
+                  </>
+                )}
+                {onSetLimit && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>How many</DropdownMenuLabel>
+                      {LIMIT_OPTIONS.map((opt) => (
+                        <DropdownMenuItem
+                          key={opt}
+                          onClick={() => onSetLimit(opt)}
+                        >
+                          {opt} {limit === opt ? "✓" : ""}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
           <button
             type="button"
             className="rounded p-1 hover:bg-muted"
@@ -87,7 +246,9 @@ export function NotesInboxBox({
             onClick={handleNew}
             className="block w-full px-3 py-3 text-left text-xs text-muted-foreground hover:bg-muted/50"
           >
-            No notes yet — capture a thought.
+            {pinnedOnly
+              ? "No pinned notes yet."
+              : "No notes yet — capture a thought."}
           </button>
         ) : (
           notes.map((n: Note) => (

@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
+// CEREBRO-PATCH(zoomable-image-preview): pinch/wheel zoom on the image lightbox (TECH-3695)
+import { ZoomableImage } from "@multica/cerebro-ui";
 import { useT } from "../../i18n";
 import { useAttachmentDownloadResolver } from "../attachment-download-context";
 
@@ -42,11 +44,12 @@ function ImageLightbox({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 cursor-zoom-out"
       onClick={onClose}
     >
-      <img
+      {/* CEREBRO-PATCH(zoomable-image-preview): TECH-3695 — pinch/wheel zoom */}
+      <ZoomableImage
         src={src}
         alt={alt}
-        className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
-        onClick={(e) => e.stopPropagation()}
+        viewportClassName="h-[90vh] w-[90vw]"
+        className="rounded-lg"
       />
     </div>,
     document.body,

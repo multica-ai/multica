@@ -40,6 +40,8 @@ import { Download, FileText, Loader2, X } from "lucide-react";
 import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { cn } from "@multica/ui/lib/utils";
+// CEREBRO-PATCH(zoomable-image-preview): pinch/wheel zoom on the attachment image preview (TECH-3695)
+import { ZoomableImage } from "@multica/cerebro-ui";
 import {
   api,
   PreviewTooLargeError,
@@ -323,10 +325,11 @@ function PreviewContent({
     case "image":
       return (
         <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
-          <img
+          {/* CEREBRO-PATCH(zoomable-image-preview): TECH-3695 — pinch/wheel zoom */}
+          <ZoomableImage
             src={state.mediaUrl}
             alt={state.filename}
-            className="h-full w-full rounded-lg object-contain"
+            className="rounded-lg"
           />
         </div>
       );

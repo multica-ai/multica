@@ -7,6 +7,8 @@ import { useQuery } from "@tanstack/react-query";
 import { GROUP_ACCESS_LOCKED_TOOLTIP } from "@multica/core/agents";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from the assignee picker ("lists" surface).
+import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
@@ -90,6 +92,8 @@ export function AssigneePicker({
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
   const filteredAgents = agents
     .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
+    // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents hidden from the assignee picker.
+    .filter((a) => !isAgentHiddenOnSurface(a, "lists", { userId: user?.id ?? null, role: memberRole ?? null }))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = squads
     .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))

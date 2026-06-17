@@ -1,7 +1,9 @@
 export { NotesPage } from "./notes-page";
 export { NotesNavItem } from "./notes-nav-item";
 export { NotesInboxBox } from "./notes-inbox-box";
-export type { NotesInboxBoxProps } from "./notes-inbox-box";
+export type { NotesInboxBoxProps, NotesBoxSort } from "./notes-inbox-box";
+export { NoteInboxBox } from "./note-inbox-box";
+export type { NoteInboxBoxProps } from "./note-inbox-box";
 export { NoteReferences, NoteAddReferenceDialog } from "./note-references";
 export { NoteCreateIssueDialog } from "./note-create-issue-dialog";
 export { NoteFolderCreateDialog } from "./note-folder-create-dialog";

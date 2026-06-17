@@ -74,6 +74,8 @@ type AgentResponse struct {
 	InfisicalFolders []AgentInfisicalFolderResponse `json:"infisical_folders,omitempty"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
 	CanTrigger bool `json:"can_trigger"`
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery flags.
+	SurfaceVisibility map[string]bool `json:"surface_visibility,omitempty"`
 }
 
 func agentToResponse(a db.Agent) AgentResponse {
@@ -140,6 +142,8 @@ func agentToResponse(a db.Agent) AgentResponse {
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
 		ArchivedBy:         uuidToPtr(a.ArchivedBy),
 		PersonaSandbox:     a.PersonaSandbox.String,
+		// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — expose per-surface flags.
+		SurfaceVisibility: surfaceVisibilityResponse(a.SurfaceVisibility),
 	}
 }
 
@@ -855,6 +859,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility.
+	surfaceVisibility, svOK := normalizeSurfaceVisibilityInput(json.RawMessage(rawFields["surface_visibility"]))
+	if !svOK {
+		writeError(w, http.StatusBadRequest, "invalid surface_visibility")
+		return
+	}
+
 	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               req.Name,
@@ -872,6 +883,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:          mc,
 		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		SurfaceVisibility:  surfaceVisibility,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1174,6 +1186,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Visibility != nil {
 		params.Visibility = pgtype.Text{String: *req.Visibility, Valid: true}
+	}
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility.
+	if rawSV, hasSV := rawFields["surface_visibility"]; hasSV {
+		sv, svOK := normalizeSurfaceVisibilityInput(json.RawMessage(rawSV))
+		if !svOK {
+			writeError(w, http.StatusBadRequest, "invalid surface_visibility")
+			return
+		}
+		params.SurfaceVisibility = sv
 	}
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}

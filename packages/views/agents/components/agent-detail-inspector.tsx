@@ -44,6 +44,9 @@ import { RuntimePicker } from "./inspector/runtime-picker";
 import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { VisibilityPicker } from "./inspector/visibility-picker";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility editor.
+import { AgentSurfaceVisibilityPicker } from "@multica/cerebro-access/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { LarkAgentBindButton } from "../../settings/components/lark-tab";
 
 interface InspectorProps {
@@ -101,6 +104,8 @@ export function AgentDetailInspector({
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
+  // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — flag-gated surface row.
+  const surfaceVisibilityEnabled = useFeatureFlag("cerebro_agent_surface_visibility");
   const isOnline = runtime?.status === "online";
 
   return (
@@ -155,6 +160,16 @@ export function AgentDetailInspector({
             onChange={(v) => update({ visibility: v })}
           />
         </PropRow>
+        {/* CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility. */}
+        {surfaceVisibilityEnabled && (
+          <PropRow label="Discovery" interactive={false}>
+            <AgentSurfaceVisibilityPicker
+              value={agent.surface_visibility}
+              canEdit={canEdit}
+              onChange={(map) => update({ surface_visibility: map })}
+            />
+          </PropRow>
+        )}
         <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
           <ConcurrencyPicker
             value={agent.max_concurrent_tasks}

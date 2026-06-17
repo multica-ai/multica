@@ -33,6 +33,8 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from the directory ("lists" surface).
+import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
@@ -240,11 +242,17 @@ export function AgentsPage({
   // returning all agents, so admin tools (and the API itself) are
   // unaffected — this is a UI-only filter.
   const visibleInView = useMemo(() => {
-    return inView.filter((a) =>
-      canAssignAgentToIssue(a, {
-        userId: currentUser?.id ?? null,
-        role: myRole,
-      }).allowed,
+    return inView.filter(
+      (a) =>
+        canAssignAgentToIssue(a, {
+          userId: currentUser?.id ?? null,
+          role: myRole,
+        }).allowed &&
+        // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents hidden from lists.
+        !isAgentHiddenOnSurface(a, "lists", {
+          userId: currentUser?.id ?? null,
+          role: myRole,
+        }),
     );
   }, [inView, currentUser?.id, myRole]);
 
