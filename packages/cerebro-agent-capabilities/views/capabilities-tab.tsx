@@ -21,6 +21,8 @@ import {
   Plug,
   KeyRound,
   Lock,
+  Activity,
+  AlertTriangle,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -31,6 +33,8 @@ import {
   type AgentCapabilityConnection,
   type AgentCapabilityRepo,
   type AgentCapabilitySecretSet,
+  type AgentCapabilityObservedAccess,
+  type AgentCapabilityObservedTool,
 } from "../api";
 
 export interface AgentCapabilitiesTabExtension {
@@ -97,6 +101,13 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       names: [],
       redacted: false,
       runtime_id: "",
+    },
+    observed_access: {
+      status: "unknown",
+      window_days: 30,
+      task_count: 0,
+      tools: [],
+      drift_count: 0,
     },
     limits: { mcp_servers: [], has_mcp_config: false },
   };
@@ -216,6 +227,9 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
         subtitle="inherited from the agent's runtime"
         set={caps.runtime_secrets}
       />
+
+      {/* Observed access (TECH-3738 Bid B) — what the agent actually used */}
+      <ObservedAccessSection observed={caps.observed_access} />
 
       {/* Limits */}
       <Section icon={Lock} title="Limits">
@@ -439,6 +453,104 @@ function StatusBadge({ status }: { status: string }) {
     default:
       return <Pill className="text-muted-foreground">{status || "—"}</Pill>;
   }
+}
+
+// ObservedAccessSection renders what the agent actually USED recently (Bid B),
+// distinct from the declared layers above. The headline signal is drift: tools
+// the agent invoked that its declared policy does not sanction (blocked or
+// unmapped) — surfaced as a red banner and per-tool warning. Tools only; observed
+// secret use is never shown because it is not recorded anywhere.
+function ObservedAccessSection({
+  observed,
+}: {
+  observed: AgentCapabilityObservedAccess;
+}) {
+  return (
+    <Section
+      icon={Activity}
+      title="Observed access"
+      count={observed.tools.length}
+    >
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={observed.status} />
+        <span className="text-xs text-muted-foreground">
+          tools actually used in the last {observed.window_days} days
+          {observed.task_count > 0
+            ? ` · ${observed.task_count} task${observed.task_count === 1 ? "" : "s"}`
+            : ""}
+        </span>
+      </div>
+
+      {observed.drift_count > 0 && (
+        <p className="mt-1.5 flex items-center gap-1 text-xs text-destructive">
+          <AlertTriangle className="h-3 w-3" />
+          {observed.drift_count} tool{observed.drift_count === 1 ? "" : "s"} used
+          that the declared policy does not allow (blocked or unmapped) — review.
+        </p>
+      )}
+
+      {observed.tools.length > 0 ? (
+        <PillRow>
+          {observed.tools.map((t) => (
+            <ObservedToolPill key={t.name} tool={t} />
+          ))}
+        </PillRow>
+      ) : (
+        <Empty>
+          {observed.status === "unknown"
+            ? "Could not determine recent activity."
+            : "No tool use recorded in this window."}
+        </Empty>
+      )}
+    </Section>
+  );
+}
+
+// observedPill maps the observed-vs-declared verdict to pill colours: allowed =
+// green, needs-approval = amber, blocked/unmapped (drift) = red. Enum drift
+// downgrades to a neutral pill (API Response Compatibility rule).
+function observedPill(status: string): string {
+  switch (status) {
+    case "allowed":
+      return "border-emerald-600/40 text-emerald-700 dark:text-emerald-300";
+    case "needs_approval":
+      return "border-amber-600/40 text-amber-700 dark:text-amber-400";
+    case "blocked":
+    case "unmapped":
+      return "border-destructive/50 text-destructive";
+    default:
+      return "";
+  }
+}
+
+function observedTitle(t: AgentCapabilityObservedTool): string {
+  const parts = [`used ${t.uses}×`];
+  if (t.last_used) parts.push(`last ${t.last_used.slice(0, 10)}`);
+  switch (t.status) {
+    case "allowed":
+      parts.push("policy: allowed");
+      break;
+    case "needs_approval":
+      parts.push("policy: needs approval");
+      break;
+    case "blocked":
+      parts.push("policy: BLOCKED — used despite being denied");
+      break;
+    case "unmapped":
+      parts.push("no policy on record for this tool");
+      break;
+  }
+  return parts.join(" · ");
+}
+
+function ObservedToolPill({ tool }: { tool: AgentCapabilityObservedTool }) {
+  return (
+    <Pill className={observedPill(tool.status)} title={observedTitle(tool)}>
+      {tool.drift && <AlertTriangle className="h-3 w-3" />}
+      {tool.name}
+      <span className="text-muted-foreground">· {tool.uses}</span>
+    </Pill>
+  );
 }
 
 function PillRow({ children }: { children: ReactNode }) {

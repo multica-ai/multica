@@ -1040,6 +1040,19 @@ type CerebroWorkspaceAuthSetting struct {
 	GoogleWorkspaceSyncEnabled bool               `json:"google_workspace_sync_enabled"`
 }
 
+type CerebroWorkspaceCopyMap struct {
+	ID                pgtype.UUID        `json:"id"`
+	RunID             pgtype.UUID        `json:"run_id"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	TargetWorkspaceID pgtype.UUID        `json:"target_workspace_id"`
+	EntityType        string             `json:"entity_type"`
+	SourceID          pgtype.UUID        `json:"source_id"`
+	TargetID          pgtype.UUID        `json:"target_id"`
+	SourceNumber      pgtype.Int4        `json:"source_number"`
+	TargetNumber      pgtype.Int4        `json:"target_number"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroWorkspaceDefaultGroup struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	GroupID     pgtype.UUID        `json:"group_id"`
