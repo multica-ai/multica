@@ -1283,7 +1283,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, task.ID)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
 					}
 				}
 			}

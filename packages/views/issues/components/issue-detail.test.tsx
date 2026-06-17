@@ -828,6 +828,51 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
   });
 
+  it("does not show retry for successful agent task comments", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-successful-task",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "Finished the requested work.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+        source_task_id: "task-success",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("Finished the requested work.");
+    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+  });
+
+  it("does not show retry for agent system comments without a source task", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-agent-system",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "System coordination update.",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "system",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("System coordination update.");
+    expect(screen.queryByRole("button", { name: "Retry task" })).not.toBeInTheDocument();
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)

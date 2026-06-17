@@ -77,7 +77,7 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
 });
 
 describe("TimelineEntriesSchema", () => {
-  it("preserves source_task_id for task-authored comments", () => {
+  it("preserves source_task_id for agent failure comments", () => {
     const parsed = TimelineEntriesSchema.parse([
       {
         type: "comment",

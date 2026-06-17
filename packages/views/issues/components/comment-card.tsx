@@ -248,7 +248,7 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
   );
 }
 
-function retryableTaskComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
+function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
   return (
     entry.actor_type === "agent" &&
     entry.comment_type === "system" &&
@@ -657,7 +657,7 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
-          {retryableTaskComment(entry) && (
+          {retryableAgentFailureComment(entry) && (
             <TaskCommentRetryButton
               issueId={issueId}
               taskId={entry.source_task_id}
@@ -944,7 +944,7 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
-                {retryableTaskComment(entry) && (
+                {retryableAgentFailureComment(entry) && (
                   <TaskCommentRetryButton
                     issueId={issueId}
                     taskId={entry.source_task_id}
