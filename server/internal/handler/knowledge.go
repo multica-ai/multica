@@ -1138,6 +1138,10 @@ func (h *Handler) CreateKnowledgeDraftFromIssue(w http.ResponseWriter, r *http.R
 		CreatedBy:   member.ID,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrCuratorDraftDispatched) {
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			return
+		}
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
 		return
 	}
@@ -1174,6 +1178,10 @@ func (h *Handler) CreateKnowledgeDraftFromCandidate(w http.ResponseWriter, r *ht
 		Regenerate:  req.Regenerate,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrCuratorDraftDispatched) {
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			return
+		}
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
 		return
 	}
@@ -1208,6 +1216,10 @@ func (h *Handler) CreateKnowledgeDraftFromGovernanceFinding(w http.ResponseWrite
 		Regenerate:  req.Regenerate,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrCuratorDraftDispatched) {
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			return
+		}
 		h.writeKnowledgeError(w, err, "failed to create governance update draft")
 		return
 	}
@@ -1296,6 +1308,13 @@ func (h *Handler) parseKnowledgePath(w http.ResponseWriter, r *http.Request) (pg
 	return wsUUID, itemID, true
 }
 
+func curatorDraftDispatchedResponse() map[string]any {
+	return map[string]any{
+		"status":  "queued",
+		"message": "Knowledge curator draft dispatched to local runtime. Poll GET /api/knowledge/curator-drafts/{taskId} for status.",
+	}
+}
+
 func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback string) {
 	if errors.Is(err, service.ErrKnowledgeValidation) {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1307,6 +1326,14 @@ func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback
 	}
 	if errors.Is(err, service.ErrCuratorEngineUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrCuratorLocalRuntimeUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrCuratorSecretNotFound) {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallback)

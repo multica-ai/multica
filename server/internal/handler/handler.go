@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -93,6 +94,9 @@ type Config struct {
 	KnowledgeCuratorEmbeddingModel string
 	KnowledgeCuratorRuntimeMode    string
 	KnowledgeCuratorTimeout        time.Duration
+	// WorkspaceSecretBox is the secretbox.Box used to encrypt/decrypt
+	// workspace secrets. When nil, workspace secret endpoints return 503.
+	WorkspaceSecretBox *secretbox.Box
 }
 
 type cloudRuntimeProxy interface {
@@ -111,8 +115,10 @@ type Handler struct {
 	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
 	KnowledgeService      *service.KnowledgeService
-	KnowledgeCurator      *service.KnowledgeCuratorService
-	EmailService          *service.EmailService
+	KnowledgeCurator       *service.KnowledgeCuratorService
+	WorkspaceSecretService *service.WorkspaceSecretService
+	CuratorDraftService    *service.CuratorDraftTaskService
+	EmailService           *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
@@ -196,6 +202,12 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	knowledgeSvc := service.NewKnowledgeService(queries, txStarter)
+
+	var workspaceSecretSvc *service.WorkspaceSecretService
+	if cfg.WorkspaceSecretBox != nil {
+		workspaceSecretSvc = service.NewWorkspaceSecretService(queries, cfg.WorkspaceSecretBox)
+	}
+
 	knowledgeEngine := service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
 		Provider:       cfg.KnowledgeCuratorProvider,
 		BaseURL:        cfg.KnowledgeCuratorBaseURL,
@@ -204,11 +216,31 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
 		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
 		Timeout:        cfg.KnowledgeCuratorTimeout,
-	})
+	}, workspaceSecretSvc, nil) // draftService set below after curator is created
 	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
+
+	var curatorDraftSvc *service.CuratorDraftTaskService
+	if workspaceSecretSvc != nil {
+		curatorDraftSvc = service.NewCuratorDraftTaskService(queries, knowledgeCurator)
+	}
+	// Re-create engine with the draft service wired in.
+	if curatorDraftSvc != nil {
+		knowledgeEngine = service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
+			Provider:       cfg.KnowledgeCuratorProvider,
+			BaseURL:        cfg.KnowledgeCuratorBaseURL,
+			APIKey:         cfg.KnowledgeCuratorAPIKey,
+			Model:          cfg.KnowledgeCuratorModel,
+			EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
+			RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
+			Timeout:        cfg.KnowledgeCuratorTimeout,
+		}, workspaceSecretSvc, curatorDraftSvc)
+		knowledgeCurator = service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
+	}
+
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Knowledge = knowledgeSvc
+
 	return &Handler{
 		Queries:               queries,
 		DB:                    executor,
@@ -220,8 +252,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		KnowledgeService:      knowledgeSvc,
-		KnowledgeCurator:      knowledgeCurator,
-		EmailService:          emailService,
+		KnowledgeCurator:       knowledgeCurator,
+		WorkspaceSecretService: workspaceSecretSvc,
+		CuratorDraftService:    curatorDraftSvc,
+		EmailService:           emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
 		ModelListStore:        NewInMemoryModelListStore(),
 		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),

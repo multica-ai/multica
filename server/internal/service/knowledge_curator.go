@@ -222,6 +222,9 @@ func (s *KnowledgeCuratorService) GenerateDraftFromCandidate(ctx context.Context
 	}
 	draft, err := s.generateAndValidateDraft(ctx, input)
 	if err != nil {
+		if errors.Is(err, ErrCuratorDraftDispatched) {
+			return KnowledgeDetail{}, err
+		}
 		_ = s.markCandidateDraftFailed(ctx, candidate, err)
 		return KnowledgeDetail{}, err
 	}

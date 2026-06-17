@@ -287,6 +287,20 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type CuratorDraftTask struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	RuntimeID   pgtype.UUID        `json:"runtime_id"`
+	DraftKind   string             `json:"draft_kind"`
+	Status      string             `json:"status"`
+	InputData   []byte             `json:"input_data"`
+	Result      []byte             `json:"result"`
+	Error       pgtype.Text        `json:"error"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
@@ -1273,4 +1287,14 @@ type WorkspaceInvitation struct {
 	LastUsedAt         pgtype.Timestamptz `json:"last_used_at"`
 	CreatedByIp        pgtype.Text        `json:"created_by_ip"`
 	CreatedByUserAgent pgtype.Text        `json:"created_by_user_agent"`
+}
+
+type WorkspaceSecret struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Name           string             `json:"name"`
+	EncryptedValue []byte             `json:"encrypted_value"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }

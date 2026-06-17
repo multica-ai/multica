@@ -161,6 +161,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		KnowledgeCuratorRuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
 		KnowledgeCuratorTimeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}
+
+	// Workspace secrets at-rest encryption. Uses the same secretbox
+	// infrastructure as Lark (AES-256-GCM). When unset, workspace secret
+	// endpoints return 503.
+	if workspaceSecretKey, err := secretbox.LoadKey("MULTICA_WORKSPACE_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(workspaceSecretKey)
+		if err != nil {
+			slog.Error("workspace secret: secretbox.New failed; workspace secrets disabled", "error", err)
+		} else {
+			signupConfig.WorkspaceSecretBox = box
+			slog.Info("workspace secret encryption enabled")
+		}
+	} else {
+		slog.Info("workspace secret encryption disabled (MULTICA_WORKSPACE_SECRET_KEY not set)")
+	}
+
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
 	h.TaskService.Metrics = opts.BusinessMetrics
@@ -542,6 +558,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
 		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
 		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
+
+		// Curator draft task endpoints for local daemon execution.
+		r.Post("/runtimes/{runtimeId}/curator-drafts/claim", h.ClaimCuratorDraftTask)
+		r.Post("/runtimes/{runtimeId}/curator-drafts/{taskId}/complete", h.CompleteCuratorDraftTask)
+		r.Post("/runtimes/{runtimeId}/curator-drafts/{taskId}/fail", h.FailCuratorDraftTask)
 		r.Get("/tasks/{taskId}/gc-check", h.GetTaskGCCheck)
 
 		r.Post("/runtimes/{runtimeId}/recover-orphans", h.RecoverOrphanedTasks)
@@ -614,6 +635,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/instructions-history", h.ListInstructionsHistory)
 					r.Get("/instructions-history/{versionId}", h.GetInstructionsHistory)
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					r.Get("/secrets", h.ListWorkspaceSecretNames)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -627,6 +649,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.Put("/secrets/{name}", h.UpsertWorkspaceSecret)
+					r.Delete("/secrets/{name}", h.DeleteWorkspaceSecret)
 				})
 				// Owner-only access
 				r.Group(func(r chi.Router) {
@@ -853,6 +877,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/governance-findings", h.ListKnowledgeGovernanceFindings)
 				r.Post("/governance-findings/{id}/draft", h.CreateKnowledgeDraftFromGovernanceFinding)
 				r.Post("/governance-findings/{id}/{action}", h.ResolveKnowledgeGovernanceFinding)
+				r.Get("/curator-drafts/{taskId}", h.GetCuratorDraftStatus)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetKnowledge)
 					r.Patch("/", h.UpdateKnowledge)

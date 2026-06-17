@@ -1,13 +1,16 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
 	"math/rand"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -2134,6 +2137,15 @@ func (d *Daemon) runRuntimePoller(
 		if task == nil {
 			d.exitClaim()
 			sem <- slot
+
+			// Try to claim a curator draft task before sleeping.
+			curatorTask, err := d.client.ClaimCuratorDraft(pollerCtx, rid)
+			if err == nil && curatorTask != nil {
+				sem <- slot // Release the slot — curator drafts are lightweight.
+				d.handleCuratorDraft(parentCtx, *curatorTask, rid)
+				continue
+			}
+
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
@@ -4121,6 +4133,155 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 // Code's `--permission-mode plan` + control_request handshake natively.
 // Currently that's claude and codebuddy (cbc reuses Claude's stream-json
 // protocol verbatim). Centralising the check keeps the four plan-mode
+// handleCuratorDraft executes a curator draft task by making a direct HTTP
+// call to the configured LLM API and parsing the JSON response. This runs
+// in-process (no subprocess) since it's a single API call.
+func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, runtimeID string) {
+	d.logger.Info("curator draft task received", "task", shortID(task.ID), "kind", task.DraftKind)
+
+	var config CuratorDraftConfig
+	if err := json.Unmarshal(task.InputData, &config); err != nil {
+		d.logger.Error("failed to parse curator draft config", "task", task.ID, "error", err)
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task config: "+err.Error())
+		return
+	}
+
+	// Build the curator prompt from input_data.
+	var input struct {
+		CuratorDraftConfig
+		DraftInput map[string]any `json:"draft_input"`
+	}
+	if err := json.Unmarshal(task.InputData, &input); err != nil {
+		d.logger.Error("failed to parse curator draft input", "task", task.ID, "error", err)
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task input: "+err.Error())
+		return
+	}
+
+	// Build the draft generation prompt. Reuse the same structure as the
+	// server-side OpenAICompatibleCuratorEngine.
+	prompt := buildCuratorDraftPrompt(input.DraftInput)
+	systemPrompt := "You are Multica's Knowledge Curator. Produce concise, structured, auditable operational knowledge."
+
+	respBody, err := callLLMAPI(ctx, config.BaseURL, config.APIKey, config.Model, systemPrompt, prompt)
+	if err != nil {
+		d.logger.Error("curator draft LLM call failed", "task", task.ID, "error", err)
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, err.Error())
+		return
+	}
+
+	// Strip markdown fences and parse JSON.
+	draftJSON, err := parseCuratorDraftJSON(respBody)
+	if err != nil {
+		d.logger.Error("curator draft JSON parse failed", "task", task.ID, "error", err)
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, err.Error())
+		return
+	}
+
+	if err := d.client.CompleteCuratorDraft(ctx, runtimeID, task.ID, draftJSON); err != nil {
+		d.logger.Error("failed to report curator draft completion", "task", task.ID, "error", err)
+		return
+	}
+
+	d.logger.Info("curator draft completed", "task", shortID(task.ID))
+}
+
+// buildCuratorDraftPrompt constructs the draft generation prompt from the
+// serialized curator draft input.
+func buildCuratorDraftPrompt(input map[string]any) string {
+	// Extract key fields from the draft input for prompt construction.
+	issueTitle, _ := input["issue"].(string)
+	sourceSummary, _ := input["source_summary"].(string)
+	evidence, _ := input["evidence"].(string)
+
+	return strings.Join([]string{
+		"Generate a reusable Multica knowledge draft from the issue evidence.",
+		"Return ONLY valid JSON with keys: title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status.",
+		"Allowed type values: lesson, playbook, reference. Allowed confidence_status values: low, medium, high.",
+		"Issue:",
+		issueTitle,
+		"Source summary:",
+		sourceSummary,
+		"Evidence:",
+		evidence,
+	}, "\n\n")
+}
+
+// callLLMAPI makes a synchronous HTTP POST to an OpenAI-compatible chat
+// completions endpoint and returns the message content.
+func callLLMAPI(ctx context.Context, baseURL, apiKey, model, systemPrompt, userPrompt string) (string, error) {
+	payload := map[string]any{
+		"model": model,
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userPrompt},
+		},
+		"temperature": 0.2,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("marshal LLM request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(raw))
+	if err != nil {
+		return "", fmt.Errorf("create LLM request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("LLM API call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return "", fmt.Errorf("read LLM response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("LLM API returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var chatResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &chatResp); err != nil {
+		return "", fmt.Errorf("decode LLM response: %w", err)
+	}
+	if chatResp.Error != nil && strings.TrimSpace(chatResp.Error.Message) != "" {
+		return "", fmt.Errorf("LLM API error: %s", chatResp.Error.Message)
+	}
+	if len(chatResp.Choices) == 0 || strings.TrimSpace(chatResp.Choices[0].Message.Content) == "" {
+		return "", fmt.Errorf("LLM response contained no content")
+	}
+	return strings.TrimSpace(chatResp.Choices[0].Message.Content), nil
+}
+
+// parseCuratorDraftJSON extracts valid JSON from an LLM response, stripping
+// markdown code fences if present.
+func parseCuratorDraftJSON(text string) (map[string]any, error) {
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	text = strings.TrimSpace(text)
+
+	var draft map[string]any
+	if err := json.Unmarshal([]byte(text), &draft); err != nil {
+		return nil, fmt.Errorf("curator returned invalid JSON: %w", err)
+	}
+	return draft, nil
+}
+
 // guard sites in this file from drifting apart when we add more
 // stream-json-compatible providers.
 func providerSupportsNativePlan(provider string) bool {

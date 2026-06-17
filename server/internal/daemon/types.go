@@ -157,6 +157,26 @@ type TaskUsageEntry struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
+// CuratorDraftTask is a curator draft task dispatched to a local daemon
+// runtime for execution. The daemon makes a direct HTTP call to the configured
+// LLM API and reports the parsed draft back.
+type CuratorDraftTask struct {
+	ID         string          `json:"id"`
+	DraftKind  string          `json:"draft_kind"`
+	Status     string          `json:"status"`
+	InputData  json.RawMessage `json:"input_data"`
+}
+
+// CuratorDraftConfig is extracted from the task's input_data and contains
+// the information needed to make the LLM API call.
+type CuratorDraftConfig struct {
+	BaseURL        string `json:"base_url"`
+	APIKey         string `json:"api_key"`
+	Model          string `json:"model"`
+	EmbeddingModel string `json:"embedding_model"`
+	Provider       string `json:"provider"`
+}
+
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
 	Status        string           `json:"status"`

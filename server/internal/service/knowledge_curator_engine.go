@@ -31,12 +31,19 @@ type OpenAICompatibleCuratorEngine struct {
 }
 
 type WorkspaceConfiguredCuratorEngine struct {
-	queries *db.Queries
-	base    OpenAICompatibleCuratorConfig
+	queries       *db.Queries
+	base          OpenAICompatibleCuratorConfig
+	secretService *WorkspaceSecretService
+	draftService  *CuratorDraftTaskService
 }
 
-func NewWorkspaceConfiguredCuratorEngine(queries *db.Queries, base OpenAICompatibleCuratorConfig) CuratorEngine {
-	return &WorkspaceConfiguredCuratorEngine{queries: queries, base: normalizeOpenAICompatibleCuratorConfig(base)}
+func NewWorkspaceConfiguredCuratorEngine(queries *db.Queries, base OpenAICompatibleCuratorConfig, secretService *WorkspaceSecretService, draftService *CuratorDraftTaskService) CuratorEngine {
+	return &WorkspaceConfiguredCuratorEngine{
+		queries:       queries,
+		base:          normalizeOpenAICompatibleCuratorConfig(base),
+		secretService: secretService,
+		draftService:  draftService,
+	}
 }
 
 func NewOpenAICompatibleCuratorEngine(cfg OpenAICompatibleCuratorConfig) CuratorEngine {
@@ -69,7 +76,18 @@ func (e *WorkspaceConfiguredCuratorEngine) ForWorkspace(ctx context.Context, wor
 	if err != nil {
 		return NewOpenAICompatibleCuratorEngine(cfg)
 	}
-	return NewOpenAICompatibleCuratorEngine(applyWorkspaceCuratorSettings(cfg, workspace.Settings))
+	cfg = applyWorkspaceCuratorSettings(cfg, workspace.Settings)
+
+	// When runtime_mode is "local", use the local daemon dispatch engine.
+	if cfg.RuntimeMode == "local" {
+		secretRef, _ := curatorSetting(workspace.Settings, "secret_ref")
+		if e.secretService == nil || e.draftService == nil {
+			return NewOpenAICompatibleCuratorEngine(cfg)
+		}
+		return NewLocalCuratorEngine(e.queries, e.secretService, e.draftService, cfg, secretRef)
+	}
+
+	return NewOpenAICompatibleCuratorEngine(cfg)
 }
 
 func (e *WorkspaceConfiguredCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDraftInput) (CuratorDraft, error) {
@@ -126,6 +144,24 @@ func nonEmptySetting(settings map[string]any, key string) (string, bool) {
 	value, ok := settings[key].(string)
 	value = strings.TrimSpace(value)
 	return value, ok && value != ""
+}
+
+// curatorSetting reads a single string value from the knowledge_curator block
+// in the workspace settings JSONB.
+func curatorSetting(rawSettings []byte, key string) (string, bool) {
+	var settings map[string]any
+	if len(rawSettings) == 0 || json.Unmarshal(rawSettings, &settings) != nil {
+		return "", false
+	}
+	raw, ok := settings["knowledge_curator"]
+	if !ok || raw == nil {
+		return "", false
+	}
+	curator, ok := raw.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	return nonEmptySetting(curator, key)
 }
 
 func (e *OpenAICompatibleCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDraftInput) (CuratorDraft, error) {
