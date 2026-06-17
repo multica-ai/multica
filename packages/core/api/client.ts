@@ -829,6 +829,8 @@ export class ApiClient {
     if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
     if (params.sort_by) search.set("sort", params.sort_by);
     if (params.sort_direction) search.set("direction", params.sort_direction);
+    if (params.archived) search.set("archived", "true");
+    if (params.include_archived) search.set("include_archived", "true");
     const raw = await this.fetch<unknown>(`/api/issues/grouped?${search}`);
     return parseWithFallback(raw, GroupedIssuesResponseSchema, EMPTY_GROUPED_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/grouped",
