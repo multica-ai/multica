@@ -141,9 +141,71 @@ export interface KnowledgeCandidate {
   dedupe_key: string;
   created_by: string | null;
   metadata: unknown;
+  evidence: CandidateEvidence | null;
   evaluated_at: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface CandidateEvidence {
+  skip_check?: SkipCheck;
+  retry_chain?: RetryChainEvidence;
+  correction_rounds?: CorrectionRound[];
+  pr_evidence?: PREvidenceItem[];
+  similarity?: SimilarityEvidence;
+}
+
+export interface SkipCheck {
+  evaluated: boolean;
+  matched_rule: string | null;
+}
+
+export interface RetryFailure {
+  attempt: number;
+  status: string;
+  error_summary: string;
+}
+
+export interface RetrySuccess {
+  attempt: number;
+  task_id: string;
+  status: string;
+}
+
+export interface RetryChainEvidence {
+  total_attempts: number;
+  has_clear_error: boolean;
+  failures: RetryFailure[];
+  final_success: RetrySuccess | null;
+}
+
+export interface CorrectionRound {
+  comment_id: string;
+  comment_text: string;
+  had_follow_up: boolean;
+}
+
+export interface PREvidenceItem {
+  number: number;
+  title: string;
+  repo_owner: string;
+  repo_name: string;
+  state: string;
+  merged_at: string;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+}
+
+export interface SimilarityMatch {
+  knowledge_item_id: string;
+  title: string;
+  vector_score: number;
+}
+
+export interface SimilarityEvidence {
+  top_matches: SimilarityMatch[];
+  max_similarity: number;
 }
 
 export type KnowledgeGovernanceFindingType =

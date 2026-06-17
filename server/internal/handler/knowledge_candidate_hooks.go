@@ -22,3 +22,16 @@ func (h *Handler) evaluateKnowledgeCandidateForIssueDone(ctx context.Context, pr
 		)
 	}
 }
+
+func (h *Handler) evaluateKnowledgeCandidateForPRMerge(ctx context.Context, issue db.Issue) {
+	if h.KnowledgeService == nil {
+		return
+	}
+	if _, err := h.KnowledgeService.EvaluateIssuePRMergedCandidate(ctx, issue); err != nil && !errors.Is(err, service.ErrKnowledgeValidation) {
+		slog.Warn("knowledge candidate PR-merge evaluation failed",
+			"issue_id", util.UUIDToString(issue.ID),
+			"workspace_id", util.UUIDToString(issue.WorkspaceID),
+			"error", err,
+		)
+	}
+}

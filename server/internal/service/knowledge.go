@@ -38,6 +38,11 @@ var (
 type KnowledgeService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
+	Embedder  Embedder
+}
+
+type Embedder interface {
+	BuildEmbedding(ctx context.Context, content string) ([]float32, error)
 }
 
 func NewKnowledgeService(q *db.Queries, tx TxStarter) *KnowledgeService {
@@ -328,6 +333,54 @@ type candidateSource struct {
 	Issue       db.Issue
 	CommentID   pgtype.UUID
 	AgentTaskID pgtype.UUID
+}
+
+type skipRuleCheck struct {
+	Evaluated   bool        `json:"evaluated"`
+	MatchedRule interface{} `json:"matched_rule"`
+}
+
+type retryFailure struct {
+	Attempt      int    `json:"attempt"`
+	Status       string `json:"status"`
+	ErrorSummary string `json:"error_summary"`
+}
+
+type retrySuccess struct {
+	Attempt int    `json:"attempt"`
+	TaskID  string `json:"task_id"`
+	Status  string `json:"status"`
+}
+
+type retryChainEvidence struct {
+	TotalAttempts int            `json:"total_attempts"`
+	HasClearError bool           `json:"has_clear_error"`
+	Failures      []retryFailure `json:"failures"`
+	FinalSuccess  *retrySuccess  `json:"final_success"`
+}
+
+type correctionRound struct {
+	CommentID   string `json:"comment_id"`
+	CommentText string `json:"comment_text"`
+	HadFollowUp bool   `json:"had_follow_up"`
+}
+
+type prEvidenceItem struct {
+	Number        int32  `json:"number"`
+	Title         string `json:"title"`
+	RepoOwner     string `json:"repo_owner"`
+	RepoName      string `json:"repo_name"`
+	State         string `json:"state"`
+	MergedAt      string `json:"merged_at"`
+	Additions     int32  `json:"additions"`
+	Deletions     int32  `json:"deletions"`
+	ChangedFiles  int32  `json:"changed_files"`
+}
+
+type similarityMatch struct {
+	KnowledgeItemID string  `json:"knowledge_item_id"`
+	Title           string  `json:"title"`
+	VectorScore     float64 `json:"vector_score"`
 }
 
 func (s *KnowledgeService) List(ctx context.Context, arg db.ListKnowledgeItemsParams) ([]db.KnowledgeItem, error) {
@@ -1118,7 +1171,41 @@ func (s *KnowledgeService) EvaluateCandidate(ctx context.Context, p KnowledgeCan
 		return db.KnowledgeCandidate{}, err
 	}
 
-	signals, score, strength, status := s.scoreCandidate(ctx, p, src)
+	// Requirement 5: evaluate skip rules before scoring
+	text := src.Issue.Title
+	if src.Issue.Description.Valid {
+		text += "\n" + src.Issue.Description.String
+	}
+	evidence := map[string]any{
+		"skip_check": skipRuleCheck{Evaluated: true, MatchedRule: nil},
+	}
+	if skipReason, shouldSkip := evaluateSkipRules(text); shouldSkip {
+		evidence["skip_check"] = skipRuleCheck{Evaluated: true, MatchedRule: skipReason}
+		evidenceJSON, _ := json.Marshal(evidence)
+		return s.Queries.UpsertKnowledgeCandidate(ctx, db.UpsertKnowledgeCandidateParams{
+			WorkspaceID:    p.WorkspaceID,
+			IssueID:        src.Issue.ID,
+			CommentID:      src.CommentID,
+			AgentTaskID:    src.AgentTaskID,
+			SourceType:     p.SourceType,
+			SourceID:       p.SourceID,
+			TriggerReason:  p.TriggerReason,
+			SignalStrength: "none",
+			Signals:        []string{"skip:" + skipReason},
+			Score:          0,
+			Status:         "rejected",
+			DedupeKey:      knowledgeCandidateDedupeKey(p.SourceType, p.SourceID, p.TriggerReason),
+			CreatedBy:      p.CreatedBy,
+			Metadata:       []byte("{}"),
+			Evidence:       evidenceJSON,
+		})
+	}
+
+	signals, score, strength, status, evidenceUpdates := s.scoreCandidate(ctx, p, src, text)
+	for k, v := range evidenceUpdates {
+		evidence[k] = v
+	}
+
 	meta := map[string]any{
 		"manual":       p.Manual,
 		"source_type":  p.SourceType,
@@ -1131,6 +1218,10 @@ func (s *KnowledgeService) EvaluateCandidate(ctx context.Context, p KnowledgeCan
 		meta[k] = v
 	}
 	metadata, err := json.Marshal(meta)
+	if err != nil {
+		return db.KnowledgeCandidate{}, err
+	}
+	evidenceJSON, err := json.Marshal(evidence)
 	if err != nil {
 		return db.KnowledgeCandidate{}, err
 	}
@@ -1150,6 +1241,7 @@ func (s *KnowledgeService) EvaluateCandidate(ctx context.Context, p KnowledgeCan
 		DedupeKey:      knowledgeCandidateDedupeKey(p.SourceType, p.SourceID, p.TriggerReason),
 		CreatedBy:      p.CreatedBy,
 		Metadata:       metadata,
+		Evidence:       evidenceJSON,
 	})
 }
 
@@ -1157,12 +1249,40 @@ func (s *KnowledgeService) EvaluateIssueDoneCandidate(ctx context.Context, issue
 	if issue.Status != "done" {
 		return db.KnowledgeCandidate{}, validationError("issue is not done")
 	}
+	prs, err := s.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	if err != nil {
+		prs = nil
+	}
+	prEvidence := make([]prEvidenceItem, 0, len(prs))
+	for _, pr := range prs {
+		item := prEvidenceItem{
+			Number:       pr.PrNumber,
+			Title:        pr.Title,
+			RepoOwner:    pr.RepoOwner,
+			RepoName:     pr.RepoName,
+			State:        pr.State,
+			Additions:    pr.Additions,
+			Deletions:    pr.Deletions,
+			ChangedFiles: pr.ChangedFiles,
+		}
+		if pr.MergedAt.Valid {
+			item.MergedAt = pr.MergedAt.Time.Format(time.RFC3339)
+		}
+		prEvidence = append(prEvidence, item)
+	}
+	additionalMeta := map[string]any{
+		"pr_count": len(prEvidence),
+	}
+	if len(prEvidence) > 0 {
+		additionalMeta["pr_data"] = prEvidence
+	}
 	return s.EvaluateCandidate(ctx, KnowledgeCandidateEvaluateParams{
-		WorkspaceID:   issue.WorkspaceID,
-		SourceType:    "issue",
-		SourceID:      issue.ID,
-		TriggerReason: "issue_done",
-		Issue:         &issue,
+		WorkspaceID:    issue.WorkspaceID,
+		SourceType:     "issue",
+		SourceID:       issue.ID,
+		TriggerReason:  "issue_done",
+		Issue:          &issue,
+		AdditionalMeta: additionalMeta,
 	})
 }
 
@@ -1238,22 +1358,29 @@ func (s *KnowledgeService) resolveCandidateSource(ctx context.Context, p Knowled
 	}
 }
 
-func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandidateEvaluateParams, src candidateSource) ([]string, int32, string, string) {
+func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandidateEvaluateParams, src candidateSource, text string) ([]string, int32, string, string, map[string]any) {
 	signals := []string{}
 	score := int32(0)
+	evidenceUpdates := map[string]any{}
 	if p.Manual || p.TriggerReason == "manual" {
-		return []string{"manual_mark"}, 100, "manual", "accepted"
+		return []string{"manual_mark"}, 100, "manual", "accepted", evidenceUpdates
 	}
 
-	text := src.Issue.Title
-	if src.Issue.Description.Valid {
-		text += "\n" + src.Issue.Description.String
-	}
 	if p.AgentTask != nil {
 		text += "\n" + extractTaskOutput(p.TaskResult, p.AgentTask.Result)
 		if p.AgentTask.ParentTaskID.Valid || p.AgentTask.Attempt > 1 {
 			signals = append(signals, "retry_success")
 			score += 75
+			retryEvidence := s.buildRetryEvidence(ctx, p.WorkspaceID, p.AgentTask)
+			evidenceUpdates["retry_chain"] = retryEvidence
+			if retryEvidence.HasClearError {
+				signals = append(signals, "retry_with_clear_error")
+				score += 10
+			}
+			if retryEvidence.TotalAttempts >= 3 {
+				signals = append(signals, "multi_retry")
+				score += 10
+			}
 		}
 		if p.AgentTask.TriggerCommentID.Valid {
 			signals = append(signals, "follow_up_task_success")
@@ -1276,7 +1403,7 @@ func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandid
 		outcomes, err := s.Queries.CountIssueTaskOutcomesForKnowledgeCandidate(ctx, src.Issue.ID)
 		if err == nil {
 			if outcomes.TaskCount == 0 {
-				return []string{"no_agent_task"}, 0, "none", "rejected"
+				return []string{"no_agent_task"}, 0, "none", "rejected", evidenceUpdates
 			}
 			if outcomes.FailedCount > 0 && outcomes.CompletedCount > 0 {
 				signals = append(signals, "failed_then_completed")
@@ -1297,11 +1424,37 @@ func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandid
 			Limit:       100,
 		})
 		if err == nil {
+			var correctionCount int32
 			for _, comment := range comments {
 				text += "\n" + comment.Content
 				if comment.AuthorType == "member" && looksLikeUserCorrection(comment.Content) {
-					signals = append(signals, "user_correction")
-					score += 35
+					correctionCount++
+					if correctionCount == 1 {
+						signals = append(signals, "user_correction")
+						score += 35
+					}
+				}
+			}
+			if correctionCount >= 2 {
+				signals = append(signals, "multi_round_correction")
+				score += 10
+			}
+			if correctionCount > 0 {
+				correctionRounds := buildCorrectionEvidence(comments)
+				evidenceUpdates["correction_rounds"] = correctionRounds
+			}
+		}
+
+		// Requirement 3: PR evidence signal
+		prEvidence := buildPREvidenceFromMeta(p.AdditionalMeta)
+		if len(prEvidence) > 0 {
+			signals = append(signals, "pr_merged")
+			score += 30
+			evidenceUpdates["pr_evidence"] = prEvidence
+			for _, pr := range prEvidence {
+				if pr.ChangedFiles >= 5 && (pr.Additions+pr.Deletions) >= 100 {
+					signals = append(signals, "substantial_pr")
+					score += 10
 					break
 				}
 			}
@@ -1312,20 +1465,42 @@ func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandid
 		signals = append(signals, "reusable_debug_context")
 		score += 30
 	}
+
+	// Requirement 4: historical similarity signal
+	simSignal, simScore, simMatches := s.scoreSimilarity(ctx, p.WorkspaceID, text)
+	if simSignal == "near_duplicate" {
+		evidenceUpdates["similarity"] = map[string]any{
+			"top_matches":   simMatches,
+			"max_similarity": simMatches[0].VectorScore,
+		}
+		signals = append(signals, "near_duplicate")
+		return signals, 0, "none", "rejected", evidenceUpdates
+	}
+	if simSignal != "" {
+		signals = append(signals, simSignal)
+		score += simScore
+	}
+	if len(simMatches) > 0 {
+		evidenceUpdates["similarity"] = map[string]any{
+			"top_matches":   simMatches,
+			"max_similarity": simMatches[0].VectorScore,
+		}
+	}
+
 	signals = uniqueSignals(signals)
 	if score > 100 {
 		score = 100
 	}
 	if score >= 80 {
-		return signals, score, "strong", "accepted"
+		return signals, score, "strong", "accepted", evidenceUpdates
 	}
 	if score >= 50 {
-		return signals, score, "weak", "pending"
+		return signals, score, "weak", "pending", evidenceUpdates
 	}
 	if len(signals) == 0 {
 		signals = []string{"no_reusable_signal"}
 	}
-	return signals, score, "none", "rejected"
+	return signals, score, "none", "rejected", evidenceUpdates
 }
 
 func (s *KnowledgeService) taskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
@@ -1334,6 +1509,282 @@ func (s *KnowledgeService) taskWorkspaceID(ctx context.Context, task db.AgentTas
 		return pgtype.UUID{}, err
 	}
 	return agent.WorkspaceID, nil
+}
+
+// ── Skip rules (Requirement 5) ────────────────────────────────────────────────
+
+func evaluateSkipRules(text string) (string, bool) {
+	lower := strings.ToLower(text)
+	noReuseKeywords := []string{
+		"bump version", "update dependencies", "update deps", "chore:", "ci:",
+		"release:", "bump ", "deps:", "routine maintenance", "dependency update",
+	}
+	for _, kw := range noReuseKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return "no_reuse_value", true
+		}
+	}
+	oneOffKeywords := []string{
+		"one-time", "一次性", "临时", "adhoc", "one-off", "single use",
+	}
+	for _, kw := range oneOffKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return "one_off_business", true
+		}
+	}
+	contentiousKeywords := []string{
+		"revert", "rollback", "回滚", "撤销", "wrong approach", "方案不对",
+		"still broken", "regression in",
+	}
+	for _, kw := range contentiousKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return "contentious", true
+		}
+	}
+	securityKeywords := []string{
+		"credential leak", "password leak", "secret key", "api key leak",
+		"token leak", "exploit", "cve-", "security vulnerability", "unauthorized access",
+	}
+	for _, kw := range securityKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return "security_sensitive", true
+		}
+	}
+	return "", false
+}
+
+// ── Retry evidence (Requirement 1) ────────────────────────────────────────────
+
+func (s *KnowledgeService) buildRetryEvidence(ctx context.Context, workspaceID pgtype.UUID, task *db.AgentTaskQueue) retryChainEvidence {
+	chain := retryChainEvidence{TotalAttempts: int(task.Attempt)}
+	if !task.ParentTaskID.Valid {
+		return chain
+	}
+
+	const maxHops = 10
+	currentID := task.ParentTaskID
+	visited := map[string]bool{}
+	for hop := 0; hop < maxHops && currentID.Valid; hop++ {
+		key := util.UUIDToString(currentID)
+		if visited[key] {
+			break
+		}
+		visited[key] = true
+
+		parent, err := s.Queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
+			ID:          currentID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			break
+		}
+		if parent.Status == "failed" {
+			errSummary := summarizeTaskError(parent)
+			chain.Failures = append(chain.Failures, retryFailure{
+				Attempt:      int(parent.Attempt),
+				Status:       parent.Status,
+				ErrorSummary: errSummary,
+			})
+			chain.TotalAttempts = int(parent.Attempt)
+			if errSummary != "" {
+				chain.HasClearError = true
+			}
+		}
+		currentID = parent.ParentTaskID
+	}
+
+	chain.FinalSuccess = &retrySuccess{
+		Attempt: int(task.Attempt),
+		TaskID:  util.UUIDToString(task.ID),
+		Status:  task.Status,
+	}
+	return chain
+}
+
+func summarizeTaskError(task db.AgentTaskQueue) string {
+	if len(task.Result) == 0 {
+		return ""
+	}
+	var payload struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(task.Result, &payload); err != nil {
+		return string(task.Result)
+	}
+	if len(payload.Error) > 500 {
+		return payload.Error[:500]
+	}
+	return payload.Error
+}
+
+// ── Correction evidence (Requirement 2) ───────────────────────────────────────
+
+func buildCorrectionEvidence(comments []db.ListIssueCommentsForKnowledgeCandidateRow) []correctionRound {
+	var rounds []correctionRound
+	for _, c := range comments {
+		if c.AuthorType == "member" && looksLikeUserCorrection(c.Content) {
+			text := c.Content
+			if len(text) > 200 {
+				text = text[:200]
+			}
+			rounds = append(rounds, correctionRound{
+				CommentID:   util.UUIDToString(c.ID),
+				CommentText: text,
+			})
+		}
+	}
+	return rounds
+}
+
+// ── PR evidence (Requirement 3) ───────────────────────────────────────────────
+
+func buildPREvidenceFromMeta(meta map[string]any) []prEvidenceItem {
+	if meta == nil {
+		return nil
+	}
+	raw, ok := meta["pr_data"]
+	if !ok {
+		return nil
+	}
+	items, ok := raw.([]prEvidenceItem)
+	if ok {
+		return items
+	}
+	// Handle the case where pr_data is JSON-decoded as []interface{}
+	slice, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	var result []prEvidenceItem
+	for _, s := range slice {
+		m, ok := s.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		item := prEvidenceItem{}
+		if v, ok := m["number"].(float64); ok {
+			item.Number = int32(v)
+		}
+		if v, ok := m["title"].(string); ok {
+			item.Title = v
+		}
+		if v, ok := m["repo_owner"].(string); ok {
+			item.RepoOwner = v
+		}
+		if v, ok := m["repo_name"].(string); ok {
+			item.RepoName = v
+		}
+		if v, ok := m["state"].(string); ok {
+			item.State = v
+		}
+		if v, ok := m["merged_at"].(string); ok {
+			item.MergedAt = v
+		}
+		if v, ok := m["additions"].(float64); ok {
+			item.Additions = int32(v)
+		}
+		if v, ok := m["deletions"].(float64); ok {
+			item.Deletions = int32(v)
+		}
+		if v, ok := m["changed_files"].(float64); ok {
+			item.ChangedFiles = int32(v)
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+// ── Historical similarity (Requirement 4) ─────────────────────────────────────
+
+func (s *KnowledgeService) scoreSimilarity(ctx context.Context, workspaceID pgtype.UUID, content string) (string, int32, []similarityMatch) {
+	if s.Embedder == nil {
+		return "", 0, nil
+	}
+	if len(content) > 8000 {
+		content = content[:8000]
+	}
+	embedding, err := s.Embedder.BuildEmbedding(ctx, content)
+	if err != nil {
+		slog.Warn("similarity embedding failed", "error", err)
+		return "", 0, nil
+	}
+	rows, err := s.Queries.SearchKnowledgeVector(ctx, db.SearchKnowledgeVectorParams{
+		WorkspaceID: workspaceID,
+		Embedding:   pgvector.NewVector(embedding),
+		Limit:       5,
+	})
+	if err != nil {
+		slog.Warn("similarity search failed", "error", err)
+		return "", 0, nil
+	}
+
+	var maxSim float64
+	matches := make([]similarityMatch, 0, len(rows))
+	for _, row := range rows {
+		if row.VectorScore > maxSim {
+			maxSim = row.VectorScore
+		}
+		matches = append(matches, similarityMatch{
+			KnowledgeItemID: util.UUIDToString(row.ID),
+			Title:           row.Title,
+			VectorScore:     row.VectorScore,
+		})
+	}
+
+	if maxSim >= 0.95 {
+		return "near_duplicate", 0, matches
+	}
+	if maxSim >= 0.85 {
+		return "similarity_very_high", 25, matches
+	}
+	if maxSim >= 0.70 {
+		return "similarity_high", 15, matches
+	}
+	if maxSim >= 0.50 {
+		return "similarity_moderate", 10, matches
+	}
+	return "", 0, matches
+}
+
+// ── PR-merge candidate (Requirement 3) ────────────────────────────────────────
+
+func (s *KnowledgeService) EvaluateIssuePRMergedCandidate(ctx context.Context, issue db.Issue) (db.KnowledgeCandidate, error) {
+	if issue.Status != "done" {
+		return db.KnowledgeCandidate{}, validationError("issue is not done")
+	}
+	prs, err := s.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("failed to fetch PRs for candidate", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		prs = nil
+	}
+	prEvidence := make([]prEvidenceItem, 0, len(prs))
+	for _, pr := range prs {
+		item := prEvidenceItem{
+			Number:       pr.PrNumber,
+			Title:        pr.Title,
+			RepoOwner:    pr.RepoOwner,
+			RepoName:     pr.RepoName,
+			State:        pr.State,
+			Additions:    pr.Additions,
+			Deletions:    pr.Deletions,
+			ChangedFiles: pr.ChangedFiles,
+		}
+		if pr.MergedAt.Valid {
+			item.MergedAt = pr.MergedAt.Time.Format(time.RFC3339)
+		}
+		prEvidence = append(prEvidence, item)
+	}
+	return s.EvaluateCandidate(ctx, KnowledgeCandidateEvaluateParams{
+		WorkspaceID:    issue.WorkspaceID,
+		SourceType:     "issue",
+		SourceID:       issue.ID,
+		TriggerReason:  "pr_merged",
+		Issue:          &issue,
+		AdditionalMeta: map[string]any{
+			"pr_count": len(prEvidence),
+			"pr_data":  prEvidence,
+		},
+	})
 }
 
 func (s *KnowledgeService) recordRetrieval(ctx context.Context, p KnowledgeSearchParams, query string, results []KnowledgeSearchResult) (db.KnowledgeRetrievalEvent, error) {

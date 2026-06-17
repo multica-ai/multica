@@ -41,6 +41,7 @@ import {
   useUpdateKnowledge,
 } from "@multica/core/knowledge/mutations";
 import type {
+  CandidateEvidence,
   KnowledgeCandidate,
   KnowledgeAnalyticsRow,
   KnowledgeDetail,
@@ -587,6 +588,70 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   );
 }
 
+function CandidateEvidenceView({ evidence }: { evidence: CandidateEvidence }) {
+  if (!evidence) return null;
+  const parts: React.ReactNode[] = [];
+  if (evidence.skip_check?.matched_rule) {
+    parts.push(
+      <div key="skip" className="text-xs text-muted-foreground">
+        Skipped: {evidence.skip_check.matched_rule}
+      </div>,
+    );
+  }
+  if (evidence.retry_chain) {
+    const rc = evidence.retry_chain;
+    parts.push(
+      <div key="retry" className="mt-1 text-xs border-t pt-1">
+        <span className="font-medium">Retry chain:</span> {rc.total_attempts} attempts
+        {rc.has_clear_error ? " · clear error" : ""}
+        {rc.final_success ? ` · final: ${rc.final_success.status}` : ""}
+        {rc.failures.map((f, i) => (
+          <div key={i} className="ml-2 text-muted-foreground">
+            #{f.attempt}: {f.error_summary ? f.error_summary.slice(0, 80) : f.status}
+          </div>
+        ))}
+      </div>,
+    );
+  }
+  if (evidence.correction_rounds && evidence.correction_rounds.length > 0) {
+    parts.push(
+      <div key="corr" className="mt-1 text-xs border-t pt-1">
+        <span className="font-medium">Corrections:</span> {evidence.correction_rounds.length} rounds
+        {evidence.correction_rounds.map((r, i) => (
+          <div key={i} className="ml-2 line-clamp-1 text-muted-foreground">{r.comment_text}</div>
+        ))}
+      </div>,
+    );
+  }
+  if (evidence.pr_evidence && evidence.pr_evidence.length > 0) {
+    parts.push(
+      <div key="pr" className="mt-1 text-xs border-t pt-1">
+        <span className="font-medium">PRs:</span>
+        {evidence.pr_evidence.map((pr, i) => (
+          <div key={i} className="ml-2 text-muted-foreground">
+            {pr.repo_owner}/{pr.repo_name}#{pr.number}: {pr.state}
+            {pr.changed_files ? ` · ${pr.changed_files} files (+${pr.additions}/-${pr.deletions})` : ""}
+          </div>
+        ))}
+      </div>,
+    );
+  }
+  if (evidence.similarity && evidence.similarity.top_matches.length > 0) {
+    parts.push(
+      <div key="sim" className="mt-1 text-xs border-t pt-1">
+        <span className="font-medium">Similar:</span> max {evidence.similarity.max_similarity.toFixed(2)}
+        {evidence.similarity.top_matches.slice(0, 3).map((m, i) => (
+          <div key={i} className="ml-2 line-clamp-1 text-muted-foreground">
+            {m.title} ({(m.vector_score * 100).toFixed(0)}%)
+          </div>
+        ))}
+      </div>,
+    );
+  }
+  if (parts.length === 0) return null;
+  return <div className="mt-1 rounded bg-muted/30 px-2 py-1">{parts}</div>;
+}
+
 function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
   const { t, i18n } = useT("knowledge");
   const paths = useWorkspacePaths();
@@ -625,6 +690,7 @@ function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
               <div className="mt-2 flex flex-wrap gap-1">
                 {candidate.signals.map((signal) => <Badge key={signal} variant="outline">{signal}</Badge>)}
               </div>
+              {candidate.evidence ? <CandidateEvidenceView evidence={candidate.evidence} /> : null}
               <p className="mt-2 text-xs text-muted-foreground">
                 {candidate.source_type} · {new Date(candidate.evaluated_at).toLocaleString(i18n.language)}
                 {metadata.draft_generation?.status ? ` · ${metadata.draft_generation.status}` : ""}

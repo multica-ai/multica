@@ -218,6 +218,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Timeout:        cfg.KnowledgeCuratorTimeout,
 	}, workspaceSecretSvc, nil) // draftService set below after curator is created
 	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
+	knowledgeSvc.Embedder = knowledgeEngine
 
 	var curatorDraftSvc *service.CuratorDraftTaskService
 	if workspaceSecretSvc != nil {
@@ -235,6 +236,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			Timeout:        cfg.KnowledgeCuratorTimeout,
 		}, workspaceSecretSvc, curatorDraftSvc)
 		knowledgeCurator = service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
+			knowledgeSvc.Embedder = knowledgeEngine
 	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)

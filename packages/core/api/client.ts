@@ -2418,6 +2418,7 @@ export class ApiClient {
       dedupe_key: "",
       created_by: null,
       metadata: {},
+      evidence: null,
       evaluated_at: "",
       created_at: "",
       updated_at: "",

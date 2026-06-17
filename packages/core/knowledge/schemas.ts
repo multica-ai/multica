@@ -135,6 +135,67 @@ export const KnowledgeSearchResultSchema = z.object({
   match_reason: z.string().default(""),
 }).passthrough();
 
+export const SkipCheckSchema = z.object({
+  evaluated: z.boolean().default(false),
+  matched_rule: z.string().nullable().default(null),
+}).passthrough();
+
+export const RetryFailureSchema = z.object({
+  attempt: z.number().default(0),
+  status: z.string().default(""),
+  error_summary: z.string().default(""),
+}).passthrough();
+
+export const RetrySuccessSchema = z.object({
+  attempt: z.number().default(0),
+  task_id: z.string().default(""),
+  status: z.string().default(""),
+}).passthrough();
+
+export const RetryChainEvidenceSchema = z.object({
+  total_attempts: z.number().default(0),
+  has_clear_error: z.boolean().default(false),
+  failures: z.array(RetryFailureSchema).default([]),
+  final_success: RetrySuccessSchema.nullable().default(null),
+}).passthrough();
+
+export const CorrectionRoundSchema = z.object({
+  comment_id: z.string().default(""),
+  comment_text: z.string().default(""),
+  had_follow_up: z.boolean().default(false),
+}).passthrough();
+
+export const PREvidenceItemSchema = z.object({
+  number: z.number().default(0),
+  title: z.string().default(""),
+  repo_owner: z.string().default(""),
+  repo_name: z.string().default(""),
+  state: z.string().default(""),
+  merged_at: z.string().default(""),
+  additions: z.number().default(0),
+  deletions: z.number().default(0),
+  changed_files: z.number().default(0),
+}).passthrough();
+
+export const SimilarityMatchSchema = z.object({
+  knowledge_item_id: z.string().default(""),
+  title: z.string().default(""),
+  vector_score: z.number().default(0),
+}).passthrough();
+
+export const SimilarityEvidenceSchema = z.object({
+  top_matches: z.array(SimilarityMatchSchema).default([]),
+  max_similarity: z.number().default(0),
+}).passthrough();
+
+export const CandidateEvidenceSchema = z.object({
+  skip_check: SkipCheckSchema.optional(),
+  retry_chain: RetryChainEvidenceSchema.optional(),
+  correction_rounds: z.array(CorrectionRoundSchema).optional(),
+  pr_evidence: z.array(PREvidenceItemSchema).optional(),
+  similarity: SimilarityEvidenceSchema.optional(),
+}).passthrough();
+
 export const KnowledgeCandidateSchema = z.object({
   id: z.string().default(""),
   workspace_id: z.string().default(""),
@@ -151,6 +212,7 @@ export const KnowledgeCandidateSchema = z.object({
   dedupe_key: z.string().default(""),
   created_by: NullableString,
   metadata: z.unknown().default({}),
+  evidence: CandidateEvidenceSchema.nullable().default(null),
   evaluated_at: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),

@@ -512,14 +512,15 @@ LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 INSERT INTO knowledge_candidate (
     workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id,
     trigger_reason, signal_strength, signals, score, status, dedupe_key,
-    created_by, metadata, evaluated_at
+    created_by, metadata, evidence, evaluated_at
 ) VALUES (
     sqlc.arg('workspace_id'), sqlc.arg('issue_id'), sqlc.narg('comment_id'),
     sqlc.narg('agent_task_id'), sqlc.arg('source_type'), sqlc.arg('source_id'),
     sqlc.arg('trigger_reason'), sqlc.arg('signal_strength'),
     COALESCE(sqlc.narg('signals')::text[], '{}'), sqlc.arg('score'), sqlc.arg('status'),
     sqlc.arg('dedupe_key'), sqlc.narg('created_by'),
-    COALESCE(sqlc.narg('metadata'), '{}'::jsonb), now()
+    COALESCE(sqlc.narg('metadata'), '{}'::jsonb),
+    COALESCE(sqlc.narg('evidence'), '{}'::jsonb), now()
 )
 ON CONFLICT (workspace_id, dedupe_key)
 DO UPDATE SET
@@ -538,6 +539,7 @@ DO UPDATE SET
     END,
     created_by = COALESCE(EXCLUDED.created_by, knowledge_candidate.created_by),
     metadata = EXCLUDED.metadata,
+    evidence = EXCLUDED.evidence,
     evaluated_at = now(),
     updated_at = now()
 RETURNING *;

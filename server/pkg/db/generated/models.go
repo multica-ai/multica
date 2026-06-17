@@ -536,6 +536,7 @@ type KnowledgeCandidate struct {
 	EvaluatedAt    pgtype.Timestamptz `json:"evaluated_at"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	Evidence       []byte             `json:"evidence"`
 }
 
 type KnowledgeEffectHourly struct {

@@ -517,7 +517,7 @@ func (q *Queries) DismissKnowledgeGovernanceFindingsForItem(ctx context.Context,
 }
 
 const getKnowledgeCandidate = `-- name: GetKnowledgeCandidate :one
-SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at, evidence
 FROM knowledge_candidate
 WHERE id = $1 AND workspace_id = $2
 `
@@ -549,6 +549,7 @@ func (q *Queries) GetKnowledgeCandidate(ctx context.Context, arg GetKnowledgeCan
 		&i.EvaluatedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Evidence,
 	)
 	return i, err
 }
@@ -1175,7 +1176,7 @@ func (q *Queries) ListKnowledgeAnalytics(ctx context.Context, arg ListKnowledgeA
 }
 
 const listKnowledgeCandidates = `-- name: ListKnowledgeCandidates :many
-SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at, evidence
 FROM knowledge_candidate
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
@@ -1229,6 +1230,7 @@ func (q *Queries) ListKnowledgeCandidates(ctx context.Context, arg ListKnowledge
 			&i.EvaluatedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Evidence,
 		); err != nil {
 			return nil, err
 		}
@@ -2531,7 +2533,7 @@ UPDATE knowledge_candidate SET
     metadata = COALESCE($2, metadata),
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
-RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at, evidence
 `
 
 type UpdateKnowledgeCandidateDraftStateParams struct {
@@ -2568,6 +2570,7 @@ func (q *Queries) UpdateKnowledgeCandidateDraftState(ctx context.Context, arg Up
 		&i.EvaluatedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Evidence,
 	)
 	return i, err
 }
@@ -2807,14 +2810,15 @@ const upsertKnowledgeCandidate = `-- name: UpsertKnowledgeCandidate :one
 INSERT INTO knowledge_candidate (
     workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id,
     trigger_reason, signal_strength, signals, score, status, dedupe_key,
-    created_by, metadata, evaluated_at
+    created_by, metadata, evidence, evaluated_at
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8,
     COALESCE($9::text[], '{}'), $10, $11,
     $12, $13,
-    COALESCE($14, '{}'::jsonb), now()
+    COALESCE($14, '{}'::jsonb),
+    COALESCE($15, '{}'::jsonb), now()
 )
 ON CONFLICT (workspace_id, dedupe_key)
 DO UPDATE SET
@@ -2833,9 +2837,10 @@ DO UPDATE SET
     END,
     created_by = COALESCE(EXCLUDED.created_by, knowledge_candidate.created_by),
     metadata = EXCLUDED.metadata,
+    evidence = EXCLUDED.evidence,
     evaluated_at = now(),
     updated_at = now()
-RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
+RETURNING id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at, evidence
 `
 
 type UpsertKnowledgeCandidateParams struct {
@@ -2853,6 +2858,7 @@ type UpsertKnowledgeCandidateParams struct {
 	DedupeKey      string      `json:"dedupe_key"`
 	CreatedBy      pgtype.UUID `json:"created_by"`
 	Metadata       interface{} `json:"metadata"`
+	Evidence       interface{} `json:"evidence"`
 }
 
 func (q *Queries) UpsertKnowledgeCandidate(ctx context.Context, arg UpsertKnowledgeCandidateParams) (KnowledgeCandidate, error) {
@@ -2871,6 +2877,7 @@ func (q *Queries) UpsertKnowledgeCandidate(ctx context.Context, arg UpsertKnowle
 		arg.DedupeKey,
 		arg.CreatedBy,
 		arg.Metadata,
+		arg.Evidence,
 	)
 	var i KnowledgeCandidate
 	err := row.Scan(
@@ -2892,6 +2899,7 @@ func (q *Queries) UpsertKnowledgeCandidate(ctx context.Context, arg UpsertKnowle
 		&i.EvaluatedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Evidence,
 	)
 	return i, err
 }
