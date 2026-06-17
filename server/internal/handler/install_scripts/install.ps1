@@ -13,7 +13,14 @@
 param(
     [switch]$Restart
 )
-$ErrorActionPreference = "Stop"
+
+# Enable TLS 1.2 for HTTPS requests — PowerShell 5.1 defaults to TLS 1.0
+# which modern CDNs (including Huawei OBS) reject.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Use "Continue" instead of "Stop" so non-terminating errors don't silently
+# crash the script; we handle errors explicitly where they matter.
+$ErrorActionPreference = "Continue"
 
 # --- Configuration ---
 $DefaultServer = "https://multica.wujieai.com"
@@ -36,7 +43,7 @@ switch ($Channel) {
         $OBSPrefix = "cli-test"
     }
     default {
-        Exit-Fatal "Unsupported channel: $Channel (supported: prod, test)"
+        throw "Unsupported channel: $Channel (supported: prod, test)"
     }
 }
 $OBSBase = "$OBSHost/$OBSPrefix/releases"
@@ -47,11 +54,24 @@ function Write-Info  { param($msg) Write-Host "[info]  $msg" -ForegroundColor Bl
 function Write-Ok    { param($msg) Write-Host "[ok]    $msg" -ForegroundColor Green }
 function Write-Warn  { param($msg) Write-Host "[warn]  $msg" -ForegroundColor Yellow }
 function Write-Err   { param($msg) Write-Host "[error] $msg" -ForegroundColor Red }
-function Exit-Fatal  { param($msg) Write-Err $msg; exit 1 }
+# "exit 1" closes the entire PowerShell session when run via irm|iex;
+# "throw" displays the error and keeps the session open.
+function Exit-Fatal  { param($msg) Write-Err $msg; throw $msg }
 
 # --- Detect architecture ---
 function Get-Arch {
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    # RuntimeInformation is available on .NET Core / PS 7+; fall back to
+    # PROCESSOR_ARCHITECTURE env var for Windows PowerShell 5.1.
+    try {
+        $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+    } catch {
+        $arch = $env:PROCESSOR_ARCHITECTURE
+        switch ($arch) {
+            "AMD64" { $arch = "X64"; break }
+            "ARM64" { $arch = "Arm64"; break }
+            default { Exit-Fatal "Unsupported architecture: $arch (from env)" }
+        }
+    }
     switch ($arch) {
         "X64"   { return "amd64" }
         "Arm64" { return "arm64" }
@@ -69,23 +89,23 @@ function Get-LatestVersion {
         if ($Channel -eq "test") {
             $versionEndpoint = "$versionEndpoint?channel=test"
         }
-        $version = (Invoke-RestMethod -Uri $versionEndpoint -TimeoutSec 10).Trim()
+        $version = (Invoke-RestMethod -Uri $versionEndpoint -TimeoutSec 15).Trim()
         if ($version) {
             return $version.TrimStart("v")
         }
     } catch {
-        Write-Warn "Server endpoint unavailable, falling back to manifest..."
+        Write-Warn "Server endpoint unavailable, falling back to manifest... ($($_.Exception.Message))"
     }
 
     # Fallback: parse manifest
     try {
-        $manifest = Invoke-RestMethod -Uri $ManifestURL -TimeoutSec 10
+        $manifest = Invoke-RestMethod -Uri $ManifestURL -TimeoutSec 15
         $version = $manifest.version.TrimStart("v")
         if ($version) {
             return $version
         }
     } catch {
-        Exit-Fatal "Failed to determine latest CLI version. Try setting `$env:MULTICA_VERSION manually."
+        Exit-Fatal "Failed to determine latest CLI version. Try setting `$env:MULTICA_VERSION manually. ($($_.Exception.Message))"
     }
 }
 
@@ -94,7 +114,7 @@ function Test-Checksum {
     param($FilePath, $Filename)
 
     try {
-        $manifest = Invoke-RestMethod -Uri $ManifestURL -TimeoutSec 10
+        $manifest = Invoke-RestMethod -Uri $ManifestURL -TimeoutSec 15
         $asset = $manifest.assets | Where-Object { $_.filename -eq $Filename }
         if ($asset -and $asset.checksum) {
             $expected = $asset.checksum
@@ -268,4 +288,13 @@ function Install-MulticaCLI {
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
 }
 
-Install-MulticaCLI
+try {
+    Install-MulticaCLI
+} catch {
+    Write-Err "Installation failed: $($_.Exception.Message)"
+    Write-Host ""
+    Write-Host "If you see a network error, check:" -ForegroundColor Yellow
+    Write-Host "  1. TLS 1.2 is already configured in this script" -ForegroundColor Yellow
+    Write-Host "  2. Check if the server is reachable: Invoke-RestMethod https://multica.wujieai.com/install/latest-cli-version" -ForegroundColor Yellow
+    Write-Host "  3. Try setting version manually: `$env:MULTICA_VERSION = 'x.y.z'; then re-run" -ForegroundColor Yellow
+}
