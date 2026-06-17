@@ -1361,16 +1361,26 @@ func firePullRequestWebhookWithHead(t *testing.T, secret, identifier string, ins
 
 func fireCheckSuiteWebhook(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, conclusion, updatedAt string) {
 	t.Helper()
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, repo, prNumbers,
+		suiteID, appID, headSHA, "completed", "completed", conclusion, updatedAt)
+}
+
+// fireCheckSuiteWebhookWithStatus is the parametric form of
+// fireCheckSuiteWebhook. Tests covering the `requested`/`rerequested` and
+// `queued`/`in_progress` matrix use it directly; the legacy completed-only
+// helper above wraps it for existing call sites.
+func fireCheckSuiteWebhookWithStatus(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, action, status, conclusion, updatedAt string) {
+	t.Helper()
 	prRefs := make([]map[string]any, 0, len(prNumbers))
 	for _, n := range prNumbers {
 		prRefs = append(prRefs, map[string]any{"number": n})
 	}
 	payload := map[string]any{
-		"action": "completed",
+		"action": action,
 		"check_suite": map[string]any{
 			"id":            suiteID,
 			"head_sha":      headSHA,
-			"status":        "completed",
+			"status":        status,
 			"conclusion":    conclusion,
 			"updated_at":    updatedAt,
 			"app":           map[string]any{"id": appID},
@@ -1415,6 +1425,7 @@ func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueRe
 	installationID := int64(33445566) + int64(time.Now().UnixNano()%1000000)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_pending_check_suite WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
 		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
 		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
@@ -1535,6 +1546,153 @@ func TestWebhook_CheckSuite_LateOlderEventIgnored(t *testing.T) {
 	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	if got == nil || *got != "failed" {
 		t.Errorf("expected failure to win against later-delivered older success, got %v", got)
+	}
+}
+
+// TestWebhook_CheckSuite_QueuedCountsAsPending covers the "CI 跑到一半" path:
+// GitHub fires `check_suite.requested` with status `queued` and an empty
+// conclusion while CI is still spinning up. The handler must persist these
+// non-terminal events so the per-PR `checks_pending` count reflects work in
+// progress; otherwise the frontend falls through to the "checks not
+// reported yet" placeholder until the first completed suite arrives.
+func TestWebhook_CheckSuite_QueuedCountsAsPending(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-pending-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "pending1234567"
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-pending", 55, "opened", head, "")
+	// CI just kicked off — `requested` action, status=queued, no conclusion.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4001, 6001, head, "requested", "queued", "", "2026-05-01T00:00:00Z")
+	// A second app's suite starts a moment later with status=in_progress.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4002, 6002, head, "requested", "in_progress", "", "2026-05-01T00:00:30Z")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+	if rows[0].ChecksPending != 2 || rows[0].ChecksTotal != 2 ||
+		rows[0].ChecksFailed != 0 || rows[0].ChecksPassed != 0 {
+		t.Fatalf("expected pending=2 total=2 failed=0 passed=0, got pending=%d total=%d failed=%d passed=%d",
+			rows[0].ChecksPending, rows[0].ChecksTotal, rows[0].ChecksFailed, rows[0].ChecksPassed)
+	}
+	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "pending" {
+		t.Errorf("expected aggregate pending while CI is running, got %v", got)
+	}
+
+	// Now one app completes successfully — pending count drops to 1 and the
+	// aggregate stays pending until the second app finishes.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4001, 6001, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
+	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if rows[0].ChecksPending != 1 || rows[0].ChecksPassed != 1 || rows[0].ChecksTotal != 2 {
+		t.Fatalf("expected pending=1 passed=1 total=2 after one suite completes, got pending=%d passed=%d total=%d",
+			rows[0].ChecksPending, rows[0].ChecksPassed, rows[0].ChecksTotal)
+	}
+}
+
+// TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert covers the out-of-order
+// path: a `check_suite` event arrives before the matching `pull_request`
+// row has been mirrored locally (e.g. webhook reordering, or the PR was
+// linked to an installation that was suspended/resumed). The handler must
+// stash the suite and replay it when the PR upsert arrives, otherwise the
+// PR's first observed suite is silently lost and `checks_pending` stays at
+// 0 until the next suite ships.
+func TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-oooreplay-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "oo01234567890"
+	// Suite event lands FIRST — the PR row does not exist yet.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-ooo", []int32{66}, 5001, 7501, head, "requested", "in_progress", "", "2026-05-01T00:00:00Z")
+
+	// Verify nothing landed on the PR table yet (no PR row to land on).
+	if rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID)); err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	} else if len(rows) != 0 {
+		t.Fatalf("expected 0 PR rows before PR webhook, got %d", len(rows))
+	}
+
+	// Now the pull_request webhook arrives. The handler must drain the
+	// pending stash and replay it onto this PR.
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-ooo", 66, "opened", head, "")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row after PR webhook, got %d", len(rows))
+	}
+	if rows[0].ChecksPending != 1 || rows[0].ChecksTotal != 1 {
+		t.Fatalf("expected pending=1 total=1 after replay, got pending=%d total=%d",
+			rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+
+	// The next PR upsert (a no-op metadata edit) must NOT re-apply or fail
+	// — the drain is one-shot, so the second pull_request webhook drains
+	// an empty pending list.
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-ooo", 66, "edited", head, "")
+	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if rows[0].ChecksPending != 1 || rows[0].ChecksTotal != 1 {
+		t.Fatalf("expected pending=1 total=1 after no-op edit, got pending=%d total=%d",
+			rows[0].ChecksPending, rows[0].ChecksTotal)
+	}
+}
+
+// TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer guards the pending
+// stash against the same out-of-order trap the live table already
+// handles: while the PR row is still missing, an older event for the
+// same suite_id must not overwrite a newer payload that was stashed
+// first. Without the suite_updated_at guard on UpsertPendingCheckSuite,
+// a late `requested/in_progress` arriving after `completed/success`
+// would roll the stash back to pending; the subsequent PR upsert would
+// then replay the stale state and the PR card would stay stuck on
+// "pending" until the next suite shipped.
+func TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-stash-order-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "stash01234567"
+	// Newer event lands FIRST while the PR row does not exist yet.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
+	// Older event for the SAME suite arrives later (webhook reorder). The
+	// pending stash must keep the newer payload.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "requested", "in_progress", "", "2026-05-01T00:00:00Z")
+
+	// PR webhook arrives — drain replays the (still newer) stash.
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-stash", 77, "opened", head, "")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row after PR webhook, got %d", len(rows))
+	}
+	if rows[0].ChecksPassed != 1 || rows[0].ChecksPending != 0 || rows[0].ChecksTotal != 1 {
+		t.Fatalf("expected passed=1 pending=0 total=1 (newer stash preserved), got passed=%d pending=%d total=%d",
+			rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
 	}
 }
 
