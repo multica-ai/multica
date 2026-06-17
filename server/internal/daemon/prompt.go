@@ -105,7 +105,7 @@ func buildChannelMentionPrompt(task Task) string {
 	if task.ChannelThreadRootMsgID != "" {
 		fmt.Fprintf(&b, "When you need to share a final result, reply in the same thread: `multica channel message reply %s %s --content \"...\"`. Do NOT reply to the triggering message directly (that would create a nested thread). Use `multica channel message send %s --content \"...\"` only when the result should be a top-level message outside the thread. If no visible reply is warranted, finish silently after doing the required work.\n", task.ChannelID, task.ChannelThreadRootMsgID, task.ChannelID)
 	} else {
-		b.WriteString("When you need to share a final result, default to a top-level channel message so it appears in the channel message list: `multica channel message send <channel-id> --content \"...\"`. Use `multica channel message reply <channel-id> <message-id> --content \"...\"` only when the result should stay attached to the triggering message. If no visible reply is warranted, finish silently after doing the required work.\n")
+		fmt.Fprintf(&b, "When you share a final result, reply to the triggering message so it stays in that message's thread (the reply auto-creates a thread): `multica channel message reply %s %s --content \"...\"`. Do NOT post a top-level `multica channel message send` for a result that is a reply — that clutters the channel timeline. Use `multica channel message send %s --content \"...\"` only for a standalone broadcast that is not a reply to anything. If no visible reply is warranted, finish silently after doing the required work.\n", task.ChannelID, task.ChannelMessageID, task.ChannelID)
 	}
 	return b.String()
 }

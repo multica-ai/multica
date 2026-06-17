@@ -611,7 +611,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		}
 	}
 
-	b.WriteString(buildLocalPreviewInstructions(ctx))
+	// Local Preview is issue-scoped (`multica preview start --issue ...`,
+	// "your final issue comment"). Channel tasks have no issue to attach a
+	// preview to and are free-form, so emitting it leaks issue framing and a
+	// useless `<issue-id>` placeholder. Skip it for channel-origin tasks.
+	if !isChannelTask(ctx) {
+		b.WriteString(buildLocalPreviewInstructions(ctx))
+	}
 
 	// Inject available repositories section.
 	if len(ctx.Repos) > 0 {
@@ -785,7 +791,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
 	}
 
-	if len(ctx.AgentSkills) > 0 {
+	// Skills enumeration is issue-task oriented (a curated menu the agent loads
+	// for concrete issue work). Channel tasks are free-form; the skills are
+	// still written to disk and discovered natively by the provider, so the
+	// brief enumeration is noise here rather than signal. Skip it for
+	// channel-origin tasks.
+	if len(ctx.AgentSkills) > 0 && !isChannelTask(ctx) {
 		b.WriteString("## Skills\n\n")
 		switch provider {
 		case "claude", "codebuddy":

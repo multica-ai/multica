@@ -1424,6 +1424,11 @@ func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
 		ChannelID:        "11111111-2222-3333-4444-555555555555",
 		ChannelName:      "release",
 		ChannelMessageID: "66666666-7777-8888-9999-000000000000",
+		// Skills are platform-configured and still written to disk for native
+		// discovery, but the brief must NOT enumerate them for a channel task.
+		AgentSkills: []SkillContextForEnv{
+			{Name: "deploy", Description: "deploy the app"},
+		},
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
@@ -1437,6 +1442,9 @@ func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
 		"multica channel member list <channel-id>",
 		// Channel agents may still open an issue when asked — but only then.
 		"only if the channel conversation explicitly asks you to open one",
+		// No thread root → the brief must default to replying to the
+		// triggering message (IDs filled in), not to a top-level send.
+		"multica channel message reply 11111111-2222-3333-4444-555555555555 66666666-7777-8888-9999-000000000000",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
@@ -1466,6 +1474,14 @@ func TestChannelTaskBriefOmitsIssueWorkflow(t *testing.T) {
 		"in_progress` unless your Agent Identity",
 		// Issue-comment HEREDOC formatting.
 		"For issue comments, always use `--content-stdin`",
+		// Local Preview is issue-scoped (`--issue`, "your final issue
+		// comment") and must not leak into a channel brief.
+		"## Local Preview",
+		"multica preview start",
+		"for this issue",
+		// Skills enumeration is noise for a free-form channel task; the
+		// skills are still on disk for native discovery.
+		"## Skills",
 	}
 	for _, s := range mustNotContain {
 		if strings.Contains(out, s) {
@@ -1484,6 +1500,9 @@ func TestIssueTaskBriefStillCarriesIssueWorkflow(t *testing.T) {
 		AgentName: "Issue Agent",
 		AgentID:   "agent-2",
 		IssueID:   "11111111-2222-3333-4444-555555555555",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "deploy", Description: "deploy the app"},
+		},
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
@@ -1492,6 +1511,12 @@ func TestIssueTaskBriefStillCarriesIssueWorkflow(t *testing.T) {
 		"multica issue comment add",
 		"## Comment Formatting",
 		"## Instruction Precedence",
+		// Local Preview and the Skills enumeration are issue-task sections
+		// and must stay present for issue tasks (the channel gating must not
+		// drop them here).
+		"## Local Preview",
+		"multica preview start",
+		"## Skills",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("issue brief missing expected %q", s)

@@ -280,9 +280,10 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		"Channel name: release",
 		"Triggering message ID: message-1",
 		"multica channel context channel-1 --message message-1 --include-replies --recent 20 --output json",
-		"default to a top-level channel message",
-		"multica channel message send <channel-id>",
-		"multica channel message reply <channel-id> <message-id>",
+		// No thread root → the agent must default to replying to the
+		// triggering message (IDs filled in), NOT to a top-level send.
+		"multica channel message reply channel-1 message-1",
+		"multica channel message send channel-1",
 		"Prior session available",
 		"Guodage",
 	}
@@ -300,6 +301,11 @@ func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.
 		"multica issue comment add",
 		"Issue Metadata",
 		"triggering comment",
+		// The no-thread-root branch must NOT push the agent to post a
+		// top-level message as the default result carrier — that lands the
+		// reply in the main channel feed instead of the triggering message's
+		// reply area.
+		"default to a top-level channel message",
 	}
 	for _, s := range mustNotContain {
 		if strings.Contains(out, s) {
