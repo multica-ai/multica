@@ -873,6 +873,7 @@ var excluded = map[string]string{
 	"POST /api/workspaces/":                        "self_only — create-workspace is pre-workspace; any authenticated user, no workspace context to gate within",
 	"POST /api/workspaces/{id}/leave":              "self_only — leaving is the caller's own membership",
 	"POST /api/workspaces/{id}/connections/test":   "admin_only — validates a connection config for the current workspace; not an agent runtime tool",
+	"POST /api/workspaces/{id}/cerebro/copy":       "admin_only — owner/admin-gated workspace copy (TECH-3582); RequireWorkspaceRoleFromURL, not wired to the tool-policy engine, no agent runtime tool equivalent",
 	"POST /api/inbox/add-issue":                    "self_only — caller pinning any issue into their own inbox",
 	"DELETE /api/me/profile":                       "self_only — caller's own profile",
 	"PATCH /api/me":                                "self_only — caller's own profile",
