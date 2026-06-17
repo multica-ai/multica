@@ -383,16 +383,24 @@ function PageHeaderBar({
           </span>
         )}
       </div>
+      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
+          reserved for the empty state's CTA. All three share the same
+          dimensions, padding, and responsive icon-only behavior so the
+          header reads as a single, consistent action group. */}
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
         {canManageProfiles && (
           <Button
             type="button"
             size="sm"
             variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.profiles.cta)}
             onClick={onAddRuntime}
           >
             <Plus className="h-3.5 w-3.5" />
-            {t(($) => $.profiles.cta)}
+            <span className="hidden md:inline">
+              {t(($) => $.profiles.cta)}
+            </span>
           </Button>
         )}
         {cloudRuntimeEnabled && (
@@ -400,14 +408,16 @@ function PageHeaderBar({
             type="button"
             size="sm"
             variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.cloud_runtime.action)}
             onClick={onOpenCloudRuntime}
           >
-            <Cloud className="h-3 w-3" />
-            {t(($) => $.cloud_runtime.action)}
+            <Cloud className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.cloud_runtime.action)}
+            </span>
           </Button>
         )}
-        {/* Quiet chrome button (outline, icon-only below md) — primary is
-            reserved for the empty state's CTA. */}
         <Button
           type="button"
           size="sm"
