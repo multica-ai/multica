@@ -59,3 +59,12 @@ SET auto_proposed_at = now()
 WHERE skill_id = @skill_id
   AND delta_type = @delta_type
   AND delta_value = @delta_value;
+
+-- name: GetCerebroSkillLearningFlagForWorkspace :one
+-- Workspace-level value of the cerebro_skill_learning feature flag. pgx.ErrNoRows
+-- means the flag has never been set and the default (OFF) applies — the
+-- learning sweeper treats that as "skip this workspace".
+SELECT enabled FROM cerebro_feature_flags
+WHERE workspace_id = $1
+  AND user_id = '00000000-0000-0000-0000-000000000000'
+  AND flag_key = 'cerebro_skill_learning';

@@ -36,6 +36,8 @@ import (
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 note types sweeper import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
+	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning sweeper import
+	cerebrolearn "github.com/multica-ai/multica/server/internal/cerebro"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -416,13 +418,15 @@ func main() {
 	go cerebrosprints.NewSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 24*time.Hour)
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 daily note-types materialiser. No-ops when no scheduled type exists (cerebro_note_types flag off).
 	go cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24*time.Hour)
+	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning. Turns threshold-crossing observations into change-request proposals. No-ops for workspaces with cerebro_skill_learning flag off.
+	go cerebrolearn.NewLearningSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 6*time.Hour)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
-		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage()) // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
-		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus) // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
+		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage())                                                                          // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
+		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
