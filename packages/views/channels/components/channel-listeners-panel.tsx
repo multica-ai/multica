@@ -36,8 +36,10 @@ interface ChannelListenersPanelProps {
 /**
  * Header-anchored popover that lists every agent in the channel together
  * with a "listen always" / "only when mentioned" toggle. The default for an
- * agent without an explicit row is 'always' — the row is created on the
- * fly when the user flips the switch off.
+ * agent without an explicit row depends on the channel kind (TECH-3691): a
+ * DM defaults to 'always' (1:1 chat), a named channel defaults to
+ * 'mention_only' (agents stay quiet until @-mentioned). The row is created on
+ * the fly when the user flips the switch away from that default.
  *
  * The button is hidden when the channel has no agent participants since the
  * toggle would have nothing to operate on.
@@ -51,6 +53,11 @@ export function ChannelListenersPanel({ channel }: ChannelListenersPanelProps) {
   if (agentParticipants.length === 0) {
     return null;
   }
+
+  // Mirror the backend default in defaultListenMode (service.go): channels
+  // start mention-only, DMs start always.
+  const defaultMode: ChannelAgentListenMode =
+    channel.kind === "channel" ? "mention_only" : "always";
 
   return (
     <Popover>
@@ -82,6 +89,7 @@ export function ChannelListenersPanel({ channel }: ChannelListenersPanelProps) {
         <ListenersList
           channelId={channel.id}
           agents={agentParticipants}
+          defaultMode={defaultMode}
         />
       </PopoverContent>
     </Popover>
@@ -91,9 +99,10 @@ export function ChannelListenersPanel({ channel }: ChannelListenersPanelProps) {
 interface ListenersListProps {
   channelId: string;
   agents: ChannelMember[];
+  defaultMode: ChannelAgentListenMode;
 }
 
-function ListenersList({ channelId, agents }: ListenersListProps) {
+function ListenersList({ channelId, agents, defaultMode }: ListenersListProps) {
   const wsId = useWorkspaceId();
   const { data, isLoading } = useQuery(channelAgentSettingsOptions(wsId, channelId));
   const setListenMode = useSetChannelAgentListenMode(channelId);
@@ -109,7 +118,7 @@ function ListenersList({ channelId, agents }: ListenersListProps) {
   return (
     <ul className="flex flex-col gap-1.5">
       {agents.map((agent) => {
-        const mode: ChannelAgentListenMode = modes[agent.user_id] ?? "always";
+        const mode: ChannelAgentListenMode = modes[agent.user_id] ?? defaultMode;
         return (
           <ListenerRow
             key={agent.user_id}
