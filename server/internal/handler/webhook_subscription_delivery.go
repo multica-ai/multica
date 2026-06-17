@@ -40,25 +40,19 @@ type OutboundWebhookDeliveryResponse struct {
 // the wire shape.
 func slimOutboundDeliveryToResponse(d db.ListOutboundWebhookDeliveriesRow) OutboundWebhookDeliveryResponse {
 	resp := OutboundWebhookDeliveryResponse{
-		ID:             uuidToString(d.ID),
-		WorkspaceID:    uuidToString(d.WorkspaceID),
-		SubscriptionID: uuidToString(d.SubscriptionID),
-		Event:          d.Event,
-		Status:         d.Status,
-		AttemptCount:   d.AttemptCount,
-		CreatedAt:      timestampToString(d.CreatedAt),
+		ID:                uuidToString(d.ID),
+		WorkspaceID:       uuidToString(d.WorkspaceID),
+		SubscriptionID:    uuidToString(d.SubscriptionID),
+		Event:             d.Event,
+		Status:            d.Status,
+		AttemptCount:      d.AttemptCount,
+		Error:             textToPtr(d.Error),
+		RedeliveredFromID: uuidToPtr(d.RedeliveredFromID),
+		CreatedAt:         timestampToString(d.CreatedAt),
 	}
 	if d.ResponseStatus.Valid {
 		v := d.ResponseStatus.Int32
 		resp.ResponseStatus = &v
-	}
-	if d.Error.Valid {
-		v := d.Error.String
-		resp.Error = &v
-	}
-	if d.RedeliveredFromID.Valid {
-		v := uuidToString(d.RedeliveredFromID)
-		resp.RedeliveredFromID = &v
 	}
 	return resp
 }
@@ -66,25 +60,19 @@ func slimOutboundDeliveryToResponse(d db.ListOutboundWebhookDeliveriesRow) Outbo
 // outboundDeliveryToResponse maps a full row; detail=true includes bodies.
 func outboundDeliveryToResponse(d db.OutboundWebhookDelivery, detail bool) OutboundWebhookDeliveryResponse {
 	resp := OutboundWebhookDeliveryResponse{
-		ID:             uuidToString(d.ID),
-		WorkspaceID:    uuidToString(d.WorkspaceID),
-		SubscriptionID: uuidToString(d.SubscriptionID),
-		Event:          d.Event,
-		Status:         d.Status,
-		AttemptCount:   d.AttemptCount,
-		CreatedAt:      timestampToString(d.CreatedAt),
+		ID:                uuidToString(d.ID),
+		WorkspaceID:       uuidToString(d.WorkspaceID),
+		SubscriptionID:    uuidToString(d.SubscriptionID),
+		Event:             d.Event,
+		Status:            d.Status,
+		AttemptCount:      d.AttemptCount,
+		Error:             textToPtr(d.Error),
+		RedeliveredFromID: uuidToPtr(d.RedeliveredFromID),
+		CreatedAt:         timestampToString(d.CreatedAt),
 	}
 	if d.ResponseStatus.Valid {
 		v := d.ResponseStatus.Int32
 		resp.ResponseStatus = &v
-	}
-	if d.Error.Valid {
-		v := d.Error.String
-		resp.Error = &v
-	}
-	if d.RedeliveredFromID.Valid {
-		v := uuidToString(d.RedeliveredFromID)
-		resp.RedeliveredFromID = &v
 	}
 	if detail {
 		if len(d.RequestBody) > 0 {
