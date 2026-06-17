@@ -11,7 +11,15 @@ package transport
 import (
 	"encoding/binary"
 	"fmt"
+	"unicode/utf8"
 )
+
+// maxStringLen is the largest UTF-8 byte length a WuKongIM string field can
+// carry — the length prefix is a uint16. Encoding more would truncate the
+// length while still appending all bytes, desyncing every following field, so
+// WriteString clips to a valid rune boundary instead. The frame stays
+// self-consistent (length == bytes written) rather than corrupt.
+const maxStringLen = 1<<16 - 1 // 65535
 
 // Framing limits. A malicious or buggy server can dribble partial packets
 // forever (e.g. an unterminated variable-length encoding) and exhaust memory;
@@ -58,8 +66,24 @@ func (e *encoder) WriteUint64(v uint64) {
 // bytes. An empty string writes a zero length.
 func (e *encoder) WriteString(s string) {
 	b := []byte(s)
+	if len(b) > maxStringLen {
+		b = clipUTF8(b, maxStringLen)
+	}
 	e.WriteUint16(uint16(len(b)))
 	e.buf = append(e.buf, b...)
+}
+
+// clipUTF8 returns the longest prefix of b that is at most max bytes and does
+// not split a multi-byte UTF-8 rune.
+func clipUTF8(b []byte, max int) []byte {
+	if len(b) <= max {
+		return b
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return b[:cut]
 }
 
 // Bytes returns the accumulated frame.

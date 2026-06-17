@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"testing"
+	"unicode/utf8"
 )
 
 func mustHex(t *testing.T, s string) []byte {
@@ -178,5 +179,46 @@ func TestUnpackOne_VarLenOverrun(t *testing.T) {
 	_, _, err := collectFrames(t, buf)
 	if err == nil {
 		t.Error("expected malformed-varlen error")
+	}
+}
+
+func TestWriteStringClipsOversizedToValidFrame(t *testing.T) {
+	// A string longer than the uint16 length prefix must not truncate the
+	// length while writing all bytes (which would desync the frame). The
+	// encoded length must always equal the number of bytes that follow.
+	var e encoder
+	big := make([]byte, maxStringLen+5000)
+	for i := range big {
+		big[i] = 'a'
+	}
+	e.WriteString(string(big))
+
+	d := newDecoder(e.Bytes())
+	got, err := d.ReadString()
+	if err != nil {
+		t.Fatalf("ReadString after oversized WriteString: %v", err)
+	}
+	if len(got) != maxStringLen {
+		t.Fatalf("clipped length = %d, want %d", len(got), maxStringLen)
+	}
+
+	// Multi-byte runes near the boundary must not be split.
+	var e2 encoder
+	// '世' is 3 bytes; fill just past the cap so the boundary lands mid-rune.
+	s := ""
+	for len([]byte(s)) <= maxStringLen+10 {
+		s += "世界"
+	}
+	e2.WriteString(s)
+	d2 := newDecoder(e2.Bytes())
+	got2, err := d2.ReadString()
+	if err != nil {
+		t.Fatalf("ReadString (multibyte): %v", err)
+	}
+	if !utf8.ValidString(got2) {
+		t.Fatalf("clipped string is not valid UTF-8")
+	}
+	if len([]byte(got2)) > maxStringLen {
+		t.Fatalf("clipped length %d exceeds cap %d", len(got2), maxStringLen)
 	}
 }
