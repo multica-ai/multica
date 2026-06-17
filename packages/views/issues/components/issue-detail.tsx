@@ -14,6 +14,7 @@ import {
   Archive,
   ArrowUp,
   BellRing, // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
+  BellOff, // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 offline-park line icon.
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -249,6 +250,16 @@ function formatActivity(
       return details.fire_at
         ? t(($) => $.activity.wakeup_scheduled_for, { date: formatWakeupFireAt(details.fire_at) })
         : t(($) => $.activity.wakeup_scheduled);
+    // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 — a wakeup that can't fire
+    // because the agent runtime is offline/missing is parked; show the cause.
+    case "wakeup_parked": {
+      const date = formatWakeupFireAt(details.next_attempt_at);
+      if (details.reason === "no_runtime")
+        return t(($) => $.activity.wakeup_parked_no_runtime, { date });
+      if (details.reason === "offline")
+        return t(($) => $.activity.wakeup_parked_offline, { date });
+      return t(($) => $.activity.wakeup_parked, { date });
+    }
     // CEREBRO-PATCH(approval-system-activity): TECH-3533 cross-actor private-agent run-request timeline labels.
     case "agent_run_requested":
       return t(($) => $.activity.agent_run_requested, { agent: details.agent_name ?? "" });
@@ -471,6 +482,9 @@ function ActivityBlock({
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else if (entry.action === "wakeup_scheduled") {
           leadIcon = <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />;
+        } else if (entry.action === "wakeup_parked") {
+          // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 offline-park line icon.
+          leadIcon = <BellOff className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
           leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
         }
@@ -995,7 +1009,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     // - all other actions: within a 2-minute window
     const COALESCE_MS = 2 * 60 * 1000;
     const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
-    const NEVER_COALESCE_ACTIONS = new Set(["wakeup_scheduled"]); // CEREBRO-PATCH(wakeup-scheduled-activity): each scheduled time must stay visible.
+    const NEVER_COALESCE_ACTIONS = new Set(["wakeup_scheduled", "wakeup_parked"]); // CEREBRO-PATCH(wakeup-scheduled-activity): each scheduled time must stay visible; CEREBRO-PATCH(wakeup-parked-activity): each park (new offline streak) stays visible.
     const coalesced: TimelineEntry[] = [];
     for (const entry of topLevel) {
       if (entry.type === "activity") {

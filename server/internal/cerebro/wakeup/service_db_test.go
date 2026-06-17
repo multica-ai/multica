@@ -414,3 +414,122 @@ func TestDispatchCreatesWakeupTaskWithoutSyntheticComment(t *testing.T) {
 		t.Fatalf("task context prompt = %q, want %q", prompt, row.Prompt)
 	}
 }
+
+// TestPostponeEmitsParkedActivityOnceAndResetsOnDispatch is the TECH-3734 core:
+// when the agent runtime is offline, dispatch parks the wakeup and that park
+// becomes a single visible wakeup_parked system activity on the transition into
+// the parked state — not one line every 5-minute retry. The postpone counter
+// climbs while offline and resets to zero once a dispatch finally succeeds.
+func TestPostponeEmitsParkedActivityOnceAndResetsOnDispatch(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+
+	// Dedicated offline runtime + agent so the shared online fixture is untouched.
+	var offRuntime, offAgent pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		 VALUES ($1, $2, 'local', 'claude_code', 'offline') RETURNING id`,
+		wkWorkspaceID, "Parked Test Runtime").Scan(&offRuntime); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		 VALUES ($1, $2, 'local', $3) RETURNING id`,
+		wkWorkspaceID, "Parked Test Agent", offRuntime).Scan(&offAgent); err != nil {
+		t.Fatalf("create offline agent: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		wkPool.Exec(bg, `DELETE FROM agent_task_queue WHERE agent_id = $1`, offAgent)
+		wkPool.Exec(bg, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, offAgent)
+		wkPool.Exec(bg, `DELETE FROM activity_log WHERE actor_id = $1`, offAgent)
+		wkPool.Exec(bg, `DELETE FROM agent WHERE id = $1`, offAgent)
+		wkPool.Exec(bg, `DELETE FROM agent_runtime WHERE id = $1`, offRuntime)
+	})
+
+	row, err := svc.Cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
+		WorkspaceID: wkWorkspaceID,
+		AgentID:     offAgent,
+		IssueID:     wkIssueID,
+		Prompt:      "park me while offline",
+		TriggerType: TriggerTime,
+		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create wakeup: %v", err)
+	}
+
+	countParked := func() int {
+		var n int
+		if err := wkPool.QueryRow(ctx,
+			`SELECT count(*) FROM activity_log WHERE issue_id = $1 AND actor_id = $2 AND action = 'wakeup_parked'`,
+			wkIssueID, offAgent).Scan(&n); err != nil {
+			t.Fatalf("count parked activities: %v", err)
+		}
+		return n
+	}
+	getPostpones := func() int32 {
+		var n int32
+		if err := wkPool.QueryRow(ctx,
+			`SELECT consecutive_postpones FROM cerebro_agent_wakeup WHERE id = $1`, row.ID).Scan(&n); err != nil {
+			t.Fatalf("get consecutive_postpones: %v", err)
+		}
+		return n
+	}
+
+	// Dispatch 1: runtime offline → park. Transition into parked → one activity.
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch 1: %v", err)
+	}
+	if got := countParked(); got != 1 {
+		t.Fatalf("parked activities after first park = %d, want 1", got)
+	}
+	if got := getPostpones(); got != 1 {
+		t.Fatalf("consecutive_postpones after first park = %d, want 1", got)
+	}
+	var rawDetails []byte
+	if err := wkPool.QueryRow(ctx,
+		`SELECT details FROM activity_log WHERE issue_id = $1 AND actor_id = $2 AND action = 'wakeup_parked' ORDER BY created_at DESC LIMIT 1`,
+		wkIssueID, offAgent).Scan(&rawDetails); err != nil {
+		t.Fatalf("load parked activity details: %v", err)
+	}
+	var details map[string]string
+	if err := json.Unmarshal(rawDetails, &details); err != nil {
+		t.Fatalf("decode parked details: %v", err)
+	}
+	if details["reason"] != postponeReasonOffline {
+		t.Fatalf("parked reason = %q, want %q", details["reason"], postponeReasonOffline)
+	}
+	if details["next_attempt_at"] == "" {
+		t.Fatalf("parked next_attempt_at missing")
+	}
+	if details["wakeup_id"] != util.UUIDToString(row.ID) {
+		t.Fatalf("parked wakeup_id = %q, want %s", details["wakeup_id"], util.UUIDToString(row.ID))
+	}
+
+	// Dispatch 2: still offline → still parked, counter climbs, but anti-flood
+	// means NO second activity line.
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch 2: %v", err)
+	}
+	if got := countParked(); got != 1 {
+		t.Fatalf("parked activities after second park = %d, want still 1 (anti-flood)", got)
+	}
+	if got := getPostpones(); got != 2 {
+		t.Fatalf("consecutive_postpones after second park = %d, want 2", got)
+	}
+
+	// Runtime comes online: dispatch succeeds and the streak resets to zero.
+	if _, err := wkPool.Exec(ctx, `UPDATE agent_runtime SET status = 'online' WHERE id = $1`, offRuntime); err != nil {
+		t.Fatalf("set runtime online: %v", err)
+	}
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch 3 (online): %v", err)
+	}
+	if got := getPostpones(); got != 0 {
+		t.Fatalf("consecutive_postpones after successful dispatch = %d, want 0", got)
+	}
+}
