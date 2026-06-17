@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -262,6 +263,7 @@ func extractXlsxText(body []byte) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open xlsx: %w", err)
 	}
+	sharedStrings := xlsxSharedStrings(zr)
 	var rows []string
 	for _, f := range zr.File {
 		if !strings.HasPrefix(f.Name, "xl/worksheets/") || !strings.HasSuffix(f.Name, ".xml") {
@@ -271,7 +273,7 @@ func extractXlsxText(body []byte) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		text := strings.TrimSpace(xmlText(data, "v"))
+		text := strings.TrimSpace(xlsxWorksheetText(data, sharedStrings))
 		if text != "" {
 			rows = append(rows, filepath.Base(f.Name)+": "+text)
 		}
@@ -281,6 +283,66 @@ func extractXlsxText(body []byte) (string, error) {
 		return "", fmt.Errorf("xlsx worksheet text not found")
 	}
 	return strings.Join(rows, "\n"), nil
+}
+
+func xlsxSharedStrings(zr *zip.Reader) []string {
+	for _, f := range zr.File {
+		if f.Name != "xl/sharedStrings.xml" {
+			continue
+		}
+		data, err := readZipFile(f)
+		if err != nil {
+			return nil
+		}
+		text := strings.TrimSpace(xmlText(data, "t"))
+		if text == "" {
+			return nil
+		}
+		return strings.Split(text, "\n")
+	}
+	return nil
+}
+
+func xlsxWorksheetText(data []byte, sharedStrings []string) string {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	var parts []string
+	var cellType string
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch t.Name.Local {
+			case "c":
+				cellType = ""
+				for _, attr := range t.Attr {
+					if attr.Name.Local == "t" {
+						cellType = attr.Value
+						break
+					}
+				}
+			case "v", "t":
+				var s string
+				if err := dec.DecodeElement(&s, &t); err != nil {
+					continue
+				}
+				s = strings.TrimSpace(s)
+				if s == "" {
+					continue
+				}
+				if t.Name.Local == "v" && cellType == "s" {
+					idx, err := strconv.Atoi(s)
+					if err == nil && idx >= 0 && idx < len(sharedStrings) {
+						s = sharedStrings[idx]
+					}
+				}
+				parts = append(parts, s)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func readZipFile(f *zip.File) ([]byte, error) {
