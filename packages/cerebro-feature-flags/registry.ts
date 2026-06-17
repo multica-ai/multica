@@ -103,6 +103,8 @@ export type CerebroFlagKey =
   | "cerebro_sprints"
   // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
   | "cerebro_recurring_issues"
+  // TECH-3738 Bid C: capability drift watcher — periodically alert owners when an agent uses a tool its policy denies.
+  | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
@@ -309,6 +311,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
   // the recurring-issue sweeper.
   cerebro_recurring_issues: false,
+  // TECH-3738 Bid C: OFF by default. The capability drift watcher does nothing
+  // until an admin turns it on; then it periodically alerts owners/admins when
+  // an agent uses a tool its declared policy denies.
+  cerebro_capability_drift_watcher: false,
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
@@ -906,6 +912,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Let users mark an individual issue as recurring (frequency, on-status-change trigger, create-new-task, recur-forever, update-status-to, sync-to-due-date). When the issue reaches its trigger status, a sweeper spawns the next occurrence with a fresh due date and the same data (assignee, text, labels, attachments) and chains the rule onto the new issue. TECH-3064.",
+  },
+  {
+    key: "cerebro_capability_drift_watcher",
+    label: "Capability drift watcher",
+    group: "agents",
+    description:
+      "Periodically scan each agent for capability drift — a tool it actually used (observed access) that its declared policy does not allow (blocked or unmapped). When drift is found, alert the workspace owners/admins in their inbox with the agent and the offending tools. Read-only and off by default; turn it on to get proactive alerts instead of only seeing drift on the Capabilities tab. TECH-3738 Bid C.",
   },
   {
     key: "cerebro_note_types",

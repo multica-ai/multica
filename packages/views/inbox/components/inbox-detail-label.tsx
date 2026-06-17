@@ -41,6 +41,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     skill_change_request_created: "Foreslået ændring til skill",
     skill_change_request_reviewed: "Dit skill-forslag er behandlet",
     runtime_auto_paused: t(($) => $.types.runtime_auto_paused), // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611.
+    agent_capability_drift: "Capability drift", // CEREBRO-PATCH(inbox-capability-drift-label): TECH-3738 Bid C inline label (locale parity untouched).
     // CEREBRO-PATCH(inbox-detail-label-agent-comment-split): TECH-2961 — three labels for agent-authored comments split by the tag they carry.
     agent_comment_no_tag: t(($) => $.types.agent_comment_no_tag),
     agent_comment_member_tag: t(($) => $.types.agent_comment_member_tag),
@@ -132,6 +133,8 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "reminder": // CEREBRO-PATCH(inbox-reminders-label): show reminder body in detail labels.
       return <span>{item.body || details.text || typeLabels[item.type]}</span>;
     case "runtime_auto_paused": // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611 — show resume/manual line.
+      return <span>{item.body || typeLabels[item.type]}</span>;
+    case "agent_capability_drift": // CEREBRO-PATCH(inbox-capability-drift-label): TECH-3738 Bid C — show the drift summary line.
       return <span>{item.body || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;

@@ -114,7 +114,12 @@ losing hand-offs).
 
 **Platform / governance:** `private_agent_run_request`,
 `skill_change_request_created`, `skill_change_request_reviewed`,
-`runtime_auto_paused`, `manually_added`.
+`runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
+Bid C — the capability drift watcher alerts workspace owners/admins, `severity`
+`attention`, when an agent uses a tool its declared policy denies; `details`
+carries `agent_id`, `agent_name`, `drift_tools`, `drift_count`; system-authored,
+`route` `inbox`. Emitted by the `driftwatch` sweeper, gated by the
+`cerebro_capability_drift_watcher` flag, default OFF).
 
 Each type has an `InboxSeverity` (`action_required` | `attention` | `info`) and
 the set actually emitted by the server today is the `EmittedNotificationType`

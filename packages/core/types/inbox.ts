@@ -39,7 +39,9 @@ export type InboxItemType =
   | "agent_comment_member_tag"
   | "agent_comment_agent_tag"
   // CEREBRO-PATCH(cerebro-inbox-add-issue): manually added by the member via the issue action menu.
-  | "manually_added";
+  | "manually_added"
+  // CEREBRO-PATCH(core-types-inbox-drift): TECH-3738 Bid C — an agent used a tool its policy denies; the drift watcher alerts owners/admins.
+  | "agent_capability_drift";
 
 // Where the item is rendered in the UI. 'inbox' = persistent inbox queue.
 // 'notifications' = lightweight notifications page anchored in the bottom of
