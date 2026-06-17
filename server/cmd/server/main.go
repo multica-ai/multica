@@ -402,7 +402,7 @@ func main() {
 		EmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
 		RuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
 		Timeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
-	}, nil, nil)
+	}, nil)
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
 	}

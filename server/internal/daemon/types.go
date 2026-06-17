@@ -158,21 +158,21 @@ type TaskUsageEntry struct {
 }
 
 // CuratorDraftTask is a curator draft task dispatched to a local daemon
-// runtime for execution. Credentials are resolved server-side at claim time
-// and delivered as a one-time payload (never persisted in the DB).
+// runtime for execution. Config contains non-sensitive LLM connection info
+// (base_url, model, etc.). The daemon supplies its own API key via
+// MULTICA_CURATOR_API_KEY — no credentials are transmitted in the claim response.
 type CuratorDraftTask struct {
-	ID          string          `json:"id"`
-	DraftKind   string          `json:"draft_kind"`
-	Status      string          `json:"status"`
-	Credentials json.RawMessage `json:"credentials"`
-	DraftInput  json.RawMessage `json:"draft_input"`
+	ID         string          `json:"id"`
+	DraftKind  string          `json:"draft_kind"`
+	Status     string          `json:"status"`
+	Config     json.RawMessage `json:"config"`
+	DraftInput json.RawMessage `json:"draft_input"`
 }
 
-// CuratorDraftConfig is extracted from the task's credentials field and contains
-// the information needed to make the LLM API call.
+// CuratorDraftConfig is the non-sensitive LLM connection info from the task's
+// config field. The APIKey is not included here — it comes from daemon config.
 type CuratorDraftConfig struct {
 	BaseURL        string `json:"base_url"`
-	APIKey         string `json:"api_key"`
 	Model          string `json:"model"`
 	EmbeddingModel string `json:"embedding_model"`
 	Provider       string `json:"provider"`

@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -19,7 +17,9 @@ import (
 )
 
 // ClaimCuratorDraftTask lets a daemon runtime claim the next queued curator
-// draft task for its workspace.
+// draft task for its workspace. The response includes non-sensitive LLM config
+// (base_url, model, etc.). The daemon supplies its own API key via
+// MULTICA_CURATOR_API_KEY.
 func (h *Handler) ClaimCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
@@ -44,16 +44,7 @@ func (h *Handler) ClaimCuratorDraftTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Resolve secret_ref to plaintext API key for one-time delivery to the daemon.
-	credentials, err := h.resolveCuratorCredentials(r.Context(), task)
-	if err != nil {
-		slog.Error("resolve curator draft credentials failed",
-			append(logger.RequestAttrs(r), "error", err, "task_id", uuidToString(task.ID))...)
-		writeError(w, http.StatusInternalServerError, "failed to resolve curator draft credentials")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"task": curatorDraftTaskToResponse(task, credentials)})
+	writeJSON(w, http.StatusOK, map[string]any{"task": curatorDraftTaskToResponse(task)})
 }
 
 // CompleteCuratorDraftTask receives a completed draft from a daemon runtime
@@ -187,45 +178,23 @@ func (h *Handler) GetCuratorDraftStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func curatorDraftTaskToResponse(task db.CuratorDraftTask, credentials map[string]any) map[string]any {
+func curatorDraftTaskToResponse(task db.CuratorDraftTask) map[string]any {
 	resp := map[string]any{
-		"id":          uuidToString(task.ID),
-		"draft_kind":  task.DraftKind,
-		"status":      task.Status,
-		"credentials": credentials,
+		"id":         uuidToString(task.ID),
+		"draft_kind": task.DraftKind,
+		"status":     task.Status,
 	}
-	// Include only the draft_input portion, not the full input_data (which may contain secret_ref).
 	if len(task.InputData) > 0 {
 		var input service.CuratorDraftTaskInput
 		if err := json.Unmarshal(task.InputData, &input); err == nil {
 			resp["draft_input"] = input.DraftInput
+			resp["config"] = map[string]any{
+				"base_url":        input.BaseURL,
+				"model":           input.Model,
+				"embedding_model": input.EmbeddingModel,
+				"provider":        input.Provider,
+			}
 		}
 	}
 	return resp
-}
-
-// resolveCuratorCredentials extracts the secret_ref from the task's input_data
-// and resolves it to a plaintext API key for one-time delivery to the daemon.
-func (h *Handler) resolveCuratorCredentials(ctx context.Context, task db.CuratorDraftTask) (map[string]any, error) {
-	var input service.CuratorDraftTaskInput
-	if err := json.Unmarshal(task.InputData, &input); err != nil {
-		return nil, fmt.Errorf("unmarshal task input: %w", err)
-	}
-
-	if h.WorkspaceSecretService == nil {
-		return nil, errors.New("workspace secret service is not configured")
-	}
-
-	apiKey, err := h.WorkspaceSecretService.ResolveSecretRef(ctx, task.WorkspaceID, input.SecretRef)
-	if err != nil {
-		return nil, fmt.Errorf("resolve secret ref: %w", err)
-	}
-
-	return map[string]any{
-		"base_url":        input.BaseURL,
-		"api_key":         apiKey,
-		"model":           input.Model,
-		"embedding_model": input.EmbeddingModel,
-		"provider":        input.Provider,
-	}, nil
 }

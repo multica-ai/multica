@@ -9,29 +9,25 @@ import (
 )
 
 // LocalCuratorEngine implements CuratorEngine by dispatching draft generation
-// tasks to local daemon runtimes. SummarizeSource and BuildEmbedding delegate
-// to a base OpenAI-compatible engine since they are fast, stateless operations
-// that don't benefit from local execution.
+// tasks to local daemon runtimes. The daemon uses its own configured API key
+// (MULTICA_CURATOR_API_KEY) for LLM calls; no credentials are stored in the
+// task or transmitted in the claim response.
 type LocalCuratorEngine struct {
-	queries       *db.Queries
-	secretService *WorkspaceSecretService
-	draftService  *CuratorDraftTaskService
-	base          *OpenAICompatibleCuratorEngine
-	secretRef     string
+	queries      *db.Queries
+	draftService *CuratorDraftTaskService
+	base         *OpenAICompatibleCuratorEngine
 }
 
 // NewLocalCuratorEngine creates a local curator engine. The base engine is
 // used for SummarizeSource and BuildEmbedding. GenerateDraft dispatches to
 // the daemon via CuratorDraftTaskService.
-func NewLocalCuratorEngine(queries *db.Queries, secretService *WorkspaceSecretService, draftService *CuratorDraftTaskService, base OpenAICompatibleCuratorConfig, secretRef string) *LocalCuratorEngine {
+func NewLocalCuratorEngine(queries *db.Queries, draftService *CuratorDraftTaskService, base OpenAICompatibleCuratorConfig) *LocalCuratorEngine {
 	cfg := normalizeOpenAICompatibleCuratorConfig(base)
 	client := &http.Client{Timeout: cfg.Timeout}
 	return &LocalCuratorEngine{
-		queries:       queries,
-		secretService: secretService,
-		draftService:  draftService,
-		base:          &OpenAICompatibleCuratorEngine{cfg: cfg, client: client},
-		secretRef:     secretRef,
+		queries:      queries,
+		draftService: draftService,
+		base:         &OpenAICompatibleCuratorEngine{cfg: cfg, client: client},
 	}
 }
 
@@ -45,7 +41,6 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 	}
 	runtime := runtimes[0]
 
-	// Build the task input with the secret_ref (not resolved here — resolved at claim time).
 	draftKind := "issue"
 	candidateID := pgtype.UUID{}
 	findingID := pgtype.UUID{}
@@ -61,7 +56,6 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 
 	taskInput := CuratorDraftTaskInput{
 		BaseURL:        e.base.cfg.BaseURL,
-		SecretRef:      e.secretRef,
 		Model:          e.base.cfg.Model,
 		EmbeddingModel: e.base.cfg.EmbeddingModel,
 		Provider:       e.base.cfg.Provider,

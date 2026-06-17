@@ -31,18 +31,16 @@ type OpenAICompatibleCuratorEngine struct {
 }
 
 type WorkspaceConfiguredCuratorEngine struct {
-	queries       *db.Queries
-	base          OpenAICompatibleCuratorConfig
-	secretService *WorkspaceSecretService
-	draftService  *CuratorDraftTaskService
+	queries      *db.Queries
+	base         OpenAICompatibleCuratorConfig
+	draftService *CuratorDraftTaskService
 }
 
-func NewWorkspaceConfiguredCuratorEngine(queries *db.Queries, base OpenAICompatibleCuratorConfig, secretService *WorkspaceSecretService, draftService *CuratorDraftTaskService) CuratorEngine {
+func NewWorkspaceConfiguredCuratorEngine(queries *db.Queries, base OpenAICompatibleCuratorConfig, draftService *CuratorDraftTaskService) CuratorEngine {
 	return &WorkspaceConfiguredCuratorEngine{
-		queries:       queries,
-		base:          normalizeOpenAICompatibleCuratorConfig(base),
-		secretService: secretService,
-		draftService:  draftService,
+		queries:      queries,
+		base:         normalizeOpenAICompatibleCuratorConfig(base),
+		draftService: draftService,
 	}
 }
 
@@ -80,11 +78,10 @@ func (e *WorkspaceConfiguredCuratorEngine) ForWorkspace(ctx context.Context, wor
 
 	// When runtime_mode is "local", use the local daemon dispatch engine.
 	if cfg.RuntimeMode == "local" {
-		secretRef, _ := curatorSetting(workspace.Settings, "secret_ref")
-		if e.secretService == nil || e.draftService == nil {
+		if e.draftService == nil {
 			return NewOpenAICompatibleCuratorEngine(cfg)
 		}
-		return NewLocalCuratorEngine(e.queries, e.secretService, e.draftService, cfg, secretRef)
+		return NewLocalCuratorEngine(e.queries, e.draftService, cfg)
 	}
 
 	return NewOpenAICompatibleCuratorEngine(cfg)

@@ -216,28 +216,23 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
 		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
 		Timeout:        cfg.KnowledgeCuratorTimeout,
-	}, workspaceSecretSvc, nil) // draftService set below after curator is created
+	}, nil) // draftService set below after curator is created
 	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
 	knowledgeSvc.Embedder = knowledgeEngine
 
-	var curatorDraftSvc *service.CuratorDraftTaskService
-	if workspaceSecretSvc != nil {
-		curatorDraftSvc = service.NewCuratorDraftTaskService(queries, knowledgeCurator)
-	}
+	curatorDraftSvc := service.NewCuratorDraftTaskService(queries, knowledgeCurator)
 	// Re-create engine with the draft service wired in.
-	if curatorDraftSvc != nil {
-		knowledgeEngine = service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
-			Provider:       cfg.KnowledgeCuratorProvider,
-			BaseURL:        cfg.KnowledgeCuratorBaseURL,
-			APIKey:         cfg.KnowledgeCuratorAPIKey,
-			Model:          cfg.KnowledgeCuratorModel,
-			EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
-			RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
-			Timeout:        cfg.KnowledgeCuratorTimeout,
-		}, workspaceSecretSvc, curatorDraftSvc)
-		knowledgeCurator = service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
-			knowledgeSvc.Embedder = knowledgeEngine
-	}
+	knowledgeEngine = service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
+		Provider:       cfg.KnowledgeCuratorProvider,
+		BaseURL:        cfg.KnowledgeCuratorBaseURL,
+		APIKey:         cfg.KnowledgeCuratorAPIKey,
+		Model:          cfg.KnowledgeCuratorModel,
+		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
+		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
+		Timeout:        cfg.KnowledgeCuratorTimeout,
+	}, curatorDraftSvc)
+	knowledgeCurator = service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
+	knowledgeSvc.Embedder = knowledgeEngine
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient

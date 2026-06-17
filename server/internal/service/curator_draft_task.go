@@ -31,7 +31,6 @@ func NewCuratorDraftTaskService(q *db.Queries, curator *KnowledgeCuratorService)
 // CuratorDraftTaskInput is the JSON-serialized payload stored in input_data.
 type CuratorDraftTaskInput struct {
 	BaseURL        string `json:"base_url"`
-	SecretRef      string `json:"secret_ref"`
 	Model          string `json:"model"`
 	EmbeddingModel string `json:"embedding_model"`
 	Provider       string `json:"provider"`

@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -26,32 +24,6 @@ func setupCuratorDraftServices(t *testing.T) func() {
 	testHandler.CuratorDraftService = service.NewCuratorDraftTaskService(testHandler.Queries, nil)
 	return func() {
 		testHandler.CuratorDraftService = prev
-	}
-}
-
-// setupCuratorDraftWithSecrets creates WorkspaceSecretService + CuratorDraftTaskService
-// on testHandler for credential delivery tests. Returns cleanup.
-func setupCuratorDraftWithSecrets(t *testing.T) func() {
-	t.Helper()
-
-	key := make([]byte, secretbox.KeySize)
-	if _, err := rand.Read(key); err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	box, err := secretbox.New(key)
-	if err != nil {
-		t.Fatalf("create box: %v", err)
-	}
-
-	prevSecret := testHandler.WorkspaceSecretService
-	prevDraft := testHandler.CuratorDraftService
-
-	testHandler.WorkspaceSecretService = service.NewWorkspaceSecretService(testHandler.Queries, box)
-	testHandler.CuratorDraftService = service.NewCuratorDraftTaskService(testHandler.Queries, nil)
-
-	return func() {
-		testHandler.WorkspaceSecretService = prevSecret
-		testHandler.CuratorDraftService = prevDraft
 	}
 }
 
@@ -248,42 +220,12 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("test database not available")
 	}
-	cleanup := setupCuratorDraftWithSecrets(t)
+	cleanup := setupCuratorDraftServices(t)
 	defer cleanup()
 
-	workspaceUUID := pgtype.UUID{}
-	if err := workspaceUUID.Scan(testWorkspaceID); err != nil {
-		t.Fatalf("parse workspace UUID: %v", err)
-	}
-	userUUID := pgtype.UUID{}
-	if err := userUUID.Scan(testUserID); err != nil {
-		t.Fatalf("parse user UUID: %v", err)
-	}
-
-	// Look up the member ID for the test user.
-	var memberID string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`,
-		testWorkspaceID, testUserID,
-	).Scan(&memberID); err != nil {
-		t.Fatalf("lookup test member: %v", err)
-	}
-	memberUUID := pgtype.UUID{}
-	if err := memberUUID.Scan(memberID); err != nil {
-		t.Fatalf("parse member UUID: %v", err)
-	}
-
-	// Create a secret.
-	err := testHandler.WorkspaceSecretService.UpsertSecret(context.Background(),
-		workspaceUUID, "curator", "sk-test-api-key-12345", memberUUID)
-	if err != nil {
-		t.Fatalf("upsert test secret: %v", err)
-	}
-
-	// Create a task with secret_ref (not resolved api_key).
+	// Create a task with only non-sensitive LLM config (no api_key, no secret_ref).
 	input := service.CuratorDraftTaskInput{
 		BaseURL:        "https://test.example/v1",
-		SecretRef:      "secret://workspace/curator",
 		Model:          "test-model",
 		EmbeddingModel: "test-embedding",
 		Provider:       "test",
@@ -313,9 +255,9 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 
 	var resp struct {
 		Task struct {
-			ID          string          `json:"id"`
-			Credentials json.RawMessage `json:"credentials"`
-			DraftInput  json.RawMessage `json:"draft_input"`
+			ID         string          `json:"id"`
+			Config     json.RawMessage `json:"config"`
+			DraftInput json.RawMessage `json:"draft_input"`
 		} `json:"task"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -325,16 +267,22 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 		t.Fatalf("task id = %s, want %s", resp.Task.ID, taskID)
 	}
 
-	// Verify credentials contain api_key.
-	var creds map[string]any
-	if err := json.Unmarshal(resp.Task.Credentials, &creds); err != nil {
-		t.Fatalf("parse credentials: %v", err)
+	// Verify config contains base_url, model, etc. but NOT api_key.
+	var config map[string]any
+	if err := json.Unmarshal(resp.Task.Config, &config); err != nil {
+		t.Fatalf("parse config: %v", err)
 	}
-	if creds["api_key"] != "sk-test-api-key-12345" {
-		t.Fatalf("credentials.api_key = %v, want sk-test-api-key-12345", creds["api_key"])
+	if config["base_url"] != "https://test.example/v1" {
+		t.Fatalf("config.base_url = %v, want https://test.example/v1", config["base_url"])
+	}
+	if config["model"] != "test-model" {
+		t.Fatalf("config.model = %v, want test-model", config["model"])
+	}
+	if _, ok := config["api_key"]; ok {
+		t.Fatal("config must not contain api_key")
 	}
 
-	// Verify response does NOT contain input_data.
+	// Verify response does NOT contain credentials or input_data.
 	var rawResp map[string]json.RawMessage
 	if err := json.Unmarshal(rec.Body.Bytes(), &rawResp); err != nil {
 		t.Fatalf("parse raw response: %v", err)
@@ -346,19 +294,19 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 	if _, ok := taskObj["input_data"]; ok {
 		t.Fatal("response must not contain input_data key")
 	}
-	if _, ok := taskObj["credentials"]; !ok {
-		t.Fatal("response must contain credentials key")
+	if _, ok := taskObj["credentials"]; ok {
+		t.Fatal("response must not contain credentials key")
+	}
+	if _, ok := taskObj["config"]; !ok {
+		t.Fatal("response must contain config key")
 	}
 	if _, ok := taskObj["draft_input"]; !ok {
 		t.Fatal("response must contain draft_input key")
 	}
 
-	// Verify the DB input_data does NOT contain the API key.
+	// Verify the DB input_data does NOT contain api_key or secret_ref.
 	var storedInput []byte
-	var dbInput struct {
-		APIKey    string `json:"api_key"`
-		SecretRef string `json:"secret_ref"`
-	}
+	var dbInput map[string]any
 	if err := testPool.QueryRow(context.Background(),
 		`SELECT input_data FROM curator_draft_task WHERE id = $1`, taskID,
 	).Scan(&storedInput); err != nil {
@@ -367,10 +315,13 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 	if err := json.Unmarshal(storedInput, &dbInput); err != nil {
 		t.Fatalf("parse db input_data: %v", err)
 	}
-	if dbInput.APIKey != "" {
+	if _, ok := dbInput["api_key"]; ok {
 		t.Fatal("DB input_data must not contain api_key")
 	}
-	if dbInput.SecretRef != "secret://workspace/curator" {
-		t.Fatalf("DB input_data.secret_ref = %q, want secret://workspace/curator", dbInput.SecretRef)
+	if _, ok := dbInput["secret_ref"]; ok {
+		t.Fatal("DB input_data must not contain secret_ref")
+	}
+	if dbInput["base_url"] != "https://test.example/v1" {
+		t.Fatalf("DB input_data.base_url = %v, want https://test.example/v1", dbInput["base_url"])
 	}
 }

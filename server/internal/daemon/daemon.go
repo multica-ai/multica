@@ -4140,9 +4140,17 @@ func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, 
 	d.logger.Info("curator draft task received", "task", shortID(task.ID), "kind", task.DraftKind)
 
 	var config CuratorDraftConfig
-	if err := json.Unmarshal(task.Credentials, &config); err != nil {
+	if err := json.Unmarshal(task.Config, &config); err != nil {
 		d.logger.Error("failed to parse curator draft config", "task", task.ID, "error", err)
-		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task credentials: "+err.Error())
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task config: "+err.Error())
+		return
+	}
+
+	// Use the daemon's own API key for the LLM call.
+	apiKey := d.cfg.CuratorAPIKey
+	if apiKey == "" {
+		d.logger.Error("curator draft task claimed but MULTICA_CURATOR_API_KEY is not set", "task", task.ID)
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "daemon curator API key is not configured")
 		return
 	}
 
@@ -4159,7 +4167,7 @@ func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, 
 	prompt := buildCuratorDraftPrompt(draftInput)
 	systemPrompt := "You are Multica's Knowledge Curator. Produce concise, structured, auditable operational knowledge."
 
-	respBody, err := callLLMAPI(ctx, config.BaseURL, config.APIKey, config.Model, systemPrompt, prompt)
+	respBody, err := callLLMAPI(ctx, config.BaseURL, apiKey, config.Model, systemPrompt, prompt)
 	if err != nil {
 		d.logger.Error("curator draft LLM call failed", "task", task.ID, "error", err)
 		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, err.Error())
