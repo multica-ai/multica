@@ -129,13 +129,14 @@ function renderActionsCell(row: RuntimeRow) {
 describe("runtime list row menu", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("hides the kebab menu for an online local runtime (self-healing)", () => {
-    // Deleting an online local runtime is a no-op (daemon re-registers in
-    // seconds), so the row menu drops the only action — Delete — entirely.
+  it("renders the kebab menu for an online local runtime (self-healing is no longer hidden)", () => {
+    // MUL-3352: hiding the kebab on a self-healing row left owners reading
+    // it as a missing permission. The action stays available; the dialog
+    // surfaces the self-heal warning instead.
     renderActionsCell(
       makeRow(makeRuntime({ runtime_mode: "local", status: "online" })),
     );
-    expect(screen.queryByLabelText("Row actions")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
   });
 
   it("renders the kebab menu for an offline local runtime", () => {

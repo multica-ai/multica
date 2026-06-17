@@ -49,7 +49,6 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
-  isSelfHealingRuntime,
   pctChange,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
@@ -82,10 +81,10 @@ const COLUMN_WIDTHS = {
 // gaps).
 const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
 
-// The kebab track is conditional like the owner column: on a healthy
-// local machine EVERY row's only action (delete) is hidden by the
-// self-healing rule, and an unconditionally reserved 28px action track
-// would hang a permanent dead zone off the last column.
+// The kebab track is conditional like the owner column: on a list where
+// no row carries a delete-permission, EVERY row's only action is hidden,
+// and an unconditionally reserved 28px action track would hang a
+// permanent dead zone off the last column.
 function columnTrackVars(
   showOwner: boolean,
   showActions: boolean,
@@ -401,12 +400,14 @@ export function RuntimeRowMenu({
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. The
-  // self-healing case (local + online) is the runtime-detail parity fix —
-  // see isSelfHealingRuntime for the rationale.
-  const selfHealing = isSelfHealingRuntime(runtime);
+  // the kebab entirely so the column doesn't render an empty popover. We
+  // used to also hide it for self-healing runtimes (live local daemon
+  // re-registers within seconds), but MUL-3352 surfaced that owners read
+  // a missing kebab as "I lost my permission" rather than "the daemon
+  // would undo this". The dialog now carries the self-heal warning and
+  // the user gets to decide.
 
-  if (!canDelete || selfHealing) {
+  if (!canDelete) {
     return <span aria-hidden />;
   }
 
@@ -521,9 +522,7 @@ export function RuntimeList({
 
   // Mirrors RuntimeRowMenu's render guard: the kebab track only earns its
   // width when at least one row will actually show the menu.
-  const showActions = rows.some(
-    (row) => row.canDelete && !isSelfHealingRuntime(row.runtime),
-  );
+  const showActions = rows.some((row) => row.canDelete);
 
   return (
     <div className="overflow-x-auto overflow-y-hidden @container">

@@ -81,7 +81,6 @@
     "all_runtimes": "すべてのランタイム",
     "read_only": "読み取り専用",
     "delete_button": "ランタイムを削除",
-    "delete_disabled_tooltip": "このランタイムは実行中のローカルデーモンが管理しており、数秒以内に自分で再登録します。完全に削除するには、デーモンプロセスを停止してください。",
     "last_seen": "最終確認 {{when}}",
     "fact_owner": "所有者",
     "fact_device": "デバイス",
@@ -106,6 +105,7 @@
     "visibility_toast_updated": "公開範囲を {{visibility}} に設定しました",
     "visibility_toast_failed": "公開範囲を更新できませんでした",
     "delete_dialog": {
+      "self_heal_notice": "このランタイムは実行中のローカルデーモンに管理されています。削除自体は成功しますが、デーモンプロセスを停止しない限り、数秒以内に新しいランタイムとして再登録されます。完全に削除するには先にデーモンを停止してください。",
       "light": {
         "title": "ランタイムを削除しますか?",
         "description": "「{{name}}」を削除してもよろしいですか? この操作は元に戻せません。",
@@ -123,7 +123,6 @@
         "cancel": "キャンセル",
         "confirm_other": "エージェント {{count}} 個をアーカイブしてランタイムを削除",
         "submitting": "アーカイブして削除中...",
-        "self_healing_blocked_toast": "このランタイムは実行中のローカルデーモンが管理しており、自分で再登録します。",
         "delete_failed_toast": "ランタイムを削除できませんでした",
         "table": {
           "header_agent": "エージェント",
