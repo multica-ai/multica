@@ -2051,7 +2051,6 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	}
 }
 
-
 // generateTestRSAKeyPEM mints an RSA-2048 key, returns its PKCS#1 PEM
 // encoding (the format GitHub hands operators when they create the App)
 // and the parsed *rsa.PrivateKey for verification.
@@ -2387,5 +2386,117 @@ func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Errorf("expected github_installation:created broadcast after webhook refresh, got none in 2s")
+	}
+}
+
+// TestSetupCallback_ConsumesPendingInstallationCreated covers the inverse
+// race to TestWebhook_InstallationCreatedRefreshesUnknownLogin: GitHub can
+// deliver installation.created before the setup callback has created the local
+// workspace binding. The webhook cannot broadcast yet, but it must not be lost;
+// the callback consumes the pending account metadata even if its direct GitHub
+// API lookup falls back to the "unknown" placeholder.
+func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "pending-installation-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	t.Setenv("GITHUB_APP_ID", "")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.test")
+
+	const installationID int64 = 81818181
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+		testPool.Exec(ctx, `DELETE FROM github_pending_installation WHERE installation_id = $1`, installationID)
+	})
+
+	// Force fetchInstallationAccount to take its degraded path. This pins that
+	// the final real account name comes from the earlier webhook, not the
+	// setup callback's synchronous GitHub API lookup.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "auth required", http.StatusUnauthorized)
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	body, _ := json.Marshal(map[string]any{
+		"action": "created",
+		"installation": map[string]any{
+			"id": installationID,
+			"account": map[string]any{
+				"login":      "pending-octocat",
+				"type":       "Organization",
+				"avatar_url": "https://example.com/pending.png",
+			},
+		},
+	})
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(body))
+	hookReq.Header.Set("X-GitHub-Event", "installation")
+	hookReq.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, hookReq)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
+	}
+
+	var pendingLogin string
+	if err := testPool.QueryRow(ctx,
+		`SELECT account_login FROM github_pending_installation WHERE installation_id = $1`,
+		installationID,
+	).Scan(&pendingLogin); err != nil {
+		t.Fatalf("pending installation row not stored: %v", err)
+	}
+	if pendingLogin != "pending-octocat" {
+		t.Fatalf("pending account_login = %q, want pending-octocat", pendingLogin)
+	}
+
+	state, err := signState(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("signState: %v", err)
+	}
+	setupReq := httptest.NewRequest("GET",
+		fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, state),
+		nil,
+	)
+	setupRec := httptest.NewRecorder()
+	testHandler.GitHubSetupCallback(setupRec, setupReq)
+	if setupRec.Code != http.StatusFound {
+		t.Fatalf("setup callback: expected 302, got %d (%s)", setupRec.Code, setupRec.Body.String())
+	}
+	if loc := setupRec.Header().Get("Location"); !strings.Contains(loc, "github_connected=1") {
+		t.Fatalf("setup callback redirect = %q, want github_connected=1", loc)
+	}
+
+	got, err := testHandler.Queries.GetGitHubInstallationByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("get installation: %v", err)
+	}
+	if got.AccountLogin != "pending-octocat" {
+		t.Errorf("account_login = %q, want pending-octocat (callback left the unknown placeholder)", got.AccountLogin)
+	}
+	if got.AccountType != "Organization" {
+		t.Errorf("account_type = %q, want Organization", got.AccountType)
+	}
+	if got.AccountAvatarUrl.String != "https://example.com/pending.png" || !got.AccountAvatarUrl.Valid {
+		t.Errorf("account_avatar_url = %+v, want pending avatar", got.AccountAvatarUrl)
+	}
+
+	var pendingCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM github_pending_installation WHERE installation_id = $1`,
+		installationID,
+	).Scan(&pendingCount); err != nil {
+		t.Fatalf("count pending installation: %v", err)
+	}
+	if pendingCount != 0 {
+		t.Fatalf("pending installation row should be consumed, got count %d", pendingCount)
 	}
 }

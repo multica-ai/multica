@@ -280,6 +280,15 @@ type GithubInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubPendingInstallation struct {
+	InstallationID   int64              `json:"installation_id"`
+	AccountLogin     string             `json:"account_login"`
+	AccountType      string             `json:"account_type"`
+	AccountAvatarUrl pgtype.Text        `json:"account_avatar_url"`
+	ReceivedAt       pgtype.Timestamptz `json:"received_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubPullRequest struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
