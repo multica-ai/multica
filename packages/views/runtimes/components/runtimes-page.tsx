@@ -389,6 +389,7 @@ function PageHeaderBar({
             type="button"
             size="sm"
             variant="outline"
+            className="h-8"
             onClick={onAddRuntime}
           >
             <Plus className="h-3.5 w-3.5" />
@@ -400,6 +401,7 @@ function PageHeaderBar({
             type="button"
             size="sm"
             variant="outline"
+            className="h-8"
             onClick={onOpenCloudRuntime}
           >
             <Cloud className="h-3 w-3" />
