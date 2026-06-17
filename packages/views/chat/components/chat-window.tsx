@@ -53,6 +53,8 @@ import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 // CEREBRO-PATCH(chat-window-cerebro): import from cerebro-chat after Phase 6 relocation
 import { ChatStatusLine, ChatSessionHeader } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(chat-upload-attachment-ids): TECH-3657 link uploaded files to the chat message.
+import { extractChatUploadAttachmentIds } from "@multica/cerebro-chat";
 import { ChatInput } from "./chat-input";
 import {
   ContextAnchorButton,
@@ -292,7 +294,8 @@ export function ChatWindow() {
       );
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      const result = await api.sendChatMessage(sessionId, finalContent);
+      // CEREBRO-PATCH(chat-upload-attachment-ids): TECH-3657 — pass uploaded attachment ids so the backend links them to the message and the gateway can read the file bytes.
+      const result = await api.sendChatMessage(sessionId, finalContent, extractChatUploadAttachmentIds(finalContent));
       apiLogger.info("sendChatMessage.success", {
         sessionId,
         messageId: result.message_id,
