@@ -225,6 +225,7 @@
     "update_failed": "更新 issue 失败",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
+    "export_failed": "导出 issue 失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个 issue 还没被本地 agent 运行过"
@@ -409,6 +410,7 @@
     "unpin_from_sidebar": "从侧边栏取消固定",
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
+    "export": "导出",
     "more": "更多",
     "create_sub_issue": "创建子 issue",
     "set_parent_issue": "设置父 issue...",

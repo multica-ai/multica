@@ -8,6 +8,7 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
+  Download,
   FolderOpen,
   Link2,
   MoreHorizontal,
@@ -102,6 +103,7 @@ export function IssueActionsMenuItems({
     updateField,
     togglePin,
     copyLink,
+    exportIssue,
     openCreateSubIssue,
     openSetParent,
     openAddChild,
@@ -264,6 +266,10 @@ export function IssueActionsMenuItems({
       <P.Item onClick={handleCopyWorkdirPath}>
         <FolderOpen className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_workdir_path)}
+      </P.Item>
+      <P.Item onClick={exportIssue}>
+        <Download className="h-3.5 w-3.5" />
+        {t(($) => $.actions.export)}
       </P.Item>
 
       <P.Separator />

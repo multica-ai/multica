@@ -6,21 +6,50 @@ import { toast } from "sonner";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 const BACKLOG_HINT_LS_KEY = "multica:backlog-agent-hint-dismissed";
+
+interface DesktopBridge {
+  downloadURL?: (u: string) => Promise<void> | void;
+}
+
+function issueExportEndpoint(issueId: string, workspaceSlug: string): string {
+  const params = new URLSearchParams({ workspace_slug: workspaceSlug });
+  const path = `/api/issues/${encodeURIComponent(issueId)}/export`;
+  const endpoint = `${path}?${params.toString()}`;
+  return resolvePublicFileUrl(endpoint) ?? endpoint;
+}
+
+function triggerBrowserDownload(url: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "";
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function desktopDownloadBridge(): DesktopBridge | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
+}
 
 export interface UseIssueActionsResult {
   isPinned: boolean;
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
+  exportIssue: () => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   openAddChild: () => void;
@@ -36,6 +65,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const workspaceSlug = useWorkspaceSlug();
   const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = user?.id;
@@ -109,6 +139,28 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     }
   }, [paths, issueId, navigation, t]);
 
+  const exportIssue = useCallback(async () => {
+    if (!issueId || !workspaceSlug) {
+      toast.error(t(($) => $.detail.export_failed));
+      return;
+    }
+    const url = issueExportEndpoint(issueId, workspaceSlug);
+    const bridge = desktopDownloadBridge();
+    try {
+      if (bridge?.downloadURL) {
+        await bridge.downloadURL(url);
+        return;
+      }
+      if (typeof document === "undefined") {
+        toast.error(t(($) => $.detail.export_failed));
+        return;
+      }
+      triggerBrowserDownload(url);
+    } catch {
+      toast.error(t(($) => $.detail.export_failed));
+    }
+  }, [issueId, workspaceSlug, t]);
+
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
     openModal("create-issue", {
@@ -145,6 +197,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     togglePin,
     copyLink,
+    exportIssue,
     openCreateSubIssue,
     openSetParent,
     openAddChild,
