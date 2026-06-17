@@ -395,6 +395,103 @@ func TestRunLocalCLIEndToEndWithFakeAPIForAgy(t *testing.T) {
 	}
 }
 
+func TestAgyExtractUserContent(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "empty",
+			raw:  "",
+			want: "",
+		},
+		{
+			name: "plain text without tags",
+			raw:  "hello world",
+			want: "hello world",
+		},
+		{
+			name: "user request with metadata",
+			raw:  "<USER_REQUEST>\nfix the bug\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ntime info\n</ADDITIONAL_METADATA>",
+			want: "fix the bug",
+		},
+		{
+			name: "user request with settings change",
+			raw:  "<USER_REQUEST>\nreview code\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nmodel changed\n</USER_SETTINGS_CHANGE>",
+			want: "review code",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agyExtractUserContent(tt.raw)
+			if got != tt.want {
+				t.Fatalf("agyExtractUserContent(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgyTranscriptTrackerSync(t *testing.T) {
+	// Create a fake brain directory with a transcript file.
+	tmp := t.TempDir()
+	brainDir := filepath.Join(tmp, ".gemini", "antigravity-cli", "brain", "test-conv")
+	logsDir := filepath.Join(brainDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	transcriptPath := filepath.Join(logsDir, "transcript.jsonl")
+
+	now := time.Now().UTC()
+	historicalTime := now.Add(-10 * time.Second)
+
+	// Write a transcript:
+	// Line 1: Historical user message (should be skipped by mapEntry, but marked as seen)
+	// Line 2: Historical model message (should be skipped by mapEntry, not setting pendingFinal)
+	// Line 3: New model message (should be processed, setting pendingFinal)
+	lines := []string{
+		`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"` + historicalTime.Format(time.RFC3339) + `","content":"<USER_REQUEST>\nold request\n</USER_REQUEST>"}`,
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + historicalTime.Format(time.RFC3339) + `","content":"old reply"}`,
+		`{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + now.Format(time.RFC3339) + `","content":"new reply"}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	startedAt := now.Add(-1 * time.Second) // pretend we started 1s ago (after historicalTime but before now)
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: startedAt,
+		ticker:    time.NewTicker(500 * time.Millisecond),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+
+	tracker.transcript = transcriptPath
+	tracker.readNewEntriesLocked()
+
+	// Verify all three lines are marked as seen
+	if !tracker.seen[1] || !tracker.seen[2] || !tracker.seen[3] {
+		t.Fatalf("expected all 3 lines to be seen, got: %v", tracker.seen)
+	}
+
+	// Verify that the historical reply (line 2) was skipped (didn't set pendingFinal to "old reply")
+	// and only the new reply (line 3) was processed (setting pendingFinal to "new reply")
+	if tracker.pendingFinal == nil {
+		t.Fatalf("expected pendingFinal to be set by new reply")
+	}
+	if tracker.pendingFinal.Content != "new reply" {
+		t.Fatalf("expected pendingFinal content to be %q, got %q", "new reply", tracker.pendingFinal.Content)
+	}
+
+	// Re-sync should not process anything new
+	tracker.readNewEntriesLocked()
+	if len(tracker.seen) != 3 {
+		t.Fatalf("re-sync processed new entries, seen count = %d, want 3", len(tracker.seen))
+	}
+}
+
 func TestInferCLIName(t *testing.T) {
 	tests := []struct {
 		in   string
