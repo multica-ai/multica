@@ -9,7 +9,7 @@
 -- repeated deliveries of the same suite while the PR is still missing are
 -- idempotent — the newer payload simply overwrites the older.
 CREATE TABLE github_pending_check_suite (
-    workspace_id     UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    workspace_id     UUID NOT NULL,
     installation_id  BIGINT NOT NULL,
     repo_owner       TEXT NOT NULL,
     repo_name        TEXT NOT NULL,
