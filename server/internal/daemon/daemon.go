@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -69,6 +70,11 @@ var (
 	// helpers above.
 	detectAgentVersion   = agent.DetectVersion
 	checkAgentMinVersion = agent.CheckMinVersion
+
+	// lookPath is an indirection over exec.LookPath so registration tests can
+	// resolve custom runtime-profile commands without manipulating the
+	// process PATH. Mirrors the detectAgentVersion hook above.
+	lookPath = exec.LookPath
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -106,6 +112,12 @@ type Daemon struct {
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
+	// profileCommandPaths maps a custom runtime profile_id -> the absolute
+	// executable path resolved on PATH for that profile's command_name
+	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
+	// command resolves; read by runTask via customCommandPathForRuntime to
+	// launch the custom command for a claimed task. Guarded by mu.
+	profileCommandPaths map[string]string
 	reloading    sync.Mutex         // prevents concurrent workspace syncs
 	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
@@ -187,6 +199,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
+		profileCommandPaths:       make(map[string]string),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
@@ -750,6 +763,45 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 	return nil
 }
 
+// recordProfileCommandPath remembers the absolute executable path resolved
+// for a custom runtime profile's command_name. Called from
+// registerRuntimesForWorkspace. Lazily initializes the map so test fixtures
+// that build a Daemon literal without seeding every map don't panic.
+func (d *Daemon) recordProfileCommandPath(profileID, path string) {
+	if profileID == "" || path == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.profileCommandPaths == nil {
+		d.profileCommandPaths = make(map[string]string)
+	}
+	d.profileCommandPaths[profileID] = path
+}
+
+// customCommandPathForRuntime returns the resolved custom executable path for
+// a claimed task's RuntimeID, and whether the runtime is a custom-profile
+// runtime. It returns ("", false) for built-in runtimes (no profile) and for
+// runtimes whose profile command was never resolved on this host. runTask
+// uses this to override the launch path so a custom runtime can run even when
+// the host has no built-in agent of the same provider installed.
+func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
+	if runtimeID == "" {
+		return "", false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rt, ok := d.runtimeIndex[runtimeID]
+	if !ok || rt.ProfileID == "" {
+		return "", false
+	}
+	path, ok := d.profileCommandPaths[rt.ProfileID]
+	if !ok || path == "" {
+		return "", false
+	}
+	return path, true
+}
+
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
@@ -776,6 +828,14 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 			"status":  "online",
 		})
 	}
+
+	// Append any workspace custom runtime profiles whose command resolves on
+	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older
+	// server returning 404) must never fail registration — the daemon simply
+	// continues with the built-in runtimes it already collected. A profile
+	// whose command_name is not on PATH is skipped (the host doesn't have it).
+	d.appendProfileRuntimes(ctx, workspaceID, &runtimes)
+
 	if len(runtimes) == 0 {
 		return nil, fmt.Errorf("no agent runtimes could be registered")
 	}
@@ -799,6 +859,79 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
 	return resp, nil
+}
+
+// appendProfileRuntimes fetches the workspace's enabled custom runtime
+// profiles (MUL-3284) and appends a runtime registration entry for each one
+// whose command_name resolves on this host's PATH. For each resolved profile
+// it records the absolute command path keyed by profile_id (via
+// recordProfileCommandPath) so runTask can later launch the custom executable
+// for a claimed task.
+//
+// Best-effort by contract: any error fetching profiles (older server, network
+// blip) is logged and swallowed — registration proceeds with the built-in
+// runtimes already collected. A profile whose command is not on PATH is
+// skipped with an Info log (this host simply doesn't have that command).
+//
+// The registration entry mirrors the built-in shape: name = display_name
+// (suffixed with the device name like the built-in path), type =
+// protocol_family (the routing provider), version = best-effort detected
+// version, status = "online", plus the profile_id the server validates.
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string) {
+	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
+	if err != nil {
+		// Best-effort: never fail registration because profiles couldn't be
+		// fetched. An older server with no profiles route returns 404.
+		d.logger.Info("skip custom runtime profiles: fetch failed (continuing with built-in runtimes)",
+			"workspace_id", workspaceID, "error", err)
+		return
+	}
+	if resp == nil {
+		return
+	}
+	for _, profile := range resp.RuntimeProfiles {
+		if profile.CommandName == "" || profile.ProtocolFamily == "" {
+			d.logger.Warn("skip custom runtime profile: missing command_name or protocol_family",
+				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
+			continue
+		}
+		resolved, err := lookPath(profile.CommandName)
+		if err != nil {
+			// Host doesn't have this command — expected on hosts that aren't
+			// provisioned for this profile. Skip without failing.
+			d.logger.Info("skip custom runtime profile: command not found on PATH",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"command_name", profile.CommandName, "error", err)
+			continue
+		}
+		// Best-effort version detection; an empty version is acceptable.
+		version, verErr := detectAgentVersion(ctx, resolved)
+		if verErr != nil {
+			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
+				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
+			version = ""
+		}
+		displayName := profile.DisplayName
+		if d.cfg.DeviceName != "" {
+			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
+		}
+		d.recordProfileCommandPath(profile.ID, resolved)
+		d.logger.Info("registering custom runtime profile",
+			"workspace_id", workspaceID, "profile_id", profile.ID,
+			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
+		// NOTE: profile.FixedArgs are launch args every agent on this runtime
+		// inherits. Wiring them into the spawned command is intentionally not
+		// done here — it's an optional, best-effort enhancement (see MUL-3284
+		// PR2 task notes). TODO(MUL-3284): plumb FixedArgs into the agent
+		// launch command if/when the agent backend exposes a hook for it.
+		*runtimes = append(*runtimes, map[string]string{
+			"name":       displayName,
+			"type":       profile.ProtocolFamily,
+			"version":    version,
+			"status":     "online",
+			"profile_id": profile.ID,
+		})
+	}
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -2641,6 +2774,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	d.registerTaskRepos(task.WorkspaceID, task.Repos)
 
 	entry, ok := d.cfg.Agents[provider]
+	// A custom runtime profile (MUL-3284) overrides the executable path: the
+	// runtime's protocol_family is the provider (so agent.New still selects
+	// the right backend), but the actual binary on PATH is the profile's
+	// command_name, resolved at registration time and keyed by RuntimeID here.
+	// Critically, a custom runtime can live on a host that has NO built-in
+	// agent of the same provider installed, so when the runtime is custom we
+	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
+	if customPath, isCustom := d.customCommandPathForRuntime(task.RuntimeID); isCustom {
+		entry.Path = customPath
+		ok = true
+		d.logger.Info("task uses custom runtime profile command",
+			"task_id", task.ID, "runtime_id", task.RuntimeID,
+			"provider", provider, "command_path", customPath)
+	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}

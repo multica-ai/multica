@@ -62,6 +62,7 @@ type AgentRuntime struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	Visibility     string             `json:"visibility"`
+	ProfileID      pgtype.UUID        `json:"profile_id"`
 }
 
 type AgentSkill struct {
@@ -548,6 +549,21 @@ type ProjectResource struct {
 	Position     int32              `json:"position"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	CreatedBy    pgtype.UUID        `json:"created_by"`
+}
+
+type RuntimeProfile struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	DisplayName    string             `json:"display_name"`
+	ProtocolFamily string             `json:"protocol_family"`
+	CommandName    string             `json:"command_name"`
+	Description    pgtype.Text        `json:"description"`
+	FixedArgs      []byte             `json:"fixed_args"`
+	Visibility     string             `json:"visibility"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	Enabled        bool               `json:"enabled"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Skill struct {
