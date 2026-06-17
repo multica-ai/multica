@@ -362,6 +362,51 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	}
 }
 
+func TestRuntimeBriefOmitsDynamicCurrentTime(t *testing.T) {
+	ctx := TaskContextForEnv{
+		IssueID:              "11111111-2222-3333-4444-555555555555",
+		AgentID:              "agent-1",
+		AgentName:            "Agent One",
+		AgentInstructions:    "Use concise status updates.",
+		WorkspaceContext:     "Shared workspace rule.",
+		ProjectID:            "project-1",
+		ProjectTitle:         "Project One",
+		BundleContextHint:    true,
+		IssueSnapshotInlined: true,
+		AgentSkills: []SkillContextForEnv{
+			{Name: "verification-before-completion", Description: "Verify before claiming completion."},
+		},
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/example/repo", Description: "Example repo"},
+		},
+	}
+
+	first := buildMetaSkillContent("codex", ctx)
+	second := buildMetaSkillContent("codex", ctx)
+
+	if strings.Contains(first, "currentTime") || strings.Contains(second, "currentTime") {
+		t.Fatalf("runtime brief must stay stable and omit dynamic currentTime")
+	}
+	if first != second {
+		t.Fatalf("runtime brief changed across identical inputs")
+	}
+
+	for _, heading := range []string{
+		"## Available Commands",
+		"## Skills",
+		"## Skill Governance",
+		"## Todo Checklists",
+	} {
+		idx := strings.Index(first, heading)
+		if idx == -1 {
+			t.Fatalf("brief missing expected heading %q", heading)
+		}
+	}
+	if outputIdx := strings.Index(first, "## Output"); outputIdx == -1 {
+		t.Fatalf("brief missing Output section")
+	}
+}
+
 // The sub-issue creation rule must reach top-level parents that have no
 // `parent_issue_id` of their own — that is where the `todo` vs `backlog`
 // decision matters most. The section must not gate on this issue being

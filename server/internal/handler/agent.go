@@ -228,10 +228,11 @@ type AgentTaskResponse struct {
 
 	TriggerThreadID string `json:"trigger_thread_id,omitempty"` // root comment ID for the triggering thread
 
-	TriggerCommentContent string  `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerSummary        *string `json:"trigger_summary,omitempty"`         // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType     string  `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName     string  `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	TriggerCommentContent   string  `json:"trigger_comment_content,omitempty"`    // content of the triggering comment
+	TriggerCommentCreatedAt string  `json:"trigger_comment_created_at,omitempty"` // RFC3339 timestamp for the triggering comment
+	TriggerSummary          *string `json:"trigger_summary,omitempty"`            // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType       string  `json:"trigger_author_type,omitempty"`        // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName       string  `json:"trigger_author_name,omitempty"`        // display name of the triggering comment author
 	// CEREBRO-PATCH(wakeup-system-activity): expose wakeup context to daemon clients without creating comments.
 	WakeupPrompt      string `json:"wakeup_prompt,omitempty"`       // prompt stored on a platform wakeup task
 	WakeupTriggerType string `json:"wakeup_trigger_type,omitempty"` // time, issue_status, or github_ci for wakeup tasks
