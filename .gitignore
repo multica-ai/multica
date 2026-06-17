@@ -61,6 +61,9 @@ apps/web/test-results/
 # feature tracking
 _features/
 
+# graphify generated knowledge graph (derived state, rebuild on demand)
+graphify-out/
+
 # runtime
 *.pid
 
