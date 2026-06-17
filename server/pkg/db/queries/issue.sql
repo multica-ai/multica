@@ -236,7 +236,7 @@ WHERE i.workspace_id = $1
 -- name: ListChildIssues :many
 SELECT * FROM issue
 WHERE parent_issue_id = $1
-ORDER BY number ASC;
+ORDER BY number DESC;
 
 -- name: ListChildrenByParents :many
 -- Batched variant of ListChildIssues: returns all children for the given
@@ -247,7 +247,7 @@ ORDER BY number ASC;
 SELECT * FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')
   AND parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
-ORDER BY parent_issue_id, number ASC;
+ORDER BY parent_issue_id, number DESC;
 
 -- name: GetIssueByOrigin :one
 -- Finds the issue stamped with a specific (origin_type, origin_id) pair.

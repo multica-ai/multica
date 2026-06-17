@@ -625,7 +625,7 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 const listChildIssues = `-- name: ListChildIssues :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
 WHERE parent_issue_id = $1
-ORDER BY number ASC
+ORDER BY number DESC
 `
 
 func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID) ([]Issue, error) {
@@ -677,7 +677,7 @@ const listChildrenByParents = `-- name: ListChildrenByParents :many
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
-ORDER BY parent_issue_id, number ASC
+ORDER BY parent_issue_id, number DESC
 `
 
 type ListChildrenByParentsParams struct {
