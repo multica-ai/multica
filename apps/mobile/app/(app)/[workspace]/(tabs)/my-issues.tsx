@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { StatusIcon } from "@/components/ui/status-icon";
-import { IssueRow } from "@/components/issue/issue-row";
+import { SwipeableIssueRow } from "@/components/issue/swipeable-issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import {
   buildMyIssuesFilter,
@@ -183,7 +183,7 @@ export default function MyIssues() {
           )}
           contentContainerClassName="pb-6"
           renderItem={({ item }) => (
-            <IssueRow
+            <SwipeableIssueRow
               issue={item}
               onPress={() => {
                 if (wsSlug) router.push(`/${wsSlug}/issue/${item.id}`);
