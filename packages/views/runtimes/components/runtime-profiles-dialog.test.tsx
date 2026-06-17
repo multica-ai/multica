@@ -82,7 +82,7 @@ describe("RuntimeProfilesDialog", () => {
       screen.getByText("Create your first custom runtime"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/such as Claude or Codex/),
+      screen.getByText(/Pick a base protocol family/),
     ).toBeInTheDocument();
 
     const builtinsToggle = screen.getByRole("button", {
@@ -137,7 +137,7 @@ describe("RuntimeProfilesDialog", () => {
 
     fireEvent.click(builtinsToggle);
 
-    expect(screen.getByText("Manage custom runtimes")).toBeInTheDocument();
+    expect(screen.getByText("Select a runtime")).toBeInTheDocument();
     expect(
       screen.queryByText(/claude is a built-in protocol family/),
     ).not.toBeInTheDocument();

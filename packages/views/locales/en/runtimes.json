@@ -275,7 +275,7 @@
   "profiles": {
     "cta": "Add runtime",
     "dialog_title": "Custom runtimes",
-    "dialog_description": "Create and manage custom runtime backends based on supported protocol families.",
+    "dialog_description": "Workspace-specific commands built on the supported protocol families below.",
     "close": "Close",
     "add_new": "New custom runtime",
     "list_title": "Runtime backends",
@@ -286,7 +286,7 @@
     "builtin_section_aria": "Supported built-in protocol families",
     "builtin_reference": "Reference",
     "empty_title": "Create your first custom runtime",
-    "empty_description": "Start from a supported protocol family such as Claude or Codex, then point Multica at the command your daemon should run.",
+    "empty_description": "Pick a base protocol family, then point Multica at the command to run.",
     "badge_builtin": "Built-in",
     "badge_custom": "Custom",
     "badge_disabled": "Disabled",
@@ -302,9 +302,8 @@
       "no_description": "No description",
       "edit": "Edit",
       "delete": "Delete",
-      "default_title": "Manage custom runtimes",
-      "default_description": "Custom runtimes let your agents use a workspace-specific command while keeping the same supported protocol family.",
-      "default_builtin_hint": "Need a base protocol? Expand the supported protocols section on the left."
+      "default_title": "Select a runtime",
+      "default_description": "Pick one from the list to see its details."
     },
     "form": {
       "create_title": "New custom runtime",

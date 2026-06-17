@@ -440,9 +440,6 @@ function DetailPanel({
           <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.detail.default_description)}
           </p>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            {t(($) => $.profiles.detail.default_builtin_hint)}
-          </p>
         </div>
       </div>
     );

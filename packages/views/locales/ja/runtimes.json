@@ -263,7 +263,7 @@
   "profiles": {
     "cta": "ランタイムを追加",
     "dialog_title": "カスタムランタイム",
-    "dialog_description": "サポートされているプロトコルファミリーを基に、エージェント用のカスタムランタイムバックエンドを作成・管理します。",
+    "dialog_description": "下記のサポートされているプロトコルファミリー上に作るワークスペース固有のコマンド。",
     "close": "閉じる",
     "add_new": "新しいカスタムランタイム",
     "list_title": "ランタイムバックエンド",
@@ -274,7 +274,7 @@
     "builtin_section_aria": "サポートされている組み込みプロトコルファミリー",
     "builtin_reference": "参考",
     "empty_title": "最初のカスタムランタイムを作成",
-    "empty_description": "Claude や Codex など、サポートされているプロトコルファミリーを選び、この daemon が実行するコマンドを指定します。",
+    "empty_description": "ベースプロトコルファミリーを選び、Multica が実行するコマンドを指定します。",
     "badge_builtin": "組み込み",
     "badge_custom": "カスタム",
     "badge_disabled": "無効",
@@ -290,9 +290,8 @@
       "no_description": "説明なし",
       "edit": "編集",
       "delete": "削除",
-      "default_title": "カスタムランタイムを管理",
-      "default_description": "カスタムランタイムを使うと、サポートされている基本プロトコルを保ちながら、ワークスペース固有のコマンドをエージェントに使用させられます。",
-      "default_builtin_hint": "基本プロトコルが必要な場合は、左側のサポートプロトコルを展開してください。"
+      "default_title": "ランタイムを選択",
+      "default_description": "リストから 1 つ選んで詳細を表示します。"
     },
     "form": {
       "create_title": "新しいカスタムランタイム",
