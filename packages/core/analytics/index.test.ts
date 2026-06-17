@@ -216,3 +216,75 @@ describe("captureException", () => {
     expect(posthog.captureException).toHaveBeenCalledWith(err, expect.any(Object));
   });
 });
+
+describe("before_send $exception pipeline", () => {
+  // before_send is registered inside posthog.init's config; pull it back out of
+  // the mock and drive it directly. Dedupe needs a working sessionStorage.
+  function makeMemoryStorage() {
+    const data = new Map<string, string>();
+    return {
+      getItem: (k: string) => (data.has(k) ? data.get(k)! : null),
+      setItem: (k: string, v: string) => void data.set(k, v),
+      removeItem: (k: string) => void data.delete(k),
+      clear: () => data.clear(),
+      key: (i: number) => Array.from(data.keys())[i] ?? null,
+      get length() {
+        return data.size;
+      },
+    };
+  }
+
+  type BeforeSend = (
+    e: { event: string; properties: Record<string, unknown> } | null,
+  ) => unknown;
+
+  function getBeforeSend(posthog: { init: ReturnType<typeof vi.fn> }): BeforeSend {
+    const config = posthog.init.mock.calls[0]?.[1] as { before_send: BeforeSend };
+    return config.before_send;
+  }
+
+  function excEvent() {
+    return {
+      event: "$exception",
+      properties: {
+        $exception_list: [
+          {
+            type: "TypeError",
+            value: "Bad email bob@corp.com",
+            stacktrace: {
+              frames: [{ filename: "a.tsx", function: "f", lineno: 1, colno: 2 }],
+            },
+          },
+        ],
+      },
+    };
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("sessionStorage", makeMemoryStorage());
+  });
+
+  it("redacts the message, then drops repeats past the per-fingerprint limit", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const beforeSend = getBeforeSend(posthog);
+
+    const first = beforeSend(excEvent()) as { properties: { $exception_list: Array<{ value: string }> } };
+    // Redaction still runs before the fuse.
+    expect(first.properties.$exception_list[0]!.value).toBe("Bad email [redacted]");
+
+    expect(beforeSend(excEvent())).not.toBeNull();
+    expect(beforeSend(excEvent())).not.toBeNull();
+    // 4th identical exception is dropped.
+    expect(beforeSend(excEvent())).toBeNull();
+  });
+
+  it("passes non-$exception events through untouched", async () => {
+    const { analytics, posthog } = await loadModule();
+    analytics.initAnalytics({ key: "k", host: "" });
+    const beforeSend = getBeforeSend(posthog);
+
+    const evt = { event: "$pageview", properties: { $current_url: "/acme/issues" } };
+    expect(beforeSend(evt)).toBe(evt);
+  });
+});

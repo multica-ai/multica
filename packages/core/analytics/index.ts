@@ -14,6 +14,7 @@
 
 import posthog from "posthog-js";
 import { redactExceptionProperties } from "./redact-exception";
+import { shouldDropException } from "./exception-dedupe";
 
 export const EVENT_SCHEMA_VERSION = 2;
 
@@ -156,10 +157,17 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // typed value, a URL with a token), so `before_send` scrubs the message
     // and `$exception_list[].value` before the event leaves the client. Stack
     // frames (code locations) are kept. See redact-exception.ts.
+    //
+    // After scrubbing, a session-level fuse drops repeats of the same error so
+    // a render loop or a polling fetch that keeps throwing can't emit 100+
+    // identical `$exception` events per session (MUL-3331). The fingerprint is
+    // built only from the already-redacted fields, so no PII reaches storage.
+    // Order matters: redact first, then fingerprint the redacted shape.
     capture_exceptions: true,
     before_send: (event) => {
       if (event && event.event === "$exception") {
         redactExceptionProperties(event.properties);
+        if (shouldDropException(event.properties)) return null;
       }
       return event;
     },
