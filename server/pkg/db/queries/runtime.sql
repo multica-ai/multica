@@ -45,10 +45,10 @@ INSERT INTO agent_runtime (
     owner_id,
     last_seen_at
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
--- Built-in runtimes carry no profile_id. The predicate matches migration 121's
--- prepared partial unique index; migration 121 also keeps the legacy full
--- UNIQUE (workspace_id, daemon_id, provider) constraint so older server builds
--- can keep registering runtimes during rolling deploys and rollbacks.
+-- Built-in runtimes carry no profile_id. The arbiter is the partial unique
+-- index from migration 121 (WHERE profile_id IS NULL); the predicate must be
+-- spelled out so Postgres selects that partial index, not the custom-runtime
+-- one on (workspace_id, daemon_id, profile_id).
 ON CONFLICT (workspace_id, daemon_id, provider) WHERE profile_id IS NULL
 DO UPDATE SET
     name = EXCLUDED.name,

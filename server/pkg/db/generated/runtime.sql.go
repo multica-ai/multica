@@ -964,10 +964,10 @@ type UpsertAgentRuntimeRow struct {
 // (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 // that updated an existing row (false). Analytics reads this to fire
 // runtime_registered/runtime_ready only on first-time registration.
-// Built-in runtimes carry no profile_id. The predicate matches migration 121's
-// prepared partial unique index; migration 121 also keeps the legacy full
-// UNIQUE (workspace_id, daemon_id, provider) constraint so older server builds
-// can keep registering runtimes during rolling deploys and rollbacks.
+// Built-in runtimes carry no profile_id. The arbiter is the partial unique
+// index from migration 121 (WHERE profile_id IS NULL); the predicate must be
+// spelled out so Postgres selects that partial index, not the custom-runtime
+// one on (workspace_id, daemon_id, profile_id).
 func (q *Queries) UpsertAgentRuntime(ctx context.Context, arg UpsertAgentRuntimeParams) (UpsertAgentRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRuntime,
 		arg.WorkspaceID,
