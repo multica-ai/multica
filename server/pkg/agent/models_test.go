@@ -149,6 +149,60 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 	}
 }
 
+func TestModelKnownIncompatibleWithProvider(t *testing.T) {
+	cases := []struct {
+		name     string
+		provider string
+		model    string
+		want     bool
+	}{
+		{
+			name:     "claude model is incompatible with codex",
+			provider: "codex",
+			model:    "claude-sonnet-4-6",
+			want:     true,
+		},
+		{
+			name:     "codex model is compatible with codex",
+			provider: "codex",
+			model:    "gpt-5.5",
+			want:     false,
+		},
+		{
+			name:     "codex model is incompatible with claude",
+			provider: "claude",
+			model:    "o3",
+			want:     true,
+		},
+		{
+			name:     "claude model is compatible with claude",
+			provider: "claude",
+			model:    "anthropic/claude-opus-4.7",
+			want:     false,
+		},
+		{
+			name:     "unknown custom model is not classified",
+			provider: "codex",
+			model:    "private-lab-model",
+			want:     false,
+		},
+		{
+			name:     "unknown target provider does not clear",
+			provider: "opencode",
+			model:    "claude-sonnet-4-6",
+			want:     false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ModelKnownIncompatibleWithProvider(tc.provider, tc.model); got != tc.want {
+				t.Fatalf("ModelKnownIncompatibleWithProvider(%q, %q) = %v, want %v", tc.provider, tc.model, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestInferCopilotProvider(t *testing.T) {
 	cases := map[string]string{
 		"gpt-5.5":           "openai",

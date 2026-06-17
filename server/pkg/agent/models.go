@@ -172,6 +172,72 @@ func ModelSelectionSupported(providerType string) bool {
 	return true
 }
 
+// ModelKnownIncompatibleWithProvider reports whether a saved model is an
+// obvious mismatch for a target runtime provider. It deliberately returns
+// false for unknown/custom model IDs: the UI and CLI allow manual model
+// strings, and the server should not reject or erase values it cannot
+// confidently classify. This is a coarse runtime-switch guard, not a live
+// access check.
+func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+
+	target := knownModelFamiliesForProvider(providerType)
+	if len(target) == 0 {
+		return false
+	}
+	for _, family := range modelFamilies(model) {
+		if target[family] {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+func knownModelFamiliesForProvider(providerType string) map[string]bool {
+	switch providerType {
+	case "claude":
+		return map[string]bool{"anthropic": true}
+	case "codex":
+		return map[string]bool{"openai": true}
+	case "gemini":
+		return map[string]bool{"google": true}
+	default:
+		return nil
+	}
+}
+
+func modelFamilies(model string) []string {
+	switch {
+	case modelInCatalog(model, claudeStaticModels()):
+		return []string{"anthropic"}
+	case modelInCatalog(model, codexStaticModels()):
+		return []string{"openai"}
+	case modelInCatalog(model, geminiStaticModels()):
+		return []string{"google"}
+	case strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "anthropic/"):
+		return []string{"anthropic"}
+	case strings.HasPrefix(model, "gpt-") || isOpenAIReasoningSeriesID(model) || strings.HasPrefix(model, "openai/"):
+		return []string{"openai"}
+	case strings.HasPrefix(model, "gemini-") || strings.HasPrefix(model, "auto-gemini-") || strings.HasPrefix(model, "google/"):
+		return []string{"google"}
+	default:
+		return nil
+	}
+}
+
+func modelInCatalog(id string, models []Model) bool {
+	for _, m := range models {
+		if m.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // cachedDiscovery invokes fn and caches the result for modelCacheTTL.
 // The cache is keyed on providerType only; callers that need to
 // distinguish discovery by host/user should include that in the key
