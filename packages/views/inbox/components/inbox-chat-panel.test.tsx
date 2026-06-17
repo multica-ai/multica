@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockCreateSession = vi.hoisted(() => vi.fn());
+const mockRecentChatsList = vi.hoisted(() => vi.fn());
 
 const chatState = vi.hoisted(() => ({
   selectedAgentId: "agent-lando",
@@ -88,7 +89,10 @@ vi.mock("@multica/views/chat", () => ({
 vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => null,
   SessionCostChip: () => null,
-  RecentChatsList: () => null,
+  RecentChatsList: (props: { agentId: string | null }) => {
+    mockRecentChatsList(props);
+    return <div data-testid="recent-chats-list" />;
+  },
 }));
 
 vi.mock("@multica/ui/components/ui/avatar", () => ({
@@ -136,6 +140,7 @@ describe("InboxChatPanel", () => {
     chatState.setHideFloatingChat.mockClear();
     mockCreateSession.mockReset();
     mockCreateSession.mockResolvedValue({ id: "session-sara" });
+    mockRecentChatsList.mockClear();
   });
 
   it("uses the sidebar-selected URL agent instead of the persisted fallback agent", async () => {
@@ -154,5 +159,20 @@ describe("InboxChatPanel", () => {
         title: "hello",
       });
     });
+  });
+
+  it("puts recent chats above the new-conversation prompt for the active agent", () => {
+    renderPanel("agent-sara");
+
+    const recentChatsList = screen.getByTestId("recent-chats-list");
+    const prompt = screen.getByText("Start a conversation with Sara - CTO");
+
+    expect(
+      recentChatsList.compareDocumentPosition(prompt) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(mockRecentChatsList).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agentId: "agent-sara" }),
+    );
   });
 });

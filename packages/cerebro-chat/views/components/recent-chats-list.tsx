@@ -72,10 +72,12 @@ function useTimeAgo(): (iso: string) => string {
 export function RecentChatsList({
   sessions,
   agents,
+  agentId,
   onOpenSession,
 }: {
   sessions: ChatSession[];
   agents: Agent[];
+  agentId: string | null;
   onOpenSession: (sessionId: string) => void;
 }) {
   const enabled = useFlagValue("cerebro_chat_recent_list");
@@ -84,12 +86,14 @@ export function RecentChatsList({
   const [expanded, setExpanded] = useState(false);
 
   const sorted = useMemo(() => {
-    return [...(sessions ?? [])].sort((a, b) => {
-      const ta = new Date(b.updated_at).getTime();
-      const tb = new Date(a.updated_at).getTime();
-      return (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
-    });
-  }, [sessions]);
+    return [...(sessions ?? [])]
+      .filter((session) => session.agent_id === agentId)
+      .sort((a, b) => {
+        const ta = new Date(b.updated_at).getTime();
+        const tb = new Date(a.updated_at).getTime();
+        return (Number.isNaN(ta) ? 0 : ta) - (Number.isNaN(tb) ? 0 : tb);
+      });
+  }, [agentId, sessions]);
 
   const agentById = useMemo(() => {
     const map = new Map<string, Agent>();
