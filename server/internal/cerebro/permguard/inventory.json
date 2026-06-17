@@ -1173,6 +1173,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "POST /api/workspaces/{id}/cerebro/copy",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "POST /api/workspaces/{id}/connections",
       "gate": "workspace_admin"
     },

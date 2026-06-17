@@ -175,7 +175,11 @@ export type CerebroFlagKey =
   // TECH-3582: Workspace copy console — a Settings tab to copy individual
   // entities (issues, channels, projects, agents, chats, autopilots) into
   // another workspace when merging two workspaces. Non-destructive.
-  | "cerebro_workspace_copy";
+  | "cerebro_workspace_copy"
+  // FIR-recent-chats: show the 3 most recent chat sessions at the top of the
+  // inbox new-chat screen, with a "see earlier" expander to scroll & resume
+  // older ones in place.
+  | "cerebro_chat_recent_list";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -386,6 +390,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3582: OFF by default. Ships dormant — the Workspace copy console only
   // appears in Settings once an admin opts in to run a one-time workspace merge.
   cerebro_workspace_copy: false,
+  cerebro_chat_recent_list: true,
 };
 
 /**
@@ -999,6 +1004,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Add a \"Workspace copy\" tab to Settings (owners/admins only) for merging one workspace into another: pick a target workspace, then copy individual issues, channels, projects, agents, chats, or autopilots into it. Copies are non-destructive — the source workspace is never changed. Off hides the tab. TECH-3582.",
+  },
+  // FIR-recent-chats: recent chat list on the inbox new-chat screen.
+  {
+    key: "cerebro_chat_recent_list",
+    label: "Recent chats on new-chat screen",
+    group: "inbox",
+    description:
+      "Show the 3 most recent chat sessions at the top of the inbox new-chat screen, with a \"See earlier\" expander to scroll through and resume older conversations in place. Off keeps the plain empty state.",
   },
   // FIR-2563: per-workspace approval gate toggle.
   {

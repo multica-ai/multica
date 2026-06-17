@@ -107,6 +107,22 @@ describe("CerebroCapabilitiesTab", () => {
       ],
       credentials: [{ name: "GITHUB_TOKEN", type: "secret", description: "" }],
       infisical_secrets: [{ environment: "prod", path: "/Cloudflare" }],
+      agent_secrets: {
+        source: "agent_custom_env",
+        status: "known",
+        count: 2,
+        names: ["OPENAI_API_KEY", "SLIPLANE_KEY"],
+        redacted: false,
+        runtime_id: "",
+      },
+      runtime_secrets: {
+        source: "runtime",
+        status: "known",
+        count: 1,
+        names: ["ANTHROPIC_API_KEY"],
+        redacted: false,
+        runtime_id: "runtime-1",
+      },
       limits: {
         sandbox: { network_allowlist: ["api.github.com:443"] },
         mcp_servers: ["multica"],
@@ -148,8 +164,51 @@ describe("CerebroCapabilitiesTab", () => {
     expect(screen.getByText("GITHUB_TOKEN")).toBeInTheDocument();
     expect(screen.getByText("/Cloudflare")).toBeInTheDocument();
 
+    // Agent + runtime secrets (names-only) — TECH-3738 Bid A.
+    expect(screen.getByText("Agent secrets")).toBeInTheDocument();
+    expect(screen.getByText("Runtime secrets")).toBeInTheDocument();
+    expect(screen.getByText("OPENAI_API_KEY")).toBeInTheDocument();
+    expect(screen.getByText("SLIPLANE_KEY")).toBeInTheDocument();
+    expect(screen.getByText("ANTHROPIC_API_KEY")).toBeInTheDocument();
+
     // Limits.
     expect(screen.getByText("multica")).toBeInTheDocument();
+  });
+
+  it("redacts secret names for non-privileged callers but keeps the count", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      agent_secrets: {
+        source: "agent_custom_env",
+        status: "known",
+        count: 3,
+        names: [],
+        redacted: true,
+        runtime_id: "",
+      },
+      runtime_secrets: {
+        source: "runtime",
+        status: "unknown",
+        count: 0,
+        names: [],
+        redacted: false,
+        runtime_id: "runtime-1",
+      },
+    });
+
+    renderTab();
+
+    // The count is shown, but no secret name leaks, and the lock note explains why.
+    expect(await screen.findByText("Agent secrets")).toBeInTheDocument();
+    expect(
+      screen.getByText(/names visible to workspace owners\/admins only/i),
+    ).toBeInTheDocument();
+    // Runtime source could not be determined → explicit "unknown", not "none".
+    expect(
+      screen.getByText("Could not determine secrets for this source."),
+    ).toBeInTheDocument();
   });
 
   it("survives a malformed response without throwing (fallback to empty)", async () => {
@@ -176,5 +235,8 @@ describe("CerebroCapabilitiesTab", () => {
     expect(screen.getByText("No connections.")).toBeInTheDocument();
     expect(screen.getByText("No credentials bound.")).toBeInTheDocument();
     expect(screen.getByText("No Infisical folders.")).toBeInTheDocument();
+    // New secret sections still scaffold from schema defaults (TECH-3738 Bid A).
+    expect(screen.getByText("Agent secrets")).toBeInTheDocument();
+    expect(screen.getByText("Runtime secrets")).toBeInTheDocument();
   });
 });

@@ -52,6 +52,10 @@ describe("findEntryByMessageKey", () => {
     expect(findEntryByMessageKey(entries, "notif:iss-9")).toBe(entries[0]);
   });
 
+  it("falls back from a channel link to a notification for the same issue", () => {
+    expect(findEntryByMessageKey(entries, "channel:iss-9")).toBe(entries[0]);
+  });
+
   it("does not cross id spaces of different kinds", () => {
     expect(findEntryByMessageKey(entries, "channel:sess-1")).toBeNull();
     expect(findEntryByMessageKey(entries, "chat:chan-1")).toBeNull();

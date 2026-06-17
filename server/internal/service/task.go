@@ -18,6 +18,7 @@ import (
 	// CEREBRO-PATCH(task-title-builder): cerebro-owned LLM title generator.
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
+	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -201,8 +202,13 @@ func (s *TaskService) CommentDelegationContext(ctx context.Context, authorType, 
 					Source:            pgtype.Text{String: source, Valid: true},
 				}, nil
 			}
+			// CEREBRO-PATCH(delegation-origin-trace): TECH-3629 — follow the issue's agent_task origin chain to recover the human (same source as resolveOnBehalfOf) before denying.
+			if human, ok := delegationorigin.ResolveHumanViaOrigin(ctx, s.Queries, issue); ok {
+				return TaskDelegationContext{OriginalUserID: human, DelegatingAgentID: task.AgentID, SourceTaskID: task.ID, Source: pgtype.Text{String: source, Valid: true}}, nil
+			}
 		}
-		return TaskDelegationContext{}, fmt.Errorf("agent delegation denied: missing original user")
+		// CEREBRO-PATCH(delegation-missing-human-sentinel): TECH-3629 — typed sentinel so the mention handler can route to agent-owner approval instead of dropping.
+		return TaskDelegationContext{}, delegationorigin.ErrMissingHuman
 	}
 	return TaskDelegationContext{
 		OriginalUserID:    task.OriginalUserID,

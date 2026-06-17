@@ -98,6 +98,41 @@ const AgentCapabilityLimitsSchema = z
   })
   .loose();
 
+// TECH-3738 Bid A — a group of secrets the agent can reach (its own custom_env
+// or the bindings it inherits from its runtime). NAMES ONLY; `names` is empty
+// and `redacted` is true for callers the backend does not let see names. `status`
+// distinguishes "we know there is nothing" (not_configured) from "we could not
+// determine it" (unknown) — an empty list must never silently read as covered.
+const AgentCapabilitySecretSetSchema = z
+  .object({
+    source: z.string().default(""),
+    // status is a server enum (known|unknown|stale|not_configured); drift
+    // downgrades to a neutral badge rather than crashing — see the tab switch.
+    status: z.string().default("not_configured"),
+    count: z.number().default(0),
+    names: z.array(z.string()).default([]),
+    redacted: z.boolean().default(false),
+    runtime_id: z.string().default(""),
+  })
+  .loose();
+
+const EMPTY_AGENT_SECRET_SET = {
+  source: "agent_custom_env",
+  status: "not_configured",
+  count: 0,
+  names: [],
+  redacted: false,
+  runtime_id: "",
+};
+const EMPTY_RUNTIME_SECRET_SET = {
+  source: "runtime",
+  status: "unknown",
+  count: 0,
+  names: [],
+  redacted: false,
+  runtime_id: "",
+};
+
 export const AgentCapabilitiesSchema = z
   .object({
     agent_id: z.string().default(""),
@@ -112,6 +147,12 @@ export const AgentCapabilitiesSchema = z
     infisical_secrets: z
       .array(AgentCapabilityInfisicalSecretSchema)
       .default([]),
+    agent_secrets: AgentCapabilitySecretSetSchema.default(
+      EMPTY_AGENT_SECRET_SET,
+    ),
+    runtime_secrets: AgentCapabilitySecretSetSchema.default(
+      EMPTY_RUNTIME_SECRET_SET,
+    ),
     limits: AgentCapabilityLimitsSchema.default({
       mcp_servers: [],
       has_mcp_config: false,
@@ -131,6 +172,9 @@ export type AgentCapabilityCredential = z.infer<
 export type AgentCapabilityInfisicalSecret = z.infer<
   typeof AgentCapabilityInfisicalSecretSchema
 >;
+export type AgentCapabilitySecretSet = z.infer<
+  typeof AgentCapabilitySecretSetSchema
+>;
 export type AgentCapabilityLimits = z.infer<typeof AgentCapabilityLimitsSchema>;
 export type AgentCapabilities = z.infer<typeof AgentCapabilitiesSchema>;
 
@@ -145,6 +189,8 @@ const EMPTY_CAPABILITIES: AgentCapabilities = {
   connections: [],
   credentials: [],
   infisical_secrets: [],
+  agent_secrets: EMPTY_AGENT_SECRET_SET,
+  runtime_secrets: EMPTY_RUNTIME_SECRET_SET,
   limits: { mcp_servers: [], has_mcp_config: false },
 };
 

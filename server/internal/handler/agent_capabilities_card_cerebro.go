@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -27,6 +28,18 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// CEREBRO-PATCH(agent-capabilities-secret-status): TECH-3738 Bid A — every
+// secret-bearing section reports an explicit status so an empty list never
+// silently reads as "fully covered". "we know there is nothing" must look
+// different from "we could not determine it".
+const (
+	capStatusKnown         = "known"          // read successfully; the list is authoritative
+	capStatusUnknown       = "unknown"        // could not determine (lookup failed / runtime unmapped)
+	capStatusStale         = "stale"          // last scan is old (reserved for Bid B/C observed access)
+	capStatusNotConfigured = "not_configured" // determined, and there is genuinely nothing
 )
 
 // CEREBRO-PATCH(agent-capabilities-card-sections): TECH-3642 route tool-policy
@@ -131,6 +144,22 @@ type AgentCapabilityInfisicalSecret struct {
 	Path        string `json:"path"`
 }
 
+// CEREBRO-PATCH(agent-capabilities-secret-set): TECH-3738 Bid A — a group of
+// secrets the agent can reach (its own custom_env, or the secret bindings it
+// inherits from its runtime). NAMES ONLY, never values, and the names are
+// withheld (Redacted=true, Names empty) from any caller who is not a workspace
+// owner/admin — including agents reading via CLI/MCP — mirroring the owner/admin
+// gate on the env-management endpoint. Count is always populated so a
+// non-privileged caller still sees how many secrets exist.
+type AgentCapabilitySecretSet struct {
+	Source    string   `json:"source"`               // agent_custom_env | runtime
+	Status    string   `json:"status"`               // known | unknown | stale | not_configured
+	Count     int      `json:"count"`                // number of secrets, always populated
+	Names     []string `json:"names"`                // populated only for owner/admin callers
+	Redacted  bool     `json:"redacted"`             // true when names were withheld from this caller
+	RuntimeID string   `json:"runtime_id,omitempty"` // set when Source=runtime
+}
+
 // AgentCapabilityLimits captures the boundaries the agent runs inside (what it
 // is LIMITED by): the sandbox policy and the MCP server surface.
 type AgentCapabilityLimits struct {
@@ -151,7 +180,12 @@ type AgentCapabilities struct {
 	Connections      []AgentCapabilityConnection      `json:"connections"`
 	Credentials      []AgentCapabilityCredential      `json:"credentials"`
 	InfisicalSecrets []AgentCapabilityInfisicalSecret `json:"infisical_secrets"`
-	Limits           AgentCapabilityLimits            `json:"limits"`
+	// CEREBRO-PATCH(agent-capabilities-secret-sets): TECH-3738 Bid A — the two
+	// previously-hidden secret layers: the agent's own custom_env and the
+	// secret bindings it inherits from its runtime. Names are owner/admin-only.
+	AgentSecrets   AgentCapabilitySecretSet `json:"agent_secrets"`
+	RuntimeSecrets AgentCapabilitySecretSet `json:"runtime_secrets"`
+	Limits         AgentCapabilityLimits    `json:"limits"`
 }
 
 // GetAgentCapabilities handles GET /api/agents/{id}/capabilities. Access control
@@ -223,6 +257,14 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+
+	// ACCESS — the two previously-hidden secret layers (TECH-3738 Bid A): the
+	// agent's own custom_env and the secret bindings inherited from its runtime.
+	// Names are revealed only to workspace owner/admin; everyone else (including
+	// agents via CLI/MCP) sees a redacted count, mirroring the env endpoint gate.
+	reveal := h.mayRevealAgentSecretNames(r, agent.WorkspaceID)
+	out.AgentSecrets = buildAgentSecretSet(agent, reveal)
+	out.RuntimeSecrets = h.buildRuntimeSecretSet(r, agent, reveal)
 
 	// LIMITS — sandbox policy + MCP server surface.
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
@@ -441,4 +483,92 @@ func buildAgentCapabilityLimits(runtimeConfig, mcpConfig []byte) AgentCapability
 	}
 
 	return limits
+}
+
+// CEREBRO-PATCH(agent-capabilities-secret-reveal): TECH-3738 Bid A — decide
+// whether this caller may see secret NAMES on the card. The capabilities card
+// is reachable by any workspace member and by agents via CLI/MCP (loadAgentForUser
+// does not gate on role), but the dedicated env-management endpoint is owner/admin
+// only and rejects agent actors outright. To avoid widening secret-name exposure
+// beyond that gate, names are revealed only to workspace owner/admin members;
+// agents and lower-privileged members get a redacted count instead.
+func (h *Handler) mayRevealAgentSecretNames(r *http.Request, workspaceID pgtype.UUID) bool {
+	wsID := uuidToString(workspaceID)
+	userID := requestUserID(r)
+	if actorType, _ := h.resolveActor(r, userID, wsID); actorType != "member" {
+		return false
+	}
+	member, err := h.getWorkspaceMember(r.Context(), userID, wsID)
+	if err != nil {
+		return false
+	}
+	return roleAllowed(member.Role, "owner", "admin")
+}
+
+// buildAgentSecretSet reports the agent's own custom_env secrets as names-only
+// (never values). custom_env is always readable, so the status is binary:
+// known when there is at least one key, not_configured when empty.
+func buildAgentSecretSet(agent db.Agent, reveal bool) AgentCapabilitySecretSet {
+	names := sortedKeys(unmarshalCustomEnv(agent))
+	set := AgentCapabilitySecretSet{Source: "agent_custom_env", Count: len(names), Names: []string{}}
+	if len(names) == 0 {
+		set.Status = capStatusNotConfigured
+		return set
+	}
+	set.Status = capStatusKnown
+	if reveal {
+		set.Names = names
+	} else {
+		set.Redacted = true
+	}
+	return set
+}
+
+// buildRuntimeSecretSet reports the secret bindings the agent inherits from the
+// runtime it runs on. It reads the agent's actual runtime row (not just the
+// static provider registry) and normalises it, so the card shows the runtime the
+// agent really uses; the registry is the fallback baked into normalizedRuntimeCapabilities.
+// A missing/unreadable runtime yields status=unknown — the card never claims
+// "no secrets" when it simply could not look them up.
+func (h *Handler) buildRuntimeSecretSet(r *http.Request, agent db.Agent, reveal bool) AgentCapabilitySecretSet {
+	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          agent.RuntimeID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		return AgentCapabilitySecretSet{
+			Source:    "runtime",
+			Status:    capStatusUnknown,
+			Names:     []string{},
+			RuntimeID: uuidToString(agent.RuntimeID),
+		}
+	}
+	caps := normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig)
+	return runtimeSecretSetFromCaps(caps, uuidToString(rt.ID), reveal)
+}
+
+// runtimeSecretSetFromCaps is the pure core of buildRuntimeSecretSet (unit-tested
+// without a DB). An "unmapped" discovery method means the scan could not map the
+// runtime, so the absence of bindings is unknown rather than confirmed-empty.
+func runtimeSecretSetFromCaps(caps map[string]any, runtimeID string, reveal bool) AgentCapabilitySecretSet {
+	bindings := anyStringSlice(caps["secret_bindings"])
+	sort.Strings(bindings)
+	method, _ := caps["discovery_method"].(string)
+	set := AgentCapabilitySecretSet{Source: "runtime", Count: len(bindings), Names: []string{}, RuntimeID: runtimeID}
+	switch {
+	case method == "unmapped":
+		set.Status = capStatusUnknown
+	case len(bindings) == 0:
+		set.Status = capStatusNotConfigured
+	default:
+		set.Status = capStatusKnown
+	}
+	if len(bindings) > 0 {
+		if reveal {
+			set.Names = bindings
+		} else {
+			set.Redacted = true
+		}
+	}
+	return set
 }

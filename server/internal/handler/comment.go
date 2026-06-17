@@ -5,6 +5,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated" // CEREBRO-PATCH(sub-issue-guard-prefetch): TECH-3099.
+	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"       // CEREBRO-PATCH(mention-missing-human-approval): TECH-3629.
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1423,6 +1425,11 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, r *http.Reques
 		// Always use the current comment as the trigger so the agent reads the
 		// actual reply that mentioned it, not the thread root.
 		if delegationErr != nil {
+			// CEREBRO-PATCH(mention-missing-human-approval): TECH-3629 — no human in the chain → ask the AGENT OWNER to approve (reuses the private-agent run-request flow) instead of silently dropping the handoff.
+			if errors.Is(delegationErr, delegationorigin.ErrMissingHuman) && h.PrivateAgentRunRequester != nil {
+				_ = h.PrivateAgentRunRequester.RequestPrivateAgentRun(ctx, wsID, agent.ID, agent.OwnerID, issue.ID, comment.ID, parseUUID(authorID), agent.Name)
+				continue
+			}
 			slog.Warn("enqueue mention agent task blocked by delegation policy", "issue_id", uuidToString(issue.ID), "agent_id", m.ID, "error", delegationErr)
 			if !delegationBlockCommented {
 				h.postMentionDelegationBlockedSystemComment(ctx, issue, comment, agent.Name)
