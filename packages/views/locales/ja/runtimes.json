@@ -252,7 +252,72 @@
     "row_actions_aria": "行の操作",
     "delete_action": "削除",
     "delete_permission_hint": "ランタイムの所有者とワークスペース管理者のみが、このランタイムを削除できます",
-    "delete_admin_hint": "ランタイムの所有者とワークスペース管理者のみが、ランタイムを削除できます。"
+    "delete_admin_hint": "ランタイムの所有者とワークスペース管理者のみが、ランタイムを削除できます。",
+    "badge_builtin": "組み込み",
+    "badge_custom": "カスタム"
+  },
+  "profiles": {
+    "cta": "ランタイムを追加",
+    "dialog_title": "カスタムランタイム",
+    "dialog_description": "エージェント用のカスタムランタイムバックエンドを定義します。組み込みファミリーは参考として表示されます。",
+    "add_new": "新しいカスタムランタイム",
+    "list_title": "ランタイム",
+    "empty_custom": "カスタムランタイムはまだありません。組み込みファミリーは上に表示されています。",
+    "badge_builtin": "組み込み",
+    "badge_custom": "カスタム",
+    "badge_disabled": "無効",
+    "builtin_detail": {
+      "title": "組み込みランタイム",
+      "description": "{{family}} は組み込みのプロトコルファミリーです。編集や削除はできません。",
+      "read_only": "読み取り専用"
+    },
+    "detail": {
+      "base_family": "ベースプロトコルファミリー",
+      "command": "コマンド",
+      "description": "説明",
+      "no_description": "説明なし",
+      "edit": "編集",
+      "delete": "削除",
+      "select_hint": "ランタイムを選択すると詳細が表示されます。"
+    },
+    "form": {
+      "create_title": "新しいカスタムランタイム",
+      "edit_title": "カスタムランタイムを編集",
+      "step_family_label": "ベースプロトコルファミリーを選択",
+      "step_family_hint": "このランタイムが使用する基盤の CLI プロトコル。",
+      "step_details_label": "ランタイムを設定",
+      "family_label": "ベースプロトコルファミリー",
+      "family_locked_hint": "作成後はベースプロトコルファミリーを変更できません。",
+      "display_name_label": "表示名",
+      "display_name_placeholder": "マイカスタム Claude",
+      "command_name_label": "コマンド",
+      "command_name_placeholder": "claude",
+      "description_label": "説明",
+      "description_placeholder": "任意 — このランタイムの用途",
+      "error_display_name_required": "表示名は必須です。",
+      "error_command_required": "コマンドは必須です。",
+      "back": "戻る",
+      "cancel": "キャンセル",
+      "next": "次へ",
+      "create": "ランタイムを作成",
+      "creating": "作成中…",
+      "save": "変更を保存",
+      "saving": "保存中…",
+      "toast_created": "カスタムランタイムを作成しました",
+      "toast_updated": "カスタムランタイムを更新しました",
+      "error_duplicate_name": "この表示名のランタイムは既に存在します。",
+      "error_generic": "ランタイムの保存に失敗しました。"
+    },
+    "delete_dialog": {
+      "title": "カスタムランタイムを削除しますか？",
+      "description": "「{{name}}」を削除しますか？この操作は元に戻せません。",
+      "confirm": "削除",
+      "cancel": "キャンセル",
+      "deleting": "削除中…",
+      "toast_deleted": "カスタムランタイムを削除しました",
+      "error_bound": "まだエージェントが使用しているため、このランタイムは削除できません。",
+      "error_generic": "ランタイムの削除に失敗しました。"
+    }
   },
   "usage": {
     "period_label": "期間",

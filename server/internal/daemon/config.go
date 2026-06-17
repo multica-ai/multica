@@ -102,6 +102,14 @@ type Config struct {
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
+
+	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
+	// executable path to use for that profile on THIS machine (MUL-3284).
+	// Sourced from the local CLI config (cli.CLIConfig.ProfileCommandOverrides),
+	// written by `multica runtime profile set-path`. appendProfileRuntimes
+	// prefers a matching, executable override over resolving the profile's
+	// command_name on PATH. nil/empty means "always resolve via PATH".
+	ProfileCommandOverrides map[string]string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -165,11 +173,26 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// file should not prevent daemon startup, since the daemon can still run
 	// purely from env-var configuration. We log a warning and proceed with
 	// no overrides.
+	var profileCommandOverrides map[string]string
 	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
 		slog.Warn("could not load CLI config for backend overrides; proceeding without",
 			"profile", overrides.Profile, "err", err)
-	} else if oc := openclawOverrideFrom(cliCfg); oc != nil {
-		applyOpenclawOverride(oc)
+	} else {
+		if oc := openclawOverrideFrom(cliCfg); oc != nil {
+			applyOpenclawOverride(oc)
+		}
+		// Per-machine custom-runtime command path overrides (MUL-3284).
+		// Copy into our own map so later mutation of the loaded config can't
+		// alias daemon state, and so an empty map normalizes to nil.
+		if len(cliCfg.ProfileCommandOverrides) > 0 {
+			profileCommandOverrides = make(map[string]string, len(cliCfg.ProfileCommandOverrides))
+			for id, path := range cliCfg.ProfileCommandOverrides {
+				if id == "" || strings.TrimSpace(path) == "" {
+					continue
+				}
+				profileCommandOverrides[id] = path
+			}
+		}
 	}
 
 	// Probe available agent CLIs. exec.LookPath is the primary path, but on
@@ -500,6 +523,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 		CodebuddyArgs:                  codebuddyArgs,
+		ProfileCommandOverrides:        profileCommandOverrides,
 	}, nil
 }
 

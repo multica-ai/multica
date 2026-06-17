@@ -264,7 +264,72 @@
     "row_actions_aria": "행 작업",
     "delete_action": "삭제",
     "delete_permission_hint": "런타임 소유자와 워크스페이스 관리자만 이 런타임을 삭제할 수 있습니다",
-    "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다."
+    "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다.",
+    "badge_builtin": "기본 제공",
+    "badge_custom": "사용자 지정"
+  },
+  "profiles": {
+    "cta": "런타임 추가",
+    "dialog_title": "사용자 지정 런타임",
+    "dialog_description": "에이전트를 위한 사용자 지정 런타임 백엔드를 정의합니다. 기본 제공 제품군은 참고용으로 표시됩니다.",
+    "add_new": "새 사용자 지정 런타임",
+    "list_title": "런타임",
+    "empty_custom": "아직 사용자 지정 런타임이 없습니다. 기본 제공 제품군은 위에 표시됩니다.",
+    "badge_builtin": "기본 제공",
+    "badge_custom": "사용자 지정",
+    "badge_disabled": "비활성화됨",
+    "builtin_detail": {
+      "title": "기본 제공 런타임",
+      "description": "{{family}}은(는) 기본 제공 프로토콜 제품군입니다. 편집하거나 삭제할 수 없습니다.",
+      "read_only": "읽기 전용"
+    },
+    "detail": {
+      "base_family": "기본 프로토콜 제품군",
+      "command": "명령",
+      "description": "설명",
+      "no_description": "설명 없음",
+      "edit": "편집",
+      "delete": "삭제",
+      "select_hint": "런타임을 선택하면 세부 정보가 표시됩니다."
+    },
+    "form": {
+      "create_title": "새 사용자 지정 런타임",
+      "edit_title": "사용자 지정 런타임 편집",
+      "step_family_label": "기본 프로토콜 제품군 선택",
+      "step_family_hint": "이 런타임이 사용하는 기반 CLI 프로토콜입니다.",
+      "step_details_label": "런타임 구성",
+      "family_label": "기본 프로토콜 제품군",
+      "family_locked_hint": "생성 후에는 기본 프로토콜 제품군을 변경할 수 없습니다.",
+      "display_name_label": "표시 이름",
+      "display_name_placeholder": "내 사용자 지정 Claude",
+      "command_name_label": "명령",
+      "command_name_placeholder": "claude",
+      "description_label": "설명",
+      "description_placeholder": "선택 사항 — 이 런타임의 용도",
+      "error_display_name_required": "표시 이름은 필수입니다.",
+      "error_command_required": "명령은 필수입니다.",
+      "back": "뒤로",
+      "cancel": "취소",
+      "next": "다음",
+      "create": "런타임 생성",
+      "creating": "생성 중…",
+      "save": "변경 사항 저장",
+      "saving": "저장 중…",
+      "toast_created": "사용자 지정 런타임이 생성되었습니다",
+      "toast_updated": "사용자 지정 런타임이 업데이트되었습니다",
+      "error_duplicate_name": "이 표시 이름을 사용하는 런타임이 이미 있습니다.",
+      "error_generic": "런타임 저장에 실패했습니다."
+    },
+    "delete_dialog": {
+      "title": "사용자 지정 런타임을 삭제하시겠습니까?",
+      "description": "\"{{name}}\"을(를) 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.",
+      "confirm": "삭제",
+      "cancel": "취소",
+      "deleting": "삭제 중…",
+      "toast_deleted": "사용자 지정 런타임이 삭제되었습니다",
+      "error_bound": "아직 에이전트가 사용 중이어서 이 런타임을 삭제할 수 없습니다.",
+      "error_generic": "런타임 삭제에 실패했습니다."
+    }
   },
   "usage": {
     "period_label": "기간",

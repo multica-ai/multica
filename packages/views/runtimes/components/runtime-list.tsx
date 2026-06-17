@@ -178,9 +178,32 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
         <span className="block min-w-0 shrink truncate text-sm font-medium">
           {baseName}
         </span>
+        <RuntimeKindBadge runtime={runtime} />
         <VisibilityBadge runtime={runtime} />
       </div>
     </ListGridCell>
+  );
+}
+
+// Distinguishes a built-in protocol-family runtime from one launched off a
+// custom runtime profile. `profile_id` is the discriminator: a non-null /
+// non-empty value means the runtime was started from a custom profile.
+// Older backends omit the field — treated as built-in.
+function RuntimeKindBadge({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const isCustom = !!runtime.profile_id;
+  return (
+    <span
+      className={
+        isCustom
+          ? "inline-flex shrink-0 items-center rounded bg-info/10 px-1 text-[10px] font-medium text-info"
+          : "inline-flex shrink-0 items-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+      }
+    >
+      {isCustom
+        ? t(($) => $.list.badge_custom)
+        : t(($) => $.list.badge_builtin)}
+    </span>
   );
 }
 

@@ -75,6 +75,21 @@ var (
 	// resolve custom runtime-profile commands without manipulating the
 	// process PATH. Mirrors the detectAgentVersion hook above.
 	lookPath = exec.LookPath
+
+	// profilePathExecutable reports whether path points at an existing,
+	// non-directory file with at least one executable bit set. It is the
+	// gate appendProfileRuntimes uses before trusting a per-machine command
+	// path override (MUL-3284) — a stale or mistyped override must fall back
+	// to the PATH lookup rather than register a runtime that can't launch.
+	// Indirected as a package var so tests can assert override preference
+	// without staging a real executable on disk.
+	profilePathExecutable = func(path string) bool {
+		info, err := os.Stat(path)
+		if err != nil || info.IsDir() {
+			return false
+		}
+		return info.Mode().Perm()&0o111 != 0
+	}
 )
 
 // workspaceState tracks registered runtimes for a single workspace.
@@ -895,14 +910,39 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
 			continue
 		}
-		resolved, err := lookPath(profile.CommandName)
-		if err != nil {
-			// Host doesn't have this command — expected on hosts that aren't
-			// provisioned for this profile. Skip without failing.
-			d.logger.Info("skip custom runtime profile: command not found on PATH",
-				"workspace_id", workspaceID, "profile_id", profile.ID,
-				"command_name", profile.CommandName, "error", err)
-			continue
+		// Resolve the executable to launch for this profile. A per-machine
+		// path override (MUL-3284, `multica runtime profile set-path`) wins
+		// over the PATH lookup when it is set AND points at a real
+		// executable — this is how an operator pins a profile to a binary
+		// that isn't on the daemon's PATH, or selects between multiple
+		// installs on the same host. A configured-but-unusable override
+		// (deleted/moved/non-executable) is logged and falls back to PATH
+		// rather than registering a runtime that can't launch. When neither
+		// the override nor PATH resolves, the profile is skipped (existing
+		// behavior).
+		var resolved string
+		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
+			if profilePathExecutable(override) {
+				resolved = override
+				d.logger.Info("custom runtime profile: using per-machine command path override",
+					"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
+			} else {
+				d.logger.Warn("custom runtime profile: command path override not executable; falling back to PATH",
+					"workspace_id", workspaceID, "profile_id", profile.ID,
+					"override_path", override, "command_name", profile.CommandName)
+			}
+		}
+		if resolved == "" {
+			r, err := lookPath(profile.CommandName)
+			if err != nil {
+				// Host doesn't have this command — expected on hosts that aren't
+				// provisioned for this profile. Skip without failing.
+				d.logger.Info("skip custom runtime profile: command not found on PATH",
+					"workspace_id", workspaceID, "profile_id", profile.ID,
+					"command_name", profile.CommandName, "error", err)
+				continue
+			}
+			resolved = r
 		}
 		// Best-effort version detection; an empty version is acceptable.
 		version, verErr := detectAgentVersion(ctx, resolved)

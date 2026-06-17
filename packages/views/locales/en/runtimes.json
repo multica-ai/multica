@@ -264,7 +264,72 @@
     "row_actions_aria": "Row actions",
     "delete_action": "Delete",
     "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",
-    "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime."
+    "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime.",
+    "badge_builtin": "Built-in",
+    "badge_custom": "Custom"
+  },
+  "profiles": {
+    "cta": "Add runtime",
+    "dialog_title": "Custom runtimes",
+    "dialog_description": "Define custom runtime backends for your agents. Built-in families are shown for reference.",
+    "add_new": "New custom runtime",
+    "list_title": "Runtimes",
+    "empty_custom": "No custom runtimes yet. Built-in families are listed above.",
+    "badge_builtin": "Built-in",
+    "badge_custom": "Custom",
+    "badge_disabled": "Disabled",
+    "builtin_detail": {
+      "title": "Built-in runtime",
+      "description": "{{family}} is a built-in protocol family. It can't be edited or removed.",
+      "read_only": "Read-only"
+    },
+    "detail": {
+      "base_family": "Base protocol family",
+      "command": "Command",
+      "description": "Description",
+      "no_description": "No description",
+      "edit": "Edit",
+      "delete": "Delete",
+      "select_hint": "Select a runtime to see its details."
+    },
+    "form": {
+      "create_title": "New custom runtime",
+      "edit_title": "Edit custom runtime",
+      "step_family_label": "Choose a base protocol family",
+      "step_family_hint": "The underlying CLI protocol this runtime speaks.",
+      "step_details_label": "Configure the runtime",
+      "family_label": "Base protocol family",
+      "family_locked_hint": "The base protocol family can't be changed after creation.",
+      "display_name_label": "Display name",
+      "display_name_placeholder": "My custom Claude",
+      "command_name_label": "Command",
+      "command_name_placeholder": "claude",
+      "description_label": "Description",
+      "description_placeholder": "Optional — what this runtime is for",
+      "error_display_name_required": "Display name is required.",
+      "error_command_required": "Command is required.",
+      "back": "Back",
+      "cancel": "Cancel",
+      "next": "Next",
+      "create": "Create runtime",
+      "creating": "Creating…",
+      "save": "Save changes",
+      "saving": "Saving…",
+      "toast_created": "Custom runtime created",
+      "toast_updated": "Custom runtime updated",
+      "error_duplicate_name": "A runtime with this display name already exists.",
+      "error_generic": "Failed to save the runtime."
+    },
+    "delete_dialog": {
+      "title": "Delete custom runtime?",
+      "description": "Delete \"{{name}}\"? This can't be undone.",
+      "confirm": "Delete",
+      "cancel": "Cancel",
+      "deleting": "Deleting…",
+      "toast_deleted": "Custom runtime deleted",
+      "error_bound": "This runtime can't be deleted while agents are still using it.",
+      "error_generic": "Failed to delete the runtime."
+    }
   },
   "usage": {
     "period_label": "Period",
