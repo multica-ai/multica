@@ -2,10 +2,6 @@ package octo
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -14,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -150,16 +147,6 @@ var ErrBindingAlreadyAssigned = errors.New("octo uid is already bound to a diffe
 // workspace. Translated to 403 at the HTTP boundary.
 var ErrBindingNotWorkspaceMember = errors.New("redeemer is not a workspace member")
 
-func randomToken(n int) (string, error) {
-	buf := make([]byte, n)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	// URL-safe so the token embeds cleanly in the binding URL without escaping.
-	return base64.RawURLEncoding.EncodeToString(buf), nil
-}
+func randomToken(n int) (string, error) { return util.RandomToken(n) }
 
-func hashToken(raw string) string {
-	sum := sha256.Sum256([]byte(raw))
-	return hex.EncodeToString(sum[:])
-}
+func hashToken(raw string) string { return util.HashTokenSHA256(raw) }
