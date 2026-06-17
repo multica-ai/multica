@@ -6,5 +6,6 @@
   "generate_button": "Generate",
   "generating": "Generating…",
   "cancel": "Cancel",
-  "generate_error": "Avatar generation failed"
+  "generate_error": "Avatar generation failed",
+  "background_started": "Generating avatar in the background — it updates here when ready."
 }

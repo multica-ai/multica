@@ -27,6 +27,12 @@ interface CerebroAvatarPickerProps {
   onChange: (url: string | null) => void;
   agentName: string;
   size?: number;
+  // When set, the agent already exists: AI generation runs in the BACKGROUND
+  // (the request returns immediately and the new avatar arrives via the
+  // agent:status websocket event), so the user never waits ~50s on the modal.
+  // When absent (create-agent dialog, no agent yet), generation stays inline
+  // and returns the URL to set on the unsaved form.
+  agentId?: string;
 }
 
 /**
@@ -42,6 +48,7 @@ export function CerebroAvatarPicker({
   onChange,
   agentName,
   size = 56,
+  agentId,
 }: CerebroAvatarPickerProps) {
   const { t } = useT("cerebro-agent-avatar");
   const enabled = useFeatureFlag("cerebro_agent_avatar");
@@ -50,6 +57,23 @@ export function CerebroAvatarPicker({
   const [prompt, setPrompt] = useState("");
 
   const handleGenerate = async () => {
+    // Existing agent: fire the background job, close the modal at once, and let
+    // the new avatar arrive over the websocket. The user is not held on screen
+    // and the request can't time the gateway out into a 500 (TECH-3760).
+    if (agentId) {
+      try {
+        await api.generateAgentAvatarAsync(agentId, prompt || undefined);
+        toast.success(t(($) => $.background_started));
+        setOpen(false);
+        setPrompt("");
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : t(($) => $.generate_error),
+        );
+      }
+      return;
+    }
+
     setGenerating(true);
     try {
       const result = await api.generateAgentAvatar(

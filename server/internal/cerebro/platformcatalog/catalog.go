@@ -1005,6 +1005,7 @@ var excluded = map[string]string{
 
 	// cosmetic / system — not access-bearing actions.
 	"POST /api/agents/generate-avatar":          "cosmetic — avatar image generation",
+	"POST /api/agents/{id}/generate-avatar":     "cosmetic — per-agent async avatar image generation",
 	"POST /api/agents/backfill-avatars":         "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":             "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/grants/evaluate": "read-only — dry-run evaluation of a grant decision; reads policy, changes no state",

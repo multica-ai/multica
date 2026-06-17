@@ -6,5 +6,6 @@
   "generate_button": "生成",
   "generating": "生成中…",
   "cancel": "取消",
-  "generate_error": "头像生成失败"
+  "generate_error": "头像生成失败",
+  "background_started": "正在后台生成头像，完成后会在此处更新。"
 }

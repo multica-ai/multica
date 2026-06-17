@@ -1503,6 +1503,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// GET is registered in the task-allowlist group above
 					// so agents can read their own configuration.
 					r.Put("/", h.UpdateAgent)
+					r.Post("/generate-avatar", h.CerebroGenerateAgentAvatar) // CEREBRO-PATCH(agent-avatar-async): TECH-3760 background per-agent avatar regen.
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)

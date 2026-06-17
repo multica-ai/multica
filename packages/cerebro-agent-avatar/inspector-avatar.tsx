@@ -49,6 +49,7 @@ export function CerebroInspectorAvatar({
       value={agent.avatar_url ?? null}
       onChange={handleChange}
       agentName={agent.name}
+      agentId={agent.id}
       size={56}
     />
   );
