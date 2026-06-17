@@ -52,7 +52,7 @@ export function channelMessagesOptions(wsId: string, channelId: string | null) {
         ? lastPage.messages[0]!.created_at
         : undefined,
     enabled: !!channelId,
-    select: (data) => data.pages.flatMap((p) => p.messages),
+    select: (data) => [...data.pages].reverse().flatMap((p) => p.messages),
   });
 }
 

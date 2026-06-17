@@ -464,7 +464,7 @@ func renderChannelMentionContext(ctx TaskContextForEnv) string {
 	if ctx.ChannelReplyToID != "" {
 		fmt.Fprintf(&b, "**Reply-to message ID:** `%s`\n", ctx.ChannelReplyToID)
 	}
-	b.WriteString("\n## Triggering Message\n\n")
+	b.WriteString("\n## Triggering Message (User's Request)\n\n")
 	b.WriteString("> ")
 	b.WriteString(ctx.ChannelTriggerContent)
 	b.WriteString("\n\n")

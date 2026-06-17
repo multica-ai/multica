@@ -95,11 +95,11 @@ func buildChannelMentionPrompt(task Task) string {
 			fmt.Fprintf(&b, "Prior work dir: %s\n", task.PriorWorkDir)
 		}
 	}
-	b.WriteString("\nTriggering message:\n")
+	b.WriteString("\n## Triggering Message (this IS the user's request — act on it directly)\n\n")
 	for _, line := range strings.Split(task.ChannelTriggerContent, "\n") {
 		fmt.Fprintf(&b, "> %s\n", line)
 	}
-	b.WriteString("\nStart by understanding the triggering message. If you need surrounding context, run:\n\n")
+	b.WriteString("\nThe triggering message above is your primary input — respond to it directly. Only run `multica channel context` if you genuinely need surrounding conversation history to understand what the user is asking:\n\n")
 	fmt.Fprintf(&b, "`multica channel context %s --message %s --include-replies --recent 20 --output json`\n\n", task.ChannelID, task.ChannelMessageID)
 	b.WriteString("You may also use workspace/member/agent/repo CLI commands as needed. Avoid Issue-oriented commands unless you explicitly create or choose a real issue during this task.\n\n")
 	if task.ChannelThreadRootMsgID != "" {
