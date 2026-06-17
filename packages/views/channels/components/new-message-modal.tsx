@@ -507,7 +507,13 @@ function PickerRow({
             {selected && "✓"}
           </span>
         )}
-        <ActorAvatar actorType={actor.type} actorId={actor.id} size={24} />
+        <ActorAvatar
+          actorType={actor.type}
+          actorId={actor.id}
+          size={24}
+          // CEREBRO-PATCH(agent-status-dots): show runtime presence for agents in Cerebro picker rows.
+          showStatusDot={actor.type === "agent"}
+        />
         <span className="truncate flex-1">{actor.name}</span>
         {actor.locked && (
           <Lock className="size-3 shrink-0 text-muted-foreground" />
