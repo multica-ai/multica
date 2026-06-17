@@ -175,10 +175,28 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			want:     true,
 		},
 		{
-			name:     "claude model is compatible with claude",
+			name:     "exact claude model is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-4-7",
+			want:     false,
+		},
+		{
+			name:     "provider-prefixed openai model is incompatible with codex",
+			provider: "codex",
+			model:    "openai/gpt-4o",
+			want:     true,
+		},
+		{
+			name:     "provider-prefixed anthropic model is incompatible with claude",
 			provider: "claude",
 			model:    "anthropic/claude-opus-4.7",
-			want:     false,
+			want:     true,
+		},
+		{
+			name:     "known openai-looking model outside codex catalog is incompatible",
+			provider: "codex",
+			model:    "gpt-99",
+			want:     true,
 		},
 		{
 			name:     "unknown custom model is not classified",

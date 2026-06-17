@@ -332,6 +332,42 @@ func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
 		}
 	})
 
+	t.Run("runtime-only switch clears provider-prefixed model not accepted by target", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-prefixed", claudeRuntimeID, "openai/gpt-4o")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 switching runtime with provider-prefixed model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "" {
+			t.Errorf("expected provider-prefixed model cleared across runtime switch, got %v", resp["model"])
+		}
+	})
+
+	t.Run("runtime-only switch keeps exact target accepted model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-accepted", claudeRuntimeID, "gpt-5.5")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 preserving exact target accepted model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "gpt-5.5" {
+			t.Errorf("expected exact target model preserved, got %v", resp["model"])
+		}
+	})
+
 	t.Run("explicit replacement model wins during switch", func(t *testing.T) {
 		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-replace", claudeRuntimeID, "claude-sonnet-4-6")
 		body := map[string]any{

@@ -172,70 +172,65 @@ func ModelSelectionSupported(providerType string) bool {
 	return true
 }
 
-// ModelKnownIncompatibleWithProvider reports whether a saved model is an
-// obvious mismatch for a target runtime provider. It deliberately returns
-// false for unknown/custom model IDs: the UI and CLI allow manual model
-// strings, and the server should not reject or erase values it cannot
-// confidently classify. This is a coarse runtime-switch guard, not a live
-// access check.
+// ModelKnownIncompatibleWithProvider reports whether a saved model is a known
+// mismatch for a target runtime provider. For first-party providers with
+// maintained static catalogs, compatibility is exact: the model must be one of
+// the IDs that runtime advertises. Unknown/custom model strings still return
+// false because the UI and CLI allow manual entries and the server should not
+// erase values it cannot confidently classify.
 func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return false
 	}
 
-	target := knownModelFamiliesForProvider(providerType)
-	if len(target) == 0 {
+	accepted, ok := acceptedModelIDsForProvider(providerType)
+	if !ok {
 		return false
 	}
-	for _, family := range modelFamilies(model) {
-		if target[family] {
-			return false
-		}
+	if accepted[model] {
+		return false
+	}
+	return isRuntimeSpecificModelID(model)
+}
+
+func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
+	switch {
+	case providerType == "claude":
+		return modelIDSet(claudeStaticModels()), true
+	case providerType == "codex":
+		return modelIDSet(codexStaticModels()), true
+	case providerType == "gemini":
+		return modelIDSet(geminiStaticModels()), true
+	default:
+		return nil, false
+	}
+}
+
+func modelIDSet(models []Model) map[string]bool {
+	out := make(map[string]bool, len(models))
+	for _, m := range models {
+		out[m.ID] = true
+	}
+	return out
+}
+
+func isRuntimeSpecificModelID(model string) bool {
+	if strings.Contains(model, "/") {
 		return true
 	}
-	return false
+	return modelHasKnownPrefix(model) ||
+		modelIDSet(claudeStaticModels())[model] ||
+		modelIDSet(codexStaticModels())[model] ||
+		modelIDSet(geminiStaticModels())[model]
 }
 
-func knownModelFamiliesForProvider(providerType string) map[string]bool {
-	switch providerType {
-	case "claude":
-		return map[string]bool{"anthropic": true}
-	case "codex":
-		return map[string]bool{"openai": true}
-	case "gemini":
-		return map[string]bool{"google": true}
-	default:
-		return nil
-	}
-}
-
-func modelFamilies(model string) []string {
-	switch {
-	case modelInCatalog(model, claudeStaticModels()):
-		return []string{"anthropic"}
-	case modelInCatalog(model, codexStaticModels()):
-		return []string{"openai"}
-	case modelInCatalog(model, geminiStaticModels()):
-		return []string{"google"}
-	case strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "anthropic/"):
-		return []string{"anthropic"}
-	case strings.HasPrefix(model, "gpt-") || isOpenAIReasoningSeriesID(model) || strings.HasPrefix(model, "openai/"):
-		return []string{"openai"}
-	case strings.HasPrefix(model, "gemini-") || strings.HasPrefix(model, "auto-gemini-") || strings.HasPrefix(model, "google/"):
-		return []string{"google"}
-	default:
-		return nil
-	}
-}
-
-func modelInCatalog(id string, models []Model) bool {
-	for _, m := range models {
-		if m.ID == id {
-			return true
-		}
-	}
-	return false
+func modelHasKnownPrefix(model string) bool {
+	return strings.HasPrefix(model, "claude-") ||
+		strings.HasPrefix(model, "gpt-") ||
+		strings.HasPrefix(model, "gemini-") ||
+		strings.HasPrefix(model, "auto-gemini-") ||
+		isOpenAIReasoningSeriesID(model)
 }
 
 // cachedDiscovery invokes fn and caches the result for modelCacheTTL.
