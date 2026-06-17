@@ -94,7 +94,6 @@ type Config struct {
 
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
-
 }
 
 type cloudRuntimeProxy interface {
@@ -126,13 +125,13 @@ type Handler struct {
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
 
-	PATCache              *auth.PATCache
-	DaemonTokenCache      *auth.DaemonTokenCache
-	MembershipCache       *auth.MembershipCache
-	WebhookRateLimiter    WebhookRateLimiter
-	WebhookIPRateLimiter  WebhookRateLimiter
-	CloudRuntime          cloudRuntimeProxy
-	cfg                   Config
+	PATCache             *auth.PATCache
+	DaemonTokenCache     *auth.DaemonTokenCache
+	MembershipCache      *auth.MembershipCache
+	WebhookRateLimiter   WebhookRateLimiter
+	WebhookIPRateLimiter WebhookRateLimiter
+	CloudRuntime         cloudRuntimeProxy
+	cfg                  Config
 	// CEREBRO-PATCH(handler-cerebro-fields): cerebro budget guard, web push,
 	// and daemon ping state.
 	BudgetService *service.BudgetService
@@ -256,6 +255,10 @@ type Handler struct {
 	ConnectionToolDeny ConnectionToolDenyResolver
 	// CEREBRO-PATCH(handler-agentvault-broker): TECH-3196 per-agent secret brokering at claim.
 	AgentVaultBroker AgentVaultBroker
+	// CEREBRO-PATCH(handler-capability-card-tools): TECH-3642 capabilities card reuses the tool-policy table.
+	CapabilityToolPolicy AgentCapabilityToolTabler
+	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.
+	CapabilityConnections AgentCapabilityConnectionsLister
 }
 
 // CustomStatusResolver is the upstream-side seam for the cerebro status-model
