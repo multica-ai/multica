@@ -7,6 +7,9 @@
 //	         entity_type ∈ {issue, channel, dm, agent, project, chat, autopilot}
 //	         entity_type = "relink" runs the issue->parent / issue->project
 //	         healing post-pass on the target (source_id not required).
+//	         entity_type = "workspace_artifacts" bulk-copies the source
+//	         workspace's folder tree + workspace-scoped artifacts (no source_id).
+//	         Issue- and project-scoped artifacts travel with their parent copy.
 //
 // Copy is non-destructive: the source is never modified. See store.go.
 //
@@ -45,6 +48,13 @@ type copyRequest struct {
 	// Cascade copies everything underneath the picked root in one call: for an
 	// issue, all open descendant sub-issues; for a project, all its open issues.
 	Cascade bool `json:"cascade,omitempty"`
+	// Statuses optionally restricts a project cascade to issues with these
+	// statuses (and their matching-status sub-issues). Empty = every open issue.
+	Statuses []string `json:"statuses,omitempty"`
+	// Conflict is the name-clash policy for uniquely-named entities (agent,
+	// skill): "skip" (default — reuse the existing target), "overwrite" (update
+	// it from the source) or "keep_both" (create a suffixed copy).
+	Conflict string `json:"conflict,omitempty"`
 }
 
 // relinkResponse is the combined result of the target-only post-pass: structural
@@ -56,7 +66,8 @@ type relinkResponse struct {
 
 // Copy copies one entity from the URL workspace into the target workspace.
 func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.workspaceID(w, r); !ok {
+	sourceWS, ok := h.workspaceID(w, r)
+	if !ok {
 		return
 	}
 	var req copyRequest
@@ -66,6 +77,45 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := parseUUIDOrBadRequest(w, req.TargetWorkspaceID, "target_workspace_id")
 	if !ok {
+		return
+	}
+
+	// workspace_artifacts is a bulk pass: copy the source workspace's folder tree
+	// and its workspace-scoped artifacts (documents/notes) into the target. No
+	// per-entity source_id — the source is the URL workspace.
+	if req.EntityType == "workspace_artifacts" {
+		runID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		res, err := h.Store.CopyWorkspaceArtifacts(r.Context(), runID, sourceWS, target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "copy failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+
+	// foundation is the one-time bulk pass that must run FIRST: labels, skills,
+	// connections + credentials, the role/group/permission graph, GitHub links
+	// and workspace settings. No per-entity source_id.
+	if req.EntityType == "foundation" {
+		runID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		res, err := h.Store.CopyFoundation(r.Context(), runID, sourceWS, target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "copy failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
+		return
+	}
+
+	// group_access heals group→agent access grants after agents are copied.
+	if req.EntityType == "group_access" {
+		n, err := h.Store.RelinkGroupAccess(r.Context(), target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "relink failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]int64{"group_agent_access_relinked": n})
 		return
 	}
 
@@ -102,6 +152,7 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 		res CopyResult
 		err error
 	)
+	policy := parseConflictPolicy(req.Conflict)
 	switch req.EntityType {
 	case "issue", "channel", "dm":
 		if req.Cascade {
@@ -110,10 +161,12 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 			res, err = h.Store.CopyIssue(r.Context(), runID, target, source)
 		}
 	case "agent":
-		res, err = h.Store.CopyAgent(r.Context(), runID, target, source)
+		res, err = h.Store.CopyAgent(r.Context(), runID, target, source, policy)
+	case "skill":
+		res, err = h.Store.CopySkill(r.Context(), runID, target, source, policy)
 	case "project":
 		if req.Cascade {
-			res, err = h.Store.CopyProjectCascade(r.Context(), runID, target, source)
+			res, err = h.Store.CopyProjectCascadeFiltered(r.Context(), runID, target, source, req.Statuses)
 		} else {
 			res, err = h.Store.CopyProject(r.Context(), runID, target, source)
 		}

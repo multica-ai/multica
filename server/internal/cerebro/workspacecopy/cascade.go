@@ -7,7 +7,7 @@
 //
 //   - CopyIssueCascade:   the issue + every open descendant sub-issue (any depth).
 //   - CopyProjectCascade: the project + every open issue in it, plus those
-//                         issues' open descendant sub-issues.
+//     issues' open descendant sub-issues.
 //
 // "Open" excludes done/cancelled issues, which stay in the source archive (see
 // README "Excluded"). The picked root issue is always copied regardless of its
@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -51,11 +52,19 @@ func (s *Store) CopyIssueCascade(ctx context.Context, runID, targetWorkspace, so
 // CopyProjectCascade copies sourceProject and every open issue in it (plus those
 // issues' open descendant sub-issues), then heals links and references.
 func (s *Store) CopyProjectCascade(ctx context.Context, runID, targetWorkspace, sourceProject pgtype.UUID) (CopyResult, error) {
+	return s.CopyProjectCascadeFiltered(ctx, runID, targetWorkspace, sourceProject, nil)
+}
+
+// CopyProjectCascadeFiltered copies sourceProject plus the issues in it whose
+// status is in statuses (and those issues' descendant sub-issues with a matching
+// status), then heals links and references. A nil/empty statuses means the
+// default "every open issue" (everything except done/cancelled).
+func (s *Store) CopyProjectCascadeFiltered(ctx context.Context, runID, targetWorkspace, sourceProject pgtype.UUID, statuses []string) (CopyResult, error) {
 	root, err := s.CopyProject(ctx, runID, targetWorkspace, sourceProject)
 	if err != nil {
 		return CopyResult{}, err
 	}
-	ids, err := s.collectProjectIssues(ctx, sourceProject)
+	ids, err := s.collectProjectIssues(ctx, sourceProject, statuses)
 	if err != nil {
 		return CopyResult{}, err
 	}
@@ -122,20 +131,37 @@ func (s *Store) collectIssueSubtree(ctx context.Context, root pgtype.UUID) ([]pg
 	return scanUUIDs(rows)
 }
 
-// collectProjectIssues returns every open issue whose project_id is the source
-// project, plus those issues' open descendant sub-issues (which may themselves
-// sit outside the project).
-func (s *Store) collectProjectIssues(ctx context.Context, project pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := s.pool.Query(ctx, `
-		WITH RECURSIVE sub AS (
-			SELECT id FROM issue
-			WHERE project_id = $1 AND status NOT IN ('done', 'cancelled')
-			UNION
-			SELECT i.id FROM issue i
-			JOIN sub ON i.parent_issue_id = sub.id
-			WHERE i.status NOT IN ('done', 'cancelled')
-		)
-		SELECT id FROM sub`, project)
+// collectProjectIssues returns the issues whose project_id is the source project
+// and whose status matches the filter, plus those issues' descendant sub-issues
+// with a matching status (which may themselves sit outside the project). A
+// nil/empty statuses applies the default open filter (everything except
+// done/cancelled).
+func (s *Store) collectProjectIssues(ctx context.Context, project pgtype.UUID, statuses []string) ([]pgtype.UUID, error) {
+	var rows pgx.Rows
+	var err error
+	if len(statuses) == 0 {
+		rows, err = s.pool.Query(ctx, `
+			WITH RECURSIVE sub AS (
+				SELECT id FROM issue
+				WHERE project_id = $1 AND status NOT IN ('done', 'cancelled')
+				UNION
+				SELECT i.id FROM issue i
+				JOIN sub ON i.parent_issue_id = sub.id
+				WHERE i.status NOT IN ('done', 'cancelled')
+			)
+			SELECT id FROM sub`, project)
+	} else {
+		rows, err = s.pool.Query(ctx, `
+			WITH RECURSIVE sub AS (
+				SELECT id FROM issue
+				WHERE project_id = $1 AND status = ANY($2)
+				UNION
+				SELECT i.id FROM issue i
+				JOIN sub ON i.parent_issue_id = sub.id
+				WHERE i.status = ANY($2)
+			)
+			SELECT id FROM sub`, project, statuses)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("collect project issues: %w", err)
 	}
