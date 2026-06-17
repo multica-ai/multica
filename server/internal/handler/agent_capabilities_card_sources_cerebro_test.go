@@ -18,123 +18,102 @@ import (
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
-type fakeTabler struct {
-	rows []cerebrotoolpolicy.TableRow
-	err  error
-}
-
-func (f fakeTabler) Table(context.Context, cerebrotoolpolicy.TableQuery) ([]cerebrotoolpolicy.TableRow, error) {
-	return f.rows, f.err
-}
-
+// CEREBRO-PATCH(agent-capabilities-card-sections-test): TECH-3642 cover the
+// row-classification split (tools/repos/connection verdicts) and secret-drop.
 type fakeConnLister struct {
 	conns []cerebroconnections.Connection
 	err   error
 }
 
-func (f fakeConnLister) ListEnabled(context.Context, pgtype.UUID) ([]cerebroconnections.Connection, error) {
+func (f fakeConnLister) List(context.Context, pgtype.UUID) ([]cerebroconnections.Connection, error) {
 	return f.conns, f.err
 }
 
-func TestAgentCapabilityTools_MapsVerdictsAndFiltersResourceRows(t *testing.T) {
-	h := &Handler{CapabilityToolPolicy: fakeTabler{rows: []cerebrotoolpolicy.TableRow{
-		{
-			ToolKey:   "add_comment",
-			Title:     "Add comment",
-			Source:    "report",
-			Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow, DecidedBy: cerebrotoolpolicy.LayerRuntime, Reason: "Allowed by runtime default"},
-		},
-		{
-			ToolKey:        "create_local_runtime",
-			Effective:      cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingDeny, DecidedBy: cerebrotoolpolicy.LayerGroup},
-			CappedByGroups: []cerebrotoolpolicy.GroupAttribution{{Name: "builders", Owner: "Jesper"}},
-		},
-		{
-			// Per-resource row must be filtered out — it is admin detail.
-			ToolKey:         "repo.checkout",
-			ResourcePattern: "github.com/firtal-group/firtal-cerebro",
-			Effective:       cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAsk},
-		},
-	}}}
+func eff(s cerebrotoolpolicy.Setting, by cerebrotoolpolicy.Layer) cerebrotoolpolicy.Effective {
+	return cerebrotoolpolicy.Effective{Setting: s, DecidedBy: by}
+}
 
-	req := httptest.NewRequest("GET", "/api/agents/x/capabilities", nil)
-	got := h.agentCapabilityTools(req, pgtype.UUID{}, pgtype.UUID{})
+func TestClassifyCapabilityRows_SplitsToolsReposAndConnVerdicts(t *testing.T) {
+	rows := []cerebrotoolpolicy.TableRow{
+		// general tool
+		{ToolKey: "add_comment", Title: "Add comment", Source: "report", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerRuntime)},
+		// repo: three permission rows for one repo URL
+		{ToolKey: "repo.read", Title: "Read code", Source: "repo", ResourcePattern: "github.com/firtal-group/firtal-cerebro", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
+		{ToolKey: "repo.checkout", Title: "Check out", Source: "repo", ResourcePattern: "github.com/firtal-group/firtal-cerebro", Effective: eff(cerebrotoolpolicy.SettingAsk, cerebrotoolpolicy.LayerAgent)},
+		{ToolKey: "repo.push", Title: "Push changes", Source: "repo", ResourcePattern: "github.com/firtal-group/firtal-cerebro", Effective: eff(cerebrotoolpolicy.SettingDeny, cerebrotoolpolicy.LayerAgent)},
+		// connection-tool verdict
+		{ToolKey: "connection:bigquery", Source: "connection-tool", ResourcePattern: "bigquery.insert", Effective: eff(cerebrotoolpolicy.SettingDeny, cerebrotoolpolicy.LayerAgent)},
+		// connection-wide + endpoint rows are rendered structurally — must be skipped
+		{ToolKey: "connection:bigquery", Source: "connection", ResourcePattern: "", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
+		{ToolKey: "connection:registry", Source: "connection-endpoint", ResourcePattern: "/datasets", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
+	}
 
-	if len(got) != 2 {
-		t.Fatalf("expected 2 capability-wide tools (resource row filtered), got %d: %+v", len(got), got)
+	tools, repos, connPerms := classifyCapabilityRows(rows)
+
+	if len(tools) != 1 || tools[0].Key != "add_comment" || tools[0].Permission != "allow" {
+		t.Fatalf("expected only the general tool, got %+v", tools)
 	}
-	if got[0].Key != "add_comment" || got[0].Permission != "allow" || got[0].DecidedBy != "runtime" {
-		t.Fatalf("unexpected first tool mapping: %+v", got[0])
+	if len(repos) != 1 || repos[0].URL != "github.com/firtal-group/firtal-cerebro" {
+		t.Fatalf("expected one repo group, got %+v", repos)
 	}
-	if got[0].Reason != "Allowed by runtime default" {
-		t.Fatalf("expected reason carried through, got %q", got[0].Reason)
+	if len(repos[0].Permissions) != 3 || repos[0].Permissions[2].Permission != "deny" {
+		t.Fatalf("expected repo to carry read/checkout/push verdicts, got %+v", repos[0].Permissions)
 	}
-	if got[1].Permission != "deny" {
-		t.Fatalf("expected deny on second tool, got %q", got[1].Permission)
+	if connPerms["bigquery"]["bigquery.insert"] != "deny" {
+		t.Fatalf("expected connection-tool verdict mapped, got %v", connPerms)
 	}
-	if len(got[1].CappedByGroups) != 1 || got[1].CappedByGroups[0] != "builders (Jesper)" {
-		t.Fatalf("expected capped-by-group label 'builders (Jesper)', got %v", got[1].CappedByGroups)
+	// connection-wide + endpoint rows must NOT leak into tools.
+	for _, tl := range tools {
+		if strings.HasPrefix(tl.Key, "connection:") {
+			t.Fatalf("connection row leaked into tools: %+v", tl)
+		}
 	}
 }
 
-func TestAgentCapabilityTools_NilSeamReturnsEmpty(t *testing.T) {
-	h := &Handler{}
-	req := httptest.NewRequest("GET", "/api/agents/x/capabilities", nil)
-	got := h.agentCapabilityTools(req, pgtype.UUID{}, pgtype.UUID{})
-	if got == nil || len(got) != 0 {
-		t.Fatalf("expected empty (non-nil) slice when seam unset, got %v", got)
-	}
-}
-
-func TestAgentCapabilityConnections_MapsEndpointsAndToolsAndDropsSecrets(t *testing.T) {
+func TestAgentCapabilityConnections_AllConnsToolsStampedSecretsDropped(t *testing.T) {
 	h := &Handler{CapabilityConnections: fakeConnLister{conns: []cerebroconnections.Connection{
 		{
-			Name:        "bigquery",
-			DisplayName: "BigQuery",
-			Type:        "mcp_http",
-			URL:         "https://bq-mcp.firtal.internal",
-			Internal:    true,
-			// Secret material that MUST NOT appear in the card output.
+			Name: "bigquery", DisplayName: "BigQuery", Type: "mcp_http",
+			URL: "https://bq-mcp.firtal.internal", Internal: true, Enabled: true,
 			AuthConfig: cerebroconnections.AuthConfig{BearerToken: "super-secret-token", CFAccessSecret: "cf-secret"},
-			Tools:      []cerebroconnections.Tool{{Name: "bigquery.query", Description: "run a read query"}},
+			Tools:      []cerebroconnections.Tool{{Name: "bigquery.query"}, {Name: "bigquery.insert"}},
 		},
 		{
-			Name: "registry",
-			Type: "api",
-			URL:  "https://registry.firtal.com",
-			EndpointPermissions: []cerebroconnections.EndpointPermission{
-				{Path: "/datasets", Methods: []string{"GET"}},
-				{Path: "/datasets/{id}/labels", Methods: []string{"POST", "PUT"}},
-			},
+			Name: "registry", Type: "api", URL: "https://registry.firtal.com", Enabled: false,
+			EndpointPermissions: []cerebroconnections.EndpointPermission{{Path: "/datasets", Methods: []string{"GET"}}},
 		},
 	}}}
 
+	connPerms := map[string]map[string]string{"bigquery": {"bigquery.insert": "deny"}}
 	req := httptest.NewRequest("GET", "/api/agents/x/capabilities", nil)
-	got := h.agentCapabilityConnections(req, pgtype.UUID{})
+	got := h.agentCapabilityConnections(req, pgtype.UUID{}, connPerms)
 
 	if len(got) != 2 {
-		t.Fatalf("expected 2 connections, got %d", len(got))
+		t.Fatalf("expected ALL connections (enabled + disabled), got %d", len(got))
 	}
-	if got[0].Name != "bigquery" || got[0].Type != "mcp_http" || !got[0].Internal {
-		t.Fatalf("unexpected mcp connection mapping: %+v", got[0])
+	if got[1].Enabled {
+		t.Fatalf("expected the disabled connection to report enabled=false")
 	}
-	if len(got[0].Tools) != 1 || got[0].Tools[0].Name != "bigquery.query" {
-		t.Fatalf("expected mcp tool mapped, got %+v", got[0].Tools)
+	// Per-tool permission stamped from connPerms.
+	var insert AgentCapabilityConnTool
+	for _, tl := range got[0].Tools {
+		if tl.Name == "bigquery.insert" {
+			insert = tl
+		}
 	}
-	if len(got[1].Endpoints) != 2 || got[1].Endpoints[1].Path != "/datasets/{id}/labels" ||
-		len(got[1].Endpoints[1].Methods) != 2 {
-		t.Fatalf("expected REST endpoints mapped, got %+v", got[1].Endpoints)
+	if insert.Permission != "deny" {
+		t.Fatalf("expected bigquery.insert stamped deny, got %q", insert.Permission)
 	}
 
 	// Hard guarantee: no auth secret may appear anywhere in the serialized card.
 	raw, err := json.Marshal(got)
 	if err != nil {
-		t.Fatalf("marshal card connections: %v", err)
+		t.Fatalf("marshal: %v", err)
 	}
 	blob := string(raw)
 	for _, secret := range []string{"super-secret-token", "cf-secret"} {
 		if strings.Contains(blob, secret) {
-			t.Fatalf("connection auth secret leaked into card output: found %q in %s", secret, blob)
+			t.Fatalf("connection auth secret leaked: found %q in %s", secret, blob)
 		}
 	}
 }
@@ -142,7 +121,7 @@ func TestAgentCapabilityConnections_MapsEndpointsAndToolsAndDropsSecrets(t *test
 func TestAgentCapabilityConnections_NilSeamReturnsEmpty(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest("GET", "/api/agents/x/capabilities", nil)
-	got := h.agentCapabilityConnections(req, pgtype.UUID{})
+	got := h.agentCapabilityConnections(req, pgtype.UUID{}, nil)
 	if got == nil || len(got) != 0 {
 		t.Fatalf("expected empty (non-nil) slice when seam unset, got %v", got)
 	}

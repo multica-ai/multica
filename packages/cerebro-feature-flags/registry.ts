@@ -43,6 +43,11 @@ export type CerebroFlagKey =
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
+  // TECH-3690 (Jesper): clicking a note in the inbox Notes box opens it in the
+  // same detail pane messages use, with an "Åbn fuldt" button to the full Notes
+  // surface — instead of navigating straight away. Default on; off reverts to
+  // the deep-link-to-full-page behavior.
+  | "cerebro_note_inbox_pane"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -206,6 +211,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_note_comments: false,
   cerebro_note_versions: false,
   cerebro_note_lock: false,
+  // TECH-3690: on by default — only takes effect where cerebro_notes is on.
+  cerebro_note_inbox_pane: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,
@@ -560,6 +567,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
+  },
+  {
+    key: "cerebro_note_inbox_pane",
+    label: "Open notes in inbox pane",
+    group: "inbox",
+    description:
+      "Clicking a note in the inbox Notes box opens it in the same detail pane that messages use — read and edit it without leaving the inbox — with an \"Åbn fuldt\" button to jump to the full Notes surface. Off reverts to opening notes on the full Notes page. Requires Notes.",
   },
   {
     key: "cerebro_inbox_slack_block",

@@ -39,12 +39,13 @@ const HEALTH_ORDER: HealthFilter[] = [
 
 // Dot tokens stay in code — labels/descriptions flow through useT.
 const HEALTH_DOT: Record<Exclude<HealthFilter, "all">, string> = {
-  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
-  // state; inactive (paused/offline/about_to_gc) is hollow (empty centre), not red.
-  // TECH-3686 follow-up: standard saturated --success green, no inset white ring (matches presence.ts).
-  online: "bg-success border border-muted-foreground",
+  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring only on
+  // hollow inactive states (paused/offline/about_to_gc). FILLED dots (online
+  // green / recently_lost warning) carry NO grey ring, per Jesper.
+  // TECH-3686 follow-up: standard saturated --success green (matches presence.ts).
+  online: "bg-success",
   paused: "bg-background border border-muted-foreground",
-  recently_lost: "bg-warning border border-muted-foreground",
+  recently_lost: "bg-warning",
   offline: "bg-background border border-muted-foreground",
   about_to_gc: "bg-background border border-muted-foreground",
 };

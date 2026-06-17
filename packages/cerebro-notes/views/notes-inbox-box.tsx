@@ -72,6 +72,12 @@ export interface NotesInboxBoxProps {
   onSetPinnedOnly?: (v: boolean) => void;
   onSetSort?: (s: NotesBoxSort) => void;
   onSetVisibility?: (v: NoteVisibility[]) => void;
+  /**
+   * TECH-3690 — open a note in the inbox's detail pane instead of navigating to
+   * the full Notes page. When omitted (e.g. mobile, classic inbox), clicking a
+   * note deep-links to the full Notes surface as before.
+   */
+  onOpenNote?: (id: string) => void;
   /** Drag handle injected by the dynamic inbox's sortable wrapper. */
   dragHandle?: ReactNode;
 }
@@ -87,6 +93,7 @@ export function NotesInboxBox({
   onSetPinnedOnly,
   onSetSort,
   onSetVisibility,
+  onOpenNote,
   dragHandle,
 }: NotesInboxBoxProps) {
   const wsId = useWorkspaceId();
@@ -111,8 +118,11 @@ export function NotesInboxBox({
     onSetLimit || onSetPinnedOnly || onSetSort || onSetVisibility,
   );
 
-  const openNote = (id: string) =>
-    push(`${paths.notes()}?note=${encodeURIComponent(id)}`);
+  const openNote = (id: string) => {
+    // TECH-3690 — prefer the inbox detail pane when the host wired it up.
+    if (onOpenNote) onOpenNote(id);
+    else push(`${paths.notes()}?note=${encodeURIComponent(id)}`);
+  };
 
   const handleNew = async () => {
     const note = await createNote.mutateAsync({ visibility: "private" });

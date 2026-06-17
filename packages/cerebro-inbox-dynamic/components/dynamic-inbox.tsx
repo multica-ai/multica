@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2, Archive } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2, Archive, Link2, Check } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -75,8 +75,10 @@ import { useTypeLabels } from "@multica/views/inbox/components/inbox-detail-labe
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
+import { copyText } from "@multica/ui/lib/clipboard";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
+import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey } from "../message-link";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
@@ -93,7 +95,7 @@ import { ArchivedInboxView } from "./archived-inbox-view";
 import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
-import { NotesInboxBox, NoteInboxBox } from "@multica/cerebro-notes/views";
+import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -103,6 +105,29 @@ function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) 
 // matched back to its live row after a refetch (ids survive read/state changes).
 function entryIdentity(entry: DynInboxEntry): string {
   return `${entry.kind}:${entry.id}`;
+}
+
+// TECH-3708 — copies a shareable link to the open message. Sits in the detail
+// toolbar so any detail kind (issue/channel/chat/notif) gets it without
+// touching the shared detail components. Uses copyText (handles plain http://).
+function CopyMessageLinkButton({ href }: { href: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        if (!(await copyText(href))) return;
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+      className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+      title="Copy a link to this message"
+      aria-label="Copy a link to this message"
+    >
+      {copied ? <Check className="size-3.5" /> : <Link2 className="size-3.5" />}
+      <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
+    </button>
+  );
 }
 
 // TECH-3413 #1 — wraps one section in a @dnd-kit sortable. The render prop
@@ -157,9 +182,11 @@ function SortableSection({
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
   // TECH-3618 — read sidebar "New message" intent off the URL (see effect below).
-  const { searchParams, replace, replaceSilent, push } = useNavigation();
+  const { searchParams, replace, replaceSilent, push, getShareableUrl } = useNavigation();
   const paths = useWorkspacePaths();
   const notesEnabled = useFeatureFlag("cerebro_notes");
+  // TECH-3690 — open notes in the inbox detail pane instead of navigating away.
+  const noteInboxPaneEnabled = useFeatureFlag("cerebro_note_inbox_pane");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, items, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
     useDynamicInboxData(wsId);
@@ -217,6 +244,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  // TECH-3690 — a note opened from the Notes box renders in the same detail
+  // pane messages use. Held separately from `selected` (which is the inbox
+  // feed union) so it doesn't disturb feed selection/snapshot logic.
+  const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [secretarySelectedKey, setSecretarySelectedKey] = useState<string | null>(null);
   const [secretaryCompletedKeys, setSecretaryCompletedKeys] = useState<Set<string>>(
     () => new Set(),
@@ -255,7 +286,18 @@ export function DynamicInbox() {
     setSelected(null);
     setSelectedSnapshot(null);
     setNewChat(null);
+    setSelectedNote(null);
   }, [secretarySelectedKey]);
+
+  // TECH-3690 — open a note in the detail pane; clears any feed/chat selection
+  // so the pane shows the note, not a stale message.
+  const openNoteInPane = useCallback((noteId: string) => {
+    setSecretarySelectedKey(null);
+    setSelected(null);
+    setSelectedSnapshot(null);
+    setNewChat(null);
+    setSelectedNote(noteId);
+  }, []);
 
   // TECH-3598 #2 — deep-link parity for notifications that carry no issue_id.
   // Skill change-requests open the skill detail with the proposal focused;
@@ -274,12 +316,15 @@ export function DynamicInbox() {
         return true;
       }
       if (item.details?.note_id) {
-        push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
+        // TECH-3690 — open the note in the detail pane (parity with the Notes
+        // box); fall back to the full Notes page when the pane is off.
+        if (noteInboxPaneEnabled) openNoteInPane(item.details.note_id);
+        else push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
         return true;
       }
       return false;
     },
-    [push, paths],
+    [push, paths, noteInboxPaneEnabled, openNoteInPane],
   );
 
   const onSelect = (entry: DynInboxEntry) => {
@@ -290,6 +335,7 @@ export function DynamicInbox() {
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(null);
     setNewChat(null);
+    setSelectedNote(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
   };
@@ -298,6 +344,7 @@ export function DynamicInbox() {
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(secretaryEntryKey(entry));
     setNewChat(null);
+    setSelectedNote(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
   };
@@ -463,6 +510,49 @@ export function DynamicInbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlChat, urlIssue, urlAgent, entries, replace, replaceSilent, paths]);
 
+  // TECH-3708 — per-message deep links. The inbox owns selection in local
+  // state, so `?message=<key>` is what makes the open message linkable: opening
+  // a row writes the key to the URL (so it can be copied), and a pasted URL
+  // re-opens that exact message once its row lands in `entries`.
+  const urlMessage = searchParams.get(INBOX_MESSAGE_PARAM) ?? "";
+  // Guards a given key from being re-applied once we've acted on it, so the
+  // writer below (which mirrors the selection back into the URL) can't make the
+  // reader re-select in a loop, and a deep-link that opened then got cleared
+  // doesn't re-open on the next entries refetch.
+  const appliedMessageRef = useRef<string>("");
+  useEffect(() => {
+    if (!urlMessage) {
+      appliedMessageRef.current = "";
+      return;
+    }
+    if (selected && messageKeyForEntry(selected) === urlMessage) {
+      appliedMessageRef.current = urlMessage;
+      return;
+    }
+    if (appliedMessageRef.current === urlMessage) return;
+    const entry = findEntryByMessageKey(entries, urlMessage);
+    if (entry) {
+      appliedMessageRef.current = urlMessage;
+      onSelect(entry);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlMessage, entries, selected]);
+
+  // Keep the URL in sync with the open message so the browser address bar (and
+  // the Copy link button) always reflects what is showing. `replaceSilent`
+  // updates the URL without an RSC nav (FIR-2684), so this never reloads the
+  // pane. A `newChat` (unsent agent chat) has no stable key, so selection being
+  // null there correctly leaves the URL message-free.
+  useEffect(() => {
+    const want = selected ? messageKeyForEntry(selected) : null;
+    if (want === (searchParams.get(INBOX_MESSAGE_PARAM) ?? null)) return;
+    const next = want
+      ? `${paths.inbox()}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(want)}`
+      : paths.inbox();
+    (replaceSilent ?? replace)(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, paths, replace, replaceSilent]);
+
   // ---- layout edits ----
   const updateActiveTab = (fn: (t: InboxTabConfig) => InboxTabConfig) =>
     setLayout(replaceTab(layout, activeTab.id, fn));
@@ -572,7 +662,23 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
-    if (!selected) return null;
+    // TECH-3690 — a note opened from the Notes box (or a note @-mention) shows
+    // in this same pane. Only when no feed row is selected; selecting a row
+    // clears selectedNote, so the two never collide.
+    if (!selected) {
+      if (selectedNote) {
+        return (
+          <ErrorBoundary resetKeys={[selectedNote]}>
+            <NoteInboxDetail
+              key={selectedNote}
+              noteId={selectedNote}
+              onClose={() => setSelectedNote(null)}
+            />
+          </ErrorBoundary>
+        );
+      }
+      return null;
+    }
     if (selected.kind === "channel") {
       return (
         <ErrorBoundary resetKeys={[selected.channel.id]}>
@@ -683,13 +789,28 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
+  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
     onNewIssue: () => openCreateIssueWithPreference(),
     onNewReminder: () => setShowReminder(true),
   };
+
+  // TECH-3708 — shareable link to the open message + the toolbar that hosts the
+  // Copy link button above the detail pane. `getShareableUrl` returns a full
+  // URL (web: origin + path; desktop: the public web URL), so the link works
+  // when pasted anywhere — important on desktop where there is no address bar.
+  const messageLinkHref = selected
+    ? getShareableUrl(
+        `${paths.inbox()}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(messageKeyForEntry(selected))}`,
+      )
+    : null;
+  const detailToolbar = messageLinkHref ? (
+    <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-2">
+      <CopyMessageLinkButton href={messageLinkHref} />
+    </div>
+  ) : null;
 
   // TECH-3541 (Jesper) — the permanent inbox block is the first "All messages"
   // box in the active tab. The search bar is rendered as part of it, and it
@@ -929,6 +1050,7 @@ export function DynamicInbox() {
                           onSetPinnedOnly={(v) => changeSection({ ...section, notesPinnedOnly: v })}
                           onSetSort={(s) => changeSection({ ...section, notesSort: s })}
                           onSetVisibility={(v) => changeSection({ ...section, notesVisibility: v })}
+                          onOpenNote={noteInboxPaneEnabled ? openNoteInPane : undefined}
                           onRemove={() => removeSection(section.id)}
                         />
                       ) : section.kind === "note" ? (
@@ -1049,7 +1171,7 @@ export function DynamicInbox() {
   // keeping the same `sectionsScrollRef` element alive under the overlay, its
   // scrollTop is preserved and Back returns to the exact previous position.
   if (isMobile) {
-    const detailOpen = Boolean(selected || newChat);
+    const detailOpen = Boolean(selected || newChat || selectedNote);
     return (
       <div className="relative flex h-full flex-col min-h-0">
         {leftColumn}
@@ -1064,6 +1186,12 @@ export function DynamicInbox() {
               >
                 <ArrowLeft className="size-4" /> Back
               </button>
+              {/* TECH-3708 — copy a link to this message (right of Back). */}
+              {messageLinkHref && (
+                <div className="ml-auto">
+                  <CopyMessageLinkButton href={messageLinkHref} />
+                </div>
+              )}
             </div>
             <div className="flex flex-1 flex-col min-h-0">{detail}</div>
           </div>
@@ -1087,7 +1215,13 @@ export function DynamicInbox() {
         </ResizablePanel>
         <ResizableHandle withHandle />
         <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
-          {detail ?? (
+          {detail ? (
+            <>
+              {/* TECH-3708 — Copy link toolbar above the message detail. */}
+              {detailToolbar}
+              <div className="flex flex-1 flex-col min-h-0">{detail}</div>
+            </>
+          ) : (
             // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
             // hint) so the right panel never reads as a blank/broken pane.
             <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
