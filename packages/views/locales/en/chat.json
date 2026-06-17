@@ -120,5 +120,10 @@
       "searching_web": "Searching the web",
       "fallback": "Working"
     }
+  },
+  "token_badges": {
+    "aria": "채팅 LLM 잔량",
+    "claude": "Claude 잔량 49%",
+    "gpt": "GPT 잔량 100%"
   }
 }

@@ -137,6 +137,24 @@ export function applyChatDoneToCache(
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
+export function applyChatTerminalTaskToCache(
+  qc: QueryClient,
+  payload: TaskCompletedPayload | TaskFailedPayload | TaskCancelledPayload,
+) {
+  const sessionId = payload.chat_session_id;
+  if (!sessionId) return;
+
+  qc.setQueryData<ChatPendingTask | undefined>(
+    chatKeys.pendingTask(sessionId),
+    (old) => {
+      if (old?.task_id && old.task_id !== payload.task_id) return old;
+      return {};
+    },
+  );
+  invalidateChatMessageQueries(qc, sessionId);
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
 function patchLatestChatMessagePage(
   old: InfiniteData<ChatMessagesPage> | undefined,
   message: ChatMessage,
@@ -966,8 +984,7 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      applyChatTerminalTaskToCache(qc, payload);
       invalidatePendingAggregate();
     });
 
@@ -983,7 +1000,11 @@ export function useRealtimeSync(
       // cleared `chatKeys.pendingTask`. This event is now only responsible
       // for refreshing the per-user cross-session aggregate that drives the
       // FAB indicator — `chat:done` is per-session and doesn't carry that
-      // information.
+      // information. Still clear the matching per-session pending cache here
+      // as a recovery path when `chat:done` is missed by an iframe / stale
+      // socket path: the next message refetch reconciles the assistant row,
+      // and the input must not remain stuck on Stop.
+      applyChatTerminalTaskToCache(qc, payload);
       invalidatePendingAggregate();
     });
 
@@ -1000,9 +1021,7 @@ export function useRealtimeSync(
       // failure bubble shows up without requiring a page refresh. Pre-#1823
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
-      invalidateChatMessageQueries(qc, payload.chat_session_id);
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      applyChatTerminalTaskToCache(qc, payload);
       invalidatePendingAggregate();
     });
 

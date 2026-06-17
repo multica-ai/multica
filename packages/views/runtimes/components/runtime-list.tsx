@@ -301,7 +301,7 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
       </div>
     );
   }
-  const fmt = cost7d >= 100 ? `$${cost7d.toFixed(0)}` : `$${cost7d.toFixed(2)}`;
+  const fmt = cost7d >= 100 ? cost7d.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",") : cost7d.toFixed(2);
   const deltaTone =
     delta == null
       ? "text-muted-foreground"

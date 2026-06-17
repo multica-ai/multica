@@ -112,8 +112,8 @@ function Segmented<T extends string | number>({
 }
 
 function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
+  if (n >= 100) return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return n.toFixed(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +177,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const costDelta = pctChange(totals.cost, prevTotals.cost);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5" data-testid="usage-weekly-token-tracker">
       {/* Page-wide period selector. Lives at the top because it controls
           basically everything below: the KPI numbers and labels, the
           daily / weekly chart window, and the cost-by aggregations. The
@@ -732,7 +732,7 @@ function CostByList({
               {formatTokens(row.tokens)}
             </div>
             <div className="text-right text-sm font-medium tabular-nums">
-              ${row.cost.toFixed(2)}
+              {row.cost.toFixed(2)}
             </div>
           </div>
         );

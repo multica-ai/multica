@@ -5,7 +5,7 @@
 @import "../../../packages/ui/styles/base.css";
 @import "./custom.css";
 
-@custom-variant dark (&:is(.dark *));
+@custom-variant dark (&:is(.dark *, [data-theme=dark] *));
 
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";

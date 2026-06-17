@@ -29,8 +29,8 @@ function getHeatmapColor(level: number): string {
 }
 
 function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
+  if (n >= 100) return n.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return n.toFixed(2);
 }
 
 function fmtDate(iso: string): string {
@@ -242,7 +242,7 @@ export function ActivityHeatmap({
               >
                 <title>
                   {c.date}:{" "}
-                  {c.cost > 0 ? `$${c.cost.toFixed(2)}` : "No activity"}
+                  {c.cost > 0 ? c.cost.toFixed(2) : "No activity"}
                 </title>
               </rect>
             ))}

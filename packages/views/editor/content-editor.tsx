@@ -355,6 +355,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-sm outline-none", className),
+          "data-acceptance": "chat-input",
         },
       },
     });
