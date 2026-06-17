@@ -100,8 +100,7 @@ func (h *Handler) DeleteWorkspaceSecret(w http.ResponseWriter, r *http.Request) 
 }
 
 // ListWorkspaceSecretNames returns all secret names for a workspace.
-// Members see names only; owners and admins can request values with ?include_values=true.
-// Agent actors are rejected.
+// Members see names only. Agent actors are rejected.
 func (h *Handler) ListWorkspaceSecretNames(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 
@@ -140,20 +139,5 @@ func (h *Handler) ListWorkspaceSecretNames(w http.ResponseWriter, r *http.Reques
 		entries = append(entries, secretEntry{Name: n.Name, CreatedBy: uuidToString(n.CreatedBy)})
 	}
 
-	includeValues := r.URL.Query().Get("include_values") == "true" && (member.Role == "owner" || member.Role == "admin")
-	result := map[string]any{"secrets": entries}
-	if includeValues {
-		values := make(map[string]string, len(names))
-		for _, n := range names {
-			val, err := h.WorkspaceSecretService.GetSecret(r.Context(), member.WorkspaceID, n.Name)
-			if err != nil {
-				values[n.Name] = ""
-				continue
-			}
-			values[n.Name] = val
-		}
-		result["values"] = values
-	}
-
-	writeJSON(w, http.StatusOK, result)
+	writeJSON(w, http.StatusOK, map[string]any{"secrets": entries})
 }

@@ -28,6 +28,8 @@ RETURNING curator_draft_task.*;
 UPDATE curator_draft_task
 SET status = 'completed', result = sqlc.arg('result'), updated_at = now()
 WHERE id = sqlc.arg('id')
+  AND runtime_id = sqlc.arg('runtime_id')
+  AND workspace_id = sqlc.arg('workspace_id')
   AND status = 'running'
 RETURNING *;
 
@@ -35,13 +37,16 @@ RETURNING *;
 UPDATE curator_draft_task
 SET status = 'failed', error = sqlc.arg('error'), updated_at = now()
 WHERE id = sqlc.arg('id')
+  AND runtime_id = sqlc.arg('runtime_id')
+  AND workspace_id = sqlc.arg('workspace_id')
   AND status = 'running'
 RETURNING *;
 
 -- name: GetCuratorDraftTask :one
 SELECT *
 FROM curator_draft_task
-WHERE id = sqlc.arg('id');
+WHERE id = sqlc.arg('id')
+  AND workspace_id = sqlc.arg('workspace_id');
 
 -- name: ListOnlineDaemonRuntimes :many
 SELECT *

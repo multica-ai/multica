@@ -1,0 +1,336 @@
+package handler
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
+)
+
+// setupCuratorDraftServices creates a CuratorDraftTaskService (with nil Curator)
+// and sets it on the shared testHandler. Returns a cleanup function.
+func setupCuratorDraftServices(t *testing.T) func() {
+	t.Helper()
+
+	prev := testHandler.CuratorDraftService
+	testHandler.CuratorDraftService = service.NewCuratorDraftTaskService(testHandler.Queries, nil)
+	return func() {
+		testHandler.CuratorDraftService = prev
+	}
+}
+
+// setupCuratorDraftWithSecrets creates WorkspaceSecretService + CuratorDraftTaskService
+// on testHandler for credential delivery tests. Returns cleanup.
+func setupCuratorDraftWithSecrets(t *testing.T) func() {
+	t.Helper()
+
+	key := make([]byte, secretbox.KeySize)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	box, err := secretbox.New(key)
+	if err != nil {
+		t.Fatalf("create box: %v", err)
+	}
+
+	prevSecret := testHandler.WorkspaceSecretService
+	prevDraft := testHandler.CuratorDraftService
+
+	testHandler.WorkspaceSecretService = service.NewWorkspaceSecretService(testHandler.Queries, box)
+	testHandler.CuratorDraftService = service.NewCuratorDraftTaskService(testHandler.Queries, nil)
+
+	return func() {
+		testHandler.WorkspaceSecretService = prevSecret
+		testHandler.CuratorDraftService = prevDraft
+	}
+}
+
+// createCuratorDraftTaskFixture inserts a curator_draft_task row for testing.
+func createCuratorDraftTaskFixture(t *testing.T, workspaceID, runtimeID string, draftKind, status string, inputData []byte) string {
+	t.Helper()
+
+	// Look up the member ID for the test user in this workspace.
+	var memberID string
+	err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`,
+		workspaceID, testUserID,
+	).Scan(&memberID)
+	if err != nil {
+		t.Fatalf("lookup test member: %v", err)
+	}
+
+	var taskID string
+	err = testPool.QueryRow(context.Background(), `
+		INSERT INTO curator_draft_task (workspace_id, runtime_id, draft_kind, status, input_data, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`, workspaceID, runtimeID, draftKind, status, inputData, memberID).Scan(&taskID)
+	if err != nil {
+		t.Fatalf("create curator draft task fixture: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM curator_draft_task WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
+// createTestRuntimeFixture creates a second runtime for cross-runtime tests.
+func createTestRuntimeFixture(t *testing.T, workspaceID, name, runtimeMode string) string {
+	t.Helper()
+
+	var runtimeID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, $2, $3, 'test_provider', 'online', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id
+	`, workspaceID, name, runtimeMode).Scan(&runtimeID)
+	if err != nil {
+		t.Fatalf("create test runtime fixture: %v", err)
+	}
+
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
+}
+
+func validDraftBody() map[string]any {
+	return map[string]any{
+		"draft": map[string]any{
+			"title":                "Test Draft",
+			"type":                 "lesson",
+			"domain_labels":        []string{"testing"},
+			"problem_pattern":      "test pattern",
+			"trigger_conditions":   "test conditions",
+			"diagnostic_steps":     "test steps",
+			"recommended_practice": "test practice",
+			"anti_patterns":        "test anti patterns",
+			"applicability":        "test applicability",
+			"confidence_status":    "high",
+		},
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Cross-runtime rejection tests (Problem 3)
+// ---------------------------------------------------------------------------
+
+func TestCompleteCuratorDraftTask_WrongRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	cleanup := setupCuratorDraftServices(t)
+	defer cleanup()
+
+	runtimeA := testRuntimeID
+	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, runtimeA, "issue", "running", []byte(`{}`))
+
+	runtimeB := createTestRuntimeFixture(t, testWorkspaceID, "cross-runtime-test-complete", "cloud")
+
+	req := newDaemonTokenRequest(http.MethodPost,
+		fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/%s/complete", runtimeB, taskID),
+		validDraftBody(), testWorkspaceID, "test-daemon")
+	req = withURLParam(req, "runtimeId", runtimeB)
+	req = withURLParam(req, "taskId", taskID)
+
+	rec := httptest.NewRecorder()
+	testHandler.CompleteCuratorDraftTask(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for wrong runtime complete, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestFailCuratorDraftTask_WrongRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	cleanup := setupCuratorDraftServices(t)
+	defer cleanup()
+
+	runtimeA := testRuntimeID
+	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, runtimeA, "issue", "running", []byte(`{}`))
+
+	runtimeB := createTestRuntimeFixture(t, testWorkspaceID, "cross-runtime-test-fail", "cloud")
+
+	req := newDaemonTokenRequest(http.MethodPost,
+		fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/%s/fail", runtimeB, taskID),
+		map[string]any{"error": "test failure"}, testWorkspaceID, "test-daemon")
+	req = withURLParam(req, "runtimeId", runtimeB)
+	req = withURLParam(req, "taskId", taskID)
+
+	rec := httptest.NewRecorder()
+	testHandler.FailCuratorDraftTask(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for wrong runtime fail, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetCuratorDraftStatus_WrongWorkspace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	cleanup := setupCuratorDraftServices(t)
+	defer cleanup()
+
+	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, testRuntimeID, "issue", "completed", []byte(`{}`))
+
+	// Try to get status with a non-existent workspace ID.
+	req := newRequest(http.MethodGet,
+		fmt.Sprintf("/api/workspaces/00000000-0000-0000-0000-000000000001/knowledge/curator-drafts/%s", taskID),
+		nil)
+	req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000001")
+	req = withURLParam(req, "taskId", taskID)
+
+	rec := httptest.NewRecorder()
+	testHandler.GetCuratorDraftStatus(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for wrong workspace status, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Credential delivery tests (Problem 1)
+// ---------------------------------------------------------------------------
+
+func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	cleanup := setupCuratorDraftWithSecrets(t)
+	defer cleanup()
+
+	workspaceUUID := pgtype.UUID{}
+	if err := workspaceUUID.Scan(testWorkspaceID); err != nil {
+		t.Fatalf("parse workspace UUID: %v", err)
+	}
+	userUUID := pgtype.UUID{}
+	if err := userUUID.Scan(testUserID); err != nil {
+		t.Fatalf("parse user UUID: %v", err)
+	}
+
+	// Look up the member ID for the test user.
+	var memberID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM member WHERE workspace_id = $1 AND user_id = $2`,
+		testWorkspaceID, testUserID,
+	).Scan(&memberID); err != nil {
+		t.Fatalf("lookup test member: %v", err)
+	}
+	memberUUID := pgtype.UUID{}
+	if err := memberUUID.Scan(memberID); err != nil {
+		t.Fatalf("parse member UUID: %v", err)
+	}
+
+	// Create a secret.
+	err := testHandler.WorkspaceSecretService.UpsertSecret(context.Background(),
+		workspaceUUID, "curator", "sk-test-api-key-12345", memberUUID)
+	if err != nil {
+		t.Fatalf("upsert test secret: %v", err)
+	}
+
+	// Create a task with secret_ref (not resolved api_key).
+	input := service.CuratorDraftTaskInput{
+		BaseURL:        "https://test.example/v1",
+		SecretRef:      "secret://workspace/curator",
+		Model:          "test-model",
+		EmbeddingModel: "test-embedding",
+		Provider:       "test",
+		DraftInput: service.CuratorDraftInput{
+			SourceSummary: "test summary",
+		},
+	}
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		t.Fatalf("marshal input: %v", err)
+	}
+
+	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, testRuntimeID, "issue", "queued", inputJSON)
+
+	// Claim the task via daemon API.
+	req := newDaemonTokenRequest(http.MethodPost,
+		fmt.Sprintf("/api/daemon/runtimes/%s/curator-drafts/claim", testRuntimeID),
+		map[string]any{}, testWorkspaceID, "test-daemon-claim")
+	req = withURLParam(req, "runtimeId", testRuntimeID)
+
+	rec := httptest.NewRecorder()
+	testHandler.ClaimCuratorDraftTask(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for claim, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Task struct {
+			ID          string          `json:"id"`
+			Credentials json.RawMessage `json:"credentials"`
+			DraftInput  json.RawMessage `json:"draft_input"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("parse claim response: %v", err)
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("task id = %s, want %s", resp.Task.ID, taskID)
+	}
+
+	// Verify credentials contain api_key.
+	var creds map[string]any
+	if err := json.Unmarshal(resp.Task.Credentials, &creds); err != nil {
+		t.Fatalf("parse credentials: %v", err)
+	}
+	if creds["api_key"] != "sk-test-api-key-12345" {
+		t.Fatalf("credentials.api_key = %v, want sk-test-api-key-12345", creds["api_key"])
+	}
+
+	// Verify response does NOT contain input_data.
+	var rawResp map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &rawResp); err != nil {
+		t.Fatalf("parse raw response: %v", err)
+	}
+	var taskObj map[string]json.RawMessage
+	if err := json.Unmarshal(rawResp["task"], &taskObj); err != nil {
+		t.Fatalf("parse task object: %v", err)
+	}
+	if _, ok := taskObj["input_data"]; ok {
+		t.Fatal("response must not contain input_data key")
+	}
+	if _, ok := taskObj["credentials"]; !ok {
+		t.Fatal("response must contain credentials key")
+	}
+	if _, ok := taskObj["draft_input"]; !ok {
+		t.Fatal("response must contain draft_input key")
+	}
+
+	// Verify the DB input_data does NOT contain the API key.
+	var storedInput []byte
+	var dbInput struct {
+		APIKey    string `json:"api_key"`
+		SecretRef string `json:"secret_ref"`
+	}
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT input_data FROM curator_draft_task WHERE id = $1`, taskID,
+	).Scan(&storedInput); err != nil {
+		t.Fatalf("read task input_data: %v", err)
+	}
+	if err := json.Unmarshal(storedInput, &dbInput); err != nil {
+		t.Fatalf("parse db input_data: %v", err)
+	}
+	if dbInput.APIKey != "" {
+		t.Fatal("DB input_data must not contain api_key")
+	}
+	if dbInput.SecretRef != "secret://workspace/curator" {
+		t.Fatalf("DB input_data.secret_ref = %q, want secret://workspace/curator", dbInput.SecretRef)
+	}
+}

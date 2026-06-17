@@ -45,13 +45,7 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 	}
 	runtime := runtimes[0]
 
-	// Resolve the secret_ref to an actual API key.
-	apiKey, err := e.secretService.ResolveSecretRef(ctx, workspaceID, e.secretRef)
-	if err != nil {
-		return CuratorDraft{}, ErrCuratorSecretNotFound
-	}
-
-	// Build the task input with the resolved API key.
+	// Build the task input with the secret_ref (not resolved here — resolved at claim time).
 	draftKind := "issue"
 	candidateID := pgtype.UUID{}
 	findingID := pgtype.UUID{}
@@ -67,7 +61,7 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 
 	taskInput := CuratorDraftTaskInput{
 		BaseURL:        e.base.cfg.BaseURL,
-		APIKey:         apiKey,
+		SecretRef:      e.secretRef,
 		Model:          e.base.cfg.Model,
 		EmbeddingModel: e.base.cfg.EmbeddingModel,
 		Provider:       e.base.cfg.Provider,
@@ -92,11 +86,11 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 }
 
 func (e *LocalCuratorEngine) SummarizeSource(ctx context.Context, source CuratorSourceBundle) (string, error) {
-	return e.base.SummarizeSource(ctx, source)
+	return "", ErrCuratorLocalSummarizeUnavailable
 }
 
 func (e *LocalCuratorEngine) BuildEmbedding(ctx context.Context, content string) ([]float32, error) {
-	return e.base.BuildEmbedding(ctx, content)
+	return nil, ErrCuratorLocalEmbeddingUnavailable
 }
 
 func (e *LocalCuratorEngine) Info() CuratorEngineInfo {

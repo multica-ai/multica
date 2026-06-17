@@ -99,6 +99,9 @@ func (e *WorkspaceConfiguredCuratorEngine) SummarizeSource(ctx context.Context, 
 }
 
 func (e *WorkspaceConfiguredCuratorEngine) BuildEmbedding(ctx context.Context, content string) ([]float32, error) {
+	if e.base.RuntimeMode == "local" {
+		return nil, ErrCuratorLocalEmbeddingUnavailable
+	}
 	return NewOpenAICompatibleCuratorEngine(e.base).BuildEmbedding(ctx, content)
 }
 

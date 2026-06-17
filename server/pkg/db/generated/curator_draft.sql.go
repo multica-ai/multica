@@ -57,17 +57,26 @@ const completeCuratorDraftTask = `-- name: CompleteCuratorDraftTask :one
 UPDATE curator_draft_task
 SET status = 'completed', result = $1, updated_at = now()
 WHERE id = $2
+  AND runtime_id = $3
+  AND workspace_id = $4
   AND status = 'running'
 RETURNING id, workspace_id, runtime_id, draft_kind, status, input_data, result, error, created_by, created_at, updated_at
 `
 
 type CompleteCuratorDraftTaskParams struct {
-	Result []byte      `json:"result"`
-	ID     pgtype.UUID `json:"id"`
+	Result      []byte      `json:"result"`
+	ID          pgtype.UUID `json:"id"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) CompleteCuratorDraftTask(ctx context.Context, arg CompleteCuratorDraftTaskParams) (CuratorDraftTask, error) {
-	row := q.db.QueryRow(ctx, completeCuratorDraftTask, arg.Result, arg.ID)
+	row := q.db.QueryRow(ctx, completeCuratorDraftTask,
+		arg.Result,
+		arg.ID,
+		arg.RuntimeID,
+		arg.WorkspaceID,
+	)
 	var i CuratorDraftTask
 	err := row.Scan(
 		&i.ID,
@@ -132,17 +141,26 @@ const failCuratorDraftTask = `-- name: FailCuratorDraftTask :one
 UPDATE curator_draft_task
 SET status = 'failed', error = $1, updated_at = now()
 WHERE id = $2
+  AND runtime_id = $3
+  AND workspace_id = $4
   AND status = 'running'
 RETURNING id, workspace_id, runtime_id, draft_kind, status, input_data, result, error, created_by, created_at, updated_at
 `
 
 type FailCuratorDraftTaskParams struct {
-	Error pgtype.Text `json:"error"`
-	ID    pgtype.UUID `json:"id"`
+	Error       pgtype.Text `json:"error"`
+	ID          pgtype.UUID `json:"id"`
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) FailCuratorDraftTask(ctx context.Context, arg FailCuratorDraftTaskParams) (CuratorDraftTask, error) {
-	row := q.db.QueryRow(ctx, failCuratorDraftTask, arg.Error, arg.ID)
+	row := q.db.QueryRow(ctx, failCuratorDraftTask,
+		arg.Error,
+		arg.ID,
+		arg.RuntimeID,
+		arg.WorkspaceID,
+	)
 	var i CuratorDraftTask
 	err := row.Scan(
 		&i.ID,
@@ -164,10 +182,16 @@ const getCuratorDraftTask = `-- name: GetCuratorDraftTask :one
 SELECT id, workspace_id, runtime_id, draft_kind, status, input_data, result, error, created_by, created_at, updated_at
 FROM curator_draft_task
 WHERE id = $1
+  AND workspace_id = $2
 `
 
-func (q *Queries) GetCuratorDraftTask(ctx context.Context, id pgtype.UUID) (CuratorDraftTask, error) {
-	row := q.db.QueryRow(ctx, getCuratorDraftTask, id)
+type GetCuratorDraftTaskParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetCuratorDraftTask(ctx context.Context, arg GetCuratorDraftTaskParams) (CuratorDraftTask, error) {
+	row := q.db.QueryRow(ctx, getCuratorDraftTask, arg.ID, arg.WorkspaceID)
 	var i CuratorDraftTask
 	err := row.Scan(
 		&i.ID,

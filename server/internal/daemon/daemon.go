@@ -4140,26 +4140,23 @@ func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, 
 	d.logger.Info("curator draft task received", "task", shortID(task.ID), "kind", task.DraftKind)
 
 	var config CuratorDraftConfig
-	if err := json.Unmarshal(task.InputData, &config); err != nil {
+	if err := json.Unmarshal(task.Credentials, &config); err != nil {
 		d.logger.Error("failed to parse curator draft config", "task", task.ID, "error", err)
-		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task config: "+err.Error())
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task credentials: "+err.Error())
 		return
 	}
 
-	// Build the curator prompt from input_data.
-	var input struct {
-		CuratorDraftConfig
-		DraftInput map[string]any `json:"draft_input"`
-	}
-	if err := json.Unmarshal(task.InputData, &input); err != nil {
+	// Parse the draft input for prompt building.
+	var draftInput map[string]any
+	if err := json.Unmarshal(task.DraftInput, &draftInput); err != nil {
 		d.logger.Error("failed to parse curator draft input", "task", task.ID, "error", err)
-		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task input: "+err.Error())
+		_ = d.client.FailCuratorDraft(ctx, runtimeID, task.ID, "invalid task draft input: "+err.Error())
 		return
 	}
 
 	// Build the draft generation prompt. Reuse the same structure as the
 	// server-side OpenAICompatibleCuratorEngine.
-	prompt := buildCuratorDraftPrompt(input.DraftInput)
+	prompt := buildCuratorDraftPrompt(draftInput)
 	systemPrompt := "You are Multica's Knowledge Curator. Produce concise, structured, auditable operational knowledge."
 
 	respBody, err := callLLMAPI(ctx, config.BaseURL, config.APIKey, config.Model, systemPrompt, prompt)

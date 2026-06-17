@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -41,14 +43,23 @@ func (h *Handler) ClaimCuratorDraftTask(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"task": curatorDraftTaskToResponse(task)})
+	// Resolve secret_ref to plaintext API key for one-time delivery to the daemon.
+	credentials, err := h.resolveCuratorCredentials(r.Context(), task)
+	if err != nil {
+		slog.Error("resolve curator draft credentials failed",
+			append(logger.RequestAttrs(r), "error", err, "task_id", uuidToString(task.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to resolve curator draft credentials")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"task": curatorDraftTaskToResponse(task, credentials)})
 }
 
 // CompleteCuratorDraftTask receives a completed draft from a daemon runtime
 // and creates the corresponding knowledge item.
 func (h *Handler) CompleteCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	_, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}
@@ -73,7 +84,7 @@ func (h *Handler) CompleteCuratorDraftTask(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	detail, err := h.CuratorDraftService.CompleteDraftTask(r.Context(), taskID, req.Draft)
+	detail, err := h.CuratorDraftService.CompleteDraftTask(r.Context(), taskID, runtime.ID, runtime.WorkspaceID, req.Draft)
 	if err != nil {
 		slog.Error("complete curator draft task failed",
 			append(logger.RequestAttrs(r), "error", err, "task_id", taskIDStr)...)
@@ -82,7 +93,7 @@ func (h *Handler) CompleteCuratorDraftTask(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Broadcast the draft-ready event so connected clients can refresh.
-	task, _ := h.CuratorDraftService.GetCuratorDraftTask(r.Context(), taskID)
+	task, _ := h.CuratorDraftService.GetCuratorDraftTask(r.Context(), taskID, runtime.WorkspaceID)
 	if task.ID.Valid {
 		h.publish(protocol.EventKnowledgeDraftReady, uuidToString(task.WorkspaceID), "agent", runtimeID, map[string]any{
 			"task_id":      taskIDStr,
@@ -97,7 +108,7 @@ func (h *Handler) CompleteCuratorDraftTask(w http.ResponseWriter, r *http.Reques
 // FailCuratorDraftTask marks a curator draft task as failed.
 func (h *Handler) FailCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	_, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}
@@ -122,7 +133,7 @@ func (h *Handler) FailCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.CuratorDraftService.FailDraftTask(r.Context(), taskID, req.Error); err != nil {
+	if err := h.CuratorDraftService.FailDraftTask(r.Context(), taskID, runtime.ID, runtime.WorkspaceID, req.Error); err != nil {
 		slog.Error("fail curator draft task failed",
 			append(logger.RequestAttrs(r), "error", err, "task_id", taskIDStr)...)
 		writeError(w, http.StatusInternalServerError, "failed to fail curator draft task")
@@ -135,6 +146,17 @@ func (h *Handler) FailCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 // GetCuratorDraftStatus returns the status of a curator draft task. Used
 // by the frontend for polling after receiving a 202 Accepted.
 func (h *Handler) GetCuratorDraftStatus(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	_, ok = h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
+
 	taskIDStr := chi.URLParam(r, "taskId")
 	taskID := parseUUID(taskIDStr)
 	if !taskID.Valid {
@@ -147,7 +169,7 @@ func (h *Handler) GetCuratorDraftStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	task, err := h.CuratorDraftService.GetCuratorDraftTask(r.Context(), taskID)
+	task, err := h.CuratorDraftService.GetCuratorDraftTask(r.Context(), taskID, wsUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "curator draft task not found")
 		return
@@ -168,14 +190,45 @@ func (h *Handler) GetCuratorDraftStatus(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func curatorDraftTaskToResponse(task db.CuratorDraftTask) map[string]any {
+func curatorDraftTaskToResponse(task db.CuratorDraftTask, credentials map[string]any) map[string]any {
 	resp := map[string]any{
-		"id":         uuidToString(task.ID),
-		"draft_kind": task.DraftKind,
-		"status":     task.Status,
+		"id":          uuidToString(task.ID),
+		"draft_kind":  task.DraftKind,
+		"status":      task.Status,
+		"credentials": credentials,
 	}
+	// Include only the draft_input portion, not the full input_data (which may contain secret_ref).
 	if len(task.InputData) > 0 {
-		resp["input_data"] = json.RawMessage(task.InputData)
+		var input service.CuratorDraftTaskInput
+		if err := json.Unmarshal(task.InputData, &input); err == nil {
+			resp["draft_input"] = input.DraftInput
+		}
 	}
 	return resp
+}
+
+// resolveCuratorCredentials extracts the secret_ref from the task's input_data
+// and resolves it to a plaintext API key for one-time delivery to the daemon.
+func (h *Handler) resolveCuratorCredentials(ctx context.Context, task db.CuratorDraftTask) (map[string]any, error) {
+	var input service.CuratorDraftTaskInput
+	if err := json.Unmarshal(task.InputData, &input); err != nil {
+		return nil, fmt.Errorf("unmarshal task input: %w", err)
+	}
+
+	if h.WorkspaceSecretService == nil {
+		return nil, errors.New("workspace secret service is not configured")
+	}
+
+	apiKey, err := h.WorkspaceSecretService.ResolveSecretRef(ctx, task.WorkspaceID, input.SecretRef)
+	if err != nil {
+		return nil, fmt.Errorf("resolve secret ref: %w", err)
+	}
+
+	return map[string]any{
+		"base_url":        input.BaseURL,
+		"api_key":         apiKey,
+		"model":           input.Model,
+		"embedding_model": input.EmbeddingModel,
+		"provider":        input.Provider,
+	}, nil
 }

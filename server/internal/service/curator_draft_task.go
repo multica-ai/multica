@@ -13,6 +13,9 @@ import (
 var ErrCuratorLocalRuntimeUnavailable = errors.New("no online local runtime available for this workspace")
 var ErrCuratorSecretNotFound = errors.New("secret_ref target secret not found")
 var ErrCuratorDraftDispatched = errors.New("knowledge curator draft dispatched to local runtime")
+var ErrCuratorDraftTaskNotFound = errors.New("curator draft task not found")
+var ErrCuratorLocalSummarizeUnavailable = errors.New("summarize source is not available in local runtime mode")
+var ErrCuratorLocalEmbeddingUnavailable = errors.New("build embedding is not available in local runtime mode")
 
 // CuratorDraftTaskService manages the lifecycle of curator draft tasks
 // dispatched to local daemon runtimes.
@@ -28,7 +31,7 @@ func NewCuratorDraftTaskService(q *db.Queries, curator *KnowledgeCuratorService)
 // CuratorDraftTaskInput is the JSON-serialized payload stored in input_data.
 type CuratorDraftTaskInput struct {
 	BaseURL        string `json:"base_url"`
-	APIKey         string `json:"api_key"`
+	SecretRef      string `json:"secret_ref"`
 	Model          string `json:"model"`
 	EmbeddingModel string `json:"embedding_model"`
 	Provider       string `json:"provider"`
@@ -71,10 +74,18 @@ func (s *CuratorDraftTaskService) ClaimNextDraftTask(ctx context.Context, runtim
 
 // CompleteDraftTask validates the draft, creates a knowledge item, and marks
 // the task as completed. Returns the created knowledge detail.
-func (s *CuratorDraftTaskService) CompleteDraftTask(ctx context.Context, taskID pgtype.UUID, draft CuratorDraft) (KnowledgeDetail, error) {
-	task, err := s.Queries.GetCuratorDraftTask(ctx, taskID)
+func (s *CuratorDraftTaskService) CompleteDraftTask(ctx context.Context, taskID, runtimeID, workspaceID pgtype.UUID, draft CuratorDraft) (KnowledgeDetail, error) {
+	task, err := s.Queries.GetCuratorDraftTask(ctx, db.GetCuratorDraftTaskParams{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+	})
 	if err != nil {
 		return KnowledgeDetail{}, fmt.Errorf("get curator draft task: %w", err)
+	}
+
+	// Verify the task belongs to this specific runtime.
+	if task.RuntimeID != runtimeID {
+		return KnowledgeDetail{}, ErrCuratorDraftTaskNotFound
 	}
 
 	if err := validateCuratorDraft(draft); err != nil {
@@ -118,8 +129,10 @@ func (s *CuratorDraftTaskService) CompleteDraftTask(ctx context.Context, taskID 
 
 	resultJSON, _ := json.Marshal(draft)
 	if _, err := s.Queries.CompleteCuratorDraftTask(ctx, db.CompleteCuratorDraftTaskParams{
-		ID:     taskID,
-		Result: resultJSON,
+		ID:          taskID,
+		RuntimeID:   runtimeID,
+		WorkspaceID: task.WorkspaceID,
+		Result:      resultJSON,
 	}); err != nil {
 		return KnowledgeDetail{}, fmt.Errorf("complete curator draft task: %w", err)
 	}
@@ -129,10 +142,18 @@ func (s *CuratorDraftTaskService) CompleteDraftTask(ctx context.Context, taskID 
 
 // FailDraftTask marks a curator draft task as failed. If the task was for a
 // candidate, the candidate metadata is updated with the error.
-func (s *CuratorDraftTaskService) FailDraftTask(ctx context.Context, taskID pgtype.UUID, errMsg string) error {
-	task, err := s.Queries.GetCuratorDraftTask(ctx, taskID)
+func (s *CuratorDraftTaskService) FailDraftTask(ctx context.Context, taskID, runtimeID, workspaceID pgtype.UUID, errMsg string) error {
+	task, err := s.Queries.GetCuratorDraftTask(ctx, db.GetCuratorDraftTaskParams{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+	})
 	if err != nil {
 		return fmt.Errorf("get curator draft task: %w", err)
+	}
+
+	// Verify the task belongs to this specific runtime.
+	if task.RuntimeID != runtimeID {
+		return ErrCuratorDraftTaskNotFound
 	}
 
 	// Update candidate metadata if applicable.
@@ -150,8 +171,10 @@ func (s *CuratorDraftTaskService) FailDraftTask(ctx context.Context, taskID pgty
 	}
 
 	if _, err := s.Queries.FailCuratorDraftTask(ctx, db.FailCuratorDraftTaskParams{
-		ID:    taskID,
-		Error: pgtype.Text{String: errMsg, Valid: true},
+		ID:          taskID,
+		RuntimeID:   runtimeID,
+		WorkspaceID: task.WorkspaceID,
+		Error:       pgtype.Text{String: errMsg, Valid: true},
 	}); err != nil {
 		return fmt.Errorf("fail curator draft task: %w", err)
 	}
@@ -159,6 +182,9 @@ func (s *CuratorDraftTaskService) FailDraftTask(ctx context.Context, taskID pgty
 }
 
 // GetCuratorDraftTask retrieves a single curator draft task.
-func (s *CuratorDraftTaskService) GetCuratorDraftTask(ctx context.Context, taskID pgtype.UUID) (db.CuratorDraftTask, error) {
-	return s.Queries.GetCuratorDraftTask(ctx, taskID)
+func (s *CuratorDraftTaskService) GetCuratorDraftTask(ctx context.Context, taskID, workspaceID pgtype.UUID) (db.CuratorDraftTask, error) {
+	return s.Queries.GetCuratorDraftTask(ctx, db.GetCuratorDraftTaskParams{
+		ID:          taskID,
+		WorkspaceID: workspaceID,
+	})
 }
