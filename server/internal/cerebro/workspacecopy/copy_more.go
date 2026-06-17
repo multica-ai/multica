@@ -166,7 +166,13 @@ func copyProjectTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourc
 	if err := recordMapping(ctx, tx, runID, sourceWorkspace, targetWorkspace, "project", sourceProject, targetID, nil, nil); err != nil {
 		return CopyResult{}, err
 	}
-	return CopyResult{EntityType: "project", SourceID: sourceProject, TargetID: targetID}, nil
+
+	// artifacts (documents/notes/reports) scoped to this project travel with it.
+	artifactsCopied, err := copyProjectArtifactsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace, sourceProject, targetID)
+	if err != nil {
+		return CopyResult{}, err
+	}
+	return CopyResult{EntityType: "project", SourceID: sourceProject, TargetID: targetID, Artifacts: artifactsCopied}, nil
 }
 
 func copyChatTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceChat pgtype.UUID) (CopyResult, error) {

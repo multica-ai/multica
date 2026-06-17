@@ -31,8 +31,12 @@ import (
 
 // RewriteResult reports how many copied rows had references rewritten.
 type RewriteResult struct {
-	IssuesRewritten   int64 `json:"issues_rewritten,omitempty"`
-	CommentsRewritten int64 `json:"comments_rewritten,omitempty"`
+	IssuesRewritten     int64 `json:"issues_rewritten,omitempty"`
+	CommentsRewritten   int64 `json:"comments_rewritten,omitempty"`
+	AgentsRewritten     int64 `json:"agents_rewritten,omitempty"`
+	SkillsRewritten     int64 `json:"skills_rewritten,omitempty"`
+	AutopilotsRewritten int64 `json:"autopilots_rewritten,omitempty"`
+	MessagesRewritten   int64 `json:"chat_messages_rewritten,omitempty"`
 }
 
 var nonAlphaRe = regexp.MustCompile(`[^a-zA-Z]`)
@@ -245,8 +249,138 @@ func (s *Store) RewriteInternalReferences(ctx context.Context, targetWorkspace p
 		}
 	}
 
+	// Cross-cutting reference check (TECH-3742): the same mention-link UUIDs and
+	// identifier tokens that appear in issue text also appear in agent
+	// instructions, skill bodies, autopilot templates and chat messages. Rewrite
+	// them there too, using each copied row's own source workspace map. rewriteOne
+	// loads a copied row's text column, applies the rewriter, and updates on change.
+	rewriteOne := func(entity, table, idCol, textCol, updateExtra string) (int64, error) {
+		rows, err := tx.Query(ctx, `
+			SELECT source_workspace_id, target_id
+			FROM cerebro_workspace_copy_map
+			WHERE target_workspace_id = $1 AND entity_type = $2`,
+			targetWorkspace, entity)
+		if err != nil {
+			return 0, fmt.Errorf("load %s mappings: %w", entity, err)
+		}
+		type row struct {
+			srcWS pgtype.UUID
+			tgt   pgtype.UUID
+		}
+		var items []row
+		for rows.Next() {
+			var rr row
+			if err := rows.Scan(&rr.srcWS, &rr.tgt); err != nil {
+				rows.Close()
+				return 0, fmt.Errorf("scan %s mapping: %w", entity, err)
+			}
+			items = append(items, rr)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return 0, fmt.Errorf("iterate %s mappings: %w", entity, err)
+		}
+		var n int64
+		for _, it := range items {
+			var txt pgtype.Text
+			// table/idCol/textCol are fixed internal constants, never user input.
+			if err := tx.QueryRow(ctx, `SELECT `+textCol+` FROM `+table+` WHERE `+idCol+` = $1`, it.tgt).Scan(&txt); err != nil {
+				return n, fmt.Errorf("load %s text: %w", entity, err)
+			}
+			if !txt.Valid {
+				continue
+			}
+			if nv := rewrite(it.srcWS.Bytes, txt.String); nv != txt.String {
+				if _, err := tx.Exec(ctx, `UPDATE `+table+` SET `+textCol+` = $1`+updateExtra+` WHERE `+idCol+` = $2`, nv, it.tgt); err != nil {
+					return n, fmt.Errorf("update %s text: %w", entity, err)
+				}
+				n++
+			}
+		}
+		return n, nil
+	}
+
+	agentsRewritten, err := rewriteOne("agent", "agent", "id", "instructions", ", updated_at = now()")
+	if err != nil {
+		return RewriteResult{}, err
+	}
+	skillsRewritten, err := rewriteOne("skill", "skill", "id", "content", ", updated_at = now()")
+	if err != nil {
+		return RewriteResult{}, err
+	}
+	autopilotsRewritten, err := rewriteOne("autopilot", "autopilot", "id", "description", ", updated_at = now()")
+	if err != nil {
+		return RewriteResult{}, err
+	}
+
+	// chat messages: text hangs off chat_message, which is reached through the
+	// copied chat_session. Rewrite each copied session's messages.
+	var messagesRewritten int64
+	chatRows, err := tx.Query(ctx, `
+		SELECT source_workspace_id, target_id
+		FROM cerebro_workspace_copy_map
+		WHERE target_workspace_id = $1 AND entity_type = 'chat'`,
+		targetWorkspace)
+	if err != nil {
+		return RewriteResult{}, fmt.Errorf("load chat mappings: %w", err)
+	}
+	type chatMap struct {
+		srcWS, tgt pgtype.UUID
+	}
+	var chats []chatMap
+	for chatRows.Next() {
+		var c chatMap
+		if err := chatRows.Scan(&c.srcWS, &c.tgt); err != nil {
+			chatRows.Close()
+			return RewriteResult{}, fmt.Errorf("scan chat mapping: %w", err)
+		}
+		chats = append(chats, c)
+	}
+	chatRows.Close()
+	if err := chatRows.Err(); err != nil {
+		return RewriteResult{}, fmt.Errorf("iterate chat mappings: %w", err)
+	}
+	for _, c := range chats {
+		mrows, err := tx.Query(ctx, `SELECT id, content FROM chat_message WHERE chat_session_id = $1`, c.tgt)
+		if err != nil {
+			return RewriteResult{}, fmt.Errorf("load chat messages: %w", err)
+		}
+		type msg struct {
+			id      pgtype.UUID
+			content string
+		}
+		var msgs []msg
+		for mrows.Next() {
+			var m msg
+			if err := mrows.Scan(&m.id, &m.content); err != nil {
+				mrows.Close()
+				return RewriteResult{}, fmt.Errorf("scan chat message: %w", err)
+			}
+			msgs = append(msgs, m)
+		}
+		mrows.Close()
+		if err := mrows.Err(); err != nil {
+			return RewriteResult{}, fmt.Errorf("iterate chat messages: %w", err)
+		}
+		for _, m := range msgs {
+			if nv := rewrite(c.srcWS.Bytes, m.content); nv != m.content {
+				if _, err := tx.Exec(ctx, `UPDATE chat_message SET content = $1 WHERE id = $2`, nv, m.id); err != nil {
+					return RewriteResult{}, fmt.Errorf("update chat message: %w", err)
+				}
+				messagesRewritten++
+			}
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return RewriteResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return RewriteResult{IssuesRewritten: issuesRewritten, CommentsRewritten: commentsRewritten}, nil
+	return RewriteResult{
+		IssuesRewritten:     issuesRewritten,
+		CommentsRewritten:   commentsRewritten,
+		AgentsRewritten:     agentsRewritten,
+		SkillsRewritten:     skillsRewritten,
+		AutopilotsRewritten: autopilotsRewritten,
+		MessagesRewritten:   messagesRewritten,
+	}, nil
 }

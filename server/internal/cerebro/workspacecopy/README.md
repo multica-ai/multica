@@ -55,24 +55,57 @@ Per-item copy (next increments — one slice each, mirror `CopyIssue`/`CopyAgent
       Done/cancelled descendants excluded (the picked root is always copied).
       Console exposes it as an "Include everything underneath" checkbox. Verified
       (`TestCopyIssueCascade`, `TestCopyProjectCascade`).
-- [ ] Agent extras: skills bindings (after bulk skill sync), wakeups, tasks/runs.
-- [ ] Chat (+ messages, attachments); Channel/DM (issue kind).
-- [ ] Autopilot (+ triggers, runs).
-- [ ] Conflict handling on name clashes (3 agents, 19 skills): keep-Web / rename / overwrite.
+- [x] Agent extras (TECH-3742): skill bindings (`agent_skill` remapped to the
+      copied skills); name-conflict policy (skip / overwrite / keep_both,
+      `conflict.go`). Wakeups + reminders now travel per issue (below).
+- [x] Per-issue extras (TECH-3742): still-pending `cerebro_agent_wakeup` (agent /
+      issue / origin-comment remapped, reset to clean pending) and
+      `cerebro_issue_date_reminder` travel inside `CopyIssue` (`copy_perissue.go`).
+- [x] Notes (TECH-3742): an artifact's `cerebro_note` extension + versions /
+      comments (threads rebuilt) / references / shares travel with it
+      (`copyNoteExtensionTx` in `copy_artifact.go`).
+- [x] Cross-cutting reference rewrite (TECH-3742): `RewriteInternalReferences`
+      now also rewrites agent instructions, skill bodies, autopilot descriptions
+      and chat messages (`references.go`).
 
-One-time bulk (Settings extension):
-- [ ] Labels, roles/permissions, connections, credentials, GitHub install,
-      skills, documents/folders/notes, workspace settings.
+One-time bulk (Settings — `CopyFoundation`, `copy_foundation.go` + `copy_roles.go`):
+- [x] Labels (workspace bulk), skills (`skill` + `skill_version` + `skill_file`,
+      per-item `CopySkill` + bulk), connections + credentials (+ bindings; the
+      credential cipher uses an instance-wide master key, so ciphertext copies
+      unchanged), roles/groups/permissions (`cerebro_role` +
+      `cerebro_role_assignment` (member subjects) + `cerebro_workspace_grant`
+      (member/role/group/workspace_default subjects) + `cerebro_group` +
+      members (by user)/capabilities; agent/project-scoped access — group→agent,
+      agent role assignments, agent grants, project→group — healed post-agent/
+      project by `RelinkGroupAccess`), workspace settings
+      (`cerebro_workspace_settings` + auth settings).
+- [x] Documents/folders/notes: `CopyWorkspaceArtifacts` (earlier increment).
 
 Wiring:
-- [ ] sqlc/raw-SQL store methods per entity; handler package; routes in
-      `server/cmd/server/router.go` (admin/owner gated); update
-      `docs/agents/permission-system.md` (CI guard).
-- [ ] Frontend `packages/cerebro-workspace-copy/`: Settings tab (bulk) + per-item
-      "Copy to workspace" action; feature flag `cerebro_workspace_copy`.
-- [ ] Guide doc: re-pair a runtime in the target workspace.
+- [x] Handler entity_types: `foundation`, `skill`, `group_access` added; conflict
+      policy plumbed (`handler.go`). Route unchanged (`/cerebro/copy`).
+- [x] Frontend `packages/cerebro-workspace-copy/`: fixed-order console (foundation
+      "do this first" step → agents → projects → issues → chats → autopilots),
+      conflict-policy selector, issue status filter, select-all + copy-all,
+      squad-assigned autopilots labelled, foundation + documents bulk buttons,
+      relink + group-access heal. Feature flag `cerebro_workspace_copy`.
+- [ ] Guide doc: re-pair a runtime + reconnect GitHub in the target workspace.
 
-## Excluded
+## Excluded (deliberate scope decisions)
 
-- Done + cancelled issues (stay in source archive).
-- Squads (set up manually).
+- **Done + cancelled issues** stay in the source archive.
+- **Squads** are set up manually; a squad-assigned autopilot is shown but its
+  squad assignee is not carried.
+- **Tasks / runs** (agent execution history) are NOT copied. They are runtime
+  bookkeeping (a `task` is a unit of dispatched work for a specific runtime;
+  `agent_run` rows are its execution log) tied to runtimes that don't exist in
+  the target until re-paired. Carrying them would point at dead runtimes and
+  re-trigger or mis-attribute work. Chat messages keep their text (`task_id`
+  cleared); the conversation survives, the execution log does not. Re-running
+  work in the target produces fresh tasks/runs.
+- **GitHub installations** cannot be duplicated: `installation_id` is globally
+  unique (one GitHub App install ↔ one row), so an installation still held by
+  the source is skipped and must be reconnected in the target after the merge
+  (the runtime re-pair pattern). Connected when free.
+- **Group → runtime access**: copied agents are parked (no runtime); runtime
+  grants are configured in the target when the owner re-pairs a runtime.

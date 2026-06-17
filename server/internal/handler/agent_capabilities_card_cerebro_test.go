@@ -7,7 +7,12 @@ import (
 	"encoding/json"
 	"sort"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -142,5 +147,92 @@ func TestRuntimeSecretSetFromCaps_Status(t *testing.T) {
 	}, "rt-4", false)
 	if !redacted.Redacted || len(redacted.Names) != 0 || redacted.Count != 1 {
 		t.Fatalf("expected redacted with count=1 and no names, got %+v", redacted)
+	}
+}
+
+// CEREBRO-PATCH(agent-capabilities-observed-test): TECH-3738 Bid B unit tests
+// for the observed-access drift logic — observed tool usage compared against the
+// declared policy, with blocked/unmapped use flagged as drift.
+
+func TestObservedToolStatus(t *testing.T) {
+	cases := []struct {
+		perm       string
+		hasRow     bool
+		wantStatus string
+		wantDrift  bool
+	}{
+		{"allow", true, observedStatusAllowed, false},
+		{"ask", true, observedStatusNeedsApproval, false},
+		{"deny", true, observedStatusBlocked, true},
+		{"", false, observedStatusUnmapped, true},   // no policy row → drift
+		{"weird", true, observedStatusUnmapped, true}, // enum drift → treated as unmapped
+	}
+	for _, c := range cases {
+		gotStatus, gotDrift := observedToolStatus(c.perm, c.hasRow)
+		if gotStatus != c.wantStatus || gotDrift != c.wantDrift {
+			t.Fatalf("observedToolStatus(%q,%v) = (%q,%v); want (%q,%v)",
+				c.perm, c.hasRow, gotStatus, gotDrift, c.wantStatus, c.wantDrift)
+		}
+	}
+}
+
+func TestPermissionLookupFromRows_MatchesTitleAndKey(t *testing.T) {
+	rows := []cerebrotoolpolicy.TableRow{
+		{ToolKey: "bash", Title: "Bash", Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow}},
+		{ToolKey: "bigquery.query", Title: "", Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingDeny}},
+		{ToolKey: "", Title: "", Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAsk}}, // skipped: no key/title
+	}
+	perm := permissionLookupFromRows(rows)
+	// task_message.tool stores "Bash"; the catalog key is "bash" — case-folded match.
+	if perm["bash"] != "allow" {
+		t.Fatalf("expected bash→allow, got %q", perm["bash"])
+	}
+	if perm["bigquery.query"] != "deny" {
+		t.Fatalf("expected bigquery.query→deny, got %q", perm["bigquery.query"])
+	}
+}
+
+func TestObservedAccessFromUsage_KnownWithDrift(t *testing.T) {
+	usage := []cerebrodb.ListAgentObservedToolUsageRow{
+		{Tool: "Bash", Uses: 12, LastUsed: pgtype.Timestamptz{Time: time.Unix(1_700_000_000, 0), Valid: true}},
+		{Tool: "Read", Uses: 5},
+		{Tool: "WebFetch", Uses: 2},  // no policy row → unmapped drift
+		{Tool: "DropTable", Uses: 1}, // denied → blocked drift
+	}
+	perm := map[string]string{"bash": "allow", "read": "allow", "droptable": "deny"}
+
+	got := observedAccessFromUsage(usage, 7, perm, observedAccessWindowDays)
+
+	if got.Status != capStatusKnown {
+		t.Fatalf("expected status known, got %q", got.Status)
+	}
+	if got.TaskCount != 7 {
+		t.Fatalf("expected task_count 7, got %d", got.TaskCount)
+	}
+	if got.DriftCount != 2 {
+		t.Fatalf("expected 2 drift tools (WebFetch unmapped + DropTable blocked), got %d", got.DriftCount)
+	}
+	if len(got.Tools) != 4 {
+		t.Fatalf("expected 4 observed tools, got %d", len(got.Tools))
+	}
+	// Bash: allowed, no drift, last_used populated as RFC3339.
+	if got.Tools[0].Name != "Bash" || got.Tools[0].Status != observedStatusAllowed || got.Tools[0].Drift {
+		t.Fatalf("unexpected Bash entry: %+v", got.Tools[0])
+	}
+	if got.Tools[0].LastUsed == "" {
+		t.Fatalf("expected Bash last_used to be populated")
+	}
+}
+
+func TestObservedAccessFromUsage_NoRunsIsNotConfigured(t *testing.T) {
+	got := observedAccessFromUsage(nil, 0, map[string]string{}, observedAccessWindowDays)
+	if got.Status != capStatusNotConfigured {
+		t.Fatalf("expected not_configured when the agent ran nothing, got %q", got.Status)
+	}
+	if got.DriftCount != 0 || len(got.Tools) != 0 {
+		t.Fatalf("expected empty observed access, got %+v", got)
+	}
+	if got.WindowDays != observedAccessWindowDays {
+		t.Fatalf("expected window_days %d, got %d", observedAccessWindowDays, got.WindowDays)
 	}
 }

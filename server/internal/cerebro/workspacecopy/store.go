@@ -56,7 +56,14 @@ type CopyResult struct {
 	Reactions    int64       `json:"reactions_copied,omitempty"`
 	Labels       int64       `json:"labels_copied,omitempty"`
 	Attachments  int64       `json:"attachments_copied,omitempty"`
-	AlreadyDone  bool        `json:"already_copied,omitempty"`
+	// Artifacts counts documents/notes/reports carried alongside this issue or
+	// project (artifacts scoped to it). Zero when the entity has none.
+	Artifacts int64 `json:"artifacts_copied,omitempty"`
+	// Wakeups / Reminders count the scheduled agent wakeups and date reminders
+	// carried alongside this issue. Zero when it has none.
+	Wakeups     int64 `json:"wakeups_copied,omitempty"`
+	Reminders   int64 `json:"reminders_copied,omitempty"`
+	AlreadyDone bool  `json:"already_copied,omitempty"`
 	// CascadeCopied counts the descendant items copied alongside this root in a
 	// cascade copy (sub-issues for an issue, issues for a project). Zero for a
 	// plain single-item copy.
@@ -73,10 +80,14 @@ func (s *Store) CopyIssue(ctx context.Context, runID, targetWorkspace, sourceIss
 
 // CopyAgent copies one agent into targetWorkspace "parked" (no runtime); the
 // owner re-pairs a runtime there via the guide. Instructions and all settings
-// travel on the agent row. Returns ErrNameConflict if the name is taken.
-func (s *Store) CopyAgent(ctx context.Context, runID, targetWorkspace, sourceAgent pgtype.UUID) (CopyResult, error) {
+// travel on the agent row, and the agent's skill bindings (agent_skill) are
+// remapped to the copied skills. A name clash is resolved by policy: skip
+// (reuse the existing target agent), overwrite (update it from the source) or
+// keep_both (create a suffixed copy). With the default skip policy and no
+// matching target agent, the copy proceeds normally.
+func (s *Store) CopyAgent(ctx context.Context, runID, targetWorkspace, sourceAgent pgtype.UUID, policy conflictPolicy) (CopyResult, error) {
 	return s.inTx(ctx, func(tx pgx.Tx) (CopyResult, error) {
-		return copyAgentTx(ctx, tx, runID, targetWorkspace, sourceAgent)
+		return copyAgentTx(ctx, tx, runID, targetWorkspace, sourceAgent, policy)
 	})
 }
 
@@ -247,6 +258,22 @@ func copyIssueTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceI
 		return CopyResult{}, err
 	}
 
+	// artifacts (documents/notes/reports) scoped to this issue travel with it.
+	artifactsCopied, err := copyIssueArtifactsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace, sourceIssue, targetID)
+	if err != nil {
+		return CopyResult{}, err
+	}
+
+	// scheduled agent wakeups + date reminders follow the issue.
+	wakeupsCopied, err := copyIssueWakeupsTx(ctx, tx, runID, sourceWorkspace, targetWorkspace, sourceIssue, targetID, commentMap)
+	if err != nil {
+		return CopyResult{}, err
+	}
+	remindersCopied, err := copyIssueRemindersTx(ctx, tx, sourceIssue, targetID)
+	if err != nil {
+		return CopyResult{}, err
+	}
+
 	return CopyResult{
 		EntityType:   "issue",
 		SourceID:     sourceIssue,
@@ -257,6 +284,9 @@ func copyIssueTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceI
 		Reactions:    rTag.RowsAffected(),
 		Labels:       labelsCopied,
 		Attachments:  attachCopied,
+		Artifacts:    artifactsCopied,
+		Wakeups:      wakeupsCopied,
+		Reminders:    remindersCopied,
 	}, nil
 }
 
@@ -434,7 +464,7 @@ func ensureLabelTx(ctx context.Context, tx pgx.Tx, runID, sourceWorkspace, targe
 	return targetLabel, nil
 }
 
-func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceAgent pgtype.UUID) (CopyResult, error) {
+func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceAgent pgtype.UUID, policy conflictPolicy) (CopyResult, error) {
 	if existing, done, err := lookupMapping(ctx, tx, targetWorkspace, "agent", sourceAgent); err != nil {
 		return CopyResult{}, err
 	} else if done {
@@ -447,30 +477,66 @@ func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceA
 		return CopyResult{}, fmt.Errorf("load source agent: %w", err)
 	}
 
-	// name-conflict guard (UNIQUE(workspace_id, name)); resolved by policy slice.
-	var dup int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM agent WHERE workspace_id = $1 AND name = $2`, targetWorkspace, name).Scan(&dup); err != nil {
-		return CopyResult{}, fmt.Errorf("name check: %w", err)
-	}
-	if dup > 0 {
-		return CopyResult{}, fmt.Errorf("%w: agent %q", ErrNameConflict, name)
+	// name-conflict handling against UNIQUE(workspace_id, name).
+	var existingTarget pgtype.UUID
+	clashErr := tx.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`, targetWorkspace, name).Scan(&existingTarget)
+	switch {
+	case clashErr == nil:
+		switch policy {
+		case conflictSkip:
+			// reuse the existing target agent; map source → it, copy no new row.
+			if err := recordMapping(ctx, tx, runID, sourceWorkspace, targetWorkspace, "agent", sourceAgent, existingTarget, nil, nil); err != nil {
+				return CopyResult{}, err
+			}
+			return CopyResult{EntityType: "agent", SourceID: sourceAgent, TargetID: existingTarget, AlreadyDone: true}, nil
+		case conflictOverwrite:
+			// update the existing target agent's carried fields from the source,
+			// then map to it and refresh its skill bindings.
+			if _, err := tx.Exec(ctx, `
+				UPDATE agent tgt SET avatar_url = src.avatar_url, runtime_mode = src.runtime_mode,
+				    runtime_config = src.runtime_config, visibility = src.visibility,
+				    max_concurrent_tasks = src.max_concurrent_tasks, description = src.description,
+				    instructions = src.instructions, custom_env = src.custom_env, custom_args = src.custom_args,
+				    mcp_config = src.mcp_config, model = src.model, persona_sandbox = src.persona_sandbox,
+				    thinking_level = src.thinking_level, updated_at = now()
+				FROM agent src WHERE tgt.id = $1 AND src.id = $2`,
+				existingTarget, sourceAgent); err != nil {
+				return CopyResult{}, fmt.Errorf("overwrite agent: %w", err)
+			}
+			if err := recordMapping(ctx, tx, runID, sourceWorkspace, targetWorkspace, "agent", sourceAgent, existingTarget, nil, nil); err != nil {
+				return CopyResult{}, err
+			}
+			if err := copyAgentSkillsTx(ctx, tx, targetWorkspace, sourceAgent, existingTarget); err != nil {
+				return CopyResult{}, err
+			}
+			return CopyResult{EntityType: "agent", SourceID: sourceAgent, TargetID: existingTarget}, nil
+		case conflictKeepBoth:
+			n, err := uniqueName(ctx, tx, "agent", targetWorkspace, name)
+			if err != nil {
+				return CopyResult{}, err
+			}
+			name = n
+		}
+	case clashErr != pgx.ErrNoRows:
+		return CopyResult{}, fmt.Errorf("name check: %w", clashErr)
 	}
 
 	// copy the agent row "parked": runtime_id NULL, status offline, not archived.
-	// instructions + all settings columns travel with the row.
+	// instructions + all settings columns travel with the row. name may have been
+	// suffixed by the keep_both policy.
 	var targetID pgtype.UUID
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO agent (id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility,
 		                   status, max_concurrent_tasks, owner_id, description, runtime_id, instructions,
 		                   custom_env, custom_args, mcp_config, model, persona_sandbox,
 		                   thinking_level, created_at, updated_at)
-		SELECT gen_random_uuid(), $1, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility,
+		SELECT gen_random_uuid(), $1, $3, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility,
 		       'offline', a.max_concurrent_tasks, a.owner_id, a.description, NULL, a.instructions,
 		       a.custom_env, a.custom_args, a.mcp_config, a.model, a.persona_sandbox,
 		       a.thinking_level, a.created_at, now()
 		FROM agent a WHERE a.id = $2
 		RETURNING id`,
-		targetWorkspace, sourceAgent).Scan(&targetID); err != nil {
+		targetWorkspace, sourceAgent, name).Scan(&targetID); err != nil {
 		return CopyResult{}, fmt.Errorf("copy agent: %w", err)
 	}
 
@@ -478,5 +544,30 @@ func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceA
 		return CopyResult{}, err
 	}
 
+	// skill bindings: link the copied agent to the copied skills it had.
+	if err := copyAgentSkillsTx(ctx, tx, targetWorkspace, sourceAgent, targetID); err != nil {
+		return CopyResult{}, err
+	}
+
 	return CopyResult{EntityType: "agent", SourceID: sourceAgent, TargetID: targetID}, nil
+}
+
+// copyAgentSkillsTx links the copied agent to the target-workspace skills that
+// correspond to its source skill bindings. Only skills already copied (present
+// in the copy map) are linked; a skill not yet copied is silently skipped (the
+// foundation pass copies skills before agents, so this is the common case).
+// Idempotent via ON CONFLICT.
+func copyAgentSkillsTx(ctx context.Context, tx pgx.Tx, targetWorkspace, sourceAgent, targetAgent pgtype.UUID) error {
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO agent_skill (agent_id, skill_id, created_at)
+		SELECT $1, sm.target_id, now()
+		FROM agent_skill ask
+		JOIN cerebro_workspace_copy_map sm
+		  ON sm.target_workspace_id = $2 AND sm.entity_type = 'skill' AND sm.source_id = ask.skill_id
+		WHERE ask.agent_id = $3
+		ON CONFLICT DO NOTHING`,
+		targetAgent, targetWorkspace, sourceAgent); err != nil {
+		return fmt.Errorf("copy agent skills: %w", err)
+	}
+	return nil
 }

@@ -57,6 +57,14 @@ const FlagSubIssueNoOwnerMention = "cerebro_sub_issue_no_owner_mention"
 const FlagSubIssueRequireAgentTag = "cerebro_sub_issue_require_agent_tag"
 const FlagSubIssueNoSplitSession = "cerebro_sub_issue_no_split_session"
 
+// FlagCommentTargetGuardWakeupExempt (TECH-3761) is a sub-toggle of the base
+// guard. When ON, an agent that has already scheduled a still-active wakeup on
+// this issue is exempt from the base recipient requirement: the wakeup is the
+// follow-up action, so the comment does not also have to tag a human. Default
+// OFF — the base guard behaves exactly as before until an admin turns it on.
+// The sub-issue checks (TECH-3099) are unaffected by this exemption.
+const FlagCommentTargetGuardWakeupExempt = "cerebro_comment_target_guard_wakeup_exempt"
+
 // flagReader is the subset of the cerebro Queries the guard needs to resolve
 // its feature flags. Satisfied by *cerebrodb.Queries; the interface keeps the
 // guard unit-testable without a database.
@@ -88,6 +96,10 @@ func New(flags flagReader) *Service { return &Service{flags: flags} }
 //   - ownerUserIDs: workspace owner user IDs (mention://member/<user_id>)
 //   - taskPostedOnParent: true when the same task session already posted on
 //     the parent issue (pre-computed by the handler via cerebro_comment_task)
+//   - agentHasActiveWakeup: true when this agent already has a pending/claimed
+//     wakeup on this issue (pre-computed by the handler). With the
+//     FlagCommentTargetGuardWakeupExempt flag ON this waives the base recipient
+//     requirement only — the wakeup is the follow-up action (TECH-3761).
 func (s *Service) RejectComment(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
@@ -95,6 +107,7 @@ func (s *Service) RejectComment(
 	isSubIssue bool,
 	ownerUserIDs []string,
 	taskPostedOnParent bool,
+	agentHasActiveWakeup bool,
 ) (string, bool) {
 	// Members may comment freely; the guard only applies to agents.
 	if s == nil || authorType != "agent" {
@@ -110,8 +123,16 @@ func (s *Service) RejectComment(
 
 	// Base check: comment must address at least one recipient. An issue link
 	// does not count — it points at a case, not a person (TECH-3279).
+	//
+	// TECH-3761 exemption: if the agent has already scheduled a still-active
+	// wakeup on this issue and the exemption flag is on, the recipient
+	// requirement is waived — the wakeup is itself the follow-up action, so a
+	// human tag is not also required. The sub-issue checks below still run.
 	if !hasRecipient(content) {
-		return MissingTargetMessage, false
+		exempt := flags[FlagCommentTargetGuardWakeupExempt] && agentHasActiveWakeup
+		if !exempt {
+			return MissingTargetMessage, false
+		}
 	}
 
 	// TECH-3099 checks — only run on sub-issues.

@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -160,6 +161,37 @@ type AgentCapabilitySecretSet struct {
 	RuntimeID string   `json:"runtime_id,omitempty"` // set when Source=runtime
 }
 
+// CEREBRO-PATCH(agent-capabilities-observed-tool): TECH-3738 Bid B — one tool the
+// agent ACTUALLY invoked in its recent runs, with how often, when last, and how
+// that observed use lines up against its declared policy. Status is the
+// declared-vs-observed verdict: allowed (used something it may use),
+// needs_approval (used an ask-gated tool), blocked (used a denied tool — drift),
+// unmapped (used a tool with no policy row on record — drift, we cannot account
+// for it). Drift is the security signal: observed access the declared policy does
+// not sanction.
+type AgentCapabilityObservedTool struct {
+	Name       string `json:"name"`
+	Uses       int64  `json:"uses"`
+	LastUsed   string `json:"last_used,omitempty"` // RFC3339, empty if unknown
+	Permission string `json:"permission,omitempty"` // allow | ask | deny | "" (no row)
+	Status     string `json:"status"`               // allowed | needs_approval | blocked | unmapped
+	Drift      bool   `json:"drift"`
+}
+
+// AgentCapabilityObservedAccess is what the agent was OBSERVED to use recently
+// (Bid B), distinct from the declared layers above. It covers tools only — the
+// one runtime-usage signal recorded today (task_message.tool); it never claims
+// observed secret use, which is not recorded anywhere. Status mirrors the
+// secret-set discipline: known (we have run data), not_configured (the agent
+// logged no tool use in the window — genuinely nothing), unknown (lookup failed).
+type AgentCapabilityObservedAccess struct {
+	Status     string                        `json:"status"`
+	WindowDays int                           `json:"window_days"`
+	TaskCount  int64                         `json:"task_count"`
+	Tools      []AgentCapabilityObservedTool `json:"tools"`
+	DriftCount int                           `json:"drift_count"`
+}
+
 // AgentCapabilityLimits captures the boundaries the agent runs inside (what it
 // is LIMITED by): the sandbox policy and the MCP server surface.
 type AgentCapabilityLimits struct {
@@ -185,7 +217,11 @@ type AgentCapabilities struct {
 	// secret bindings it inherits from its runtime. Names are owner/admin-only.
 	AgentSecrets   AgentCapabilitySecretSet `json:"agent_secrets"`
 	RuntimeSecrets AgentCapabilitySecretSet `json:"runtime_secrets"`
-	Limits         AgentCapabilityLimits    `json:"limits"`
+	// CEREBRO-PATCH(agent-capabilities-observed-access): TECH-3738 Bid B — tools
+	// the agent was observed to actually use recently, each compared against its
+	// declared policy so undeclared/blocked use (drift) is visible on the card.
+	ObservedAccess AgentCapabilityObservedAccess `json:"observed_access"`
+	Limits         AgentCapabilityLimits         `json:"limits"`
 }
 
 // GetAgentCapabilities handles GET /api/agents/{id}/capabilities. Access control
@@ -265,6 +301,12 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	reveal := h.mayRevealAgentSecretNames(r, agent.WorkspaceID)
 	out.AgentSecrets = buildAgentSecretSet(agent, reveal)
 	out.RuntimeSecrets = h.buildRuntimeSecretSet(r, agent, reveal)
+
+	// OBSERVED (TECH-3738 Bid B) — the tools the agent actually invoked in its
+	// recent runs, each compared against the declared policy rows above so
+	// blocked/unmapped use surfaces as drift. Tools only: it is the one
+	// runtime-usage signal recorded; observed secret use is not tracked anywhere.
+	out.ObservedAccess = h.buildObservedAccess(r, agent.ID, rows)
 
 	// LIMITS — sandbox policy + MCP server surface.
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
@@ -571,4 +613,130 @@ func runtimeSecretSetFromCaps(caps map[string]any, runtimeID string, reveal bool
 		}
 	}
 	return set
+}
+
+// observedAccessWindowDays is the look-back window for observed tool usage. 30
+// days is long enough to cover an agent's recent working rhythm without drowning
+// the card in tools from a one-off task months ago.
+const observedAccessWindowDays = 30
+
+// Observed-tool status verdicts: how an observed (actually-used) tool lines up
+// against the agent's declared policy. blocked/unmapped are drift.
+const (
+	observedStatusAllowed       = "allowed"        // used, and the policy allows it
+	observedStatusNeedsApproval = "needs_approval" // used, and the policy asks first
+	observedStatusBlocked       = "blocked"        // used, but the policy denies it — drift
+	observedStatusUnmapped      = "unmapped"       // used, but no policy row on record — drift
+)
+
+// buildObservedAccess reads the tools the agent actually invoked in the recent
+// window (task_message.tool aggregated per tool) and compares each against the
+// declared policy rows to flag drift. A missing CerebroQueries handle or a failed
+// lookup yields status=unknown — the card never claims "nothing observed" when it
+// simply could not look it up.
+func (h *Handler) buildObservedAccess(r *http.Request, agentID pgtype.UUID, rows []cerebrotoolpolicy.TableRow) AgentCapabilityObservedAccess {
+	out := AgentCapabilityObservedAccess{
+		Status:     capStatusUnknown,
+		WindowDays: observedAccessWindowDays,
+		Tools:      []AgentCapabilityObservedTool{},
+	}
+	if h.CerebroQueries == nil {
+		return out
+	}
+	usage, err := h.CerebroQueries.ListAgentObservedToolUsage(r.Context(), cerebrodb.ListAgentObservedToolUsageParams{
+		AgentID:    agentID,
+		WindowDays: observedAccessWindowDays,
+	})
+	if err != nil {
+		return out
+	}
+	taskCount, err := h.CerebroQueries.CountAgentTasksInWindow(r.Context(), cerebrodb.CountAgentTasksInWindowParams{
+		AgentID:    agentID,
+		WindowDays: observedAccessWindowDays,
+	})
+	if err != nil {
+		return out
+	}
+	return observedAccessFromUsage(usage, taskCount, permissionLookupFromRows(rows), observedAccessWindowDays)
+}
+
+// permissionLookupFromRows indexes the declared policy rows by tool name so an
+// observed tool ("Bash") can be matched to its effective permission regardless of
+// whether the row carries the display title ("Bash") or the key ("bash"). Keys
+// are lower-cased on both sides so the runtime's tool name matches the catalog.
+func permissionLookupFromRows(rows []cerebrotoolpolicy.TableRow) map[string]string {
+	perm := make(map[string]string, len(rows)*2)
+	for _, row := range rows {
+		setting := string(row.Effective.Setting)
+		if setting == "" {
+			continue
+		}
+		if row.Title != "" {
+			perm[strings.ToLower(row.Title)] = setting
+		}
+		if row.ToolKey != "" {
+			perm[strings.ToLower(row.ToolKey)] = setting
+		}
+	}
+	return perm
+}
+
+// observedAccessFromUsage is the pure core of buildObservedAccess (unit-tested
+// without a DB). taskCount distinguishes "the agent ran nothing recently"
+// (not_configured) from "it ran but every message was tool-less" — both yield an
+// empty tool list, but only a genuine zero-activity agent is not_configured.
+func observedAccessFromUsage(usage []cerebrodb.ListAgentObservedToolUsageRow, taskCount int64, permByName map[string]string, windowDays int) AgentCapabilityObservedAccess {
+	out := AgentCapabilityObservedAccess{
+		WindowDays: windowDays,
+		TaskCount:  taskCount,
+		Tools:      []AgentCapabilityObservedTool{},
+	}
+	for _, u := range usage {
+		perm, hasRow := permByName[strings.ToLower(u.Tool)]
+		status, drift := observedToolStatus(perm, hasRow)
+		tool := AgentCapabilityObservedTool{
+			Name:       u.Tool,
+			Uses:       u.Uses,
+			Permission: perm,
+			Status:     status,
+			Drift:      drift,
+		}
+		if u.LastUsed.Valid {
+			tool.LastUsed = u.LastUsed.Time.UTC().Format(time.RFC3339)
+		}
+		if drift {
+			out.DriftCount++
+		}
+		out.Tools = append(out.Tools, tool)
+	}
+	switch {
+	case len(out.Tools) > 0:
+		out.Status = capStatusKnown
+	case taskCount == 0:
+		out.Status = capStatusNotConfigured
+	default:
+		// Ran tasks but logged no tool calls — we know there is nothing to show.
+		out.Status = capStatusNotConfigured
+	}
+	return out
+}
+
+// observedToolStatus maps an observed tool's declared permission to its
+// observed-vs-declared verdict and whether it is drift. A tool used with no
+// policy row (hasRow=false) is unmapped drift: we observed access the declared
+// model does not account for. A used-but-denied tool is the strongest drift.
+func observedToolStatus(permission string, hasRow bool) (status string, drift bool) {
+	if !hasRow {
+		return observedStatusUnmapped, true
+	}
+	switch permission {
+	case "allow":
+		return observedStatusAllowed, false
+	case "ask":
+		return observedStatusNeedsApproval, false
+	case "deny":
+		return observedStatusBlocked, true
+	default:
+		return observedStatusUnmapped, true
+	}
 }
