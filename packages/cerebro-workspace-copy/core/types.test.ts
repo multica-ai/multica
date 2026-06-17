@@ -26,6 +26,17 @@ describe("CopyResultSchema", () => {
       target_id: "b",
     });
     expect(parsed.comments_copied).toBeUndefined();
+    expect(parsed.cascade_copied).toBeUndefined();
+  });
+
+  it("parses a cascade copy result", () => {
+    const parsed = CopyResultSchema.parse({
+      entity_type: "issue",
+      source_id: "src",
+      target_id: "tgt",
+      cascade_copied: 14,
+    });
+    expect(parsed.cascade_copied).toBe(14);
   });
 
   it("rejects a malformed result so parseWithFallback can fall back", () => {
@@ -53,5 +64,16 @@ describe("RelinkResultSchema", () => {
     const parsed = RelinkResultSchema.parse({});
     expect(parsed.parents_relinked).toBeUndefined();
     expect(parsed.projects_relinked).toBeUndefined();
+  });
+
+  it("parses the combined relink + rewrite counts", () => {
+    const parsed = RelinkResultSchema.parse({
+      parents_relinked: 2,
+      projects_relinked: 1,
+      issues_rewritten: 5,
+      comments_rewritten: 9,
+    });
+    expect(parsed.issues_rewritten).toBe(5);
+    expect(parsed.comments_rewritten).toBe(9);
   });
 });

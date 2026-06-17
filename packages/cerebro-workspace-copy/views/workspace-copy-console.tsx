@@ -17,6 +17,7 @@ import { Copy, CopyCheck, Link2, Loader2, ShieldOff, TriangleAlert } from "lucid
 import { toast } from "sonner";
 
 import { Button } from "@multica/ui/components/ui/button";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -35,6 +36,7 @@ import {
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import { workspaceListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects";
@@ -45,18 +47,24 @@ import { issueListOptions } from "@multica/core/issues";
 
 import { relinkIssues } from "../core/api";
 import { useCopyToWorkspace } from "../core/queries";
-import { ISSUE_SHAPED, type WorkspaceCopyEntityType } from "../core/types";
+import {
+  CASCADE_CAPABLE,
+  ISSUE_SHAPED,
+  type WorkspaceCopyEntityType,
+} from "../core/types";
 
 interface TypeOption {
   value: WorkspaceCopyEntityType;
   label: string;
 }
 
-// The entity kinds the console offers. "dm" is intentionally omitted — DMs are
-// not copied as part of a workspace merge.
+// The entity kinds the console offers. Channels and DMs are both issue-shaped
+// (kind 'channel' / 'dm') and travel through the same backend copier; the
+// console lists them as separate types so each can be picked and copied.
 const TYPE_OPTIONS: TypeOption[] = [
   { value: "issue", label: "Issues" },
   { value: "channel", label: "Channels" },
+  { value: "dm", label: "Direct messages" },
   { value: "project", label: "Projects" },
   { value: "agent", label: "Agents" },
   { value: "chat", label: "Chats" },
@@ -83,7 +91,9 @@ export function WorkspaceCopyConsole() {
   const [filter, setFilter] = useState("");
   const [statuses, setStatuses] = useState<Record<string, RowStatus>>({});
   const [relinking, setRelinking] = useState(false);
+  const [cascade, setCascade] = useState(false);
 
+  const { getActorName } = useActorName();
   const copyMutation = useCopyToWorkspace();
 
   const { data: workspaces = [] } = useQuery(workspaceListOptions());
@@ -95,7 +105,10 @@ export function WorkspaceCopyConsole() {
 
   // One query per entity type, only the selected one is enabled.
   const issues = useQuery({ ...issueListOptions(wsId), enabled: entityType === "issue" });
-  const channels = useQuery({ ...channelListOptions(wsId), enabled: entityType === "channel" });
+  const channels = useQuery({
+    ...channelListOptions(wsId),
+    enabled: entityType === "channel" || entityType === "dm",
+  });
   const projects = useQuery({ ...projectListOptions(wsId), enabled: entityType === "project" });
   const agents = useQuery({ ...agentListOptions(wsId), enabled: entityType === "agent" });
   const chats = useQuery({ ...chatSessionsOptions(wsId), enabled: entityType === "chat" });
@@ -107,7 +120,7 @@ export function WorkspaceCopyConsole() {
     {
       issue: issues,
       channel: channels,
-      dm: issues,
+      dm: channels,
       project: projects,
       agent: agents,
       chat: chats,
@@ -122,7 +135,23 @@ export function WorkspaceCopyConsole() {
           label: `#${i.number} ${i.title}`,
         }));
       case "channel":
-        return (channels.data ?? []).map((c) => ({ id: c.id, label: c.title }));
+        return (channels.data ?? [])
+          .filter((c) => c.kind === "channel")
+          .map((c) => ({ id: c.id, label: c.title || "Untitled channel" }));
+      case "dm":
+        // DMs have no name of their own — label them by their participants so
+        // the admin can tell which conversation is which.
+        return (channels.data ?? [])
+          .filter((c) => c.kind === "dm")
+          .map((c) => {
+            const names = c.participants
+              .map((p) => getActorName(p.user_type, p.user_id))
+              .filter((n) => n && n.trim().length > 0);
+            return {
+              id: c.id,
+              label: names.join(", ") || c.title || "Direct message",
+            };
+          });
       case "project":
         return (projects.data ?? []).map((p) => ({ id: p.id, label: p.title }));
       case "agent":
@@ -137,7 +166,7 @@ export function WorkspaceCopyConsole() {
       default:
         return [];
     }
-  }, [entityType, issues.data, channels.data, projects.data, agents.data, chats.data, autopilots.data]);
+  }, [entityType, issues.data, channels.data, projects.data, agents.data, chats.data, autopilots.data, getActorName]);
 
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -173,16 +202,22 @@ export function WorkspaceCopyConsole() {
       toast.error("Pick a target workspace first.");
       return;
     }
+    const withCascade = cascade && CASCADE_CAPABLE.has(entityType);
     setStatuses((s) => ({ ...s, [row.id]: "copying" }));
     copyMutation.mutate(
-      { wsId, input: { targetWorkspaceId: targetId, entityType, sourceId: row.id } },
+      {
+        wsId,
+        input: { targetWorkspaceId: targetId, entityType, sourceId: row.id, cascade: withCascade },
+      },
       {
         onSuccess: (res) => {
           setStatuses((s) => ({ ...s, [row.id]: "done" }));
+          const extra = res.cascade_copied ?? 0;
+          const cascadeNote = extra > 0 ? ` (+${extra} underneath)` : "";
           toast.success(
             res.already_copied
               ? `"${row.label}" was already copied.`
-              : `Copied "${row.label}".`,
+              : `Copied "${row.label}"${cascadeNote}.`,
           );
         },
         onError: (err) => {
@@ -202,7 +237,8 @@ export function WorkspaceCopyConsole() {
     try {
       const res = await relinkIssues(wsId, targetId);
       toast.success(
-        `Relinked ${res.parents_relinked ?? 0} parent and ${res.projects_relinked ?? 0} project links.`,
+        `Relinked ${res.parents_relinked ?? 0} parent and ${res.projects_relinked ?? 0} project links; ` +
+          `rewrote references in ${res.issues_rewritten ?? 0} issues and ${res.comments_rewritten ?? 0} comments.`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Relink failed.");
@@ -255,6 +291,9 @@ export function WorkspaceCopyConsole() {
               if (!v) return;
               setEntityType(v as WorkspaceCopyEntityType);
               setFilter("");
+              // Reset the cascade toggle so a choice made for one type never
+              // silently carries into another.
+              setCascade(false);
             }}
           >
             <SelectTrigger className="w-[min(100%,12rem)]">
@@ -269,6 +308,20 @@ export function WorkspaceCopyConsole() {
             </SelectContent>
           </Select>
         </div>
+
+        {CASCADE_CAPABLE.has(entityType) && (
+          <label className="flex items-center gap-2 pb-2 text-sm">
+            <Checkbox
+              checked={cascade}
+              onCheckedChange={(v) => setCascade(v === true)}
+            />
+            <span>
+              {entityType === "project"
+                ? "Include all open issues in the project"
+                : "Include all open sub-issues"}
+            </span>
+          </label>
+        )}
 
         {ISSUE_SHAPED.has(entityType) && (
           <Button

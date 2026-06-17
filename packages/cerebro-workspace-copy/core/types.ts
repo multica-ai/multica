@@ -25,7 +25,17 @@ export interface CopyToWorkspaceInput {
   targetWorkspaceId: string;
   entityType: WorkspaceCopyEntityType;
   sourceId: string;
+  // Cascade copies everything underneath the picked root: for an issue, all
+  // open descendant sub-issues; for a project, all its open issues. Only
+  // meaningful for entity types in CASCADE_CAPABLE.
+  cascade?: boolean;
 }
+
+// Entity types that support a cascade ("take everything underneath") copy.
+export const CASCADE_CAPABLE: ReadonlySet<WorkspaceCopyEntityType> = new Set([
+  "issue",
+  "project",
+]);
 
 // Mirrors workspacecopy.CopyResult (server/internal/cerebro/workspacecopy/store.go).
 // Every count is optional because the backend omits zero values (omitempty).
@@ -40,13 +50,19 @@ export const CopyResultSchema = z.object({
   labels_copied: z.number().optional(),
   attachments_copied: z.number().optional(),
   already_copied: z.boolean().optional(),
+  cascade_copied: z.number().optional(),
 });
 export type CopyResult = z.infer<typeof CopyResultSchema>;
 
-// Mirrors workspacecopy.RelinkResult (copy_more.go).
+// Mirrors workspacecopy.relinkResponse (RelinkResult + RewriteResult, handler.go).
+// The relink post-pass also rewrites internal references (mention-link UUIDs +
+// identifier tokens) to the copies, so the response carries both link counts and
+// rewrite counts.
 export const RelinkResultSchema = z.object({
   parents_relinked: z.number().optional(),
   projects_relinked: z.number().optional(),
+  issues_rewritten: z.number().optional(),
+  comments_rewritten: z.number().optional(),
 });
 export type RelinkResult = z.infer<typeof RelinkResultSchema>;
 

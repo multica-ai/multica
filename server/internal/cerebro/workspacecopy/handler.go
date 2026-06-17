@@ -42,6 +42,16 @@ type copyRequest struct {
 	EntityType        string `json:"entity_type"`
 	SourceID          string `json:"source_id"`
 	RunID             string `json:"run_id,omitempty"`
+	// Cascade copies everything underneath the picked root in one call: for an
+	// issue, all open descendant sub-issues; for a project, all its open issues.
+	Cascade bool `json:"cascade,omitempty"`
+}
+
+// relinkResponse is the combined result of the target-only post-pass: structural
+// link healing plus internal-reference rewriting.
+type relinkResponse struct {
+	RelinkResult
+	RewriteResult
 }
 
 // Copy copies one entity from the URL workspace into the target workspace.
@@ -60,14 +70,20 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// relink is a target-only post-pass (no source): it heals issue->parent /
-	// issue->project links once both ends are copied, regardless of copy order.
+	// issue->project links AND rewrites internal text references (mention-link
+	// UUIDs + identifier tokens) to the copies, regardless of copy order.
 	if req.EntityType == "relink" {
 		rel, err := h.Store.RelinkIssueRelations(r.Context(), target)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "relink failed: "+err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, rel)
+		rew, err := h.Store.RewriteInternalReferences(r.Context(), target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "reference rewrite failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, relinkResponse{RelinkResult: rel, RewriteResult: rew})
 		return
 	}
 
@@ -88,11 +104,19 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 	)
 	switch req.EntityType {
 	case "issue", "channel", "dm":
-		res, err = h.Store.CopyIssue(r.Context(), runID, target, source)
+		if req.Cascade {
+			res, err = h.Store.CopyIssueCascade(r.Context(), runID, target, source)
+		} else {
+			res, err = h.Store.CopyIssue(r.Context(), runID, target, source)
+		}
 	case "agent":
 		res, err = h.Store.CopyAgent(r.Context(), runID, target, source)
 	case "project":
-		res, err = h.Store.CopyProject(r.Context(), runID, target, source)
+		if req.Cascade {
+			res, err = h.Store.CopyProjectCascade(r.Context(), runID, target, source)
+		} else {
+			res, err = h.Store.CopyProject(r.Context(), runID, target, source)
+		}
 	case "chat":
 		res, err = h.Store.CopyChat(r.Context(), runID, target, source)
 	case "autopilot":

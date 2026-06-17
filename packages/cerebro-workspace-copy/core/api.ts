@@ -25,6 +25,7 @@ export async function copyEntity(
       target_workspace_id: input.targetWorkspaceId,
       entity_type: input.entityType,
       source_id: input.sourceId,
+      cascade: input.cascade ?? false,
     }),
   });
   return parseWithFallback(

@@ -57,6 +57,10 @@ type CopyResult struct {
 	Labels       int64       `json:"labels_copied,omitempty"`
 	Attachments  int64       `json:"attachments_copied,omitempty"`
 	AlreadyDone  bool        `json:"already_copied,omitempty"`
+	// CascadeCopied counts the descendant items copied alongside this root in a
+	// cascade copy (sub-issues for an issue, issues for a project). Zero for a
+	// plain single-item copy.
+	CascadeCopied int64 `json:"cascade_copied,omitempty"`
 }
 
 // CopyIssue copies one issue (kind issue/channel/dm) with its comments,

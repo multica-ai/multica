@@ -41,7 +41,20 @@ Per-item copy (next increments — one slice each, mirror `CopyIssue`/`CopyAgent
 - [x] Project: row + members + nesting (parent remapped). `CopyProject`. (sprints, repo resources, issue-linking still TODO)
 - [x] Chat: session + messages, agent remapped (parked, runtime null). `CopyChat`. (attachments TODO)
 - [x] Autopilot: row + triggers (copied DISABLED, no webhook token), assignee/project remapped. `CopyAutopilot`. (runs history TODO)
-- [x] Channel/DM: copied via `CopyIssue` (kind passthrough).
+- [x] Channel/DM: copied via `CopyIssue` (kind passthrough). DM is now a
+      first-class pick in the console type dropdown (TECH-3732).
+- [x] Internal references rewritten (TECH-3732): the relink post-pass also runs
+      `RewriteInternalReferences`, which rewrites mention-link UUIDs
+      (`mention://issue/<src>` → `<tgt>`) and bare identifier tokens
+      (`TECH-123` → `FIR-<n>`) inside copied descriptions + comments, so text
+      references resolve to the copies. Idempotent; source untouched. Verified
+      (`TestRewriteInternalReferences`).
+- [x] Cascade copy (TECH-3732): `CopyIssueCascade` (issue + all open descendant
+      sub-issues) and `CopyProjectCascade` (project + all its open issues +
+      their open descendants), each healing links + references once at the end.
+      Done/cancelled descendants excluded (the picked root is always copied).
+      Console exposes it as an "Include everything underneath" checkbox. Verified
+      (`TestCopyIssueCascade`, `TestCopyProjectCascade`).
 - [ ] Agent extras: skills bindings (after bulk skill sync), wakeups, tasks/runs.
 - [ ] Chat (+ messages, attachments); Channel/DM (issue kind).
 - [ ] Autopilot (+ triggers, runs).
