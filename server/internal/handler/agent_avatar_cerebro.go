@@ -41,6 +41,7 @@ func (h *Handler) cerebroGenerateAgentAvatarAsync(workspaceID string, created db
 	}()
 }
 
+// CEREBRO-PATCH(agent-avatar-async): TECH-3760 background per-agent avatar regen.
 // CerebroGenerateAgentAvatar handles POST /api/agents/{id}/generate-avatar.
 // It regenerates the avatar for an existing agent in the BACKGROUND: the image
 // model call takes ~50s and previously blocked the request, so the inspector

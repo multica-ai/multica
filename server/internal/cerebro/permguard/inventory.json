@@ -437,6 +437,10 @@
       "gate": "cerebro_agent_access"
     },
     {
+      "id": "POST /api/agents/{id}/generate-avatar",
+      "gate": "cerebro_agent_access"
+    },
+    {
       "id": "POST /api/agents/{id}/restore",
       "gate": "cerebro_agent_access"
     },
