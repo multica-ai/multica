@@ -75,7 +75,7 @@ func NewS3StorageFromEnv() *S3Storage {
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			o.UsePathStyle = os.Getenv("S3_FORCE_PATH_STYLE") != "false"
 		})
 	}
 
