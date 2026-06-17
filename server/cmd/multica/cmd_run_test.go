@@ -471,7 +471,7 @@ func TestAgyTranscriptTrackerSync(t *testing.T) {
 	tracker.transcript = transcriptPath
 	tracker.readNewEntriesLocked()
 
-	// Verify all three lines are marked as seen
+	// Verify all three lines are marked as seen (line numbers are 1-based)
 	if !tracker.seen[1] || !tracker.seen[2] || !tracker.seen[3] {
 		t.Fatalf("expected all 3 lines to be seen, got: %v", tracker.seen)
 	}
@@ -485,10 +485,113 @@ func TestAgyTranscriptTrackerSync(t *testing.T) {
 		t.Fatalf("expected pendingFinal content to be %q, got %q", "new reply", tracker.pendingFinal.Content)
 	}
 
+	// Verify that a model step immediately following a tool-calling step does NOT set pendingFinal
+	// by simulating a tool call in a fresh tracker.
+	tracker2 := &agyTranscriptTracker{
+		reporter: &localRunReporter{},
+		seen:     make(map[int]bool),
+	}
+	// step 0: tool call
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 0, Source: "MODEL", Type: "PLANNER_RESPONSE", ToolCalls: []agyTranscriptTool{{Name: "test"}}})
+	// step 1: tool output
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", Content: "tool output"})
+	if tracker2.pendingFinal != nil {
+		t.Fatalf("expected pendingFinal to be nil after tool output, got %v", tracker2.pendingFinal)
+	}
+
 	// Re-sync should not process anything new
 	tracker.readNewEntriesLocked()
 	if len(tracker.seen) != 3 {
 		t.Fatalf("re-sync processed new entries, seen count = %d, want 3", len(tracker.seen))
+	}
+}
+
+// TestAgyTranscriptTrackerToolOutputNotFinal verifies that a PLANNER_RESPONSE
+// step immediately following a tool-calling step is NOT set as pendingFinal.
+// Scenario: think → dispatch tool → process output → real summary.
+// Only the real summary should become an Issue comment.
+func TestAgyTranscriptTrackerToolOutputNotFinal(t *testing.T) {
+	now := time.Now().UTC()
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: now.Add(-1 * time.Second),
+		ticker:    time.NewTicker(time.Hour),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+	entries := []*agyTranscriptEntry{
+		{StepIndex: 0, Source: "USER_EXPLICIT", Type: "USER_INPUT", CreatedAt: now.Format(time.RFC3339),
+			Content: "<USER_REQUEST>\nrun tests and tell me the result\n</USER_REQUEST>"},
+		// step 1: model dispatches a tool
+		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "I'll run the tests now.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
+		// step 2: model processes raw tool output — MUST NOT become pendingFinal
+		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "=== RUN   TestFoo\n--- PASS: TestFoo (0.01s)\nok  \tsome/pkg\t0.123s"},
+		// step 3: genuine human-readable reply — MUST become pendingFinal
+		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "All tests pass. The fix is working correctly."},
+	}
+	for _, e := range entries {
+		tracker.mapEntry(e)
+	}
+	if tracker.pendingFinal == nil {
+		t.Fatal("pendingFinal is nil; expected the final summary to be buffered")
+	}
+	want := "All tests pass. The fix is working correctly."
+	if tracker.pendingFinal.Content != want {
+		t.Errorf("pendingFinal.Content = %q\nwant               = %q", tracker.pendingFinal.Content, want)
+	}
+	if tracker.pendingFinal.Type != "final" {
+		t.Errorf("pendingFinal.Type = %q, want %q", tracker.pendingFinal.Type, "final")
+	}
+}
+
+// TestAgyTranscriptTrackerToolOutputChainNotFinal verifies that a multi-tool
+// chain (git status → go test → summary) correctly filters all intermediate
+// tool-output steps and captures only the final human summary.
+func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
+	now := time.Now().UTC()
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: now.Add(-1 * time.Second),
+		ticker:    time.NewTicker(time.Hour),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+	entries := []*agyTranscriptEntry{
+		{StepIndex: 0, Source: "USER_EXPLICIT", Type: "USER_INPUT", CreatedAt: now.Format(time.RFC3339),
+			Content: "<USER_REQUEST>\ncheck git status and run tests\n</USER_REQUEST>"},
+		// Tool A
+		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "Let me check git status first.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "git status"}}}},
+		// Output A — must NOT be final
+		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "On branch feat/fix\nnothing to commit, working tree clean"},
+		// Tool B
+		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "Good. Now I'll run the tests.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
+		// Output B — must NOT be final
+		{StepIndex: 4, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "=== RUN   TestBar\n--- PASS: TestBar (0.00s)"},
+		// Real summary — MUST be final
+		{StepIndex: 5, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "Everything looks good: git status is clean and all tests pass."},
+	}
+	for _, e := range entries {
+		tracker.mapEntry(e)
+	}
+	if tracker.pendingFinal == nil {
+		t.Fatal("pendingFinal is nil; expected the final summary to be buffered")
+	}
+	want := "Everything looks good: git status is clean and all tests pass."
+	if tracker.pendingFinal.Content != want {
+		t.Errorf("pendingFinal.Content = %q\nwant               = %q", tracker.pendingFinal.Content, want)
 	}
 }
 
@@ -501,7 +604,6 @@ func TestInferCLIName(t *testing.T) {
 		{in: "/usr/local/bin/claude", want: "claude"},
 		{in: `C:\Tools\codex.exe`, want: `C:\Tools\codex`},
 	}
-
 	for _, tt := range tests {
 		if got := inferCLIName(tt.in); got != tt.want {
 			t.Fatalf("inferCLIName(%q) = %q, want %q", tt.in, got, tt.want)
