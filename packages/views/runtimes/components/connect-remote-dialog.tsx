@@ -229,7 +229,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              macOS / Linux
+              {t(($) => $.connect.platform_mac)}
             </button>
             <button
               type="button"
@@ -241,7 +241,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              Windows
+              {t(($) => $.connect.platform_windows)}
             </button>
           </div>
 
