@@ -1746,6 +1746,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/impact", h.GetSkillImpact)
 					// CEREBRO-PATCH(skill-observations-route): TECH-3077 — learning observations.
 					r.Get("/observations", h.GetSkillObservations)
+					// CEREBRO-PATCH(skill-autolearn-route): TECH-3692 — toggle self-learning switch.
+					r.Post("/auto-learn", h.SetSkillAutoLearn)
 					r.Get("/forks", h.ListSkillForks)
 					r.Post("/forks", h.CreateSkillFork)
 					// CEREBRO-PATCH(skill-fork-parent-lineage): FIR-2629 — "forked from" lineage for the web UI.
