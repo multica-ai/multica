@@ -13,6 +13,7 @@ import {
   RuntimeUsageListSchema,
   SquadListSchema,
   SquadSchema,
+  TimelineEntriesSchema,
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -72,6 +73,25 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+});
+
+describe("TimelineEntriesSchema", () => {
+  it("preserves source_task_id for agent failure comments", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "API Error: 500 Internal server error",
+        comment_type: "system",
+        source_task_id: "task-1",
+      },
+    ]);
+
+    expect(parsed[0]?.source_task_id).toBe("task-1");
   });
 });
 

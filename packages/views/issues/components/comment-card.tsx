@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -245,6 +245,60 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
     (entry.attachments ?? [])
       .filter((attachment) => !contentReferencesAttachment(content, attachment))
       .map((attachment) => attachment.id),
+  );
+}
+
+function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
+  return (
+    entry.actor_type === "agent" &&
+    entry.comment_type === "system" &&
+    typeof entry.source_task_id === "string" &&
+    entry.source_task_id.length > 0
+  );
+}
+
+function TaskCommentRetryButton({
+  issueId,
+  taskId,
+  className,
+}: {
+  issueId: string;
+  taskId: string;
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(issueId, taskId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  return (
+    <div className={cn("flex", className)}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={handleRetry}
+        disabled={retrying}
+        aria-label={t(($) => $.execution_log.retry_task_aria)}
+      >
+        {retrying ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RotateCcw className="h-3.5 w-3.5" />
+        )}
+        {t(($) => $.execution_log.retry_task_tooltip)}
+      </Button>
+    </div>
   );
 }
 
@@ -603,6 +657,13 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
+          {retryableAgentFailureComment(entry) && (
+            <TaskCommentRetryButton
+              issueId={issueId}
+              taskId={entry.source_task_id}
+              className="mt-2 pl-12 pr-4"
+            />
+          )}
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -883,6 +944,13 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                {retryableAgentFailureComment(entry) && (
+                  <TaskCommentRetryButton
+                    issueId={issueId}
+                    taskId={entry.source_task_id}
+                    className="mt-2 pl-10"
+                  />
+                )}
                 <ReactionBar
                   reactions={reactions}
                   currentUserId={currentUserId}

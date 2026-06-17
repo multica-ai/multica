@@ -89,6 +89,7 @@ export const CommentSchema = z.object({
   resolved_at: z.string().nullable().default(null),
   resolved_by_type: z.string().nullable().default(null),
   resolved_by_id: z.string().nullable().default(null),
+  source_task_id: z.string().nullable().optional(),
 }).loose() as unknown as z.ZodType<Comment>;
 
 export const EMPTY_COMMENT: Comment = {

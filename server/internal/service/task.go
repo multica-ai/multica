@@ -1283,7 +1283,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID)
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
 					}
 				}
 			}
@@ -1444,7 +1444,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// want to spam the issue with "task timed out" messages on every
 	// daemon hiccup.
 	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
 	// Mirror the issue fallback for chat tasks: write an assistant
@@ -2096,7 +2096,7 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 	return ws.IssuePrefix
 }
 
-func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID pgtype.UUID) {
+func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
 	if content == "" {
 		return
 	}
@@ -2118,13 +2118,14 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		}
 	}
 	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     issueID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "agent",
-		AuthorID:    agentID,
-		Content:     content,
-		Type:        commentType,
-		ParentID:    parentID,
+		IssueID:      issueID,
+		WorkspaceID:  issue.WorkspaceID,
+		AuthorType:   "agent",
+		AuthorID:     agentID,
+		Content:      content,
+		Type:         commentType,
+		ParentID:     parentID,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		return
@@ -2136,14 +2137,15 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		ActorID:     util.UUIDToString(agentID),
 		Payload: map[string]any{
 			"comment": map[string]any{
-				"id":          util.UUIDToString(comment.ID),
-				"issue_id":    util.UUIDToString(comment.IssueID),
-				"author_type": comment.AuthorType,
-				"author_id":   util.UUIDToString(comment.AuthorID),
-				"content":     comment.Content,
-				"type":        comment.Type,
-				"parent_id":   util.UUIDToPtr(comment.ParentID),
-				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"id":             util.UUIDToString(comment.ID),
+				"issue_id":       util.UUIDToString(comment.IssueID),
+				"author_type":    comment.AuthorType,
+				"author_id":      util.UUIDToString(comment.AuthorID),
+				"content":        comment.Content,
+				"type":           comment.Type,
+				"parent_id":      util.UUIDToPtr(comment.ParentID),
+				"source_task_id": util.UUIDToPtr(comment.SourceTaskID),
+				"created_at":     comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
 			},
 			"issue_title":  issue.Title,
 			"issue_status": issue.Status,
