@@ -293,6 +293,28 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.24",
+        date: "2026-06-17",
+        title: "Custom Runtime Profiles and Clearer Agent Setup",
+        changes: [],
+        features: [
+          "Teams can now create custom runtime profiles so agents use the right local tools, model choices, and working setup for each environment",
+          "Command line agent setup now includes thinking level choices, making it easier to match an agent's reasoning depth to the work",
+        ],
+        improvements: [
+          "New and updated runtime profiles appear more quickly across the app, and agents prefer the most specific profile available",
+          "Failure reports are quieter and easier to review, with repeated client errors and freezes grouped before they create noise",
+          "Issue trigger previews use clearer wording so it is easier to see which agents or squads will start after a comment is posted",
+        ],
+        fixes: [
+          "Office 365 email delivery works more reliably when the first sign-in method is unavailable",
+          "GitHub integration keeps installation context more reliably and now shows pending checks while CI is still running",
+          "Codex runs fail fast when the app server exits, avoiding unclear stuck states",
+          "Runtime owners can delete self-healing runtimes again, and incompatible model choices are cleared when switching runtimes",
+          "Issue pages handle unknown icons safely, and plain filenames in comments no longer turn into external links by mistake",
+        ],
+      },
+      {
         version: "0.3.23",
         date: "2026-06-16",
         title: "Issue Date Filters and More Stable Agent Runs",
