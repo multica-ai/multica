@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Save } from "lucide-react";
+import { BrainCircuit, Save, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
@@ -46,6 +46,7 @@ interface KnowledgeRAGSettings {
   type_filters: KnowledgeTypeFilter[];
   confidence_threshold: RAGConfidenceThreshold;
   curator_runtime_policy: RAGCuratorRuntimePolicy;
+  token_budget: number;
 }
 
 const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
@@ -64,6 +65,7 @@ const DEFAULT_RAG_SETTINGS: KnowledgeRAGSettings = {
   type_filters: [],
   confidence_threshold: "high",
   curator_runtime_policy: "workspace_default",
+  token_budget: 2000,
 };
 
 function readCuratorSettings(settings: Record<string, unknown> | undefined): KnowledgeCuratorSettings {
@@ -104,12 +106,14 @@ function readRAGSettings(settings: Record<string, unknown> | undefined): Knowled
     )
     : DEFAULT_RAG_SETTINGS.type_filters;
   const rawLimit = typeof data.limit === "number" ? data.limit : DEFAULT_RAG_SETTINGS.limit;
+  const rawTokenBudget = typeof data.token_budget === "number" ? data.token_budget : DEFAULT_RAG_SETTINGS.token_budget;
   return {
     auto_inject: data.auto_inject !== false,
     limit: Math.max(1, Math.min(8, Math.round(rawLimit))),
     type_filters: typeFilters,
     confidence_threshold: threshold,
     curator_runtime_policy: runtimePolicy,
+    token_budget: Math.max(500, Math.min(8000, Math.round(rawTokenBudget))),
   };
 }
 
@@ -143,6 +147,9 @@ export function CuratorTab() {
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const dirty = !sameSettings(settings, savedSettings) || !sameRAGSettings(ragSettings, savedRAGSettings);
+  const modelChanged =
+    settings.model !== savedSettings.model ||
+    settings.embedding_model !== savedSettings.embedding_model;
 
   useEffect(() => {
     setSettings(savedSettings);
@@ -318,6 +325,21 @@ export function CuratorTab() {
                 />
               </label>
               <label className="space-y-1.5">
+                <span className="text-xs font-medium">{t(($) => $.curator.rag_token_budget_label)}</span>
+                <Input
+                  type="number"
+                  min={500}
+                  max={8000}
+                  step={100}
+                  value={ragSettings.token_budget}
+                  onChange={(e) => setRAGSettings((s) => ({ ...s, token_budget: Math.max(500, Math.min(8000, Number(e.target.value) || 500)) }))}
+                  disabled={!canManageWorkspace || saving}
+                />
+                <span className="block text-xs text-muted-foreground">
+                  {t(($) => $.curator.rag_token_budget_description)}
+                </span>
+              </label>
+              <label className="space-y-1.5">
                 <span className="text-xs font-medium">{t(($) => $.curator.rag_confidence_label)}</span>
                 <Select
                   value={ragSettings.confidence_threshold}
@@ -373,6 +395,12 @@ export function CuratorTab() {
             </div>
           </CardContent>
         </Card>
+        {canManageWorkspace && dirty && modelChanged && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>{t(($) => $.curator.rag_model_changed_hint)}</span>
+          </div>
+        )}
         {canManageWorkspace ? (
           <div className="flex justify-end">
             <Button size="sm" onClick={handleSave} disabled={!dirty || saving}>

@@ -1746,6 +1746,7 @@ func (h *Handler) injectKnowledgeContextForClaim(ctx context.Context, resp *Agen
 		Limit:                   policy.Limit,
 		TypeFilters:             policy.TypeFilters,
 		ConfidenceThreshold:     policy.ConfidenceThreshold,
+		TokenBudget:             policy.TokenBudget,
 	})
 	if err != nil {
 		slog.Warn("task claim: failed to inject knowledge context",
@@ -1763,6 +1764,7 @@ type knowledgeRAGPolicy struct {
 	Limit               int32
 	TypeFilters         []string
 	ConfidenceThreshold string
+	TokenBudget         int32
 }
 
 func readKnowledgeRAGPolicy(raw []byte) knowledgeRAGPolicy {
@@ -1770,6 +1772,7 @@ func readKnowledgeRAGPolicy(raw []byte) knowledgeRAGPolicy {
 		AutoInject:          true,
 		Limit:               5,
 		ConfidenceThreshold: "high",
+		TokenBudget:         2000,
 	}
 	if len(raw) == 0 {
 		return policy
@@ -1805,6 +1808,9 @@ func readKnowledgeRAGPolicy(raw []byte) knowledgeRAGPolicy {
 				policy.TypeFilters = append(policy.TypeFilters, itemType)
 			}
 		}
+	}
+	if v, ok := rag["token_budget"].(float64); ok && v >= 500 && v <= 8000 {
+		policy.TokenBudget = int32(v)
 	}
 	return policy
 }

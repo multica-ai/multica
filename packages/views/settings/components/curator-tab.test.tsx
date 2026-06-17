@@ -24,6 +24,14 @@ const workspaceRef = vi.hoisted(() => ({
         base_url: "https://api.example.com/v1",
         secret_ref: "secret://workspace/curator",
       },
+      knowledge_rag: {
+        auto_inject: true,
+        limit: 5,
+        type_filters: [],
+        confidence_threshold: "high",
+        curator_runtime_policy: "workspace_default",
+        token_budget: 2000,
+      },
     } as Record<string, unknown>,
     repos: [] as { url: string }[],
   },
@@ -100,6 +108,14 @@ function resetFixtures() {
         base_url: "https://api.example.com/v1",
         secret_ref: "secret://workspace/curator",
       },
+      knowledge_rag: {
+        auto_inject: true,
+        limit: 5,
+        type_filters: [],
+        confidence_threshold: "high",
+        curator_runtime_policy: "workspace_default",
+        token_budget: 2000,
+      },
     },
     repos: [],
   };
@@ -147,5 +163,34 @@ describe("CuratorTab", () => {
     );
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
     expect(screen.getByText("Only admins and owners can update Curator settings.")).toBeTruthy();
+  });
+
+  it("renders token budget input with default value", () => {
+    render(<CuratorTab />, { wrapper: I18nWrapper });
+    const tokenBudgetInput = screen.getByDisplayValue("2000");
+    expect(tokenBudgetInput).toBeTruthy();
+    expect(tokenBudgetInput).toHaveAttribute("type", "number");
+  });
+
+  it("shows rebuild hint when model or embedding model changes", async () => {
+    const user = userEvent.setup();
+    render(<CuratorTab />, { wrapper: I18nWrapper });
+
+    const modelInput = screen.getByPlaceholderText("Model used to write drafts");
+    await user.clear(modelInput);
+    await user.type(modelInput, "gpt-4-new");
+
+    expect(screen.getByText(/Model or embedding model has changed/)).toBeTruthy();
+  });
+
+  it("does not show rebuild hint when only non-model fields change", async () => {
+    const user = userEvent.setup();
+    render(<CuratorTab />, { wrapper: I18nWrapper });
+
+    const providerInput = screen.getByPlaceholderText("openai, anthropic, custom");
+    await user.clear(providerInput);
+    await user.type(providerInput, "custom-v2");
+
+    expect(screen.queryByText(/Model or embedding model has changed/)).toBeNull();
   });
 });

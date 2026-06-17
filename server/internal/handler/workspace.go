@@ -213,6 +213,12 @@ func validateKnowledgeRAGSettings(settings any) error {
 			}
 		}
 	}
+	if v, ok := policy["token_budget"]; ok && v != nil {
+		budget, ok := jsonNumberToFloat(v)
+		if !ok || budget < 500 || budget > 8000 || budget != float64(int(budget)) {
+			return fmt.Errorf("knowledge_rag.token_budget must be an integer between 500 and 8000")
+		}
+	}
 	return nil
 }
 

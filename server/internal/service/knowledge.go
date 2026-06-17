@@ -146,6 +146,7 @@ type KnowledgeTaskClaimParams struct {
 	Limit                   int32
 	TypeFilters             []string
 	ConfidenceThreshold     string
+	TokenBudget             int32
 }
 
 type KnowledgeTaskProjectResource struct {
@@ -885,6 +886,7 @@ func (s *KnowledgeService) SearchForTaskClaim(ctx context.Context, p KnowledgeTa
 			Rank:             pgtype.Int4{Int32: int32(idx + 1), Valid: true},
 			Score:            pgtype.Float8{Float64: result.FinalScore, Valid: true},
 			InjectionReason:  pgtype.Text{String: item.Reason, Valid: item.Reason != ""},
+			TokenBudget:      pgtype.Int4{Int32: p.TokenBudget, Valid: p.TokenBudget > 0},
 		}); err != nil {
 			return nil, err
 		}

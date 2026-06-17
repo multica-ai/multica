@@ -222,6 +222,9 @@
       "playbook": "Playbooks",
       "reference": "References"
     },
+    "rag_token_budget_label": "Token budget",
+    "rag_token_budget_description": "Maximum tokens allocated per RAG injection. Higher values provide more context but increase agent task cost.",
+    "rag_model_changed_hint": "Model or embedding model has changed from the saved configuration. Existing embeddings were built with the previous model and may produce lower-quality retrieval results. Consider triggering a full re-embedding of published knowledge items after saving.",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update Curator settings.",
