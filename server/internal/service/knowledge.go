@@ -1703,7 +1703,15 @@ func (s *KnowledgeService) scoreSimilarity(ctx context.Context, workspaceID pgty
 	if len(content) > 8000 {
 		content = content[:8000]
 	}
-	embedding, err := s.Embedder.BuildEmbedding(ctx, content)
+
+	// Resolve workspace-aware engine so that local runtime mode
+	// can block embedding instead of silently using the cloud provider.
+	engine := s.Embedder
+	if wsEngine, ok := s.Embedder.(workspaceCuratorEngine); ok {
+		engine = wsEngine.ForWorkspace(ctx, workspaceID)
+	}
+
+	embedding, err := engine.BuildEmbedding(ctx, content)
 	if err != nil {
 		slog.Warn("similarity embedding failed", "error", err)
 		return "", 0, nil

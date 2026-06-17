@@ -11,8 +11,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // setupCuratorDraftServices creates a CuratorDraftTaskService (with nil Curator)
@@ -176,7 +178,7 @@ func TestFailCuratorDraftTask_WrongRuntime(t *testing.T) {
 	}
 }
 
-func TestGetCuratorDraftStatus_WrongWorkspace(t *testing.T) {
+func TestGetCuratorDraftStatus_Success(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("test database not available")
 	}
@@ -185,18 +187,56 @@ func TestGetCuratorDraftStatus_WrongWorkspace(t *testing.T) {
 
 	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, testRuntimeID, "issue", "completed", []byte(`{}`))
 
-	// Try to get status with a non-existent workspace ID.
-	req := newRequest(http.MethodGet,
-		fmt.Sprintf("/api/workspaces/00000000-0000-0000-0000-000000000001/knowledge/curator-drafts/%s", taskID),
-		nil)
-	req = withURLParam(req, "id", "00000000-0000-0000-0000-000000000001")
+	// Simulate the RequireWorkspaceMember middleware injecting workspace context.
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/knowledge/curator-drafts/%s", taskID), nil)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	// Inject workspace context as the middleware would.
+	userUUID := pgtype.UUID{}
+	userUUID.Scan(testUserID)
+	wsUUID := pgtype.UUID{}
+	wsUUID.Scan(testWorkspaceID)
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID:      userUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		t.Fatalf("get test member: %v", err)
+	}
+	ctx := middleware.SetMemberContext(req.Context(), testWorkspaceID, member)
+	req = req.WithContext(ctx)
 	req = withURLParam(req, "taskId", taskID)
 
 	rec := httptest.NewRecorder()
 	testHandler.GetCuratorDraftStatus(rec, req)
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for wrong workspace status, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetCuratorDraftStatus_MissingWorkspaceContext(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("test database not available")
+	}
+	cleanup := setupCuratorDraftServices(t)
+	defer cleanup()
+
+	taskID := createCuratorDraftTaskFixture(t, testWorkspaceID, testRuntimeID, "issue", "completed", []byte(`{}`))
+
+	// Request without middleware-injected workspace context (no SetMemberContext).
+	req := httptest.NewRequest(http.MethodGet,
+		fmt.Sprintf("/api/knowledge/curator-drafts/%s", taskID), nil)
+	req.Header.Set("Content-Type", "application/json")
+	req = withURLParam(req, "taskId", taskID)
+
+	rec := httptest.NewRecorder()
+	testHandler.GetCuratorDraftStatus(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing workspace context, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

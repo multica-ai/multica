@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -145,14 +146,10 @@ func (h *Handler) FailCuratorDraftTask(w http.ResponseWriter, r *http.Request) {
 
 // GetCuratorDraftStatus returns the status of a curator draft task. Used
 // by the frontend for polling after receiving a 202 Accepted.
+// Workspace context is resolved from the RequireWorkspaceMember middleware on the route group.
 func (h *Handler) GetCuratorDraftStatus(w http.ResponseWriter, r *http.Request) {
-	workspaceID := chi.URLParam(r, "id")
+	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-
-	_, ok = h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 	if !ok {
 		return
 	}
