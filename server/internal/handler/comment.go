@@ -904,6 +904,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		isSubIssue := issue.ParentIssueID.Valid
 		var ownerUserIDs []string
 		var taskPostedOnParent bool
+		// CEREBRO-PATCH(comment-target-guard-wakeup-exempt): TECH-3761 — does this agent already have a still-active wakeup on this issue? The guard waives the recipient requirement when it does and the exemption flag is on.
+		var agentHasActiveWakeup bool
+		if authorType == "agent" && h.CerebroQueries != nil {
+			if agentUUID, err := util.ParseUUID(authorID); err == nil {
+				if active, err := h.CerebroQueries.HasActiveWakeupForAgentIssue(r.Context(), cerebrodb.HasActiveWakeupForAgentIssueParams{WorkspaceID: issue.WorkspaceID, AgentID: agentUUID, IssueID: issue.ID}); err == nil {
+					agentHasActiveWakeup = active
+				}
+			}
+		}
 		if isSubIssue && authorType == "agent" {
 			// CEREBRO-PATCH(sub-issue-on-behalf-of): TECH-3099 fix — use task.OriginalUserID (the user the task was started for) instead of workspace role "owner", so the guard blocks the actual triggering human regardless of workspace role.
 			if taskIDHdr := r.Header.Get("X-Task-ID"); taskIDHdr != "" {
@@ -930,7 +939,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, req.Content, isSubIssue, ownerUserIDs, taskPostedOnParent); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 + TECH-3099.
+		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, req.Content, isSubIssue, ownerUserIDs, taskPostedOnParent, agentHasActiveWakeup); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 + TECH-3099 + TECH-3761.
 			writeError(w, http.StatusUnprocessableEntity, msg)
 			return
 		}

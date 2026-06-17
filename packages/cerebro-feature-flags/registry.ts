@@ -111,6 +111,9 @@ export type CerebroFlagKey =
   | "cerebro_comment_reminders"
   // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
   | "cerebro_comment_target_guard"
+  // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
+  // the recipient requirement when it already has an active wakeup on the issue.
+  | "cerebro_comment_target_guard_wakeup_exempt"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
@@ -325,6 +328,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // with a 422 telling the agent to add one. Members are never affected. Off
   // restores the prior behaviour (comments with no target allowed).
   cerebro_comment_target_guard: false,
+  // TECH-3761: OFF by default. When on (and the base guard is on), an agent
+  // that already has an active wakeup scheduled on the issue is exempt from the
+  // recipient requirement — the wakeup is the follow-up action, so the comment
+  // need not also tag a human. Off keeps the base guard's behaviour unchanged.
+  cerebro_comment_target_guard_wakeup_exempt: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
@@ -849,6 +857,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Reject an agent-authored comment that addresses no recipient — it must point at a person, an agent, or a squad. A bare issue link (e.g. MUL-123) no longer counts: it points at a case, not a person, so it never satisfies the rule. Member comments are never affected. Off restores the prior behaviour (agent comments with no recipient allowed). FIR-2674.",
+  },
+  {
+    key: "cerebro_comment_target_guard_wakeup_exempt",
+    label: "Exempt agents with a scheduled wakeup",
+    group: "issues",
+    description:
+      "Sub-setting of 'Require a recipient on agent comments'. When on, an agent that has already scheduled an active wakeup on this issue may post without naming a recipient — the wakeup is the follow-up action, so a human tag is not also required. Only the recipient requirement is waived; the sub-issue checks still apply. Requires 'Require a recipient on agent comments' to be on. Off keeps every agent comment subject to the recipient rule. TECH-3761.",
   },
   {
     key: "cerebro_firtal_welcome",
