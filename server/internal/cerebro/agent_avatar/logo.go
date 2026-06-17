@@ -68,7 +68,7 @@ func (h *Handler) GenerateLogos(w http.ResponseWriter, r *http.Request) {
 
 	cfg := h.gatewayConfig(r.Context(), wsID)
 	if cfg.baseURL == "" || cfg.apiKey == "" {
-		writeError(w, http.StatusServiceUnavailable, "image generation not configured: data registry AI gateway URL/key unset")
+		writeError(w, http.StatusServiceUnavailable, "image generation not configured: Firtal AI gateway URL/key unset")
 		return
 	}
 
