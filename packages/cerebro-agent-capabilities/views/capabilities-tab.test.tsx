@@ -116,11 +116,15 @@ describe("CerebroCapabilitiesTab", () => {
     // Skills.
     expect(screen.getByText("deploy")).toBeInTheDocument();
 
-    // Tools with verdicts: allow renders "Allow", deny renders "Block".
+    // Tools with verdicts: allow renders "Allow", deny renders "Block". Each
+    // verdict word also appears once in the legend, so the allow-tool row makes
+    // "Allow" appear twice and the deny-tool row makes "Block" appear twice,
+    // while "Ask" (no tool) appears only in the legend.
     expect(screen.getByText("add_comment")).toBeInTheDocument();
-    expect(screen.getByText("Allow")).toBeInTheDocument();
     expect(screen.getByText("create_local_runtime")).toBeInTheDocument();
-    expect(screen.getByText("Block")).toBeInTheDocument();
+    expect(screen.getAllByText("Allow")).toHaveLength(2);
+    expect(screen.getAllByText("Block")).toHaveLength(2);
+    expect(screen.getAllByText("Ask")).toHaveLength(1);
     expect(
       screen.getByText(/capped by builders \(Jesper\)/),
     ).toBeInTheDocument();
