@@ -518,6 +518,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dispatch always-listening agents in channels.
 	channelListenSvc := cerebrochannels.New(cerebroQueries, queries, h.TaskService, bus)
 	h.ChannelListen = channelListenSvc
+	h.ChannelPerms = channelListenSvc // CEREBRO-PATCH(router-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).
 	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 member presence (heartbeat + sweeper) and typing relay for the inbox Slack-block.
 	presenceHandler := cerebropresence.NewHandler(cerebropresence.NewTracker(cerebropresence.DefaultTTL), bus)
 	presenceHandler.StartSweeper(context.Background(), 20*time.Second)
@@ -1676,6 +1677,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// listen-mode toggle.
 				r.Get("/{id}/agent-settings", channelListenSvc.ListSettings)
 				r.Put("/{id}/agents/{agentId}/listen-mode", channelListenSvc.SetListenModeHandler)
+				// CEREBRO-PATCH(channel-perms-routes): TECH-3698 — per-channel
+				// permission settings (rename / add-remove members / leave).
+				r.Get("/{id}/permissions", channelListenSvc.GetPermissions)
+				r.Put("/{id}/permissions", channelListenSvc.SetPermissions)
 				// CEREBRO-PATCH(channel-archive-routes): per-(channel, user)
 				// archive flag (JEH-855/912).
 				r.Post("/{id}/archive", channelListenSvc.ArchiveChannelHandler)

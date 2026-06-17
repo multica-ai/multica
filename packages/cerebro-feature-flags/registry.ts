@@ -172,6 +172,10 @@ export type CerebroFlagKey =
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
   | "cerebro_comment_drafts"
+  // TECH-3698: per-channel permission settings (who may rename / add-remove
+  // participants / leave) surfaced in the channel settings sheet and the
+  // create-channel dialog. Gates only the configuration UI.
+  | "cerebro_channel_permissions"
   // TECH-3582: Workspace copy console — a Settings tab to copy individual
   // entities (issues, channels, projects, agents, chats, autopilots) into
   // another workspace when merging two workspaces. Non-destructive.
@@ -195,6 +199,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_sandbox_ui: true,
   cerebro_mcp_guide: true,
   cerebro_channels: true,
+  cerebro_channel_permissions: true, // TECH-3698
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
   cerebro_web_push: true,

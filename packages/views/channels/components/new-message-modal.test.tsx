@@ -319,6 +319,10 @@ describe("NewMessageModal", () => {
         name: "Alice, Mads",
         member_ids: ["alice", "mads"],
         agent_ids: [],
+        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
+        rename_policy: "admins",
+        add_members_policy: "everyone",
+        allow_self_leave: true,
       });
     });
   });
@@ -364,6 +368,10 @@ describe("NewMessageModal", () => {
         name: "Alice, Reviewer",
         member_ids: ["alice"],
         agent_ids: ["a1"],
+        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
+        rename_policy: "admins",
+        add_members_policy: "everyone",
+        allow_self_leave: true,
       });
     });
   });

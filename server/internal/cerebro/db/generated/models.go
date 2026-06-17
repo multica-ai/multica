@@ -432,6 +432,14 @@ type CerebroChannelArchived struct {
 	ArchivedAt pgtype.Timestamptz `json:"archived_at"`
 }
 
+type CerebroChannelPermission struct {
+	ChannelID        pgtype.UUID        `json:"channel_id"`
+	RenamePolicy     string             `json:"rename_policy"`
+	AddMembersPolicy string             `json:"add_members_policy"`
+	AllowSelfLeave   bool               `json:"allow_self_leave"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelState struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	UserID     pgtype.UUID        `json:"user_id"`

@@ -116,9 +116,12 @@ export type {
   ChannelAgentListenMode,
   ChannelAgentSetting,
   ChannelAgentSettingsResponse,
+  ChannelAddMembersPolicy, // CEREBRO-PATCH(core-types-channel-perms): TECH-3698
   ChannelKind,
   ChannelLastMessage,
   ChannelMember,
+  ChannelPermissions, // CEREBRO-PATCH(core-types-channel-perms): TECH-3698
+  ChannelRenamePolicy, // CEREBRO-PATCH(core-types-channel-perms): TECH-3698
   CreateChannelRequest,
 } from "./channel";
 export type { StorageAdapter } from "./storage";

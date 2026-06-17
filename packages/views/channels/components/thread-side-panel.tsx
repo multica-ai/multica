@@ -73,6 +73,7 @@ interface ThreadSidePanelProps {
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   currentUserId?: string;
+  canModerate?: boolean; // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
 }
 
 export function ThreadSidePanel({
@@ -88,6 +89,7 @@ export function ThreadSidePanel({
   onDelete,
   onToggleReaction,
   currentUserId,
+  canModerate, // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
 }: ThreadSidePanelProps) {
   const flatReplies = useMemo(
     () => (parentEntry ? collectThreadReplies(parentEntry.id, repliesByParent) : []),
@@ -157,6 +159,7 @@ export function ThreadSidePanel({
           entry={parentEntry}
           isRoot
           currentUserId={currentUserId}
+          canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
           onEdit={onEdit}
           onDelete={onDelete}
           onToggleReaction={onToggleReaction}
@@ -177,6 +180,7 @@ export function ThreadSidePanel({
             entry={reply}
             isRoot={false}
             currentUserId={currentUserId}
+            canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
             onEdit={onEdit}
             onDelete={onDelete}
             onToggleReaction={onToggleReaction}
@@ -201,6 +205,7 @@ interface ThreadEntryProps {
   entry: TimelineEntry;
   isRoot: boolean;
   currentUserId?: string;
+  canModerate?: boolean; // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -211,6 +216,7 @@ function ThreadEntry({
   entry,
   isRoot,
   currentUserId,
+  canModerate, // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
   onEdit,
   onDelete,
   onToggleReaction,
@@ -235,8 +241,11 @@ function ThreadEntry({
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEdit = isOwn;
-  const canDelete = isOwn;
+  // CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — admins/owners can delete others' replies.
+  const canDelete = isOwn || !!canModerate;
   const isTemp = entry.id.startsWith("temp-");
+  // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698 — keep action bar mounted while the emoji popover is open.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const reactions = entry.reactions ?? [];
   // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — match mobile message actions and reminders inside threads.
   const clearLongPressTimer = useCallback(() => {
@@ -400,11 +409,13 @@ function ThreadEntry({
         <div
           className={cn(
             "absolute -top-3 left-2 items-center gap-0.5 rounded-md border bg-background shadow-sm sm:left-auto sm:right-4",
-            actionsOpen ? "flex" : "hidden sm:group-hover/threadrow:flex sm:focus-within:flex",
+            // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698 — also stay open while the emoji popover is open.
+            actionsOpen || pickerOpen ? "flex" : "hidden sm:group-hover/threadrow:flex sm:focus-within:flex",
           )}
         >
           <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+            onOpenChange={setPickerOpen} // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698
             align="end"
           />
           <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>

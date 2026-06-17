@@ -154,6 +154,8 @@ type Handler struct {
 	CommentTargetGuard CommentTargetGuardInvoker
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
+	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).
+	ChannelPerms ChannelPermsInvoker
 	// CEREBRO-PATCH(handler-private-agent-run-request): FIR-2385 — turns a member's
 	// tag of an unowned private agent into a run-request in the owner's inbox.
 	PrivateAgentRunRequester PrivateAgentRunRequesterInvoker
@@ -351,6 +353,22 @@ type CommentTargetGuardInvoker interface {
 // CEREBRO-PATCH(handler-channel-create-guard-iface): seam for FIR-2660.
 type ChannelCreateGuardInvoker interface {
 	RejectCreate(ctx context.Context, workspaceID pgtype.UUID, callerType, callerID, kind string) (string, bool) // CEREBRO-PATCH(handler-channel-create-guard-iface): FIR-2660 feature-flag-gated, workspace-scoped.
+}
+
+// ChannelPermsInvoker is the upstream-side seam for Cerebro's per-channel
+// permission settings (TECH-3698). The upstream rename/subscribe/unsubscribe
+// handlers ask the cerebro service whether a member caller may perform the
+// action on a kind='channel'; the service resolves the channel's policy +
+// the caller's role internally. A nil invoker disables the gate.
+//
+// CEREBRO-PATCH(handler-channel-perms-iface): seam for TECH-3698.
+type ChannelPermsInvoker interface {
+	CanRenameChannel(ctx context.Context, channelID pgtype.UUID, callerType, callerID string) bool
+	CanManageMembers(ctx context.Context, channelID pgtype.UUID, callerType, callerID string) bool
+	CanSelfLeave(ctx context.Context, channelID pgtype.UUID, callerType, callerID string) bool
+	// SetCreatePermissions persists the creator's chosen policies for a new
+	// channel. Primitive args keep this seam free of the cerebro package.
+	SetCreatePermissions(ctx context.Context, channelID pgtype.UUID, renamePolicy, addMembersPolicy string, allowSelfLeave bool) error
 }
 
 // PrivateAgentRunRequesterInvoker is the upstream-side seam for FIR-2385. It is

@@ -827,11 +827,12 @@ var catalog = []Capability{
 		Key:         "manage_channels",
 		Title:       "Manage channels",
 		Category:    CategoryChannels,
-		Description: "Create or archive a channel and set an agent's listen mode in it.",
+		Description: "Create or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
 		Ops: []string{
 			"POST /api/channels/",
 			"POST /api/channels/{id}/archive",
 			"DELETE /api/channels/{id}/archive",
+			"PUT /api/channels/{id}/permissions",
 			"PUT /api/channels/{id}/agents/{agentId}/listen-mode",
 		},
 	},

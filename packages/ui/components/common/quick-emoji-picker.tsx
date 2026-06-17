@@ -14,14 +14,18 @@ interface QuickEmojiPickerProps {
   onSelect: (emoji: string) => void;
   align?: "start" | "end";
   className?: string;
+  // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698 — let callers keep
+  // their (otherwise hover-hidden) anchor mounted while the picker is open.
+  onOpenChange?: (open: boolean) => void;
 }
 
-function QuickEmojiPicker({ onSelect, align = "start", className }: QuickEmojiPickerProps) {
+function QuickEmojiPicker({ onSelect, align = "start", className, onOpenChange }: QuickEmojiPickerProps) {
   const [open, setOpen] = useState(false);
   const [showFull, setShowFull] = useState(false);
 
   const handleOpenChange = (v: boolean) => {
     setOpen(v);
+    onOpenChange?.(v); // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698
     if (!v) setShowFull(false);
   };
 

@@ -99,6 +99,7 @@ import type {
   ChannelAgentListenMode,
   ChannelAgentSetting,
   ChannelAgentSettingsResponse,
+  ChannelPermissions, // CEREBRO-PATCH(channel-perms-client): TECH-3698
   CreateChannelRequest,
   Project,
   ProjectMember,
@@ -252,6 +253,21 @@ import {
 // CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
 import { z } from "zod";
 const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
+
+// CEREBRO-PATCH(channel-perms-client): TECH-3698 — per-channel permission
+// settings schema + safe defaults (enum drift downgrades to the default).
+const DEFAULT_CHANNEL_PERMISSIONS: ChannelPermissions = {
+  rename_policy: "admins",
+  add_members_policy: "everyone",
+  allow_self_leave: true,
+};
+const ChannelPermissionsSchema = z
+  .object({
+    rename_policy: z.enum(["admins", "everyone"]).catch("admins"),
+    add_members_policy: z.enum(["admins", "everyone"]).catch("everyone"),
+    allow_self_leave: z.boolean().catch(true),
+  })
+  .loose();
 
 /** Identifies the calling client to the server.
  *  Sent on every HTTP request as X-Client-Platform / X-Client-Version /
@@ -2635,6 +2651,30 @@ export class ApiClient {
         body: JSON.stringify({ listen_mode: listenMode }),
       },
     );
+  }
+
+  // CEREBRO-PATCH(channel-perms-client): TECH-3698 — per-channel permission
+  // settings (who may rename, add/remove others, and whether members may
+  // leave). Parsed through a schema so a backend drift can never white-screen
+  // the channel; on a malformed body we fall back to the safe defaults.
+  async getChannelPermissions(channelId: string): Promise<ChannelPermissions> {
+    const raw = await this.fetch<unknown>(`/api/channels/${channelId}/permissions`);
+    return parseWithFallback(raw, ChannelPermissionsSchema, DEFAULT_CHANNEL_PERMISSIONS, {
+      endpoint: "GET /api/channels/:id/permissions",
+    });
+  }
+
+  async updateChannelPermissions(
+    channelId: string,
+    perms: ChannelPermissions,
+  ): Promise<ChannelPermissions> {
+    const raw = await this.fetch<unknown>(`/api/channels/${channelId}/permissions`, {
+      method: "PUT",
+      body: JSON.stringify(perms),
+    });
+    return parseWithFallback(raw, ChannelPermissionsSchema, perms, {
+      endpoint: "PUT /api/channels/:id/permissions",
+    });
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {

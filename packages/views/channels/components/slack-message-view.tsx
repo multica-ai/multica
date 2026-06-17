@@ -65,6 +65,10 @@ interface SlackMessageViewProps {
    */
   repliesByParent: Map<string, TimelineEntry[]>;
   currentUserId?: string;
+  // CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — workspace admins/owners
+  // may delete other people's messages (backend already permits it in
+  // DeleteComment). When true, the delete action is surfaced on every message.
+  canModerate?: boolean;
   activeThreadId?: string | null;
   onOpenThread: (parentId: string) => void;
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
@@ -77,6 +81,7 @@ export function SlackMessageView({
   topLevel,
   repliesByParent,
   currentUserId,
+  canModerate, // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
   activeThreadId,
   onOpenThread,
   onEdit,
@@ -104,6 +109,7 @@ export function SlackMessageView({
                 threadLastTs={latestDescendantTs(entry.id, repliesByParent)}
                 isThreadOpen={entry.id === activeThreadId}
                 currentUserId={currentUserId}
+                canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
                 onOpenThread={onOpenThread}
                 onEdit={onEdit}
                 onDelete={onDelete}
@@ -125,6 +131,7 @@ interface MessageRowProps {
   threadLastTs: string | null;
   isThreadOpen: boolean;
   currentUserId?: string;
+  canModerate?: boolean; // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
   onOpenThread: (parentId: string) => void;
   onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
@@ -139,6 +146,7 @@ const MessageRow = memo(function MessageRow({
   threadLastTs,
   isThreadOpen,
   currentUserId,
+  canModerate, // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
   onOpenThread,
   onEdit,
   onDelete,
@@ -150,6 +158,11 @@ const MessageRow = memo(function MessageRow({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [createIssueOpen, setCreateIssueOpen] = useState(false); // CEREBRO-PATCH(channels-create-issue-from-message): TECH-2909
   const [actionsOpen, setActionsOpen] = useState(false);
+  // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698 — keep the hover action
+  // bar mounted while the emoji popover is open. Otherwise scrolling moves the
+  // pointer off the row, the bar gets display:none, the popover loses its
+  // anchor and Base UI snaps it to the top-left corner.
+  const [pickerOpen, setPickerOpen] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   const cancelledRef = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -166,7 +179,8 @@ const MessageRow = memo(function MessageRow({
   const isOwn =
     entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEdit = isOwn;
-  const canDelete = isOwn;
+  // CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — admins/owners can delete others' messages.
+  const canDelete = isOwn || !!canModerate;
   const isTemp = entry.id.startsWith("temp-");
   const reactions = entry.reactions ?? [];
   // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — expose message actions on mobile and add channel reminders.
@@ -380,11 +394,13 @@ const MessageRow = memo(function MessageRow({
         <div
           className={cn(
             "absolute -top-3 left-2 items-center gap-0.5 rounded-md border bg-background shadow-sm sm:left-auto sm:right-4",
-            actionsOpen ? "flex" : "hidden sm:group-hover/msg:flex sm:focus-within:flex",
+            // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698 — also stay open while the emoji popover is open.
+            actionsOpen || pickerOpen ? "flex" : "hidden sm:group-hover/msg:flex sm:focus-within:flex",
           )}
         >
           <QuickEmojiPicker
             onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
+            onOpenChange={setPickerOpen} // CEREBRO-PATCH(channel-emoji-scroll-jump): TECH-3698
             align="end"
           />
           <Tooltip>
@@ -504,7 +520,10 @@ const MessageRow = memo(function MessageRow({
 
 function DateSeparator({ dayKey }: { dayKey: string }) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-3 px-4 py-2 backdrop-blur-sm bg-background/80">
+    // CEREBRO-PATCH(channel-date-separator-scroll): TECH-3698 — the divider
+    // scrolls with the messages instead of sticking to the top. The old sticky
+    // bar had a translucent backdrop that overlapped message text on scroll.
+    <div className="flex items-center gap-3 px-4 py-2">
       <div className="h-px flex-1 bg-border" />
       <span className="rounded-full border bg-background px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
         {formatDayLabel(dayKey)}

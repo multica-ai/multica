@@ -1353,6 +1353,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/channels/{id}/permissions",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/comments/{commentId}/",
       "gate": "workspace_member"
     },
