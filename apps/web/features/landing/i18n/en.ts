@@ -293,6 +293,28 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.24",
+        date: "2026-06-17",
+        title: "Custom Runtimes",
+        changes: [],
+        features: [
+          "Teams can create custom runtimes so agents use the right local tools and models",
+          "CLI agent create and update now supports thinking level",
+        ],
+        improvements: [
+          "Runtime profiles sync faster and prefer the best match for the current environment",
+          "Client error and freeze reports now group duplicates",
+          "Issue trigger previews are easier to read",
+        ],
+        fixes: [
+          "Office 365 email delivery is more reliable",
+          "GitHub installation context and pending CI display are more reliable",
+          "Codex runs fail quickly when the app server exits",
+          "Self-healing runtimes can be deleted again, and incompatible models are cleared on runtime switch",
+          "Unknown Issue icons and plain filenames are handled safely",
+        ],
+      },
+      {
         version: "0.3.23",
         date: "2026-06-16",
         title: "Issue Date Filters and More Stable Agent Runs",

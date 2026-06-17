@@ -293,6 +293,28 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.24",
+        date: "2026-06-17",
+        title: "自定义运行时",
+        changes: [],
+        features: [
+          "团队可以创建自定义运行时，让智能体按环境使用合适的本地工具和模型",
+          "命令行创建和更新智能体时可以选择思考强度",
+        ],
+        improvements: [
+          "运行时配置会更快同步到应用，并优先匹配当前环境",
+          "客户端错误和卡顿反馈会合并重复信息",
+          "Issue 评论触发预览文案更清楚",
+        ],
+        fixes: [
+          "Office 365 邮件的备用发送方式更稳定",
+          "GitHub 安装上下文和 CI 等待状态显示更可靠",
+          "Codex 服务退出时会快速失败",
+          "自修复运行时可再次删除，切换运行时时会清理不兼容模型",
+          "未知 Issue 图标和普通文件名链接识别更安全",
+        ],
+      },
+      {
         version: "0.3.23",
         date: "2026-06-16",
         title: "Issue 日期筛选和提高智能体运行稳定性",
