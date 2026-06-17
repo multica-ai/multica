@@ -5,3 +5,4 @@ export { CerebroChatSessionRowActions } from "./components/chat-row-actions";
 export { MessageCostBadge } from "./components/message-cost-badge";
 export { SessionCostChip } from "./components/session-cost-chip";
 export { ChatAttachmentList } from "./components/chat-attachment-list";
+export { RecentChatsList } from "./components/recent-chats-list";

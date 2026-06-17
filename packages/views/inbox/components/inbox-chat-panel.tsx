@@ -18,7 +18,8 @@ import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { ChatMessageList, ChatMessageSkeleton, ChatInput } from "@multica/views/chat";
-import { ChatStatusLine, SessionCostChip } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(chat-recent-list): FIR-recent-chats — recent sessions + resume
+import { ChatStatusLine, SessionCostChip, RecentChatsList } from "@multica/cerebro-chat/views";
 import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -219,13 +220,20 @@ export function InboxChatPanel({
             availability={undefined}
           />
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
-            <MessageSquare className="size-10 text-muted-foreground/30" />
-            <p className="text-sm">
-              {activeAgent
-                ? `Start a conversation with ${activeAgent.name}`
-                : "Select an agent to start chatting"}
-            </p>
+          <div className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-6 text-muted-foreground">
+            <div className="flex flex-col items-center gap-3">
+              <MessageSquare className="size-10 text-muted-foreground/30" />
+              <p className="text-sm">
+                {activeAgent
+                  ? `Start a conversation with ${activeAgent.name}`
+                  : "Select an agent to start chatting"}
+              </p>
+            </div>
+            <RecentChatsList
+              sessions={allSessions}
+              agents={agents}
+              onOpenSession={(id) => onSessionCreated?.(id)}
+            />
           </div>
         )}
       </div>
