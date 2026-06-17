@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   Loader2,
   Pencil,
@@ -43,11 +44,12 @@ import {
   type ProfileFormErrorField,
   type ProfileFormValues,
   type RuntimeCatalogEntry,
+  type RuntimeCatalogSections,
 } from "./runtime-profile-catalog";
 import { useT } from "../../i18n";
 
 // The dialog runs in two surfaces that swap inside one Popup:
-//   - "browse": master list (built-in + custom, badged) + adaptive detail
+//   - "browse": custom-first master list + adaptive detail
 //   - "form":   create (2-step) or edit (single step, family locked)
 type DialogState =
   | { surface: "browse" }
@@ -73,17 +75,36 @@ export function RuntimeProfilesDialog({
     useState<RuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
 
   const catalog = useMemo(() => buildRuntimeCatalog(profiles), [profiles]);
+  const entries = useMemo(
+    () => [...catalog.customs, ...catalog.builtins],
+    [catalog],
+  );
   const selectedEntry =
-    catalog.find((entry) => entry.id === selectedId) ?? null;
+    entries.find((entry) => entry.id === selectedId) ?? null;
+  const openCreateForm = () =>
+    setState({ surface: "form", mode: "create", step: "family" });
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl">
         <DialogHeader className="border-b px-6 py-5">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Server className="h-4 w-4 text-muted-foreground" />
-            {t(($) => $.profiles.dialog_title)}
-          </DialogTitle>
+          <div className="flex items-start justify-between gap-3">
+            <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
+              <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{t(($) => $.profiles.dialog_title)}</span>
+            </DialogTitle>
+            {state.surface === "browse" && (
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 shrink-0 px-2.5"
+                onClick={openCreateForm}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t(($) => $.profiles.add_new)}
+              </Button>
+            )}
+          </div>
           <DialogDescription className="text-xs">
             {t(($) => $.profiles.dialog_description)}
           </DialogDescription>
@@ -118,13 +139,11 @@ export function RuntimeProfilesDialog({
         ) : (
           <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
             <CatalogList
-              entries={catalog}
+              catalog={catalog}
               loading={isLoading}
               selectedId={selectedId}
               onSelect={setSelectedId}
-              onAddNew={() =>
-                setState({ surface: "form", mode: "create", step: "family" })
-              }
+              onAddNew={openCreateForm}
             />
             <DetailPanel
               entry={selectedEntry}
@@ -142,58 +161,159 @@ export function RuntimeProfilesDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Master list — built-in families + custom profiles, mixed, each badged.
+// Master list — custom profiles first, built-in families as collapsed reference.
 // ---------------------------------------------------------------------------
 
 function CatalogList({
-  entries,
+  catalog,
   loading,
   selectedId,
   onSelect,
   onAddNew,
 }: {
-  entries: RuntimeCatalogEntry[];
+  catalog: RuntimeCatalogSections;
   loading: boolean;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onAddNew: () => void;
 }) {
   const { t } = useT("runtimes");
-  const hasCustom = entries.some((entry) => entry.kind === "custom");
+  const [builtinsOpen, setBuiltinsOpen] = useState(false);
+  const hasCustom = catalog.customs.length > 0;
+  const selectedIsBuiltin = catalog.builtins.some(
+    (entry) => entry.id === selectedId,
+  );
 
   return (
     <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
-      <div className="flex shrink-0 items-center justify-between border-b bg-background px-4 py-2.5">
+      <div className="flex shrink-0 items-center justify-between border-b bg-background px-4 py-3">
         <h3 className="text-sm font-medium">
           {t(($) => $.profiles.list_title)}
         </h3>
-        <Button type="button" size="sm" className="h-7 px-2" onClick={onAddNew}>
-          <Plus className="h-3.5 w-3.5" />
-          {t(($) => $.profiles.add_new)}
-        </Button>
       </div>
       {loading ? (
         <div className="flex h-40 items-center justify-center">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <ul className="min-h-0 flex-1 overflow-y-auto py-1" role="listbox" aria-label={t(($) => $.profiles.list_title)}>
-          {entries.map((entry) => (
-            <li key={entry.id}>
-              <CatalogRow
-                entry={entry}
-                active={entry.id === selectedId}
-                onClick={() => onSelect(entry.id)}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          <section aria-labelledby="runtime-profile-custom-section">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <h4
+                id="runtime-profile-custom-section"
+                className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                {t(($) => $.profiles.custom_section_title, {
+                  count: catalog.customs.length,
+                })}
+              </h4>
+            </div>
+            {hasCustom ? (
+              <ul
+                className="space-y-1"
+                role="listbox"
+                aria-label={t(($) => $.profiles.custom_section_aria)}
+              >
+                {catalog.customs.map((entry) => (
+                  <li key={entry.id}>
+                    <CatalogRow
+                      entry={entry}
+                      active={entry.id === selectedId}
+                      onClick={() => onSelect(entry.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyCustomState onAddNew={onAddNew} />
+            )}
+          </section>
+
+          <section aria-labelledby="runtime-profile-builtin-section">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-expanded={builtinsOpen}
+              aria-controls="runtime-profile-builtin-list"
+              onClick={() =>
+                setBuiltinsOpen((open) => {
+                  const nextOpen = !open;
+                  if (!nextOpen && selectedIsBuiltin) {
+                    onSelect(null);
+                  }
+                  return nextOpen;
+                })
+              }
+            >
+              <span className="min-w-0">
+                <span
+                  id="runtime-profile-builtin-section"
+                  className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  {t(($) => $.profiles.builtin_section_title, {
+                    count: catalog.builtins.length,
+                  })}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                  {t(($) => $.profiles.builtin_section_hint)}
+                </span>
+              </span>
+              <ChevronDown
+                className={cn(
+                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
+                  builtinsOpen && "rotate-180",
+                )}
               />
-            </li>
-          ))}
-          {!hasCustom && (
-            <li className="px-4 py-3 text-xs text-muted-foreground">
-              {t(($) => $.profiles.empty_custom)}
-            </li>
-          )}
-        </ul>
+            </button>
+            {builtinsOpen && (
+              <ul
+                id="runtime-profile-builtin-list"
+                className="mt-2 space-y-1"
+                role="listbox"
+                aria-label={t(($) => $.profiles.builtin_section_aria)}
+              >
+                {catalog.builtins.map((entry) => (
+                  <li key={entry.id}>
+                    <CatalogRow
+                      entry={entry}
+                      active={entry.id === selectedId}
+                      onClick={() => onSelect(entry.id)}
+                    />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       )}
+    </div>
+  );
+}
+
+function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
+  const { t } = useT("runtimes");
+  return (
+    <div className="rounded-md border bg-muted/20 p-4">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
+          <Server className="h-4 w-4 text-muted-foreground" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h5 className="text-sm font-medium">{t(($) => $.profiles.empty_title)}</h5>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {t(($) => $.profiles.empty_description)}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            className="mt-3 h-8 px-2.5"
+            onClick={onAddNew}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t(($) => $.profiles.add_new)}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -211,6 +331,7 @@ function CatalogRow({
   const label =
     entry.kind === "custom" ? entry.profile.display_name : entry.protocolFamily;
   const disabled = entry.kind === "custom" && !entry.profile.enabled;
+  const isBuiltin = entry.kind === "builtin";
   return (
     <button
       type="button"
@@ -218,12 +339,17 @@ function CatalogRow({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        "flex w-full min-w-0 items-center gap-2.5 px-4 py-2 text-left transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/50",
+        "flex w-full min-w-0 items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active && "bg-accent",
+        !active && !isBuiltin && "hover:bg-accent/50",
+        isBuiltin && !active && "text-muted-foreground hover:bg-muted/40",
       )}
     >
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-        <ProviderLogo provider={entry.protocolFamily} className="h-4 w-4" />
+        <ProviderLogo
+          provider={entry.protocolFamily}
+          className={cn("h-4 w-4", isBuiltin && "opacity-75")}
+        />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
@@ -247,26 +373,12 @@ function CatalogRow({
           </span>
         )}
       </span>
-      <KindBadge kind={entry.kind} />
-    </button>
-  );
-}
-
-function KindBadge({ kind }: { kind: "builtin" | "custom" }) {
-  const { t } = useT("runtimes");
-  return (
-    <span
-      className={cn(
-        "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium",
-        kind === "custom"
-          ? "bg-info/10 text-info"
-          : "bg-muted text-muted-foreground",
+      {isBuiltin && (
+        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          {t(($) => $.profiles.builtin_reference)}
+        </span>
       )}
-    >
-      {kind === "custom"
-        ? t(($) => $.profiles.badge_custom)
-        : t(($) => $.profiles.badge_builtin)}
-    </span>
+    </button>
   );
 }
 
@@ -291,10 +403,21 @@ function DetailPanel({
 
   if (!entry) {
     return (
-      <div className="flex min-h-[12rem] flex-1 items-center justify-center p-6 text-center">
-        <p className="text-sm text-muted-foreground">
-          {t(($) => $.profiles.detail.select_hint)}
-        </p>
+      <div className="flex min-h-[12rem] flex-1 items-center justify-center p-6">
+        <div className="max-w-sm text-center">
+          <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border bg-background">
+            <Server className="h-5 w-5 text-muted-foreground" />
+          </span>
+          <h3 className="mt-4 text-base font-semibold">
+            {t(($) => $.profiles.detail.default_title)}
+          </h3>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            {t(($) => $.profiles.detail.default_description)}
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            {t(($) => $.profiles.detail.default_builtin_hint)}
+          </p>
+        </div>
       </div>
     );
   }

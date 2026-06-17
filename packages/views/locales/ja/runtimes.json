@@ -259,15 +259,22 @@
   "profiles": {
     "cta": "ランタイムを追加",
     "dialog_title": "カスタムランタイム",
-    "dialog_description": "エージェント用のカスタムランタイムバックエンドを定義します。組み込みファミリーは参考として表示されます。",
+    "dialog_description": "サポートされているプロトコルファミリーを基に、エージェント用のカスタムランタイムバックエンドを作成・管理します。",
     "add_new": "新しいカスタムランタイム",
-    "list_title": "ランタイム",
-    "empty_custom": "カスタムランタイムはまだありません。組み込みファミリーは上に表示されています。",
+    "list_title": "ランタイムバックエンド",
+    "custom_section_title": "カスタムランタイム（{{count}}）",
+    "custom_section_aria": "カスタムランタイム",
+    "builtin_section_title": "サポートされている基本プロトコル（{{count}}）",
+    "builtin_section_hint": "組み込みファミリーは読み取り専用の参考情報です。",
+    "builtin_section_aria": "サポートされている組み込みプロトコルファミリー",
+    "builtin_reference": "参考",
+    "empty_title": "最初のカスタムランタイムを作成",
+    "empty_description": "Claude や Codex など、サポートされているプロトコルファミリーを選び、この daemon が実行するコマンドを指定します。",
     "badge_builtin": "組み込み",
     "badge_custom": "カスタム",
     "badge_disabled": "無効",
     "builtin_detail": {
-      "title": "組み込みランタイム",
+      "title": "組み込みプロトコルファミリー",
       "description": "{{family}} は組み込みのプロトコルファミリーです。編集や削除はできません。",
       "read_only": "読み取り専用"
     },
@@ -278,7 +285,9 @@
       "no_description": "説明なし",
       "edit": "編集",
       "delete": "削除",
-      "select_hint": "ランタイムを選択すると詳細が表示されます。"
+      "default_title": "カスタムランタイムを管理",
+      "default_description": "カスタムランタイムを使うと、サポートされている基本プロトコルを保ちながら、ワークスペース固有のコマンドをエージェントに使用させられます。",
+      "default_builtin_hint": "基本プロトコルが必要な場合は、左側のサポートプロトコルを展開してください。"
     },
     "form": {
       "create_title": "新しいカスタムランタイム",

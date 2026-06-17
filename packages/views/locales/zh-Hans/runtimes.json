@@ -259,15 +259,22 @@
   "profiles": {
     "cta": "添加运行时",
     "dialog_title": "自定义运行时",
-    "dialog_description": "为你的智能体定义自定义运行时后端。内置类型仅供参考。",
+    "dialog_description": "基于支持的协议族，创建和管理智能体可使用的自定义运行时后端。",
     "add_new": "新建自定义运行时",
-    "list_title": "运行时",
-    "empty_custom": "暂无自定义运行时。内置类型已列在上方。",
+    "list_title": "运行时后端",
+    "custom_section_title": "自定义运行时（{{count}}）",
+    "custom_section_aria": "自定义运行时",
+    "builtin_section_title": "支持的基础协议（{{count}}）",
+    "builtin_section_hint": "内置协议族为只读参考。",
+    "builtin_section_aria": "支持的内置协议族",
+    "builtin_reference": "参考",
+    "empty_title": "创建第一个自定义运行时",
+    "empty_description": "从 Claude、Codex 等支持的协议族开始，然后指定这个 Daemon 应该运行的命令。",
     "badge_builtin": "内置",
     "badge_custom": "自定义",
     "badge_disabled": "已禁用",
     "builtin_detail": {
-      "title": "内置运行时",
+      "title": "内置协议族",
       "description": "{{family}} 是内置协议类型，无法编辑或删除。",
       "read_only": "只读"
     },
@@ -278,7 +285,9 @@
       "no_description": "无描述",
       "edit": "编辑",
       "delete": "删除",
-      "select_hint": "选择一个运行时以查看详情。"
+      "default_title": "管理自定义运行时",
+      "default_description": "自定义运行时让智能体使用工作区指定的命令，同时保持受支持的基础协议族。",
+      "default_builtin_hint": "需要选择基础协议？可以展开左侧的支持协议参考。"
     },
     "form": {
       "create_title": "新建自定义运行时",

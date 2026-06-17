@@ -5,9 +5,8 @@ import {
 } from "@multica/core/types";
 
 // A single row in the runtimes catalog the management dialog renders: the
-// built-in protocol families ship as read-only reference rows, the custom
-// profiles as editable rows. They render mixed in one list, each tagged with
-// its kind so the row can stamp the right badge (built-in vs custom).
+// built-in protocol families ship as read-only reference rows, while custom
+// profiles are the user's editable assets.
 export type RuntimeCatalogEntry =
   | {
       kind: "builtin";
@@ -22,19 +21,22 @@ export type RuntimeCatalogEntry =
       profile: RuntimeProfile;
     };
 
+export interface RuntimeCatalogSections {
+  customs: RuntimeCatalogEntry[];
+  builtins: RuntimeCatalogEntry[];
+}
+
 // Re-export the whitelist as a typed array so callers (the family picker,
 // the catalog builder) share the single source of truth.
 export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
   RUNTIME_PROFILE_PROTOCOL_FAMILIES;
 
-// buildRuntimeCatalog produces the mixed, flat list: every built-in family
-// first (in whitelist order), then the custom profiles (alphabetical by
-// display name, case-insensitive). No grouping / headers — the row badge is
-// the only built-in-vs-custom signal, matching the locked progressive-
-// disclosure design.
+// buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
+// protocol families. The dialog renders customs as the primary management
+// surface and built-ins as a collapsed reference section.
 export function buildRuntimeCatalog(
   profiles: RuntimeProfile[],
-): RuntimeCatalogEntry[] {
+): RuntimeCatalogSections {
   const builtins: RuntimeCatalogEntry[] = PROTOCOL_FAMILIES.map((family) => ({
     kind: "builtin" as const,
     id: `builtin:${family}`,
@@ -42,11 +44,15 @@ export function buildRuntimeCatalog(
   }));
 
   const customs: RuntimeCatalogEntry[] = [...profiles]
-    .sort((a, b) =>
-      a.display_name.localeCompare(b.display_name, undefined, {
+    .sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+      const aTime = Date.parse(a.updated_at) || 0;
+      const bTime = Date.parse(b.updated_at) || 0;
+      if (aTime !== bTime) return bTime - aTime;
+      return a.display_name.localeCompare(b.display_name, undefined, {
         sensitivity: "base",
-      }),
-    )
+      });
+    })
     .map((profile) => ({
       kind: "custom" as const,
       id: profile.id,
@@ -54,7 +60,7 @@ export function buildRuntimeCatalog(
       profile,
     }));
 
-  return [...builtins, ...customs];
+  return { customs, builtins };
 }
 
 // NOTE: `fixed_args` is intentionally NOT exposed in the v1 UI. The server

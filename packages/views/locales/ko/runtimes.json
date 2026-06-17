@@ -271,15 +271,22 @@
   "profiles": {
     "cta": "런타임 추가",
     "dialog_title": "사용자 지정 런타임",
-    "dialog_description": "에이전트를 위한 사용자 지정 런타임 백엔드를 정의합니다. 기본 제공 제품군은 참고용으로 표시됩니다.",
+    "dialog_description": "지원되는 프로토콜 제품군을 기반으로 에이전트가 사용할 사용자 지정 런타임 백엔드를 만들고 관리합니다.",
     "add_new": "새 사용자 지정 런타임",
-    "list_title": "런타임",
-    "empty_custom": "아직 사용자 지정 런타임이 없습니다. 기본 제공 제품군은 위에 표시됩니다.",
+    "list_title": "런타임 백엔드",
+    "custom_section_title": "사용자 지정 런타임({{count}})",
+    "custom_section_aria": "사용자 지정 런타임",
+    "builtin_section_title": "지원되는 기본 프로토콜({{count}})",
+    "builtin_section_hint": "기본 제공 제품군은 읽기 전용 참고 항목입니다.",
+    "builtin_section_aria": "지원되는 기본 제공 프로토콜 제품군",
+    "builtin_reference": "참고",
+    "empty_title": "첫 사용자 지정 런타임 만들기",
+    "empty_description": "Claude나 Codex 같은 지원되는 프로토콜 제품군에서 시작한 다음 이 daemon이 실행할 명령을 지정하세요.",
     "badge_builtin": "기본 제공",
     "badge_custom": "사용자 지정",
     "badge_disabled": "비활성화됨",
     "builtin_detail": {
-      "title": "기본 제공 런타임",
+      "title": "기본 제공 프로토콜 제품군",
       "description": "{{family}}은(는) 기본 제공 프로토콜 제품군입니다. 편집하거나 삭제할 수 없습니다.",
       "read_only": "읽기 전용"
     },
@@ -290,7 +297,9 @@
       "no_description": "설명 없음",
       "edit": "편집",
       "delete": "삭제",
-      "select_hint": "런타임을 선택하면 세부 정보가 표시됩니다."
+      "default_title": "사용자 지정 런타임 관리",
+      "default_description": "사용자 지정 런타임은 지원되는 기본 프로토콜 제품군을 유지하면서 에이전트가 워크스페이스별 명령을 사용하도록 합니다.",
+      "default_builtin_hint": "기본 프로토콜이 필요하면 왼쪽의 지원 프로토콜 섹션을 펼치세요."
     },
     "form": {
       "create_title": "새 사용자 지정 런타임",
