@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -533,6 +534,14 @@ func (f FrameDecoderFunc) Decode(payload []byte, inst db.LarkInstallation) (Inbo
 // GorillaDialer is the production WSDialer.
 type GorillaDialer struct {
 	Dialer *websocket.Dialer
+
+	// Proxy is the proxy function for WebSocket connections. When nil
+	// (the zero value), the dialer defaults to http.ProxyFromEnvironment
+	// so standard HTTPS_PROXY / HTTP_PROXY / NO_PROXY environment
+	// variables are respected. Set Proxy to a non-nil func to override
+	// (e.g. for custom proxy auth or a fixed proxy URL). To disable proxy
+	// entirely, pass a func that returns (nil, nil).
+	Proxy func(*http.Request) (*url.URL, error)
 }
 
 func NewGorillaDialer() *GorillaDialer {
@@ -548,7 +557,15 @@ func (g *GorillaDialer) DialContext(ctx context.Context, urlStr string, requestH
 	if d == nil {
 		d = websocket.DefaultDialer
 	}
-	c, resp, err := d.DialContext(ctx, urlStr, requestHeader)
+	// Shallow copy so we don't mutate the shared dialer's Proxy field.
+	dd := *d
+	if g.Proxy != nil {
+		dd.Proxy = g.Proxy
+	}
+	if dd.Proxy == nil {
+		dd.Proxy = http.ProxyFromEnvironment
+	}
+	c, resp, err := dd.DialContext(ctx, urlStr, requestHeader)
 	if err != nil {
 		return nil, resp, err
 	}

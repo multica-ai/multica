@@ -45,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("installFreezeWatchdog", () => {
@@ -95,5 +96,39 @@ describe("installFreezeWatchdog", () => {
     const { installFreezeWatchdog } = await load();
 
     expect(() => installFreezeWatchdog()).not.toThrow();
+  });
+
+  it("emits at most one client_unresponsive per 60s cooldown window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const { installFreezeWatchdog, captureEvent } = await load();
+    installFreezeWatchdog();
+
+    // A sustained freeze arrives as several long-task entries back to back.
+    fireLongTask(2500);
+    fireLongTask(2500);
+    fireLongTask(3000);
+
+    expect(captureEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits again only after the cooldown window elapses", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
+    const { installFreezeWatchdog, captureEvent } = await load();
+    installFreezeWatchdog();
+
+    fireLongTask(2500);
+    expect(captureEvent).toHaveBeenCalledTimes(1);
+
+    // Still inside the window → suppressed.
+    vi.advanceTimersByTime(59_999);
+    fireLongTask(2500);
+    expect(captureEvent).toHaveBeenCalledTimes(1);
+
+    // Window elapsed → emits again.
+    vi.advanceTimersByTime(1);
+    fireLongTask(2500);
+    expect(captureEvent).toHaveBeenCalledTimes(2);
   });
 });

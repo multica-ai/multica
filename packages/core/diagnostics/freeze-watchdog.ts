@@ -24,6 +24,16 @@ import { captureEvent } from "../analytics";
 // felt a real stall" without flooding on routine heavy renders.
 const FREEZE_THRESHOLD_MS = 2000;
 
+// A single sustained freeze is delivered by the browser as several separate
+// long-task entries, so emitting per entry makes client_unresponsive volume
+// grow without bound with the freeze length (MUL-3331). A global cooldown caps
+// it to at most one event per window. Module-level (page-lifetime) state is the
+// right scope here — it matches the `installed` singleton and resets on a full
+// reload, which is rare and itself a distinct signal. No route bucketing: a
+// global window is the most direct cap on volume.
+const COOLDOWN_MS = 60_000;
+let lastEmitMs = 0;
+
 let installed = false;
 
 /**
@@ -41,6 +51,11 @@ export function installFreezeWatchdog(): void {
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         if (entry.duration < FREEZE_THRESHOLD_MS) continue;
+        // Cooldown is checked only against qualifying freezes, so sub-threshold
+        // long tasks neither emit nor reset the window.
+        const now = Date.now();
+        if (now - lastEmitMs < COOLDOWN_MS) continue;
+        lastEmitMs = now;
         captureEvent("client_unresponsive", {
           source: "longtask",
           duration_ms: Math.round(entry.duration),

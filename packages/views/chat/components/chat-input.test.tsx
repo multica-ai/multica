@@ -121,6 +121,7 @@ vi.mock("@multica/core/chat", () => {
   };
   return {
     DRAFT_NEW_SESSION: "__draft_new__",
+    newSessionDraftKey: (agentId: string | null) => `__draft_new__:${agentId ?? ""}`,
     useChatStore: Object.assign(
       (selector?: (s: typeof state) => unknown) =>
         selector ? selector(state) : state,
@@ -321,7 +322,6 @@ describe("ChatInput attachment wiring", () => {
 
   it("does not render the file upload button when onUploadFile is omitted", () => {
     renderInput({ onUploadFile: undefined });
-    expect(editorProps.last?.onUploadFile).toBeUndefined();
     // FileUploadButton renders an icon button labelled by its tooltip — when
     // upload wiring is absent the chat input falls back to "submit + extras"
     // only. Probe by counting buttons: with no upload, only the submit

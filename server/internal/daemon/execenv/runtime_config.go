@@ -473,8 +473,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` — flags after a HEREDOC terminator can be silently swallowed (#4182).\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent. For agent-authored long descriptions, prefer `--description-file <path>` over stdin (#4182).\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
 	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
 	// Available Commands lists `multica issue comment add` with all three input
@@ -493,30 +493,49 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	//     non-UTF-8 codepage (issues #2198 / #2236 / #2376) — which is why
 	//     Windows uses `--content-file`, not stdin.
 	// Because the corruption is shell-driven, the guardrail is provider-agnostic.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, do NOT inline `--content` — the shell can rewrite backticks, `$()`, quotes, or newlines before the CLI sees them; use the platform-correct non-inline mode shown in ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
+	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — Post a comment. For agent-authored bodies, **write the body to a UTF-8 file and use `--content-file <path>`** — do NOT inline `--content` (the shell rewrites backticks, `$()`, quotes, or newlines before the CLI sees them) and do NOT use `--content-stdin` with a HEREDOC (extra flags around the heredoc can be silently swallowed, #4182). See ## Comment Formatting below. Run `multica issue comment add --help` for details.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
 	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString("### Squad maintenance\n")
 	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
 
-	// Comment Formatting guardrail for ALL providers. The MUL-2904
-	// duplicate-comment loop happened because an agent inlined a backtick-wrapped
-	// table name into `--content "..."`; the shell ran it as a command
-	// substitution, silently deleted it, and the model retried forever. Because
-	// the corruption is shell-driven, not provider-driven, this directive is not
-	// scoped to Codex — every agent-authored comment must avoid inline
-	// `--content`. The platform split mirrors BuildCommentReplyInstructions:
-	// Windows → file (stdin pipes drop non-ASCII), Linux/macOS → quoted HEREDOC
-	// over stdin (the quoted delimiter blocks backtick / `$()` / `$VAR`).
+	// Comment Formatting guardrail for ALL providers and ALL hosts. Two
+	// shell-layer hazards motivate a single, uniform "write a file, post with
+	// `--content-file`" rule rather than a per-OS split:
+	//
+	//   1. Inline `--content "..."`: backtick / `$()` substitution, `$VAR`
+	//      expansion, and quote / newline mangling on Linux/macOS. A
+	//      backtick-wrapped token in the body is executed and silently deleted,
+	//      corrupting the stored comment and triggering a retry loop
+	//      (MUL-2904 / OKK-497).
+	//   2. `--content-stdin` with a HEREDOC: TWO failure modes the model cannot
+	//      see — (a) on Windows, PowerShell 5.1's `$OutputEncoding` defaults to
+	//      ASCIIEncoding when piping to a native command and silently drops
+	//      non-ASCII as `?` before the bytes reach `multica.exe` (#2198 /
+	//      #2236 / #2376); (b) on any host, when the model emits a multi-flag
+	//      command (`multica issue create --title ... --assignee-id ...
+	//      --project ...`), the bash heredoc/flag boundary is fragile — a
+	//      `BODY \` "terminator with trailing token" is not recognised as the
+	//      heredoc end (flag lines after it leak into the description), or a
+	//      clean terminator turns the trailing `--assignee ...` line into a
+	//      separate failing shell statement while the create already exited 0
+	//      with no assignee (GitHub #4182, OXY-78 / OXY-76).
+	//
+	// `--content-file` defeats both classes: all flags live on one shell-token
+	// line, the body never reaches the shell, no heredoc boundary exists for
+	// flags to leak across. This is identical to the long-standing Windows
+	// path, so the cross-platform guidance is now one shape.
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
 		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
 		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("After posting, remove the temp file with `Remove-Item ./reply.md` (or your chosen path) so a later run does not pick up stale content. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	} else {
-		b.WriteString("For issue comments, always use `--content-stdin` with a HEREDOC, even for short single-line replies — use a quoted delimiter (`<<'COMMENT'`) so the shell does not expand backticks, `$()`, or `$VAR` inside the body. `--content-file <path>` works too. ")
-		b.WriteString("Never use inline `--content` for agent-authored comments: unescaped backticks, `$()`, `$VAR`, or quotes in the body are rewritten by the shell before the CLI receives them. Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites backticks, `$()`, `$VAR`, or quotes in the body before the CLI receives them (MUL-2904). Do NOT use `--content-stdin` with a HEREDOC either: when extra flags accompany the command (e.g. `--assignee`, `--project` on `multica issue create`), the bash heredoc/flag boundary is fragile and flags can be silently swallowed into the stdin stream while the command still exits 0 (GitHub #4182). ")
+		b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
+		b.WriteString("After posting, remove the temp file with `rm ./reply.md` (or your chosen path) so a later run does not pick up stale content. ")
 		b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 	}
 

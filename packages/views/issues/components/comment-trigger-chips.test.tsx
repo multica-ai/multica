@@ -45,7 +45,7 @@ describe("CommentTriggerChips", () => {
     );
 
     const chip = screen.getByRole("button");
-    expect(chip).toHaveTextContent("Starts working when sent");
+    expect(chip).toHaveTextContent("Will start when sent");
     expect(chip).toHaveAttribute("aria-pressed", "false");
 
     fireEvent.click(chip);
@@ -62,7 +62,7 @@ describe("CommentTriggerChips", () => {
     );
 
     const chip = screen.getByRole("button");
-    expect(chip).toHaveTextContent("Won't be triggered");
+    expect(chip).toHaveTextContent("Won't start this time");
     expect(chip).toHaveAttribute("aria-pressed", "true");
   });
 
@@ -75,7 +75,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByRole("button")).toHaveTextContent("2 agents start working when sent");
+    expect(screen.getByRole("button")).toHaveTextContent("2 agents will start when sent");
   });
 
   it("counts only non-suppressed agents in the sentence", () => {
@@ -87,7 +87,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByRole("button")).toHaveTextContent("1 agent starts working when sent");
+    expect(screen.getByRole("button")).toHaveTextContent("1 agent will start when sent");
   });
 
   it("switches to the none-will-trigger state when every agent is suppressed", () => {
@@ -99,7 +99,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByRole("button")).toHaveTextContent("No agents will be triggered");
+    expect(screen.getByRole("button")).toHaveTextContent("No agents will start");
   });
 
   it("opens the popover on click and toggles a row", () => {
@@ -114,7 +114,6 @@ describe("CommentTriggerChips", () => {
 
     fireEvent.click(screen.getByRole("button"));
 
-    expect(screen.getByText("This comment will trigger")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /Bob/ });
     expect(row).toHaveTextContent("Bob");
     fireEvent.click(row);

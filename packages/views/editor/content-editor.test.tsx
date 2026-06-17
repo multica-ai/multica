@@ -10,6 +10,9 @@ const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
   markdown: "",
+  // Nodes the mocked doc reports via `descendants`. The content-sync effect
+  // walks these to detect in-flight uploads; default empty = nothing uploading.
+  uploadingNodes: [] as Array<{ attrs: { uploading?: boolean } }>,
 }));
 
 // Records the attachments[] prop the provider received on its most recent
@@ -83,7 +86,14 @@ vi.mock("@tiptap/react", () => ({
         },
         getMarkdown: () => editorState.markdown,
         state: {
-          doc: { content: { size: 0 } },
+          doc: {
+            content: { size: 0 },
+            descendants: (cb: (node: { attrs: { uploading?: boolean } }) => boolean | void) => {
+              for (const node of editorState.uploadingNodes) {
+                if (cb(node) === false) break;
+              }
+            },
+          },
           selection: { empty: true, from: 0, to: 0 },
         },
       };
@@ -109,6 +119,7 @@ describe("ContentEditor", () => {
     editorState.isFocused = false;
     editorState.isDestroyed = false;
     editorState.markdown = "";
+    editorState.uploadingNodes = [];
     editorRef.current = null;
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
@@ -153,6 +164,25 @@ describe("ContentEditor", () => {
       "new content from server",
       expect.objectContaining({ emitUpdate: false, contentType: "markdown" }),
     );
+  });
+
+  it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
+    editorState.markdown = "old content";
+    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+
+    // A file is uploading: the doc holds a node with attrs.uploading. An
+    // external defaultValue change (e.g. chat lazy-creating a session mid-upload
+    // flips the draft key → defaultValue) must NOT setContent over it, or the
+    // uploading node is wiped and the upload's finalize can't find it.
+    editorState.uploadingNodes = [{ attrs: { uploading: true } }];
+    rerender(<ContentEditor defaultValue="" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    // Once the upload settles (no uploading node), a later external change syncs.
+    editorState.uploadingNodes = [];
+    rerender(<ContentEditor defaultValue="new content from server" />);
+    expect(mockSetContent).toHaveBeenCalledTimes(1);
   });
 
   it("does not sync when editor is focused and has unsaved local edits", () => {

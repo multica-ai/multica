@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -648,6 +649,70 @@ func TestWSConnectorReassemblesChunkedDataFrame(t *testing.T) {
 	}
 	if string(decodedPayloads[0]) != "ABC" {
 		t.Errorf("decoder saw payload = %q; want ABC", string(decodedPayloads[0]))
+	}
+}
+
+func TestGorillaDialerPreservesConfiguredDialerProxy(t *testing.T) {
+	t.Parallel()
+
+	proxyErr := errors.New("configured proxy refused")
+	d := &GorillaDialer{
+		Dialer: &websocket.Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return nil, proxyErr
+			},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
+	if !errors.Is(err, proxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, proxyErr)
+	}
+}
+
+func TestGorillaDialerProxyOverridesConfiguredDialerProxy(t *testing.T) {
+	t.Parallel()
+
+	configuredProxyErr := errors.New("configured proxy refused")
+	overrideProxyErr := errors.New("override proxy refused")
+	d := &GorillaDialer{
+		Dialer: &websocket.Dialer{
+			Proxy: func(*http.Request) (*url.URL, error) {
+				return nil, configuredProxyErr
+			},
+		},
+		Proxy: func(*http.Request) (*url.URL, error) {
+			return nil, overrideProxyErr
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
+	if !errors.Is(err, overrideProxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, overrideProxyErr)
+	}
+	if errors.Is(err, configuredProxyErr) {
+		t.Fatalf("DialContext used configured proxy error %v instead of override", configuredProxyErr)
+	}
+}
+
+func TestGorillaDialerProxyForwardsError(t *testing.T) {
+	t.Parallel()
+
+	d := NewGorillaDialer()
+	proxyErr := errors.New("proxy refused")
+	d.Proxy = func(r *http.Request) (*url.URL, error) {
+		return nil, proxyErr
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, _, err := d.DialContext(ctx, "ws://127.0.0.1:1", nil)
+	if !errors.Is(err, proxyErr) {
+		t.Fatalf("DialContext error = %v, want %v", err, proxyErr)
 	}
 }
 

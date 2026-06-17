@@ -14,6 +14,12 @@ type Runtime struct {
 	Name     string `json:"name"`
 	Provider string `json:"provider"`
 	Status   string `json:"status"`
+	// ProfileID is non-empty when this runtime was registered from a
+	// workspace custom runtime profile (MUL-3284). It links the runtime row
+	// back to the profile so the daemon can resolve the profile's
+	// command_name to the executable to launch. Built-in (provider-detected)
+	// runtimes leave this empty.
+	ProfileID string `json:"profile_id,omitempty"`
 }
 
 // RepoData holds repository information from the workspace.

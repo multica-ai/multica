@@ -1,7 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Globe, MoreHorizontal, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Globe,
+  Loader2,
+  MoreHorizontal,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -49,10 +55,14 @@ import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
-  isSelfHealingRuntime,
   pctChange,
 } from "../utils";
 import { splitRuntimeName } from "./runtime-machines";
+import {
+  isPendingCustomRuntime,
+  isPendingCustomRuntimeWarning,
+  pendingRuntimeCommandName,
+} from "./pending-runtime";
 import { useT } from "../../i18n";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
@@ -82,10 +92,10 @@ const COLUMN_WIDTHS = {
 // gaps).
 const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
 
-// The kebab track is conditional like the owner column: on a healthy
-// local machine EVERY row's only action (delete) is hidden by the
-// self-healing rule, and an unconditionally reserved 28px action track
-// would hang a permanent dead zone off the last column.
+// The kebab track is conditional like the owner column: on a list where
+// no row carries a delete-permission, EVERY row's only action is hidden,
+// and an unconditionally reserved 28px action track would hang a
+// permanent dead zone off the last column.
 function columnTrackVars(
   showOwner: boolean,
   showActions: boolean,
@@ -178,9 +188,43 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
         <span className="block min-w-0 shrink truncate text-sm font-medium">
           {baseName}
         </span>
+        <RuntimeKindBadge runtime={runtime} />
+        <PendingRuntimeBadge runtime={runtime} />
         <VisibilityBadge runtime={runtime} />
       </div>
     </ListGridCell>
+  );
+}
+
+// Distinguishes a built-in protocol-family runtime from one launched off a
+// custom runtime profile. `profile_id` is the discriminator: a non-null /
+// non-empty value means the runtime was started from a custom profile.
+// Older backends omit the field — treated as built-in.
+function RuntimeKindBadge({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  const isCustom = !!runtime.profile_id;
+  return (
+    <span
+      className={
+        isCustom
+          ? "inline-flex shrink-0 items-center rounded bg-info/10 px-1 text-[10px] font-medium text-info"
+          : "inline-flex shrink-0 items-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground"
+      }
+    >
+      {isCustom
+        ? t(($) => $.list.badge_custom)
+        : t(($) => $.list.badge_builtin)}
+    </span>
+  );
+}
+
+function PendingRuntimeBadge({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  if (!isPendingCustomRuntime(runtime)) return null;
+  return (
+    <span className="inline-flex shrink-0 items-center rounded bg-warning/10 px-1 text-[10px] font-medium text-warning">
+      {t(($) => $.list.badge_registering)}
+    </span>
   );
 }
 
@@ -222,8 +266,27 @@ function HealthCell({
   workload: RuntimeWorkload;
   now: number;
 }) {
+  const { t } = useT("runtimes");
   const { t: tAgents } = useT("agents");
   const labelOf = useHealthLabel();
+  if (isPendingCustomRuntime(runtime)) {
+    const warning = isPendingCustomRuntimeWarning(runtime, now);
+    return (
+      <ListGridCell className="gap-1.5">
+        {warning ? (
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warning" />
+        ) : (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-info" />
+        )}
+        <span className="block min-w-0 truncate text-xs">
+          {warning
+            ? t(($) => $.list.pending_health_warning)
+            : t(($) => $.list.pending_health)}
+        </span>
+      </ListGridCell>
+    );
+  }
+
   const health = deriveRuntimeHealth(runtime, now);
   const offline = health === "offline" || health === "about_to_gc";
   const lastSeen = formatLastSeen(runtime.last_seen_at);
@@ -306,6 +369,28 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
 }
 
 export function CliCell({ runtime }: { runtime: AgentRuntime }) {
+  const { t } = useT("runtimes");
+  if (isPendingCustomRuntime(runtime)) {
+    const command = pendingRuntimeCommandName(runtime);
+    if (!command) {
+      return (
+        <span className="text-xs text-muted-foreground/50">
+          {t(($) => $.list.pending_cli_unknown)}
+        </span>
+      );
+    }
+    return (
+      <div className="flex min-w-0 items-center text-xs">
+        <span
+          className="truncate font-mono text-muted-foreground"
+          title={command}
+        >
+          {command}
+        </span>
+      </div>
+    );
+  }
+
   if (runtime.runtime_mode === "cloud") {
     return <span className="text-xs text-muted-foreground/50">—</span>;
   }
@@ -378,12 +463,14 @@ export function RuntimeRowMenu({
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
   // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. The
-  // self-healing case (local + online) is the runtime-detail parity fix —
-  // see isSelfHealingRuntime for the rationale.
-  const selfHealing = isSelfHealingRuntime(runtime);
+  // the kebab entirely so the column doesn't render an empty popover. We
+  // used to also hide it for self-healing runtimes (live local daemon
+  // re-registers within seconds), but MUL-3352 surfaced that owners read
+  // a missing kebab as "I lost my permission" rather than "the daemon
+  // would undo this". The dialog now carries the self-heal warning and
+  // the user gets to decide.
 
-  if (!canDelete || selfHealing) {
+  if (!canDelete) {
     return <span aria-hidden />;
   }
 
@@ -492,15 +579,15 @@ export function RuntimeList({
         ? memberById.get(runtime.owner_id) ?? null
         : null,
       workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
-      canDelete: isAdmin || (!!user && runtime.owner_id === user.id),
+      canDelete:
+        !isPendingCustomRuntime(runtime) &&
+        (isAdmin || (!!user && runtime.owner_id === user.id)),
     }));
   }, [runtimes, memberById, workloadIndex, isAdmin, user]);
 
   // Mirrors RuntimeRowMenu's render guard: the kebab track only earns its
   // width when at least one row will actually show the menu.
-  const showActions = rows.some(
-    (row) => row.canDelete && !isSelfHealingRuntime(row.runtime),
-  );
+  const showActions = rows.some((row) => row.canDelete);
 
   return (
     <div className="overflow-x-auto overflow-y-hidden @container">
@@ -531,61 +618,72 @@ export function RuntimeList({
           </ListGridHeaderCell>
           <span aria-hidden="true" />
         </ListGridHeader>
-        {rows.map((row) => (
-          <ListGridRow
-            key={row.runtime.id}
-            className="cursor-pointer"
-            {...rowLink(wsPaths.runtimeDetail(row.runtime.id))}
-          >
-            <RuntimeNameCell runtime={row.runtime} />
-            <HealthCell
-              runtime={row.runtime}
-              workload={row.workload}
-              now={now}
-            />
-            {showOwner ? (
-              <ListGridCell className="hidden gap-1.5 @2xl:flex">
-                {row.ownerMember ? (
-                  <>
-                    <ActorAvatar
-                      actorType="member"
-                      actorId={row.ownerMember.user_id}
-                      size={18}
-                    />
-                    <span className="min-w-0 truncate text-xs text-muted-foreground">
-                      {row.ownerMember.name}
-                    </span>
-                  </>
+        {rows.map((row) => {
+          const pending = isPendingCustomRuntime(row.runtime);
+          return (
+            <ListGridRow
+              key={row.runtime.id}
+              className={pending ? "cursor-default" : "cursor-pointer"}
+              {...(!pending
+                ? rowLink(wsPaths.runtimeDetail(row.runtime.id))
+                : {})}
+            >
+              <RuntimeNameCell runtime={row.runtime} />
+              <HealthCell
+                runtime={row.runtime}
+                workload={row.workload}
+                now={now}
+              />
+              {showOwner ? (
+                <ListGridCell className="hidden gap-1.5 @2xl:flex">
+                  {row.ownerMember ? (
+                    <>
+                      <ActorAvatar
+                        actorType="member"
+                        actorId={row.ownerMember.user_id}
+                        size={18}
+                      />
+                      <span className="min-w-0 truncate text-xs text-muted-foreground">
+                        {row.ownerMember.name}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-xs text-muted-foreground/50">—</span>
+                  )}
+                </ListGridCell>
+              ) : (
+                <ListGridCell className="hidden px-0 @2xl:flex" />
+              )}
+              <ListGridCell className="hidden @2xl:flex">
+                <AgentStack agentIds={row.workload.agentIds} />
+              </ListGridCell>
+              <ListGridCell className="hidden @2xl:flex">
+                {pending ? (
+                  <div className="w-full text-right">
+                    <span className="text-xs text-muted-foreground/50">—</span>
+                  </div>
                 ) : (
-                  <span className="text-xs text-muted-foreground/50">—</span>
+                  <CostCell runtimeId={row.runtime.id} />
                 )}
               </ListGridCell>
-            ) : (
-              <ListGridCell className="hidden px-0 @2xl:flex" />
-            )}
-            <ListGridCell className="hidden @2xl:flex">
-              <AgentStack agentIds={row.workload.agentIds} />
-            </ListGridCell>
-            <ListGridCell className="hidden @2xl:flex">
-              <CostCell runtimeId={row.runtime.id} />
-            </ListGridCell>
-            <ListGridCell className="hidden @2xl:flex">
-              <CliCell runtime={row.runtime} />
-            </ListGridCell>
-            <ListGridCell className="justify-end px-0">
-              <span
-                onClick={(e) => e.stopPropagation()}
-                className="flex items-center"
-              >
-                <RuntimeRowMenu
-                  runtime={row.runtime}
-                  wsId={wsId}
-                  canDelete={row.canDelete}
-                />
-              </span>
-            </ListGridCell>
-          </ListGridRow>
-        ))}
+              <ListGridCell className="hidden @2xl:flex">
+                <CliCell runtime={row.runtime} />
+              </ListGridCell>
+              <ListGridCell className="justify-end px-0">
+                <span
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center"
+                >
+                  <RuntimeRowMenu
+                    runtime={row.runtime}
+                    wsId={wsId}
+                    canDelete={row.canDelete}
+                  />
+                </span>
+              </ListGridCell>
+            </ListGridRow>
+          );
+        })}
       </ListGrid>
     </div>
   );
