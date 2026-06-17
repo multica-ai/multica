@@ -31,6 +31,15 @@ function NavigationProviderInner({
     back: router.back,
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),
+    // TECH-3702: web has no app-tab model, so "open in new tab" maps to a real
+    // browser tab. Without this, modifier-click handlers that call
+    // e.preventDefault() and then `if (openInNewTab) openInNewTab(...)` (issue
+    // and project mentions, skill chips, AppLink, avatars) silently no-op on
+    // web — the native anchor is suppressed and nothing replaces it, so Cmd+click
+    // on an issue link does nothing despite the "open in new tab" preference.
+    openInNewTab: (path: string) => {
+      window.open(path, "_blank", "noopener,noreferrer");
+    },
     getShareableUrl: (path: string) =>
       typeof window === "undefined" ? path : window.location.origin + path,
     // router.prefetch is a no-op in dev mode by Next.js design; in production
