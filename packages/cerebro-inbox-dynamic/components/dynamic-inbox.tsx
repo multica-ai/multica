@@ -5,7 +5,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2, Archive, Link2, Check } from "lucide-react";
+import { Plus, MoreHorizontal, LayoutList, Search, X, Inbox, GripVertical, ArrowLeft, Pencil, Save, Trash2, Archive } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -76,7 +76,6 @@ import { useTypeLabels } from "@multica/views/inbox/components/inbox-detail-labe
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
-import { copyText } from "@multica/ui/lib/clipboard";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
 import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey } from "../message-link";
@@ -108,28 +107,6 @@ function entryIdentity(entry: DynInboxEntry): string {
   return `${entry.kind}:${entry.id}`;
 }
 
-// TECH-3708 — copies a shareable link to the open message. Sits in the detail
-// toolbar so any detail kind (issue/channel/chat/notif) gets it without
-// touching the shared detail components. Uses copyText (handles plain http://).
-function CopyMessageLinkButton({ href }: { href: string }) {
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={async () => {
-        if (!(await copyText(href))) return;
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
-      }}
-      className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
-      title="Copy a link to this message"
-      aria-label="Copy a link to this message"
-    >
-      {copied ? <Check className="size-3.5" /> : <Link2 className="size-3.5" />}
-      <span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span>
-    </button>
-  );
-}
 
 // TECH-3413 #1 — wraps one section in a @dnd-kit sortable. The render prop
 // receives the drag handle to place inside the section header so only the
@@ -183,7 +160,7 @@ function SortableSection({
 export function DynamicInbox() {
   const wsId = useWorkspaceId();
   // TECH-3618 — read sidebar "New message" intent off the URL (see effect below).
-  const { searchParams, replace, replaceSilent, push, getShareableUrl } = useNavigation();
+  const { searchParams, replace, replaceSilent, push } = useNavigation();
   const paths = useWorkspacePaths();
   const notesEnabled = useFeatureFlag("cerebro_notes");
   // TECH-3690 — open notes in the inbox detail pane instead of navigating away.
@@ -585,10 +562,15 @@ export function DynamicInbox() {
   };
   const removeSection = (id: string) =>
     // TECH-3541 (Jesper) — the permanent inbox block (first "all" box in the
-    // tab) cannot be removed.
+    // tab) cannot be removed. TECH-3748 (Jesper) — this protection only applies
+    // in its default placement (the first/home tab); on any other tab the
+    // "All messages" box was inserted by the user and can be removed.
     updateActiveTab((t) => {
-      const inboxId = t.sections.find((s) => s.kind === "all")?.id ?? null;
-      if (id === inboxId) return t;
+      const isDefaultTab = layout.tabs[0]?.id === t.id;
+      const permanentId = isDefaultTab
+        ? t.sections.find((s) => s.kind === "all")?.id ?? null
+        : null;
+      if (id === permanentId) return t;
       return { ...t, sections: t.sections.filter((s) => s.id !== id) };
     });
   const changeSection = (next: InboxSectionConfig) =>
@@ -805,26 +787,17 @@ export function DynamicInbox() {
     onNewReminder: () => setShowReminder(true),
   };
 
-  // TECH-3708 — shareable link to the open message + the toolbar that hosts the
-  // Copy link button above the detail pane. `getShareableUrl` returns a full
-  // URL (web: origin + path; desktop: the public web URL), so the link works
-  // when pasted anywhere — important on desktop where there is no address bar.
-  const messageLinkHref = selected
-    ? getShareableUrl(
-        `${paths.inbox()}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(messageKeyForEntry(selected))}`,
-      )
-    : null;
-  const detailToolbar = messageLinkHref ? (
-    <div className="flex h-9 shrink-0 items-center justify-end border-b border-border px-2">
-      <CopyMessageLinkButton href={messageLinkHref} />
-    </div>
-  ) : null;
 
   // TECH-3541 (Jesper) — the permanent inbox block is the first "All messages"
-  // box in the active tab. The search bar is rendered as part of it, and it
-  // cannot be removed. When a custom tab has no "all" box, the search falls back
-  // to a standalone bar at the top so search is never lost.
+  // box in the active tab. The search bar is rendered as part of it. When a tab
+  // has no "all" box, the search falls back to a standalone bar at the top so
+  // search is never lost.
   const inboxBlockId = activeTab.sections.find((s) => s.kind === "all")?.id ?? null;
+  // TECH-3748 (Jesper) — the "All messages" box is permanent (non-removable)
+  // only in its default placement: the first/home tab. On every other tab it
+  // was inserted by the user and can be removed like any other box.
+  const isDefaultTab = layout.tabs[0]?.id === activeTab.id;
+  const permanentBlockId = isDefaultTab ? inboxBlockId : null;
 
   const searchBar = (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
@@ -1130,7 +1103,7 @@ export function DynamicInbox() {
                               <div className="border-b border-border px-3 py-2">{searchBar}</div>
                             ) : undefined
                           }
-                          removable={section.id !== inboxBlockId}
+                          removable={section.id !== permanentBlockId}
                           favoritesEnabled={favoritesEnabled}
                           onSelect={onSelect}
                           onArchive={onArchive}
@@ -1194,12 +1167,6 @@ export function DynamicInbox() {
               >
                 <ArrowLeft className="size-4" /> Back
               </button>
-              {/* TECH-3708 — copy a link to this message (right of Back). */}
-              {messageLinkHref && (
-                <div className="ml-auto">
-                  <CopyMessageLinkButton href={messageLinkHref} />
-                </div>
-              )}
             </div>
             <div className="flex flex-1 flex-col min-h-0">{detail}</div>
           </div>
@@ -1224,11 +1191,7 @@ export function DynamicInbox() {
         <ResizableHandle withHandle />
         <ResizablePanel id="detail" minSize="40%" className="flex flex-col">
           {detail ? (
-            <>
-              {/* TECH-3708 — Copy link toolbar above the message detail. */}
-              {detailToolbar}
-              <div className="flex flex-1 flex-col min-h-0">{detail}</div>
-            </>
+            <div className="flex flex-1 flex-col min-h-0">{detail}</div>
           ) : (
             // Empty detail placeholder — mirrors the classic inbox (Inbox icon +
             // hint) so the right panel never reads as a blank/broken pane.

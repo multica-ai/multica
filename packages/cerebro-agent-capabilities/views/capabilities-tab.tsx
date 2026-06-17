@@ -30,6 +30,7 @@ import {
   type AgentCapabilityTool,
   type AgentCapabilityConnection,
   type AgentCapabilityRepo,
+  type AgentCapabilitySecretSet,
 } from "../api";
 
 export interface AgentCapabilitiesTabExtension {
@@ -81,6 +82,22 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
     connections: [],
     credentials: [],
     infisical_secrets: [],
+    agent_secrets: {
+      source: "agent_custom_env",
+      status: "not_configured",
+      count: 0,
+      names: [],
+      redacted: false,
+      runtime_id: "",
+    },
+    runtime_secrets: {
+      source: "runtime",
+      status: "unknown",
+      count: 0,
+      names: [],
+      redacted: false,
+      runtime_id: "",
+    },
     limits: { mcp_servers: [], has_mcp_config: false },
   };
 
@@ -89,9 +106,9 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-muted-foreground">
-        Everything this agent can do, may use, has access to, and is limited by —
-        the same fields agents read via the CLI and MCP. Green = allowed, amber =
-        needs approval, red = blocked.
+        Registered and observed access for this agent — the same fields agents
+        read via the CLI and MCP. Unknown sources are marked explicitly. Green =
+        allowed, amber = needs approval, red = blocked.
       </p>
 
       {/* Skills */}
@@ -185,6 +202,20 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
           </PillRow>
         )}
       </Section>
+
+      {/* Agent secrets (custom_env) — TECH-3738 Bid A, names owner/admin-only */}
+      <SecretSetSection
+        title="Agent secrets"
+        subtitle="from the agent's own custom env"
+        set={caps.agent_secrets}
+      />
+
+      {/* Runtime secrets — inherited from the runtime the agent runs on */}
+      <SecretSetSection
+        title="Runtime secrets"
+        subtitle="inherited from the agent's runtime"
+        set={caps.runtime_secrets}
+      />
 
       {/* Limits */}
       <Section icon={Lock} title="Limits">
@@ -333,6 +364,81 @@ function Section({
       {children}
     </section>
   );
+}
+
+// SecretSetSection renders one names-only secret group (agent custom_env or
+// runtime bindings). It always shows an explicit status badge so an empty list
+// is never ambiguous, and it honours the backend's redaction: when names are
+// withheld it shows the count and a lock note instead of the names — never a
+// secret value, and never a name the caller is not allowed to see.
+function SecretSetSection({
+  title,
+  subtitle,
+  set,
+}: {
+  title: string;
+  subtitle: string;
+  set: AgentCapabilitySecretSet;
+}) {
+  return (
+    <Section icon={KeyRound} title={title} count={set.count}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={set.status} />
+        <span className="text-xs text-muted-foreground">{subtitle}</span>
+      </div>
+      {set.redacted ? (
+        <p className="mt-1.5 flex items-center gap-1 text-xs text-muted-foreground">
+          <Lock className="h-3 w-3" />
+          {set.count} secret{set.count === 1 ? "" : "s"} — names visible to
+          workspace owners/admins only.
+        </p>
+      ) : set.names.length > 0 ? (
+        <PillRow>
+          {set.names.map((name) => (
+            <Pill key={name} mono title="secret name (value never shown)">
+              {name}
+            </Pill>
+          ))}
+        </PillRow>
+      ) : (
+        <Empty>
+          {set.status === "unknown"
+            ? "Could not determine secrets for this source."
+            : "No secrets configured."}
+        </Empty>
+      )}
+    </Section>
+  );
+}
+
+// StatusBadge surfaces the source's scan status so "nothing here" and "we don't
+// know" look different. Enum drift downgrades to a neutral badge (API Response
+// Compatibility rule) rather than crashing the tab.
+function StatusBadge({ status }: { status: string }) {
+  switch (status) {
+    case "known":
+      return (
+        <Pill className="border-emerald-600/40 text-emerald-700 dark:text-emerald-300">
+          known
+        </Pill>
+      );
+    case "not_configured":
+      return <Pill className="text-muted-foreground">none</Pill>;
+    case "unknown":
+      return (
+        <Pill className="border-amber-600/40 text-amber-700 dark:text-amber-400">
+          unknown
+        </Pill>
+      );
+    case "stale":
+      return (
+        <Pill className="border-amber-600/40 text-amber-700 dark:text-amber-400">
+          stale
+        </Pill>
+      );
+    default:
+      return <Pill className="text-muted-foreground">{status || "—"}</Pill>;
+  }
 }
 
 function PillRow({ children }: { children: ReactNode }) {
