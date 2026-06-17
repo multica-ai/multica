@@ -1449,3 +1449,4 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `skill-autolearn-gate` | server/internal/handler/skill_learning_cerebro.go | marked inline guard | TECH-3692 — `RecordSkillObservation` skips skills whose auto-learn switch is off. |
 | `skill-autolearn-route` | server/cmd/server/router.go | 2 marked lines | TECH-3692 — mounts the auto-learn endpoint. |
 | `skill-autolearn-cli` | server/cmd/multica/cerebro_skill_autolearn.go | net-new file | TECH-3692 — `multica skill auto-learn <id> --on|--off`. |
+| `skill-autolearn-mcp` | server/internal/cerebro/clitools/mcp_tools_skill_learning.go | marked inline registration | TECH-3692 — `skill_set_auto_learn` lets agents toggle the switch through MCP. |

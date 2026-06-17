@@ -907,6 +907,8 @@ var catalog = []Capability{
 			"DELETE /api/skills/{id}/files/{fileId}",
 			// CEREBRO-PATCH(skill-observations-catalog): TECH-3077 agent runtime learning signal.
 			"POST /api/skill-observations",
+			// CEREBRO-PATCH(skill-autolearn-catalog): TECH-3692 — toggle a skill's self-learning switch.
+			"POST /api/skills/{id}/auto-learn",
 		},
 	},
 
