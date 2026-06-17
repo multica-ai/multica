@@ -522,7 +522,6 @@ func TestUpdateWorkspace_KnowledgeCuratorRequiresAdminAndValidSchema(t *testing.
 				"embedding_model": "embedding-model",
 				"runtime_mode":    "external",
 				"base_url":        "https://api.example.com/v1",
-				"secret_ref":      "secret://workspace/curator",
 			},
 			"other": "value",
 		},

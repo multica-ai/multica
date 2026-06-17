@@ -125,7 +125,7 @@ func validateKnowledgeCuratorSettings(settings any) error {
 			return fmt.Errorf("knowledge_curator.enabled must be a boolean")
 		}
 	}
-	stringFields := []string{"provider", "model", "embedding_model", "runtime_mode", "base_url", "secret_ref"}
+	stringFields := []string{"provider", "model", "embedding_model", "runtime_mode", "base_url"}
 	for _, field := range stringFields {
 		if v, ok := curator[field]; ok && v != nil {
 			value, ok := v.(string)

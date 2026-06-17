@@ -37,7 +37,6 @@ interface KnowledgeCuratorSettings {
   embedding_model: string;
   runtime_mode: CuratorRuntimeMode;
   base_url: string;
-  secret_ref: string;
 }
 
 interface KnowledgeRAGSettings {
@@ -56,7 +55,6 @@ const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
   embedding_model: "",
   runtime_mode: "external",
   base_url: "",
-  secret_ref: "",
 };
 
 const DEFAULT_RAG_SETTINGS: KnowledgeRAGSettings = {
@@ -84,7 +82,6 @@ function readCuratorSettings(settings: Record<string, unknown> | undefined): Kno
     embedding_model: typeof data.embedding_model === "string" ? data.embedding_model : "",
     runtime_mode: runtimeMode,
     base_url: typeof data.base_url === "string" ? data.base_url : "",
-    secret_ref: typeof data.secret_ref === "string" ? data.secret_ref : "",
   };
 }
 
@@ -276,18 +273,6 @@ export function CuratorTab() {
                   disabled={!canManageWorkspace || saving}
                   placeholder={t(($) => $.curator.base_url_placeholder)}
                 />
-              </label>
-              <label className="space-y-1.5 md:col-span-2">
-                <span className="text-xs font-medium">{t(($) => $.curator.secret_ref_label)}</span>
-                <Input
-                  value={settings.secret_ref}
-                  onChange={(e) => setSettings((s) => ({ ...s, secret_ref: e.target.value }))}
-                  disabled={!canManageWorkspace || saving}
-                  placeholder={t(($) => $.curator.secret_ref_placeholder)}
-                />
-                <span className="block text-xs text-muted-foreground">
-                  {t(($) => $.curator.secret_ref_hint)}
-                </span>
               </label>
             </div>
 

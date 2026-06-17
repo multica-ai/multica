@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -60,35 +59,4 @@ func (s *WorkspaceSecretService) DeleteSecret(ctx context.Context, workspaceID p
 // ListSecretNames returns secret names with metadata (no values).
 func (s *WorkspaceSecretService) ListSecretNames(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListWorkspaceSecretNamesRow, error) {
 	return s.Queries.ListWorkspaceSecretNames(ctx, workspaceID)
-}
-
-// ResolveSecretRef parses a secret_ref string and returns the plaintext value.
-// Accepted format: "secret://workspace/<name>"
-func (s *WorkspaceSecretService) ResolveSecretRef(ctx context.Context, workspaceID pgtype.UUID, secretRef string) (string, error) {
-	secretRef = strings.TrimSpace(secretRef)
-	if secretRef == "" {
-		return "", ErrWorkspaceSecretNotFound
-	}
-	name, err := parseSecretRef(secretRef)
-	if err != nil {
-		return "", err
-	}
-	value, err := s.GetSecret(ctx, workspaceID, name)
-	if err != nil {
-		return "", fmt.Errorf("%w: %s", ErrWorkspaceSecretNotFound, name)
-	}
-	return value, nil
-}
-
-func parseSecretRef(ref string) (string, error) {
-	const prefix = "secret://workspace/"
-	rest, ok := strings.CutPrefix(ref, prefix)
-	if !ok || strings.TrimSpace(rest) == "" {
-		return "", fmt.Errorf("invalid secret_ref format: expected secret://workspace/<name>")
-	}
-	rest = strings.TrimSpace(rest)
-	if strings.Contains(rest, "/") || strings.Contains(rest, "\\") {
-		return "", fmt.Errorf("invalid secret_ref: name must not contain path separators")
-	}
-	return rest, nil
 }

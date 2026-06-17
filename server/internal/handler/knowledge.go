@@ -1397,10 +1397,6 @@ func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
-	if errors.Is(err, service.ErrCuratorSecretNotFound) {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	writeError(w, http.StatusInternalServerError, fallback)
 }
 

@@ -11,7 +11,6 @@ import (
 )
 
 var ErrCuratorLocalRuntimeUnavailable = errors.New("no online local runtime available for this workspace")
-var ErrCuratorSecretNotFound = errors.New("secret_ref target secret not found")
 var ErrCuratorDraftDispatched = errors.New("knowledge curator draft dispatched to local runtime")
 var ErrCuratorDraftTaskNotFound = errors.New("curator draft task not found")
 var ErrCuratorLocalSummarizeUnavailable = errors.New("summarize source is not available in local runtime mode")
