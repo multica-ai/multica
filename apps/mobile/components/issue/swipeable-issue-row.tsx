@@ -24,11 +24,13 @@ import Animated, {
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from "react-native-gesture-handler/ReanimatedSwipeable";
+import { MenuView } from "@react-native-menu/menu";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { IssueRow } from "@/components/issue/issue-row";
+import { statusMenuActions } from "@/components/issue/issue-context-menu";
 import { useUpdateIssue } from "@/data/mutations/issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -62,7 +64,17 @@ export function SwipeableIssueRow({ issue, onPress, showStatus }: Props) {
         <CompleteAction isDone={isDone} onPress={fire} drag={drag} />
       )}
     >
-      <IssueRow issue={issue} onPress={onPress} showStatus={showStatus} />
+      {/* Long-press → native iOS UIMenu of statuses. */}
+      <MenuView
+        title={issue.identifier}
+        shouldOpenOnLongPress
+        actions={statusMenuActions(issue)}
+        onPressAction={({ nativeEvent }) =>
+          update.mutate({ status: nativeEvent.event as IssueStatus })
+        }
+      >
+        <IssueRow issue={issue} onPress={onPress} showStatus={showStatus} />
+      </MenuView>
     </ReanimatedSwipeable>
   );
 }
