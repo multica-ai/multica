@@ -116,5 +116,27 @@
   },
   "chip": {
     "fallback_label": "Project"
+  },
+  "eidetix": {
+    "title": "Eidetix",
+    "status_configured": "Configured",
+    "status_not_configured": "Not configured",
+    "graph_label": "Graph label",
+    "graph_label_placeholder": "e.g. Marketing",
+    "token_label": "Bearer token",
+    "token_placeholder": "Paste the Eidetix token",
+    "set_token": "Set token",
+    "replace_token": "Replace token",
+    "save": "Save",
+    "cancel": "Cancel",
+    "enabled": "Enabled",
+    "enable": "Enable",
+    "disable": "Disable",
+    "clear": "Clear",
+    "clear_confirm": "Remove the Eidetix binding for this project?",
+    "saved": "Eidetix updated",
+    "cleared": "Eidetix binding removed",
+    "error_server_disabled": "Eidetix isn't enabled on this server",
+    "error_generic": "Couldn't update Eidetix"
   }
 }

@@ -116,5 +116,27 @@
   },
   "chip": {
     "fallback_label": "프로젝트"
+  },
+  "eidetix": {
+    "title": "Eidetix",
+    "status_configured": "구성됨",
+    "status_not_configured": "구성되지 않음",
+    "graph_label": "그래프 레이블",
+    "graph_label_placeholder": "예: Marketing",
+    "token_label": "Bearer 토큰",
+    "token_placeholder": "Eidetix 토큰 붙여넣기",
+    "set_token": "토큰 설정",
+    "replace_token": "토큰 교체",
+    "save": "저장",
+    "cancel": "취소",
+    "enabled": "활성화됨",
+    "enable": "활성화",
+    "disable": "비활성화",
+    "clear": "지우기",
+    "clear_confirm": "이 프로젝트의 Eidetix 바인딩을 제거할까요?",
+    "saved": "Eidetix가 업데이트되었습니다",
+    "cleared": "Eidetix 바인딩이 제거되었습니다",
+    "error_server_disabled": "이 서버에서는 Eidetix가 활성화되어 있지 않습니다",
+    "error_generic": "Eidetix를 업데이트하지 못했습니다"
   }
 }

@@ -116,5 +116,27 @@
   },
   "chip": {
     "fallback_label": "プロジェクト"
+  },
+  "eidetix": {
+    "title": "Eidetix",
+    "status_configured": "設定済み",
+    "status_not_configured": "未設定",
+    "graph_label": "グラフラベル",
+    "graph_label_placeholder": "例: Marketing",
+    "token_label": "Bearer トークン",
+    "token_placeholder": "Eidetix トークンを貼り付け",
+    "set_token": "トークンを設定",
+    "replace_token": "トークンを置き換え",
+    "save": "保存",
+    "cancel": "キャンセル",
+    "enabled": "有効",
+    "enable": "有効にする",
+    "disable": "無効にする",
+    "clear": "クリア",
+    "clear_confirm": "このプロジェクトの Eidetix バインディングを削除しますか？",
+    "saved": "Eidetix を更新しました",
+    "cleared": "Eidetix バインディングを削除しました",
+    "error_server_disabled": "このサーバーでは Eidetix が有効になっていません",
+    "error_generic": "Eidetix を更新できませんでした"
   }
 }

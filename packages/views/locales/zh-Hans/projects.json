@@ -116,5 +116,27 @@
   },
   "chip": {
     "fallback_label": "项目"
+  },
+  "eidetix": {
+    "title": "Eidetix",
+    "status_configured": "已配置",
+    "status_not_configured": "未配置",
+    "graph_label": "图谱标签",
+    "graph_label_placeholder": "例如 Marketing",
+    "token_label": "Bearer 令牌",
+    "token_placeholder": "粘贴 Eidetix 令牌",
+    "set_token": "设置令牌",
+    "replace_token": "替换令牌",
+    "save": "保存",
+    "cancel": "取消",
+    "enabled": "已启用",
+    "enable": "启用",
+    "disable": "停用",
+    "clear": "清除",
+    "clear_confirm": "移除该项目的 Eidetix 绑定？",
+    "saved": "Eidetix 已更新",
+    "cleared": "已移除 Eidetix 绑定",
+    "error_server_disabled": "此服务器未启用 Eidetix",
+    "error_generic": "无法更新 Eidetix"
   }
 }
