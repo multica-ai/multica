@@ -98,7 +98,7 @@ jobs:
         run: cd server && go run ./cmd/migrate up
 
       - name: Test
-        run: cd server && go test ./...
+        run: cd server && go test -race ./...
 
   installer:
     # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
