@@ -50,6 +50,7 @@ export function findEntryByMessageKey(
     if (kind === "notif" && entry.kind === "notif" && (entry.item.issue_id ?? entry.item.id) === id)
       return entry;
     if (kind === "channel" && entry.kind === "channel" && entry.channel.id === id) return entry;
+    if (kind === "channel" && entry.kind === "notif" && entry.item.issue_id === id) return entry;
     if (kind === "chat" && entry.kind === "chat" && entry.session.id === id) return entry;
   }
   return null;

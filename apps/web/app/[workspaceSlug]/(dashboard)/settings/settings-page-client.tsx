@@ -14,6 +14,8 @@ import {
 } from "@multica/cerebro-tool-policy/views";
 // CEREBRO-PATCH(cerebro-connections-settings-tab): TECH-3108 workspace connections tab.
 import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/views";
+// TECH-3582: workspace copy console tab, present only when cerebro_workspace_copy is on.
+import { useCerebroWorkspaceCopySettingsTabs } from "@multica/cerebro-workspace-copy/views";
 // TECH-3522: web_fetch URL policy tab.
 import { useCerebroWebFetchPolicySettingsTabs } from "@multica/cerebro-web-fetch-policy/views";
 
@@ -48,6 +50,9 @@ export function SettingsPageClient({
   // TECH-3108: the workspace Connections tab, present only when the
   // cerebro_connections flag is on.
   const connectionsTabs = useCerebroConnectionsSettingsTabs();
+  // TECH-3582: the Workspace copy tab, present only when the
+  // cerebro_workspace_copy flag is on (read via a hook).
+  const workspaceCopyTabs = useCerebroWorkspaceCopySettingsTabs();
   // TECH-3522: the workspace Web fetch tab, present only when the
   // cerebro_web_fetch_policy flag is on.
   const webFetchPolicyTabs = useCerebroWebFetchPolicySettingsTabs();
@@ -58,9 +63,17 @@ export function SettingsPageClient({
       ...agentTriggerTabs,
       ...displayCurrencyTabs,
       ...connectionsTabs,
+      ...workspaceCopyTabs,
       ...webFetchPolicyTabs,
     ],
-    [toolPolicyTabs, agentTriggerTabs, displayCurrencyTabs, connectionsTabs, webFetchPolicyTabs],
+    [
+      toolPolicyTabs,
+      agentTriggerTabs,
+      displayCurrencyTabs,
+      connectionsTabs,
+      workspaceCopyTabs,
+      webFetchPolicyTabs,
+    ],
   );
 
   return (

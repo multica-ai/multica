@@ -414,7 +414,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           </div>
           {/* CEREBRO-PATCH(channel-typing): TECH-3664 — "X is typing…" above composer. */}
           <ChannelTypingIndicator typingUserIds={typingUserIds} />
-          <div className="shrink-0 border-t px-4 py-3">
+          {/* CEREBRO-PATCH(channel-composer-spacing): TECH-3720 align Channels/DM composer spacing with the standard chat input. */}
+          <div className="shrink-0 px-5 pb-3 pt-0">
             {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
                 chat-like; entering one should land the caret in the input. */}
             {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}

@@ -97,6 +97,7 @@ import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/pat
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { requestInboxDefaultTab } from "@multica/core/inbox"; // CEREBRO-PATCH(inbox-default-tab-nav): Inbox link resets Dynamic inbox to default tab.
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { notificationsListOptions } from "@multica/cerebro-notifications/core/queries";
 import { useArchiveAllNotifications } from "@multica/cerebro-notifications/core/mutations";
@@ -444,6 +445,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const handleNavClick = useCallback(() => {
     if (isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
+  const handleInboxNavClick = useCallback(() => {
+    requestInboxDefaultTab();
+    handleNavClick();
+  }, [handleNavClick]);
   const handleNewMessageClick = useCallback(() => {
     if (isMobile) setOpenMobile(false); // CEREBRO-PATCH(sidebar-new-message-mobile-close): JEH-1443 close mobile sidebar before the agent chat navigation.
     useModalStore.getState().open("new-message");
@@ -777,7 +782,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <SidebarMenuButton
                   isActive={isNavActive(pathname, p.inbox())}
                   render={<AppLink href={p.inbox()} />}
-                  onClick={handleNavClick}
+                  onClick={handleInboxNavClick}
                   className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
                 >
                   <Inbox />

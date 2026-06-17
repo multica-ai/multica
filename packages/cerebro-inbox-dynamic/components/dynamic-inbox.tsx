@@ -59,6 +59,7 @@ import {
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
 } from "@multica/core/inbox/mutations";
+import { listenForInboxDefaultTab } from "@multica/core/inbox";
 import { useArchiveChannel } from "@multica/cerebro-channels";
 import {
   GlobalInboxReminderDialog,
@@ -258,6 +259,13 @@ export function DynamicInbox() {
   const [newChat, setNewChat] = useState<{ agentId: string; sessionId: string | null } | null>(null);
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [showReminder, setShowReminder] = useState(false);
+  useEffect(
+    () =>
+      listenForInboxDefaultTab(() => {
+        setActiveTabId(layout.tabs[0]?.id ?? "");
+      }),
+    [layout.tabs],
+  );
   const [savePresetOpen, setSavePresetOpen] = useState(false);
   const [presetName, setPresetName] = useState("");
   // TECH-3541 #3 — archived messages are a VIEW reached from the ⋯ menu, not a
