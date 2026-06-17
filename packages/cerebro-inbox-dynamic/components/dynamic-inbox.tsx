@@ -585,10 +585,15 @@ export function DynamicInbox() {
   };
   const removeSection = (id: string) =>
     // TECH-3541 (Jesper) — the permanent inbox block (first "all" box in the
-    // tab) cannot be removed.
+    // tab) cannot be removed. TECH-3748 (Jesper) — this protection only applies
+    // in its default placement (the first/home tab); on any other tab the
+    // "All messages" box was inserted by the user and can be removed.
     updateActiveTab((t) => {
-      const inboxId = t.sections.find((s) => s.kind === "all")?.id ?? null;
-      if (id === inboxId) return t;
+      const isDefaultTab = layout.tabs[0]?.id === t.id;
+      const permanentId = isDefaultTab
+        ? t.sections.find((s) => s.kind === "all")?.id ?? null
+        : null;
+      if (id === permanentId) return t;
       return { ...t, sections: t.sections.filter((s) => s.id !== id) };
     });
   const changeSection = (next: InboxSectionConfig) =>
@@ -821,10 +826,15 @@ export function DynamicInbox() {
   ) : null;
 
   // TECH-3541 (Jesper) — the permanent inbox block is the first "All messages"
-  // box in the active tab. The search bar is rendered as part of it, and it
-  // cannot be removed. When a custom tab has no "all" box, the search falls back
-  // to a standalone bar at the top so search is never lost.
+  // box in the active tab. The search bar is rendered as part of it. When a tab
+  // has no "all" box, the search falls back to a standalone bar at the top so
+  // search is never lost.
   const inboxBlockId = activeTab.sections.find((s) => s.kind === "all")?.id ?? null;
+  // TECH-3748 (Jesper) — the "All messages" box is permanent (non-removable)
+  // only in its default placement: the first/home tab. On every other tab it
+  // was inserted by the user and can be removed like any other box.
+  const isDefaultTab = layout.tabs[0]?.id === activeTab.id;
+  const permanentBlockId = isDefaultTab ? inboxBlockId : null;
 
   const searchBar = (
     <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
@@ -1130,7 +1140,7 @@ export function DynamicInbox() {
                               <div className="border-b border-border px-3 py-2">{searchBar}</div>
                             ) : undefined
                           }
-                          removable={section.id !== inboxBlockId}
+                          removable={section.id !== permanentBlockId}
                           favoritesEnabled={favoritesEnabled}
                           onSelect={onSelect}
                           onArchive={onArchive}
