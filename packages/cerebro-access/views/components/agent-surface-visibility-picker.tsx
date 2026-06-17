@@ -38,7 +38,15 @@ export function AgentSurfaceVisibilityPicker({
   onChange: (next: Record<string, boolean>) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
-  const preset = surfaceVisibilityPreset(value);
+  const derivedPreset = surfaceVisibilityPreset(value);
+  // The radio selection cannot be derived from `value` alone: "advanced with
+  // every surface hidden" is byte-identical to the "hidden" preset, so deriving
+  // the mode made clicking "Advanced" snap straight back to Skjult and the
+  // per-surface panel never opened (TECH-3704). Hold the explicit advanced
+  // choice in UI state; it wins over the derived preset until the user picks a
+  // simple preset again.
+  const [advanced, setAdvanced] = useState(derivedPreset === "custom");
+  const preset = advanced ? "custom" : derivedPreset;
 
   const summary = PRESET_LABEL[preset];
   const Icon = PRESET_ICON[preset];
@@ -54,16 +62,13 @@ export function AgentSurfaceVisibilityPicker({
 
   const setPreset = (next: SurfaceVisibilityPreset) => {
     if (next === "custom") {
-      // Entering advanced from a non-custom preset: seed an explicit map so the
-      // switches have something to toggle. Default everything hidden so the
-      // advanced choice is deliberate (the owner came here to restrict).
-      const seed =
-        preset === "custom"
-          ? (value ?? {})
-          : presetToSurfaceMap("hidden");
-      void onChange({ ...seed });
+      // Just open the per-surface panel — nothing to persist until the user
+      // flips a switch. The switches read their state straight from `value`, so
+      // the current visibility is the starting point.
+      setAdvanced(true);
       return;
     }
+    setAdvanced(false);
     void onChange(presetToSurfaceMap(next));
   };
 
