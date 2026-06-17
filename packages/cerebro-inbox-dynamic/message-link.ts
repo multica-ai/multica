@@ -55,3 +55,27 @@ export function findEntryByMessageKey(
   }
   return null;
 }
+
+/**
+ * Resolve the legacy `?issue=<id>` inbox URL param used by the global
+ * "New message" flow. Channels/DMs also use issue ids, so prefer the channel
+ * row when it exists. While channel data is still loading, callers can defer
+ * issue-notification matches to avoid locking the detail pane onto IssueDetail
+ * before the channel row has had a chance to arrive.
+ */
+export function findEntryByInboxIssueParam(
+  entries: DynInboxEntry[],
+  id: string,
+  opts: { deferIssueNotifications?: boolean } = {},
+): DynInboxEntry | null {
+  if (!id) return null;
+  for (const entry of entries) {
+    if (entry.kind === "channel" && entry.id === id) return entry;
+  }
+  if (opts.deferIssueNotifications) return null;
+  for (const entry of entries) {
+    if (entry.kind === "notif" && (entry.item.issue_id ?? entry.item.id) === id)
+      return entry;
+  }
+  return null;
+}
