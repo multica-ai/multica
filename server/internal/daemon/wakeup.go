@@ -284,6 +284,17 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				d.logger.Debug("task wakeup received", "runtime_id", payload.RuntimeID, "task_id", payload.TaskID)
 			}
 			signalTaskWakeup(taskWakeups, payload.RuntimeID)
+		case protocol.EventDaemonRuntimeProfilesChanged:
+			var payload protocol.RuntimeProfilesChangedPayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				d.logger.Debug("runtime profile refresh websocket invalid payload", "error", err)
+				continue
+			}
+			if payload.WorkspaceID == "" {
+				d.logger.Debug("runtime profile refresh websocket missing workspace_id")
+				continue
+			}
+			go d.handleRuntimeProfilesChanged(payload)
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
@@ -292,6 +303,18 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
 		}
+	}
+}
+
+func (d *Daemon) handleRuntimeProfilesChanged(payload protocol.RuntimeProfilesChangedPayload) {
+	if payload.WorkspaceID == "" {
+		return
+	}
+	if err := d.refreshWorkspaceRuntimeProfiles(d.recoveryContext(), payload.WorkspaceID); err != nil {
+		d.logger.Debug("runtime profile refresh websocket hint failed",
+			"workspace_id", payload.WorkspaceID,
+			"runtime_profile_id", payload.RuntimeProfileID,
+			"error", err)
 	}
 }
 

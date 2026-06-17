@@ -39,6 +39,7 @@
     "section_cloud": "云端",
     "this_machine": "本机",
     "local_badge": "本地 · 这台机器",
+    "pending_custom_runtimes": "待注册自定义运行时",
     "runtime_count_other": "{{count}} 个运行时",
     "busy_count_other": "{{count}} 个忙碌",
     "no_matches_title": "没有机器",
@@ -253,12 +254,17 @@
     "delete_permission_hint": "只有运行时所有者和工作区管理员可以删除这个运行时",
     "delete_admin_hint": "只有运行时所有者和工作区管理员可以删除运行时。",
     "badge_builtin": "内置",
-    "badge_custom": "自定义"
+    "badge_custom": "自定义",
+    "badge_registering": "注册中",
+    "pending_health": "正在向守护进程注册",
+    "pending_health_warning": "等待守护进程同步",
+    "pending_cli_unknown": "等待中"
   },
   "profiles": {
     "cta": "添加运行时",
     "dialog_title": "自定义运行时",
     "dialog_description": "基于支持的协议族，创建和管理智能体可使用的自定义运行时后端。",
+    "close": "关闭",
     "add_new": "新建自定义运行时",
     "list_title": "运行时后端",
     "custom_section_title": "自定义运行时（{{count}}）",

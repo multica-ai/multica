@@ -172,8 +172,10 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profileID := uuidToString(profile.ID)
+	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
-		"runtime_profile_id": uuidToString(profile.ID),
+		"runtime_profile_id": profileID,
 	})
 
 	writeJSON(w, http.StatusCreated, runtimeProfileToResponse(profile))
@@ -308,8 +310,10 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	profileID := uuidToString(profile.ID)
+	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
-		"runtime_profile_id": uuidToString(profile.ID),
+		"runtime_profile_id": profileID,
 	})
 
 	writeJSON(w, http.StatusOK, runtimeProfileToResponse(profile))
@@ -440,8 +444,10 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Tell connected clients to refetch the runtime list (instances vanished).
+	profileID := uuidToString(profileUUID)
+	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
-		"deleted_runtime_profile_id": uuidToString(profileUUID),
+		"deleted_runtime_profile_id": profileID,
 	})
 
 	w.WriteHeader(http.StatusNoContent)
@@ -474,4 +480,11 @@ func (h *Handler) DaemonListRuntimeProfiles(w http.ResponseWriter, r *http.Reque
 		"workspace_id":     workspaceID,
 		"runtime_profiles": resp,
 	})
+}
+
+func (h *Handler) requestDaemonRuntimeProfileRefresh(workspaceID, profileID string) {
+	if h.DaemonProfileRefresh == nil {
+		return
+	}
+	h.DaemonProfileRefresh.NotifyRuntimeProfilesChanged(workspaceID, profileID)
 }

@@ -39,6 +39,7 @@
     "section_cloud": "クラウド",
     "this_machine": "このデバイス",
     "local_badge": "ローカル · このマシン",
+    "pending_custom_runtimes": "登録待ちのカスタムランタイム",
     "runtime_count_other": "ランタイム {{count}} 個",
     "busy_count_other": "使用中 {{count}} 個",
     "no_matches_title": "マシンなし",
@@ -253,12 +254,17 @@
     "delete_permission_hint": "ランタイムの所有者とワークスペース管理者のみが、このランタイムを削除できます",
     "delete_admin_hint": "ランタイムの所有者とワークスペース管理者のみが、ランタイムを削除できます。",
     "badge_builtin": "組み込み",
-    "badge_custom": "カスタム"
+    "badge_custom": "カスタム",
+    "badge_registering": "登録中",
+    "pending_health": "Daemon に登録中",
+    "pending_health_warning": "Daemon 同期待ち",
+    "pending_cli_unknown": "待機中"
   },
   "profiles": {
     "cta": "ランタイムを追加",
     "dialog_title": "カスタムランタイム",
     "dialog_description": "サポートされているプロトコルファミリーを基に、エージェント用のカスタムランタイムバックエンドを作成・管理します。",
+    "close": "閉じる",
     "add_new": "新しいカスタムランタイム",
     "list_title": "ランタイムバックエンド",
     "custom_section_title": "カスタムランタイム（{{count}}）",

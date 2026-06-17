@@ -39,6 +39,7 @@
     "section_cloud": "Cloud",
     "this_machine": "This device",
     "local_badge": "Local · this machine",
+    "pending_custom_runtimes": "Pending custom runtimes",
     "runtime_count_one": "{{count}} runtime",
     "runtime_count_other": "{{count}} runtimes",
     "busy_count_one": "{{count}} busy",
@@ -265,12 +266,17 @@
     "delete_permission_hint": "Only the runtime owner and workspace admins can delete this runtime",
     "delete_admin_hint": "Only the runtime owner and workspace admins can delete a runtime.",
     "badge_builtin": "Built-in",
-    "badge_custom": "Custom"
+    "badge_custom": "Custom",
+    "badge_registering": "Registering",
+    "pending_health": "Registering with daemon",
+    "pending_health_warning": "Waiting for daemon sync",
+    "pending_cli_unknown": "waiting"
   },
   "profiles": {
     "cta": "Add runtime",
     "dialog_title": "Custom runtimes",
     "dialog_description": "Create and manage custom runtime backends based on supported protocol families.",
+    "close": "Close",
     "add_new": "New custom runtime",
     "list_title": "Runtime backends",
     "custom_section_title": "Custom runtimes ({{count}})",

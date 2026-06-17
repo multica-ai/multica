@@ -10,6 +10,7 @@ import {
   Plus,
   Server,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -26,6 +27,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -58,9 +60,11 @@ type DialogState =
 
 export function RuntimeProfilesDialog({
   wsId,
+  onProfileCreated,
   onClose,
 }: {
   wsId: string;
+  onProfileCreated?: (profile: RuntimeProfile) => void;
   onClose: () => void;
 }) {
   const { t } = useT("runtimes");
@@ -86,24 +90,43 @@ export function RuntimeProfilesDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl">
+      <DialogContent
+        className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl"
+        showCloseButton={false}
+      >
         <DialogHeader className="border-b px-6 py-5">
           <div className="flex items-start justify-between gap-3">
             <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
               <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{t(($) => $.profiles.dialog_title)}</span>
             </DialogTitle>
-            {state.surface === "browse" && (
-              <Button
-                type="button"
-                size="sm"
-                className="h-8 shrink-0 px-2.5"
-                onClick={openCreateForm}
+            <div className="flex shrink-0 items-center gap-2">
+              {state.surface === "browse" && (
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-8 px-2.5"
+                  onClick={openCreateForm}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  {t(($) => $.profiles.add_new)}
+                </Button>
+              )}
+              <DialogClose
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0"
+                    aria-label={t(($) => $.profiles.close)}
+                  />
+                }
               >
-                <Plus className="h-3.5 w-3.5" />
-                {t(($) => $.profiles.add_new)}
-              </Button>
-            )}
+                <X className="h-4 w-4" />
+                <span className="sr-only">{t(($) => $.profiles.close)}</span>
+              </DialogClose>
+            </div>
           </div>
           <DialogDescription className="text-xs">
             {t(($) => $.profiles.dialog_description)}
@@ -132,6 +155,9 @@ export function RuntimeProfilesDialog({
             }}
             onCancel={() => setState({ surface: "browse" })}
             onSaved={(profile) => {
+              if (state.surface === "form" && state.mode === "create") {
+                onProfileCreated?.(profile);
+              }
               setSelectedId(profile.id);
               setState({ surface: "browse" });
             }}
