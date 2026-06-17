@@ -49,7 +49,7 @@ import {
 import { useT } from "../../i18n";
 
 // The dialog runs in two surfaces that swap inside one Popup:
-//   - "browse": master list (built-in + custom, badged) + adaptive detail
+//   - "browse": custom-first master list + adaptive detail
 //   - "form":   create (2-step) or edit (single step, family locked)
 type DialogState =
   | { surface: "browse" }
@@ -148,7 +148,6 @@ export function RuntimeProfilesDialog({
             <DetailPanel
               entry={selectedEntry}
               wsId={wsId}
-              onAddNew={openCreateForm}
               onEdit={(profile) =>
                 setState({ surface: "form", mode: "edit", profile })
               }
@@ -175,12 +174,15 @@ function CatalogList({
   catalog: RuntimeCatalogSections;
   loading: boolean;
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onAddNew: () => void;
 }) {
   const { t } = useT("runtimes");
   const [builtinsOpen, setBuiltinsOpen] = useState(false);
   const hasCustom = catalog.customs.length > 0;
+  const selectedIsBuiltin = catalog.builtins.some(
+    (entry) => entry.id === selectedId,
+  );
 
   return (
     <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
@@ -233,7 +235,15 @@ function CatalogList({
               className="flex w-full items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2.5 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-expanded={builtinsOpen}
               aria-controls="runtime-profile-builtin-list"
-              onClick={() => setBuiltinsOpen((open) => !open)}
+              onClick={() =>
+                setBuiltinsOpen((open) => {
+                  const nextOpen = !open;
+                  if (!nextOpen && selectedIsBuiltin) {
+                    onSelect(null);
+                  }
+                  return nextOpen;
+                })
+              }
             >
               <span className="min-w-0">
                 <span
@@ -380,13 +390,11 @@ function CatalogRow({
 function DetailPanel({
   entry,
   wsId,
-  onAddNew,
   onEdit,
   onDeleted,
 }: {
   entry: RuntimeCatalogEntry | null;
   wsId: string;
-  onAddNew: () => void;
   onEdit: (profile: RuntimeProfile) => void;
   onDeleted: () => void;
 }) {
@@ -409,10 +417,6 @@ function DetailPanel({
           <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.detail.default_builtin_hint)}
           </p>
-          <Button type="button" size="sm" className="mt-4" onClick={onAddNew}>
-            <Plus className="h-3.5 w-3.5" />
-            {t(($) => $.profiles.add_new)}
-          </Button>
         </div>
       </div>
     );
