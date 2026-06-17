@@ -171,7 +171,11 @@ export type CerebroFlagKey =
   | "cerebro_agent_vault"
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
-  | "cerebro_comment_drafts";
+  | "cerebro_comment_drafts"
+  // TECH-3582: Workspace copy console — a Settings tab to copy individual
+  // entities (issues, channels, projects, agents, chats, autopilots) into
+  // another workspace when merging two workspaces. Non-destructive.
+  | "cerebro_workspace_copy";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -379,6 +383,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is the intended behaviour change. Off restores the old "lose it on navigate"
   // behaviour and hides the "Kladde gemt" hint.
   cerebro_comment_drafts: true,
+  // TECH-3582: OFF by default. Ships dormant — the Workspace copy console only
+  // appears in Settings once an admin opts in to run a one-time workspace merge.
+  cerebro_workspace_copy: false,
 };
 
 /**
@@ -984,6 +991,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
+  },
+  // TECH-3582: Workspace copy console — one-time workspace merge tool.
+  {
+    key: "cerebro_workspace_copy",
+    label: "Workspace copy console",
+    group: "workspace",
+    description:
+      "Add a \"Workspace copy\" tab to Settings (owners/admins only) for merging one workspace into another: pick a target workspace, then copy individual issues, channels, projects, agents, chats, or autopilots into it. Copies are non-destructive — the source workspace is never changed. Off hides the tab. TECH-3582.",
   },
   // FIR-2563: per-workspace approval gate toggle.
   {

@@ -105,6 +105,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler import
+	cerebroworkspacecopy "github.com/multica-ai/multica/server/internal/cerebro/workspacecopy"
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler import
 	cerebrowebfetchpolicy "github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 Agent Vault broker module import
@@ -549,6 +551,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
 	h.IdentityProvisioner = cerebroIdentityService
+	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler.
+	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
@@ -1130,6 +1134,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
 					r.Delete("/connections/{connId}", cerebroConnectionsHandler.Delete)
 				})
+				// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 — non-destructive copy of an
+				// entity into another workspace. Owner/admin only; never mutates the source.
+				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin")).
+					Post("/cerebro/copy", cerebroWorkspaceCopyHandler.Copy)
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
 
