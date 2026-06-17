@@ -15,7 +15,9 @@ import (
 //	"You've hit your session limit · resets 5:10pm (UTC)"
 //	"You've hit your session limit · resets 10:10pm (Europe/Paris)"
 //	"You've hit your session limit · resets 12:00am (America/New_York)"
-var sessionLimitResetRe = regexp.MustCompile(`(?i)resets?\s+(\d{1,2}):(\d{2})\s*(am|pm)\s*\(?([A-Za-z]+(?:/[A-Za-z0-9_+-]+)*)\)?`)
+//	"You've hit your session limit · resets 12pm (UTC)"
+//	"You've hit your session limit · resets 2pm (Europe/Paris)"
+var sessionLimitResetRe = regexp.MustCompile(`(?i)resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(?([A-Za-z]+(?:/[A-Za-z0-9_+-]+)*)\)?`)
 
 // ParseSessionLimitResetTime extracts the reset time from a Claude session
 // limit message. The wall-clock time is interpreted in the timezone named by

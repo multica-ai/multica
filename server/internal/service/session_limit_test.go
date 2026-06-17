@@ -72,6 +72,16 @@ func TestParseSessionLimitResetTime(t *testing.T) {
 			wantOK:  true,
 		},
 		{
+			name:    "whole hour no minutes UTC",
+			message: "resets 12pm (UTC)",
+			wantOK:  true,
+		},
+		{
+			name:    "whole hour no minutes Europe/Paris",
+			message: "resets 2pm (Europe/Paris)",
+			wantOK:  true,
+		},
+		{
 			name:    "unresolvable timezone",
 			message: "You've hit your session limit · resets 5:10pm (Mars/Olympus_Mons)",
 			wantOK:  false,
@@ -166,6 +176,12 @@ func TestParseSessionLimitResetTimeConversions(t *testing.T) {
 			wantHour:   1,
 			wantMinute: 0,
 		},
+		{
+			name:       "whole-hour 12pm UTC has zero minutes",
+			message:    "resets 12pm (UTC)",
+			wantHour:   12,
+			wantMinute: 0,
+		},
 	}
 
 	for _, tc := range cases {
@@ -210,6 +226,14 @@ func TestParseSessionLimitResetTimeTimezone(t *testing.T) {
 			tz:         "America/New_York",
 			message:    "You've hit your session limit · resets 12:00am (America/New_York)",
 			wantHour:   0,
+			wantMinute: 0,
+		},
+		{
+			// DST-safe: asserts wall-clock 2pm in Paris regardless of UTC offset.
+			name:       "whole-hour Europe/Paris 2pm",
+			tz:         "Europe/Paris",
+			message:    "resets 2pm (Europe/Paris)",
+			wantHour:   14,
 			wantMinute: 0,
 		},
 	}
