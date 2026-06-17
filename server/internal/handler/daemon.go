@@ -181,6 +181,11 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// ProfileID, when non-empty, marks this as an instance of a custom
+		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
+		// Type carries the protocol family for both built-in and custom rows
+		// so task routing (agent.New) is unchanged.
+		ProfileID string `json:"profile_id"`
 	} `json:"runtimes"`
 }
 
@@ -333,51 +338,125 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"launched_by": req.LaunchedBy,
 		})
 
-		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    provider,
-			Status:      status,
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-		})
-		if err != nil {
-			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				req.DaemonID,
-				provider,
-				"registration_failed",
-				"db_error",
-				true,
-			))
-			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
-			return
-		}
+		var registered db.AgentRuntime
+		var inserted bool
+		isCustom := strings.TrimSpace(runtime.ProfileID) != ""
 
-		registered := db.AgentRuntime{
-			ID:             row.ID,
-			WorkspaceID:    row.WorkspaceID,
-			DaemonID:       row.DaemonID,
-			Name:           row.Name,
-			RuntimeMode:    row.RuntimeMode,
-			Provider:       row.Provider,
-			Status:         row.Status,
-			DeviceInfo:     row.DeviceInfo,
-			Metadata:       row.Metadata,
-			LastSeenAt:     row.LastSeenAt,
-			CreatedAt:      row.CreatedAt,
-			UpdatedAt:      row.UpdatedAt,
-			OwnerID:        row.OwnerID,
-			LegacyDaemonID: row.LegacyDaemonID,
+		if isCustom {
+			profileUUID, pok := parseUUIDOrBadRequest(w, strings.TrimSpace(runtime.ProfileID), "profile_id")
+			if !pok {
+				return
+			}
+			// The profile must exist in this workspace and be enabled. Trust
+			// the profile's stored protocol_family over the daemon-sent type so
+			// the provider used for task routing cannot drift from the profile.
+			profile, perr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+				ID:          profileUUID,
+				WorkspaceID: wsUUID,
+			})
+			if perr != nil {
+				writeError(w, http.StatusBadRequest, "unknown runtime profile: "+runtime.ProfileID)
+				return
+			}
+			if !profile.Enabled {
+				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
+				return
+			}
+			provider = profile.ProtocolFamily
+
+			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+				ProfileID:   profileUUID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = prow.Inserted
+			registered = db.AgentRuntime{
+				ID:             prow.ID,
+				WorkspaceID:    prow.WorkspaceID,
+				DaemonID:       prow.DaemonID,
+				Name:           prow.Name,
+				RuntimeMode:    prow.RuntimeMode,
+				Provider:       prow.Provider,
+				Status:         prow.Status,
+				DeviceInfo:     prow.DeviceInfo,
+				Metadata:       prow.Metadata,
+				LastSeenAt:     prow.LastSeenAt,
+				CreatedAt:      prow.CreatedAt,
+				UpdatedAt:      prow.UpdatedAt,
+				OwnerID:        prow.OwnerID,
+				LegacyDaemonID: prow.LegacyDaemonID,
+				Visibility:     prow.Visibility,
+				ProfileID:      prow.ProfileID,
+			}
+		} else {
+			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
+				WorkspaceID: wsUUID,
+				DaemonID:    strToText(req.DaemonID),
+				Name:        name,
+				RuntimeMode: "local",
+				Provider:    provider,
+				Status:      status,
+				DeviceInfo:  deviceInfo,
+				Metadata:    metadata,
+				OwnerID:     ownerID,
+			})
+			if err != nil {
+				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
+					uuidToString(ownerID),
+					req.WorkspaceID,
+					req.DaemonID,
+					provider,
+					"registration_failed",
+					"db_error",
+					true,
+				))
+				writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
+				return
+			}
+			inserted = row.Inserted
+			registered = db.AgentRuntime{
+				ID:             row.ID,
+				WorkspaceID:    row.WorkspaceID,
+				DaemonID:       row.DaemonID,
+				Name:           row.Name,
+				RuntimeMode:    row.RuntimeMode,
+				Provider:       row.Provider,
+				Status:         row.Status,
+				DeviceInfo:     row.DeviceInfo,
+				Metadata:       row.Metadata,
+				LastSeenAt:     row.LastSeenAt,
+				CreatedAt:      row.CreatedAt,
+				UpdatedAt:      row.UpdatedAt,
+				OwnerID:        row.OwnerID,
+				LegacyDaemonID: row.LegacyDaemonID,
+				Visibility:     row.Visibility,
+				ProfileID:      row.ProfileID,
+			}
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
-		if row.Inserted {
+		if inserted {
 			obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeRegistered(
 				uuidToString(ownerID),
 				req.WorkspaceID,
@@ -404,7 +483,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// (e.g. "host.local", "host", "host-staging"); for each match we
 		// reassign agents + tasks onto the new UUID-keyed row, then delete
 		// the stale row so there's only ever one runtime per machine.
-		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		//
+		// Only built-in runtimes participate: legacy rows predate custom
+		// profiles, so a profile-keyed instance never has a hostname-derived
+		// ancestor to merge, and mergeLegacyRuntimes scopes by provider alone
+		// (no profile_id), which could otherwise fold a built-in row into a
+		// custom one of the same provider.
+		if !isCustom {
+			h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+		}
 
 		resp = append(resp, runtimeToResponse(registered))
 	}

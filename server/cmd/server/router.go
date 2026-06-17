@@ -497,6 +497,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/heartbeat", h.DaemonHeartbeat)
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
+		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
@@ -575,6 +576,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Custom runtime profiles — listing/reading is member-visible
+					// (the Runtime page renders for everyone; create/edit/delete
+					// are admin-gated below).
+					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
+					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -587,6 +593,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Delete("/", h.DeleteMember)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					// Custom runtime profile mutations (admin-only).
+					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
+					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
+					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)

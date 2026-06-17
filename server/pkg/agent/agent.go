@@ -134,6 +134,39 @@ type Config struct {
 
 // New creates a Backend for the given agent type.
 // Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "gemini", "pi", "cursor", "kimi", "kiro", "antigravity".
+//
+// SupportedTypes is the canonical whitelist of agent types New can construct.
+// It MUST stay in lockstep with the switch in New below and the
+// runtime_profile.protocol_family CHECK constraint (migration 120): a custom
+// runtime profile may only be based on a backend Multica officially supports.
+var SupportedTypes = []string{
+	"claude",
+	"codebuddy",
+	"codex",
+	"copilot",
+	"opencode",
+	"openclaw",
+	"hermes",
+	"gemini",
+	"pi",
+	"cursor",
+	"kimi",
+	"kiro",
+	"antigravity",
+}
+
+// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
+// Used to validate a custom runtime profile's protocol_family before it is
+// persisted or registered.
+func IsSupportedType(agentType string) bool {
+	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()

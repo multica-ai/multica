@@ -37,6 +37,26 @@ DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
 
+-- name: UpsertPendingGitHubInstallation :one
+INSERT INTO github_pending_installation (
+    installation_id, account_login, account_type, account_avatar_url
+) VALUES (
+    $1, $2, $3, sqlc.narg('account_avatar_url')
+)
+ON CONFLICT (installation_id) DO UPDATE SET
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    account_avatar_url = EXCLUDED.account_avatar_url,
+    updated_at = now()
+RETURNING *;
+
+-- name: DeletePendingGitHubInstallation :exec
+DELETE FROM github_pending_installation WHERE installation_id = $1;
+
+-- name: GetPendingGitHubInstallation :one
+SELECT * FROM github_pending_installation WHERE installation_id = $1
+;
+
 -- =====================
 -- GitHub Pull Request
 -- =====================

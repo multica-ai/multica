@@ -354,10 +354,41 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&github_error=persist_failed", http.StatusFound)
 		return
 	}
+	inst, err = h.consumePendingGitHubInstallation(r.Context(), inst)
+	if err != nil {
+		slog.Error("github: failed to apply pending installation metadata", "err", err, "installation_id", installationID)
+		http.Redirect(w, r, settingsURL+"&github_error=persist_failed", http.StatusFound)
+		return
+	}
 	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
 		"installation": githubInstallationToBroadcast(inst),
 	})
 	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
+}
+
+func (h *Handler) consumePendingGitHubInstallation(ctx context.Context, inst db.GithubInstallation) (db.GithubInstallation, error) {
+	pending, err := h.Queries.GetPendingGitHubInstallation(ctx, inst.InstallationID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return inst, nil
+		}
+		return inst, err
+	}
+	refreshed, err := h.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:      inst.WorkspaceID,
+		InstallationID:   inst.InstallationID,
+		AccountLogin:     pending.AccountLogin,
+		AccountType:      coalesce(pending.AccountType, "User"),
+		AccountAvatarUrl: pending.AccountAvatarUrl,
+		ConnectedByID:    inst.ConnectedByID,
+	})
+	if err != nil {
+		return inst, err
+	}
+	if err := h.Queries.DeletePendingGitHubInstallation(ctx, inst.InstallationID); err != nil {
+		return inst, err
+	}
+	return refreshed, nil
 }
 
 // fetchInstallationAccount tries to enrich the installation row with the
@@ -632,6 +663,16 @@ type ghInstallationPayload struct {
 	} `json:"installation"`
 }
 
+func githubInstallationAccountFromPayload(p ghInstallationPayload) (login, accountType string, avatar *string, ok bool) {
+	login = strings.TrimSpace(p.Installation.Account.Login)
+	if login == "" {
+		return "", "", nil, false
+	}
+	accountType = coalesce(p.Installation.Account.Type, "User")
+	avatar = strPtrOrNil(p.Installation.Account.AvatarURL)
+	return login, accountType, avatar, true
+}
+
 func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 	var p ghInstallationPayload
 	if err := json.Unmarshal(body, &p); err != nil {
@@ -648,10 +689,16 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		deleted, err := h.Queries.DeleteGitHubInstallationByInstallationID(ctx, p.Installation.ID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
+				if err := h.Queries.DeletePendingGitHubInstallation(ctx, p.Installation.ID); err != nil {
+					slog.Warn("github: delete pending installation failed", "err", err, "installation_id", p.Installation.ID)
+				}
 				return // already gone — nothing to broadcast
 			}
 			slog.Warn("github: delete installation failed", "err", err, "installation_id", p.Installation.ID)
 			return
+		}
+		if err := h.Queries.DeletePendingGitHubInstallation(ctx, p.Installation.ID); err != nil {
+			slog.Warn("github: delete pending installation failed", "err", err, "installation_id", p.Installation.ID)
 		}
 		// Broadcast the internal row id only — the numeric installation_id is
 		// a management handle that non-admin members are not allowed to see.
@@ -661,26 +708,46 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 			"id": uuidToString(deleted.ID),
 		})
 	case "created", "new_permissions_accepted", "unsuspend":
-		// We don't know which workspace this maps to from the webhook
-		// alone — the setup callback handler is what binds installation
-		// to workspace, so we just refresh metadata if we already have
-		// a row.
-		existing, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
-		if err != nil {
+		login, accountType, avatar, ok := githubInstallationAccountFromPayload(p)
+		if !ok {
+			slog.Warn("github: installation payload missing account login", "installation_id", p.Installation.ID)
 			return
 		}
-		avatar := p.Installation.Account.AvatarURL
+
+		// We don't know which workspace this maps to from the webhook alone.
+		// If the setup callback has not created the workspace binding yet,
+		// keep the account metadata and let the callback consume it after it
+		// creates github_installation.
+		existing, err := h.Queries.GetGitHubInstallationByInstallationID(ctx, p.Installation.ID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				if _, err := h.Queries.UpsertPendingGitHubInstallation(ctx, db.UpsertPendingGitHubInstallationParams{
+					InstallationID:   p.Installation.ID,
+					AccountLogin:     login,
+					AccountType:      accountType,
+					AccountAvatarUrl: ptrToText(avatar),
+				}); err != nil {
+					slog.Warn("github: store pending installation failed", "err", err, "installation_id", p.Installation.ID)
+				}
+				return
+			}
+			slog.Warn("github: lookup installation failed", "err", err, "installation_id", p.Installation.ID)
+			return
+		}
 		inst, err := h.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
 			WorkspaceID:      existing.WorkspaceID,
 			InstallationID:   p.Installation.ID,
-			AccountLogin:     p.Installation.Account.Login,
-			AccountType:      coalesce(p.Installation.Account.Type, "User"),
-			AccountAvatarUrl: ptrToText(strPtrOrNil(avatar)),
+			AccountLogin:     login,
+			AccountType:      accountType,
+			AccountAvatarUrl: ptrToText(avatar),
 			ConnectedByID:    existing.ConnectedByID,
 		})
 		if err != nil {
 			slog.Warn("github: refresh installation failed", "err", err)
 			return
+		}
+		if err := h.Queries.DeletePendingGitHubInstallation(ctx, p.Installation.ID); err != nil {
+			slog.Warn("github: delete pending installation failed", "err", err, "installation_id", p.Installation.ID)
 		}
 		// Broadcast so any open Settings → GitHub tab re-queries the
 		// installations list. Without this, a row created by the setup

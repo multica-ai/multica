@@ -172,6 +172,67 @@ func ModelSelectionSupported(providerType string) bool {
 	return true
 }
 
+// ModelKnownIncompatibleWithProvider reports whether a saved model is a known
+// mismatch for a target runtime provider. For first-party providers with
+// maintained static catalogs, compatibility is exact: the model must be one of
+// the IDs that runtime advertises. Unknown/custom model strings still return
+// false because the UI and CLI allow manual entries and the server should not
+// erase values it cannot confidently classify.
+func ModelKnownIncompatibleWithProvider(providerType, model string) bool {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return false
+	}
+
+	accepted, ok := acceptedModelIDsForProvider(providerType)
+	if !ok {
+		return false
+	}
+	if accepted[model] {
+		return false
+	}
+	return isRuntimeSpecificModelID(model)
+}
+
+func acceptedModelIDsForProvider(providerType string) (map[string]bool, bool) {
+	switch {
+	case providerType == "claude":
+		return modelIDSet(claudeStaticModels()), true
+	case providerType == "codex":
+		return modelIDSet(codexStaticModels()), true
+	case providerType == "gemini":
+		return modelIDSet(geminiStaticModels()), true
+	default:
+		return nil, false
+	}
+}
+
+func modelIDSet(models []Model) map[string]bool {
+	out := make(map[string]bool, len(models))
+	for _, m := range models {
+		out[m.ID] = true
+	}
+	return out
+}
+
+func isRuntimeSpecificModelID(model string) bool {
+	if strings.Contains(model, "/") {
+		return true
+	}
+	return modelHasKnownPrefix(model) ||
+		modelIDSet(claudeStaticModels())[model] ||
+		modelIDSet(codexStaticModels())[model] ||
+		modelIDSet(geminiStaticModels())[model]
+}
+
+func modelHasKnownPrefix(model string) bool {
+	return strings.HasPrefix(model, "claude-") ||
+		strings.HasPrefix(model, "gpt-") ||
+		strings.HasPrefix(model, "gemini-") ||
+		strings.HasPrefix(model, "auto-gemini-") ||
+		isOpenAIReasoningSeriesID(model)
+}
+
 // cachedDiscovery invokes fn and caches the result for modelCacheTTL.
 // The cache is keyed on providerType only; callers that need to
 // distinguish discovery by host/user should include that in the key
