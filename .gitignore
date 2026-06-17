@@ -72,3 +72,7 @@ data/
 
 # Eidetix eval run artifacts (may contain agent outputs)
 evals/eidetix/results/
+
+# Python bytecode (eval harness)
+__pycache__/
+*.pyc
