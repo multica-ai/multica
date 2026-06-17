@@ -6,13 +6,12 @@ import {
   View,
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { InboxItem } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
 import { HeaderActions } from "@/components/ui/app-header-actions";
 import { SwipeableInboxRow } from "@/components/inbox/swipeable-inbox-row";
@@ -114,18 +113,19 @@ export default function Inbox() {
 
   return (
     <View className="flex-1 bg-background">
-      <Header
-        title="Inbox"
-        right={
-          <>
-            <IconButton
-              name="ellipsis-horizontal"
-              onPress={onPressMenu}
-              accessibilityLabel="Inbox actions"
-            />
-            <HeaderActions />
-          </>
-        }
+      <Stack.Screen
+        options={{
+          headerRight: () => (
+            <View className="flex-row items-center gap-1">
+              <IconButton
+                name="ellipsis-horizontal"
+                onPress={onPressMenu}
+                accessibilityLabel="Inbox actions"
+              />
+              <HeaderActions />
+            </View>
+          ),
+        }}
       />
       {isLoading ? (
         <InboxLoading />
@@ -145,6 +145,7 @@ export default function Inbox() {
         <FlatList
           data={data}
           keyExtractor={(item) => item.id}
+          contentInsetAdjustmentBehavior="automatic"
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-16" />
           )}
