@@ -102,7 +102,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
-import { knowledgeCandidatesOptions } from "@multica/core/knowledge/queries";
+import { knowledgeCandidatesOptions, knowledgeInjectionsOptions } from "@multica/core/knowledge/queries";
 import { useCreateKnowledgeDraftFromIssue, useCreateKnowledgeFeedback } from "@multica/core/knowledge/mutations";
 import type { KnowledgeCandidate, KnowledgeFeedbackValue } from "@multica/core/knowledge/types";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -1260,6 +1260,11 @@ export function IssueDetail({
     enabled: !!issue,
   });
   const knowledgeCandidates = knowledgeCandidatesData?.candidates ?? [];
+  const { data: knowledgeInjectionsData } = useQuery({
+    ...knowledgeInjectionsOptions(wsId, resolvedId),
+    enabled: !!issue,
+  });
+  const knowledgeInjections = knowledgeInjectionsData?.injections ?? [];
   const { data: localRuntimes = [] } = useQuery({
     queryKey: ["local-preview-runtimes", wsId],
     queryFn: () => api.listRuntimes({ workspace_id: wsId, owner: "me" }),
@@ -2340,6 +2345,111 @@ export function IssueDetail({
                 ? tKnowledge(($) => $.issue.generating)
                 : tKnowledge(($) => $.issue.generate_draft)}
             </Button>
+
+            {/* Injections */}
+            <div className="space-y-1.5">
+              <p className="px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {tKnowledge(($) => $.issue.injections)}
+              </p>
+              {knowledgeInjections.length === 0 ? (
+                <p className="px-2 text-xs text-muted-foreground">
+                  {tKnowledge(($) => $.issue.no_injections)}
+                </p>
+              ) : (
+                knowledgeInjections.map((inj) => (
+                  <div key={inj.injection_event_id} className="rounded-md border bg-muted/10 px-2 py-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <AppLink
+                        href={paths.knowledgeDetail(inj.knowledge_item_id)}
+                        className="min-w-0 flex-1 truncate text-xs font-medium hover:underline"
+                      >
+                        {inj.knowledge_title || `(${tKnowledge(($) => $.detail.untitled)})`}
+                      </AppLink>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${inj.was_used ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-muted text-muted-foreground"}`}>
+                        {inj.was_used
+                          ? tKnowledge(($) => $.issue.used_badge)
+                          : tKnowledge(($) => $.issue.not_used_badge)}
+                      </span>
+                      {inj.rank != null && (
+                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                          {tKnowledge(($) => $.issue.rank_label, { rank: String(inj.rank) })}
+                        </span>
+                      )}
+                    </div>
+                    {inj.injection_reason && (
+                      <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">
+                        {inj.injection_reason}
+                      </p>
+                    )}
+                    <div className="mt-1 flex items-center gap-3 text-[11px] text-muted-foreground">
+                      {inj.source_issue_id && (
+                        <AppLink
+                          href={paths.issueDetail(inj.source_issue_id)}
+                          className="inline-flex items-center gap-1 hover:underline"
+                        >
+                          <BookOpenCheck className="h-3 w-3" />
+                          {tKnowledge(($) => $.issue.injection_source_issue)}
+                        </AppLink>
+                      )}
+                      {inj.score != null && (
+                        <span>{tKnowledge(($) => $.issue.score_label, { score: inj.score.toFixed(2) })}</span>
+                      )}
+                    </div>
+                    <div className="mt-2 flex items-center gap-1">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        render={<AppLink href={paths.knowledgeDetail(inj.knowledge_item_id)} />}
+                      >
+                        {tKnowledge(($) => $.issue.view_knowledge)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "helpful")}
+                      >
+                        {tKnowledge(($) => $.feedback.helpful)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "not_helpful")}
+                      >
+                        {tKnowledge(($) => $.feedback.not_helpful)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "misleading")}
+                      >
+                        {tKnowledge(($) => $.feedback.misleading)}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-[11px]"
+                        disabled={createKnowledgeFeedback.isPending}
+                        onClick={() => handleKnowledgeFeedback(inj.knowledge_item_id, "outdated")}
+                      >
+                        {tKnowledge(($) => $.feedback.outdated)}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
 
             <div className="space-y-1.5">
               <p className="px-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

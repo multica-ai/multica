@@ -26,6 +26,8 @@ export const knowledgeKeys = {
     [...knowledgeKeys.all(wsId), "effect", params ?? {}] as const,
   effectSummary: (wsId: string, params?: Omit<ListKnowledgeEffectParams, "limit" | "offset">) =>
     [...knowledgeKeys.all(wsId), "effect-summary", params ?? {}] as const,
+  injections: (wsId: string, issueId: string) =>
+    [...knowledgeKeys.all(wsId), "injections", issueId] as const,
 };
 
 export function knowledgeListOptions(wsId: string, params?: ListKnowledgeParams) {
@@ -98,5 +100,13 @@ export function knowledgeEffectSummaryOptions(
   return queryOptions({
     queryKey: knowledgeKeys.effectSummary(wsId, params),
     queryFn: () => api.getKnowledgeEffectSummary(params),
+  });
+}
+
+export function knowledgeInjectionsOptions(wsId: string, issueId: string | null) {
+  return queryOptions({
+    queryKey: knowledgeKeys.injections(wsId, issueId ?? ""),
+    queryFn: () => api.listKnowledgeInjections(issueId ?? ""),
+    enabled: !!issueId,
   });
 }

@@ -197,6 +197,7 @@ import type {
   SearchKnowledgeRequest,
   SearchKnowledgeResponse,
   UpdateKnowledgeRequest,
+  ListKnowledgeInjectionsResponse,
 } from "../knowledge/types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -306,6 +307,7 @@ import {
   EMPTY_LIST_KNOWLEDGE_EFFECT_RESPONSE,
   EMPTY_KNOWLEDGE_EFFECT_SUMMARY,
   EMPTY_LIST_KNOWLEDGE_GOVERNANCE_FINDINGS_RESPONSE,
+  EMPTY_LIST_KNOWLEDGE_INJECTIONS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
   EMPTY_SEARCH_KNOWLEDGE_RESPONSE,
@@ -319,6 +321,7 @@ import {
   ListKnowledgeEffectResponseSchema,
   KnowledgeEffectSummarySchema,
   ListKnowledgeGovernanceFindingsResponseSchema,
+  ListKnowledgeInjectionsResponseSchema,
   ListKnowledgeResponseSchema,
   ListKnowledgeSourcesResponseSchema,
   SearchKnowledgeResponseSchema,
@@ -2500,6 +2503,16 @@ export class ApiClient {
     return parseWithFallback(raw, KnowledgeFeedbackSchema, EMPTY_KNOWLEDGE_FEEDBACK, {
       endpoint: "POST /api/knowledge/:id/feedback",
     });
+  }
+
+  async listKnowledgeInjections(issueId: string): Promise<ListKnowledgeInjectionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/knowledge-injections`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeInjectionsResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_INJECTIONS_RESPONSE,
+      { endpoint: "GET /api/issues/:id/knowledge-injections" },
+    );
   }
 
   // Members

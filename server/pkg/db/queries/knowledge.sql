@@ -834,3 +834,41 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   AND (sqlc.narg('task_kind')::text IS NULL OR task_kind = sqlc.narg('task_kind'))
   AND (sqlc.narg('has_injection')::boolean IS NULL OR has_injection = sqlc.narg('has_injection'))
   AND (sqlc.narg('model')::text IS NULL OR model = sqlc.narg('model'));
+
+-- name: ListKnowledgeInjectionsByIssue :many
+SELECT
+    kie.id AS injection_event_id,
+    kie.knowledge_item_id,
+    kie.agent_task_id,
+    kie.injection_target,
+    kie.retrieval_event_id,
+    kie.rank,
+    kie.score,
+    kie.injection_reason,
+    kie.token_budget,
+    kie.discarded_reason,
+    kie.created_at AS injected_at,
+    ki.title AS knowledge_title,
+    ki.type AS knowledge_type,
+    ki.lifecycle_status AS knowledge_lifecycle_status,
+    EXISTS (
+        SELECT 1 FROM knowledge_usage_event kue
+        WHERE kue.knowledge_item_id = kie.knowledge_item_id
+          AND kue.agent_task_id = kie.agent_task_id
+    ) AS was_used,
+    (
+        SELECT ks.source_id
+        FROM knowledge_source ks
+        WHERE ks.knowledge_item_id = kie.knowledge_item_id
+          AND ks.source_type = 'issue'
+          AND ks.workspace_id = kie.workspace_id
+        ORDER BY ks.created_at ASC
+        LIMIT 1
+    ) AS source_issue_id
+FROM knowledge_injection_event kie
+JOIN agent_task_queue atq ON atq.id = kie.agent_task_id
+JOIN knowledge_item ki ON ki.id = kie.knowledge_item_id AND ki.workspace_id = kie.workspace_id
+WHERE atq.issue_id = sqlc.arg('issue_id')
+  AND kie.workspace_id = sqlc.arg('workspace_id')
+  AND kie.discarded_reason IS NULL
+ORDER BY kie.rank ASC NULLS LAST, kie.score DESC NULLS LAST;

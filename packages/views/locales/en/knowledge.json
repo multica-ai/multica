@@ -112,7 +112,16 @@
     "candidates": "Candidates",
     "no_candidates": "No knowledge candidates for this issue yet.",
     "open_draft": "Open draft",
-    "feedback": "Feedback"
+    "feedback": "Feedback",
+    "injections": "Injected Knowledge",
+    "no_injections": "No knowledge was injected for this claim.",
+    "used_badge": "Used",
+    "not_used_badge": "Not used",
+    "injection_source_issue": "Source Issue",
+    "rank_label": "Rank #{{rank}}",
+    "score_label": "Score {{score}}",
+    "view_knowledge": "View Knowledge",
+    "view_source_issue": "View Source Issue"
   },
   "publish": { "cancel": "Cancel", "submit": "Publish" },
   "publish_wiki": {

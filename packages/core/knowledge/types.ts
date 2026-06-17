@@ -380,6 +380,29 @@ export interface PublishKnowledgeToSkillRequest {
 export interface CreateKnowledgeFeedbackRequest {
   value: KnowledgeFeedbackValue;
   note?: string | null;
+  agent_task_id?: string | null;
+}
+
+export interface KnowledgeInjectionDetail {
+  injection_event_id: string;
+  knowledge_item_id: string;
+  agent_task_id: string | null;
+  injection_target: string;
+  retrieval_event_id: string | null;
+  rank: number | null;
+  score: number | null;
+  injection_reason: string | null;
+  token_budget: number | null;
+  injected_at: string;
+  knowledge_title: string;
+  knowledge_type: string;
+  knowledge_lifecycle_status: string;
+  was_used: boolean;
+  source_issue_id: string | null;
+}
+
+export interface ListKnowledgeInjectionsResponse {
+  injections: KnowledgeInjectionDetail[];
 }
 
 export interface EvaluateKnowledgeCandidateRequest {

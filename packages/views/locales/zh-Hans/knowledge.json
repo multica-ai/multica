@@ -96,7 +96,16 @@
     "candidates": "候选",
     "no_candidates": "这个 issue 还没有 Knowledge 候选。",
     "open_draft": "打开草稿",
-    "feedback": "反馈"
+    "feedback": "反馈",
+    "injections": "本次注入",
+    "no_injections": "本次 claim 没有注入 Knowledge。",
+    "used_badge": "已引用",
+    "not_used_badge": "未引用",
+    "injection_source_issue": "来源 Issue",
+    "rank_label": "排名 #{{rank}}",
+    "score_label": "得分 {{score}}",
+    "view_knowledge": "查看 Knowledge",
+    "view_source_issue": "查看来源 Issue"
   },
   "publish": { "cancel": "取消", "submit": "发布" },
   "publish_wiki": {

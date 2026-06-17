@@ -1628,6 +1628,106 @@ func (q *Queries) ListKnowledgeGovernanceFindings(ctx context.Context, arg ListK
 	return items, nil
 }
 
+const listKnowledgeInjectionsByIssue = `-- name: ListKnowledgeInjectionsByIssue :many
+SELECT
+    kie.id AS injection_event_id,
+    kie.knowledge_item_id,
+    kie.agent_task_id,
+    kie.injection_target,
+    kie.retrieval_event_id,
+    kie.rank,
+    kie.score,
+    kie.injection_reason,
+    kie.token_budget,
+    kie.discarded_reason,
+    kie.created_at AS injected_at,
+    ki.title AS knowledge_title,
+    ki.type AS knowledge_type,
+    ki.lifecycle_status AS knowledge_lifecycle_status,
+    EXISTS (
+        SELECT 1 FROM knowledge_usage_event kue
+        WHERE kue.knowledge_item_id = kie.knowledge_item_id
+          AND kue.agent_task_id = kie.agent_task_id
+    ) AS was_used,
+    (
+        SELECT ks.source_id
+        FROM knowledge_source ks
+        WHERE ks.knowledge_item_id = kie.knowledge_item_id
+          AND ks.source_type = 'issue'
+          AND ks.workspace_id = kie.workspace_id
+        ORDER BY ks.created_at ASC
+        LIMIT 1
+    ) AS source_issue_id
+FROM knowledge_injection_event kie
+JOIN agent_task_queue atq ON atq.id = kie.agent_task_id
+JOIN knowledge_item ki ON ki.id = kie.knowledge_item_id AND ki.workspace_id = kie.workspace_id
+WHERE atq.issue_id = $1
+  AND kie.workspace_id = $2
+  AND kie.discarded_reason IS NULL
+ORDER BY kie.rank ASC NULLS LAST, kie.score DESC NULLS LAST
+`
+
+type ListKnowledgeInjectionsByIssueParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListKnowledgeInjectionsByIssueRow struct {
+	InjectionEventID         pgtype.UUID        `json:"injection_event_id"`
+	KnowledgeItemID          pgtype.UUID        `json:"knowledge_item_id"`
+	AgentTaskID              pgtype.UUID        `json:"agent_task_id"`
+	InjectionTarget          string             `json:"injection_target"`
+	RetrievalEventID         pgtype.UUID        `json:"retrieval_event_id"`
+	Rank                     pgtype.Int4        `json:"rank"`
+	Score                    pgtype.Float8      `json:"score"`
+	InjectionReason          pgtype.Text        `json:"injection_reason"`
+	TokenBudget              pgtype.Int4        `json:"token_budget"`
+	DiscardedReason          pgtype.Text        `json:"discarded_reason"`
+	InjectedAt               pgtype.Timestamptz `json:"injected_at"`
+	KnowledgeTitle           string             `json:"knowledge_title"`
+	KnowledgeType            string             `json:"knowledge_type"`
+	KnowledgeLifecycleStatus string             `json:"knowledge_lifecycle_status"`
+	WasUsed                  bool               `json:"was_used"`
+	SourceIssueID            pgtype.UUID        `json:"source_issue_id"`
+}
+
+func (q *Queries) ListKnowledgeInjectionsByIssue(ctx context.Context, arg ListKnowledgeInjectionsByIssueParams) ([]ListKnowledgeInjectionsByIssueRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeInjectionsByIssue, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnowledgeInjectionsByIssueRow{}
+	for rows.Next() {
+		var i ListKnowledgeInjectionsByIssueRow
+		if err := rows.Scan(
+			&i.InjectionEventID,
+			&i.KnowledgeItemID,
+			&i.AgentTaskID,
+			&i.InjectionTarget,
+			&i.RetrievalEventID,
+			&i.Rank,
+			&i.Score,
+			&i.InjectionReason,
+			&i.TokenBudget,
+			&i.DiscardedReason,
+			&i.InjectedAt,
+			&i.KnowledgeTitle,
+			&i.KnowledgeType,
+			&i.KnowledgeLifecycleStatus,
+			&i.WasUsed,
+			&i.SourceIssueID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeItems = `-- name: ListKnowledgeItems :many
 SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 FROM knowledge_item

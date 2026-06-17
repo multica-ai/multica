@@ -6,6 +6,7 @@ import type {
   KnowledgeEffectSummary,
   KnowledgeFeedback,
   KnowledgeGovernanceFinding,
+  KnowledgeInjectionDetail,
   KnowledgeItem,
   KnowledgeSearchResult,
   KnowledgeSourceDetail,
@@ -13,6 +14,7 @@ import type {
   ListKnowledgeCandidatesResponse,
   ListKnowledgeEffectResponse,
   ListKnowledgeGovernanceFindingsResponse,
+  ListKnowledgeInjectionsResponse,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
   SearchKnowledgeResponse,
@@ -411,11 +413,40 @@ export const EMPTY_LIST_KNOWLEDGE_EFFECT_RESPONSE: ListKnowledgeEffectResponse =
   total: 0,
 };
 
+const NullableNumber = z.number().nullable().default(null);
+
+export const KnowledgeInjectionDetailSchema = z.object({
+  injection_event_id: z.string().default(""),
+  knowledge_item_id: z.string().default(""),
+  agent_task_id: NullableString,
+  injection_target: z.string().default(""),
+  retrieval_event_id: NullableString,
+  rank: NullableNumber,
+  score: NullableNumber,
+  injection_reason: NullableString,
+  token_budget: NullableNumber,
+  injected_at: z.string().default(""),
+  knowledge_title: z.string().default(""),
+  knowledge_type: z.string().default(""),
+  knowledge_lifecycle_status: z.string().default(""),
+  was_used: z.boolean().default(false),
+  source_issue_id: NullableString,
+}).passthrough();
+
+export const ListKnowledgeInjectionsResponseSchema = z.object({
+  injections: z.array(KnowledgeInjectionDetailSchema).default([]),
+}).passthrough();
+
+export const EMPTY_LIST_KNOWLEDGE_INJECTIONS_RESPONSE: ListKnowledgeInjectionsResponse = {
+  injections: [],
+};
+
 export type {
   KnowledgeCandidate,
   KnowledgeDetail,
   KnowledgeFeedback,
   KnowledgeGovernanceFinding,
+  KnowledgeInjectionDetail,
   KnowledgeItem,
   KnowledgeSearchResult,
   KnowledgeSourceDetail,

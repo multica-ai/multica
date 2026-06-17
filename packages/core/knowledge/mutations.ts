@@ -120,6 +120,7 @@ export function useCreateKnowledgeFeedback() {
       api.createKnowledgeFeedback(id, data),
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: [...knowledgeKeys.all(wsId), "injections"] });
     },
   });
 }

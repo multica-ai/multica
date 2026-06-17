@@ -2725,6 +2725,16 @@ func extractReferencedKnowledgeIDs(text string) []pgtype.UUID {
 	return ids
 }
 
+// ListKnowledgeInjectionsByIssue returns non-discarded injection events for
+// every agent task on the given issue, enriched with knowledge item metadata
+// and usage state.
+func (s *KnowledgeService) ListKnowledgeInjectionsByIssue(ctx context.Context, workspaceID, issueID pgtype.UUID) ([]db.ListKnowledgeInjectionsByIssueRow, error) {
+	return s.Queries.ListKnowledgeInjectionsByIssue(ctx, db.ListKnowledgeInjectionsByIssueParams{
+		WorkspaceID: workspaceID,
+		IssueID:     issueID,
+	})
+}
+
 func knowledgeSlugFromTitle(title string) string {
 	slug := strings.ToLower(strings.TrimSpace(title))
 	slug = knowledgeSlugNonAlnum.ReplaceAllString(slug, "-")

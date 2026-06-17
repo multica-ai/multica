@@ -226,6 +226,28 @@ type KnowledgeSearchResultResponse struct {
 	MatchReason   string                         `json:"match_reason"`
 }
 
+type KnowledgeInjectionDetailResponse struct {
+	InjectionEventID         string  `json:"injection_event_id"`
+	KnowledgeItemID          string  `json:"knowledge_item_id"`
+	AgentTaskID              *string `json:"agent_task_id"`
+	InjectionTarget          string  `json:"injection_target"`
+	RetrievalEventID         *string `json:"retrieval_event_id"`
+	Rank                     *int32  `json:"rank"`
+	Score                    *float64 `json:"score"`
+	InjectionReason          *string `json:"injection_reason"`
+	TokenBudget              *int32  `json:"token_budget"`
+	InjectedAt               string  `json:"injected_at"`
+	KnowledgeTitle           string  `json:"knowledge_title"`
+	KnowledgeType            string  `json:"knowledge_type"`
+	KnowledgeLifecycleStatus string  `json:"knowledge_lifecycle_status"`
+	WasUsed                  bool    `json:"was_used"`
+	SourceIssueID            *string `json:"source_issue_id"`
+}
+
+type listKnowledgeInjectionsResponse struct {
+	Injections []KnowledgeInjectionDetailResponse `json:"injections"`
+}
+
 type createKnowledgeRequest struct {
 	ProjectID           *string                `json:"project_id"`
 	AgentID             *string                `json:"agent_id"`
@@ -1294,6 +1316,49 @@ func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request
 		"note":              textToPtr(feedback.Note),
 		"created_at":        timestampToString(feedback.CreatedAt),
 	})
+}
+
+// ListKnowledgeInjectionsByIssue returns all non-discarded knowledge injection
+// events for a given issue, ordered by rank then score.
+func (h *Handler) ListKnowledgeInjectionsByIssue(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issue id")
+	if !ok {
+		return
+	}
+	// Verify the issue exists and the user has access.
+	if _, ok := h.loadIssueForUser(w, r, util.UUIDToString(issueID)); !ok {
+		return
+	}
+	rows, err := h.KnowledgeService.ListKnowledgeInjectionsByIssue(r.Context(), wsUUID, issueID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to list knowledge injections")
+		return
+	}
+	injections := make([]KnowledgeInjectionDetailResponse, 0, len(rows))
+	for _, row := range rows {
+		injections = append(injections, KnowledgeInjectionDetailResponse{
+			InjectionEventID:         uuidToString(row.InjectionEventID),
+			KnowledgeItemID:          uuidToString(row.KnowledgeItemID),
+			AgentTaskID:              uuidToPtr(row.AgentTaskID),
+			InjectionTarget:          row.InjectionTarget,
+			RetrievalEventID:         uuidToPtr(row.RetrievalEventID),
+			Rank:                     int4ToPtr(row.Rank),
+			Score:                    float8ToPtr(row.Score),
+			InjectionReason:          textToPtr(row.InjectionReason),
+			TokenBudget:              int4ToPtr(row.TokenBudget),
+			InjectedAt:               timestampToString(row.InjectedAt),
+			KnowledgeTitle:           row.KnowledgeTitle,
+			KnowledgeType:            row.KnowledgeType,
+			KnowledgeLifecycleStatus: row.KnowledgeLifecycleStatus,
+			WasUsed:                  row.WasUsed,
+			SourceIssueID:            uuidToPtr(row.SourceIssueID),
+		})
+	}
+	writeJSON(w, http.StatusOK, listKnowledgeInjectionsResponse{Injections: injections})
 }
 
 func (h *Handler) parseKnowledgePath(w http.ResponseWriter, r *http.Request) (pgtype.UUID, pgtype.UUID, bool) {
