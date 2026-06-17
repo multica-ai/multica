@@ -46,9 +46,15 @@ const (
 	// Also used as the delay before re-scheduling after a postpone notification.
 	WakeupMinIntervalMinutes = 15
 
-	// WakeupMaxConsecutivePostpones is the number of consecutive wakeup
-	// dispatches allowed before an inbox notification is sent to the issue owner.
+	// WakeupMaxConsecutivePostpones is the number of consecutive postpones
+	// (offline / missing-runtime parks) allowed before an inbox notification is
+	// sent to the issue owner.
 	WakeupMaxConsecutivePostpones = 3
+
+	// Postpone reasons recorded on the wakeup_parked system activity so the
+	// timeline can render a human cause instead of a silent retry.
+	postponeReasonOffline   = "offline"    // runtime exists but is not online
+	postponeReasonNoRuntime = "no_runtime" // agent has no runtime at all
 )
 
 var ErrNotFound = errors.New("wakeup not found")
@@ -293,7 +299,7 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 			"wakeup_id", util.UUIDToString(row.ID),
 			"agent_id", util.UUIDToString(row.AgentID),
 		)
-		return s.postpone(ctx, row)
+		return s.postpone(ctx, row, issue, postponeReasonNoRuntime)
 	}
 	rt, rtErr := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
 	if rtErr != nil || rt.Status != "online" {
@@ -302,7 +308,7 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 			"agent_id", util.UUIDToString(row.AgentID),
 			"runtime_id", util.UUIDToString(agent.RuntimeID),
 		)
-		return s.postpone(ctx, row)
+		return s.postpone(ctx, row, issue, postponeReasonOffline)
 	}
 
 	// TECH-3487: wakeups are system activity, not user-visible synthetic
@@ -326,9 +332,13 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 		return fmt.Errorf("mark dispatched: %w", err)
 	}
 
-	// Phase 1: increment postpone counter and notify the issue owner if the
-	// loop threshold is reached.
-	go s.checkPostponeLimit(context.Background(), row, issue)
+	// A successful dispatch ends any offline/no-runtime parking streak, so reset
+	// the postpone counter. The next park then re-emits the parked activity as a
+	// fresh transition instead of staying silent (counter still above zero).
+	if err := s.Cerebro.ResetWakeupPostpones(ctx, row.ID); err != nil {
+		slog.Warn("cerebro wakeup: reset postpones after dispatch failed",
+			"wakeup_id", util.UUIDToString(row.ID), "error", err)
+	}
 
 	return nil
 }
@@ -482,42 +492,89 @@ func (s *Service) enforceSelfWakeupLimits(ctx context.Context, workspaceID pgtyp
 	return nil
 }
 
-func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup) error {
-	newFireAt := pgtype.Timestamptz{Time: time.Now().Add(postponeDelay), Valid: true}
-	if err := s.Cerebro.PostponeWakeup(ctx, cerebrodb.PostponeWakeupParams{
+// postpone parks a wakeup that cannot fire because the agent runtime is offline
+// or missing: it pushes fire_at out by postponeDelay and increments the postpone
+// counter. The returned count drives two anti-flood gates so a runtime that
+// stays offline for hours produces one timeline line and one inbox item, not one
+// of each every 5 minutes:
+//   - count == 1: this is the transition into the parked state, so record the
+//     wakeup_parked system activity (with the human reason + next attempt time).
+//   - count == WakeupMaxConsecutivePostpones: the streak crossed the loop
+//     threshold, so notify the issue owner once. The counter keeps climbing and
+//     only resets on a successful dispatch, so this fires exactly once per streak.
+func (s *Service) postpone(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, reason string) error {
+	nextAttempt := time.Now().Add(postponeDelay)
+	count, err := s.Cerebro.PostponeWakeup(ctx, cerebrodb.PostponeWakeupParams{
 		ID:     row.ID,
-		FireAt: newFireAt,
-	}); err != nil {
+		FireAt: pgtype.Timestamptz{Time: nextAttempt, Valid: true},
+	})
+	if err != nil {
 		return fmt.Errorf("postpone wakeup: %w", err)
+	}
+	if count == 1 {
+		s.recordWakeupParkedActivity(ctx, row, reason, nextAttempt)
+	}
+	if count == WakeupMaxConsecutivePostpones {
+		s.sendPostponeNotification(ctx, row, issue, count, reason)
 	}
 	return nil
 }
 
-// checkPostponeLimit increments the postpone counter and sends an inbox
-// notification to the issue owner when the limit is reached. Called after
-// a successful dispatch so it never blocks the dispatch path.
-func (s *Service) checkPostponeLimit(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue) {
-	count, err := s.Cerebro.IncrementWakeupPostpones(ctx, row.ID)
+// recordWakeupParkedActivity writes the wakeup_parked system activity and
+// publishes it on the event bus, mirroring recordWakeupScheduledActivity so the
+// timeline renders a single human line ("paused — runtime offline, retrying …")
+// instead of the old silent slog-only postpone.
+func (s *Service) recordWakeupParkedActivity(ctx context.Context, row cerebrodb.CerebroAgentWakeup, reason string, nextAttempt time.Time) {
+	if s.Queries == nil || s.Bus == nil {
+		return
+	}
+	detailsMap := map[string]string{
+		"wakeup_id":       util.UUIDToString(row.ID),
+		"trigger_type":    row.TriggerType,
+		"reason":          reason,
+		"next_attempt_at": nextAttempt.UTC().Format(time.RFC3339),
+	}
+	details, err := json.Marshal(detailsMap)
 	if err != nil {
-		slog.Warn("cerebro wakeup: increment postpones failed",
-			"wakeup_id", util.UUIDToString(row.ID), "error", err)
+		slog.Warn("cerebro wakeup parked activity details marshal failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
 		return
 	}
-	if count < WakeupMaxConsecutivePostpones {
+	activity, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: row.WorkspaceID,
+		IssueID:     row.IssueID,
+		ActorType:   util.StrToText("agent"),
+		ActorID:     row.AgentID,
+		Action:      "wakeup_parked", // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 visible offline-park line.
+		Details:     details,
+	})
+	if err != nil {
+		slog.Warn("cerebro wakeup parked activity create failed", "wakeup_id", util.UUIDToString(row.ID), "error", err)
 		return
 	}
-	// Threshold reached — notify the issue owner and reset the counter.
-	s.sendPostponeNotification(ctx, row, issue, count)
-	if resetErr := s.Cerebro.ResetWakeupPostpones(ctx, row.ID); resetErr != nil {
-		slog.Warn("cerebro wakeup: reset postpones failed",
-			"wakeup_id", util.UUIDToString(row.ID), "error", resetErr)
-	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventActivityCreated,
+		WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(row.AgentID),
+		Payload: map[string]any{
+			"issue_id": util.UUIDToString(row.IssueID),
+			"entry": map[string]any{
+				"type":       "activity",
+				"id":         util.UUIDToString(activity.ID),
+				"actor_type": "agent",
+				"actor_id":   util.UUIDToString(row.AgentID),
+				"action":     activity.Action,
+				"details":    json.RawMessage(activity.Details),
+				"created_at": util.TimestampToString(activity.CreatedAt),
+			},
+		},
+	})
 }
 
 // sendPostponeNotification sends an inbox item to the member who owns the
-// issue (assignee if member, else creator) warning that the wakeup has
-// fired consecutiveCount times without resolution.
-func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, consecutiveCount int32) {
+// issue (assignee if member, else creator) warning that the wakeup has been
+// parked consecutiveCount times because the agent runtime is offline or missing.
+func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.CerebroAgentWakeup, issue db.Issue, consecutiveCount int32, reason string) {
 	// Find the human recipient: assignee if member, else creator.
 	var recipientID pgtype.UUID
 	if issue.AssigneeID.Valid && issue.AssigneeType.Valid && issue.AssigneeType.String == "member" {
@@ -535,7 +592,12 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 		"consecutive_count": consecutiveCount,
 		"prompt":            row.Prompt,
 		"max_postpones":     WakeupMaxConsecutivePostpones,
+		"reason":            reason,
 	})
+	cause := "agentens runtime er offline"
+	if reason == postponeReasonNoRuntime {
+		cause = "agenten har ingen runtime"
+	}
 	_, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		WorkspaceID:   row.WorkspaceID,
 		RecipientType: "member",
@@ -543,11 +605,11 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 		Type:          "wakeup_loop",
 		Severity:      "action_required",
 		IssueID:       issue.ID,
-		Title:         fmt.Sprintf(`Wakeup loop på "%s"`, issue.Title),
+		Title:         fmt.Sprintf(`Wakeup parkeret på "%s"`, issue.Title),
 		Body: pgtype.Text{
 			String: fmt.Sprintf(
-				`Agenten har modtaget dette wakeup %d gange i træk uden at afslutte: "%s". Tjek hvad der blokerer.`,
-				consecutiveCount, row.Prompt,
+				`Dette wakeup er blevet parkeret %d gange i træk, fordi %s: "%s". Start runtimen, så det kan køre.`,
+				consecutiveCount, cause, row.Prompt,
 			),
 			Valid: true,
 		},

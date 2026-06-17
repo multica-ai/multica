@@ -140,6 +140,16 @@ export function formatActivity(
       return details.fire_at
         ? `scheduled wakeup for ${wakeupDateTime(details.fire_at)}`
         : "scheduled a wakeup";
+    case "wakeup_parked": {
+      // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 — wakeup parked because the
+      // agent runtime is offline/missing; mirror packages/views/locales/en/issues.json.
+      const when = wakeupDateTime(details.next_attempt_at);
+      if (details.reason === "no_runtime")
+        return `paused this wakeup (no runtime) — retrying ${when}`;
+      if (details.reason === "offline")
+        return `paused this wakeup (runtime offline) — retrying ${when}`;
+      return `paused this wakeup — retrying ${when}`;
+    }
     default:
       return entry.action ?? "";
   }

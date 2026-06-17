@@ -873,6 +873,29 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/\(.+\)/)).toBeInTheDocument();
   });
 
+  it("renders a parked wakeup activity with the offline reason and retry time", async () => {
+    // CEREBRO-PATCH(wakeup-parked-activity): TECH-3734 — offline park is a visible
+    // system activity line, not a silent retry loop.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-wakeup-parked",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        action: "wakeup_parked",
+        details: { reason: "offline", next_attempt_at: "2026-06-13T14:05:00Z" },
+        created_at: "2026-06-13T14:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/paused this wakeup \(runtime offline\)/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/retrying/i)).toBeInTheDocument();
+  });
+
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
     // Timeline shape:
     //   [activities: status_changed, priority_changed] ← block A (older)

@@ -161,29 +161,26 @@ SET state = 'cancelled',
 WHERE issue_id = $1
   AND state = 'pending';
 
--- name: PostponeWakeup :exec
+-- name: PostponeWakeup :one
 -- Resets a claimed wakeup back to pending as a time trigger, firing after the
--- given delay. Used when dispatch conditions aren't met (active task on issue
--- or agent runtime offline).
+-- given delay, and increments the consecutive postpone counter. Used when
+-- dispatch conditions aren't met (agent runtime offline or missing). Returns the
+-- new postpone count so the caller can surface the parked activity only on the
+-- transition into the parked state (count == 1) and notify the issue owner once
+-- at the loop threshold. The counter is named for what it now counts: postpones.
 UPDATE cerebro_agent_wakeup
 SET state = 'pending',
     trigger_type = 'time',
     fire_at = $2,
-    updated_at = now()
-WHERE id = $1;
-
--- name: IncrementWakeupPostpones :one
--- Increments consecutive_postpones and returns the new count.
--- Called after each successful wakeup dispatch so the sweeper can
--- notify the issue owner when the loop threshold is reached.
-UPDATE cerebro_agent_wakeup
-SET consecutive_postpones = consecutive_postpones + 1,
+    consecutive_postpones = consecutive_postpones + 1,
     updated_at = now()
 WHERE id = $1
 RETURNING consecutive_postpones;
 
 -- name: ResetWakeupPostpones :exec
--- Resets the postpone counter (called after inbox notification is sent).
+-- Resets the postpone counter, called after a successful dispatch so an
+-- offline streak that finally fires starts fresh (and the next park re-emits
+-- the parked activity as a new transition).
 UPDATE cerebro_agent_wakeup
 SET consecutive_postpones = 0,
     updated_at = now()

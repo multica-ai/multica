@@ -417,24 +417,6 @@ func (q *Queries) HasRecentPendingWakeupForAgentIssue(ctx context.Context, arg H
 	return has_recent, err
 }
 
-const incrementWakeupPostpones = `-- name: IncrementWakeupPostpones :one
-UPDATE cerebro_agent_wakeup
-SET consecutive_postpones = consecutive_postpones + 1,
-    updated_at = now()
-WHERE id = $1
-RETURNING consecutive_postpones
-`
-
-// Increments consecutive_postpones and returns the new count.
-// Called after each successful wakeup dispatch so the sweeper can
-// notify the issue owner when the loop threshold is reached.
-func (q *Queries) IncrementWakeupPostpones(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementWakeupPostpones, id)
-	var consecutive_postpones int32
-	err := row.Scan(&consecutive_postpones)
-	return consecutive_postpones, err
-}
-
 const listCerebroAgentWakeups = `-- name: ListCerebroAgentWakeups :many
 SELECT id, workspace_id, agent_id, issue_id, prompt, trigger_type,
        fire_at, watch_issue_id, watch_status, state, claimed_at,
@@ -560,13 +542,15 @@ func (q *Queries) MaxActiveTimeWakeupFireAtForAgentIssue(ctx context.Context, ar
 	return max_fire_at, err
 }
 
-const postponeWakeup = `-- name: PostponeWakeup :exec
+const postponeWakeup = `-- name: PostponeWakeup :one
 UPDATE cerebro_agent_wakeup
 SET state = 'pending',
     trigger_type = 'time',
     fire_at = $2,
+    consecutive_postpones = consecutive_postpones + 1,
     updated_at = now()
 WHERE id = $1
+RETURNING consecutive_postpones
 `
 
 type PostponeWakeupParams struct {
@@ -575,11 +559,16 @@ type PostponeWakeupParams struct {
 }
 
 // Resets a claimed wakeup back to pending as a time trigger, firing after the
-// given delay. Used when dispatch conditions aren't met (active task on issue
-// or agent runtime offline).
-func (q *Queries) PostponeWakeup(ctx context.Context, arg PostponeWakeupParams) error {
-	_, err := q.db.Exec(ctx, postponeWakeup, arg.ID, arg.FireAt)
-	return err
+// given delay, and increments the consecutive postpone counter. Used when
+// dispatch conditions aren't met (agent runtime offline or missing). Returns the
+// new postpone count so the caller can surface the parked activity only on the
+// transition into the parked state (count == 1) and notify the issue owner once
+// at the loop threshold. The counter is named for what it now counts: postpones.
+func (q *Queries) PostponeWakeup(ctx context.Context, arg PostponeWakeupParams) (int32, error) {
+	row := q.db.QueryRow(ctx, postponeWakeup, arg.ID, arg.FireAt)
+	var consecutive_postpones int32
+	err := row.Scan(&consecutive_postpones)
+	return consecutive_postpones, err
 }
 
 const releaseWakeupToPending = `-- name: ReleaseWakeupToPending :exec
@@ -605,7 +594,9 @@ SET consecutive_postpones = 0,
 WHERE id = $1
 `
 
-// Resets the postpone counter (called after inbox notification is sent).
+// Resets the postpone counter, called after a successful dispatch so an
+// offline streak that finally fires starts fresh (and the next park re-emits
+// the parked activity as a new transition).
 func (q *Queries) ResetWakeupPostpones(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, resetWakeupPostpones, id)
 	return err
