@@ -96,6 +96,20 @@ Drifted from the prior skill's `github.go:736` citation.
 Net: a bare title prefix (`MUL-2759: ...`) or a branch ref links only;
 `Closes MUL-2759` links **and** records close intent.
 
+## PR URL handoff in the issue body
+
+| Behavior | File:line |
+|---|---|
+| Runtime brief emits the issue-scoped `## Pull Request Handoff` instruction | `server/internal/daemon/execenv/runtime_config.go:591-592` |
+| `multica issue get <id>` reads the current issue, including `description` | `server/cmd/multica/cmd_issue.go:97-101,591-607` |
+| `multica issue update <id>` accepts `--description-file` for a full replacement body | `server/cmd/multica/cmd_issue.go:322-326` |
+| Update path resolves `--description-file` and sends the new `description` field | `server/cmd/multica/cmd_issue.go:897-902` |
+
+The handoff rule is intentionally a prompt-level instruction, not an automatic
+server mutation: the agent must preserve the existing issue description, add or
+update a stable PR URL line, and submit the whole updated body with
+`--description-file`.
+
 ## Status side effects (enqueue contracts)
 
 | Behavior | File:line | Drifted from |
@@ -134,4 +148,6 @@ grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse stru
 grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' internal/handler/github.go
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
+grep -n 'Pull Request Handoff'              internal/daemon/execenv/runtime_config.go
+grep -n 'description-file'                  cmd/multica/cmd_issue.go
 ```

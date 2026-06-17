@@ -66,9 +66,13 @@ MUL-2759: fix login redirect        # links only
 Closes MUL-2759                     # links and records close intent
 ```
 
-In the final issue comment, include the PR URL when a PR exists. If the task did
-not produce a PR because no code changed or the user asked not to create one, say
-that explicitly.
+When a PR URL exists and your role permits issue updates, add or update a stable
+`Pull request: <url>` line in the Multica issue body/description before your
+final comment. Preserve the current description from `multica issue get`; write
+the full updated body to a UTF-8 file and run
+`multica issue update <issue-id> --description-file <path>`. In the final issue
+comment, include the PR URL too. If the task did not produce a PR because no code
+changed or the user asked not to create one, say that explicitly.
 
 ## Reading a linked PR's real state
 

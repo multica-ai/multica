@@ -59,6 +59,73 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	}
 }
 
+func TestPullRequestHandoffSectionPresentForIssueRuns(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+		want bool
+	}{
+		{
+			name: "assignment-triggered",
+			ctx:  TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"},
+			want: true,
+		},
+		{
+			name: "comment-triggered",
+			ctx: TaskContextForEnv{
+				IssueID:          "22222222-3333-4444-5555-666666666666",
+				TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+			},
+			want: true,
+		},
+		{
+			name: "chat",
+			ctx:  TaskContextForEnv{ChatSessionID: "chat-1"},
+		},
+		{
+			name: "quick-create",
+			ctx:  TaskContextForEnv{QuickCreatePrompt: "create me an issue"},
+		},
+		{
+			name: "autopilot run-only",
+			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if !tc.want {
+				for _, banned := range []string{
+					"## Pull Request Handoff",
+					"add the PR URL to the issue body/description",
+				} {
+					if strings.Contains(out, banned) {
+						t.Errorf("[%s] non-issue brief must not include PR handoff text %q\n---\n%s", tc.name, banned, out)
+					}
+				}
+				return
+			}
+
+			for _, want := range []string{
+				"## Pull Request Handoff",
+				"add the PR URL to the issue body/description",
+				"Preserve the existing description from `multica issue get`",
+				"multica issue update " + tc.ctx.IssueID + " --description-file <path>",
+				"Pull request: <url>",
+				"separate from the final issue comment",
+				"Only do this when a PR URL exists",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("[%s] PR handoff section missing %q\n---\n%s", tc.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 // The brief must no longer carry any parent-notification guidance. PR
 // #2918 added a "Tell the parent when you finish a child" rule that
 // turned into noise (self-mention loops, planner ack ping-pong,
