@@ -96,6 +96,8 @@ import (
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
+	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler import
+	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox
@@ -686,6 +688,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
+	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
 	cerebroNoteTypesHandler := cerebronotetypes.NewHandler(cerebroQueries, pool)
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
@@ -1903,6 +1907,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)
 				r.Put("/", cerebroSprintsHandler.AssignIssue)
 			})
+			// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue REST surface.
+			r.Route("/api/cerebro/issues/{issueID}/recurrence", func(r chi.Router) {
+				r.Get("/", cerebroRecurringIssueHandler.GetByIssue)
+				r.Put("/", cerebroRecurringIssueHandler.Upsert)
+				r.Delete("/", cerebroRecurringIssueHandler.Delete)
+			})
+			r.Post("/api/cerebro/issue-recurrences/{id}/run", cerebroRecurringIssueHandler.RunNow)
 			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model REST surface.
 			r.Route("/api/cerebro/status-models", func(r chi.Router) {
 				// Read-only: any workspace member (the board needs to resolve labels).

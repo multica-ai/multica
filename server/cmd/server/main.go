@@ -34,6 +34,8 @@ import (
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	// CEREBRO-PATCH(main-sprints-sweeper): FIR-2666 project sprint sweeper import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
+	// CEREBRO-PATCH(main-recurring-issue-sweeper): TECH-3064 recurring-issue sweeper import
+	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 note types sweeper import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning sweeper import
@@ -416,6 +418,8 @@ func main() {
 	go workflowSvc.RunCronSweeper(sweepCtx, time.Minute)
 	// CEREBRO-PATCH(main-sprints-sweeper): FIR-2666 daily sprint auto-create / advance-state sweeper. No-ops when no project opted in (cerebro_sprints flag off).
 	go cerebrosprints.NewSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 24*time.Hour)
+	// CEREBRO-PATCH(main-recurring-issue-sweeper): TECH-3064 recurring-issue sweeper. No-ops when cerebro_recurring_issues flag is off.
+	go cerebrorecurringissue.NewSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, cerebrorecurringissue.DefaultInterval)
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 daily note-types materialiser. No-ops when no scheduled type exists (cerebro_note_types flag off).
 	go cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24*time.Hour)
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning. Turns threshold-crossing observations into change-request proposals. No-ops for workspaces with cerebro_skill_learning flag off.

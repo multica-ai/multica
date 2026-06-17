@@ -615,6 +615,40 @@ type CerebroIssueDueTime struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroIssueRecurrence struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	SourceIssueID   pgtype.UUID        `json:"source_issue_id"`
+	Frequency       string             `json:"frequency"`
+	IntervalCount   int32              `json:"interval_count"`
+	Weekdays        []int16            `json:"weekdays"`
+	DaysAfter       int32              `json:"days_after"`
+	TriggerStatus   string             `json:"trigger_status"`
+	Anchor          string             `json:"anchor"`
+	CreateNewIssue  bool               `json:"create_new_issue"`
+	NewStatus       string             `json:"new_status"`
+	RecurForever    bool               `json:"recur_forever"`
+	EndDate         pgtype.Date        `json:"end_date"`
+	MaxOccurrences  pgtype.Int4        `json:"max_occurrences"`
+	OccurrenceCount int32              `json:"occurrence_count"`
+	Armed           bool               `json:"armed"`
+	Enabled         bool               `json:"enabled"`
+	CreatedByType   pgtype.Text        `json:"created_by_type"`
+	CreatedByID     pgtype.UUID        `json:"created_by_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroIssueRecurrenceLog struct {
+	ID               pgtype.UUID        `json:"id"`
+	RecurrenceID     pgtype.UUID        `json:"recurrence_id"`
+	TriggerIssueID   pgtype.UUID        `json:"trigger_issue_id"`
+	SpawnedIssueID   pgtype.UUID        `json:"spawned_issue_id"`
+	OccurrenceNumber int32              `json:"occurrence_number"`
+	SpawnedAt        pgtype.Timestamptz `json:"spawned_at"`
+}
+
 type CerebroIssueReference struct {
 	ID            pgtype.UUID        `json:"id"`
 	IssueID       pgtype.UUID        `json:"issue_id"`

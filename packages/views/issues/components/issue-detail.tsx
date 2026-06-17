@@ -113,6 +113,8 @@ import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 assign issue to a sprint sub-project from the sidebar, gated on cerebro_sprints.
 import { SprintPicker } from "@multica/cerebro-sprints/views";
+// CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
+import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1156,6 +1158,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
   // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 gate the sidebar sprint picker.
   const sprintsEnabled = useFeatureFlag("cerebro_sprints");
+  // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
+  const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -1464,6 +1468,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           {sprintsEnabled && issue.project_id && (
             <PropRow label="Sprint">
               <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />
+            </PropRow>
+          )}
+          {/* CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue panel, gated on cerebro_recurring_issues. */}
+          {recurringIssuesEnabled && (
+            <PropRow label="Recurring">
+              <RecurrencePanel workspaceId={wsId} issueId={issue.id} />
             </PropRow>
           )}
           {/* CEREBRO-PATCH(issue-on-behalf-of): MUL-2553 — show the human an agent created this issue for, so it traces back to a member. Label translated to English (TECH-3099). */}
