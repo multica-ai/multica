@@ -79,7 +79,16 @@ export function AgentSurfaceVisibilityPicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // Drop the transient Advanced mode on close so the trigger pill and the
+        // next open reflect the actual stored preset (an all-visible or
+        // all-hidden map is not "Advanced").
+        if (!next) setAdvanced(false);
+      }}
+    >
       <PopoverTrigger
         className={cn(
           "flex items-center gap-1.5 rounded px-1.5 py-0.5 text-sm hover:bg-muted",
