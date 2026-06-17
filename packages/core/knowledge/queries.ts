@@ -3,6 +3,7 @@ import { api } from "../api";
 import type {
   ListKnowledgeAnalyticsParams,
   ListKnowledgeCandidatesParams,
+  ListKnowledgeGovernanceFindingsParams,
   ListKnowledgeParams,
 } from "./types";
 
@@ -16,6 +17,8 @@ export const knowledgeKeys = {
     [...knowledgeKeys.all(wsId), "sources", id] as const,
   candidates: (wsId: string, params?: ListKnowledgeCandidatesParams) =>
     [...knowledgeKeys.all(wsId), "candidates", params ?? {}] as const,
+  governanceFindings: (wsId: string, params?: ListKnowledgeGovernanceFindingsParams) =>
+    [...knowledgeKeys.all(wsId), "governance-findings", params ?? {}] as const,
   analytics: (wsId: string, params?: ListKnowledgeAnalyticsParams) =>
     [...knowledgeKeys.all(wsId), "analytics", params ?? {}] as const,
 };
@@ -50,6 +53,16 @@ export function knowledgeCandidatesOptions(
   return queryOptions({
     queryKey: knowledgeKeys.candidates(wsId, params),
     queryFn: () => api.listKnowledgeCandidates(params),
+  });
+}
+
+export function knowledgeGovernanceFindingsOptions(
+  wsId: string,
+  params?: ListKnowledgeGovernanceFindingsParams,
+) {
+  return queryOptions({
+    queryKey: knowledgeKeys.governanceFindings(wsId, params),
+    queryFn: () => api.listKnowledgeGovernanceFindings(params),
   });
 }
 

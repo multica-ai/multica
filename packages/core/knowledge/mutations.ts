@@ -4,6 +4,7 @@ import { useWorkspaceId } from "../hooks";
 import { knowledgeKeys } from "./queries";
 import type {
   CreateKnowledgeDraftFromCandidateRequest,
+  CreateKnowledgeDraftFromGovernanceFindingRequest,
   CreateKnowledgeDraftFromIssueRequest,
   CreateKnowledgeFeedbackRequest,
   EvaluateKnowledgeCandidateRequest,
@@ -153,6 +154,30 @@ export function useCreateKnowledgeDraftFromCandidate() {
   return useMutation({
     mutationFn: ({ candidate_id, regenerate }: CreateKnowledgeDraftFromCandidateRequest) =>
       api.createKnowledgeDraftFromCandidate(candidate_id, { regenerate }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useCreateKnowledgeDraftFromGovernanceFinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ finding_id, regenerate }: CreateKnowledgeDraftFromGovernanceFindingRequest) =>
+      api.createKnowledgeDraftFromGovernanceFinding(finding_id, { regenerate }),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useResolveKnowledgeGovernanceFinding() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "accept" | "reject" | "dismiss" | "archive" | "deprecate" }) =>
+      api.resolveKnowledgeGovernanceFinding(id, action),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
     },

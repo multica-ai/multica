@@ -631,6 +631,118 @@ UPDATE knowledge_item SET
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 
+-- name: ListKnowledgeGovernanceFindings :many
+SELECT *
+FROM knowledge_governance_finding
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
+  AND (sqlc.narg('finding_type')::text IS NULL OR finding_type = sqlc.narg('finding_type'))
+  AND (sqlc.narg('knowledge_item_id')::uuid IS NULL OR knowledge_item_id = sqlc.narg('knowledge_item_id'))
+ORDER BY
+    CASE status WHEN 'open' THEN 0 WHEN 'drafted' THEN 1 ELSE 2 END,
+    severity DESC,
+    updated_at DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+
+-- name: GetKnowledgeGovernanceFinding :one
+SELECT *
+FROM knowledge_governance_finding
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id');
+
+-- name: UpsertKnowledgeGovernanceFinding :one
+INSERT INTO knowledge_governance_finding (
+    workspace_id, knowledge_item_id, finding_type, status, severity,
+    reason, evidence, suggested_action, source_map
+) VALUES (
+    sqlc.arg('workspace_id'), sqlc.arg('knowledge_item_id'), sqlc.arg('finding_type'),
+    'open', sqlc.arg('severity'), sqlc.arg('reason'), COALESCE(sqlc.narg('evidence'), '{}'::jsonb),
+    sqlc.arg('suggested_action'), COALESCE(sqlc.narg('source_map'), '{}'::jsonb)
+)
+ON CONFLICT (workspace_id, knowledge_item_id, finding_type)
+DO UPDATE SET
+    status = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.status
+        WHEN knowledge_governance_finding.status = 'drafted'
+            THEN 'drafted'
+        ELSE 'open'
+    END,
+    severity = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.severity
+        ELSE EXCLUDED.severity
+    END,
+    reason = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.reason
+        ELSE EXCLUDED.reason
+    END,
+    evidence = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.evidence
+        ELSE EXCLUDED.evidence
+    END,
+    suggested_action = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.suggested_action
+        ELSE EXCLUDED.suggested_action
+    END,
+    source_map = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.source_map
+        ELSE EXCLUDED.source_map
+    END,
+    updated_at = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.updated_at
+        ELSE now()
+    END
+RETURNING *;
+
+-- name: UpdateKnowledgeGovernanceFindingStatus :one
+UPDATE knowledge_governance_finding SET
+    status = sqlc.arg('status'),
+    draft_knowledge_item_id = COALESCE(sqlc.narg('draft_knowledge_item_id'), draft_knowledge_item_id),
+    resolved_by = CASE
+        WHEN sqlc.arg('status')::text IN ('accepted', 'rejected', 'archived', 'deprecated') THEN sqlc.narg('actor_id')
+        ELSE resolved_by
+    END,
+    resolved_at = CASE
+        WHEN sqlc.arg('status')::text IN ('accepted', 'rejected', 'archived', 'deprecated') THEN now()
+        ELSE resolved_at
+    END,
+    dismissed_by = CASE
+        WHEN sqlc.arg('status')::text = 'dismissed' THEN sqlc.narg('actor_id')
+        ELSE dismissed_by
+    END,
+    dismissed_at = CASE
+        WHEN sqlc.arg('status')::text = 'dismissed' THEN now()
+        ELSE dismissed_at
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: DismissKnowledgeGovernanceFindingsForItem :many
+UPDATE knowledge_governance_finding SET
+    status = 'dismissed',
+    dismissed_by = sqlc.arg('actor_id'),
+    dismissed_at = now(),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND knowledge_item_id = sqlc.arg('knowledge_item_id')
+  AND status IN ('open', 'drafted')
+RETURNING *;
+
+-- name: ListNegativeKnowledgeFeedback :many
+SELECT *
+FROM knowledge_feedback
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND knowledge_item_id = sqlc.arg('knowledge_item_id')
+  AND value IN ('not_helpful', 'misleading', 'outdated')
+ORDER BY created_at DESC
+LIMIT sqlc.arg('limit');
+
 -- name: GetKnowledgeCandidate :one
 SELECT *
 FROM knowledge_candidate

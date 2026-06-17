@@ -3,11 +3,13 @@ import type {
   KnowledgeCandidate,
   KnowledgeDetail,
   KnowledgeFeedback,
+  KnowledgeGovernanceFinding,
   KnowledgeItem,
   KnowledgeSearchResult,
   KnowledgeSourceDetail,
   ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesResponse,
+  ListKnowledgeGovernanceFindingsResponse,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
   SearchKnowledgeResponse,
@@ -149,6 +151,26 @@ export const KnowledgeCandidateSchema = z.object({
   updated_at: z.string().default(""),
 }).passthrough();
 
+export const KnowledgeGovernanceFindingSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  knowledge_item_id: z.string().default(""),
+  finding_type: z.string().default("stale"),
+  status: z.string().default("open"),
+  severity: z.number().default(0),
+  reason: z.string().default(""),
+  evidence: z.unknown().default({}),
+  suggested_action: z.string().default(""),
+  source_map: z.unknown().default({}),
+  draft_knowledge_item_id: NullableString,
+  resolved_by: NullableString,
+  resolved_at: NullableString,
+  dismissed_by: NullableString,
+  dismissed_at: NullableString,
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).passthrough();
+
 export const KnowledgeFeedbackSchema = z.object({
   id: z.string().default(""),
   knowledge_item_id: z.string().default(""),
@@ -198,6 +220,11 @@ export const ListKnowledgeSourcesResponseSchema = z.object({
 
 export const ListKnowledgeCandidatesResponseSchema = z.object({
   candidates: z.array(KnowledgeCandidateSchema).default([]),
+  total: z.number().default(0),
+}).passthrough();
+
+export const ListKnowledgeGovernanceFindingsResponseSchema = z.object({
+  findings: z.array(KnowledgeGovernanceFindingSchema).default([]),
   total: z.number().default(0),
 }).passthrough();
 
@@ -275,6 +302,11 @@ export const EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE: ListKnowledgeCandidatesRe
   total: 0,
 };
 
+export const EMPTY_LIST_KNOWLEDGE_GOVERNANCE_FINDINGS_RESPONSE: ListKnowledgeGovernanceFindingsResponse = {
+  findings: [],
+  total: 0,
+};
+
 export const EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE: ListKnowledgeAnalyticsResponse = {
   items: [],
   total: 0,
@@ -294,6 +326,7 @@ export type {
   KnowledgeCandidate,
   KnowledgeDetail,
   KnowledgeFeedback,
+  KnowledgeGovernanceFinding,
   KnowledgeItem,
   KnowledgeSearchResult,
   KnowledgeSourceDetail,

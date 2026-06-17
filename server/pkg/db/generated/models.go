@@ -547,6 +547,26 @@ type KnowledgeFeedback struct {
 	AgentTaskID     pgtype.UUID        `json:"agent_task_id"`
 }
 
+type KnowledgeGovernanceFinding struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	KnowledgeItemID      pgtype.UUID        `json:"knowledge_item_id"`
+	FindingType          string             `json:"finding_type"`
+	Status               string             `json:"status"`
+	Severity             int32              `json:"severity"`
+	Reason               string             `json:"reason"`
+	Evidence             []byte             `json:"evidence"`
+	SuggestedAction      string             `json:"suggested_action"`
+	SourceMap            []byte             `json:"source_map"`
+	DraftKnowledgeItemID pgtype.UUID        `json:"draft_knowledge_item_id"`
+	ResolvedBy           pgtype.UUID        `json:"resolved_by"`
+	ResolvedAt           pgtype.Timestamptz `json:"resolved_at"`
+	DismissedBy          pgtype.UUID        `json:"dismissed_by"`
+	DismissedAt          pgtype.Timestamptz `json:"dismissed_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type KnowledgeInjectionEvent struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

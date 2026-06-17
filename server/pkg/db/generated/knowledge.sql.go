@@ -460,6 +460,62 @@ func (q *Queries) DismissKnowledgeGovernance(ctx context.Context, arg DismissKno
 	return i, err
 }
 
+const dismissKnowledgeGovernanceFindingsForItem = `-- name: DismissKnowledgeGovernanceFindingsForItem :many
+UPDATE knowledge_governance_finding SET
+    status = 'dismissed',
+    dismissed_by = $1,
+    dismissed_at = now(),
+    updated_at = now()
+WHERE workspace_id = $2
+  AND knowledge_item_id = $3
+  AND status IN ('open', 'drafted')
+RETURNING id, workspace_id, knowledge_item_id, finding_type, status, severity, reason, evidence, suggested_action, source_map, draft_knowledge_item_id, resolved_by, resolved_at, dismissed_by, dismissed_at, created_at, updated_at
+`
+
+type DismissKnowledgeGovernanceFindingsForItemParams struct {
+	ActorID         pgtype.UUID `json:"actor_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+}
+
+func (q *Queries) DismissKnowledgeGovernanceFindingsForItem(ctx context.Context, arg DismissKnowledgeGovernanceFindingsForItemParams) ([]KnowledgeGovernanceFinding, error) {
+	rows, err := q.db.Query(ctx, dismissKnowledgeGovernanceFindingsForItem, arg.ActorID, arg.WorkspaceID, arg.KnowledgeItemID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeGovernanceFinding{}
+	for rows.Next() {
+		var i KnowledgeGovernanceFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeItemID,
+			&i.FindingType,
+			&i.Status,
+			&i.Severity,
+			&i.Reason,
+			&i.Evidence,
+			&i.SuggestedAction,
+			&i.SourceMap,
+			&i.DraftKnowledgeItemID,
+			&i.ResolvedBy,
+			&i.ResolvedAt,
+			&i.DismissedBy,
+			&i.DismissedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getKnowledgeCandidate = `-- name: GetKnowledgeCandidate :one
 SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
 FROM knowledge_candidate
@@ -534,6 +590,42 @@ func (q *Queries) GetKnowledgeFeedbackSummary(ctx context.Context, arg GetKnowle
 		return nil, err
 	}
 	return items, nil
+}
+
+const getKnowledgeGovernanceFinding = `-- name: GetKnowledgeGovernanceFinding :one
+SELECT id, workspace_id, knowledge_item_id, finding_type, status, severity, reason, evidence, suggested_action, source_map, draft_knowledge_item_id, resolved_by, resolved_at, dismissed_by, dismissed_at, created_at, updated_at
+FROM knowledge_governance_finding
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetKnowledgeGovernanceFindingParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetKnowledgeGovernanceFinding(ctx context.Context, arg GetKnowledgeGovernanceFindingParams) (KnowledgeGovernanceFinding, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeGovernanceFinding, arg.ID, arg.WorkspaceID)
+	var i KnowledgeGovernanceFinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeItemID,
+		&i.FindingType,
+		&i.Status,
+		&i.Severity,
+		&i.Reason,
+		&i.Evidence,
+		&i.SuggestedAction,
+		&i.SourceMap,
+		&i.DraftKnowledgeItemID,
+		&i.ResolvedBy,
+		&i.ResolvedAt,
+		&i.DismissedBy,
+		&i.DismissedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getKnowledgeItem = `-- name: GetKnowledgeItem :one
@@ -1283,6 +1375,74 @@ func (q *Queries) ListKnowledgeGovernanceCandidates(ctx context.Context, arg Lis
 	return items, nil
 }
 
+const listKnowledgeGovernanceFindings = `-- name: ListKnowledgeGovernanceFindings :many
+SELECT id, workspace_id, knowledge_item_id, finding_type, status, severity, reason, evidence, suggested_action, source_map, draft_knowledge_item_id, resolved_by, resolved_at, dismissed_by, dismissed_at, created_at, updated_at
+FROM knowledge_governance_finding
+WHERE workspace_id = $1
+  AND ($2::text IS NULL OR status = $2)
+  AND ($3::text IS NULL OR finding_type = $3)
+  AND ($4::uuid IS NULL OR knowledge_item_id = $4)
+ORDER BY
+    CASE status WHEN 'open' THEN 0 WHEN 'drafted' THEN 1 ELSE 2 END,
+    severity DESC,
+    updated_at DESC
+LIMIT $6 OFFSET $5
+`
+
+type ListKnowledgeGovernanceFindingsParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Status          pgtype.Text `json:"status"`
+	FindingType     pgtype.Text `json:"finding_type"`
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	Offset          int32       `json:"offset"`
+	Limit           int32       `json:"limit"`
+}
+
+func (q *Queries) ListKnowledgeGovernanceFindings(ctx context.Context, arg ListKnowledgeGovernanceFindingsParams) ([]KnowledgeGovernanceFinding, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeGovernanceFindings,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.FindingType,
+		arg.KnowledgeItemID,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeGovernanceFinding{}
+	for rows.Next() {
+		var i KnowledgeGovernanceFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.KnowledgeItemID,
+			&i.FindingType,
+			&i.Status,
+			&i.Severity,
+			&i.Reason,
+			&i.Evidence,
+			&i.SuggestedAction,
+			&i.SourceMap,
+			&i.DraftKnowledgeItemID,
+			&i.ResolvedBy,
+			&i.ResolvedAt,
+			&i.DismissedBy,
+			&i.DismissedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeItems = `-- name: ListKnowledgeItems :many
 SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
 FROM knowledge_item
@@ -1599,6 +1759,51 @@ func (q *Queries) ListKnowledgeSources(ctx context.Context, arg ListKnowledgeSou
 			&i.SourceTitle,
 			&i.SourceExcerpt,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNegativeKnowledgeFeedback = `-- name: ListNegativeKnowledgeFeedback :many
+SELECT id, knowledge_item_id, workspace_id, member_id, value, note, created_at, agent_task_id
+FROM knowledge_feedback
+WHERE workspace_id = $1
+  AND knowledge_item_id = $2
+  AND value IN ('not_helpful', 'misleading', 'outdated')
+ORDER BY created_at DESC
+LIMIT $3
+`
+
+type ListNegativeKnowledgeFeedbackParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	Limit           int32       `json:"limit"`
+}
+
+func (q *Queries) ListNegativeKnowledgeFeedback(ctx context.Context, arg ListNegativeKnowledgeFeedbackParams) ([]KnowledgeFeedback, error) {
+	rows, err := q.db.Query(ctx, listNegativeKnowledgeFeedback, arg.WorkspaceID, arg.KnowledgeItemID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeFeedback{}
+	for rows.Next() {
+		var i KnowledgeFeedback
+		if err := rows.Scan(
+			&i.ID,
+			&i.KnowledgeItemID,
+			&i.WorkspaceID,
+			&i.MemberID,
+			&i.Value,
+			&i.Note,
+			&i.CreatedAt,
+			&i.AgentTaskID,
 		); err != nil {
 			return nil, err
 		}
@@ -2156,6 +2361,70 @@ func (q *Queries) UpdateKnowledgeGovernance(ctx context.Context, arg UpdateKnowl
 	return i, err
 }
 
+const updateKnowledgeGovernanceFindingStatus = `-- name: UpdateKnowledgeGovernanceFindingStatus :one
+UPDATE knowledge_governance_finding SET
+    status = $1,
+    draft_knowledge_item_id = COALESCE($2, draft_knowledge_item_id),
+    resolved_by = CASE
+        WHEN $1::text IN ('accepted', 'rejected', 'archived', 'deprecated') THEN $3
+        ELSE resolved_by
+    END,
+    resolved_at = CASE
+        WHEN $1::text IN ('accepted', 'rejected', 'archived', 'deprecated') THEN now()
+        ELSE resolved_at
+    END,
+    dismissed_by = CASE
+        WHEN $1::text = 'dismissed' THEN $3
+        ELSE dismissed_by
+    END,
+    dismissed_at = CASE
+        WHEN $1::text = 'dismissed' THEN now()
+        ELSE dismissed_at
+    END,
+    updated_at = now()
+WHERE id = $4 AND workspace_id = $5
+RETURNING id, workspace_id, knowledge_item_id, finding_type, status, severity, reason, evidence, suggested_action, source_map, draft_knowledge_item_id, resolved_by, resolved_at, dismissed_by, dismissed_at, created_at, updated_at
+`
+
+type UpdateKnowledgeGovernanceFindingStatusParams struct {
+	Status               string      `json:"status"`
+	DraftKnowledgeItemID pgtype.UUID `json:"draft_knowledge_item_id"`
+	ActorID              pgtype.UUID `json:"actor_id"`
+	ID                   pgtype.UUID `json:"id"`
+	WorkspaceID          pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) UpdateKnowledgeGovernanceFindingStatus(ctx context.Context, arg UpdateKnowledgeGovernanceFindingStatusParams) (KnowledgeGovernanceFinding, error) {
+	row := q.db.QueryRow(ctx, updateKnowledgeGovernanceFindingStatus,
+		arg.Status,
+		arg.DraftKnowledgeItemID,
+		arg.ActorID,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i KnowledgeGovernanceFinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeItemID,
+		&i.FindingType,
+		&i.Status,
+		&i.Severity,
+		&i.Reason,
+		&i.Evidence,
+		&i.SuggestedAction,
+		&i.SourceMap,
+		&i.DraftKnowledgeItemID,
+		&i.ResolvedBy,
+		&i.ResolvedAt,
+		&i.DismissedBy,
+		&i.DismissedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateKnowledgeItem = `-- name: UpdateKnowledgeItem :one
 UPDATE knowledge_item SET
     project_id = COALESCE($1, project_id),
@@ -2393,6 +2662,102 @@ func (q *Queries) UpsertKnowledgeEmbedding(ctx context.Context, arg UpsertKnowle
 		&i.ContentHash,
 		&i.EmbeddedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeGovernanceFinding = `-- name: UpsertKnowledgeGovernanceFinding :one
+INSERT INTO knowledge_governance_finding (
+    workspace_id, knowledge_item_id, finding_type, status, severity,
+    reason, evidence, suggested_action, source_map
+) VALUES (
+    $1, $2, $3,
+    'open', $4, $5, COALESCE($6, '{}'::jsonb),
+    $7, COALESCE($8, '{}'::jsonb)
+)
+ON CONFLICT (workspace_id, knowledge_item_id, finding_type)
+DO UPDATE SET
+    status = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.status
+        WHEN knowledge_governance_finding.status = 'drafted'
+            THEN 'drafted'
+        ELSE 'open'
+    END,
+    severity = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.severity
+        ELSE EXCLUDED.severity
+    END,
+    reason = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.reason
+        ELSE EXCLUDED.reason
+    END,
+    evidence = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.evidence
+        ELSE EXCLUDED.evidence
+    END,
+    suggested_action = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.suggested_action
+        ELSE EXCLUDED.suggested_action
+    END,
+    source_map = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.source_map
+        ELSE EXCLUDED.source_map
+    END,
+    updated_at = CASE
+        WHEN knowledge_governance_finding.status IN ('accepted', 'rejected', 'dismissed', 'archived', 'deprecated')
+            THEN knowledge_governance_finding.updated_at
+        ELSE now()
+    END
+RETURNING id, workspace_id, knowledge_item_id, finding_type, status, severity, reason, evidence, suggested_action, source_map, draft_knowledge_item_id, resolved_by, resolved_at, dismissed_by, dismissed_at, created_at, updated_at
+`
+
+type UpsertKnowledgeGovernanceFindingParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	KnowledgeItemID pgtype.UUID `json:"knowledge_item_id"`
+	FindingType     string      `json:"finding_type"`
+	Severity        int32       `json:"severity"`
+	Reason          string      `json:"reason"`
+	Evidence        interface{} `json:"evidence"`
+	SuggestedAction string      `json:"suggested_action"`
+	SourceMap       interface{} `json:"source_map"`
+}
+
+func (q *Queries) UpsertKnowledgeGovernanceFinding(ctx context.Context, arg UpsertKnowledgeGovernanceFindingParams) (KnowledgeGovernanceFinding, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeGovernanceFinding,
+		arg.WorkspaceID,
+		arg.KnowledgeItemID,
+		arg.FindingType,
+		arg.Severity,
+		arg.Reason,
+		arg.Evidence,
+		arg.SuggestedAction,
+		arg.SourceMap,
+	)
+	var i KnowledgeGovernanceFinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.KnowledgeItemID,
+		&i.FindingType,
+		&i.Status,
+		&i.Severity,
+		&i.Reason,
+		&i.Evidence,
+		&i.SuggestedAction,
+		&i.SourceMap,
+		&i.DraftKnowledgeItemID,
+		&i.ResolvedBy,
+		&i.ResolvedAt,
+		&i.DismissedBy,
+		&i.DismissedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

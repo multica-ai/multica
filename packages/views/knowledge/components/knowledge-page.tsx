@@ -13,6 +13,7 @@ import {
   History,
   Search,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { AppLink, useNavigation } from "../../navigation";
@@ -24,13 +25,16 @@ import {
   knowledgeAnalyticsOptions,
   knowledgeCandidatesOptions,
   knowledgeDetailOptions,
+  knowledgeGovernanceFindingsOptions,
   knowledgeListOptions,
 } from "@multica/core/knowledge/queries";
 import {
   useArchiveKnowledge,
   useCreateKnowledgeDraftFromCandidate,
+  useCreateKnowledgeDraftFromGovernanceFinding,
   useDismissKnowledgeGovernance,
   usePublishKnowledge,
+  useResolveKnowledgeGovernanceFinding,
   useRestoreKnowledge,
   useReviewKnowledge,
   useUpdateKnowledge,
@@ -39,6 +43,7 @@ import type {
   KnowledgeCandidate,
   KnowledgeAnalyticsRow,
   KnowledgeDetail,
+  KnowledgeGovernanceFinding,
   KnowledgeItem,
   KnowledgeLifecycleStatus,
   UpdateKnowledgeRequest,
@@ -511,6 +516,15 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                             <ExternalLink className="h-4 w-4" />
                           </Button>
                         )}
+                        {source.source_type === "knowledge" && source.source_id && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            render={<AppLink href={paths.knowledgeDetail(source.source_id ?? "")} />}
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                       {source.source_excerpt && (
                         <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">
@@ -633,6 +647,178 @@ function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
   );
 }
 
+function findingEvidenceSummary(finding: KnowledgeGovernanceFinding): string {
+  const evidence = finding.evidence;
+  if (!evidence || typeof evidence !== "object") return "";
+  const record = evidence as Record<string, unknown>;
+  const values = [
+    ["helpful", record.helpful_count],
+    ["not helpful", record.not_helpful_count],
+    ["misleading", record.misleading_count],
+    ["outdated", record.outdated_count],
+    ["injections", record.injection_count],
+    ["usage", record.usage_count],
+  ]
+    .filter(([, value]) => typeof value === "number" && value > 0)
+    .map(([label, value]) => `${label}: ${value}`);
+  return values.join(" · ");
+}
+
+function findingSourceMapSummary(finding: KnowledgeGovernanceFinding): string {
+  const sourceMap = finding.source_map;
+  if (!sourceMap || typeof sourceMap !== "object") return "";
+  const record = sourceMap as Record<string, unknown>;
+  const feedback = Array.isArray(record.negative_feedback) ? record.negative_feedback.length : 0;
+  const sourceIssues = Array.isArray(record.source_issue_ids) ? record.source_issue_ids.length : 0;
+  const sources = Array.isArray(record.sources) ? record.sources.length : 0;
+  return [feedback ? `${feedback} feedback` : "", sourceIssues ? `${sourceIssues} issues` : "", sources ? `${sources} sources` : ""]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function governanceFindingTypeLabel(type: string, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
+  switch (type) {
+    case "stale":
+      return t(($) => $.governance_types.stale);
+    case "conflict":
+      return t(($) => $.governance_types.conflict);
+    case "low_effectiveness":
+      return t(($) => $.governance_types.low_effectiveness);
+    case "misleading":
+      return t(($) => $.governance_types.misleading);
+    case "outdated":
+      return t(($) => $.governance_types.outdated);
+    default:
+      return type;
+  }
+}
+
+function governanceFindingStatusLabel(status: string, t: ReturnType<typeof useT<"knowledge">>["t"]): string {
+  switch (status) {
+    case "open":
+      return t(($) => $.governance_status.open);
+    case "drafted":
+      return t(($) => $.governance_status.drafted);
+    case "accepted":
+      return t(($) => $.governance_status.accepted);
+    case "rejected":
+      return t(($) => $.governance_status.rejected);
+    case "dismissed":
+      return t(($) => $.governance_status.dismissed);
+    case "archived":
+      return t(($) => $.governance_status.archived);
+    case "deprecated":
+      return t(($) => $.governance_status.deprecated);
+    default:
+      return status;
+  }
+}
+
+function GovernanceFindingsQueue({ findings }: { findings: KnowledgeGovernanceFinding[] }) {
+  const { t, i18n } = useT("knowledge");
+  const paths = useWorkspacePaths();
+  const createDraft = useCreateKnowledgeDraftFromGovernanceFinding();
+  const resolveFinding = useResolveKnowledgeGovernanceFinding();
+  const generate = async (finding: KnowledgeGovernanceFinding, regenerate = false) => {
+    try {
+      await createDraft.mutateAsync({ finding_id: finding.id, regenerate });
+      toast.success(t(($) => $.toast.draft_created));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
+    }
+  };
+  const resolve = async (
+    finding: KnowledgeGovernanceFinding,
+    action: "accept" | "reject" | "dismiss" | "archive" | "deprecate",
+  ) => {
+    try {
+      await resolveFinding.mutateAsync({ id: finding.id, action });
+      toast.success(t(($) => $.toast[`governance_${action}`] ?? $.toast.action_failed));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
+    }
+  };
+  if (findings.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <AlertTriangle className="h-7 w-7 text-muted-foreground/50" />
+        <p className="text-sm font-medium">{t(($) => $.governance_queue.empty_title)}</p>
+        <p className="text-sm text-muted-foreground">{t(($) => $.governance_queue.empty_body)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto grid max-w-5xl gap-3">
+        {findings.map((finding) => {
+          const evidence = findingEvidenceSummary(finding);
+          const sourceMap = findingSourceMapSummary(finding);
+          const hasDraft = !!finding.draft_knowledge_item_id;
+          const isResolved = !["open", "drafted"].includes(finding.status);
+          return (
+            <div key={finding.id} className="rounded-lg border p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={finding.finding_type === "conflict" || finding.finding_type === "misleading" ? "destructive" : "outline"}>
+                  {governanceFindingTypeLabel(finding.finding_type, t)}
+                </Badge>
+                <Badge variant={isResolved ? "secondary" : "outline"}>
+                  {governanceFindingStatusLabel(finding.status, t)}
+                </Badge>
+                <span className="font-mono text-xs text-muted-foreground">{finding.severity}</span>
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {new Date(finding.updated_at).toLocaleString(i18n.language)}
+                </span>
+              </div>
+              <p className="mt-3 text-sm font-medium">{finding.reason}</p>
+              {finding.suggested_action && (
+                <p className="mt-1 text-sm text-muted-foreground">{finding.suggested_action}</p>
+              )}
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-2">
+                {evidence && <span>{evidence}</span>}
+                {sourceMap && <span>{sourceMap}</span>}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(finding.knowledge_item_id)} />}>
+                  <ExternalLink className="h-4 w-4" />
+                  {t(($) => $.governance_queue.open_original)}
+                </Button>
+                {hasDraft && (
+                  <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(finding.draft_knowledge_item_id ?? "")} />}>
+                    <FileText className="h-4 w-4" />
+                    {t(($) => $.governance_queue.open_draft)}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => generate(finding, hasDraft)} disabled={createDraft.isPending || isResolved}>
+                  <Sparkles className="h-4 w-4" />
+                  {hasDraft ? t(($) => $.governance_queue.regenerate_draft) : t(($) => $.governance_queue.generate_draft)}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => resolve(finding, "accept")} disabled={resolveFinding.isPending || !hasDraft || isResolved}>
+                  <CheckCircle2 className="h-4 w-4" />
+                  {t(($) => $.governance_queue.accept)}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => resolve(finding, "reject")} disabled={resolveFinding.isPending || isResolved}>
+                  <XCircle className="h-4 w-4" />
+                  {t(($) => $.governance_queue.reject)}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => resolve(finding, "archive")} disabled={resolveFinding.isPending || isResolved}>
+                  <Archive className="h-4 w-4" />
+                  {t(($) => $.governance_queue.archive_original)}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => resolve(finding, "deprecate")} disabled={resolveFinding.isPending || isResolved}>
+                  {t(($) => $.governance_queue.deprecate_original)}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => resolve(finding, "dismiss")} disabled={resolveFinding.isPending || isResolved}>
+                  {t(($) => $.governance_queue.dismiss)}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsPanel({ rows }: { rows: KnowledgeAnalyticsRow[] }) {
   const { t } = useT("knowledge");
   const paths = useWorkspacePaths();
@@ -703,6 +889,10 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
     ...knowledgeCandidatesOptions(wsId, { limit: 50 }),
     enabled: workspaceView === "candidates",
   });
+  const governanceFindingsQuery = useQuery({
+    ...knowledgeGovernanceFindingsOptions(wsId, { status: "active", limit: 50 }),
+    enabled: workspaceView === "review",
+  });
   const analyticsQuery = useQuery({
     ...knowledgeAnalyticsOptions(wsId, { limit: 50 }),
     enabled: workspaceView === "analytics",
@@ -752,7 +942,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
             </Button>
           ))}
         </div>
-        {(workspaceView === "knowledge" || workspaceView === "review") && (
+        {workspaceView === "knowledge" && (
           <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
             <SelectTrigger size="sm">
               <SelectValue />
@@ -769,7 +959,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
       </PageHeader>
 
       <div className="flex min-h-0 flex-1">
-        {(workspaceView === "knowledge" || workspaceView === "review") && (
+        {workspaceView === "knowledge" && (
           <aside className="flex w-96 shrink-0 flex-col border-r">
           <div className="border-b p-3 md:hidden">
             <div className="relative">
@@ -807,7 +997,16 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
           </aside>
         )}
         <main className="min-w-0 flex-1">
-          {workspaceView === "candidates" ? (
+          {workspaceView === "review" ? (
+            governanceFindingsQuery.isLoading ? (
+              <div className="space-y-4 p-6">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ) : (
+              <GovernanceFindingsQueue findings={governanceFindingsQuery.data?.findings ?? []} />
+            )
+          ) : workspaceView === "candidates" ? (
             candidatesQuery.isLoading ? (
               <div className="space-y-4 p-6">
                 <Skeleton className="h-24 w-full" />

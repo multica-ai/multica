@@ -350,6 +350,118 @@ func TestKnowledgeDismissGovernanceClearsReviewFinding(t *testing.T) {
 	}
 }
 
+func TestKnowledgeGovernanceFindingDismissStaysResolved(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Governance outdated source", "done", "medium")
+	created := createGovernanceKnowledgeFixture(t, issueID)
+	createNegativeKnowledgeFeedback(t, created.Item.ID, "outdated", "This is outdated after the latest Android behavior.")
+	createNegativeKnowledgeFeedback(t, created.Item.ID, "outdated", "The recommended diagnostic path no longer works.")
+
+	result, err := testHandler.KnowledgeService.RunGovernance(context.Background(), service.KnowledgeGovernanceParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Limit:       100,
+	})
+	if err != nil {
+		t.Fatalf("RunGovernance: %v", err)
+	}
+	if result.Findings == 0 {
+		t.Fatalf("RunGovernance findings = 0, want > 0")
+	}
+	finding := loadGovernanceFindingByType(t, created.Item.ID, "outdated")
+	if finding.Status != "open" {
+		t.Fatalf("finding status = %q, want open", finding.Status)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/governance-findings/"+uuidToString(finding.ID)+"/dismiss", nil)
+	req = withURLParam(req, "id", uuidToString(finding.ID))
+	req = withURLParam(req, "action", "dismiss")
+	testHandler.ResolveKnowledgeGovernanceFinding(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("dismiss governance finding: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testHandler.KnowledgeService.RunGovernance(context.Background(), service.KnowledgeGovernanceParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Limit:       100,
+	}); err != nil {
+		t.Fatalf("RunGovernance after dismiss: %v", err)
+	}
+	finding = loadGovernanceFindingByType(t, created.Item.ID, "outdated")
+	if finding.Status != "dismissed" {
+		t.Fatalf("dismissed finding reopened as %q", finding.Status)
+	}
+}
+
+func TestKnowledgeGovernanceFindingCreatesReviewDraftWithSourceMap(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Governance misleading source", "done", "medium")
+	created := createGovernanceKnowledgeFixture(t, issueID)
+	createNegativeKnowledgeFeedback(t, created.Item.ID, "misleading", "This sent the agent down the wrong path.")
+	createNegativeKnowledgeFeedback(t, created.Item.ID, "outdated", "The old command is obsolete.")
+	withStaticCuratorEngine(t, service.CuratorDraft{
+		Title:               "Updated governance draft",
+		Type:                "lesson",
+		ProblemPattern:      "The old knowledge is misleading after platform behavior changes.",
+		TriggerConditions:   "Use when governance reports misleading or outdated feedback.",
+		DiagnosticSteps:     "Inspect the negative feedback and latest source issue before updating.",
+		RecommendedPractice: "Create a reviewed update draft and keep publishing as a separate human action.",
+		AntiPatterns:        "Do not auto-publish governance-generated drafts.",
+		Applicability:       "Knowledge governance updates.",
+		ConfidenceStatus:    "high",
+	})
+	if _, err := testHandler.KnowledgeService.RunGovernance(context.Background(), service.KnowledgeGovernanceParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Limit:       100,
+	}); err != nil {
+		t.Fatalf("RunGovernance: %v", err)
+	}
+	finding := loadGovernanceFindingByType(t, created.Item.ID, "misleading")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/governance-findings/"+uuidToString(finding.ID)+"/draft", map[string]any{})
+	req = withURLParam(req, "id", uuidToString(finding.ID))
+	testHandler.CreateKnowledgeDraftFromGovernanceFinding(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateKnowledgeDraftFromGovernanceFinding: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var detail KnowledgeDetailResponse
+	if err := json.NewDecoder(w.Body).Decode(&detail); err != nil {
+		t.Fatalf("decode governance draft: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, detail.Item.ID)
+	})
+	if detail.Item.LifecycleStatus != "draft" {
+		t.Fatalf("draft lifecycle_status = %q, want draft", detail.Item.LifecycleStatus)
+	}
+	sourceTypes := map[string]bool{}
+	for _, source := range detail.Sources {
+		sourceTypes[source.SourceType] = true
+	}
+	if !sourceTypes["knowledge"] || !sourceTypes["issue"] {
+		t.Fatalf("draft sources missing knowledge/issue source map: %#v", detail.Sources)
+	}
+	finding = loadGovernanceFindingByType(t, created.Item.ID, "misleading")
+	if finding.Status != "drafted" || uuidToString(finding.DraftKnowledgeItemID) != detail.Item.ID {
+		t.Fatalf("finding after draft = status %q draft %s, want drafted %s", finding.Status, uuidToString(finding.DraftKnowledgeItemID), detail.Item.ID)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/knowledge/governance-findings/"+uuidToString(finding.ID)+"/accept", nil)
+	req = withURLParam(req, "id", uuidToString(finding.ID))
+	req = withURLParam(req, "action", "accept")
+	testHandler.ResolveKnowledgeGovernanceFinding(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("accept governance draft: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var lifecycle string
+	if err := testPool.QueryRow(context.Background(), `SELECT lifecycle_status FROM knowledge_item WHERE id = $1`, detail.Item.ID).Scan(&lifecycle); err != nil {
+		t.Fatalf("load accepted draft: %v", err)
+	}
+	if lifecycle != "reviewed" {
+		t.Fatalf("accepted governance draft lifecycle = %q, want reviewed", lifecycle)
+	}
+}
+
 func TestKnowledgePublishWikiSkillTargetsAndSourceDetails(t *testing.T) {
 	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge source issue", "done", "medium")
 	created := createKnowledgeFixture(t, map[string]any{
@@ -791,6 +903,55 @@ func createKnowledgeFixture(t *testing.T, body map[string]any) KnowledgeDetailRe
 		testPool.Exec(context.Background(), `DELETE FROM knowledge_item WHERE id = $1`, resp.Item.ID)
 	})
 	return resp
+}
+
+func createGovernanceKnowledgeFixture(t *testing.T, issueID string) KnowledgeDetailResponse {
+	t.Helper()
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Governance source knowledge",
+		"type":                 "lesson",
+		"problem_pattern":      "An existing knowledge item can become stale or misleading.",
+		"trigger_conditions":   "Use this when similar tasks reuse old guidance.",
+		"diagnostic_steps":     "Check the current bad case and compare it with original sources.",
+		"recommended_practice": "Refresh the guidance through a review draft.",
+		"anti_patterns":        "Do not auto-publish the generated update.",
+		"applicability":        "Knowledge governance tests.",
+		"confidence_status":    "high",
+		"sources": []map[string]any{{
+			"source_type":  "issue",
+			"source_id":    issueID,
+			"source_title": "Original governance issue",
+		}},
+	})
+	return publishKnowledgeForRAG(t, created.Item.ID)
+}
+
+func createNegativeKnowledgeFeedback(t *testing.T, itemID, value, note string) {
+	t.Helper()
+	memberID := handlerTestMemberID(t)
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO knowledge_feedback (knowledge_item_id, workspace_id, member_id, value, note)
+		VALUES ($1, $2, $3, $4, $5)
+	`, itemID, testWorkspaceID, uuidToString(memberID), value, note); err != nil {
+		t.Fatalf("insert knowledge feedback: %v", err)
+	}
+}
+
+func loadGovernanceFindingByType(t *testing.T, itemID, findingType string) db.KnowledgeGovernanceFinding {
+	t.Helper()
+	findings, err := testHandler.Queries.ListKnowledgeGovernanceFindings(context.Background(), db.ListKnowledgeGovernanceFindingsParams{
+		WorkspaceID:     parseUUID(testWorkspaceID),
+		FindingType:     pgtype.Text{String: findingType, Valid: true},
+		KnowledgeItemID: parseUUID(itemID),
+		Limit:           10,
+	})
+	if err != nil {
+		t.Fatalf("load governance finding: %v", err)
+	}
+	if len(findings) == 0 {
+		t.Fatalf("no governance finding type %q for item %s", findingType, itemID)
+	}
+	return findings[0]
 }
 
 func reviewKnowledge(t *testing.T, itemID string) KnowledgeItemResponse {

@@ -60,6 +60,13 @@ type CuratorCandidateDraftParams struct {
 	Regenerate  bool
 }
 
+type CuratorGovernanceDraftParams struct {
+	WorkspaceID pgtype.UUID
+	FindingID   pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Regenerate  bool
+}
+
 type KnowledgeEmbeddingRebuildParams struct {
 	WorkspaceID pgtype.UUID
 	ItemID      pgtype.UUID
@@ -74,17 +81,21 @@ type KnowledgeEmbeddingRebuildResult struct {
 }
 
 type CuratorDraftInput struct {
-	WorkspaceID    pgtype.UUID
-	Issue          db.Issue
-	Project        *db.Project
-	Labels         []db.IssueLabel
-	Comments       []db.Comment
-	AgentTasks     []db.AgentTaskQueue
-	PullRequests   []db.ListPullRequestsByIssueRow
-	Candidate      *db.KnowledgeCandidate
-	SourceSummary  string
-	TriggerComment *db.Comment
-	TriggerTask    *db.AgentTaskQueue
+	WorkspaceID      pgtype.UUID
+	Issue            db.Issue
+	Project          *db.Project
+	Labels           []db.IssueLabel
+	Comments         []db.Comment
+	AgentTasks       []db.AgentTaskQueue
+	PullRequests     []db.ListPullRequestsByIssueRow
+	Candidate        *db.KnowledgeCandidate
+	Governance       *db.KnowledgeGovernanceFinding
+	OriginalItem     *db.KnowledgeItem
+	OriginalSources  []db.KnowledgeSource
+	NegativeFeedback []db.KnowledgeFeedback
+	SourceSummary    string
+	TriggerComment   *db.Comment
+	TriggerTask      *db.AgentTaskQueue
 }
 
 type CuratorSourceBundle struct {
@@ -228,6 +239,78 @@ func (s *KnowledgeCuratorService) GenerateDraftFromCandidate(ctx context.Context
 func (s *KnowledgeCuratorService) RegenerateDraft(ctx context.Context, p CuratorCandidateDraftParams) (KnowledgeDetail, error) {
 	p.Regenerate = true
 	return s.GenerateDraftFromCandidate(ctx, p)
+}
+
+func (s *KnowledgeCuratorService) GenerateDraftFromGovernanceFinding(ctx context.Context, p CuratorGovernanceDraftParams) (KnowledgeDetail, error) {
+	finding, err := s.Queries.GetKnowledgeGovernanceFinding(ctx, db.GetKnowledgeGovernanceFindingParams{ID: p.FindingID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return KnowledgeDetail{}, ErrKnowledgeNotFound
+		}
+		return KnowledgeDetail{}, err
+	}
+	if finding.Status == "rejected" || finding.Status == "dismissed" || finding.Status == "accepted" || finding.Status == "archived" || finding.Status == "deprecated" {
+		return KnowledgeDetail{}, validationError("governance finding is already resolved")
+	}
+	if finding.Status == "drafted" && !p.Regenerate && finding.DraftKnowledgeItemID.Valid {
+		return s.Knowledge.GetDetail(ctx, p.WorkspaceID, finding.DraftKnowledgeItemID)
+	}
+	item, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: finding.KnowledgeItemID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		return KnowledgeDetail{}, knowledgeItemLookupErr(err)
+	}
+	originalSources, err := s.Queries.ListKnowledgeSources(ctx, db.ListKnowledgeSourcesParams{KnowledgeItemID: item.ID, WorkspaceID: p.WorkspaceID})
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	issueID := firstIssueSourceID(originalSources)
+	if !issueID.Valid {
+		return KnowledgeDetail{}, validationError("governance draft requires an issue source")
+	}
+	bundle, err := s.collectIssueSource(ctx, p.WorkspaceID, issueID)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	input, err := s.buildDraftInput(ctx, bundle, nil)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	feedback, err := s.Queries.ListNegativeKnowledgeFeedback(ctx, db.ListNegativeKnowledgeFeedbackParams{
+		WorkspaceID:     p.WorkspaceID,
+		KnowledgeItemID: item.ID,
+		Limit:           20,
+	})
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	input.Governance = &finding
+	input.OriginalItem = &item
+	input.OriginalSources = originalSources
+	input.NegativeFeedback = feedback
+	input.SourceSummary = strings.TrimSpace(strings.Join([]string{
+		input.SourceSummary,
+		governanceFindingSummary(finding, item, feedback),
+	}, "\n\n"))
+	draft, err := s.generateAndValidateDraft(ctx, input)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	detail, err := s.createDraft(ctx, p.WorkspaceID, p.CreatedBy, input, draft)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	updated, err := s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+		ID:                   finding.ID,
+		WorkspaceID:          finding.WorkspaceID,
+		Status:               "drafted",
+		DraftKnowledgeItemID: detail.Item.ID,
+		ActorID:              p.CreatedBy,
+	})
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	_ = updated
+	return detail, nil
 }
 
 func (s *KnowledgeCuratorService) SummarizeSource(ctx context.Context, bundle CuratorSourceBundle) (string, error) {
@@ -603,6 +686,23 @@ func curatorKnowledgeSources(input CuratorDraftInput) []KnowledgeSourceInput {
 		seen[key] = true
 		sources = append(sources, source)
 	}
+	if input.OriginalItem != nil {
+		add(KnowledgeSourceInput{
+			SourceType:    "knowledge",
+			SourceID:      input.OriginalItem.ID,
+			SourceTitle:   textValue(input.OriginalItem.Title),
+			SourceExcerpt: textValue(excerpt(input.OriginalItem.ProblemPattern+"\n"+input.OriginalItem.RecommendedPractice, 600)),
+		})
+	}
+	for _, source := range input.OriginalSources {
+		add(KnowledgeSourceInput{
+			SourceType:    source.SourceType,
+			SourceID:      source.SourceID,
+			SourceURL:     source.SourceUrl,
+			SourceTitle:   source.SourceTitle,
+			SourceExcerpt: source.SourceExcerpt,
+		})
+	}
 	if input.TriggerComment != nil {
 		add(commentKnowledgeSource(*input.TriggerComment))
 	}
@@ -625,6 +725,16 @@ func curatorKnowledgeSources(input CuratorDraftInput) []KnowledgeSourceInput {
 			}
 		}
 	}
+	for _, feedback := range input.NegativeFeedback {
+		if feedback.AgentTaskID.Valid {
+			add(KnowledgeSourceInput{
+				SourceType:    "agent_task",
+				SourceID:      feedback.AgentTaskID,
+				SourceTitle:   textValue("Negative feedback task"),
+				SourceExcerpt: textValue(feedback.Value + ": " + feedback.Note.String),
+			})
+		}
+	}
 	for _, pr := range input.PullRequests {
 		add(KnowledgeSourceInput{
 			SourceType:    "pull_request",
@@ -635,6 +745,31 @@ func curatorKnowledgeSources(input CuratorDraftInput) []KnowledgeSourceInput {
 		})
 	}
 	return sources
+}
+
+func firstIssueSourceID(sources []db.KnowledgeSource) pgtype.UUID {
+	for _, source := range sources {
+		if source.SourceType == "issue" && source.SourceID.Valid {
+			return source.SourceID
+		}
+	}
+	return pgtype.UUID{}
+}
+
+func governanceFindingSummary(finding db.KnowledgeGovernanceFinding, item db.KnowledgeItem, feedback []db.KnowledgeFeedback) string {
+	parts := []string{
+		fmt.Sprintf("Governance finding: type=%s status=%s severity=%d reason=%s", finding.FindingType, finding.Status, finding.Severity, finding.Reason),
+		"Original knowledge: " + item.Title,
+		"Suggested action: " + finding.SuggestedAction,
+	}
+	for _, row := range feedback {
+		note := strings.TrimSpace(row.Note.String)
+		if note == "" {
+			note = row.Value
+		}
+		parts = append(parts, "Negative feedback: "+excerpt(note, 800))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func commentKnowledgeSource(comment db.Comment) KnowledgeSourceInput {

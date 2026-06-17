@@ -178,11 +178,14 @@ import type {
   KnowledgeCandidate,
   KnowledgeDetail,
   KnowledgeFeedback,
+  KnowledgeGovernanceFinding,
   KnowledgeItem,
   ListKnowledgeAnalyticsParams,
   ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesParams,
   ListKnowledgeCandidatesResponse,
+  ListKnowledgeGovernanceFindingsParams,
+  ListKnowledgeGovernanceFindingsResponse,
   ListKnowledgeParams,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
@@ -297,15 +300,18 @@ import {
   EMPTY_KNOWLEDGE_ITEM,
   EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE,
+  EMPTY_LIST_KNOWLEDGE_GOVERNANCE_FINDINGS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
   EMPTY_SEARCH_KNOWLEDGE_RESPONSE,
   KnowledgeCandidateSchema,
   KnowledgeDetailSchema,
   KnowledgeFeedbackSchema,
+  KnowledgeGovernanceFindingSchema,
   KnowledgeItemSchema,
   ListKnowledgeAnalyticsResponseSchema,
   ListKnowledgeCandidatesResponseSchema,
+  ListKnowledgeGovernanceFindingsResponseSchema,
   ListKnowledgeResponseSchema,
   ListKnowledgeSourcesResponseSchema,
   SearchKnowledgeResponseSchema,
@@ -2317,6 +2323,24 @@ export class ApiClient {
     );
   }
 
+  async listKnowledgeGovernanceFindings(
+    params?: ListKnowledgeGovernanceFindingsParams,
+  ): Promise<ListKnowledgeGovernanceFindingsResponse> {
+    const search = new URLSearchParams();
+    if (params?.knowledge_item_id) search.set("knowledge_item_id", params.knowledge_item_id);
+    if (params?.status) search.set("status", params.status);
+    if (params?.finding_type) search.set("finding_type", params.finding_type);
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/knowledge/governance-findings?${search}`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeGovernanceFindingsResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_GOVERNANCE_FINDINGS_RESPONSE,
+      { endpoint: "GET /api/knowledge/governance-findings" },
+    );
+  }
+
   async evaluateKnowledgeCandidate(
     data: EvaluateKnowledgeCandidateRequest,
   ): Promise<KnowledgeCandidate> {
@@ -2368,6 +2392,49 @@ export class ApiClient {
     });
     return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
       endpoint: "POST /api/knowledge/candidates/:id/draft",
+    });
+  }
+
+  async createKnowledgeDraftFromGovernanceFinding(
+    findingId: string,
+    data?: { regenerate?: boolean },
+  ): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/governance-findings/${findingId}/draft`, {
+      method: "POST",
+      body: JSON.stringify({ regenerate: data?.regenerate ?? false }),
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/governance-findings/:id/draft",
+    });
+  }
+
+  async resolveKnowledgeGovernanceFinding(
+    id: string,
+    action: "accept" | "reject" | "dismiss" | "archive" | "deprecate",
+  ): Promise<KnowledgeGovernanceFinding> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/governance-findings/${id}/${action}`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeGovernanceFindingSchema, {
+      id: "",
+      workspace_id: "",
+      knowledge_item_id: "",
+      finding_type: "stale",
+      status: "open",
+      severity: 0,
+      reason: "",
+      evidence: {},
+      suggested_action: "",
+      source_map: {},
+      draft_knowledge_item_id: null,
+      resolved_by: null,
+      resolved_at: null,
+      dismissed_by: null,
+      dismissed_at: null,
+      created_at: "",
+      updated_at: "",
+    }, {
+      endpoint: "POST /api/knowledge/governance-findings/:id/:action",
     });
   }
 

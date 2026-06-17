@@ -20,6 +20,22 @@
     "applicability": "Applicability"
   },
   "feedback": { "helpful": "Helpful", "not_helpful": "Not helpful", "misleading": "Misleading", "outdated": "Outdated" },
+  "governance_types": {
+    "stale": "Stale",
+    "conflict": "Conflict",
+    "low_effectiveness": "Low effect",
+    "misleading": "Misleading",
+    "outdated": "Outdated"
+  },
+  "governance_status": {
+    "open": "Open",
+    "drafted": "Drafted",
+    "accepted": "Accepted",
+    "rejected": "Rejected",
+    "dismissed": "Dismissed",
+    "archived": "Archived",
+    "deprecated": "Deprecated"
+  },
   "governance": {
     "title": "Governance",
     "review_needed": "Review needed",
@@ -33,6 +49,19 @@
     "conflict_group": "Conflict group: {{group}}",
     "review_needed_since": "Review requested {{date}}",
     "dismiss": "Mark reviewed"
+  },
+  "governance_queue": {
+    "empty_title": "No governance findings",
+    "empty_body": "Stale, conflict, low-effectiveness, misleading, and outdated findings will appear here.",
+    "open_original": "Open original",
+    "open_draft": "Open draft",
+    "generate_draft": "Generate draft",
+    "regenerate_draft": "Regenerate",
+    "accept": "Accept update",
+    "reject": "Reject",
+    "archive_original": "Archive original",
+    "deprecate_original": "Mark deprecated",
+    "dismiss": "Dismiss"
   },
   "list": { "empty_title": "No knowledge found", "empty_body": "Try another status or search query.", "no_summary": "No summary yet." },
   "candidates": {
@@ -116,6 +145,10 @@
     "archive": "Knowledge archived",
     "restore": "Knowledge restored",
     "governance_dismiss": "Review request cleared",
+    "governance_accept": "Update accepted for review",
+    "governance_reject": "Governance finding rejected",
+    "governance_archive": "Original knowledge archived",
+    "governance_deprecate": "Original knowledge marked deprecated",
     "action_failed": "Action failed",
     "feedback_sent": "Feedback sent",
     "draft_created": "Knowledge draft created",

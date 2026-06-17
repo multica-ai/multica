@@ -20,6 +20,22 @@
     "applicability": "适用范围"
   },
   "feedback": { "helpful": "有帮助", "not_helpful": "没帮助", "misleading": "误导", "outdated": "已过期" },
+  "governance_types": {
+    "stale": "疑似过期",
+    "conflict": "冲突",
+    "low_effectiveness": "低效",
+    "misleading": "误导",
+    "outdated": "已过期"
+  },
+  "governance_status": {
+    "open": "待处理",
+    "drafted": "已生成草稿",
+    "accepted": "已接受",
+    "rejected": "已驳回",
+    "dismissed": "已忽略",
+    "archived": "已归档",
+    "deprecated": "已标记过期"
+  },
   "governance": {
     "title": "治理",
     "review_needed": "待复审",
@@ -33,6 +49,19 @@
     "conflict_group": "冲突组：{{group}}",
     "review_needed_since": "{{date}} 请求复审",
     "dismiss": "标记已复审"
+  },
+  "governance_queue": {
+    "empty_title": "没有治理发现",
+    "empty_body": "过期、冲突、低效、误导和已过期反馈会在这里进入复审。",
+    "open_original": "打开原 Knowledge",
+    "open_draft": "打开草稿",
+    "generate_draft": "生成草稿",
+    "regenerate_draft": "重新生成",
+    "accept": "接受更新",
+    "reject": "驳回",
+    "archive_original": "归档原 Knowledge",
+    "deprecate_original": "标记 deprecated",
+    "dismiss": "忽略"
   },
   "list": { "empty_title": "没有匹配的 Knowledge", "empty_body": "换一个状态或搜索词试试。", "no_summary": "还没有摘要。" },
   "candidates": { "empty_title": "还没有候选", "empty_body": "issue 和智能体活动沉淀出可复用经验后，会在这里显示 Knowledge 候选。", "generate_draft": "生成草稿", "regenerate_draft": "重新生成", "open_draft": "打开草稿" },
@@ -101,6 +130,10 @@
     "archive": "Knowledge 已归档",
     "restore": "Knowledge 已恢复",
     "governance_dismiss": "复审请求已清除",
+    "governance_accept": "更新已接受，等待发布",
+    "governance_reject": "治理发现已驳回",
+    "governance_archive": "原 Knowledge 已归档",
+    "governance_deprecate": "原 Knowledge 已标记 deprecated",
     "action_failed": "操作失败",
     "feedback_sent": "反馈已提交",
     "draft_created": "Knowledge 草稿已生成",

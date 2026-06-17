@@ -151,6 +151,26 @@ type KnowledgeCandidateResponse struct {
 	UpdatedAt      string   `json:"updated_at"`
 }
 
+type KnowledgeGovernanceFindingResponse struct {
+	ID                   string  `json:"id"`
+	WorkspaceID          string  `json:"workspace_id"`
+	KnowledgeItemID      string  `json:"knowledge_item_id"`
+	FindingType          string  `json:"finding_type"`
+	Status               string  `json:"status"`
+	Severity             int32   `json:"severity"`
+	Reason               string  `json:"reason"`
+	Evidence             any     `json:"evidence"`
+	SuggestedAction      string  `json:"suggested_action"`
+	SourceMap            any     `json:"source_map"`
+	DraftKnowledgeItemID *string `json:"draft_knowledge_item_id"`
+	ResolvedBy           *string `json:"resolved_by"`
+	ResolvedAt           *string `json:"resolved_at"`
+	DismissedBy          *string `json:"dismissed_by"`
+	DismissedAt          *string `json:"dismissed_at"`
+	CreatedAt            string  `json:"created_at"`
+	UpdatedAt            string  `json:"updated_at"`
+}
+
 type KnowledgeDetailResponse struct {
 	Item            KnowledgeItemResponse                `json:"item"`
 	Sources         []KnowledgeSourceResponse            `json:"sources"`
@@ -265,6 +285,10 @@ type createKnowledgeDraftFromIssueRequest struct {
 }
 
 type createKnowledgeDraftFromCandidateRequest struct {
+	Regenerate bool `json:"regenerate"`
+}
+
+type createKnowledgeDraftFromGovernanceFindingRequest struct {
 	Regenerate bool `json:"regenerate"`
 }
 
@@ -849,6 +873,46 @@ func (h *Handler) ListKnowledgeCandidates(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"candidates": resp, "total": len(resp)})
 }
 
+func (h *Handler) ListKnowledgeGovernanceFindings(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r)); !ok {
+		return
+	}
+	q := r.URL.Query()
+	limit, ok := parseLimitQuery(w, q.Get("limit"), 50, 100)
+	if !ok {
+		return
+	}
+	offset, ok := parseOffsetQuery(w, q.Get("offset"))
+	if !ok {
+		return
+	}
+	itemID, ok := parseOptionalUUIDQuery(w, q.Get("knowledge_item_id"), "knowledge_item_id")
+	if !ok {
+		return
+	}
+	findings, err := h.KnowledgeService.ListGovernanceFindings(r.Context(), service.KnowledgeGovernanceFindingListParams{
+		WorkspaceID:     wsUUID,
+		Status:          q.Get("status"),
+		FindingType:     q.Get("finding_type"),
+		KnowledgeItemID: itemID,
+		Limit:           limit,
+		Offset:          offset,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to list knowledge governance findings")
+		return
+	}
+	resp := make([]KnowledgeGovernanceFindingResponse, len(findings))
+	for i, finding := range findings {
+		resp[i] = knowledgeGovernanceFindingToResponse(finding)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"findings": resp, "total": len(resp)})
+}
+
 func (h *Handler) EvaluateKnowledgeCandidate(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
@@ -952,6 +1016,67 @@ func (h *Handler) CreateKnowledgeDraftFromCandidate(w http.ResponseWriter, r *ht
 	}
 	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, detail.Item.ID)
 	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) CreateKnowledgeDraftFromGovernanceFinding(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	findingID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "governance finding id")
+	if !ok {
+		return
+	}
+	var req createKnowledgeDraftFromGovernanceFindingRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	detail, err := h.KnowledgeCurator.GenerateDraftFromGovernanceFinding(r.Context(), service.CuratorGovernanceDraftParams{
+		WorkspaceID: wsUUID,
+		FindingID:   findingID,
+		CreatedBy:   member.ID,
+		Regenerate:  req.Regenerate,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to create governance update draft")
+		return
+	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, detail.Item.ID)
+	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
+}
+
+func (h *Handler) ResolveKnowledgeGovernanceFinding(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	findingID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "governance finding id")
+	if !ok {
+		return
+	}
+	action := chi.URLParam(r, "action")
+	finding, err := h.KnowledgeService.ResolveGovernanceFinding(r.Context(), service.KnowledgeGovernanceFindingActionParams{
+		WorkspaceID: wsUUID,
+		FindingID:   findingID,
+		ActorID:     member.ID,
+		Action:      action,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to update knowledge governance finding")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeGovernanceFindingToResponse(finding))
 }
 
 func (h *Handler) CreateKnowledgeFeedback(w http.ResponseWriter, r *http.Request) {
@@ -1195,6 +1320,28 @@ func knowledgeCandidateToResponse(candidate db.KnowledgeCandidate) KnowledgeCand
 	}
 }
 
+func knowledgeGovernanceFindingToResponse(finding db.KnowledgeGovernanceFinding) KnowledgeGovernanceFindingResponse {
+	return KnowledgeGovernanceFindingResponse{
+		ID:                   uuidToString(finding.ID),
+		WorkspaceID:          uuidToString(finding.WorkspaceID),
+		KnowledgeItemID:      uuidToString(finding.KnowledgeItemID),
+		FindingType:          finding.FindingType,
+		Status:               finding.Status,
+		Severity:             finding.Severity,
+		Reason:               finding.Reason,
+		Evidence:             jsonObjectOrEmpty(finding.Evidence),
+		SuggestedAction:      finding.SuggestedAction,
+		SourceMap:            jsonObjectOrEmpty(finding.SourceMap),
+		DraftKnowledgeItemID: uuidToPtr(finding.DraftKnowledgeItemID),
+		ResolvedBy:           uuidToPtr(finding.ResolvedBy),
+		ResolvedAt:           timestampPtr(finding.ResolvedAt),
+		DismissedBy:          uuidToPtr(finding.DismissedBy),
+		DismissedAt:          timestampPtr(finding.DismissedAt),
+		CreatedAt:            timestampToString(finding.CreatedAt),
+		UpdatedAt:            timestampToString(finding.UpdatedAt),
+	}
+}
+
 func knowledgeAnalyticsRowToResponse(row db.ListKnowledgeAnalyticsRow) KnowledgeAnalyticsRowResponse {
 	return KnowledgeAnalyticsRowResponse{
 		KnowledgeItemID:          uuidToString(row.KnowledgeItemID),
@@ -1217,6 +1364,20 @@ func knowledgeAnalyticsRowToResponse(row db.ListKnowledgeAnalyticsRow) Knowledge
 		TotalTaskSeconds:         row.TotalTaskSeconds,
 		TotalTokens:              row.TotalTokens,
 	}
+}
+
+func jsonObjectOrEmpty(raw []byte) any {
+	var out any = map[string]any{}
+	if len(raw) == 0 {
+		return out
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	if out == nil {
+		return map[string]any{}
+	}
+	return out
 }
 
 func parseKnowledgeSources(w http.ResponseWriter, inputs []knowledgeSourceInput) ([]service.KnowledgeSourceInput, bool) {

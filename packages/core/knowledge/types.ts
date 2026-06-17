@@ -146,6 +146,42 @@ export interface KnowledgeCandidate {
   updated_at: string;
 }
 
+export type KnowledgeGovernanceFindingType =
+  | "stale"
+  | "conflict"
+  | "low_effectiveness"
+  | "misleading"
+  | "outdated";
+
+export type KnowledgeGovernanceFindingStatus =
+  | "open"
+  | "drafted"
+  | "accepted"
+  | "rejected"
+  | "dismissed"
+  | "archived"
+  | "deprecated";
+
+export interface KnowledgeGovernanceFinding {
+  id: string;
+  workspace_id: string;
+  knowledge_item_id: string;
+  finding_type: KnowledgeGovernanceFindingType | string;
+  status: KnowledgeGovernanceFindingStatus | string;
+  severity: number;
+  reason: string;
+  evidence: unknown;
+  suggested_action: string;
+  source_map: unknown;
+  draft_knowledge_item_id: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  dismissed_by: string | null;
+  dismissed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface ListKnowledgeParams {
   q?: string;
   status?: KnowledgeLifecycleStatus | string;
@@ -237,6 +273,19 @@ export interface ListKnowledgeCandidatesResponse {
   total: number;
 }
 
+export interface ListKnowledgeGovernanceFindingsParams {
+  knowledge_item_id?: string | null;
+  status?: KnowledgeGovernanceFindingStatus | string;
+  finding_type?: KnowledgeGovernanceFindingType | string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListKnowledgeGovernanceFindingsResponse {
+  findings: KnowledgeGovernanceFinding[];
+  total: number;
+}
+
 export interface UpdateKnowledgeRequest {
   project_id?: string | null;
   agent_id?: string | null;
@@ -292,5 +341,10 @@ export interface CreateKnowledgeDraftFromIssueRequest {
 
 export interface CreateKnowledgeDraftFromCandidateRequest {
   candidate_id: string;
+  regenerate?: boolean;
+}
+
+export interface CreateKnowledgeDraftFromGovernanceFindingRequest {
+  finding_id: string;
   regenerate?: boolean;
 }

@@ -257,6 +257,32 @@ type KnowledgeGovernanceResult struct {
 	Checked      int
 	ReviewNeeded int
 	Conflicts    int
+	Findings     int
+}
+
+type KnowledgeGovernanceFindingListParams struct {
+	WorkspaceID     pgtype.UUID
+	Status          string
+	FindingType     string
+	KnowledgeItemID pgtype.UUID
+	Limit           int32
+	Offset          int32
+}
+
+type KnowledgeGovernanceFindingActionParams struct {
+	WorkspaceID pgtype.UUID
+	FindingID   pgtype.UUID
+	ActorID     pgtype.UUID
+	Action      string
+}
+
+type KnowledgeGovernanceFindingInput struct {
+	FindingType     string
+	Severity        int32
+	Reason          string
+	SuggestedAction string
+	Evidence        map[string]any
+	SourceMap       map[string]any
 }
 
 type KnowledgeCandidateEvaluateParams struct {
@@ -337,6 +363,13 @@ func (s *KnowledgeService) GetSourceDetails(ctx context.Context, workspaceID, it
 		}
 		if source.SourceID.Valid {
 			switch source.SourceType {
+			case "knowledge":
+				item, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: source.SourceID, WorkspaceID: workspaceID})
+				if err == nil {
+					detail.ResolvedTitle = pgtype.Text{String: item.Title, Valid: true}
+					detail.ResolvedURL = pgtype.Text{String: "/knowledge/" + util.UUIDToString(item.ID), Valid: true}
+					detail.ResolvedNote = pgtype.Text{String: truncateKnowledgeText(item.ProblemPattern, 240), Valid: true}
+				}
 			case "issue":
 				issue, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
 				if err == nil {
@@ -549,6 +582,13 @@ func (s *KnowledgeService) DismissGovernance(ctx context.Context, workspaceID, i
 	})
 	if err != nil {
 		return db.KnowledgeItem{}, knowledgeItemLookupErr(err)
+	}
+	if _, err := s.Queries.DismissKnowledgeGovernanceFindingsForItem(ctx, db.DismissKnowledgeGovernanceFindingsForItemParams{
+		WorkspaceID:     workspaceID,
+		KnowledgeItemID: itemID,
+		ActorID:         actorID,
+	}); err != nil {
+		return db.KnowledgeItem{}, err
 	}
 	return item, nil
 }
@@ -1440,8 +1480,125 @@ func (s *KnowledgeService) RunGovernance(ctx context.Context, p KnowledgeGoverna
 		}); err != nil {
 			return result, err
 		}
+		findings, err := s.upsertGovernanceFindings(ctx, row, assessment)
+		if err != nil {
+			return result, err
+		}
+		result.Findings += findings
 	}
 	return result, nil
+}
+
+func (s *KnowledgeService) ListGovernanceFindings(ctx context.Context, p KnowledgeGovernanceFindingListParams) ([]db.KnowledgeGovernanceFinding, error) {
+	if p.Limit <= 0 {
+		p.Limit = 50
+	}
+	if p.Limit > 100 {
+		p.Limit = 100
+	}
+	status := textFromTrimmed(p.Status)
+	activeOnly := status.Valid && status.String == "active"
+	if activeOnly {
+		status = pgtype.Text{}
+	}
+	if status.Valid && !validKnowledgeGovernanceFindingStatus(status.String) {
+		return nil, validationError("invalid status")
+	}
+	findingType := textFromTrimmed(p.FindingType)
+	if findingType.Valid && !validKnowledgeGovernanceFindingType(findingType.String) {
+		return nil, validationError("invalid finding_type")
+	}
+	findings, err := s.Queries.ListKnowledgeGovernanceFindings(ctx, db.ListKnowledgeGovernanceFindingsParams{
+		WorkspaceID:     p.WorkspaceID,
+		Status:          status,
+		FindingType:     findingType,
+		KnowledgeItemID: p.KnowledgeItemID,
+		Limit:           p.Limit,
+		Offset:          p.Offset,
+	})
+	if err != nil || !activeOnly {
+		return findings, err
+	}
+	out := findings[:0]
+	for _, finding := range findings {
+		if finding.Status == "open" || finding.Status == "drafted" {
+			out = append(out, finding)
+		}
+	}
+	return out, nil
+}
+
+func (s *KnowledgeService) GetGovernanceFinding(ctx context.Context, workspaceID, findingID pgtype.UUID) (db.KnowledgeGovernanceFinding, error) {
+	finding, err := s.Queries.GetKnowledgeGovernanceFinding(ctx, db.GetKnowledgeGovernanceFindingParams{ID: findingID, WorkspaceID: workspaceID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.KnowledgeGovernanceFinding{}, ErrKnowledgeNotFound
+		}
+		return db.KnowledgeGovernanceFinding{}, err
+	}
+	return finding, nil
+}
+
+func (s *KnowledgeService) ResolveGovernanceFinding(ctx context.Context, p KnowledgeGovernanceFindingActionParams) (db.KnowledgeGovernanceFinding, error) {
+	if !validKnowledgeGovernanceFindingAction(p.Action) {
+		return db.KnowledgeGovernanceFinding{}, validationError("invalid governance action")
+	}
+	finding, err := s.GetGovernanceFinding(ctx, p.WorkspaceID, p.FindingID)
+	if err != nil {
+		return db.KnowledgeGovernanceFinding{}, err
+	}
+	switch p.Action {
+	case "dismiss":
+		return s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+			ID:          p.FindingID,
+			WorkspaceID: p.WorkspaceID,
+			Status:      "dismissed",
+			ActorID:     p.ActorID,
+		})
+	case "reject":
+		return s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+			ID:          p.FindingID,
+			WorkspaceID: p.WorkspaceID,
+			Status:      "rejected",
+			ActorID:     p.ActorID,
+		})
+	case "accept":
+		if !finding.DraftKnowledgeItemID.Valid {
+			return db.KnowledgeGovernanceFinding{}, validationError("governance finding has no update draft")
+		}
+		if _, err := s.Review(ctx, p.WorkspaceID, finding.DraftKnowledgeItemID, p.ActorID); err != nil {
+			return db.KnowledgeGovernanceFinding{}, err
+		}
+		return s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+			ID:                   p.FindingID,
+			WorkspaceID:          p.WorkspaceID,
+			Status:               "accepted",
+			DraftKnowledgeItemID: finding.DraftKnowledgeItemID,
+			ActorID:              p.ActorID,
+		})
+	case "archive":
+		if _, err := s.Archive(ctx, p.WorkspaceID, finding.KnowledgeItemID, p.ActorID); err != nil {
+			return db.KnowledgeGovernanceFinding{}, err
+		}
+		return s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+			ID:          p.FindingID,
+			WorkspaceID: p.WorkspaceID,
+			Status:      "archived",
+			ActorID:     p.ActorID,
+		})
+	case "deprecate":
+		if _, err := s.Deprecate(ctx, p.WorkspaceID, finding.KnowledgeItemID, p.ActorID); err != nil {
+			return db.KnowledgeGovernanceFinding{}, err
+		}
+		return s.Queries.UpdateKnowledgeGovernanceFindingStatus(ctx, db.UpdateKnowledgeGovernanceFindingStatusParams{
+			ID:          p.FindingID,
+			WorkspaceID: p.WorkspaceID,
+			Status:      "deprecated",
+			ActorID:     p.ActorID,
+		})
+	default:
+		return db.KnowledgeGovernanceFinding{}, validationError("invalid governance action")
+	}
 }
 
 func buildTaskClaimKnowledgeQuery(p KnowledgeTaskClaimParams) string {
@@ -1622,6 +1779,142 @@ func assessKnowledgeGovernance(row db.ListKnowledgeGovernanceCandidatesRow, conf
 	}
 }
 
+func (s *KnowledgeService) upsertGovernanceFindings(ctx context.Context, row db.ListKnowledgeGovernanceCandidatesRow, assessment knowledgeGovernanceAssessment) (int, error) {
+	inputs := governanceFindingInputs(row, assessment)
+	if len(inputs) == 0 {
+		return 0, nil
+	}
+	sourceMap, err := s.knowledgeGovernanceSourceMap(ctx, row)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, input := range inputs {
+		evidence := cloneStringAnyMap(input.Evidence)
+		evidence["source_map"] = sourceMap
+		rawEvidence, err := json.Marshal(evidence)
+		if err != nil {
+			return count, err
+		}
+		rawSourceMap, err := json.Marshal(sourceMap)
+		if err != nil {
+			return count, err
+		}
+		if _, err := s.Queries.UpsertKnowledgeGovernanceFinding(ctx, db.UpsertKnowledgeGovernanceFindingParams{
+			WorkspaceID:     row.WorkspaceID,
+			KnowledgeItemID: row.ID,
+			FindingType:     input.FindingType,
+			Severity:        input.Severity,
+			Reason:          input.Reason,
+			Evidence:        rawEvidence,
+			SuggestedAction: input.SuggestedAction,
+			SourceMap:       rawSourceMap,
+		}); err != nil {
+			return count, err
+		}
+		count++
+	}
+	return count, nil
+}
+
+func governanceFindingInputs(row db.ListKnowledgeGovernanceCandidatesRow, assessment knowledgeGovernanceAssessment) []KnowledgeGovernanceFindingInput {
+	negative := row.NotHelpfulCount + row.MisleadingCount + row.OutdatedCount
+	baseEvidence := map[string]any{
+		"stale_score":                 assessment.staleScore,
+		"effectiveness_score":         assessment.effectivenessScore,
+		"helpful_count":               row.HelpfulCount,
+		"not_helpful_count":           row.NotHelpfulCount,
+		"misleading_count":            row.MisleadingCount,
+		"outdated_count":              row.OutdatedCount,
+		"retrieval_count":             row.RetrievalCount,
+		"injection_count":             row.InjectionCount,
+		"usage_count":                 row.UsageCount,
+		"latest_negative_feedback_at": timestamptzEvidence(row.LatestNegativeFeedbackAt),
+		"conflict_group":              assessment.conflictGroup,
+		"review_reason":               assessment.reviewReason,
+	}
+	var out []KnowledgeGovernanceFindingInput
+	add := func(kind string, severity int32, reason, action string, extra map[string]any) {
+		evidence := cloneStringAnyMap(baseEvidence)
+		for k, v := range extra {
+			evidence[k] = v
+		}
+		out = append(out, KnowledgeGovernanceFindingInput{
+			FindingType:     kind,
+			Severity:        severity,
+			Reason:          reason,
+			SuggestedAction: action,
+			Evidence:        evidence,
+		})
+	}
+	if assessment.conflictGroup != "" {
+		add("conflict", 95, "conflict_detected", "Compare the conflicting knowledge items and create a reviewed replacement draft before further RAG use.", nil)
+	}
+	if assessment.staleScore >= 70 {
+		add("stale", int32(math.Round(assessment.staleScore)), "stale_feedback", "Generate an update draft from the latest source evidence; keep the draft in human review.", nil)
+	}
+	if assessment.effectivenessScore <= 50 && negative >= 2 {
+		add("low_effectiveness", int32(math.Round(100-assessment.effectivenessScore)), "low_effectiveness", "Inspect negative feedback and lower confidence or accept an updated draft.", map[string]any{"negative_feedback_count": negative})
+	}
+	if row.MisleadingCount > 0 {
+		add("misleading", int32(clampFloat(float64(row.MisleadingCount)*35, 35, 100)), "misleading_feedback", "Generate a corrective draft from the bad case and prevent automatic publishing.", map[string]any{"misleading_count": row.MisleadingCount})
+	}
+	if row.OutdatedCount > 0 {
+		add("outdated", int32(clampFloat(float64(row.OutdatedCount)*35, 35, 100)), "outdated_feedback", "Refresh the knowledge from current issue/task evidence and route it through review.", map[string]any{"outdated_count": row.OutdatedCount})
+	}
+	return out
+}
+
+func (s *KnowledgeService) knowledgeGovernanceSourceMap(ctx context.Context, row db.ListKnowledgeGovernanceCandidatesRow) (map[string]any, error) {
+	sources, err := s.Queries.ListKnowledgeSources(ctx, db.ListKnowledgeSourcesParams{KnowledgeItemID: row.ID, WorkspaceID: row.WorkspaceID})
+	if err != nil {
+		return nil, err
+	}
+	feedback, err := s.Queries.ListNegativeKnowledgeFeedback(ctx, db.ListNegativeKnowledgeFeedbackParams{
+		WorkspaceID:     row.WorkspaceID,
+		KnowledgeItemID: row.ID,
+		Limit:           20,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sourceEntries := make([]map[string]any, 0, len(sources))
+	sourceIssueIDs := []string{}
+	for _, source := range sources {
+		entry := map[string]any{
+			"source_type": source.SourceType,
+			"source_id":   uuidEvidence(source.SourceID),
+			"source_url":  textEvidence(source.SourceUrl),
+			"title":       textEvidence(source.SourceTitle),
+			"excerpt":     textEvidence(source.SourceExcerpt),
+		}
+		sourceEntries = append(sourceEntries, entry)
+		if source.SourceType == "issue" && source.SourceID.Valid {
+			sourceIssueIDs = append(sourceIssueIDs, util.UUIDToString(source.SourceID))
+		}
+	}
+	feedbackEntries := make([]map[string]any, 0, len(feedback))
+	for _, item := range feedback {
+		feedbackEntries = append(feedbackEntries, map[string]any{
+			"id":            util.UUIDToString(item.ID),
+			"value":         item.Value,
+			"note":          textEvidence(item.Note),
+			"agent_task_id": uuidEvidence(item.AgentTaskID),
+			"created_at":    timestamptzEvidence(item.CreatedAt),
+		})
+	}
+	return map[string]any{
+		"original_knowledge": map[string]any{
+			"id":               util.UUIDToString(row.ID),
+			"title":            row.Title,
+			"lifecycle_status": row.LifecycleStatus,
+		},
+		"sources":           sourceEntries,
+		"source_issue_ids":  sourceIssueIDs,
+		"negative_feedback": feedbackEntries,
+	}, nil
+}
+
 func detectKnowledgeConflicts(rows []db.ListKnowledgeGovernanceCandidatesRow) map[string]string {
 	type candidate struct {
 		id             string
@@ -1745,6 +2038,40 @@ func governanceText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
 
+func textFromTrimmed(value string) pgtype.Text {
+	value = strings.TrimSpace(value)
+	return pgtype.Text{String: value, Valid: value != ""}
+}
+
+func textEvidence(value pgtype.Text) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.String
+}
+
+func uuidEvidence(value pgtype.UUID) any {
+	if !value.Valid {
+		return nil
+	}
+	return util.UUIDToString(value)
+}
+
+func timestamptzEvidence(value pgtype.Timestamptz) any {
+	if !value.Valid {
+		return nil
+	}
+	return value.Time.UTC().Format(time.RFC3339Nano)
+}
+
+func cloneStringAnyMap(input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
+}
+
 func clampFloat(value, minValue, maxValue float64) float64 {
 	if value < minValue {
 		return minValue
@@ -1826,6 +2153,9 @@ func validateKnowledgeSource(ctx context.Context, q *db.Queries, workspaceID pgt
 		return nil
 	}
 	switch source.SourceType {
+	case "knowledge":
+		_, err := q.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: source.SourceID, WorkspaceID: workspaceID})
+		return sourceLookupErr(err)
 	case "issue":
 		_, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: source.SourceID, WorkspaceID: workspaceID})
 		return sourceLookupErr(err)
@@ -1899,7 +2229,7 @@ func validKnowledgeLifecycleStatus(v string) bool {
 
 func validKnowledgeSourceType(v string) bool {
 	switch v {
-	case "issue", "comment", "agent_task", "pull_request", "commit":
+	case "knowledge", "issue", "comment", "agent_task", "pull_request", "commit":
 		return true
 	default:
 		return false
@@ -1927,6 +2257,33 @@ func validKnowledgeCandidateSourceType(v string) bool {
 func validKnowledgeCandidateStatus(v string) bool {
 	switch v {
 	case "pending", "accepted", "rejected", "drafted":
+		return true
+	default:
+		return false
+	}
+}
+
+func validKnowledgeGovernanceFindingType(v string) bool {
+	switch v {
+	case "stale", "conflict", "low_effectiveness", "misleading", "outdated":
+		return true
+	default:
+		return false
+	}
+}
+
+func validKnowledgeGovernanceFindingStatus(v string) bool {
+	switch v {
+	case "open", "drafted", "accepted", "rejected", "dismissed", "archived", "deprecated":
+		return true
+	default:
+		return false
+	}
+}
+
+func validKnowledgeGovernanceFindingAction(v string) bool {
+	switch v {
+	case "accept", "reject", "dismiss", "archive", "deprecate":
 		return true
 	default:
 		return false

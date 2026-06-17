@@ -848,6 +848,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/candidates", h.ListKnowledgeCandidates)
 				r.Post("/candidates/evaluate", h.EvaluateKnowledgeCandidate)
 				r.Post("/candidates/{id}/draft", h.CreateKnowledgeDraftFromCandidate)
+				r.Get("/governance-findings", h.ListKnowledgeGovernanceFindings)
+				r.Post("/governance-findings/{id}/draft", h.CreateKnowledgeDraftFromGovernanceFinding)
+				r.Post("/governance-findings/{id}/{action}", h.ResolveKnowledgeGovernanceFinding)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetKnowledge)
 					r.Patch("/", h.UpdateKnowledge)

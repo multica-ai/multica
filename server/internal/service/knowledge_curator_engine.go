@@ -267,6 +267,20 @@ func candidateEvidenceText(input CuratorDraftInput) string {
 	if input.Candidate != nil {
 		parts = append(parts, fmt.Sprintf("Candidate reason=%s strength=%s score=%d signals=%s", input.Candidate.TriggerReason, input.Candidate.SignalStrength, input.Candidate.Score, strings.Join(input.Candidate.Signals, ", ")))
 	}
+	if input.Governance != nil {
+		parts = append(parts, fmt.Sprintf("Governance finding type=%s severity=%d reason=%s suggested_action=%s", input.Governance.FindingType, input.Governance.Severity, input.Governance.Reason, input.Governance.SuggestedAction))
+	}
+	if input.OriginalItem != nil {
+		parts = append(parts, "Original knowledge:\n"+strings.Join([]string{
+			"Title: " + input.OriginalItem.Title,
+			"Problem: " + input.OriginalItem.ProblemPattern,
+			"Recommended practice: " + input.OriginalItem.RecommendedPractice,
+			"Anti-patterns: " + input.OriginalItem.AntiPatterns,
+		}, "\n"))
+	}
+	for _, feedback := range input.NegativeFeedback {
+		parts = append(parts, "Negative feedback:\n"+excerpt(strings.TrimSpace(feedback.Value+" "+feedback.Note.String), 800))
+	}
 	if input.TriggerComment != nil {
 		parts = append(parts, "Trigger comment:\n"+excerpt(input.TriggerComment.Content, 1200))
 	}
