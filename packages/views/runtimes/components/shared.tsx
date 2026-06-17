@@ -35,12 +35,13 @@ export function ProviderChip({ provider }: { provider: string }) {
 // Paused uses the brand tone (not warning) because it's an intentional
 // state, not an anomaly — visually distinct from amber 'recently_lost'.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
-  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
-  // state; inactive states are hollow (empty centre) with a muted (not red) tone.
-  // TECH-3686 follow-up: standard saturated --success green, no inset white ring (matches presence.ts).
-  online: { dot: "bg-success border border-muted-foreground", tone: "bg-success/10 text-success" },
+  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring only on
+  // hollow inactive states (empty centre, muted not-red tone). FILLED dots
+  // (online green / recently_lost warning) carry NO grey ring, per Jesper.
+  // TECH-3686 follow-up: standard saturated --success green (matches presence.ts).
+  online: { dot: "bg-success", tone: "bg-success/10 text-success" },
   paused: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
-  recently_lost: { dot: "bg-warning border border-muted-foreground", tone: "bg-warning/10 text-warning" },
+  recently_lost: { dot: "bg-warning", tone: "bg-warning/10 text-warning" },
   offline: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
   about_to_gc: { dot: "bg-background border border-muted-foreground", tone: "bg-muted text-muted-foreground" },
 };

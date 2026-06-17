@@ -230,12 +230,14 @@ function MemberStatusDot({ userId, size }: { userId: string; size?: number }) {
   if (online === null) return null;
 
   // CEREBRO-PATCH(status-slack-dot): offline = hollow grey-ringed dot (Slack away
-  // style), not red; online keeps the same grey ring so both read clearly (TECH-3686).
+  // style), not red. Online is a FILLED green dot with NO grey ring — the grey
+  // ring is reserved for the hollow offline state, per Jesper (TECH-3686).
   const dotClass = online
-    ? // CEREBRO-PATCH(status-slack-dot): TECH-3686 follow-up — standard saturated
-      // --success green, no inset white ring, mirroring availabilityConfig.online.
-      // The ring-2 ring-background on the wrapper supplies the background gap.
-      "bg-success border border-muted-foreground"
+    ? // CEREBRO-PATCH(status-slack-dot): TECH-3686 follow-up (Jesper) — filled
+      // saturated --success green with NO grey outline ring, mirroring
+      // availabilityConfig.online. The ring-2 ring-background on the wrapper
+      // supplies the background gap; the grey ring stays on hollow offline only.
+      "bg-success"
     : "bg-background border border-muted-foreground";
   const label = online ? "Online" : "Offline";
   const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";

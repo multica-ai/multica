@@ -56,14 +56,12 @@ export interface AvailabilityVisual {
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
   online: {
     label: "Online",
-    // CEREBRO-PATCH(status-slack-dot): grey outline ring on every dot (Slack look).
-    // TECH-3686 follow-up (Jesper): online dot uses the standard, saturated
-    // Multica green token (--success) so it reads clearly — not the washed-out
-    // lighter green we tried earlier. No inset white ring inside the dot; the
-    // only white is the avatar's ring-background separation, which reads as a
-    // background gap (not a second white circle), per Jesper.
-    dotClass:
-      "bg-success border border-muted-foreground",
+    // CEREBRO-PATCH(status-slack-dot): TECH-3686 follow-up (Jesper) — a FILLED
+    // dot carries NO grey outline ring; the grey ring is reserved for the hollow
+    // inactive states below. Online is the standard saturated Multica green
+    // token (--success). The only white is the avatar's ring-background
+    // separation, which reads as a background gap, per Jesper.
+    dotClass: "bg-success",
     textClass: "text-success",
     icon: CircleDot,
   },
@@ -79,7 +77,9 @@ export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> =
   },
   unstable: {
     label: "Unstable",
-    dotClass: "bg-warning border border-muted-foreground",
+    // CEREBRO-PATCH(status-slack-dot): TECH-3686 — filled (warning) dot, no grey
+    // ring; consistent with online (grey ring is hollow-states-only).
+    dotClass: "bg-warning",
     textClass: "text-warning",
     icon: PlugZap,
   },
