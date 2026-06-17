@@ -9,8 +9,6 @@ import {
   AlertTriangle,
   ShieldOff,
   RotateCw,
-  Copy,
-  Check,
   Webhook,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -29,9 +27,13 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import {
+  CodeBlock,
+  MetaRow,
+  formatDeliveryDate,
+} from "../../common/delivery-primitives";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -71,16 +73,6 @@ function visualForStatus(status: string): StatusVisual {
 }
 
 // --- Helpers --------------------------------------------------------------
-
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // A delivery is replayable when (a) the server allows it (signature is not
 // invalid AND the delivery itself wasn't rejected) and (b) we have something
@@ -204,7 +196,7 @@ function DeliveryRow({
           </Badge>
         )}
         <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-          {formatDate(delivery.received_at || delivery.created_at)}
+          {formatDeliveryDate(delivery.received_at || delivery.created_at)}
         </span>
       </button>
       {open && (
@@ -283,11 +275,11 @@ function DeliveryDetailDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
-              value={formatDate(full.received_at)}
+              value={formatDeliveryDate(full.received_at)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.last_attempt_at)}
-              value={formatDate(full.last_attempt_at)}
+              value={formatDeliveryDate(full.last_attempt_at)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.attempt_count)}
@@ -349,31 +341,6 @@ function DeliveryDetailDialog({
   );
 }
 
-function MetaRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex flex-col">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
-    </div>
-  );
-}
-
 function SignatureBadge({ status }: { status: WebhookSignatureStatus | string }) {
   const { t } = useT("autopilots");
   let variant: "default" | "secondary" | "destructive" | "outline" = "outline";
@@ -404,84 +371,36 @@ function DetailSections({
     );
   }
   if (!detail) return null;
+  const cbLabels = {
+    copy: t(($) => $.webhook_payload.copy),
+    copied: t(($) => $.webhook_payload.copied_short),
+    copiedToast: t(($) => $.webhook_payload.copied),
+    copyFailedToast: t(($) => $.webhook_payload.copy_failed),
+    truncated: t(($) => $.webhook_payload.truncated_marker),
+  };
   return (
     <div className="space-y-3">
       {detail.raw_body && (
         <CodeBlock
           label={t(($) => $.deliveries.detail.raw_body)}
           value={detail.raw_body}
+          labels={cbLabels}
         />
       )}
       {detail.selected_headers && Object.keys(detail.selected_headers).length > 0 && (
         <CodeBlock
           label={t(($) => $.deliveries.detail.selected_headers)}
           value={JSON.stringify(detail.selected_headers, null, 2)}
+          labels={cbLabels}
         />
       )}
       {detail.response_body && (
         <CodeBlock
           label={t(($) => $.deliveries.detail.response_body)}
           value={detail.response_body}
+          labels={cbLabels}
         />
       )}
-    </div>
-  );
-}
-
-function CodeBlock({ label, value }: { label: string; value: string }) {
-  const { t } = useT("autopilots");
-  const [copied, setCopied] = useState(false);
-  // Truncate in-DOM display for very large bodies; the Copy button still
-  // yields the full string. 4 KiB is large enough for typical webhook
-  // payloads while keeping the dialog responsive.
-  const TRUNCATE_AT = 4096;
-  const isTruncated = value.length > TRUNCATE_AT;
-  const display = isTruncated ? value.slice(0, TRUNCATE_AT) : value;
-
-  const handleCopy = async () => {
-    if (await copyText(value)) {
-      setCopied(true);
-      toast.success(t(($) => $.webhook_payload.copied));
-      setTimeout(() => setCopied(false), 1500);
-    } else {
-      toast.error(t(($) => $.webhook_payload.copy_failed));
-    }
-  };
-
-  return (
-    // min-w-0 lets this card shrink below the <pre>'s intrinsic min-content
-    // width — without it, a minified single-line JSON body would push the
-    // surrounding grid/flex cell (and the whole DialogContent) past the
-    // viewport edge.
-    <div className="min-w-0 rounded-md border bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px]">
-        <span className="font-medium text-muted-foreground">{label}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
-        >
-          {copied ? (
-            <Check className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <Copy className="h-3 w-3" />
-          )}
-          {copied
-            ? t(($) => $.webhook_payload.copied_short)
-            : t(($) => $.webhook_payload.copy)}
-        </button>
-      </div>
-      {/* whitespace-pre-wrap keeps pretty-printed indentation but lets
-          long lines wrap; break-all is the only thing that breaks mid-token
-          (necessary for minified JSON, which has no whitespace to break at). */}
-      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
-        {display}
-        {isTruncated && (
-          <span className="block pt-2 text-muted-foreground/70">
-            {t(($) => $.webhook_payload.truncated_marker)}
-          </span>
-        )}
-      </pre>
     </div>
   );
 }

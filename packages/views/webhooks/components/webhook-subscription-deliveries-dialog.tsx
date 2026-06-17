@@ -6,8 +6,6 @@ import {
   XCircle,
   AlertTriangle,
   RotateCw,
-  Copy,
-  Check,
   Webhook,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -26,9 +24,13 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import {
+  CodeBlock,
+  MetaRow,
+  formatDeliveryDate,
+} from "../../common/delivery-primitives";
 import type {
   OutboundWebhookDelivery,
   OutboundWebhookDeliveryStatus,
@@ -52,16 +54,6 @@ const UNKNOWN_VISUAL: StatusVisual = {
 
 function visualForStatus(status: string): StatusVisual {
   return (STATUS_VISUAL as Record<string, StatusVisual>)[status] ?? UNKNOWN_VISUAL;
-}
-
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 // --- Dialog ---------------------------------------------------------------
@@ -163,7 +155,7 @@ function DeliveryRow({
           </Badge>
         )}
         <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-          {formatDate(delivery.created_at)}
+          {formatDeliveryDate(delivery.created_at)}
         </span>
       </button>
       {open && (
@@ -224,7 +216,7 @@ function DeliveryDetailDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <MetaRow
               label={t(($) => $.webhooks.deliveries.created_at)}
-              value={formatDate(full.created_at)}
+              value={formatDeliveryDate(full.created_at)}
             />
             <MetaRow
               label={t(($) => $.webhooks.deliveries.attempt_count)}
@@ -267,25 +259,6 @@ function DeliveryDetailDialog({
   );
 }
 
-function MetaRow({
-  label,
-  value,
-  mono = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex flex-col">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("truncate text-foreground", mono && "font-mono")} title={value}>
-        {value}
-      </dd>
-    </div>
-  );
-}
-
 function DetailBodies({
   detail,
   isLoading,
@@ -303,68 +276,29 @@ function DetailBodies({
     );
   }
   if (!detail) return null;
+  const cbLabels = {
+    copy: t(($) => $.webhooks.deliveries.copy),
+    copied: t(($) => $.webhooks.deliveries.copied),
+    copiedToast: t(($) => $.webhooks.deliveries.copied),
+    copyFailedToast: t(($) => $.webhooks.deliveries.copy_failed),
+    truncated: t(($) => $.webhooks.deliveries.truncated_marker),
+  };
   return (
     <div className="space-y-3">
       {detail.request_body && (
         <CodeBlock
           label={t(($) => $.webhooks.deliveries.request_body)}
           value={detail.request_body}
+          labels={cbLabels}
         />
       )}
       {detail.response_body && (
         <CodeBlock
           label={t(($) => $.webhooks.deliveries.response_body)}
           value={detail.response_body}
+          labels={cbLabels}
         />
       )}
-    </div>
-  );
-}
-
-function CodeBlock({ label, value }: { label: string; value: string }) {
-  const { t } = useT("settings");
-  const [copied, setCopied] = useState(false);
-  const TRUNCATE_AT = 4096;
-  const isTruncated = value.length > TRUNCATE_AT;
-  const display = isTruncated ? value.slice(0, TRUNCATE_AT) : value;
-
-  const handleCopy = async () => {
-    if (await copyText(value)) {
-      setCopied(true);
-      toast.success(t(($) => $.webhooks.deliveries.copied));
-      setTimeout(() => setCopied(false), 1500);
-    } else {
-      toast.error(t(($) => $.webhooks.deliveries.copy_failed));
-    }
-  };
-
-  return (
-    <div className="min-w-0 rounded-md border bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px]">
-        <span className="font-medium text-muted-foreground">{label}</span>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
-        >
-          {copied ? (
-            <Check className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <Copy className="h-3 w-3" />
-          )}
-          {copied
-            ? t(($) => $.webhooks.deliveries.copied)
-            : t(($) => $.webhooks.deliveries.copy)}
-        </button>
-      </div>
-      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
-        {display}
-        {isTruncated && (
-          <span className="block pt-2 text-muted-foreground/70">
-            {t(($) => $.webhooks.deliveries.truncated_marker)}
-          </span>
-        )}
-      </pre>
     </div>
   );
 }
