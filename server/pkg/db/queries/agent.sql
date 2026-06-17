@@ -18,11 +18,13 @@ SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAgent :one
+-- CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — surface_visibility column.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox, thinking_level,
+    surface_visibility
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -43,6 +45,8 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     persona_sandbox = COALESCE(sqlc.narg('persona_sandbox'), persona_sandbox),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    -- CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility.
+    surface_visibility = COALESCE(sqlc.narg('surface_visibility'), surface_visibility),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

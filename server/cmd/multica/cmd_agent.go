@@ -171,6 +171,8 @@ func init() {
 	agentCreateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentCreateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON object from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide from non-owners per surface.
+	agentCreateCmd.Flags().String("hide-from", "", "Hide this agent from non-owner members on these discovery surfaces (comma list of lists,mention,chat,channels, or 'all'). Owner + workspace admins always see it.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -194,6 +196,8 @@ func init() {
 	agentUpdateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentUpdateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide from non-owners per surface. Pass --hide-from '' to make visible everywhere again.
+	agentUpdateCmd.Flags().String("hide-from", "", "Hide this agent from non-owner members on these discovery surfaces (comma list of lists,mention,chat,channels, or 'all'). Empty string clears the hide.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -477,6 +481,11 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
 	}
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — build surface_visibility map.
+	if cmd.Flags().Changed("hide-from") {
+		v, _ := cmd.Flags().GetString("hide-from")
+		body["surface_visibility"] = buildSurfaceVisibility(v)
+	}
 	if cmd.Flags().Changed("max-concurrent-tasks") {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
@@ -545,6 +554,11 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
+	}
+	// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — build surface_visibility map.
+	if cmd.Flags().Changed("hide-from") {
+		v, _ := cmd.Flags().GetString("hide-from")
+		body["surface_visibility"] = buildSurfaceVisibility(v)
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
@@ -1163,4 +1177,31 @@ func strVal(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — translate a --hide-from
+// comma list into the surface_visibility object the API expects: each named
+// surface maps to false (hidden from non-owners). "all" hides every surface
+// (the "Skjult" preset). An empty spec yields {} = visible everywhere.
+func buildSurfaceVisibility(spec string) map[string]bool {
+	all := []string{"lists", "mention", "chat", "channels"}
+	out := map[string]bool{}
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return out
+	}
+	if spec == "all" {
+		for _, s := range all {
+			out[s] = false
+		}
+		return out
+	}
+	valid := map[string]bool{"lists": true, "mention": true, "chat": true, "channels": true}
+	for _, part := range strings.Split(spec, ",") {
+		s := strings.TrimSpace(part)
+		if valid[s] {
+			out[s] = false
+		}
+	}
+	return out
 }

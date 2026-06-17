@@ -29,6 +29,8 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { canAssignAgent } from "../../issues/components";
+// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from the channel member picker.
+import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 
@@ -72,6 +74,8 @@ export function ParticipantsPanel({
         (a) =>
           !a.archived_at &&
           canAssignAgent(a, user?.id, memberRole) &&
+          // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents hidden from channels.
+          !isAgentHiddenOnSurface(a, "channels", { userId: user?.id ?? null, role: memberRole ?? null }) &&
           !isParticipant("agent", a.id),
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
