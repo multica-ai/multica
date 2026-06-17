@@ -14,6 +14,8 @@ export type {
 
 export { canAssignAgentToIssue, canEditAgent } from "./rules";
 
+export { useCurrentMember } from "./use-current-member";
+
 export {
   useAgentPermissions,
   useSkillPermissions,
