@@ -367,7 +367,6 @@ func main() {
 	go uploadCleanupHandler.RunAttachmentUploadCleanup(sweepCtx, 0)
 	go runUsageHourlyRollup(sweepCtx, pool)
 	go runIssueAutoArchive(sweepCtx, queries, bus)
-	go runKnowledgeGovernance(sweepCtx, queries)
 	go h.RunLocalCLIMessageOutbox(sweepCtx, time.Second)
 
 	// Lark inbound supervisor: holds the §4.4 WS lease per installation
@@ -395,13 +394,27 @@ func main() {
 	// logging them on the tick that fails and retrying on the next
 	// cycle, so a temporary outage does not crash the server.
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	knowledgeSchedulerEngine := service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
+		Provider:       os.Getenv("KNOWLEDGE_CURATOR_PROVIDER"),
+		BaseURL:        os.Getenv("KNOWLEDGE_CURATOR_BASE_URL"),
+		APIKey:         os.Getenv("KNOWLEDGE_CURATOR_API_KEY"),
+		Model:          os.Getenv("KNOWLEDGE_CURATOR_MODEL"),
+		EmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
+		RuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
+		Timeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
+	})
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
-	} else {
-		go func() {
-			_ = schedulerMgr.Run(sweepCtx)
-		}()
 	}
+	if err := schedulerMgr.Register(scheduler.KnowledgeGovernanceJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register knowledge governance job", "error", err)
+	}
+	if err := schedulerMgr.Register(scheduler.KnowledgeEmbeddingRebuildJob(pool, knowledgeSchedulerEngine)); err != nil {
+		slog.Warn("scheduler: failed to register knowledge embedding rebuild job", "error", err)
+	}
+	go func() {
+		_ = schedulerMgr.Run(sweepCtx)
+	}()
 
 	if metricsServer != nil {
 		go func() {

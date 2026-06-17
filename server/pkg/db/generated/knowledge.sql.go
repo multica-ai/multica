@@ -402,6 +402,64 @@ func (q *Queries) CreateKnowledgeUsageEvent(ctx context.Context, arg CreateKnowl
 	return i, err
 }
 
+const dismissKnowledgeGovernance = `-- name: DismissKnowledgeGovernance :one
+UPDATE knowledge_item SET
+    review_reason = NULL,
+    update_suggestion = NULL,
+    review_needed_at = NULL,
+    conflict_group = NULL,
+    governance_checked_at = now(),
+    updated_by = $1,
+    updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
+`
+
+type DismissKnowledgeGovernanceParams struct {
+	UpdatedBy   pgtype.UUID `json:"updated_by"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) DismissKnowledgeGovernance(ctx context.Context, arg DismissKnowledgeGovernanceParams) (KnowledgeItem, error) {
+	row := q.db.QueryRow(ctx, dismissKnowledgeGovernance, arg.UpdatedBy, arg.ID, arg.WorkspaceID)
+	var i KnowledgeItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ProjectID,
+		&i.AgentID,
+		&i.Title,
+		&i.Type,
+		&i.DomainLabels,
+		&i.ProblemPattern,
+		&i.TriggerConditions,
+		&i.DiagnosticSteps,
+		&i.RecommendedPractice,
+		&i.AntiPatterns,
+		&i.Applicability,
+		&i.ConfidenceStatus,
+		&i.LifecycleStatus,
+		&i.CreatedBy,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.PublishedAt,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+		&i.DeprecatedAt,
+		&i.StaleScore,
+		&i.EffectivenessScore,
+		&i.ConflictGroup,
+		&i.ReviewReason,
+		&i.UpdateSuggestion,
+		&i.ReviewNeededAt,
+		&i.GovernanceCheckedAt,
+	)
+	return i, err
+}
+
 const getKnowledgeCandidate = `-- name: GetKnowledgeCandidate :one
 SELECT id, workspace_id, issue_id, comment_id, agent_task_id, source_type, source_id, trigger_reason, signal_strength, signals, score, status, dedupe_key, created_by, metadata, evaluated_at, created_at, updated_at
 FROM knowledge_candidate
@@ -1348,6 +1406,72 @@ type ListKnowledgeItemsByIDsParams struct {
 
 func (q *Queries) ListKnowledgeItemsByIDs(ctx context.Context, arg ListKnowledgeItemsByIDsParams) ([]KnowledgeItem, error) {
 	rows, err := q.db.Query(ctx, listKnowledgeItemsByIDs, arg.WorkspaceID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KnowledgeItem{}
+	for rows.Next() {
+		var i KnowledgeItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.AgentID,
+			&i.Title,
+			&i.Type,
+			&i.DomainLabels,
+			&i.ProblemPattern,
+			&i.TriggerConditions,
+			&i.DiagnosticSteps,
+			&i.RecommendedPractice,
+			&i.AntiPatterns,
+			&i.Applicability,
+			&i.ConfidenceStatus,
+			&i.LifecycleStatus,
+			&i.CreatedBy,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.PublishedAt,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+			&i.DeprecatedAt,
+			&i.StaleScore,
+			&i.EffectivenessScore,
+			&i.ConflictGroup,
+			&i.ReviewReason,
+			&i.UpdateSuggestion,
+			&i.ReviewNeededAt,
+			&i.GovernanceCheckedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeItemsForEmbeddingRebuild = `-- name: ListKnowledgeItemsForEmbeddingRebuild :many
+SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
+FROM knowledge_item
+WHERE workspace_id = $1
+  AND lifecycle_status IN ('reviewed', 'published')
+ORDER BY updated_at DESC, created_at DESC
+LIMIT $2
+`
+
+type ListKnowledgeItemsForEmbeddingRebuildParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+}
+
+func (q *Queries) ListKnowledgeItemsForEmbeddingRebuild(ctx context.Context, arg ListKnowledgeItemsForEmbeddingRebuildParams) ([]KnowledgeItem, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeItemsForEmbeddingRebuild, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

@@ -168,6 +168,44 @@ export interface ListKnowledgeSourcesResponse {
   total: number;
 }
 
+export interface KnowledgeAnalyticsRow {
+  knowledge_item_id: string;
+  title: string;
+  type: string;
+  lifecycle_status: string;
+  retrieval_count: number;
+  injection_count: number;
+  injected_task_count: number;
+  usage_count: number;
+  agent_reference_count: number;
+  active_search_count: number;
+  helpful_count: number;
+  not_helpful_count: number;
+  misleading_count: number;
+  outdated_count: number;
+  latest_negative_feedback_at: string | null;
+  successful_task_count: number;
+  failed_task_count: number;
+  total_task_seconds: number;
+  total_tokens: number;
+}
+
+export interface ListKnowledgeAnalyticsParams {
+  knowledge_item_id?: string | null;
+  project_id?: string | null;
+  agent_id?: string | null;
+  since?: string | null;
+  until?: string | null;
+  include_zero?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListKnowledgeAnalyticsResponse {
+  items: KnowledgeAnalyticsRow[];
+  total: number;
+}
+
 export interface SearchKnowledgeRequest {
   query: string;
   embedding?: number[];
@@ -213,6 +251,27 @@ export interface UpdateKnowledgeRequest {
   applicability?: string;
   confidence_status?: KnowledgeConfidenceStatus | string;
   lifecycle_status?: KnowledgeLifecycleStatus | string;
+}
+
+export interface PublishKnowledgeToWikiRequest {
+  wiki_page_id?: string | null;
+  parent_id?: string | null;
+  title?: string | null;
+  content?: string | null;
+}
+
+export interface KnowledgeSkillPublishFile {
+  path: string;
+  content: string;
+}
+
+export interface PublishKnowledgeToSkillRequest {
+  skill_id?: string | null;
+  name?: string | null;
+  description?: string | null;
+  content?: string | null;
+  include_source_map?: boolean;
+  files?: KnowledgeSkillPublishFile[];
 }
 
 export interface CreateKnowledgeFeedbackRequest {

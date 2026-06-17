@@ -1,5 +1,6 @@
 {
   "page": { "title": "Knowledge", "search": "Search knowledge" },
+  "views": { "knowledge": "Knowledge", "review": "Review queue", "candidates": "Candidates", "analytics": "Analytics" },
   "status": {
     "all": "All",
     "draft": "Draft",
@@ -30,9 +31,27 @@
     "review_reason": "Review reason",
     "no_review_reason": "No review needed",
     "conflict_group": "Conflict group: {{group}}",
-    "review_needed_since": "Review requested {{date}}"
+    "review_needed_since": "Review requested {{date}}",
+    "dismiss": "Mark reviewed"
   },
   "list": { "empty_title": "No knowledge found", "empty_body": "Try another status or search query.", "no_summary": "No summary yet." },
+  "candidates": {
+    "empty_title": "No candidates yet",
+    "empty_body": "Knowledge candidates will appear here when issue and agent activity creates reusable lessons.",
+    "generate_draft": "Generate draft",
+    "regenerate_draft": "Regenerate",
+    "open_draft": "Open draft"
+  },
+  "analytics": {
+    "empty_title": "No analytics yet",
+    "empty_body": "Retrievals, injections, usage, and feedback will appear after knowledge is used.",
+    "retrievals": "Retrievals",
+    "injections": "Injections",
+    "usage": "Usage",
+    "negative_feedback": "Negative feedback",
+    "feedback": "Feedback",
+    "tasks": "Tasks"
+  },
   "detail": {
     "empty_title": "Select knowledge",
     "empty_body": "Choose an item from the list to review, edit, publish, or archive it.",
@@ -41,6 +60,8 @@
     "labels_placeholder": "Labels, comma separated",
     "review": "Review",
     "publish": "Publish",
+    "publish_wiki": "Publish to Wiki",
+    "publish_skill": "Publish as Skill",
     "archive": "Archive",
     "restore": "Restore",
     "save": "Save",
@@ -63,6 +84,30 @@
     "open_draft": "Open draft",
     "feedback": "Feedback"
   },
+  "publish": { "cancel": "Cancel", "submit": "Publish" },
+  "publish_wiki": {
+    "title": "Publish to Wiki",
+    "description": "Choose a Wiki target and edit the generated page content before publishing.",
+    "target": "Target page",
+    "new_page": "Create new page",
+    "parent": "Parent folder",
+    "no_parent": "No parent",
+    "page_title": "Page title",
+    "content": "Content"
+  },
+  "publish_skill": {
+    "title": "Publish as Skill",
+    "description": "Create or update a skill from this knowledge item.",
+    "target": "Target skill",
+    "new_skill": "Create new skill",
+    "name": "Skill name",
+    "description_label": "Description",
+    "content": "SKILL.md content",
+    "include_source_map": "Include source map",
+    "files": "Supporting files",
+    "add_file": "Add file",
+    "no_files": "No supporting files."
+  },
   "toast": {
     "saved": "Knowledge saved",
     "save_failed": "Failed to save knowledge",
@@ -70,7 +115,11 @@
     "publish": "Knowledge published",
     "archive": "Knowledge archived",
     "restore": "Knowledge restored",
+    "governance_dismiss": "Review request cleared",
     "action_failed": "Action failed",
-    "feedback_sent": "Feedback sent"
+    "feedback_sent": "Feedback sent",
+    "draft_created": "Knowledge draft created",
+    "publish_wiki": "Knowledge published to Wiki",
+    "publish_skill": "Knowledge published to Skill"
   }
 }

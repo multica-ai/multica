@@ -179,11 +179,15 @@ import type {
   KnowledgeDetail,
   KnowledgeFeedback,
   KnowledgeItem,
+  ListKnowledgeAnalyticsParams,
+  ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesParams,
   ListKnowledgeCandidatesResponse,
   ListKnowledgeParams,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
+  PublishKnowledgeToSkillRequest,
+  PublishKnowledgeToWikiRequest,
   SearchKnowledgeRequest,
   SearchKnowledgeResponse,
   UpdateKnowledgeRequest,
@@ -291,6 +295,7 @@ import {
   EMPTY_KNOWLEDGE_DETAIL,
   EMPTY_KNOWLEDGE_FEEDBACK,
   EMPTY_KNOWLEDGE_ITEM,
+  EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
@@ -299,6 +304,7 @@ import {
   KnowledgeDetailSchema,
   KnowledgeFeedbackSchema,
   KnowledgeItemSchema,
+  ListKnowledgeAnalyticsResponseSchema,
   ListKnowledgeCandidatesResponseSchema,
   ListKnowledgeResponseSchema,
   ListKnowledgeSourcesResponseSchema,
@@ -2160,6 +2166,30 @@ export class ApiClient {
     });
   }
 
+  async listKnowledgeAnalytics(
+    params?: ListKnowledgeAnalyticsParams,
+  ): Promise<ListKnowledgeAnalyticsResponse> {
+    const search = new URLSearchParams();
+    if (params?.knowledge_item_id) search.set("knowledge_item_id", params.knowledge_item_id);
+    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.agent_id) search.set("agent_id", params.agent_id);
+    if (params?.since) search.set("since", params.since);
+    if (params?.until) search.set("until", params.until);
+    if (params?.include_zero) search.set("include_zero", "true");
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const path = params?.knowledge_item_id
+      ? `/api/knowledge/${params.knowledge_item_id}/analytics?${search}`
+      : `/api/knowledge/analytics?${search}`;
+    const raw = await this.fetch<unknown>(path);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeAnalyticsResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
+      { endpoint: "GET /api/knowledge/analytics" },
+    );
+  }
+
   async updateKnowledge(id: string, data: UpdateKnowledgeRequest): Promise<KnowledgeItem> {
     const raw = await this.fetch<unknown>(`/api/knowledge/${id}`, {
       method: "PATCH",
@@ -2185,6 +2215,41 @@ export class ApiClient {
     });
     return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
       endpoint: "POST /api/knowledge/:id/publish",
+    });
+  }
+
+  async dismissKnowledgeGovernance(id: string): Promise<KnowledgeItem> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/governance/dismiss`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, KnowledgeItemSchema, EMPTY_KNOWLEDGE_ITEM, {
+      endpoint: "POST /api/knowledge/:id/governance/dismiss",
+    });
+  }
+
+  async publishKnowledgeToWiki(
+    id: string,
+    data: PublishKnowledgeToWikiRequest,
+  ): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/publish/wiki`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/:id/publish/wiki",
+    });
+  }
+
+  async publishKnowledgeToSkill(
+    id: string,
+    data: PublishKnowledgeToSkillRequest,
+  ): Promise<KnowledgeDetail> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/${id}/publish/skill`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
+      endpoint: "POST /api/knowledge/:id/publish/skill",
     });
   }
 

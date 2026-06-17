@@ -1,5 +1,6 @@
 {
   "page": { "title": "Knowledge", "search": "搜索 Knowledge" },
+  "views": { "knowledge": "Knowledge", "review": "复审队列", "candidates": "候选", "analytics": "分析" },
   "status": {
     "all": "全部",
     "draft": "草稿",
@@ -30,9 +31,12 @@
     "review_reason": "复审原因",
     "no_review_reason": "无需复审",
     "conflict_group": "冲突组：{{group}}",
-    "review_needed_since": "{{date}} 请求复审"
+    "review_needed_since": "{{date}} 请求复审",
+    "dismiss": "标记已复审"
   },
   "list": { "empty_title": "没有匹配的 Knowledge", "empty_body": "换一个状态或搜索词试试。", "no_summary": "还没有摘要。" },
+  "candidates": { "empty_title": "还没有候选", "empty_body": "issue 和智能体活动沉淀出可复用经验后，会在这里显示 Knowledge 候选。", "generate_draft": "生成草稿", "regenerate_draft": "重新生成", "open_draft": "打开草稿" },
+  "analytics": { "empty_title": "还没有分析数据", "empty_body": "Knowledge 被检索、注入、引用或收到反馈后，数据会显示在这里。", "retrievals": "检索", "injections": "注入", "usage": "引用", "negative_feedback": "负反馈", "feedback": "反馈", "tasks": "task" },
   "detail": {
     "empty_title": "选择一条 Knowledge",
     "empty_body": "从列表选择 Knowledge 后，可以审核、编辑、发布或归档。",
@@ -41,6 +45,8 @@
     "labels_placeholder": "标签，用逗号分隔",
     "review": "审核",
     "publish": "发布",
+    "publish_wiki": "发布到 Wiki",
+    "publish_skill": "发布为 Skill",
     "archive": "归档",
     "restore": "恢复",
     "save": "保存",
@@ -63,6 +69,30 @@
     "open_draft": "打开草稿",
     "feedback": "反馈"
   },
+  "publish": { "cancel": "取消", "submit": "发布" },
+  "publish_wiki": {
+    "title": "发布到 Wiki",
+    "description": "选择 Wiki 目标，并在发布前编辑生成的页面内容。",
+    "target": "目标页面",
+    "new_page": "新建页面",
+    "parent": "父级文件夹",
+    "no_parent": "无父级",
+    "page_title": "页面标题",
+    "content": "内容"
+  },
+  "publish_skill": {
+    "title": "发布为 Skill",
+    "description": "从这条 Knowledge 新建或更新 skill。",
+    "target": "目标 skill",
+    "new_skill": "新建 skill",
+    "name": "Skill 名称",
+    "description_label": "描述",
+    "content": "SKILL.md 内容",
+    "include_source_map": "包含 source map",
+    "files": "支持文件",
+    "add_file": "添加文件",
+    "no_files": "没有支持文件。"
+  },
   "toast": {
     "saved": "Knowledge 已保存",
     "save_failed": "保存 Knowledge 失败",
@@ -70,7 +100,11 @@
     "publish": "Knowledge 已发布",
     "archive": "Knowledge 已归档",
     "restore": "Knowledge 已恢复",
+    "governance_dismiss": "复审请求已清除",
     "action_failed": "操作失败",
-    "feedback_sent": "反馈已提交"
+    "feedback_sent": "反馈已提交",
+    "draft_created": "Knowledge 草稿已生成",
+    "publish_wiki": "Knowledge 已发布到 Wiki",
+    "publish_skill": "Knowledge 已发布为 Skill"
   }
 }

@@ -163,6 +163,14 @@ WHERE knowledge_item_id = sqlc.arg('knowledge_item_id')
   AND workspace_id = sqlc.arg('workspace_id')
 ORDER BY embedded_at DESC;
 
+-- name: ListKnowledgeItemsForEmbeddingRebuild :many
+SELECT *
+FROM knowledge_item
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND lifecycle_status IN ('reviewed', 'published')
+ORDER BY updated_at DESC, created_at DESC
+LIMIT sqlc.arg('limit');
+
 -- name: UpsertKnowledgeEmbedding :one
 INSERT INTO knowledge_embedding (
     knowledge_item_id, workspace_id, provider, model, content_hash, embedding, embedded_at
@@ -607,6 +615,18 @@ UPDATE knowledge_item SET
         ELSE COALESCE(review_needed_at, now())
     END,
     governance_checked_at = now(),
+    updated_at = now()
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: DismissKnowledgeGovernance :one
+UPDATE knowledge_item SET
+    review_reason = NULL,
+    update_suggestion = NULL,
+    review_needed_at = NULL,
+    conflict_group = NULL,
+    governance_checked_at = now(),
+    updated_by = sqlc.arg('updated_by'),
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;

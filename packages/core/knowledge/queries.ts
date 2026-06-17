@@ -1,6 +1,10 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { ListKnowledgeCandidatesParams, ListKnowledgeParams } from "./types";
+import type {
+  ListKnowledgeAnalyticsParams,
+  ListKnowledgeCandidatesParams,
+  ListKnowledgeParams,
+} from "./types";
 
 export const knowledgeKeys = {
   all: (wsId: string) => ["knowledge", wsId] as const,
@@ -12,6 +16,8 @@ export const knowledgeKeys = {
     [...knowledgeKeys.all(wsId), "sources", id] as const,
   candidates: (wsId: string, params?: ListKnowledgeCandidatesParams) =>
     [...knowledgeKeys.all(wsId), "candidates", params ?? {}] as const,
+  analytics: (wsId: string, params?: ListKnowledgeAnalyticsParams) =>
+    [...knowledgeKeys.all(wsId), "analytics", params ?? {}] as const,
 };
 
 export function knowledgeListOptions(wsId: string, params?: ListKnowledgeParams) {
@@ -44,5 +50,15 @@ export function knowledgeCandidatesOptions(
   return queryOptions({
     queryKey: knowledgeKeys.candidates(wsId, params),
     queryFn: () => api.listKnowledgeCandidates(params),
+  });
+}
+
+export function knowledgeAnalyticsOptions(
+  wsId: string,
+  params?: ListKnowledgeAnalyticsParams,
+) {
+  return queryOptions({
+    queryKey: knowledgeKeys.analytics(wsId, params),
+    queryFn: () => api.listKnowledgeAnalytics(params),
   });
 }

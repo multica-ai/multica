@@ -6,6 +6,7 @@ import type {
   KnowledgeItem,
   KnowledgeSearchResult,
   KnowledgeSourceDetail,
+  ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesResponse,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
@@ -158,6 +159,28 @@ export const KnowledgeFeedbackSchema = z.object({
   created_at: z.string().default(""),
 }).passthrough();
 
+export const KnowledgeAnalyticsRowSchema = z.object({
+  knowledge_item_id: z.string().default(""),
+  title: z.string().default(""),
+  type: z.string().default(""),
+  lifecycle_status: z.string().default(""),
+  retrieval_count: z.number().default(0),
+  injection_count: z.number().default(0),
+  injected_task_count: z.number().default(0),
+  usage_count: z.number().default(0),
+  agent_reference_count: z.number().default(0),
+  active_search_count: z.number().default(0),
+  helpful_count: z.number().default(0),
+  not_helpful_count: z.number().default(0),
+  misleading_count: z.number().default(0),
+  outdated_count: z.number().default(0),
+  latest_negative_feedback_at: NullableString,
+  successful_task_count: z.number().default(0),
+  failed_task_count: z.number().default(0),
+  total_task_seconds: z.number().default(0),
+  total_tokens: z.number().default(0),
+}).passthrough();
+
 export const ListKnowledgeResponseSchema = z.object({
   items: z.array(KnowledgeItemSchema).default([]),
   total: z.number().default(0),
@@ -175,6 +198,11 @@ export const ListKnowledgeSourcesResponseSchema = z.object({
 
 export const ListKnowledgeCandidatesResponseSchema = z.object({
   candidates: z.array(KnowledgeCandidateSchema).default([]),
+  total: z.number().default(0),
+}).passthrough();
+
+export const ListKnowledgeAnalyticsResponseSchema = z.object({
+  items: z.array(KnowledgeAnalyticsRowSchema).default([]),
   total: z.number().default(0),
 }).passthrough();
 
@@ -244,6 +272,11 @@ export const EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE: ListKnowledgeSourcesResponse
 
 export const EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE: ListKnowledgeCandidatesResponse = {
   candidates: [],
+  total: 0,
+};
+
+export const EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE: ListKnowledgeAnalyticsResponse = {
+  items: [],
   total: 0,
 };
 

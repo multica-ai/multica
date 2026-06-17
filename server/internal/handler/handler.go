@@ -82,10 +82,17 @@ type Config struct {
 	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
 	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
 	// return 503 instead of attempting to dial a hard-coded private service.
-	CloudRuntimeFleetURL     string
-	CloudRuntimeFleetTimeout time.Duration
-	AttachmentDownloadMode   string
-	AttachmentDownloadURLTTL time.Duration
+	CloudRuntimeFleetURL           string
+	CloudRuntimeFleetTimeout       time.Duration
+	AttachmentDownloadMode         string
+	AttachmentDownloadURLTTL       time.Duration
+	KnowledgeCuratorProvider       string
+	KnowledgeCuratorBaseURL        string
+	KnowledgeCuratorAPIKey         string
+	KnowledgeCuratorModel          string
+	KnowledgeCuratorEmbeddingModel string
+	KnowledgeCuratorRuntimeMode    string
+	KnowledgeCuratorTimeout        time.Duration
 }
 
 type cloudRuntimeProxy interface {
@@ -189,7 +196,16 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 
 	knowledgeSvc := service.NewKnowledgeService(queries, txStarter)
-	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, service.MissingCuratorEngine{})
+	knowledgeEngine := service.NewWorkspaceConfiguredCuratorEngine(queries, service.OpenAICompatibleCuratorConfig{
+		Provider:       cfg.KnowledgeCuratorProvider,
+		BaseURL:        cfg.KnowledgeCuratorBaseURL,
+		APIKey:         cfg.KnowledgeCuratorAPIKey,
+		Model:          cfg.KnowledgeCuratorModel,
+		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
+		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
+		Timeout:        cfg.KnowledgeCuratorTimeout,
+	})
+	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Knowledge = knowledgeSvc

@@ -21,17 +21,23 @@ import { useT } from "../../i18n";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  knowledgeAnalyticsOptions,
+  knowledgeCandidatesOptions,
   knowledgeDetailOptions,
   knowledgeListOptions,
 } from "@multica/core/knowledge/queries";
 import {
   useArchiveKnowledge,
+  useCreateKnowledgeDraftFromCandidate,
+  useDismissKnowledgeGovernance,
   usePublishKnowledge,
   useRestoreKnowledge,
   useReviewKnowledge,
   useUpdateKnowledge,
 } from "@multica/core/knowledge/mutations";
 import type {
+  KnowledgeCandidate,
+  KnowledgeAnalyticsRow,
   KnowledgeDetail,
   KnowledgeItem,
   KnowledgeLifecycleStatus,
@@ -51,10 +57,22 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Separator } from "@multica/ui/components/ui/separator";
 import { cn } from "@multica/ui/lib/utils";
+import { KnowledgePublishSkillDialog, KnowledgePublishWikiDialog } from "./knowledge-publish-dialogs";
 
-type KnowledgeView = "all" | KnowledgeLifecycleStatus;
+type KnowledgeStatusView = "all" | KnowledgeLifecycleStatus;
+type KnowledgeWorkspaceView = "knowledge" | "review" | "candidates" | "analytics";
 
-const STATUS_OPTIONS: KnowledgeView[] = [
+type CandidateMetadata = {
+  knowledge_item_id?: string;
+  draft_generation?: {
+    status?: string;
+    knowledge_item_id?: string;
+    generated_at?: string;
+    draft_error?: string;
+  };
+};
+
+const STATUS_OPTIONS: KnowledgeStatusView[] = [
   "all",
   "draft",
   "reviewed",
@@ -224,12 +242,23 @@ function makeDraft(detail: KnowledgeDetail | null): UpdateKnowledgeRequest {
   };
 }
 
+function candidateMetadata(candidate: KnowledgeCandidate): CandidateMetadata {
+  if (!candidate.metadata || typeof candidate.metadata !== "object") return {};
+  return candidate.metadata as CandidateMetadata;
+}
+
+function candidateKnowledgeItemId(candidate: KnowledgeCandidate): string | null {
+  const metadata = candidateMetadata(candidate);
+  return metadata.knowledge_item_id ?? metadata.draft_generation?.knowledge_item_id ?? null;
+}
+
 function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   const { t, i18n } = useT("knowledge");
   const paths = useWorkspacePaths();
   const updateKnowledge = useUpdateKnowledge();
   const reviewKnowledge = useReviewKnowledge();
   const publishKnowledge = usePublishKnowledge();
+  const dismissGovernance = useDismissKnowledgeGovernance();
   const archiveKnowledge = useArchiveKnowledge();
   const restoreKnowledge = useRestoreKnowledge();
   const [draft, setDraft] = useState<UpdateKnowledgeRequest>(() => makeDraft(detail));
@@ -263,7 +292,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
     }
   };
   const runAction = async (
-    action: "review" | "publish" | "archive" | "restore",
+    action: "review" | "publish" | "archive" | "restore" | "governance_dismiss",
     fn: () => Promise<unknown>,
   ) => {
     try {
@@ -273,6 +302,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
       toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
     }
   };
+  const hasGovernanceFinding = !!(item.review_needed_at || item.review_reason || item.update_suggestion || item.conflict_group);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -310,6 +340,8 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
           <Sparkles className="h-4 w-4" />
           {t(($) => $.detail.publish)}
         </Button>
+        <KnowledgePublishWikiDialog detail={detail} />
+        <KnowledgePublishSkillDialog detail={detail} />
         <Button
           size="sm"
           variant="outline"
@@ -443,6 +475,15 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                     {t(($) => $.governance.review_needed_since, { date: new Date(item.review_needed_at).toLocaleString(i18n.language) })}
                   </p>
                 )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="mt-3"
+                  disabled={dismissGovernance.isPending || !hasGovernanceFinding}
+                  onClick={() => runAction("governance_dismiss", () => dismissGovernance.mutateAsync(item.id))}
+                >
+                  {t(($) => $.governance.dismiss)}
+                </Button>
               </div>
             )}
           </section>
@@ -502,6 +543,19 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                     <span>{t(($) => $.detail.publish_targets)}</span>
                     <span>{detail.publish_targets.length}</span>
                   </div>
+                  {detail.publish_targets.map((target) => (
+                    <div key={`${target.target_type}-${target.target_id ?? target.target_url ?? target.id}`} className="rounded-md bg-muted/40 px-2 py-1 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-foreground">{target.target_title ?? target.target_type}</span>
+                        <Badge variant="outline">{target.target_type}</Badge>
+                      </div>
+                      {(target.target_url || target.updated_at) && (
+                        <div className="mt-1 truncate">
+                          {target.target_url ?? new Date(target.updated_at).toLocaleString(i18n.language)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                   <div className="flex items-center justify-between">
                     <span>{t(($) => $.detail.embeddings)}</span>
                     <span>{detail.embeddings.length}</span>
@@ -516,25 +570,148 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
   );
 }
 
+function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
+  const { t, i18n } = useT("knowledge");
+  const paths = useWorkspacePaths();
+  const createDraft = useCreateKnowledgeDraftFromCandidate();
+  const generate = async (candidate: KnowledgeCandidate, regenerate = false) => {
+    try {
+      await createDraft.mutateAsync({ candidate_id: candidate.id, regenerate });
+      toast.success(t(($) => $.toast.draft_created));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
+    }
+  };
+  if (candidates.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <Sparkles className="h-7 w-7 text-muted-foreground/50" />
+        <p className="text-sm font-medium">{t(($) => $.candidates.empty_title)}</p>
+        <p className="text-sm text-muted-foreground">{t(($) => $.candidates.empty_body)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto grid max-w-5xl gap-3">
+        {candidates.map((candidate) => {
+          const itemId = candidateKnowledgeItemId(candidate);
+          const metadata = candidateMetadata(candidate);
+          return (
+            <div key={candidate.id} className="rounded-lg border p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">{candidate.status}</Badge>
+                <Badge variant="secondary">{candidate.signal_strength}</Badge>
+                <span className="text-sm font-medium">{candidate.trigger_reason}</span>
+                <span className="ml-auto font-mono text-xs text-muted-foreground">{candidate.score}</span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {candidate.signals.map((signal) => <Badge key={signal} variant="outline">{signal}</Badge>)}
+              </div>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {candidate.source_type} · {new Date(candidate.evaluated_at).toLocaleString(i18n.language)}
+                {metadata.draft_generation?.status ? ` · ${metadata.draft_generation.status}` : ""}
+              </p>
+              <div className="mt-3 flex gap-2">
+                {itemId && (
+                  <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(itemId)} />}>
+                    {t(($) => $.candidates.open_draft)}
+                  </Button>
+                )}
+                <Button size="sm" onClick={() => generate(candidate, false)} disabled={createDraft.isPending}>
+                  {t(($) => $.candidates.generate_draft)}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => generate(candidate, true)} disabled={createDraft.isPending}>
+                  {t(($) => $.candidates.regenerate_draft)}
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AnalyticsPanel({ rows }: { rows: KnowledgeAnalyticsRow[] }) {
+  const { t } = useT("knowledge");
+  const paths = useWorkspacePaths();
+  const totals = rows.reduce((acc, row) => ({
+    retrievals: acc.retrievals + row.retrieval_count,
+    injections: acc.injections + row.injection_count,
+    usage: acc.usage + row.usage_count,
+    negative: acc.negative + row.not_helpful_count + row.misleading_count + row.outdated_count,
+  }), { retrievals: 0, injections: 0, usage: 0, negative: 0 });
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <BookOpenCheck className="h-7 w-7 text-muted-foreground/50" />
+        <p className="text-sm font-medium">{t(($) => $.analytics.empty_title)}</p>
+        <p className="text-sm text-muted-foreground">{t(($) => $.analytics.empty_body)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-5xl space-y-4">
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{t(($) => $.analytics.retrievals)}</p><p className="text-xl font-semibold">{totals.retrievals}</p></div>
+          <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{t(($) => $.analytics.injections)}</p><p className="text-xl font-semibold">{totals.injections}</p></div>
+          <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{t(($) => $.analytics.usage)}</p><p className="text-xl font-semibold">{totals.usage}</p></div>
+          <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">{t(($) => $.analytics.negative_feedback)}</p><p className="text-xl font-semibold">{totals.negative}</p></div>
+        </div>
+        <div className="space-y-2">
+          {rows.map((row) => (
+            <AppLink key={row.knowledge_item_id} href={paths.knowledgeDetail(row.knowledge_item_id)} className="block rounded-lg border p-4 hover:bg-accent/50">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{row.title}</span>
+                <Badge variant="outline">{row.lifecycle_status}</Badge>
+              </div>
+              <div className="mt-3 grid gap-2 text-xs text-muted-foreground md:grid-cols-5">
+                <span>{t(($) => $.analytics.retrievals)}: {row.retrieval_count}</span>
+                <span>{t(($) => $.analytics.injections)}: {row.injection_count}</span>
+                <span>{t(($) => $.analytics.usage)}: {row.usage_count}</span>
+                <span>{t(($) => $.analytics.feedback)}: {row.helpful_count}/{row.not_helpful_count + row.misleading_count + row.outdated_count}</span>
+                <span>{t(($) => $.analytics.tasks)}: {row.successful_task_count}/{row.failed_task_count}</span>
+              </div>
+            </AppLink>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
   const { t } = useT("knowledge");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const nav = useNavigation();
-  const [view, setView] = useState<KnowledgeView>("all");
+  const [workspaceView, setWorkspaceView] = useState<KnowledgeWorkspaceView>("knowledge");
+  const [view, setView] = useState<KnowledgeStatusView>("all");
   const [search, setSearch] = useState("");
   const listParams = useMemo(
     () => ({
-      status: view === "all" ? undefined : view,
-      include_inactive: view === "archived" || view === "deprecated",
+      status: workspaceView === "review" ? undefined : view === "all" ? undefined : view,
+      include_inactive: workspaceView === "review" || view === "archived" || view === "deprecated",
       limit: 50,
     }),
-    [view],
+    [view, workspaceView],
   );
   const listQuery = useQuery(knowledgeListOptions(wsId, listParams));
+  const candidatesQuery = useQuery({
+    ...knowledgeCandidatesOptions(wsId, { limit: 50 }),
+    enabled: workspaceView === "candidates",
+  });
+  const analyticsQuery = useQuery({
+    ...knowledgeAnalyticsOptions(wsId, { limit: 50 }),
+    enabled: workspaceView === "analytics",
+  });
   const items = useMemo(
-    () => (listQuery.data?.items ?? []).filter((item) => itemMatches(item, search)),
-    [listQuery.data?.items, search],
+    () => (listQuery.data?.items ?? [])
+      .filter((item) => workspaceView !== "review" || item.lifecycle_status === "draft" || !!item.review_needed_at || !!item.review_reason)
+      .filter((item) => itemMatches(item, search)),
+    [listQuery.data?.items, search, workspaceView],
   );
   const selectedId = knowledgeId ?? items[0]?.id ?? null;
   const detailQuery = useQuery({
@@ -543,10 +720,10 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
   });
 
   useEffect(() => {
-    if (!knowledgeId && items[0]?.id) {
+    if (workspaceView === "knowledge" && !knowledgeId && items[0]?.id) {
       nav.replace(paths.knowledgeDetail(items[0].id));
     }
-  }, [items, knowledgeId, nav, paths]);
+  }, [items, knowledgeId, nav, paths, workspaceView]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -563,22 +740,37 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
             className="pl-8"
           />
         </div>
-        <Select value={view} onValueChange={(value) => setView(value as KnowledgeView)}>
-          <SelectTrigger size="sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {STATUS_OPTIONS.map((status) => (
-              <SelectItem key={status} value={status}>
-                {status === "all" ? t(($) => $.status.all) : t(($) => $.status[status])}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-1 rounded-md border p-1">
+          {(["knowledge", "review", "candidates", "analytics"] as KnowledgeWorkspaceView[]).map((mode) => (
+            <Button
+              key={mode}
+              size="sm"
+              variant={workspaceView === mode ? "secondary" : "ghost"}
+              onClick={() => setWorkspaceView(mode)}
+            >
+              {t(($) => $.views[mode])}
+            </Button>
+          ))}
+        </div>
+        {(workspaceView === "knowledge" || workspaceView === "review") && (
+          <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
+            <SelectTrigger size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {STATUS_OPTIONS.map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status === "all" ? t(($) => $.status.all) : t(($) => $.status[status])}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </PageHeader>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-96 shrink-0 flex-col border-r">
+        {(workspaceView === "knowledge" || workspaceView === "review") && (
+          <aside className="flex w-96 shrink-0 flex-col border-r">
           <div className="border-b p-3 md:hidden">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -612,9 +804,28 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
               </div>
             )}
           </div>
-        </aside>
+          </aside>
+        )}
         <main className="min-w-0 flex-1">
-          {detailQuery.isLoading ? (
+          {workspaceView === "candidates" ? (
+            candidatesQuery.isLoading ? (
+              <div className="space-y-4 p-6">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ) : (
+              <CandidateQueue candidates={candidatesQuery.data?.candidates ?? []} />
+            )
+          ) : workspaceView === "analytics" ? (
+            analyticsQuery.isLoading ? (
+              <div className="space-y-4 p-6">
+                <Skeleton className="h-24 w-full" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            ) : (
+              <AnalyticsPanel rows={analyticsQuery.data?.items ?? []} />
+            )
+          ) : detailQuery.isLoading ? (
             <div className="space-y-4 p-6">
               <Skeleton className="h-8 w-2/3" />
               <Skeleton className="h-24 w-full" />

@@ -312,6 +312,44 @@ func TestKnowledgeUsageFeedbackAndAnalytics(t *testing.T) {
 	}
 }
 
+func TestKnowledgeDismissGovernanceClearsReviewFinding(t *testing.T) {
+	created := createKnowledgeFixture(t, map[string]any{
+		"title":                "Governance finding",
+		"type":                 "lesson",
+		"problem_pattern":      "A stale pattern should be manually reviewed.",
+		"recommended_practice": "Review and either update or dismiss the finding.",
+		"sources": []map[string]any{{
+			"source_type": "commit",
+			"source_url":  "https://example.com/commit/governance",
+		}},
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE knowledge_item
+		SET review_reason = 'outdated feedback',
+		    update_suggestion = 'refresh the diagnostic steps',
+		    review_needed_at = now(),
+		    conflict_group = 'conflict:test'
+		WHERE id = $1
+	`, created.Item.ID); err != nil {
+		t.Fatalf("seed governance finding: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/knowledge/"+created.Item.ID+"/governance/dismiss", nil)
+	req = withURLParam(req, "id", created.Item.ID)
+	testHandler.DismissKnowledgeGovernance(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DismissKnowledgeGovernance: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp KnowledgeItemResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode dismiss response: %v", err)
+	}
+	if resp.ReviewReason != nil || resp.UpdateSuggestion != nil || resp.ReviewNeededAt != nil || resp.ConflictGroup != nil {
+		t.Fatalf("governance finding was not cleared: %#v", resp)
+	}
+}
+
 func TestKnowledgePublishWikiSkillTargetsAndSourceDetails(t *testing.T) {
 	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge source issue", "done", "medium")
 	created := createKnowledgeFixture(t, map[string]any{

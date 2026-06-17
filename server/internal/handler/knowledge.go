@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -379,6 +380,7 @@ func (h *Handler) CreateKnowledge(w http.ResponseWriter, r *http.Request) {
 		h.writeKnowledgeError(w, err, "failed to create knowledge")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, detail.Item.ID)
 	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
 }
 
@@ -470,6 +472,7 @@ func (h *Handler) ReviewKnowledge(w http.ResponseWriter, r *http.Request) {
 		h.writeKnowledgeError(w, err, "failed to review knowledge")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
 	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
 }
 
@@ -487,6 +490,7 @@ func (h *Handler) PublishKnowledge(w http.ResponseWriter, r *http.Request) {
 		h.writeKnowledgeError(w, err, "failed to publish knowledge")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
 	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
 }
 
@@ -538,6 +542,24 @@ func (h *Handler) RestoreKnowledge(w http.ResponseWriter, r *http.Request) {
 		h.writeKnowledgeError(w, err, "failed to restore knowledge")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
+	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
+}
+
+func (h *Handler) DismissKnowledgeGovernance(w http.ResponseWriter, r *http.Request) {
+	wsUUID, itemID, ok := h.parseKnowledgePath(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r))
+	if !ok {
+		return
+	}
+	item, err := h.KnowledgeService.DismissGovernance(r.Context(), wsUUID, itemID, member.ID)
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to dismiss knowledge governance finding")
+		return
+	}
 	writeJSON(w, http.StatusOK, knowledgeItemToResponse(item))
 }
 
@@ -579,6 +601,7 @@ func (h *Handler) PublishKnowledgeToWiki(w http.ResponseWriter, r *http.Request)
 		h.writeKnowledgeError(w, err, "failed to publish knowledge to wiki")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
 	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
 }
 
@@ -626,6 +649,7 @@ func (h *Handler) PublishKnowledgeToSkill(w http.ResponseWriter, r *http.Request
 		h.writeKnowledgeError(w, err, "failed to publish knowledge to skill")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, itemID)
 	writeJSON(w, http.StatusOK, knowledgeDetailToResponse(detail))
 }
 
@@ -890,6 +914,7 @@ func (h *Handler) CreateKnowledgeDraftFromIssue(w http.ResponseWriter, r *http.R
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, detail.Item.ID)
 	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
 }
 
@@ -925,6 +950,7 @@ func (h *Handler) CreateKnowledgeDraftFromCandidate(w http.ResponseWriter, r *ht
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
 		return
 	}
+	h.maybeEnsureKnowledgeEmbedding(r.Context(), wsUUID, detail.Item.ID)
 	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
 }
 
@@ -996,6 +1022,17 @@ func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallback)
+}
+
+func (h *Handler) maybeEnsureKnowledgeEmbedding(ctx context.Context, workspaceID, itemID pgtype.UUID) {
+	if h.KnowledgeCurator == nil {
+		return
+	}
+	go func() {
+		if _, err := h.KnowledgeCurator.EnsureKnowledgeEmbedding(context.WithoutCancel(ctx), workspaceID, itemID); err != nil && !errors.Is(err, service.ErrCuratorEngineUnavailable) {
+			// Best-effort: search still works through text ranking if embeddings fail.
+		}
+	}()
 }
 
 func knowledgeDetailToResponse(detail service.KnowledgeDetail) KnowledgeDetailResponse {

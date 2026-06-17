@@ -60,6 +60,19 @@ type CuratorCandidateDraftParams struct {
 	Regenerate  bool
 }
 
+type KnowledgeEmbeddingRebuildParams struct {
+	WorkspaceID pgtype.UUID
+	ItemID      pgtype.UUID
+	Limit       int32
+}
+
+type KnowledgeEmbeddingRebuildResult struct {
+	Checked int
+	Rebuilt int
+	Skipped int
+	Failed  int
+}
+
 type CuratorDraftInput struct {
 	WorkspaceID    pgtype.UUID
 	Issue          db.Issue
@@ -218,10 +231,11 @@ func (s *KnowledgeCuratorService) RegenerateDraft(ctx context.Context, p Curator
 }
 
 func (s *KnowledgeCuratorService) SummarizeSource(ctx context.Context, bundle CuratorSourceBundle) (string, error) {
-	if s.Engine == nil {
+	engine := s.engineForWorkspace(ctx, bundle.WorkspaceID)
+	if engine == nil {
 		return deterministicSourceSummary(bundle), nil
 	}
-	summary, err := s.Engine.SummarizeSource(ctx, bundle)
+	summary, err := engine.SummarizeSource(ctx, bundle)
 	if err != nil || strings.TrimSpace(summary) == "" {
 		return deterministicSourceSummary(bundle), nil
 	}
@@ -229,15 +243,128 @@ func (s *KnowledgeCuratorService) SummarizeSource(ctx context.Context, bundle Cu
 }
 
 func (s *KnowledgeCuratorService) BuildEmbedding(ctx context.Context, content string) ([]float32, string, error) {
-	if s.Engine == nil {
+	return s.buildEmbeddingWithEngine(ctx, s.Engine, content)
+}
+
+func (s *KnowledgeCuratorService) buildEmbeddingWithEngine(ctx context.Context, engine CuratorEngine, content string) ([]float32, string, error) {
+	if engine == nil {
 		return nil, "", ErrCuratorEngineUnavailable
 	}
-	embedding, err := s.Engine.BuildEmbedding(ctx, content)
+	embedding, err := engine.BuildEmbedding(ctx, content)
 	if err != nil {
 		return nil, "", err
 	}
 	sum := sha256.Sum256([]byte(content))
 	return embedding, hex.EncodeToString(sum[:]), nil
+}
+
+func (s *KnowledgeCuratorService) EnsureKnowledgeEmbedding(ctx context.Context, workspaceID, itemID pgtype.UUID) (bool, error) {
+	item, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return false, knowledgeItemLookupErr(err)
+	}
+	if item.LifecycleStatus != "reviewed" && item.LifecycleStatus != "published" {
+		return false, nil
+	}
+	engine := s.engineForWorkspace(ctx, workspaceID)
+	if engine == nil {
+		return false, ErrCuratorEngineUnavailable
+	}
+	content := canonicalKnowledgeEmbeddingContent(item)
+	info := engine.Info()
+	if strings.TrimSpace(info.Provider) == "" || strings.TrimSpace(info.EmbeddingModel) == "" {
+		return false, ErrCuratorEngineUnavailable
+	}
+	embeddings, err := s.Queries.ListKnowledgeEmbeddingMetadata(ctx, db.ListKnowledgeEmbeddingMetadataParams{KnowledgeItemID: itemID, WorkspaceID: workspaceID})
+	if err != nil {
+		return false, err
+	}
+	sum := sha256.Sum256([]byte(content))
+	contentHash := hex.EncodeToString(sum[:])
+	for _, existing := range embeddings {
+		if existing.Provider == info.Provider && existing.Model == info.EmbeddingModel && existing.ContentHash == contentHash {
+			return false, nil
+		}
+	}
+	embedding, hash, err := s.buildEmbeddingWithEngine(ctx, engine, content)
+	if err != nil {
+		return false, err
+	}
+	if _, err := s.Knowledge.UpsertEmbedding(ctx, itemID, workspaceID, info.Provider, info.EmbeddingModel, hash, embedding); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (s *KnowledgeCuratorService) RebuildKnowledgeEmbeddings(ctx context.Context, p KnowledgeEmbeddingRebuildParams) (KnowledgeEmbeddingRebuildResult, error) {
+	limit := p.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	items := []db.KnowledgeItem{}
+	if p.ItemID.Valid {
+		item, err := s.Queries.GetKnowledgeItem(ctx, db.GetKnowledgeItemParams{ID: p.ItemID, WorkspaceID: p.WorkspaceID})
+		if err != nil {
+			return KnowledgeEmbeddingRebuildResult{}, knowledgeItemLookupErr(err)
+		}
+		items = append(items, item)
+	} else {
+		listed, err := s.Queries.ListKnowledgeItemsForEmbeddingRebuild(ctx, db.ListKnowledgeItemsForEmbeddingRebuildParams{
+			WorkspaceID: p.WorkspaceID,
+			Limit:       limit,
+		})
+		if err != nil {
+			return KnowledgeEmbeddingRebuildResult{}, err
+		}
+		items = listed
+	}
+	result := KnowledgeEmbeddingRebuildResult{Checked: len(items)}
+	for _, item := range items {
+		rebuilt, err := s.EnsureKnowledgeEmbedding(ctx, item.WorkspaceID, item.ID)
+		if err != nil {
+			result.Failed++
+			continue
+		}
+		if rebuilt {
+			result.Rebuilt++
+		} else {
+			result.Skipped++
+		}
+	}
+	return result, nil
+}
+
+func canonicalKnowledgeEmbeddingContent(item db.KnowledgeItem) string {
+	return strings.Join([]string{
+		"Title: " + item.Title,
+		"Type: " + item.Type,
+		"Labels: " + strings.Join(item.DomainLabels, ", "),
+		"Problem pattern:\n" + item.ProblemPattern,
+		"Trigger conditions:\n" + item.TriggerConditions,
+		"Diagnostic steps:\n" + item.DiagnosticSteps,
+		"Recommended practice:\n" + item.RecommendedPractice,
+		"Anti-patterns:\n" + item.AntiPatterns,
+		"Applicability:\n" + item.Applicability,
+	}, "\n\n")
+}
+
+type workspaceCuratorEngine interface {
+	ForWorkspace(context.Context, pgtype.UUID) CuratorEngine
+}
+
+func (s *KnowledgeCuratorService) engineForWorkspace(ctx context.Context, workspaceID pgtype.UUID) CuratorEngine {
+	if s.Engine == nil {
+		return nil
+	}
+	if workspaceID.Valid {
+		if engine, ok := s.Engine.(workspaceCuratorEngine); ok {
+			return engine.ForWorkspace(ctx, workspaceID)
+		}
+	}
+	return s.Engine
 }
 
 func (s *KnowledgeCuratorService) collectIssueSource(ctx context.Context, workspaceID, issueID pgtype.UUID) (CuratorSourceBundle, error) {
@@ -342,10 +469,11 @@ func (s *KnowledgeCuratorService) buildDraftInput(ctx context.Context, bundle Cu
 }
 
 func (s *KnowledgeCuratorService) generateAndValidateDraft(ctx context.Context, input CuratorDraftInput) (CuratorDraft, error) {
-	if s.Engine == nil {
+	engine := s.engineForWorkspace(ctx, input.WorkspaceID)
+	if engine == nil {
 		return CuratorDraft{}, ErrCuratorEngineUnavailable
 	}
-	draft, err := s.Engine.GenerateDraft(ctx, input)
+	draft, err := engine.GenerateDraft(ctx, input)
 	if err != nil {
 		return CuratorDraft{}, err
 	}
@@ -377,6 +505,7 @@ func (s *KnowledgeCuratorService) createDraft(ctx context.Context, workspaceID, 
 
 func (s *KnowledgeCuratorService) markCandidateDraftSucceeded(ctx context.Context, candidate db.KnowledgeCandidate, itemID pgtype.UUID, summary string) (db.KnowledgeCandidate, error) {
 	meta := candidateMetadata(candidate)
+	engine := s.engineForWorkspace(ctx, candidate.WorkspaceID)
 	meta["knowledge_item_id"] = util.UUIDToString(itemID)
 	meta["draft_error"] = nil
 	meta["source_summary"] = summary
@@ -384,7 +513,7 @@ func (s *KnowledgeCuratorService) markCandidateDraftSucceeded(ctx context.Contex
 		"status":       "succeeded",
 		"knowledge_id": util.UUIDToString(itemID),
 		"generated_at": time.Now().UTC().Format(time.RFC3339Nano),
-		"engine":       s.Engine.Info(),
+		"engine":       curatorEngineInfo(engine),
 	}
 	raw, err := json.Marshal(meta)
 	if err != nil {
@@ -400,6 +529,7 @@ func (s *KnowledgeCuratorService) markCandidateDraftSucceeded(ctx context.Contex
 
 func (s *KnowledgeCuratorService) markCandidateDraftFailed(ctx context.Context, candidate db.KnowledgeCandidate, cause error) error {
 	meta := candidateMetadata(candidate)
+	engine := s.engineForWorkspace(ctx, candidate.WorkspaceID)
 	message := "draft generation failed"
 	if cause != nil {
 		message = cause.Error()
@@ -409,7 +539,7 @@ func (s *KnowledgeCuratorService) markCandidateDraftFailed(ctx context.Context, 
 		"status":       "failed",
 		"error":        message,
 		"generated_at": time.Now().UTC().Format(time.RFC3339Nano),
-		"engine":       s.Engine.Info(),
+		"engine":       curatorEngineInfo(engine),
 	}
 	raw, err := json.Marshal(meta)
 	if err != nil {
@@ -421,6 +551,13 @@ func (s *KnowledgeCuratorService) markCandidateDraftFailed(ctx context.Context, 
 		WorkspaceID: candidate.WorkspaceID,
 	})
 	return err
+}
+
+func curatorEngineInfo(engine CuratorEngine) CuratorEngineInfo {
+	if engine == nil {
+		return CuratorEngineInfo{}
+	}
+	return engine.Info()
 }
 
 func validateCuratorDraft(draft CuratorDraft) error {

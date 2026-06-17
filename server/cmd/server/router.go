@@ -143,16 +143,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
 
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
-		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
-		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AllowSignup:                    os.Getenv("ALLOW_SIGNUP") != "false",
+		AllowedEmails:                  splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
+		AllowedEmailDomains:            splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		DisableWorkspaceCreation:       os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		PublicURL:                      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies:                 parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
+		CloudRuntimeFleetURL:           cloudRuntimeFleetURLFromEnv(),
+		CloudRuntimeFleetTimeout:       envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		AttachmentDownloadMode:         os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
+		AttachmentDownloadURLTTL:       envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		KnowledgeCuratorProvider:       os.Getenv("KNOWLEDGE_CURATOR_PROVIDER"),
+		KnowledgeCuratorBaseURL:        os.Getenv("KNOWLEDGE_CURATOR_BASE_URL"),
+		KnowledgeCuratorAPIKey:         os.Getenv("KNOWLEDGE_CURATOR_API_KEY"),
+		KnowledgeCuratorModel:          os.Getenv("KNOWLEDGE_CURATOR_MODEL"),
+		KnowledgeCuratorEmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
+		KnowledgeCuratorRuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
+		KnowledgeCuratorTimeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	h.Metrics = opts.BusinessMetrics
@@ -853,6 +860,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/archive", h.ArchiveKnowledge)
 					r.Post("/deprecate", h.DeprecateKnowledge)
 					r.Post("/restore", h.RestoreKnowledge)
+					r.Post("/governance/dismiss", h.DismissKnowledgeGovernance)
 					r.Post("/publish/wiki", h.PublishKnowledgeToWiki)
 					r.Post("/publish/skill", h.PublishKnowledgeToSkill)
 				})

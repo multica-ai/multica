@@ -541,6 +541,18 @@ func (s *KnowledgeService) Restore(ctx context.Context, workspaceID, itemID, act
 	return s.setLifecycleStatus(ctx, s.Queries, workspaceID, itemID, actorID, targetStatus)
 }
 
+func (s *KnowledgeService) DismissGovernance(ctx context.Context, workspaceID, itemID, actorID pgtype.UUID) (db.KnowledgeItem, error) {
+	item, err := s.Queries.DismissKnowledgeGovernance(ctx, db.DismissKnowledgeGovernanceParams{
+		ID:          itemID,
+		WorkspaceID: workspaceID,
+		UpdatedBy:   actorID,
+	})
+	if err != nil {
+		return db.KnowledgeItem{}, knowledgeItemLookupErr(err)
+	}
+	return item, nil
+}
+
 func (s *KnowledgeService) PublishToWiki(ctx context.Context, p KnowledgePublishWikiParams) (KnowledgeDetail, error) {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {

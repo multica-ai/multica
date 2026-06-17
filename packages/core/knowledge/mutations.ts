@@ -7,6 +7,8 @@ import type {
   CreateKnowledgeDraftFromIssueRequest,
   CreateKnowledgeFeedbackRequest,
   EvaluateKnowledgeCandidateRequest,
+  PublishKnowledgeToSkillRequest,
+  PublishKnowledgeToWikiRequest,
   UpdateKnowledgeRequest,
 } from "./types";
 
@@ -42,6 +44,44 @@ export function usePublishKnowledge() {
     mutationFn: (id: string) => api.publishKnowledge(id),
     onSettled: (_data, _err, id) => {
       qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
+export function useDismissKnowledgeGovernance() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.dismissKnowledgeGovernance(id),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
+export function usePublishKnowledgeToWiki() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & PublishKnowledgeToWikiRequest) =>
+      api.publishKnowledgeToWiki(id, data),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, vars.id) });
+      qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+    },
+  });
+}
+
+export function usePublishKnowledgeToSkill() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & PublishKnowledgeToSkillRequest) =>
+      api.publishKnowledgeToSkill(id, data),
+    onSettled: (_data, _err, vars) => {
+      qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
     },
   });
