@@ -13,9 +13,12 @@ import enAvatar from "./locales/en.json";
 const TEST_RESOURCES = { en: { "cerebro-agent-avatar": enAvatar } };
 
 const generateAgentAvatar = vi.fn();
+const generateAgentAvatarAsync = vi.fn();
 vi.mock("@multica/core/api", () => ({
   api: {
     generateAgentAvatar: (...args: unknown[]) => generateAgentAvatar(...args),
+    generateAgentAvatarAsync: (...args: unknown[]) =>
+      generateAgentAvatarAsync(...args),
   },
 }));
 
@@ -104,8 +107,11 @@ describe("CerebroInspectorAvatar", () => {
     expect(screen.getByText(/Generate AI/i)).toBeTruthy();
   });
 
-  it("persists a generated avatar via onUpdate", async () => {
-    generateAgentAvatar.mockResolvedValue({ url: "https://cdn/avatar.png" });
+  it("starts background generation for an existing agent without blocking", async () => {
+    // An existing agent regenerates in the background: the async endpoint is
+    // called with the agent id, and the new avatar arrives over the websocket
+    // rather than through onUpdate, so the user is never held on the modal.
+    generateAgentAvatarAsync.mockResolvedValue(undefined);
     const { onUpdate } = renderInspectorAvatar({ canEdit: true });
 
     fireEvent.click(screen.getByText(/Generate AI/i));
@@ -115,10 +121,9 @@ describe("CerebroInspectorAvatar", () => {
     fireEvent.click(generateButton);
 
     await waitFor(() => {
-      expect(generateAgentAvatar).toHaveBeenCalledWith("Existing Agent", undefined);
+      expect(generateAgentAvatarAsync).toHaveBeenCalledWith("agent-1", undefined);
     });
-    await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledWith({ avatar_url: "https://cdn/avatar.png" });
-    });
+    expect(generateAgentAvatar).not.toHaveBeenCalled();
+    expect(onUpdate).not.toHaveBeenCalled();
   });
 });

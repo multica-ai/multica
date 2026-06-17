@@ -3969,6 +3969,16 @@ export class ApiClient {
     return this.fetch("/api/agents/generate-avatar", { method: "POST", body });
   }
 
+  // CEREBRO-PATCH(agent-avatar-async): TECH-3760 — regenerate an existing agent's
+  // avatar in the background. Returns 202 immediately; the new avatar arrives via
+  // the agent:status websocket event, so the UI never blocks on the ~50s image call.
+  async generateAgentAvatarAsync(agentId: string, customPrompt?: string): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/generate-avatar`, {
+      method: "POST",
+      body: JSON.stringify({ custom_prompt: customPrompt }),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-connections-client): TECH-3108 workspace connection registry methods.
   // Bodies are unknown so cerebro-connections package owns the schema via parseWithFallback.
   async listCerebroConnections<T = unknown>(wsId: string): Promise<T> {

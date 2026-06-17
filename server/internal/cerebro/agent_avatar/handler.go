@@ -181,7 +181,7 @@ func (h *Handler) GenerateForAgent(ctx context.Context, wsID string, agent db.Ag
 	if agent.AvatarUrl.Valid && strings.TrimSpace(agent.AvatarUrl.String) != "" {
 		return agent.AvatarUrl.String, nil
 	}
-	return h.storeAvatarForAgent(ctx, wsID, agent, "")
+	return h.storeAvatarForAgent(ctx, wsID, agent, "", "")
 }
 
 // RegenerateForAgent forces a fresh avatar for an agent even when one already
@@ -192,13 +192,25 @@ func (h *Handler) RegenerateForAgent(ctx context.Context, wsID string, agent db.
 	if h.agents == nil {
 		return "", fmt.Errorf("agent store is not configured")
 	}
-	return h.storeAvatarForAgent(ctx, wsID, agent, background)
+	return h.storeAvatarForAgent(ctx, wsID, agent, background, "")
+}
+
+// RegenerateForAgentCustom forces a fresh avatar for an existing agent, honouring
+// an optional custom prompt typed in the inspector. The background colour stays
+// name-hashed (override ""), so leaving the prompt blank reproduces the default
+// auto-prompt. Used by the per-agent background-generation endpoint so the
+// "Generate AI" button never blocks the request on the ~50s image call.
+func (h *Handler) RegenerateForAgentCustom(ctx context.Context, wsID string, agent db.Agent, customPrompt string) (string, error) {
+	if h.agents == nil {
+		return "", fmt.Errorf("agent store is not configured")
+	}
+	return h.storeAvatarForAgent(ctx, wsID, agent, "", customPrompt)
 }
 
 // storeAvatarForAgent generates an avatar with the given background, uploads it,
 // and persists only avatar_url via the COALESCE-based UpdateAgent query.
-func (h *Handler) storeAvatarForAgent(ctx context.Context, wsID string, agent db.Agent, background string) (string, error) {
-	url, err := h.generateAndStore(ctx, wsID, agent.Name, "", background)
+func (h *Handler) storeAvatarForAgent(ctx context.Context, wsID string, agent db.Agent, background, customPrompt string) (string, error) {
+	url, err := h.generateAndStore(ctx, wsID, agent.Name, customPrompt, background)
 	if err != nil {
 		return "", err
 	}

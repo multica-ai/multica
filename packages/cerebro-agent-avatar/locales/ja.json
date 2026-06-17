@@ -6,5 +6,6 @@
   "generate_button": "生成",
   "generating": "生成中…",
   "cancel": "キャンセル",
-  "generate_error": "アバターの生成に失敗しました"
+  "generate_error": "アバターの生成に失敗しました",
+  "background_started": "バックグラウンドでアバターを生成しています。完了するとここに表示されます。"
 }
