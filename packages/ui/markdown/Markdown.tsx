@@ -6,11 +6,10 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
-import { createLowlight, common } from 'lowlight'
 import { toJsxRuntime } from 'hast-util-to-jsx-runtime'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
 import { FileText, Download, Check, Copy, Trash2 } from 'lucide-react'
-import { isValidElement, useState } from 'react'
+import { isValidElement, useEffect, useState } from 'react'
 import { cn } from '@multica/ui/lib/utils'
 import { CODE_LIGATURE_CLASS } from '@multica/ui/lib/code-style'
 import { CodeBlock, InlineCode } from './CodeBlock'
@@ -110,11 +109,63 @@ export interface MarkdownProps {
 }
 
 // ---------------------------------------------------------------------------
-// Lowlight — same engine + language set as Tiptap's CodeBlockLowlight.
-// Used only in editor-parity mode.
+// Lowlight lazy-loader — lowlight + the common language set is a sizable
+// dependency that only editor-parity mode (wiki/issue readonly surfaces)
+// needs. We dynamically import only `lowlight` on demand so the chat
+// (minimal/full) static bundle never pays for it. `hast-util-to-jsx-runtime`
+// and `react/jsx-runtime` are statically imported: the former is small and
+// React-free, the latter MUST be the same React instance the component tree
+// uses (a dynamically-imported `react/jsx-runtime` can resolve to a duplicate
+// React copy under pnpm, producing elements a foreign reconciler won't
+// attach). Mirrors `mermaid-diagram.tsx`'s `getMermaid()` shape.
 // ---------------------------------------------------------------------------
+type HighlightFn = (lang: string | undefined, code: string) => React.ReactNode | null
 
-const lowlight = createLowlight(common)
+let highlightFnPromise: Promise<HighlightFn> | null = null
+
+function getHighlightFn(): Promise<HighlightFn> {
+  highlightFnPromise ??= import('lowlight').then((lowlightMod) => {
+    // Same engine + language set as Tiptap's CodeBlockLowlight.
+    const lowlight = lowlightMod.createLowlight(lowlightMod.common)
+    return (lang: string | undefined, code: string): React.ReactNode | null => {
+      try {
+        const tree =
+          lang && lang.length > 0
+            ? lowlight.highlight(lang, code)
+            : lowlight.highlightAuto(code)
+        if (tree.children.length === 0) return null
+        return toJsxRuntime(tree, { jsx, jsxs, Fragment })
+      } catch {
+        // Unknown language or lowlight internal error — plain text fallback.
+        return null
+      }
+    }
+  })
+  return highlightFnPromise
+}
+
+/**
+ * Loads the lowlight highlighter on demand and returns it once ready, or
+ * `null` until then. Callers render plain text as a fallback: content stays
+ * visible while the chunk loads, then upgrades to highlighted spans.
+ *
+ * Only `CodeBlockHighlighted` (editor-parity code blocks) calls this, so chat
+ * (minimal/full) never triggers the lowlight load — it never renders that
+ * component.
+ */
+function useCodeHighlighter(): HighlightFn | null {
+  const [fn, setFn] = useState<HighlightFn | null>(null)
+  useEffect(() => {
+    let alive = true
+    void getHighlightFn().then((h) => {
+      if (alive) setFn(() => h)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+  return fn
+}
 
 // Code fences that the `code` renderer returns as a non-<code> React element
 // (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
@@ -233,6 +284,42 @@ function extractTextFromAst(node: any): string {
     })
     .join('')
     .replace(/\n$/, '')
+}
+
+/**
+ * editor-parity code block that highlights via lowlight once the (lazy-loaded)
+ * highlighter is ready. Rendered by the editor-parity `code` renderer for
+ * ordinary fenced blocks. Lives in its own component so it can subscribe to
+ * the async highlighter with a hook and re-render ONLY itself when lowlight
+ * arrives — keeping the `components` object stable so sibling content (e.g.
+ * MermaidDiagram, which holds its own open-lightbox state) is never re-rendered
+ * or remounted by a code-block highlight upgrade.
+ *
+ * Before the highlighter resolves, the raw text is shown (content stays
+ * visible); once resolved, it upgrades to highlighted spans.
+ */
+function CodeBlockHighlighted({
+  lang,
+  code,
+  className,
+  ...props
+}: {
+  lang?: string
+  code: string
+  className?: string
+} & React.HTMLAttributes<HTMLElement>) {
+  const highlight = useCodeHighlighter()
+  const highlighted = highlight?.(lang, code)
+  if (highlighted) {
+    return (
+      <code className={cn('hljs', lang && `language-${lang}`)}>{highlighted}</code>
+    )
+  }
+  return (
+    <code className={cn('hljs', className)} {...props}>
+      {code}
+    </code>
+  )
 }
 
 /**
@@ -492,49 +579,40 @@ function createComponents(
 
         const code = codeText || String(children).replace(/\n$/, '')
 
-        // Block code — highlight with lowlight (same engine as Tiptap)
-        try {
-          const tree = lang
-            ? lowlight.highlight(lang, code)
-            : lowlight.highlightAuto(code)
-          if (tree.children.length > 0) {
-            const highlighted = toJsxRuntime(tree, { jsx, jsxs, Fragment })
-            return (
-              <code className={cn('hljs', lang && `language-${lang}`)}>
-                {highlighted}
-              </code>
-            )
-          }
-        } catch {
-          // fall through to plain render
-        }
+        // Block code — delegate to CodeBlockHighlighted, which subscribes to
+        // the lazy-loaded lowlight highlighter and re-renders only itself when
+        // it arrives (plain text until then). Same engine as Tiptap.
         return (
-          <code className={cn('hljs', className)} {...props}>
-            {code}
-          </code>
+          <CodeBlockHighlighted lang={lang} code={code} className={className} {...props} />
         )
       },
 
-      // Pre — pass through for CSS styling. Special-case Mermaid / HtmlBlockPreview
-      // so the outer <pre> does not wrap them.
+      // Pre — pass through (CSS handles styling via .rich-text-editor pre).
+      // Special-case Mermaid / HtmlBlockPreview returned from the `code`
+      // renderer above so the outer `<pre>` does not wrap them — this is the
+      // standard two-layer pattern used to escape react-markdown's default
+      // `<pre><code>` envelope.
       pre: ({ node, children }) => {
+        // react-markdown calls `pre` BEFORE invoking the `code` renderer —
+        // `children` is the unrendered `<code>` element from the AST. So we
+        // identify "this block was meant to be unwrapped" by inspecting the
+        // child's className (`language-mermaid`, `language-html`), not by
+        // checking `children.type === MermaidDiagram`, which never matches.
+        //
+        // Match by exact class token: a substring `includes("language-html")`
+        // would also fire on neighboring languages like `language-htmlbars`
+        // and silently strip their <pre> wrapper.
         if (isValidElement(children)) {
           const childProps = children.props as { className?: string }
           if (PRE_UNWRAP_RE.test(childProps.className ?? '')) {
             return <>{children}</>
           }
         }
-        // Extract text content and language for header bar
+        // Extract text content and language for the header bar.
         const codeEl = (node?.children ?? []).find(
           (child: any) => child.type === 'element' && child.tagName === 'code'
         ) as any
-        const codeText = codeEl
-          ? (codeEl.children as any[])
-              .filter((n: any) => n.type === 'text')
-              .map((n: any) => n.value as string)
-              .join('')
-              .replace(/\n$/, '')
-          : ''
+        const codeText = codeEl ? extractTextFromAst(codeEl) : ''
         const classNames: string[] = codeEl?.properties?.className ?? []
         const langClass = classNames.find((cls: string) => cls.startsWith('language-'))
         const language = langClass?.replace('language-', '')
@@ -657,6 +735,11 @@ export function Markdown({
   renderHtmlBlock,
   onLinkHover,
 }: MarkdownProps): React.JSX.Element {
+  // The `components` object is intentionally free of any lowlight dependency:
+  // editor-parity code blocks subscribe to the lazy highlighter themselves
+  // (CodeBlockHighlighted), so this object stays referentially stable and a
+  // highlight upgrade never re-renders sibling content. Chat (minimal/full)
+  // never renders CodeBlockHighlighted, so it never triggers the lowlight load.
   const components = React.useMemo(
     () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderMermaid, renderHtmlBlock),
     [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderMermaid, renderHtmlBlock]

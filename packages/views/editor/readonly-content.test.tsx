@@ -362,7 +362,7 @@ describe("ReadonlyContent code styling", () => {
     expect(blockCode?.textContent?.trim()).toBe(token);
   });
 
-  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", () => {
+  it("renders code blocks with syntax highlighting as stable React elements (not dangerouslySetInnerHTML)", async () => {
     const codeText = [
       "const url = \"http://wujieai.com\";",
       "const user = \"@agent\";",
@@ -374,10 +374,20 @@ describe("ReadonlyContent code styling", () => {
     const blockCode = container.querySelector("pre code");
 
     expect(blockCode?.textContent).toBe(codeText);
-    // Should have hljs spans for syntax highlighting (not plain text)
-    expect(blockCode?.querySelector("span.hljs-keyword")).not.toBeNull();
-    // Should NOT use dangerouslySetInnerHTML (no __html attribute on any child)
-    expect(blockCode?.innerHTML).not.toBe("");
+    // lowlight loads async; once ready the plain-text fallback upgrades to
+    // highlighted spans (stable React elements, not dangerouslySetInnerHTML).
+    // `createLowlight(common)` registers ~35 grammars, which is slow in jsdom,
+    // so allow a generous timeout (production uses a pre-built chunk). Re-query
+    // fresh each poll — the upgrade swaps the <code> children, and a stale
+    // node reference captured before the re-render won't see the new spans.
+    await waitFor(
+      () => {
+        expect(container.querySelector("pre code span.hljs-keyword")).not.toBeNull();
+      },
+      { timeout: 5000 },
+    );
+    const highlightedCode = container.querySelector("pre code");
+    expect(highlightedCode?.innerHTML).not.toBe("");
   });
 
   it("keeps readonly code block chrome separate from selectable code text", async () => {

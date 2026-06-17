@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Markdown } from "./Markdown";
 
@@ -58,14 +58,31 @@ describe("Markdown editor-parity mode", () => {
     expect(markEl?.textContent).toBe("highlighted");
   });
 
-  it("renders code blocks with lowlight highlighting", () => {
+  it("renders code blocks with lowlight highlighting", async () => {
+    const { container } = render(
+      <Markdown mode="editor-parity">{"```javascript\nconst x = 1;\n```"}</Markdown>,
+    );
+
+    // The lowlight chunk loads async; once ready the plain-text fallback
+    // upgrades to highlighted spans (e.g. .hljs-keyword for `const`).
+    await waitFor(() => {
+      const keyword = container.querySelector("code.hljs .hljs-keyword");
+      expect(keyword).not.toBeNull();
+    });
+    const codeEl = container.querySelector("code.hljs");
+    expect(codeEl?.className).toContain("language-javascript");
+  });
+
+  it("renders code block text before the lowlight chunk loads (graceful fallback)", () => {
+    // On first render the highlighter is still null, so the block must show
+    // its raw text content — never blank — until highlighting upgrades it.
     const { container } = render(
       <Markdown mode="editor-parity">{"```javascript\nconst x = 1;\n```"}</Markdown>,
     );
 
     const codeEl = container.querySelector("code.hljs");
     expect(codeEl).not.toBeNull();
-    expect(codeEl?.className).toContain("language-javascript");
+    expect(codeEl?.textContent).toContain("const x = 1");
   });
 
   it("renders CodeBlockHeader with language label", () => {

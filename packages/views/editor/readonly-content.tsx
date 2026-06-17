@@ -20,7 +20,6 @@
 import { memo } from "react";
 import { Markdown as ViewsMarkdown } from "../common/markdown";
 import type { Attachment } from "@multica/core/types";
-import { cn } from "@multica/ui/lib/utils";
 
 interface ReadonlyContentProps {
   content: string;
