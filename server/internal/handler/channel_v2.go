@@ -53,6 +53,14 @@ type ChannelAgentTaskResponse struct {
 	CompletedAt      *string `json:"completed_at,omitempty"`
 	Kind             string  `json:"kind"`
 	AgentName        string  `json:"agent_name,omitempty"`
+	// WorkDir is the daemon-reported absolute working directory, populated
+	// once execution starts. RelativeWorkDir is its privacy-safe display form
+	// (home prefix stripped) — the transcript dialog renders the workdir copy
+	// button off RelativeWorkDir, so without these the channel scenario
+	// silently drops the affordance that the issue scenario has. Mirrors
+	// AgentTaskResponse in agent.go.
+	WorkDir         string `json:"work_dir,omitempty"`
+	RelativeWorkDir string `json:"relative_work_dir,omitempty"`
 }
 
 type ChannelContextResponse struct {
@@ -132,7 +140,22 @@ func channelMessagePaginatedToResponse(m db.ListChannelMessagesPaginatedRow) Cha
 	}
 }
 
-func channelAgentTaskToResponse(t db.AgentTaskQueue, agents map[string]db.Agent) ChannelAgentTaskResponse {
+func channelMessageAfterToResponse(m db.ListChannelMessagesAfterRow) ChannelMessageV2Response {
+	return ChannelMessageV2Response{
+		ID:          uuidToString(m.ID),
+		ChannelID:   uuidToString(m.ChannelID),
+		WorkspaceID: uuidToString(m.WorkspaceID),
+		AuthorType:  m.AuthorType,
+		AuthorID:    uuidToPtr(m.AuthorID),
+		Content:     m.Content,
+		ReplyToID:   uuidToPtr(m.ReplyToID),
+		ReplyCount:  m.ReplyCount,
+		CreatedAt:   timestampToString(m.CreatedAt),
+		UpdatedAt:   timestampToString(m.UpdatedAt),
+	}
+}
+
+func channelAgentTaskToResponse(t db.AgentTaskQueue, agents map[string]db.Agent, workspaceID string) ChannelAgentTaskResponse {
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -141,6 +164,10 @@ func channelAgentTaskToResponse(t db.AgentTaskQueue, agents map[string]db.Agent)
 	agentName := ""
 	if agent, ok := agents[agentID]; ok {
 		agentName = agent.Name
+	}
+	workDir := ""
+	if t.WorkDir.Valid {
+		workDir = t.WorkDir.String
 	}
 	return ChannelAgentTaskResponse{
 		ID:               uuidToString(t.ID),
@@ -163,6 +190,8 @@ func channelAgentTaskToResponse(t db.AgentTaskQueue, agents map[string]db.Agent)
 		CompletedAt:      timestampToPtr(t.CompletedAt),
 		Kind:             computeTaskKind(t),
 		AgentName:        agentName,
+		WorkDir:          workDir,
+		RelativeWorkDir:  relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 	}
 }
 
@@ -183,6 +212,13 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 	if err != nil {
 		return messages
 	}
+	// All messages in a channel share one workspace; relativeWorkDir needs
+	// it to strip the home prefix. Derive from the first message rather than
+	// threading a param through every caller.
+	workspaceID := ""
+	if len(messages) > 0 {
+		workspaceID = messages[0].WorkspaceID
+	}
 	agentIDs := make(map[string]pgtype.UUID)
 	for _, task := range tasks {
 		agentIDs[uuidToString(task.AgentID)] = task.AgentID
@@ -196,7 +232,7 @@ func (h *Handler) attachChannelAgentTasks(ctx context.Context, messages []Channe
 	byMessage := make(map[string][]ChannelAgentTaskResponse)
 	for _, task := range tasks {
 		msgID := uuidToString(task.ChannelMessageID)
-		byMessage[msgID] = append(byMessage[msgID], channelAgentTaskToResponse(task, agents))
+		byMessage[msgID] = append(byMessage[msgID], channelAgentTaskToResponse(task, agents, workspaceID))
 	}
 	for i := range messages {
 		messages[i].AgentTasks = byMessage[messages[i].ID]
@@ -272,6 +308,10 @@ func channelReplyForContextToMessage(m db.ListChannelMessageRepliesForContextRow
 // ListChannelMessages lists top-level messages in a channel (flat timeline).
 // Supports pagination: ?limit=N (default 20) returns the latest N messages.
 // ?before=<RFC3339> loads older messages before that timestamp.
+// ?around=<messageUUID> deep-links: loads a window centered on the target
+// message (half older + target + half newer) so the client can scroll to it
+// even when it falls outside the latest page. has_more reflects older
+// history so upward infinite-scroll keeps working from there.
 func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
@@ -284,6 +324,7 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 
 	limitStr := r.URL.Query().Get("limit")
 	beforeStr := r.URL.Query().Get("before")
+	aroundStr := r.URL.Query().Get("around")
 
 	limit := int32(20)
 	if limitStr != "" {
@@ -294,8 +335,30 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 
 	var resp []ChannelMessageV2Response
 	var hasMore bool
+	loaded := false
 
-	if beforeStr != "" {
+	// ?around=<id> deep-links to a window centered on the target message. A
+	// malformed id is a 400; a well-formed id that no longer exists, belongs to
+	// another channel, or is a reply (not top-level) silently falls back to the
+	// latest page — a stale shared link should still open the channel, not
+	// white-screen it.
+	if aroundStr != "" {
+		targetID, parseOK := parseUUIDOrBadRequest(w, aroundStr, "around message id")
+		if !parseOK {
+			return
+		}
+		if target, err := h.Queries.GetChannelMessage(r.Context(), targetID); err == nil &&
+			target.ChannelID == cctx.channel.ID && !target.ThreadID.Valid {
+			window, more, err := h.loadAroundWindow(r.Context(), cctx, target, limit)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list messages")
+				return
+			}
+			resp, hasMore, loaded = window, more, true
+		}
+	}
+
+	if !loaded && beforeStr != "" {
 		beforeTime, err := time.Parse(time.RFC3339Nano, beforeStr)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid before timestamp")
@@ -319,7 +382,10 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 			resp[i] = channelMessagePaginatedToResponse(m)
 		}
 		slices.Reverse(resp)
-	} else {
+		loaded = true
+	}
+
+	if !loaded {
 		messages, err := h.Queries.ListChannelMessagesLatest(r.Context(), db.ListChannelMessagesLatestParams{
 			ChannelID: cctx.channel.ID,
 			Limit:     limit + 1,
@@ -342,6 +408,61 @@ func (h *Handler) ListChannelMessages(w http.ResponseWriter, r *http.Request) {
 	resp = h.attachChannelAgentTasks(r.Context(), resp)
 	resp = h.attachChannelAuthorNames(r.Context(), resp)
 	writeJSON(w, http.StatusOK, map[string]any{"messages": resp, "total": len(resp), "has_more": hasMore})
+}
+
+// loadAroundWindow loads a deep-link window centered on a target message: up
+// to `half` older top-level messages, the target itself, and up to `half`
+// newer ones — returned in ASC display order. hasMore is true when older
+// history exists beyond the loaded window so upward infinite-scroll keeps
+// working. The caller has already validated that target is a top-level
+// message in cctx.channel.
+func (h *Handler) loadAroundWindow(ctx context.Context, cctx channelContext, target db.ChannelMessage, limit int32) ([]ChannelMessageV2Response, bool, error) {
+	half := limit / 2
+	if half < 1 {
+		half = 1
+	}
+
+	// Older side: created_at < target, DESC. Request half+1 to detect whether
+	// older history exists beyond what we return (mirrors the latest/before
+	// branches' limit+1 trick).
+	older, err := h.Queries.ListChannelMessagesPaginated(ctx, db.ListChannelMessagesPaginatedParams{
+		ChannelID: cctx.channel.ID,
+		CreatedAt: target.CreatedAt,
+		Limit:     half + 1,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := int32(len(older)) > half
+	if hasMore {
+		older = older[:half]
+	}
+
+	// Newer side: created_at > target, ASC.
+	newer, err := h.Queries.ListChannelMessagesAfter(ctx, db.ListChannelMessagesAfterParams{
+		ChannelID: cctx.channel.ID,
+		CreatedAt: target.CreatedAt,
+		Limit:     half,
+	})
+	if err != nil {
+		return nil, false, err
+	}
+
+	replyCount, err := h.Queries.CountMessageReplies(ctx, target.ID)
+	if err != nil {
+		replyCount = 0
+	}
+
+	// Assemble ASC order: older (reversed to ASC) + target + newer.
+	resp := make([]ChannelMessageV2Response, 0, len(older)+1+len(newer))
+	for i := len(older) - 1; i >= 0; i-- {
+		resp = append(resp, channelMessagePaginatedToResponse(older[i]))
+	}
+	resp = append(resp, channelMessageToV2Response(target, replyCount))
+	for _, m := range newer {
+		resp = append(resp, channelMessageAfterToResponse(m))
+	}
+	return resp, hasMore, nil
 }
 
 // SendChannelMessage posts a top-level message to a channel (no thread required).

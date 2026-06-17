@@ -38,12 +38,24 @@ export function channelGroupsOptions(wsId: string) {
 
 const CHANNEL_PAGE_SIZE = 20;
 
-export function channelMessagesOptions(wsId: string, channelId: string | null) {
+export function channelMessagesOptions(
+  wsId: string,
+  channelId: string | null,
+  aroundMessageId?: string | null,
+) {
   return infiniteQueryOptions({
-    queryKey: channelKeys.channelMessages(wsId, channelId ?? ""),
+    // aroundMessageId is part of the key so navigating to a different
+    // ?message= in the same channel re-anchors the first page. The prefix
+    // (channelKeys.channelMessages) is still used for WS invalidation, so
+    // events refresh the window regardless of which message it's centered on.
+    queryKey: [...channelKeys.channelMessages(wsId, channelId ?? ""), aroundMessageId ?? null],
     queryFn: ({ pageParam }) =>
       api.listChannelMessages(channelId ?? "", {
         limit: CHANNEL_PAGE_SIZE,
+        // The first page deep-links to the target message (?around=...) so a
+        // message outside the latest window is actually loaded and scrollable.
+        // Subsequent pages paginate older history with ?before=<cursor>.
+        around: pageParam === null ? (aroundMessageId ?? undefined) : undefined,
         before: pageParam ?? undefined,
       }),
     initialPageParam: null as string | null,

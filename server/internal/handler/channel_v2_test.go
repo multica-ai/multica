@@ -902,3 +902,148 @@ func TestV2ChannelMentionTaskCompletionFallsBackToTopLevelChannelMessage(t *test
 		t.Fatal("trigger sanity check failed")
 	}
 }
+
+// TestV2ListChannelMessagesAround verifies the ?around=<id> deep-link: the
+// target message plus a window of older and newer top-level messages are
+// returned in ASC order, and has_more reflects older history beyond the
+// window. This is what makes a copied message link land on the right message
+// even when it falls outside the latest page.
+func TestV2ListChannelMessagesAround(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM channel WHERE workspace_id = $1`, testWorkspaceID)
+	})
+
+	rr := httptest.NewRecorder()
+	testHandler.CreateChannel(rr, newRequest(http.MethodPost, "/api/channels", map[string]any{
+		"name": "Around Test Channel",
+	}))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("CreateChannel: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var channel ChannelResponse
+	decodeJSON(t, rr, &channel)
+
+	// Send 5 top-level messages; record their IDs in send order (ASC by
+	// created_at, which monotonic per insert).
+	send := func(content string) string {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPost, "/", map[string]any{
+			"content": content,
+		}), "id", channel.ID)
+		testHandler.SendChannelMessage(rr, req)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("SendChannelMessage: %d (%s)", rr.Code, rr.Body.String())
+		}
+		var m ChannelMessageV2Response
+		decodeJSON(t, rr, &m)
+		return m.ID
+	}
+	ids := []string{
+		send("msg-1"),
+		send("msg-2"),
+		send("msg-3"),
+		send("msg-4"),
+		send("msg-5"),
+	}
+	targetID := ids[2] // msg-3, the middle message.
+
+	// List with ?around=target&limit=4 → half=2: up to 2 older, target, up to 2 newer.
+	rr = httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodGet, "/?around="+targetID+"&limit=4", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChannelMessages around: %d (%s)", rr.Code, rr.Body.String())
+	}
+	var aroundResp struct {
+		Messages []ChannelMessageV2Response `json:"messages"`
+		HasMore  bool                       `json:"has_more"`
+	}
+	decodeJSON(t, rr, &aroundResp)
+
+	// Expect: msg-1, msg-2, msg-3(target), msg-4, msg-5 — but limit=4 caps the
+	// window at half=2 older + target + half=2 newer = 5 rows; since only 2
+	// older exist and 2 newer exist, all 5 fit and has_more must be false.
+	if len(aroundResp.Messages) != 5 {
+		t.Fatalf("expected 5 messages in around window, got %d", len(aroundResp.Messages))
+	}
+	gotIDs := make([]string, 5)
+	for i, m := range aroundResp.Messages {
+		gotIDs[i] = m.ID
+	}
+	wantASC := ids // already ASC
+	for i := range wantASC {
+		if gotIDs[i] != wantASC[i] {
+			t.Fatalf("around order mismatch at %d: got %v, want %v", i, gotIDs, wantASC)
+		}
+	}
+	if aroundResp.HasMore {
+		t.Fatalf("expected has_more=false (no older history beyond window), got true")
+	}
+
+	// Now target the oldest message (msg-1): no older side, target, 2 newer.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/?around="+ids[0]+"&limit=4", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChannelMessages around oldest: %d (%s)", rr.Code, rr.Body.String())
+	}
+	decodeJSON(t, rr, &aroundResp)
+	if len(aroundResp.Messages) != 3 {
+		t.Fatalf("expected 3 messages (target + 2 newer), got %d", len(aroundResp.Messages))
+	}
+	if aroundResp.Messages[0].ID != ids[0] {
+		t.Fatalf("expected oldest target first, got %s", aroundResp.Messages[0].ID)
+	}
+	if aroundResp.HasMore {
+		t.Fatalf("expected has_more=false for oldest target, got true")
+	}
+
+	// has_more=true case: add 3 more older messages by targeting msg-1 with a
+	// tiny window so older history exists beyond it. Re-target msg-3 with
+	// limit=2 (half=1): 1 older + target + 1 newer; but 2 older exist beyond
+	// the 1 returned → has_more=true.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/?around="+targetID+"&limit=2", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("ListChannelMessages around small window: %d (%s)", rr.Code, rr.Body.String())
+	}
+	decodeJSON(t, rr, &aroundResp)
+	// half=1 → 1 older (msg-2) + target (msg-3) + 1 newer (msg-4) = 3 rows.
+	if len(aroundResp.Messages) != 3 {
+		t.Fatalf("expected 3 messages in small around window, got %d", len(aroundResp.Messages))
+	}
+	if aroundResp.Messages[1].ID != targetID {
+		t.Fatalf("expected target in middle position, got %v", aroundResp.Messages)
+	}
+	if !aroundResp.HasMore {
+		t.Fatalf("expected has_more=true (older history msg-1 beyond window), got false")
+	}
+
+	// Invalid around id (not a UUID) → 400.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/?around=not-a-uuid", nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid around id, got %d", rr.Code)
+	}
+
+	// Stale link: a well-formed UUID that doesn't exist falls back to the
+	// latest page (200) instead of erroring — a shared link must still open
+	// the channel even if the message was deleted.
+	rr = httptest.NewRecorder()
+	req = withURLParam(newRequest(http.MethodGet, "/?around="+util.MustParseUUID("00000000-0000-0000-0000-000000000000").String(), nil), "id", channel.ID)
+	testHandler.ListChannelMessages(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 for stale around link (fallback to latest), got %d (%s)", rr.Code, rr.Body.String())
+	}
+	decodeJSON(t, rr, &aroundResp)
+	if len(aroundResp.Messages) == 0 {
+		t.Fatalf("fallback to latest returned no messages")
+	}
+}

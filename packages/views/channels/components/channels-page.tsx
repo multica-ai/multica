@@ -207,7 +207,11 @@ export function ChannelsPage({ channelId }: ChannelsPageProps) {
   const sidePanelRef = useRef<HTMLDivElement>(null);
 
   const { data: channels, isLoading: loadingChannels } = useQuery(channelListOptions(wsId));
-  const { data: messages, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null));
+  // ?message=<id> deep-link target. Fed into the messages query as ?around= so
+  // the first page loads a window centered on it (the target may be older than
+  // the latest page), and also drives the scroll-to-and-highlight on render.
+  const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
+  const { data: messages, isLoading: loadingMessages, hasNextPage, fetchNextPage, isFetchingNextPage } = useInfiniteQuery(channelMessagesOptions(wsId, channelId ?? null, linkedMessageId));
   const { data: members = [] } = useQuery(channelMembersOptions(wsId, channelId ?? null));
   const { data: workspaceMembers = [] } = useQuery(memberListOptions(wsId));
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);

@@ -170,6 +170,17 @@ WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at < $2
 ORDER BY m.created_at DESC
 LIMIT $3;
 
+-- name: ListChannelMessagesAfter :many
+-- Lists top-level channel messages strictly newer than a timestamp (created_at > $2),
+-- in ASC order. Used by the ?around=<id> deep-link to load context above the target
+-- message. The older side reuses ListChannelMessagesPaginated (created_at < $2).
+SELECT m.*,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at > $2
+ORDER BY m.created_at ASC
+LIMIT $3;
+
 -- name: CreateChannelMessageTopLevel :one
 -- Creates a top-level message in a channel (no thread).
 INSERT INTO channel_message (channel_id, workspace_id, author_type, author_id, content)

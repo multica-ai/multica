@@ -2210,11 +2210,12 @@ export class ApiClient {
   // Channel V2 — flat messages
   async listChannelMessages(
     channelId: string,
-    params: { limit?: number; before?: string } = {},
+    params: { limit?: number; before?: string; around?: string } = {},
   ): Promise<ListChannelMessagesResponse> {
     const query = new URLSearchParams();
     if (params.limit) query.set("limit", String(params.limit));
     if (params.before) query.set("before", params.before);
+    if (params.around) query.set("around", params.around);
     const qs = query.toString();
     return this.fetch(`/api/channels/${channelId}/messages${qs ? `?${qs}` : ""}`);
   }

@@ -884,6 +884,70 @@ func (q *Queries) ListChannelMessages(ctx context.Context, channelID pgtype.UUID
 	return items, nil
 }
 
+const listChannelMessagesAfter = `-- name: ListChannelMessagesAfter :many
+SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
+    COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
+FROM channel_message m
+WHERE m.channel_id = $1 AND m.thread_id IS NULL AND m.created_at > $2
+ORDER BY m.created_at ASC
+LIMIT $3
+`
+
+type ListChannelMessagesAfterParams struct {
+	ChannelID pgtype.UUID        `json:"channel_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Limit     int32              `json:"limit"`
+}
+
+type ListChannelMessagesAfterRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+	ReplyCount  int32              `json:"reply_count"`
+}
+
+// Lists top-level channel messages strictly newer than a timestamp (created_at > $2),
+// in ASC order. Used by the ?around=<id> deep-link to load context above the target
+// message. The older side reuses ListChannelMessagesPaginated (created_at < $2).
+func (q *Queries) ListChannelMessagesAfter(ctx context.Context, arg ListChannelMessagesAfterParams) ([]ListChannelMessagesAfterRow, error) {
+	rows, err := q.db.Query(ctx, listChannelMessagesAfter, arg.ChannelID, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChannelMessagesAfterRow{}
+	for rows.Next() {
+		var i ListChannelMessagesAfterRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ThreadID,
+			&i.ChannelID,
+			&i.WorkspaceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ReplyToID,
+			&i.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listChannelMessagesLatest = `-- name: ListChannelMessagesLatest :many
 SELECT m.id, m.thread_id, m.channel_id, m.workspace_id, m.author_type, m.author_id, m.content, m.created_at, m.updated_at, m.reply_to_id,
     COALESCE((SELECT count(*) FROM channel_message r WHERE r.reply_to_id = m.id)::int, 0)::int AS reply_count
