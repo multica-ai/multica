@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api, ApiError } from "../api";
 import {
@@ -101,7 +101,16 @@ export function useLoadMoreByStatusForWorkspace(
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
   const total = bucket?.total ?? 0;
-  const hasMore = loaded < total;
+  // When the filter changes the cache key, the new entry may not be populated
+  // yet (the query is still in flight). Keep the last non-zero total so the
+  // column header doesn't flash to 0 during the transition.
+  const lastTotalRef = useRef(total);
+  if (total > 0) lastTotalRef.current = total;
+  const displayTotal = total > 0 ? total : lastTotalRef.current;
+  // Reset the ref when the key genuinely changes to a zero-total bucket
+  // (i.e. the query resolved and the status truly has 0 issues).
+  if (cache && total === 0) lastTotalRef.current = 0;
+  const hasMore = loaded < displayTotal;
 
   const loadMore = useCallback(async () => {
     if (isLoading || !hasMore) return;
@@ -129,7 +138,7 @@ export function useLoadMoreByStatusForWorkspace(
     }
   }, [qc, activeKey, status, loaded, hasMore, isLoading, requestFilter, sort]);
 
-  return { loadMore, hasMore, isLoading, total };
+  return { loadMore, hasMore, isLoading, total: displayTotal };
 }
 
 function stripBucketOnlyFilters(filter: IssueListFilter): Omit<IssueListFilter, "statuses"> {
