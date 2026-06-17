@@ -202,6 +202,17 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/share-tokens/{tokenId}",
 		},
 	},
+	{
+		Key:         "manage_issue_recurrence",
+		Title:       "Manage issue recurrence",
+		Category:    CategoryIssues,
+		Description: "Configure or remove an issue's recurrence (repeat schedule), or manually run a recurrence to spawn the next issue.",
+		Ops: []string{
+			"PUT /api/cerebro/issues/{issueID}/recurrence/",
+			"DELETE /api/cerebro/issues/{issueID}/recurrence/",
+			"POST /api/cerebro/issue-recurrences/{id}/run",
+		},
+	},
 
 	// --- Comments -------------------------------------------------------------
 	{
