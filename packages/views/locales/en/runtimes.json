@@ -277,6 +277,7 @@
     "cta": "Add runtime",
     "dialog_title": "Custom runtimes",
     "dialog_description": "Create and manage custom runtime backends based on supported protocol families.",
+    "close": "Close",
     "add_new": "New custom runtime",
     "list_title": "Runtime backends",
     "custom_section_title": "Custom runtimes ({{count}})",

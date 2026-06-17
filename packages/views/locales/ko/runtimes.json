@@ -277,6 +277,7 @@
     "cta": "런타임 추가",
     "dialog_title": "사용자 지정 런타임",
     "dialog_description": "지원되는 프로토콜 제품군을 기반으로 에이전트가 사용할 사용자 지정 런타임 백엔드를 만들고 관리합니다.",
+    "close": "닫기",
     "add_new": "새 사용자 지정 런타임",
     "list_title": "런타임 백엔드",
     "custom_section_title": "사용자 지정 런타임({{count}})",

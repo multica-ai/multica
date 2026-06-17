@@ -265,6 +265,7 @@
     "cta": "添加运行时",
     "dialog_title": "自定义运行时",
     "dialog_description": "基于支持的协议族，创建和管理智能体可使用的自定义运行时后端。",
+    "close": "关闭",
     "add_new": "新建自定义运行时",
     "list_title": "运行时后端",
     "custom_section_title": "自定义运行时（{{count}}）",

@@ -119,11 +119,12 @@ export function RuntimeProfilesDialog({
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
+                    aria-label={t(($) => $.profiles.close)}
                   />
                 }
               >
                 <X className="h-4 w-4" />
-                <span className="sr-only">Close</span>
+                <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
