@@ -221,6 +221,13 @@ export function InboxChatPanel({
           />
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-4 overflow-y-auto px-4 py-6 text-muted-foreground">
+            {/* CEREBRO-PATCH(chat-recent-list-selected-agent): keep recent chats above the new-chat prompt and scoped to the selected agent. */}
+            <RecentChatsList
+              sessions={allSessions}
+              agents={agents}
+              agentId={activeAgent?.id ?? null}
+              onOpenSession={(id) => onSessionCreated?.(id)}
+            />
             <div className="flex flex-col items-center gap-3">
               <MessageSquare className="size-10 text-muted-foreground/30" />
               <p className="text-sm">
@@ -229,11 +236,6 @@ export function InboxChatPanel({
                   : "Select an agent to start chatting"}
               </p>
             </div>
-            <RecentChatsList
-              sessions={allSessions}
-              agents={agents}
-              onOpenSession={(id) => onSessionCreated?.(id)}
-            />
           </div>
         )}
       </div>
