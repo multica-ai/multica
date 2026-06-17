@@ -133,6 +133,10 @@ interface ContentEditorProps {
   // editor instance exists, so cerebro can register decoration plugins (e.g.
   // note comment-anchor highlights) without owning the editor lifecycle.
   onEditorReady?: (editor: Editor) => void;
+  // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637 — when set,
+  // the bubble menu shows a "comment on selection" icon; notes use it to open
+  // the comments panel anchored to the selected text.
+  onCommentOnSelection?: (text: string) => void;
 }
 
 interface ContentEditorRef {
@@ -178,6 +182,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       enableSlashCommands = false,
       onEditorReady, // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637.
+      onCommentOnSelection, // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637.
     },
     ref,
   ) {
@@ -443,7 +448,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
         {showBubbleMenu && (
-          <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} />
+          <EditorBubbleMenu
+            editor={editor}
+            currentIssueId={currentIssueId}
+            onCommentOnSelection={onCommentOnSelection} // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637.
+          />
         )}
         <LinkHoverCard {...hover} />
       </div>

@@ -29,6 +29,8 @@ function workspaceScoped(slug: string) {
     channelDetail: (id: string) => `${ws}/channels/${encode(id)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
+    // CEREBRO-PATCH(sprint-detail-path): TECH-3684 sprint opens as its own board view.
+    sprintDetail: (id: string) => `${ws}/sprints/${encode(id)}`,
     documents: () => `${ws}/documents`,
     documentsFolder: (folderId: string) =>
       `${ws}/documents?folder=${encode(folderId)}`,

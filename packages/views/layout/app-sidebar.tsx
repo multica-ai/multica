@@ -114,6 +114,8 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
+// CEREBRO-PATCH(sidebar-sprints-nav): TECH-3684 sprints listed under each project.
+import { ProjectSprintsNav } from "./cerebro-project-sprints-nav";
 import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
@@ -954,6 +956,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                                     {children.map((child) => renderProject(child, level + 1))}
                                   </ul>
                                 )}
+                                {/* CEREBRO-PATCH(sidebar-sprints-nav): TECH-3684 sprints under the project. */}
+                                <ProjectSprintsNav projectId={item.id} level={level} />
                               </SidebarMenuItem>
                             );
                           };

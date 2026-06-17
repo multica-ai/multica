@@ -41,13 +41,31 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
 
   const sprints = sprintsQuery.data?.sprints ?? [];
   const currentSprintId = assignmentQuery.data?.sprint_id ?? "";
+  // TECH-3684: resolve the selected id to its sprint name for the trigger
+  // label. Base UI's <SelectValue> renders the raw value by default, which
+  // showed the sprint UUID instead of "Sprint 1"; the render-function child
+  // below maps it back to the name.
+  const currentSprint = sprints.find((s) => s.id === currentSprintId);
 
   if (!projectId) return null;
   if (sprintsQuery.isLoading) {
     return <div className={className}>Loading sprint…</div>;
   }
+  // TECH-3684: stay visible even with no sprints yet, so the field never
+  // disappears from the issue side panel — show a disabled "No sprints yet".
   if (sprints.length === 0) {
-    return null;
+    return (
+      <div className={className}>
+        <Select value={NONE} disabled>
+          <SelectTrigger>
+            <SelectValue placeholder="No sprints yet" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>No sprints yet</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    );
   }
 
   return (
@@ -62,7 +80,9 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
         }
       >
         <SelectTrigger>
-          <SelectValue placeholder="No sprint" />
+          <SelectValue placeholder="No sprint">
+            {() => currentSprint?.name ?? "No sprint"}
+          </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={NONE}>No sprint</SelectItem>

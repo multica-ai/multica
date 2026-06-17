@@ -234,6 +234,8 @@
     "sandbox": "沙箱",
     "tools": "工具",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
+    "capabilities": "能力",
+    "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label",
     "mcp_config": "MCP",
     "integrations": "集成",
     "discard_dialog_title": "放弃未保存的修改？",

@@ -17,6 +17,13 @@ import {
   DialogTrigger,
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
+import { useWorkspacePaths } from "@multica/core/paths";
+// Imported as a leaf primitive WITHOUT declaring `@multica/views` in this
+// package's package.json — `views` already depends on `@multica/cerebro-sprints`,
+// so declaring the reverse edge creates a turbo build cycle (broke all frontend
+// CI on main, #1352). Same phantom-import pattern as cerebro-groups. Do not add
+// `@multica/views` to dependencies here.
+import { AppLink } from "@multica/views/navigation";
 
 import { projectSprintsOptions, useCreateSprint, useDeleteSprint } from "../core/queries";
 import type { SprintStatus } from "../core/types";
@@ -47,6 +54,7 @@ export function SprintList({ workspaceId, projectId }: Props) {
   const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
   const createSprint = useCreateSprint(workspaceId, projectId);
   const deleteSprint = useDeleteSprint(workspaceId, projectId);
+  const paths = useWorkspacePaths();
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({
@@ -177,7 +185,13 @@ export function SprintList({ workspaceId, projectId }: Props) {
                 <CalendarRange className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate font-medium">{sprint.name}</span>
+                    {/* Clicking the sprint opens it as its own board view (create + drag-and-drop). */}
+                    <AppLink
+                      href={paths.sprintDetail(sprint.id)}
+                      className="truncate font-medium hover:underline"
+                    >
+                      {sprint.name}
+                    </AppLink>
                     <Badge variant="secondary" className={cn(statusConfig.className)}>
                       {statusConfig.label}
                     </Badge>

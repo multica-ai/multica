@@ -21,12 +21,15 @@ import type { AgentAvailability, Workload } from "@multica/core/agents";
 //
 // Color tokens map to project semantic tokens (no hardcoded Tailwind colors):
 //
-//   AVAILABILITY (drives the dot everywhere a dot appears):
-//     online    → success         (green)
-//     unstable  → warning         (amber) — pairs with the runtime card's amber
-//     paused    → destructive     (red)   intentional, but not online
-//     offline   → destructive     (red)
-//     archived  → destructive     (red)
+//   AVAILABILITY (drives the dot everywhere a dot appears). Every dot is a
+//   Slack-style presence indicator: a filled centre on a thin grey outline
+//   ring (`border border-muted-foreground`). State reads from the centre fill,
+//   not an alarming colour:
+//     online    → success center + grey ring   (green)
+//     unstable  → warning center + grey ring   (amber) — transient
+//     paused    → background center + grey ring (empty/hollow) — not online
+//     offline   → background center + grey ring (empty/hollow)
+//     archived  → background center + grey ring (empty/hollow)
 //
 //   WORKLOAD (drives the optional workload chip on focused surfaces):
 //     working   → brand           (blue)  has activity
@@ -53,38 +56,46 @@ export interface AvailabilityVisual {
 export const availabilityConfig: Record<AgentAvailability, AvailabilityVisual> = {
   online: {
     label: "Online",
-    dotClass: "bg-success",
+    // CEREBRO-PATCH(status-slack-dot): grey outline ring on every dot (Slack look).
+    // TECH-3686 follow-up (Jesper): online dot uses a lighter green
+    // (--success-bright) and a 1px inset white/background ring that shrinks the
+    // green fill slightly and leaves a white border between the green and the grey
+    // ring. Implemented as an inset box-shadow (not a Tailwind ring) so it composes
+    // with the separate ring-background separation ring the avatar dots apply.
+    dotClass:
+      "bg-[var(--success-bright)] border border-muted-foreground shadow-[inset_0_0_0_1px_var(--background)]",
     textClass: "text-success",
     icon: CircleDot,
   },
-  // CEREBRO-PATCH(status-red-green): inactive states (paused/offline/archived)
-  // use red instead of brand/grey so online (green) vs not-online (red) reads
-  // at a glance. Replaces the upstream brand-blue paused / grey offline tones.
+  // CEREBRO-PATCH(status-slack-dot): inactive states (paused/offline/archived)
+  // render as a hollow grey-ringed dot (Slack away style) — empty centre on a
+  // grey outline, no red. State reads from fill (green vs empty), distinct by
+  // shape. Supersedes the earlier red status-red-green treatment (TECH-3686).
   paused: {
     label: "Paused",
-    dotClass: "bg-destructive",
-    textClass: "text-destructive",
+    dotClass: "bg-background border border-muted-foreground",
+    textClass: "text-muted-foreground",
     icon: PauseCircle,
   },
   unstable: {
     label: "Unstable",
-    dotClass: "bg-warning",
+    dotClass: "bg-warning border border-muted-foreground",
     textClass: "text-warning",
     icon: PlugZap,
   },
   offline: {
     label: "Offline",
-    dotClass: "bg-destructive",
-    textClass: "text-destructive",
+    dotClass: "bg-background border border-muted-foreground",
+    textClass: "text-muted-foreground",
     icon: CircleSlash,
   },
-  // Lifecycle state, not a runtime state — a retired agent. Red like
+  // Lifecycle state, not a runtime state — a retired agent. Hollow like
   // offline (it can't take work) but labelled distinctly so the user reads
   // "this agent is archived", not "temporarily unreachable".
   archived: {
     label: "Archived",
-    dotClass: "bg-destructive",
-    textClass: "text-destructive",
+    dotClass: "bg-background border border-muted-foreground",
+    textClass: "text-muted-foreground",
     icon: Archive,
   },
 };

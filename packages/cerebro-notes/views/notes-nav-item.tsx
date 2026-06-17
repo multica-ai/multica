@@ -1,6 +1,7 @@
 "use client";
 
 import { NotebookPen } from "lucide-react";
+import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import {
@@ -31,6 +32,10 @@ export function NotesNavItem({ workspaceSlug, onClick }: NotesNavItemProps) {
         render={<AppLink href={href} />}
         onClick={onClick}
         tooltip="Notes"
+        className={cn(
+          "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70",
+          "data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
+        )}
       >
         <NotebookPen />
         <span>Notes</span>

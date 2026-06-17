@@ -21,7 +21,8 @@
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tiptap/pm": "^3.22.1",
-    "@tiptap/react": "^3.22.1"
+    "@tiptap/react": "^3.22.1",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",
