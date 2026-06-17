@@ -62,7 +62,7 @@ beforeEach(() => {
 });
 
 describe("CerebroCapabilitiesTab", () => {
-  it("renders the four capability sections from a well-formed response", async () => {
+  it("renders every capability section from a well-formed response", async () => {
     mockCerebroRequest.mockResolvedValue({
       agent_id: "agent-1",
       name: "Tine",
@@ -70,10 +70,34 @@ describe("CerebroCapabilitiesTab", () => {
       description: "",
       skills: [{ id: "s1", name: "deploy", description: "Ship a PR" }],
       tools: [
-        { name: "read_issue", enabled: true },
-        { name: "delete_issue", enabled: false },
+        { key: "add_comment", permission: "allow", decided_by: "runtime" },
+        {
+          key: "create_local_runtime",
+          permission: "deny",
+          decided_by: "group",
+          capped_by_groups: ["builders (Jesper)"],
+        },
+      ],
+      connections: [
+        {
+          name: "bigquery",
+          display_name: "BigQuery",
+          type: "mcp_http",
+          url: "https://bq-mcp.firtal.internal",
+          internal: true,
+          tools: [{ name: "bigquery.query", description: "run a read query" }],
+          endpoints: [],
+        },
+        {
+          name: "registry",
+          type: "api",
+          url: "https://registry.firtal.com",
+          tools: [],
+          endpoints: [{ path: "/datasets", methods: ["GET"] }],
+        },
       ],
       credentials: [{ name: "GITHUB_TOKEN", type: "secret", description: "" }],
+      infisical_secrets: [{ environment: "prod", path: "/Cloudflare" }],
       limits: {
         sandbox: { network_allowlist: ["api.github.com:443"] },
         mcp_servers: ["multica"],
@@ -85,14 +109,32 @@ describe("CerebroCapabilitiesTab", () => {
 
     expect(await screen.findByText("Can do")).toBeInTheDocument();
     expect(screen.getByText("May use")).toBeInTheDocument();
+    expect(screen.getByText("Connections")).toBeInTheDocument();
     expect(screen.getByText("Has access to")).toBeInTheDocument();
     expect(screen.getByText("Limited by")).toBeInTheDocument();
 
+    // Skills.
     expect(screen.getByText("deploy")).toBeInTheDocument();
-    // Only enabled tools render; the disabled one is filtered out.
-    expect(screen.getByText("read_issue")).toBeInTheDocument();
-    expect(screen.queryByText("delete_issue")).not.toBeInTheDocument();
+
+    // Tools with verdicts: allow renders "Allow", deny renders "Block".
+    expect(screen.getByText("add_comment")).toBeInTheDocument();
+    expect(screen.getByText("Allow")).toBeInTheDocument();
+    expect(screen.getByText("create_local_runtime")).toBeInTheDocument();
+    expect(screen.getByText("Block")).toBeInTheDocument();
+    expect(
+      screen.getByText(/capped by builders \(Jesper\)/),
+    ).toBeInTheDocument();
+
+    // Connections with their underlying tools + endpoints.
+    expect(screen.getByText("BigQuery")).toBeInTheDocument();
+    expect(screen.getByText("bigquery.query")).toBeInTheDocument();
+    expect(screen.getByText("/datasets")).toBeInTheDocument();
+
+    // Credentials + Infisical names (never values).
     expect(screen.getByText("GITHUB_TOKEN")).toBeInTheDocument();
+    expect(screen.getByText("/Cloudflare")).toBeInTheDocument();
+
+    // Limits.
     expect(screen.getByText("multica")).toBeInTheDocument();
   });
 
@@ -102,7 +144,9 @@ describe("CerebroCapabilitiesTab", () => {
       agent_id: 123,
       skills: null,
       tools: "not-an-array",
+      connections: undefined,
       credentials: undefined,
+      infisical_secrets: 42,
       limits: { mcp_servers: null },
     });
 
@@ -112,7 +156,9 @@ describe("CerebroCapabilitiesTab", () => {
     // rather than white-screening.
     expect(await screen.findByText("Can do")).toBeInTheDocument();
     expect(screen.getByText("No skills loaded.")).toBeInTheDocument();
-    expect(screen.getByText("No tools enabled.")).toBeInTheDocument();
+    expect(screen.getByText("No tools resolved.")).toBeInTheDocument();
+    expect(screen.getByText("No connections.")).toBeInTheDocument();
     expect(screen.getByText("No credentials bound.")).toBeInTheDocument();
+    expect(screen.getByText("No Infisical folders.")).toBeInTheDocument();
   });
 });

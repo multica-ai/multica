@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	pdftext "github.com/multica-ai/multica/packages/cerebro-pdf-text"
@@ -153,14 +154,14 @@ func gatewayAttachmentBlocks(ctx context.Context, store storage.Storage, att db.
 		}
 		return attachmentTextBlocks(att.Filename, text), nil
 	default:
-		if text := strings.TrimSpace(string(body)); text != "" && strings.HasPrefix(mediaType, "text/") {
+		// Inject any attachment whose bytes are readable UTF-8 text — text/*,
+		// but also application/json, application/xml, csv, yaml, source code,
+		// etc. that the explicit cases above do not cover. This is what lets a
+		// chat/issue agent actually read a .json/.csv/.md the user attaches; a
+		// type-prefix allowlist silently dropped them before (TECH-3657). Binary
+		// blobs (null bytes / invalid UTF-8) fall through to an explicit error.
+		if text := strings.TrimSpace(string(body)); text != "" && utf8.Valid(body) && bytes.IndexByte(body, 0) == -1 {
 			return attachmentTextBlocks(att.Filename, text), nil
-		}
-		if mediaType == "application/pdf" {
-			text, err := pdftext.Extract(body, firtalGatewayAttachmentMaxBytes)
-			if err == nil {
-				return attachmentTextBlocks(att.Filename, string(text)), nil
-			}
 		}
 		return nil, fmt.Errorf("unsupported attachment type %q", mediaType)
 	}

@@ -15,6 +15,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/cost_optimization" // CEREBRO-PATCH(snapshot-thread-scope): thread-scope helper for channels (TECH-3691)
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 
@@ -75,6 +76,8 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 			slog.Warn("snapshot cost-saving: list comments failed", "error", err)
 			return
 		}
+		// CEREBRO-PATCH(snapshot-thread-scope): on channels, inline only the triggering thread, not unrelated chatter (TECH-3691)
+		comments = cost_optimization.ScopeSnapshotToTriggerThread(issue.Kind, comments, triggerCommentID)
 		snapshot := renderIssueSnapshot(issue, comments, triggerCommentID, resp.AgentID)
 
 		// CEREBRO-PATCH(daemon-snapshot-compression): overflow guard — activate B or C when snapshot is too large (FIR-3074)

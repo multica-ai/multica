@@ -17,6 +17,7 @@ import { api } from "@multica/core/api";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ArtifactBody, PdfViewer } from "@multica/cerebro-artifacts/views/components";
+import { ZoomableImage } from "@multica/cerebro-ui";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 function formatBytes(n: number): string {
@@ -175,10 +176,15 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
         <div className="mt-6">
           {kind === "image" ? (
             downloadHref ? (
-              <img
+              // Zoomable image preview: wheel-zoom on desktop, two-finger pinch
+              // on mobile, drag-pan when zoomed, double-click/tap to reset.
+              // This is the surface users actually open from an attachment link,
+              // so the zoom gesture must live here (not only in the inline
+              // lightbox / editor modal). See TECH-3695.
+              <ZoomableImage
                 src={downloadHref}
                 alt={attachment.filename}
-                className="mx-auto max-h-[80vh] max-w-full rounded border border-border object-contain"
+                viewportClassName="mx-auto h-[80vh] w-full max-w-5xl rounded border border-border bg-muted/10"
               />
             ) : (
               <FallbackUnavailable downloadUrl={forcedDownloadHref} />

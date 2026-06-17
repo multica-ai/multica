@@ -554,7 +554,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
 	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
-	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
+	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
+	h.CapabilityToolPolicy = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-capability-card-tools-wire): TECH-3642 capabilities card tool-policy table.
+	h.CapabilityConnections = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-capability-card-conns-wire): TECH-3642 capabilities card connections list.
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	if avMod, avOK := cerebroagentvault.NewModule(pool); avOK {
 		h.AgentVaultBroker = avMod.Service

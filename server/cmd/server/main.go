@@ -440,6 +440,10 @@ func main() {
 			if err := cerebroruntimetools.SeedBuiltinCloudToolsForAllRuntimes(context.Background(), pool); err != nil {
 				slog.Warn("seed cerebro_runtime_tool cloud rows failed", "error", err)
 			}
+			// CEREBRO-PATCH(main-cloud-capability-startup-scan): TECH-3657 — also sync the capability register so the admin matrix self-heals on deploy.
+			if err := seedCloudCapabilitiesForAllRuntimes(context.Background(), pool); err != nil {
+				slog.Warn("seed cloud runtime capabilities failed", "error", err)
+			}
 		}()
 	}
 
