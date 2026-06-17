@@ -22,13 +22,32 @@ import (
 
 // fakeStore returns a fixed subscription list, ignoring the workspace filter
 // (the dispatcher does the workspace-level vs project-level filtering itself).
+// It also captures recorded delivery rows so tests can assert the dispatcher
+// persists the terminal outcome.
 type fakeStore struct {
 	subs []db.WebhookSubscription
 	err  error
+
+	mu        sync.Mutex
+	delivered []db.CreateOutboundWebhookDeliveryParams
 }
 
 func (f *fakeStore) ListEnabledWebhookSubscriptionsForDispatch(_ context.Context, _ pgtype.UUID) ([]db.WebhookSubscription, error) {
 	return f.subs, f.err
+}
+
+func (f *fakeStore) CreateOutboundWebhookDelivery(_ context.Context, arg db.CreateOutboundWebhookDeliveryParams) (db.OutboundWebhookDelivery, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delivered = append(f.delivered, arg)
+	return db.OutboundWebhookDelivery{}, nil
+}
+
+// records returns a copy of the captured delivery rows.
+func (f *fakeStore) records() []db.CreateOutboundWebhookDeliveryParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]db.CreateOutboundWebhookDeliveryParams(nil), f.delivered...)
 }
 
 // newTestDispatcher builds a dispatcher with a fast retry backoff and registers
@@ -415,3 +434,118 @@ func TestClose_DrainsInFlightAndStopsAccepting(t *testing.T) {
 		t.Fatalf("second Close: %v", err)
 	}
 }
+
+// waitForRecords polls the fakeStore until it has captured at least n recorded
+// deliveries, or fails after the timeout. Recording happens after the HTTP
+// response, on the delivery worker, so tests can't rely on the collector wg.
+func waitForRecords(t *testing.T, store *fakeStore, n int, d time.Duration) []db.CreateOutboundWebhookDeliveryParams {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for {
+		recs := store.records()
+		if len(recs) >= n {
+			return recs
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d recorded deliveries, got %d", n, len(recs))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestDeliveryRecordedOnSuccess(t *testing.T) {
+	c := &collector{wg: &sync.WaitGroup{}}
+	srv := httptest.NewServer(http.HandlerFunc(c.handler))
+	defer srv.Close()
+
+	store := &fakeStore{subs: []db.WebhookSubscription{
+		sub(t, subID1, "", []string{EventIssueStatusChanged}, srv.URL),
+	}}
+	d := newTestDispatcher(t, store, &http.Client{Timeout: deliveryTimeout})
+
+	c.wg.Add(1)
+	d.DispatchIssueStatusChanged(IssueStatusChanged{
+		WorkspaceID: wsID,
+		Issue:       map[string]any{"id": "issue-1", "status": "done"},
+	})
+	waitTimeout(t, c.wg, 5*time.Second)
+
+	recs := waitForRecords(t, store, 1, 2*time.Second)
+	r := recs[0]
+	if r.Status != "delivered" {
+		t.Errorf("status = %q, want delivered", r.Status)
+	}
+	if r.AttemptCount != 1 {
+		t.Errorf("attempt_count = %d, want 1", r.AttemptCount)
+	}
+	if !r.ResponseStatus.Valid || r.ResponseStatus.Int32 != http.StatusOK {
+		t.Errorf("response_status = %+v, want 200", r.ResponseStatus)
+	}
+	if len(r.RequestBody) == 0 {
+		t.Errorf("request_body should be recorded for redelivery")
+	}
+	if uuidStr(r.SubscriptionID) != subID1 {
+		t.Errorf("subscription_id = %q, want %q", uuidStr(r.SubscriptionID), subID1)
+	}
+	if r.Event != EventIssueStatusChanged {
+		t.Errorf("event = %q", r.Event)
+	}
+	if r.RedeliveredFromID.Valid {
+		t.Errorf("a normal delivery must not have redelivered_from_id")
+	}
+}
+
+func TestDeliveryRecordedAsFailedOn4xx(t *testing.T) {
+	// A 4xx is non-retryable; deliver() records one failed row and stops.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer srv.Close()
+
+	store := &fakeStore{subs: []db.WebhookSubscription{
+		sub(t, subID1, "", []string{EventIssueStatusChanged}, srv.URL),
+	}}
+	d := newTestDispatcher(t, store, &http.Client{Timeout: deliveryTimeout})
+	d.DispatchIssueStatusChanged(IssueStatusChanged{WorkspaceID: wsID, Issue: map[string]any{"id": "i"}})
+
+	recs := waitForRecords(t, store, 1, 3*time.Second)
+	r := recs[0]
+	if r.Status != "failed" {
+		t.Errorf("status = %q, want failed", r.Status)
+	}
+	if r.AttemptCount != 1 {
+		t.Errorf("attempt_count = %d, want 1 (4xx not retried)", r.AttemptCount)
+	}
+	if !r.ResponseStatus.Valid || r.ResponseStatus.Int32 != http.StatusBadRequest {
+		t.Errorf("response_status = %+v, want 400", r.ResponseStatus)
+	}
+}
+
+func TestRedeliverEnqueuesAndRecordsLineage(t *testing.T) {
+	c := &collector{wg: &sync.WaitGroup{}}
+	srv := httptest.NewServer(http.HandlerFunc(c.handler))
+	defer srv.Close()
+
+	store := &fakeStore{}
+	d := newTestDispatcher(t, store, &http.Client{Timeout: deliveryTimeout})
+
+	s := sub(t, subID1, "", []string{EventIssueStatusChanged}, srv.URL)
+	fromID := mustUUID(t, "55555555-5555-5555-5555-555555555555")
+
+	c.wg.Add(1)
+	if !d.Redeliver(s, EventIssueStatusChanged, []byte(`{"event":"issue.status_changed"}`), fromID) {
+		t.Fatal("Redeliver returned false (queue full?)")
+	}
+	waitTimeout(t, c.wg, 5*time.Second)
+
+	recs := waitForRecords(t, store, 1, 2*time.Second)
+	r := recs[0]
+	if r.Status != "delivered" {
+		t.Errorf("status = %q, want delivered", r.Status)
+	}
+	if !r.RedeliveredFromID.Valid || uuidStr(r.RedeliveredFromID) != uuidStr(fromID) {
+		t.Errorf("redelivered_from_id = %+v, want %q", r.RedeliveredFromID, uuidStr(fromID))
+	}
+}
+
+func uuidStr(u pgtype.UUID) string { return util.UUIDToString(u) }

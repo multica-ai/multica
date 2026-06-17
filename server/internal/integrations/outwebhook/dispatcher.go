@@ -77,13 +77,27 @@ var defaultRetryBackoff = []time.Duration{1 * time.Second, 4 * time.Second}
 // the selection/filtering/signing logic testable without a database.
 type Store interface {
 	ListEnabledWebhookSubscriptionsForDispatch(ctx context.Context, workspaceID pgtype.UUID) ([]db.WebhookSubscription, error)
+	CreateOutboundWebhookDelivery(ctx context.Context, arg db.CreateOutboundWebhookDeliveryParams) (db.OutboundWebhookDelivery, error)
 }
 
+// recordTimeout bounds the best-effort delivery-history write so a slow DB can
+// never wedge a delivery worker.
+const recordTimeout = 5 * time.Second
+
+// maxRecordedResponseBody caps the response body kept per delivery record. The
+// post() reader already limits what it reads from the wire; this is the storage
+// cap (matches that 4 KiB limit).
+const maxRecordedResponseBody = 4096
+
 // deliverJob is one queued delivery: a subscription + the marshaled body shared
-// (read-only) across retries.
+// (read-only) across retries. event identifies the payload's event type.
+// redeliveredFromID is Valid only when this job is a manual redelivery of an
+// earlier recorded delivery; deliver() persists it as the lineage link.
 type deliverJob struct {
-	sub  db.WebhookSubscription
-	body []byte
+	sub               db.WebhookSubscription
+	event             string
+	body              []byte
+	redeliveredFromID pgtype.UUID
 }
 
 // Dispatcher fans an event out to matching subscriptions via bounded worker
@@ -213,7 +227,7 @@ func (d *Dispatcher) safeDeliver(job deliverJob) {
 				"subscription_id", util.UUIDToString(job.sub.ID), "recovered", r)
 		}
 	}()
-	d.deliver(job.sub, EventIssueStatusChanged, job.body)
+	d.deliver(job)
 }
 
 // IssueStatusChanged describes a single issue status transition. The listener
@@ -312,7 +326,7 @@ func (d *Dispatcher) dispatch(ev IssueStatusChanged) {
 		// v1) rather than letting this dispatch goroutine block, which would let
 		// dispatch goroutines accumulate under a status-change storm.
 		select {
-		case d.jobs <- deliverJob{sub: s, body: body}:
+		case d.jobs <- deliverJob{sub: s, event: EventIssueStatusChanged, body: body}:
 		default:
 			slog.Warn("outwebhook: delivery queue full, dropping",
 				"subscription_id", util.UUIDToString(s.ID), "host", hostOf(s.Url))
@@ -320,37 +334,108 @@ func (d *Dispatcher) dispatch(ev IssueStatusChanged) {
 	}
 }
 
-// deliver POSTs body to one subscription, retrying on network error / 5xx.
-func (d *Dispatcher) deliver(sub db.WebhookSubscription, event string, body []byte) {
+// Redeliver enqueues a manual redelivery of a previously recorded delivery: it
+// re-POSTs the stored body to the subscription's CURRENT url/secret (a fresh
+// signature is computed in deliver). Non-blocking, like dispatch — the new
+// delivery is recorded with redeliveredFromID linking it to the original.
+// Returns false if the queue is full (the caller surfaces that to the operator).
+func (d *Dispatcher) Redeliver(sub db.WebhookSubscription, event string, body []byte, fromID pgtype.UUID) bool {
+	select {
+	case <-d.stopDispatch:
+		return false
+	default:
+	}
+	select {
+	case d.jobs <- deliverJob{sub: sub, event: event, body: body, redeliveredFromID: fromID}:
+		return true
+	default:
+		slog.Warn("outwebhook: delivery queue full, dropping redelivery",
+			"subscription_id", util.UUIDToString(sub.ID), "host", hostOf(sub.Url))
+		return false
+	}
+}
+
+// deliver POSTs body to one subscription, retrying on network error / 5xx, then
+// records a single delivery-history row for the terminal outcome.
+func (d *Dispatcher) deliver(job deliverJob) {
+	sub := job.sub
 	deliveryID := uuid.NewString()
-	signature := webhooksign.Sign(sub.Secret, body)
+	signature := webhooksign.Sign(sub.Secret, job.body)
 	subID := util.UUIDToString(sub.ID)
 	// Log host only — subscriber URLs frequently carry tokens in path/query.
 	host := hostOf(sub.Url)
 
+	var (
+		lastStatus int
+		lastErr    error
+		lastBody   []byte
+		attempts   int
+	)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			time.Sleep(d.retryBackoff[attempt-1])
 		}
+		attempts = attempt + 1
 
-		status, err := d.post(sub.Url, event, deliveryID, signature, body)
+		status, respBody, err := d.post(sub.Url, job.event, deliveryID, signature, job.body)
+		lastStatus, lastErr, lastBody = status, err, respBody
 		if err == nil && status >= 200 && status < 300 {
 			slog.Debug("outwebhook: delivered",
-				"subscription_id", subID, "event", event, "status", status, "attempt", attempt+1)
+				"subscription_id", subID, "event", job.event, "status", status, "attempt", attempts)
+			d.record(job, "delivered", attempts, status, lastBody, nil)
 			return
 		}
 
 		// 429 is "retry later", not a permanent rejection.
 		retryable := err != nil || status == http.StatusTooManyRequests || status >= 500
 		slog.Warn("outwebhook: delivery attempt failed",
-			"subscription_id", subID, "event", event, "host", host,
-			"status", status, "attempt", attempt+1, "retryable", retryable, "error", redactErr(err))
+			"subscription_id", subID, "event", job.event, "host", host,
+			"status", status, "attempt", attempts, "retryable", retryable, "error", redactErr(err))
 		if !retryable {
-			return // 4xx — endpoint rejected the payload; retrying won't help.
+			d.record(job, "failed", attempts, status, lastBody, err) // 4xx — endpoint rejected the payload.
+			return
 		}
 	}
 	slog.Error("outwebhook: delivery exhausted retries",
-		"subscription_id", subID, "event", event, "host", host)
+		"subscription_id", subID, "event", job.event, "host", host)
+	d.record(job, "failed", attempts, lastStatus, lastBody, lastErr)
+}
+
+// record writes one delivery-history row for a terminal outcome. Best-effort: a
+// failure to record is logged, never propagated (the delivery itself already
+// happened or failed; losing the audit row must not crash a worker). status is
+// "delivered" or "failed"; httpStatus is 0 when no response was received.
+func (d *Dispatcher) record(job deliverJob, status string, attempts, httpStatus int, respBody []byte, deliverErr error) {
+	params := db.CreateOutboundWebhookDeliveryParams{
+		WorkspaceID:       job.sub.WorkspaceID,
+		SubscriptionID:    job.sub.ID,
+		Event:             job.event,
+		Status:            status,
+		AttemptCount:      int32(attempts),
+		RequestBody:       job.body,
+		RedeliveredFromID: job.redeliveredFromID,
+	}
+	if httpStatus > 0 {
+		params.ResponseStatus = pgtype.Int4{Int32: int32(httpStatus), Valid: true}
+	}
+	if len(respBody) > 0 {
+		if len(respBody) > maxRecordedResponseBody {
+			respBody = respBody[:maxRecordedResponseBody]
+		}
+		params.ResponseBody = pgtype.Text{String: string(respBody), Valid: true}
+	}
+	if deliverErr != nil {
+		// redactErr strips the URL (which carries subscriber tokens) from the
+		// transport error before it is persisted.
+		params.Error = pgtype.Text{String: redactErr(deliverErr), Valid: true}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), recordTimeout)
+	defer cancel()
+	if _, err := d.store.CreateOutboundWebhookDelivery(ctx, params); err != nil {
+		slog.Error("outwebhook: failed to record delivery",
+			"subscription_id", util.UUIDToString(job.sub.ID), "error", err)
+	}
 }
 
 // redactErr renders a transport error for logging without leaking the request
@@ -378,14 +463,16 @@ func hostOf(raw string) string {
 	return u.Host
 }
 
-// post performs a single delivery attempt and returns the HTTP status code.
-func (d *Dispatcher) post(url, event, deliveryID, signature string, body []byte) (int, error) {
+// post performs a single delivery attempt and returns the HTTP status code plus
+// a truncated copy of the response body (read up to maxRecordedResponseBody so
+// the connection can be reused and the body can be recorded for debugging).
+func (d *Dispatcher) post(url, event, deliveryID, signature string, body []byte) (int, []byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), deliveryTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, fmt.Errorf("build request: %w", err)
+		return 0, nil, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Multica-Webhook/1.0")
@@ -395,12 +482,13 @@ func (d *Dispatcher) post(url, event, deliveryID, signature string, body []byte)
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	// Drain the body so the connection can be reused.
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	return resp.StatusCode, nil
+	// Read a bounded prefix so the connection can be reused and the body can be
+	// recorded in the delivery history.
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxRecordedResponseBody))
+	return resp.StatusCode, respBody, nil
 }
 
 // subscriptionMatches reports whether a subscription applies to an issue with
