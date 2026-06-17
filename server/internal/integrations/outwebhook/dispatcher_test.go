@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -549,3 +550,36 @@ func TestRedeliverEnqueuesAndRecordsLineage(t *testing.T) {
 }
 
 func uuidStr(u pgtype.UUID) string { return util.UUIDToString(u) }
+
+// TestDeliveryRecordsSanitizedResponseBody proves that a subscriber response
+// containing non-UTF-8 bytes is coerced to valid UTF-8 before being recorded,
+// so the INSERT into the TEXT response_body column can't fail (which would
+// silently drop the whole delivery-history row).
+func TestDeliveryRecordsSanitizedResponseBody(t *testing.T) {
+	c := &collector{wg: &sync.WaitGroup{}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Invalid UTF-8 bytes (a lone continuation byte + a truncated 3-byte rune).
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte{0xff, 0xfe, 0xe2, 0x80})
+		c.wg.Done()
+	}))
+	defer srv.Close()
+
+	store := &fakeStore{subs: []db.WebhookSubscription{
+		sub(t, subID1, "", []string{EventIssueStatusChanged}, srv.URL),
+	}}
+	d := newTestDispatcher(t, store, &http.Client{Timeout: deliveryTimeout})
+
+	c.wg.Add(1)
+	d.DispatchIssueStatusChanged(IssueStatusChanged{WorkspaceID: wsID, Issue: map[string]any{"id": "i"}})
+	waitTimeout(t, c.wg, 5*time.Second)
+
+	recs := waitForRecords(t, store, 1, 2*time.Second)
+	rb := recs[0].ResponseBody
+	if !rb.Valid {
+		t.Fatalf("response_body should be recorded")
+	}
+	if !utf8.ValidString(rb.String) {
+		t.Fatalf("response_body was not sanitized to valid UTF-8: %q", rb.String)
+	}
+}

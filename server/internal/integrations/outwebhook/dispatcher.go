@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -419,10 +420,12 @@ func (d *Dispatcher) record(job deliverJob, status string, attempts, httpStatus 
 		params.ResponseStatus = pgtype.Int4{Int32: int32(httpStatus), Valid: true}
 	}
 	if len(respBody) > 0 {
-		if len(respBody) > maxRecordedResponseBody {
-			respBody = respBody[:maxRecordedResponseBody]
-		}
-		params.ResponseBody = pgtype.Text{String: string(respBody), Valid: true}
+		// response_body is a TEXT column but respBody holds the subscriber's raw
+		// response (which may be binary / non-UTF-8 / cut mid-rune by the read
+		// cap). Coerce to valid UTF-8 so the INSERT can't fail with "invalid byte
+		// sequence for encoding UTF8" and silently drop the whole history row.
+		// (post() already caps the length via io.LimitReader.)
+		params.ResponseBody = pgtype.Text{String: strings.ToValidUTF8(string(respBody), "�"), Valid: true}
 	}
 	if deliverErr != nil {
 		// redactErr strips the URL (which carries subscriber tokens) from the
