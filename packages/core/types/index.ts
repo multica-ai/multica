@@ -124,6 +124,8 @@ export type {
   AutopilotStatus,
   AutopilotExecutionMode,
   AutopilotAssigneeType,
+  AutopilotSubscriber,
+  AutopilotSubscriberInput,
   AutopilotTrigger,
   AutopilotTriggerKind,
   AutopilotRun,

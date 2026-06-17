@@ -47,6 +47,7 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 // Mirrors useTypeLabels in packages/views/inbox/components/inbox-detail-label.tsx
 const TYPE_LABEL: Record<InboxItemType, string> = {
   issue_assigned: "Assigned",
+  issue_subscribed: "Subscribed",
   unassigned: "Unassigned",
   assignee_changed: "Reassigned",
   status_changed: "Status changed",

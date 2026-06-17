@@ -353,3 +353,24 @@ UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
 RETURNING *;
+
+-- =====================
+-- Autopilot Subscribers
+-- =====================
+
+-- name: ListAutopilotSubscribers :many
+-- ORDER BY created_at keeps chip rendering stable across refreshes.
+SELECT * FROM autopilot_subscriber
+WHERE autopilot_id = $1
+ORDER BY created_at ASC, user_id ASC;
+
+-- name: AddAutopilotSubscriber :exec
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
+
+-- name: DeleteAutopilotSubscribersForAutopilot :exec
+-- Paired with a re-insert loop to implement full-replace PATCH semantics.
+DELETE FROM autopilot_subscriber
+WHERE autopilot_id = $1;
+

@@ -152,6 +152,13 @@ type AutopilotRun struct {
 	SquadID        pgtype.UUID        `json:"squad_id"`
 }
 
+type AutopilotSubscriber struct {
+	AutopilotID pgtype.UUID        `json:"autopilot_id"`
+	UserType    string             `json:"user_type"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotTrigger struct {
 	ID             pgtype.UUID        `json:"id"`
 	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
