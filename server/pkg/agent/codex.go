@@ -1171,6 +1171,18 @@ type codexClient struct {
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
+
+	// closed latches true once the reader goroutine observes the app-server's
+	// stdout close (the process exited or stopped emitting). Guarded by mu and
+	// set by closeAllPending. While the reader is alive it delivers responses
+	// and, on EOF, fails every in-flight request; but once it has exited no
+	// goroutine remains to complete a freshly-registered request. Without this
+	// latch such a request — e.g. the thread/start fallback after a
+	// thread/resume that killed the app-server — would block on its context
+	// until the task timeout (hours), pinning the runtime and bypassing the
+	// daemon's "resume failed, retry with a fresh session" recovery.
+	closed   bool
+	closeErr error
 }
 
 func (c *codexClient) setTurnError(msg string) {
@@ -1202,6 +1214,17 @@ type rpcResult struct {
 
 func (c *codexClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	c.mu.Lock()
+	if c.closed {
+		// The app-server is gone; no goroutine will ever complete this
+		// request. Fail fast with the exit error instead of blocking on ctx
+		// (the task timeout) so callers like startOrResumeThread surface the
+		// failure promptly. The mu/closed handshake makes this race-free: a
+		// request that registered before closeAllPending ran is failed by it
+		// via the pending map; one arriving after is caught here.
+		closeErr := c.closeErr
+		c.mu.Unlock()
+		return nil, closeErr
+	}
 	c.nextID++
 	id := c.nextID
 	pr := &pendingRPC{ch: make(chan rpcResult, 1), method: method}
@@ -1282,9 +1305,20 @@ func (c *codexClient) respondError(id int, code int, message string) {
 	_, _ = c.stdin.Write(data)
 }
 
+// closeAllPending fails every in-flight request and latches the client closed
+// so that any request() issued afterwards fails fast instead of blocking on its
+// context. It is called once, when the reader goroutine sees the app-server's
+// stdout close. The latch is what rescues the thread/start fallback in
+// startOrResumeThread: once the process is gone, no goroutine remains to deliver
+// an RPC response, so a fresh request would otherwise wait out the whole task
+// timeout rather than surfacing the failure for the daemon to retry fresh.
 func (c *codexClient) closeAllPending(err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if !c.closed {
+		c.closed = true
+		c.closeErr = err
+	}
 	for id, pr := range c.pending {
 		pr.ch <- rpcResult{err: err}
 		delete(c.pending, id)
