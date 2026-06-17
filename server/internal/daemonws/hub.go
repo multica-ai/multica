@@ -85,9 +85,10 @@ type MessageKindRecorder interface {
 type Hub struct {
 	upgrader websocket.Upgrader
 
-	mu        sync.RWMutex
-	clients   map[*client]bool
-	byRuntime map[string]map[*client]bool
+	mu          sync.RWMutex
+	clients     map[*client]bool
+	byRuntime   map[string]map[*client]bool
+	byWorkspace map[string]map[*client]bool
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
@@ -106,8 +107,9 @@ func NewHub() *Hub {
 			// grows cookie fallback.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		clients:   make(map[*client]bool),
-		byRuntime: make(map[string]map[*client]bool),
+		clients:     make(map[*client]bool),
+		byRuntime:   make(map[string]map[*client]bool),
+		byWorkspace: make(map[string]map[*client]bool),
 	}
 }
 
@@ -194,6 +196,12 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 	h.notifyTaskAvailable(runtimeID, taskID, "")
 }
 
+// NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
+// runtime profiles now instead of waiting for their periodic sync loop.
+func (h *Hub) NotifyRuntimeProfilesChanged(workspaceID, profileID string) {
+	h.notifyRuntimeProfilesChanged(workspaceID, profileID, "")
+}
+
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
@@ -208,6 +216,17 @@ func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	} else if !deduped {
 		M.WakeupDeliveredMiss.Add(1)
 	}
+}
+
+func (h *Hub) notifyRuntimeProfilesChanged(workspaceID, profileID, eventID string) {
+	if h == nil || workspaceID == "" {
+		return
+	}
+	data, err := runtimeProfilesChangedFrame(workspaceID, profileID)
+	if err != nil {
+		return
+	}
+	h.notifyWorkspaceFrame(workspaceID, data, eventID)
 }
 
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
@@ -267,12 +286,50 @@ func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delive
 	return delivered, deduped
 }
 
+func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID string) (delivered bool, deduped bool) {
+	h.mu.RLock()
+	clients := h.byWorkspace[workspaceID]
+	slow := make([]*client, 0)
+	for c := range clients {
+		if !c.markSeen(eventID) {
+			deduped = true
+			continue
+		}
+		select {
+		case c.send <- data:
+			delivered = true
+		default:
+			slow = append(slow, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range slow {
+		h.unregister(c)
+		c.conn.Close()
+	}
+	if len(slow) > 0 {
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
+	}
+	return delivered, deduped
+}
+
 func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
 	return json.Marshal(protocol.Message{
 		Type: protocol.EventDaemonTaskAvailable,
 		Payload: mustMarshalRaw(protocol.TaskAvailablePayload{
 			RuntimeID: runtimeID,
 			TaskID:    taskID,
+		}),
+	})
+}
+
+func runtimeProfilesChangedFrame(workspaceID, profileID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonRuntimeProfilesChanged,
+		Payload: mustMarshalRaw(protocol.RuntimeProfilesChangedPayload{
+			WorkspaceID:      workspaceID,
+			RuntimeProfileID: profileID,
 		}),
 	})
 }
@@ -291,6 +348,12 @@ func (h *Hub) RuntimeConnectionCount(runtimeID string) int {
 	return len(h.byRuntime[runtimeID])
 }
 
+func (h *Hub) WorkspaceConnectionCount(workspaceID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.byWorkspace[workspaceID])
+}
+
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
@@ -299,6 +362,14 @@ func (h *Hub) register(c *client) {
 		if conns == nil {
 			conns = make(map[*client]bool)
 			h.byRuntime[runtimeID] = conns
+		}
+		conns[c] = true
+	}
+	if c.identity.WorkspaceID != "" {
+		conns := h.byWorkspace[c.identity.WorkspaceID]
+		if conns == nil {
+			conns = make(map[*client]bool)
+			h.byWorkspace[c.identity.WorkspaceID] = conns
 		}
 		conns[c] = true
 	}
@@ -329,6 +400,14 @@ func (h *Hub) unregister(c *client) {
 			delete(conns, c)
 			if len(conns) == 0 {
 				delete(h.byRuntime, runtimeID)
+			}
+		}
+	}
+	if c.identity.WorkspaceID != "" {
+		if conns := h.byWorkspace[c.identity.WorkspaceID]; conns != nil {
+			delete(conns, c)
+			if len(conns) == 0 {
+				delete(h.byWorkspace, c.identity.WorkspaceID)
 			}
 		}
 	}
