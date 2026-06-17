@@ -51,9 +51,16 @@ export function DynamicInboxRow({
 }: DynamicInboxRowProps) {
   let row: React.ReactNode;
   if (entry.kind === "notif") {
+    // TECH-3709 — the open row reads as "read" the moment you're active on it:
+    // the bold weight + brand-blue unread stripe drop on selection. We only
+    // change what THIS row renders; placement still uses the frozen
+    // selection-time snapshot (see displayEntries in dynamic-inbox.tsx), so the
+    // row does NOT jump box/group until you move to another row.
+    const item =
+      isSelected && !entry.item.read ? { ...entry.item, read: true } : entry.item;
     row = (
       <InboxListItem
-        item={entry.item}
+        item={item}
         isSelected={isSelected}
         agentRunState={agentRunState}
         onClick={() => onSelect(entry)}
@@ -62,10 +69,17 @@ export function DynamicInboxRow({
       />
     );
   } else if (entry.kind === "channel") {
+    // TECH-3709 — same as above for channel/DM rows: zero the unread count on
+    // the open row so it renders read (no bold, no stripe, no count badge)
+    // without leaving its box.
+    const channel =
+      isSelected && entry.channel.unread_count > 0
+        ? { ...entry.channel, unread_count: 0 }
+        : entry.channel;
     row = (
       <ChannelListItem
-        channel={entry.channel}
-        mentioned={mentioned}
+        channel={channel}
+        mentioned={isSelected ? false : mentioned}
         isSelected={isSelected}
         onClick={() => onSelect(entry)}
         onArchive={() => onArchive(entry)}
@@ -263,7 +277,10 @@ function ChatSessionRow({
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const agentName = getActorName("agent", session.agent_id);
-  const unread = session.has_unread;
+  // TECH-3709 — the open chat row reads as "read" while you're active on it
+  // (drops the bold title + brand-blue unread stripe). The agent-chat snapshot
+  // in dynamic-inbox.tsx keeps it in its box until you select another row.
+  const unread = session.has_unread && !isSelected;
 
   return (
     <div
