@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,7 +76,7 @@ func NewS3StorageFromEnv() *S3Storage {
 	if endpointURL != "" {
 		s3Opts = append(s3Opts, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpointURL)
-			o.UsePathStyle = true
+			o.UsePathStyle = s3ForcePathStyleFromEnv()
 		})
 	}
 
@@ -91,6 +92,19 @@ func NewS3StorageFromEnv() *S3Storage {
 
 func (s *S3Storage) CdnDomain() string {
 	return s.cdnDomain
+}
+
+func s3ForcePathStyleFromEnv() bool {
+	raw := strings.TrimSpace(os.Getenv("S3_FORCE_PATH_STYLE"))
+	if raw == "" {
+		return false
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid env var (must be boolean), ignored", "name", "S3_FORCE_PATH_STYLE", "value", raw, "error", err)
+		return false
+	}
+	return v
 }
 
 // looksLikeS3Hostname returns true when the configured S3_BUCKET value looks
