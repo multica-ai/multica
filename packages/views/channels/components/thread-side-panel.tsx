@@ -184,7 +184,8 @@ export function ThreadSidePanel({
         ))}
       </div>
 
-      <div className="shrink-0 border-t px-4 py-3">
+      {/* CEREBRO-PATCH(thread-composer-spacing): TECH-3720 align thread reply composer spacing with the standard chat input (match channel-detail composer). */}
+      <div className="shrink-0 px-5 pb-3 pt-0">
         <ThreadReplyInput
           channelId={channelId}
           parentId={parentEntry.id}
