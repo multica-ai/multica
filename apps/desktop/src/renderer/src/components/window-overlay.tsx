@@ -49,7 +49,7 @@ function WindowOverlayInner() {
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
       {overlay.type === "new-workspace" && (
         <NewWorkspacePage
-          onSuccess={(ws) => push(paths.workspace(ws.slug).issues())}
+          onSuccess={(ws) => push(paths.workspace(ws.slug).chat())}
           onBack={onBack}
         />
       )}
@@ -65,11 +65,11 @@ function WindowOverlayInner() {
           onComplete={(ws, issueId) => {
             close();
             // Runtime-connected onboarding lands on its single guide
-            // issue. Runtime-less exits still land on the issues list.
+            // issue. Runtime-less exits land on chat.
             if (ws && issueId) {
               push(paths.workspace(ws.slug).issueDetail(issueId));
             } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
+              push(paths.workspace(ws.slug).chat());
             } else {
               push(paths.root());
             }

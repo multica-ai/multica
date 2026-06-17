@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Plus } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -44,6 +45,8 @@ interface ChatInputProps {
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
+  /** Visual treatment: floating window card or full-page bottom composer. */
+  variant?: "window" | "page";
 }
 
 export function ChatInput({
@@ -58,9 +61,11 @@ export function ChatInput({
   agentName,
   leftAdornment,
   contextItems,
+  variant = "window",
 }: ChatInputProps) {
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
+  const pageFileInputRef = useRef<HTMLInputElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
@@ -229,15 +234,96 @@ export function ChatInput({
     setIsEmpty(true);
   };
 
+  const defaultPlaceholder = variant === "page"
+    ? t(($) => $.input.placeholder_page)
+    : t(($) => $.input.placeholder_default);
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? t(($) => $.input.placeholder_archived)
-      : agentName
+      : agentName && variant !== "page"
         ? t(($) => $.input.placeholder_named, { name: agentName })
-        : t(($) => $.input.placeholder_default);
+        : defaultPlaceholder;
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
+
+  if (variant === "page") {
+    const handlePageFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = "";
+      for (const file of files) editorRef.current?.uploadFile(file);
+    };
+
+    return (
+      <div
+        className={cn(
+          "shrink-0 border-t bg-background px-6 py-5",
+          noAgent && "cursor-not-allowed",
+        )}
+      >
+        <div
+          {...(uploadEnabled ? dropZoneProps : {})}
+          className={cn(
+            "relative mx-auto flex h-12 w-full max-w-4xl items-center gap-3 rounded-full bg-background",
+            noAgent && "pointer-events-none opacity-60",
+          )}
+          aria-disabled={noAgent || undefined}
+        >
+          {uploadEnabled ? (
+            <>
+              <button
+                type="button"
+                aria-label={t(($) => $.input.attach_tooltip)}
+                title={t(($) => $.input.attach_tooltip)}
+                onClick={() => pageFileInputRef.current?.click()}
+                className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+              >
+                <Plus className="size-4" />
+              </button>
+              <input
+                ref={pageFileInputRef}
+                type="file"
+                className="hidden"
+                onChange={handlePageFileChange}
+              />
+            </>
+          ) : (
+            <span className="size-10 shrink-0" />
+          )}
+          <div className="min-w-0 flex-1 rounded-full bg-muted/80 px-4 py-2">
+            <ContentEditor
+              key={editorKey}
+              ref={editorRef}
+              defaultValue={activeRestore?.content ?? inputDraft}
+              placeholder={placeholder}
+              onUpdate={(md) => {
+                setIsEmpty(!md.trim());
+                setInputDraft(draftKey, md);
+              }}
+              onSubmit={handleSend}
+              onUploadFile={uploadEnabled ? handleUpload : undefined}
+              debounceMs={100}
+              mentionMode={contextItems ? "context" : "default"}
+              mentionContextItems={contextItems}
+              enableSlashCommands
+              showBubbleMenu={false}
+            />
+          </div>
+          <div className="absolute right-1.5 top-1/2 -translate-y-1/2">
+            <SubmitButton
+              onClick={handleSend}
+              disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
+              running={isRunning}
+              onStop={onStop}
+              tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+              stopTooltip={t(($) => $.input.stop_tooltip)}
+            />
+          </div>
+          {uploadEnabled && isDragOver && <FileDropOverlay />}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

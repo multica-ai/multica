@@ -22,6 +22,7 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
+import { ChatPage } from "@multica/views/chat";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { SettingsPage } from "@multica/views/settings";
@@ -116,7 +117,12 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          { index: true, element: <Navigate to="issues" replace /> },
+          { index: true, element: <Navigate to="chat" replace /> },
+          {
+            path: "chat",
+            element: <ChatPage />,
+            handle: { title: "Chat" },
+          },
           {
             path: "issues",
             element: <IssuesPage />,

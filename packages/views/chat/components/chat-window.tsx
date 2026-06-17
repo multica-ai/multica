@@ -3,8 +3,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
+import { ArrowLeft, Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square, Search, MessageSquare, Zap } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  SidebarTrigger,
+  useSidebarSafe,
+} from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
@@ -18,7 +22,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { api } from "@multica/core/api";
-import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
+import { useAgentPresenceDetail, useWorkspaceAgentAvailability, type AgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
@@ -52,6 +56,7 @@ import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
@@ -177,9 +182,25 @@ function replaceOptimisticChatMessageId(
   );
 }
 
-export function ChatWindow() {
+interface ChatWindowProps {
+  mode?: "window" | "page";
+}
+
+export function ChatPage() {
+  return <ChatWindow mode="page" />;
+}
+
+function MobileSidebarTrigger() {
+  const sidebar = useSidebarSafe();
+  if (!sidebar) return null;
+  return <SidebarTrigger className="md:hidden" />;
+}
+
+export function ChatWindow({ mode = "window" }: ChatWindowProps = {}) {
   const { t } = useT("chat");
+  const isPageMode = mode === "page";
   const wsId = useWorkspaceId();
+  const { pathname } = useNavigation();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -231,6 +252,7 @@ export function ChatWindow() {
     id: string;
     content: string;
   } | null>(null);
+  const [mobileListOpen, setMobileListOpen] = useState(true);
   const handleRestoreDraftConsumed = useCallback(() => {
     setRestoreDraftRequest(null);
   }, []);
@@ -312,12 +334,12 @@ export function ChatWindow() {
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isOpen || !activeSessionId) return;
+    if ((!isOpen && !isPageMode) || !activeSessionId) return;
     if (!currentHasUnread) return;
     uiLogger.info("auto markRead", { sessionId: activeSessionId });
     markRead.mutate(activeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isOpen, activeSessionId, currentHasUnread]);
+  }, [isOpen, isPageMode, activeSessionId, currentHasUnread]);
 
   const { uploadWithToast } = useFileUpload(api);
 
@@ -599,7 +621,13 @@ export function ChatWindow() {
       // current session just because the user closed the menu this way.
       // Compare against activeAgent (what the UI shows), not selectedAgentId
       // (which may be null / point to an archived agent on first load).
-      if (activeAgent && agent.id === activeAgent.id) return;
+      if (activeAgent && agent.id === activeAgent.id) {
+        if (isPageMode) {
+          setActiveSession(null);
+          setMobileListOpen(false);
+        }
+        return;
+      }
       uiLogger.info("selectAgent", {
         from: selectedAgentId,
         to: agent.id,
@@ -608,8 +636,9 @@ export function ChatWindow() {
       setSelectedAgentId(agent.id);
       // Reset session when switching agent
       setActiveSession(null);
+      if (isPageMode) setMobileListOpen(false);
     },
-    [activeAgent, selectedAgentId, activeSessionId, setSelectedAgentId, setActiveSession],
+    [activeAgent, selectedAgentId, activeSessionId, setSelectedAgentId, setActiveSession, isPageMode],
   );
 
   const handleNewChat = useCallback(() => {
@@ -618,7 +647,8 @@ export function ChatWindow() {
       previousPendingTask: pendingTaskId,
     });
     setActiveSession(null);
-  }, [activeSessionId, pendingTaskId, setActiveSession]);
+    if (isPageMode) setMobileListOpen(false);
+  }, [activeSessionId, pendingTaskId, setActiveSession, isPageMode]);
 
   const handleSelectSession = useCallback(
     (session: ChatSession) => {
@@ -633,8 +663,9 @@ export function ChatWindow() {
         setSelectedAgentId(session.agent_id);
       }
       setActiveSession(session.id);
+      if (isPageMode) setMobileListOpen(false);
     },
-    [activeAgent, setSelectedAgentId, setActiveSession],
+    [activeAgent, setSelectedAgentId, setActiveSession, isPageMode],
   );
 
   const handleMinimize = useCallback(() => {
@@ -649,6 +680,7 @@ export function ChatWindow() {
 
   const windowRef = useRef<HTMLDivElement>(null);
   const { renderWidth, renderHeight, isAtMax, boundsReady, isDragging, toggleExpand, startDrag } = useChatResize(windowRef);
+  const contextItems = useChatContextItems(wsId);
 
   // Show the list (vs empty state) as soon as there's anything to display —
   // a real message, or a pending task whose timeline will stream in.
@@ -656,98 +688,91 @@ export function ChatWindow() {
 
   const isVisible = isOpen && (isExpanded || boundsReady);
 
+  if (!isPageMode && pathname.match(/^\/[^/]+\/chat(?:\/)?$/)) {
+    return null;
+  }
+
   const containerClass = "absolute bottom-2 right-2 z-50 flex flex-col rounded-xl ring-1 ring-foreground/10 bg-sidebar shadow-2xl overflow-hidden";
   const containerStyle: React.CSSProperties = {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
 
-  const contextItems = useChatContextItems(wsId);
-
-  return (
-    <motion.div
-      ref={windowRef}
-      className={containerClass}
-      style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
-      animate={{
-        opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0.95,
-        width: renderWidth,
-        height: renderHeight,
-      }}
-      transition={{
-        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        opacity: { duration: 0.15 },
-        scale: { type: "spring", duration: 0.2, bounce: 0 },
-      }}
-    >
-      <ChatResizeHandles onDragStart={startDrag} />
-      {/* Header — ⊕ new + session dropdown | window tools */}
-      <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
-        <div className="flex items-center gap-1 min-w-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={handleNewChat}
-                />
-              }
-            >
-              <Plus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
-          </Tooltip>
-          <SessionDropdown
-            sessions={sessions}
-            // Use the full agent list (incl. archived) so historical
-            // sessions can still resolve their avatar.
-            agents={agents}
-            activeSessionId={activeSessionId}
-            onSelectSession={handleSelectSession}
-          />
+  const chatSurface = (
+    <>
+      {isPageMode ? null : <ChatResizeHandles onDragStart={startDrag} />}
+      {isPageMode ? (
+        <PageChatHeader
+          activeAgent={activeAgent}
+          availability={availability}
+          activeSessionId={activeSessionId}
+          sessions={sessions}
+          onBackToAgents={() => setMobileListOpen(true)}
+          onNewChat={handleNewChat}
+          onSelectSession={handleSelectSession}
+        />
+      ) : (
+        <div className="flex items-center justify-between border-b px-4 py-2.5 gap-2">
+          <div className="flex items-center gap-1 min-w-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="rounded-full text-muted-foreground"
+                    onClick={handleNewChat}
+                  />
+                }
+              >
+                <Plus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+            </Tooltip>
+            <SessionDropdown
+              sessions={sessions}
+              agents={agents}
+              activeSessionId={activeSessionId}
+              onSelectSession={handleSelectSession}
+            />
+          </div>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={toggleExpand}
+                  />
+                }
+              >
+                {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={handleMinimize}
+                  />
+                }
+              >
+                <Minus />
+              </TooltipTrigger>
+              <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
+            </Tooltip>
+          </div>
         </div>
-        <div className="flex items-center gap-0.5 shrink-0">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={toggleExpand}
-                />
-              }
-            >
-              {isExpanded || isAtMax ? <Minimize2 /> : <Maximize2 />}
-            </TooltipTrigger>
-            <TooltipContent side="top">
-              {isExpanded || isAtMax ? t(($) => $.window.restore_tooltip) : t(($) => $.window.expand_tooltip)}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={handleMinimize}
-                />
-              }
-            >
-              <Minus />
-            </TooltipTrigger>
-            <TooltipContent side="top">{t(($) => $.window.minimize_tooltip)}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
+      )}
 
-      {/* Messages / skeleton / empty state */}
       {showSkeleton ? (
         <ChatMessageSkeleton />
       ) : hasMessages ? (
@@ -769,24 +794,14 @@ export function ChatWindow() {
         />
       )}
 
-      {/* Status banner above the input — single mutually-exclusive slot.
-       *  Priority: no-agent > offline / unstable. Agent presence is the
-       *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. Recent issue/project navigation
-       *  lives in the input action row; it is not message/session state.
-       *
-       *  We key off `noAgent` (the resolved-empty state) rather than
-       *  `!activeAgent`, so the loading window between mount and the
-       *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
       ) : (
         <OfflineBanner agentName={activeAgent?.name} availability={availability} />
       )}
 
-      {/* Input — disabled for legacy archived sessions; locked out entirely
-       *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
+        variant={isPageMode ? "page" : "window"}
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         onRestoreDraftConsumed={handleRestoreDraftConsumed}
@@ -796,16 +811,58 @@ export function ChatWindow() {
         disabled={isSessionArchived}
         noAgent={noAgent}
         agentName={activeAgent?.name}
-        leftAdornment={
+        leftAdornment={isPageMode ? null : (
           <AgentDropdown
             agents={availableAgents}
             activeAgent={activeAgent}
             userId={user?.id}
             onSelect={handleSelectAgent}
           />
-        }
+        )}
         contextItems={contextItems}
       />
+    </>
+  );
+
+  if (isPageMode) {
+    return (
+      <div className="flex h-full min-h-0 bg-background">
+        <ChatAgentSidebar
+          agents={availableAgents}
+          activeAgent={activeAgent}
+          sessions={sessions}
+          userId={user?.id}
+          mobileOpen={mobileListOpen}
+          onNewChat={handleNewChat}
+          onSelectAgent={handleSelectAgent}
+        />
+        <div className={cn("min-w-0 flex-1 flex-col overflow-hidden bg-background", mobileListOpen ? "hidden md:flex" : "flex")}>
+          {chatSurface}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <motion.div
+      ref={windowRef}
+      className={containerClass}
+      style={containerStyle}
+      initial={{ opacity: 0, scale: 0.95, width: renderWidth, height: renderHeight }}
+      animate={{
+        opacity: isVisible ? 1 : 0,
+        scale: isVisible ? 1 : 0.95,
+        width: renderWidth,
+        height: renderHeight,
+      }}
+      transition={{
+        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+        opacity: { duration: 0.15 },
+        scale: { type: "spring", duration: 0.2, bounce: 0 },
+      }}
+    >
+      {chatSurface}
     </motion.div>
   );
 }
@@ -918,6 +975,360 @@ export function AgentDropdown({
       )}
     </PropertyPicker>
   );
+}
+
+function ChatAgentSidebar({
+  agents,
+  activeAgent,
+  sessions,
+  userId,
+  mobileOpen,
+  onNewChat,
+  onSelectAgent,
+}: {
+  agents: Agent[];
+  activeAgent: Agent | null;
+  sessions: ChatSession[];
+  userId: string | undefined;
+  mobileOpen: boolean;
+  onNewChat: () => void;
+  onSelectAgent: (agent: Agent) => void;
+}) {
+  const { t } = useT("chat");
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const latestSessionByAgentId = useMemo(() => {
+    const map = new Map<string, ChatSession>();
+    for (const session of sessions) {
+      if (session.status === "archived") continue;
+      const current = map.get(session.agent_id);
+      if (!current || new Date(session.updated_at).getTime() > new Date(current.updated_at).getTime()) {
+        map.set(session.agent_id, session);
+      }
+    }
+    return map;
+  }, [sessions]);
+
+  const filteredAgents = useMemo(() => {
+    return agents.filter((agent) => {
+      if (!normalizedQuery) return true;
+      return (
+        agent.name.toLowerCase().includes(normalizedQuery) ||
+        matchesPinyin(agent.name, normalizedQuery)
+      );
+    });
+  }, [agents, normalizedQuery]);
+
+  return (
+    <aside
+      className={cn(
+        "w-full shrink-0 border-r bg-background md:flex md:w-[232px] md:flex-col",
+        mobileOpen ? "flex flex-col" : "hidden",
+      )}
+    >
+      <div className="px-4 pb-3 pt-7">
+        <div className="flex h-6 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <MobileSidebarTrigger />
+            <h1 className="truncate text-base font-semibold leading-6 text-foreground">{t(($) => $.page.messages_title)}</h1>
+          </div>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  onClick={onNewChat}
+                />
+              }
+            >
+              <Plus className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent side="top">{t(($) => $.window.new_chat_tooltip)}</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="mt-4 flex h-8 items-center gap-2 rounded-md bg-muted/70 px-2.5 text-muted-foreground">
+          <Search className="size-3.5 shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t(($) => $.page.search_short_placeholder)}
+            className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {filteredAgents.length === 0 ? (
+          <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+            {agents.length === 0 ? t(($) => $.window.no_agents) : t(($) => $.page.no_results)}
+          </div>
+        ) : (
+          <div className="space-y-1">
+            {filteredAgents.map((agent) => {
+              const isActiveAgent = agent.id === activeAgent?.id;
+              const latestSession = latestSessionByAgentId.get(agent.id);
+              const ownerLabel = agent.owner_id === userId ? t(($) => $.window.my_agents) : t(($) => $.window.others);
+              const subtitle = latestSession?.title?.trim() || ownerLabel;
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  onClick={() => onSelectAgent(agent)}
+                  className={cn(
+                    "grid min-h-[48px] w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-muted/70",
+                    isActiveAgent && "bg-muted",
+                  )}
+                >
+                  <ActorAvatar actorType="agent" actorId={agent.id} size={32} enableHoverCard showStatusDot />
+                  <div className="min-w-0 self-center">
+                    <div className="truncate text-xs font-semibold leading-4 text-foreground">{agent.name}</div>
+                    <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                      {subtitle}
+                    </div>
+                  </div>
+                  <div className="self-start pt-0.5 text-[10px] leading-4 text-muted-foreground">
+                    {latestSession ? formatSidebarTimestamp(latestSession.updated_at, t(($) => $.page.yesterday)) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function PageChatHeader({
+  activeAgent,
+  availability,
+  activeSessionId,
+  sessions,
+  onBackToAgents,
+  onNewChat,
+  onSelectSession,
+}: {
+  activeAgent: Agent | null;
+  availability: AgentAvailability | undefined;
+  activeSessionId: string | null;
+  sessions: ChatSession[];
+  onBackToAgents: () => void;
+  onNewChat: () => void;
+  onSelectSession: (session: ChatSession) => void;
+}) {
+  const { t } = useT("chat");
+  const dragScrollRef = useDragScroll<HTMLDivElement>();
+  const agentSessions = useMemo(
+    () =>
+      activeAgent
+        ? sessions
+            .filter((session) => session.agent_id === activeAgent.id && session.status !== "archived")
+            .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+        : [],
+    [activeAgent, sessions],
+  );
+  const presence = getPageAgentPresence(availability, {
+    online: t(($) => $.page.presence.online),
+    unstable: t(($) => $.page.presence.unstable),
+    offline: t(($) => $.page.presence.offline),
+    archived: t(($) => $.page.presence.archived),
+  });
+
+  return (
+    <div className="shrink-0 border-b bg-background">
+      <div className="flex min-h-10 items-center gap-2 px-4 py-2">
+        <MobileSidebarTrigger />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="md:hidden rounded-full text-muted-foreground"
+                onClick={onBackToAgents}
+              />
+            }
+          >
+            <ArrowLeft />
+          </TooltipTrigger>
+          <TooltipContent side="top">{t(($) => $.page.back_to_agents)}</TooltipContent>
+        </Tooltip>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-sm font-semibold text-foreground">
+              {activeAgent?.name ?? t(($) => $.window.no_agents)}
+            </span>
+            <Zap className="size-3.5 shrink-0 text-amber-500" />
+            <span
+              className={cn("size-1.5 shrink-0 rounded-full", presence.dotClass)}
+              aria-hidden="true"
+            />
+            <span className="shrink-0 text-xs text-muted-foreground">{presence.label}</span>
+          </div>
+        </div>
+      </div>
+      <div
+        ref={dragScrollRef}
+        className="flex cursor-grab select-none gap-2 overflow-x-auto overscroll-x-contain px-4 pb-3 pt-1 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        <ThreadChip
+          icon={<MessageSquare className="size-3.5" />}
+          label={t(($) => $.page.current_thread)}
+          active={!activeSessionId}
+          onClick={onNewChat}
+        />
+        <ThreadChip
+          icon={<Plus className="size-3.5" />}
+          label={t(($) => $.page.new_thread)}
+          onClick={onNewChat}
+        />
+        {agentSessions.map((session) => (
+          <ThreadChip
+            key={session.id}
+            label={session.title?.trim() || t(($) => $.window.untitled)}
+            active={session.id === activeSessionId}
+            unread={session.has_unread && session.id !== activeSessionId}
+            onClick={() => onSelectSession(session)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ThreadChip({
+  icon,
+  label,
+  active = false,
+  unread = false,
+  onClick,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  active?: boolean;
+  unread?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex h-8 max-w-44 shrink-0 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-colors",
+        active
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+      )}
+    >
+      {icon}
+      <span className="truncate">{label}</span>
+      {unread && <span className="size-1.5 shrink-0 rounded-full bg-brand" />}
+    </button>
+  );
+}
+
+function getPageAgentPresence(
+  availability: AgentAvailability | undefined,
+  labels: Record<AgentAvailability, string>,
+): { label: string; dotClass: string } {
+  if (availability === "online") {
+    return { label: labels.online, dotClass: "bg-emerald-500" };
+  }
+  if (availability === "unstable") {
+    return { label: labels.unstable, dotClass: "bg-amber-500" };
+  }
+  if (availability === "archived") {
+    return { label: labels.archived, dotClass: "bg-muted-foreground/60" };
+  }
+  return { label: labels.offline, dotClass: "bg-muted-foreground/60" };
+}
+
+function formatSidebarTimestamp(dateStr: string, yesterdayLabel: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const diffDays = Math.round((startOfToday - startOfDate) / 86400000);
+
+  if (diffDays === 0) {
+    return date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
+  if (diffDays === 1) return yesterdayLabel;
+  return date.toLocaleDateString(undefined, {
+    month: "numeric",
+    day: "numeric",
+  });
+}
+
+function useDragScroll<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const suppressClickRef = useRef(false);
+  const dragStateRef = useRef<{
+    pointerId: number;
+    startX: number;
+    scrollLeft: number;
+    moved: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      dragStateRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        scrollLeft: node.scrollLeft,
+        moved: false,
+      };
+      node.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const state = dragStateRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+      const dx = event.clientX - state.startX;
+      if (Math.abs(dx) > 3) state.moved = true;
+      node.scrollLeft = state.scrollLeft - dx;
+    };
+
+    const finishDrag = (event: PointerEvent) => {
+      const state = dragStateRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+      if (node.hasPointerCapture(event.pointerId)) {
+        node.releasePointerCapture(event.pointerId);
+      }
+      suppressClickRef.current = state.moved;
+      dragStateRef.current = null;
+    };
+
+    const handleClick = (event: MouseEvent) => {
+      if (!suppressClickRef.current) return;
+      suppressClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    node.addEventListener("pointerdown", handlePointerDown);
+    node.addEventListener("pointermove", handlePointerMove);
+    node.addEventListener("pointerup", finishDrag);
+    node.addEventListener("pointercancel", finishDrag);
+    node.addEventListener("click", handleClick, true);
+    return () => {
+      node.removeEventListener("pointerdown", handlePointerDown);
+      node.removeEventListener("pointermove", handlePointerMove);
+      node.removeEventListener("pointerup", finishDrag);
+      node.removeEventListener("pointercancel", finishDrag);
+      node.removeEventListener("click", handleClick, true);
+    };
+  }, []);
+
+  return ref;
 }
 
 function AgentPickerItem({

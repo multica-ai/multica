@@ -77,6 +77,8 @@ describe("ConnectRemoteDialog", () => {
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://multica.ai",
     );
+    expect(baseElement).toHaveTextContent("multica daemon restart");
+    expect(baseElement).not.toHaveTextContent("multica daemon start");
   });
 
   it("uses self-host daemon URLs from runtime config", () => {
@@ -94,6 +96,8 @@ describe("ConnectRemoteDialog", () => {
     expect(baseElement).toHaveTextContent(
       "multica config set app_url https://app.example.com",
     );
+    expect(baseElement).toHaveTextContent("multica daemon restart");
+    expect(baseElement).not.toHaveTextContent("multica daemon start");
   });
 
   it("disables font ligatures in setup command code", () => {

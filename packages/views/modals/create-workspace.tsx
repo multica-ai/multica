@@ -80,7 +80,7 @@ export function CreateWorkspaceModal({ onClose }: { onClose: () => void }) {
                     // has already seeded the workspace list cache, so the destination
                     // [workspaceSlug]/layout will resolve newWs.slug → workspace
                     // synchronously without a loading flash.
-                    router.push(paths.workspace(newWs.slug).issues());
+                    router.push(paths.workspace(newWs.slug).chat());
                   }}
                 />
               </>

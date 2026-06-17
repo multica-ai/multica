@@ -3,8 +3,8 @@
 import { DashboardLayout } from "@multica/views/layout";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
-import { ChatFab, ChatWindow } from "@multica/views/chat";
 import { WebNotificationBridge } from "@/components/web-notification-bridge";
+import { DashboardChatOverlays } from "./dashboard-chat-overlays";
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
@@ -14,8 +14,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       extra={
         <>
           <SearchCommand />
-          <ChatWindow />
-          <ChatFab />
+          <DashboardChatOverlays />
           <WebNotificationBridge />
         </>
       }
