@@ -232,6 +232,13 @@ describe("ChannelDetail thread header", () => {
     expect(screen.getByTestId("avatar-lando")).toBeInTheDocument();
   });
 
+  it("renders the composer without the old channel-only top border", () => {
+    render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
+    const shell = screen.getByTestId("comment-input").parentElement;
+    expect(shell).toHaveClass("px-5", "pb-3", "pt-0");
+    expect(shell).not.toHaveClass("border-t");
+  });
+
   it("pins the channel when not yet pinned", async () => {
     pinListData.items = [];
     mockCreatePin.mockClear();
