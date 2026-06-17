@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -206,8 +207,8 @@ func TestRunLocalCLIRejectsUnsupportedLocalAgent(t *testing.T) {
 }
 
 func TestSupportsLocalRunAgentIncludesProviderRegistry(t *testing.T) {
-	if !supportsLocalRunAgent("codex") || !supportsLocalRunAgent("claude") {
-		t.Fatalf("expected codex and claude providers to be supported")
+	if !supportsLocalRunAgent("codex") || !supportsLocalRunAgent("claude") || !supportsLocalRunAgent("agy") {
+		t.Fatalf("expected codex, claude, and agy providers to be supported")
 	}
 	if supportsLocalRunAgent("sh") {
 		t.Fatalf("unexpected support for shell without a provider")
@@ -226,6 +227,374 @@ func newRunCommandForTest() *cobra.Command {
 	return cmd
 }
 
+func TestValidateAgyLocalRunArgs(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "empty", args: nil, wantErr: false},
+		{name: "normal flags", args: []string{"--model", "gemini-2.5-pro"}, wantErr: false},
+		{name: "blocked -i", args: []string{"-i"}, wantErr: true},
+		{name: "blocked --prompt-interactive", args: []string{"--prompt-interactive"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAgyLocalRunArgs(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateAgyLocalRunArgs(%v) error = %v, wantErr %v", tt.args, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestAgyLocalRunSystemPrompt(t *testing.T) {
+	tests := []struct {
+		name    string
+		issueID string
+		wantNil bool
+		wantSub string
+	}{
+		{name: "empty issue", issueID: "", wantNil: true},
+		{name: "whitespace only", issueID: "   ", wantNil: true},
+		{name: "valid issue", issueID: "abc-123", wantSub: "Bound Multica issue ID: abc-123"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agyLocalRunSystemPrompt(tt.issueID)
+			if tt.wantNil {
+				if got != "" {
+					t.Fatalf("agyLocalRunSystemPrompt(%q) = %q, want empty", tt.issueID, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantSub) {
+				t.Fatalf("agyLocalRunSystemPrompt(%q) = %q, want substring %q", tt.issueID, got, tt.wantSub)
+			}
+			if !strings.Contains(got, "multica issue get") {
+				t.Fatalf("agyLocalRunSystemPrompt(%q) missing CLI command reference", tt.issueID)
+			}
+		})
+	}
+}
+
+func TestAgyLocalRunChildArgs(t *testing.T) {
+	args := []string{"agy", "some-arg", "--model", "gemini-pro"}
+	got := agyLocalRunChildArgs(args)
+	if !slices.Equal(got, args) {
+		t.Fatalf("agyLocalRunChildArgs(%v) = %v, want copy of original slice", args, got)
+	}
+	// Verify it's a clone (does not share back-array with source args)
+	got[0] = "mutated"
+	if args[0] == "mutated" {
+		t.Fatalf("agyLocalRunChildArgs shared backing array; original was mutated")
+	}
+}
+
+func TestRunLocalCLIEndToEndWithFakeAPIForAgy(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("/bin/sh unavailable")
+	}
+	tmp := t.TempDir()
+	agyPath := filepath.Join(tmp, "agy")
+	if err := os.Symlink("/bin/sh", agyPath); err != nil {
+		t.Fatalf("symlink agy shim: %v", err)
+	}
+	origExecute := executeLocalCLIForRun
+	executeLocalCLIForRun = func(args []string, cwd, cliName string, env localCLIEnv, reporter *localRunReporter, usageReporter *localRunUsageReporter) (int, error) {
+		if cliName != "agy" {
+			t.Fatalf("cliName = %q, want agy", cliName)
+		}
+		if len(args) == 0 || args[0] != agyPath {
+			t.Fatalf("args = %v, want agy path first", args)
+		}
+		if env.RunID != "run-1" || env.IssueID != "issue-1" || env.WorkspaceID != "ws-1" {
+			t.Fatalf("env = %+v, want run, issue, and workspace metadata", env)
+		}
+		reporter.SetActiveMs(1500)
+		return 0, nil
+	}
+	defer func() { executeLocalCLIForRun = origExecute }()
+	var (
+		createBody map[string]any
+		patches    []map[string]any
+		messages   []map[string]any
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":           "issue-1",
+				"identifier":   "MUL-1",
+				"title":        "Fake issue",
+				"status":       "todo",
+				"priority":     "medium",
+				"description":  "Do it",
+				"workspace_id": "ws-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/local-runs":
+			json.NewDecoder(r.Body).Decode(&createBody)
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":          "run-1",
+				"issue_id":    "issue-1",
+				"cli_name":    "agy",
+				"context_dir": "",
+			})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/local-runs/run-1":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			patches = append(patches, body)
+			json.NewEncoder(w).Encode(map[string]any{"id": "run-1"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/local-runs/run-1/messages":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			messages = append(messages, body)
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := newRunCommandForTest()
+	if err := cmd.Flags().Set("server-url", srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("workspace-id", "ws-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("cwd", tmp); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Flags().Set("comments", "off"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_TOKEN", "token-1")
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+
+	err := runLocalCLI(cmd, []string{"MUL-1", agyPath, "-c", `printf '{"type":"result","result":"done"}\n'`})
+	if err != nil {
+		t.Fatalf("runLocalCLI: %v", err)
+	}
+
+	if createBody["cli_name"] != "agy" || createBody["comments_mode"] != "off" || createBody["work_dir"] != tmp {
+		t.Fatalf("unexpected create body: %+v", createBody)
+	}
+	if len(patches) < 2 {
+		t.Fatalf("patches = %+v, want running and terminal status updates", patches)
+	}
+	if patches[0]["status"] != "running" {
+		t.Fatalf("first patch = %+v, want running status update", patches[0])
+	}
+	lastPatch := patches[len(patches)-1]
+	if lastPatch["status"] != "completed" || int(lastPatch["exit_code"].(float64)) != 0 {
+		t.Fatalf("last patch = %+v, want completed exit 0", lastPatch)
+	}
+}
+
+func TestAgyExtractUserContent(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "empty",
+			raw:  "",
+			want: "",
+		},
+		{
+			name: "plain text without tags",
+			raw:  "hello world",
+			want: "hello world",
+		},
+		{
+			name: "user request with metadata",
+			raw:  "<USER_REQUEST>\nfix the bug\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\ntime info\n</ADDITIONAL_METADATA>",
+			want: "fix the bug",
+		},
+		{
+			name: "user request with settings change",
+			raw:  "<USER_REQUEST>\nreview code\n</USER_REQUEST>\n<USER_SETTINGS_CHANGE>\nmodel changed\n</USER_SETTINGS_CHANGE>",
+			want: "review code",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := agyExtractUserContent(tt.raw)
+			if got != tt.want {
+				t.Fatalf("agyExtractUserContent(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAgyTranscriptTrackerSync(t *testing.T) {
+	// Create a fake brain directory with a transcript file.
+	tmp := t.TempDir()
+	brainDir := filepath.Join(tmp, ".gemini", "antigravity-cli", "brain", "test-conv")
+	logsDir := filepath.Join(brainDir, ".system_generated", "logs")
+	if err := os.MkdirAll(logsDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	transcriptPath := filepath.Join(logsDir, "transcript.jsonl")
+
+	now := time.Now().UTC()
+	historicalTime := now.Add(-10 * time.Second)
+
+	// Write a transcript:
+	// Line 1: Historical user message (should be skipped by mapEntry, but marked as seen)
+	// Line 2: Historical model message (should be skipped by mapEntry, not setting pendingFinal)
+	// Line 3: New model message (should be processed, setting pendingFinal)
+	lines := []string{
+		`{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"` + historicalTime.Format(time.RFC3339) + `","content":"<USER_REQUEST>\nold request\n</USER_REQUEST>"}`,
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + historicalTime.Format(time.RFC3339) + `","content":"old reply"}`,
+		`{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + now.Format(time.RFC3339) + `","content":"new reply"}`,
+	}
+	if err := os.WriteFile(transcriptPath, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+
+	startedAt := now.Add(-1 * time.Second) // pretend we started 1s ago (after historicalTime but before now)
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: startedAt,
+		ticker:    time.NewTicker(500 * time.Millisecond),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+
+	tracker.transcript = transcriptPath
+	tracker.readNewEntriesLocked()
+
+	// Verify all three lines are marked as seen (line numbers are 1-based)
+	if !tracker.seen[1] || !tracker.seen[2] || !tracker.seen[3] {
+		t.Fatalf("expected all 3 lines to be seen, got: %v", tracker.seen)
+	}
+
+	// Verify that the historical reply (line 2) was skipped (didn't set pendingFinal to "old reply")
+	// and only the new reply (line 3) was processed (setting pendingFinal to "new reply")
+	if tracker.pendingFinal == nil {
+		t.Fatalf("expected pendingFinal to be set by new reply")
+	}
+	if tracker.pendingFinal.Content != "new reply" {
+		t.Fatalf("expected pendingFinal content to be %q, got %q", "new reply", tracker.pendingFinal.Content)
+	}
+
+	// Verify that a model step immediately following a tool-calling step does NOT set pendingFinal
+	// by simulating a tool call in a fresh tracker.
+	tracker2 := &agyTranscriptTracker{
+		reporter: &localRunReporter{},
+		seen:     make(map[int]bool),
+	}
+	// step 0: tool call
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 0, Source: "MODEL", Type: "PLANNER_RESPONSE", ToolCalls: []agyTranscriptTool{{Name: "test"}}})
+	// step 1: tool output
+	tracker2.mapEntry(&agyTranscriptEntry{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", Content: "tool output"})
+	if tracker2.pendingFinal != nil {
+		t.Fatalf("expected pendingFinal to be nil after tool output, got %v", tracker2.pendingFinal)
+	}
+
+	// Re-sync should not process anything new
+	tracker.readNewEntriesLocked()
+	if len(tracker.seen) != 3 {
+		t.Fatalf("re-sync processed new entries, seen count = %d, want 3", len(tracker.seen))
+	}
+}
+
+// TestAgyTranscriptTrackerToolOutputNotFinal verifies that a PLANNER_RESPONSE
+// step immediately following a tool-calling step is NOT set as pendingFinal.
+// Scenario: think → dispatch tool → process output → real summary.
+// Only the real summary should become an Issue comment.
+func TestAgyTranscriptTrackerToolOutputNotFinal(t *testing.T) {
+	now := time.Now().UTC()
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: now.Add(-1 * time.Second),
+		ticker:    time.NewTicker(time.Hour),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+	entries := []*agyTranscriptEntry{
+		{StepIndex: 0, Source: "USER_EXPLICIT", Type: "USER_INPUT", CreatedAt: now.Format(time.RFC3339),
+			Content: "<USER_REQUEST>\nrun tests and tell me the result\n</USER_REQUEST>"},
+		// step 1: model dispatches a tool
+		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "I'll run the tests now.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
+		// step 2: model processes raw tool output — MUST NOT become pendingFinal
+		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "=== RUN   TestFoo\n--- PASS: TestFoo (0.01s)\nok  \tsome/pkg\t0.123s"},
+		// step 3: genuine human-readable reply — MUST become pendingFinal
+		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "All tests pass. The fix is working correctly."},
+	}
+	for _, e := range entries {
+		tracker.mapEntry(e)
+	}
+	if tracker.pendingFinal == nil {
+		t.Fatal("pendingFinal is nil; expected the final summary to be buffered")
+	}
+	want := "All tests pass. The fix is working correctly."
+	if tracker.pendingFinal.Content != want {
+		t.Errorf("pendingFinal.Content = %q\nwant               = %q", tracker.pendingFinal.Content, want)
+	}
+	if tracker.pendingFinal.Type != "final" {
+		t.Errorf("pendingFinal.Type = %q, want %q", tracker.pendingFinal.Type, "final")
+	}
+}
+
+// TestAgyTranscriptTrackerToolOutputChainNotFinal verifies that a multi-tool
+// chain (git status → go test → summary) correctly filters all intermediate
+// tool-output steps and captures only the final human summary.
+func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
+	now := time.Now().UTC()
+	tracker := &agyTranscriptTracker{
+		reporter:  &localRunReporter{},
+		startedAt: now.Add(-1 * time.Second),
+		ticker:    time.NewTicker(time.Hour),
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+	entries := []*agyTranscriptEntry{
+		{StepIndex: 0, Source: "USER_EXPLICIT", Type: "USER_INPUT", CreatedAt: now.Format(time.RFC3339),
+			Content: "<USER_REQUEST>\ncheck git status and run tests\n</USER_REQUEST>"},
+		// Tool A
+		{StepIndex: 1, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "Let me check git status first.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "git status"}}}},
+		// Output A — must NOT be final
+		{StepIndex: 2, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "On branch feat/fix\nnothing to commit, working tree clean"},
+		// Tool B
+		{StepIndex: 3, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content:   "Good. Now I'll run the tests.",
+			ToolCalls: []agyTranscriptTool{{Name: "run_command", Args: map[string]any{"CommandLine": "go test ./..."}}}},
+		// Output B — must NOT be final
+		{StepIndex: 4, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "=== RUN   TestBar\n--- PASS: TestBar (0.00s)"},
+		// Real summary — MUST be final
+		{StepIndex: 5, Source: "MODEL", Type: "PLANNER_RESPONSE", CreatedAt: now.Format(time.RFC3339),
+			Content: "Everything looks good: git status is clean and all tests pass."},
+	}
+	for _, e := range entries {
+		tracker.mapEntry(e)
+	}
+	if tracker.pendingFinal == nil {
+		t.Fatal("pendingFinal is nil; expected the final summary to be buffered")
+	}
+	want := "Everything looks good: git status is clean and all tests pass."
+	if tracker.pendingFinal.Content != want {
+		t.Errorf("pendingFinal.Content = %q\nwant               = %q", tracker.pendingFinal.Content, want)
+	}
+}
+
 func TestInferCLIName(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -235,7 +604,6 @@ func TestInferCLIName(t *testing.T) {
 		{in: "/usr/local/bin/claude", want: "claude"},
 		{in: `C:\Tools\codex.exe`, want: `C:\Tools\codex`},
 	}
-
 	for _, tt := range tests {
 		if got := inferCLIName(tt.in); got != tt.want {
 			t.Fatalf("inferCLIName(%q) = %q, want %q", tt.in, got, tt.want)
