@@ -1557,7 +1557,8 @@ func gatewayLoadWorkspaceContext(ctx context.Context, q *db.Queries, wsID pgtype
 func buildGatewaySystemPrompt(agent db.Agent, workspaceContext string) string {
 	parts := []string{
 		"You are a Multica chat agent running on the server-side Firtal Data Registry AI Gateway runtime.",
-		"You can answer chat messages only. You do not have local tools, shell access, repository checkout, files, or daemon state.",
+		"You do not have shell access, repository checkout, or daemon state.",
+		"Files attached to this chat — images, PDFs, spreadsheets (xlsx), Word documents (docx), and text files (txt, csv, json, md, xml) — are included directly in the conversation as readable content. Read them and use their contents in your answer; never claim you cannot read an attached file.",
 		"Answer directly in the existing chat conversation.",
 	}
 	if workspaceContext != "" {
@@ -1577,7 +1578,8 @@ func buildGatewaySystemPrompt(agent db.Agent, workspaceContext string) string {
 func buildGatewayIssueSystemPrompt(agent db.Agent, workspaceContext string) string {
 	parts := []string{
 		"You are a Multica agent running on the server-side Firtal Data Registry AI Gateway runtime.",
-		"You have been asked to respond to an issue. You do not have local tools, shell access, repository checkout, files, or CLI commands. You cannot run code, edit files, or call multica subcommands.",
+		"You have been asked to respond to an issue. You do not have shell access, repository checkout, or CLI commands; you cannot run code or call multica subcommands.",
+		"Files attached to the issue or its comments — images, PDFs, spreadsheets (xlsx), Word documents (docx), and text files (txt, csv, json, md, xml) — are included directly in the conversation as readable content. Read them and use their contents in your answer; never claim you cannot read an attached file.",
 		"Your reply will be posted as a comment on the issue. Answer concisely and directly from the issue context provided below.",
 	}
 	if workspaceContext != "" {
