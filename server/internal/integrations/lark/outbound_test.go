@@ -82,7 +82,16 @@ type fakeAPIClient struct {
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
+	// failOnThreadReply makes the three send methods return an error
+	// whenever the call carries a thread ReplyTarget, while still
+	// recording the attempt. Used to exercise the patcher's chat-level
+	// fallback: the thread reply fails, the retry (chat-level) succeeds.
+	failOnThreadReply bool
 }
+
+// errThreadReply is the synthetic failure the fake returns for threaded
+// sends when failOnThreadReply is set.
+var errThreadReply = errors.New("fake: thread reply rejected")
 
 func (f *fakeAPIClient) IsConfigured() bool { return true }
 
@@ -90,6 +99,9 @@ func (f *fakeAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, p)
+	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
+		return "", errThreadReply
+	}
 	return f.sendReturn, f.sendErr
 }
 func (f *fakeAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardParams) error {
@@ -102,12 +114,18 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.textSent = append(f.textSent, p)
+	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
+		return "", errThreadReply
+	}
 	return f.textSendReturn, f.textSendErr
 }
 func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mdCardSent = append(f.mdCardSent, p)
+	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
+		return "", errThreadReply
+	}
 	return f.mdCardReturn, f.mdCardErr
 }
 func (f *fakeAPIClient) SendBindingPromptCard(ctx context.Context, p BindingPromptParams) error {
@@ -461,5 +479,120 @@ func TestDefaultRendererConfigCarriesUpdateMulti(t *testing.T) {
 				t.Errorf("config.wide_screen_mode regression: %v", cfg)
 			}
 		})
+	}
+}
+
+// TestPatcherRepliesInThreadWhenTriggerWasInThread pins the core
+// behavior of this feature: when the chat binding's most-recent trigger
+// lived inside a Lark topic (last_lark_thread_id set), the agent reply
+// is routed through the reply endpoint targeting that message with
+// reply_in_thread=true, so it lands inside the 话题 instead of the group.
+func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee666666-ee66-ee66-ee66-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "in-thread reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	got := api.textSent[0].ReplyTarget
+	if got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got)
+	}
+}
+
+// TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
+// (no last_lark_thread_id on the binding) keeps the historical
+// chat-level send: ReplyTarget stays empty so SendTextMessage targets
+// the chat by chat_id. This is the no-behavior-change guarantee for
+// normal group / p2p chats.
+func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	// binding has a message id but NO thread id → must not thread.
+	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("non-thread trigger must NOT route through the reply endpoint; got %+v",
+			api.textSent[0].ReplyTarget)
+	}
+}
+
+// TestPatcherThreadReplyMarkdownRoutesToThread verifies the markdown
+// card path also threads when the trigger was in a topic.
+func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "# heading\n- bullet"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("expected one markdown card send; got %d", len(api.mdCardSent))
+	}
+	got := api.mdCardSent[0].ReplyTarget
+	if got.MessageID != "om_trigger" || !got.InThread {
+		t.Errorf("expected markdown thread reply target {om_trigger, InThread:true}; got %+v", got)
+	}
+}
+
+// TestPatcherThreadReplyFallsBackToChatLevel verifies that when a
+// threaded send fails (e.g. the trigger message was deleted or the
+// topic was aggregated), the patcher retries once at the chat level so
+// the agent's reply is never silently lost.
+func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	api.failOnThreadReply = true
+	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "reply that must survive"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("expected two text sends (thread attempt + chat-level fallback); got %d", len(api.textSent))
+	}
+	if !api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("first attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
+	}
+	if api.textSent[1].ReplyTarget.IsSet() {
+		t.Errorf("fallback attempt must be chat-level (empty ReplyTarget); got %+v", api.textSent[1].ReplyTarget)
 	}
 }

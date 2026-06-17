@@ -228,6 +228,32 @@ func (c *httpAPIClient) invalidateToken(appID string) {
 	c.mu.Unlock()
 }
 
+// outboundMessageRequest builds the (path, body) the three send methods
+// share. When target.IsSet() the message is routed through Lark's reply
+// endpoint (POST /im/v1/messages/{message_id}/reply) so it threads back
+// into the originating 话题 — reply_in_thread carries the target's
+// InThread flag (Lark also keeps the reply in-thread automatically when
+// the parent message already belongs to a thread). Otherwise the message
+// goes to the chat-level send endpoint keyed by receive_id=chat_id, the
+// historical behavior. Body is map[string]any (not map[string]string)
+// because reply_in_thread is a bool.
+func outboundMessageRequest(chatID ChatID, msgType, content string, target ReplyTarget) (string, map[string]any) {
+	if target.IsSet() {
+		return "/open-apis/im/v1/messages/" + url.PathEscape(target.MessageID) + "/reply", map[string]any{
+			"msg_type":        msgType,
+			"content":         content,
+			"reply_in_thread": target.InThread,
+		}
+	}
+	q := url.Values{}
+	q.Set("receive_id_type", "chat_id")
+	return "/open-apis/im/v1/messages?" + q.Encode(), map[string]any{
+		"receive_id": string(chatID),
+		"msg_type":   msgType,
+		"content":    content,
+	}
+}
+
 // SendInteractiveCard posts a fresh interactive card into a chat and
 // returns Lark's message_id so the Patcher can target subsequent
 // patches at the same card.
@@ -242,13 +268,7 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	if err != nil {
 		return "", err
 	}
-	q := url.Values{}
-	q.Set("receive_id_type", "chat_id")
-	body := map[string]string{
-		"receive_id": string(p.ChatID),
-		"msg_type":   "interactive",
-		"content":    p.CardJSON,
-	}
+	path, body := outboundMessageRequest(p.ChatID, "interactive", p.CardJSON, p.ReplyTarget)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -256,7 +276,6 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 			MessageID string `json:"message_id"`
 		} `json:"data"`
 	}
-	path := "/open-apis/im/v1/messages?" + q.Encode()
 	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
 		return "", fmt.Errorf("lark http client: send interactive card: %w", err)
 	}
@@ -293,13 +312,7 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
-	q := url.Values{}
-	q.Set("receive_id_type", "chat_id")
-	body := map[string]string{
-		"receive_id": string(p.ChatID),
-		"msg_type":   "text",
-		"content":    string(contentBytes),
-	}
+	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -307,7 +320,6 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 			MessageID string `json:"message_id"`
 		} `json:"data"`
 	}
-	path := "/open-apis/im/v1/messages?" + q.Encode()
 	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
 		return "", fmt.Errorf("lark http client: send text message: %w", err)
 	}
@@ -363,13 +375,7 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode markdown card: %w", err)
 	}
-	q := url.Values{}
-	q.Set("receive_id_type", "chat_id")
-	body := map[string]string{
-		"receive_id": string(p.ChatID),
-		"msg_type":   "interactive",
-		"content":    string(cardBytes),
-	}
+	path, body := outboundMessageRequest(p.ChatID, "interactive", string(cardBytes), p.ReplyTarget)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -377,7 +383,6 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 			MessageID string `json:"message_id"`
 		} `json:"data"`
 	}
-	path := "/open-apis/im/v1/messages?" + q.Encode()
 	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
 		return "", fmt.Errorf("lark http client: send markdown card: %w", err)
 	}

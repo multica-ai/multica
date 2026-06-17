@@ -83,7 +83,12 @@ type AppendUserMessageParams struct {
 	CommandBody    string
 	InstallationID pgtype.UUID
 	LarkMessageID  string
-	ClaimToken     pgtype.UUID
+	// LarkThreadID is the Lark topic (话题) id of the trigger message, or
+	// empty for a normal chat message. AppendUserMessage records it (with
+	// LarkMessageID) on the chat binding so the outbound patcher can
+	// thread its reply back into the originating topic.
+	LarkThreadID string
+	ClaimToken   pgtype.UUID
 }
 
 // AppendResult reports what AppendUserMessage decided.

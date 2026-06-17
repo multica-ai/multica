@@ -233,7 +233,7 @@ INSERT INTO lark_chat_session_binding (
 ) VALUES (
     $1, $2, $3, $4
 )
-RETURNING id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at
+RETURNING id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at, last_lark_message_id, last_lark_thread_id
 `
 
 type CreateLarkChatSessionBindingParams struct {
@@ -261,6 +261,8 @@ func (q *Queries) CreateLarkChatSessionBinding(ctx context.Context, arg CreateLa
 		&i.LarkChatID,
 		&i.LarkChatType,
 		&i.CreatedAt,
+		&i.LastLarkMessageID,
+		&i.LastLarkThreadID,
 	)
 	return i, err
 }
@@ -458,7 +460,7 @@ func (q *Queries) DeleteLarkUserBinding(ctx context.Context, id pgtype.UUID) err
 }
 
 const getLarkChatSessionBinding = `-- name: GetLarkChatSessionBinding :one
-SELECT id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at FROM lark_chat_session_binding
+SELECT id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at, last_lark_message_id, last_lark_thread_id FROM lark_chat_session_binding
 WHERE installation_id = $1 AND lark_chat_id = $2
 `
 
@@ -481,12 +483,14 @@ func (q *Queries) GetLarkChatSessionBinding(ctx context.Context, arg GetLarkChat
 		&i.LarkChatID,
 		&i.LarkChatType,
 		&i.CreatedAt,
+		&i.LastLarkMessageID,
+		&i.LastLarkThreadID,
 	)
 	return i, err
 }
 
 const getLarkChatSessionBindingBySession = `-- name: GetLarkChatSessionBindingBySession :one
-SELECT id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at FROM lark_chat_session_binding
+SELECT id, chat_session_id, installation_id, lark_chat_id, lark_chat_type, created_at, last_lark_message_id, last_lark_thread_id FROM lark_chat_session_binding
 WHERE chat_session_id = $1
 `
 
@@ -503,6 +507,8 @@ func (q *Queries) GetLarkChatSessionBindingBySession(ctx context.Context, chatSe
 		&i.LarkChatID,
 		&i.LarkChatType,
 		&i.CreatedAt,
+		&i.LastLarkMessageID,
+		&i.LastLarkThreadID,
 	)
 	return i, err
 }
@@ -1050,6 +1056,31 @@ type SetLarkInstallationStatusParams struct {
 
 func (q *Queries) SetLarkInstallationStatus(ctx context.Context, arg SetLarkInstallationStatusParams) error {
 	_, err := q.db.Exec(ctx, setLarkInstallationStatus, arg.ID, arg.Status)
+	return err
+}
+
+const updateLarkChatSessionBindingReplyTarget = `-- name: UpdateLarkChatSessionBindingReplyTarget :exec
+UPDATE lark_chat_session_binding
+SET last_lark_message_id = $2,
+    last_lark_thread_id  = $3
+WHERE chat_session_id = $1
+`
+
+type UpdateLarkChatSessionBindingReplyTargetParams struct {
+	ChatSessionID     pgtype.UUID `json:"chat_session_id"`
+	LastLarkMessageID pgtype.Text `json:"last_lark_message_id"`
+	LastLarkThreadID  pgtype.Text `json:"last_lark_thread_id"`
+}
+
+// Records the most recent inbound trigger message + the Lark topic
+// (thread) it belongs to, so the decoupled outbound patcher can thread
+// its reply back into the originating 话题. Called on every ingested
+// message (in the same tx as the chat_message write). last_lark_thread_id
+// is NULL for non-thread messages, which keeps the outbound on the
+// existing chat-level send path; a non-NULL value flips the next reply
+// into a thread reply targeting last_lark_message_id.
+func (q *Queries) UpdateLarkChatSessionBindingReplyTarget(ctx context.Context, arg UpdateLarkChatSessionBindingReplyTargetParams) error {
+	_, err := q.db.Exec(ctx, updateLarkChatSessionBindingReplyTarget, arg.ChatSessionID, arg.LastLarkMessageID, arg.LastLarkThreadID)
 	return err
 }
 

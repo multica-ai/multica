@@ -106,6 +106,34 @@ func (f *larkFakeServer) stubSend(resp map[string]any, verify func(r *http.Reque
 	})
 }
 
+// stubReply installs the IM-reply endpoint
+// (POST /open-apis/im/v1/messages/<id>/reply), used by the thread-reply
+// path. Body is decoded as map[string]any because reply_in_thread is a
+// bool. Register stubToken + stubReply (and not stubSend / stubPatch) in
+// a reply test, since they share the /messages/ prefix.
+func (f *larkFakeServer) stubReply(resp map[string]any, verify func(r *http.Request, id string, body map[string]any)) {
+	const prefix = "/open-apis/im/v1/messages/"
+	f.mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/reply") {
+			f.t.Errorf("reply: want POST .../reply, got %s %s", r.Method, r.URL.Path)
+			return
+		}
+		f.sendN.Add(1)
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/reply")
+		if id == "" {
+			f.t.Errorf("reply: missing message id")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			f.t.Errorf("reply: decode body: %v", err)
+		}
+		if verify != nil {
+			verify(r, id, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
 // stubPatch installs the IM-patch endpoint. The Lark route is
 // /open-apis/im/v1/messages/<id>; ServeMux uses prefix matching when
 // we register the parent path explicitly. We register the parent
@@ -407,6 +435,62 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 	if got := fake.lastAuth(); got != "Bearer tok_text" {
 		t.Errorf("Authorization header: got %q want Bearer tok_text", got)
+	}
+}
+
+// TestHTTPClient_SendTextMessage_ReplyInThread pins the wire shape of a
+// threaded reply: when ReplyTarget is set the client must POST to the
+// reply endpoint (/messages/<id>/reply), carry reply_in_thread=true, and
+// NOT include a chat-level receive_id — that's what lands the agent's
+// reply inside the originating 话题 (thread) instead of the group.
+func TestHTTPClient_SendTextMessage_ReplyInThread(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_reply", 7200)
+	fake.stubReply(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_reply_1"},
+		},
+		func(r *http.Request, id string, body map[string]any) {
+			if id != "om_trigger" {
+				t.Errorf("reply target id: got %q want om_trigger", id)
+			}
+			if body["msg_type"] != "text" {
+				t.Errorf("msg_type: got %v want text", body["msg_type"])
+			}
+			if v, _ := body["reply_in_thread"].(bool); !v {
+				t.Errorf("reply_in_thread: got %v want true", body["reply_in_thread"])
+			}
+			if _, hasRecv := body["receive_id"]; hasRecv {
+				t.Errorf("reply endpoint body must NOT carry receive_id; got %v", body)
+			}
+			content, ok := body["content"].(string)
+			if !ok {
+				t.Fatalf("content missing or not a string: %v", body["content"])
+			}
+			var inner map[string]string
+			if err := json.Unmarshal([]byte(content), &inner); err != nil {
+				t.Fatalf("content inner JSON: %v (raw=%q)", err, content)
+			}
+			if inner["text"] != "threaded hi" {
+				t.Errorf("inner content.text: got %q want threaded hi", inner["text"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendTextMessage(context.Background(), SendTextParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc_chat_42"),
+		Text:           "threaded hi",
+		ReplyTarget:    ReplyTarget{MessageID: "om_trigger", InThread: true},
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if msgID != "om_reply_1" {
+		t.Errorf("message id: got %q want om_reply_1", msgID)
 	}
 }
 

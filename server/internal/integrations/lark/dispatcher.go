@@ -57,6 +57,15 @@ type InboundMessage struct {
 	ParentID string
 	RootID   string
 
+	// ThreadID is the Lark topic (话题) id this message belongs to,
+	// taken verbatim from the receive event's `thread_id`. Lark only
+	// populates it for messages posted inside a thread, so a non-empty
+	// value is the signal that the @-mention happened in a thread. The
+	// dispatcher persists it on the chat binding so the (decoupled)
+	// outbound patcher can reply back into the same thread instead of
+	// posting at the chat level.
+	ThreadID string
+
 	// CommandBody is the user's OWN typed text (the decoded Body before
 	// the enricher prepends any <quoted_message> / <forwarded_messages>
 	// context). The `/issue` command is parsed from THIS, not from the
@@ -484,6 +493,7 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 		CommandBody:    msg.CommandBody,
 		InstallationID: inst.ID,
 		LarkMessageID:  msg.MessageID,
+		LarkThreadID:   msg.ThreadID,
 		ClaimToken:     claimToken,
 	})
 	if err != nil {

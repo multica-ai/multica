@@ -359,24 +359,65 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	if content == "" {
 		return nil
 	}
+	target := threadReplyTarget(binding)
 	if containsMarkdown(content) {
-		if _, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+		return p.sendWithThreadFallback("send markdown card", target, func(t ReplyTarget) error {
+			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
+				InstallationID: creds,
+				ChatID:         ChatID(binding.LarkChatID),
+				Markdown:       content,
+				ReplyTarget:    t,
+			})
+			return err
+		})
+	}
+	return p.sendWithThreadFallback("send text message", target, func(t ReplyTarget) error {
+		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         ChatID(binding.LarkChatID),
-			Markdown:       content,
-		}); err != nil {
-			return fmt.Errorf("send markdown card: %w", err)
+			Text:           content,
+			ReplyTarget:    t,
+		})
+		return err
+	})
+}
+
+// threadReplyTarget derives the outbound reply target from the chat
+// binding's most-recent inbound trigger. We thread the reply ONLY when
+// that trigger was itself inside a Lark topic (last_lark_thread_id
+// present): normal group / p2p chats keep the unchanged chat-level send
+// path, and only an @-mention that happened inside a thread gets a
+// threaded reply (replying to last_lark_message_id with reply_in_thread).
+// The zero ReplyTarget means "send at the chat level".
+func threadReplyTarget(binding db.LarkChatSessionBinding) ReplyTarget {
+	if binding.LastLarkThreadID.Valid && binding.LastLarkThreadID.String != "" &&
+		binding.LastLarkMessageID.Valid && binding.LastLarkMessageID.String != "" {
+		return ReplyTarget{MessageID: binding.LastLarkMessageID.String, InThread: true}
+	}
+	return ReplyTarget{}
+}
+
+// sendWithThreadFallback runs send with the thread reply target; if a
+// threaded send fails it retries once at the chat level so the agent's
+// reply is never silently lost. This covers the cases where the topic
+// reply legitimately can't land — the trigger message was deleted, the
+// group has topics disabled, or the message was aggregated (Lark error
+// 23007). When target is already chat-level there is nothing to fall
+// back to and the original error is returned.
+func (p *Patcher) sendWithThreadFallback(op string, target ReplyTarget, send func(ReplyTarget) error) error {
+	err := send(target)
+	if err == nil {
+		return nil
+	}
+	if target.IsSet() {
+		p.cfg.Logger.Warn("lark patcher: thread reply failed, retrying at chat level",
+			"op", op, "reply_message_id", target.MessageID, "error", err)
+		if fallbackErr := send(ReplyTarget{}); fallbackErr != nil {
+			return fmt.Errorf("%s (chat-level fallback after thread reply failed: %v): %w", op, err, fallbackErr)
 		}
 		return nil
 	}
-	if _, err := p.client.SendTextMessage(ctx, SendTextParams{
-		InstallationID: creds,
-		ChatID:         ChatID(binding.LarkChatID),
-		Text:           content,
-	}); err != nil {
-		return fmt.Errorf("send text message: %w", err)
-	}
-	return nil
+	return fmt.Errorf("%s: %w", op, err)
 }
 
 func (p *Patcher) installationCredentials(inst db.LarkInstallation) (InstallationCredentials, error) {
@@ -417,14 +458,15 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 	if err != nil {
 		return fmt.Errorf("render error card: %w", err)
 	}
-	if _, err := p.client.SendInteractiveCard(ctx, SendCardParams{
-		InstallationID: creds,
-		ChatID:         ChatID(binding.LarkChatID),
-		CardJSON:       render.JSON,
-	}); err != nil {
-		return fmt.Errorf("send error card: %w", err)
-	}
-	return nil
+	return p.sendWithThreadFallback("send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
+		_, err := p.client.SendInteractiveCard(ctx, SendCardParams{
+			InstallationID: creds,
+			ChatID:         ChatID(binding.LarkChatID),
+			CardJSON:       render.JSON,
+			ReplyTarget:    t,
+		})
+		return err
+	})
 }
 
 // taskAndSessionFromEvent parses the typed-ish payload broadcastTaskEvent
