@@ -160,8 +160,12 @@ function Install-MulticaCLI {
         Write-Info "Restarting daemon..."
         & $multica daemon stop 2>$null
         Start-Sleep -Seconds 1
-        try { & $multica daemon start 2>$null; Write-Ok "Daemon started" }
-        catch { Write-Warn "Failed to start daemon. Run manually: multica daemon start" }
+        & $multica daemon start
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Daemon started"
+        } else {
+            Write-Warn "Failed to start daemon. Run manually: multica daemon start"
+        }
         Write-Host ""
         Write-Ok "Multica CLI updated successfully!"
         return
@@ -256,14 +260,28 @@ function Install-MulticaCLI {
         Write-Ok "Update manifest set to test channel: $ManifestURL"
     }
 
-    # Restart daemon
+    # --- Login and start daemon ---
+    # Mirror install.sh: open a browser for OAuth login, then start the
+    # daemon only after a token exists. Starting the daemon before login
+    # would spin up a process that can never register (no PAT).
+    Write-Host ""
+    Write-Info "Opening browser login for $ServerURL..."
+    Write-Info "Complete authorization in the browser, then return here."
+    & $multica login
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Login did not complete. You can try again later: multica login"
+        # Skip daemon start — without a token it can only fail to register.
+        return
+    }
+    Write-Ok "Login successful"
+
     Write-Info "Restarting daemon..."
     & $multica daemon stop 2>$null
     Start-Sleep -Seconds 1
-    try {
-        & $multica daemon start 2>$null
+    & $multica daemon start
+    if ($LASTEXITCODE -eq 0) {
         Write-Ok "Daemon started"
-    } catch {
+    } else {
         Write-Warn "Failed to start daemon. Run manually: multica daemon start"
     }
 
@@ -280,10 +298,6 @@ function Install-MulticaCLI {
     }
     Write-Host "  Binary:   $(Join-Path $InstallDir 'multica.exe')"
     Write-Host "  Server:   $ServerURL"
-    Write-Host ""
-    Write-Host "  Next step: Log in to your Multica account:"
-    Write-Host ""
-    Write-Host "    multica login"
     Write-Host ""
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Cyan
 }
