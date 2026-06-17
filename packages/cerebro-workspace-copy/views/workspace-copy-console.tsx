@@ -107,8 +107,10 @@ const ISSUE_STATUSES: IssueStatus[] = [
   "cancelled",
 ];
 
-// Hard cap on rows rendered at once — the source workspace can hold thousands
-// of issues. The filter narrows the list; the count line shows what is hidden.
+// Hard cap on rows *rendered* at once — the source workspace can hold thousands
+// of issues. This caps the table only; "Copy all" still copies every row that
+// matches the filter, not just the rendered ones. The count line shows what is
+// hidden from the table.
 const ROW_CAP = 100;
 
 interface CopyRow {
@@ -292,11 +294,14 @@ export function WorkspaceCopyConsole() {
     );
   };
 
-  // Copy every selected row (or all visible rows when none are ticked) in one
-  // sequential pass, so the admin doesn't click a button per item.
+  // Copy every selected row (or every filtered row when none are ticked) in one
+  // sequential pass, so the admin doesn't click a button per item. "Copy all"
+  // operates on `filtered` (all rows matching the current filter), never on the
+  // render-capped `visible` slice — otherwise a workspace with >100 rows would
+  // silently copy only the first 100 (TECH-3766).
   const copyMany = async () => {
     if (!requireTarget()) return;
-    const rows = selected.size > 0 ? visible.filter((r) => selected.has(r.id)) : visible;
+    const rows = selected.size > 0 ? filtered.filter((r) => selected.has(r.id)) : filtered;
     if (rows.length === 0) {
       toast.error("Nothing to copy.");
       return;
@@ -514,11 +519,11 @@ export function WorkspaceCopyConsole() {
         />
         <Button
           size="sm"
-          disabled={!targetId || bulkRunning || visible.length === 0}
+          disabled={!targetId || bulkRunning || filtered.length === 0}
           onClick={() => void copyMany()}
         >
           {bulkRunning ? <Loader2 className="mr-1 size-4 animate-spin" /> : <Copy className="mr-1 size-4" />}
-          {selected.size > 0 ? `Copy ${selected.size} selected` : "Copy all shown"}
+          {selected.size > 0 ? `Copy ${selected.size} selected` : `Copy all ${filtered.length}`}
         </Button>
       </div>
 
