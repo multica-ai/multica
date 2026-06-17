@@ -21,9 +21,20 @@ images:
 # -----------------------------------------------------------------------------
 # Pre-created Secret with sensitive values. Create it before `helm install`:
 #
+# Built-in postgres (default):
 #   kubectl -n <namespace> create secret generic multica-secrets \
 #     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
 #     --from-literal=POSTGRES_PASSWORD="$(openssl rand -hex 16)" \
+#     --from-literal=RESEND_API_KEY="" \
+#     --from-literal=GOOGLE_CLIENT_SECRET="" \
+#     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
+#
+# External postgres (postgres.external.enabled=true):
+#   Replace POSTGRES_PASSWORD with DATABASE_URL pointing at your external cluster.
+#   kubectl -n <namespace> create secret generic multica-secrets \
+#     --from-literal=JWT_SECRET="$(openssl rand -hex 32)" \
+#     --from-literal=DATABASE_URL="postgres://user:pass@host:5432/multica?sslmode=require" \
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
@@ -38,6 +49,12 @@ existingSecret: multica-secrets
 # PostgreSQL (pgvector)
 # -----------------------------------------------------------------------------
 postgres:
+  # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
+  # supply DATABASE_URL directly via the existingSecret instead. When true,
+  # the postgres Deployment, PVC, and Service are not created.
+  # Add DATABASE_URL to your existingSecret pointing at the external cluster.
+  external:
+    enabled: false
   database: multica
   user: multica
   persistence:
