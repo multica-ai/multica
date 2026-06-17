@@ -95,7 +95,7 @@ import { ArchivedInboxView } from "./archived-inbox-view";
 import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
-import { NotesInboxBox, NoteInboxBox } from "@multica/cerebro-notes/views";
+import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -185,6 +185,8 @@ export function DynamicInbox() {
   const { searchParams, replace, replaceSilent, push, getShareableUrl } = useNavigation();
   const paths = useWorkspacePaths();
   const notesEnabled = useFeatureFlag("cerebro_notes");
+  // TECH-3690 — open notes in the inbox detail pane instead of navigating away.
+  const noteInboxPaneEnabled = useFeatureFlag("cerebro_note_inbox_pane");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
   const { entries, items, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
     useDynamicInboxData(wsId);
@@ -242,6 +244,10 @@ export function DynamicInbox() {
   // TECH-3413 #9 — free-text search across all sections in the active tab.
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<DynInboxEntry | null>(null);
+  // TECH-3690 — a note opened from the Notes box renders in the same detail
+  // pane messages use. Held separately from `selected` (which is the inbox
+  // feed union) so it doesn't disturb feed selection/snapshot logic.
+  const [selectedNote, setSelectedNote] = useState<string | null>(null);
   const [secretarySelectedKey, setSecretarySelectedKey] = useState<string | null>(null);
   const [secretaryCompletedKeys, setSecretaryCompletedKeys] = useState<Set<string>>(
     () => new Set(),
@@ -280,7 +286,18 @@ export function DynamicInbox() {
     setSelected(null);
     setSelectedSnapshot(null);
     setNewChat(null);
+    setSelectedNote(null);
   }, [secretarySelectedKey]);
+
+  // TECH-3690 — open a note in the detail pane; clears any feed/chat selection
+  // so the pane shows the note, not a stale message.
+  const openNoteInPane = useCallback((noteId: string) => {
+    setSecretarySelectedKey(null);
+    setSelected(null);
+    setSelectedSnapshot(null);
+    setNewChat(null);
+    setSelectedNote(noteId);
+  }, []);
 
   // TECH-3598 #2 — deep-link parity for notifications that carry no issue_id.
   // Skill change-requests open the skill detail with the proposal focused;
@@ -299,12 +316,15 @@ export function DynamicInbox() {
         return true;
       }
       if (item.details?.note_id) {
-        push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
+        // TECH-3690 — open the note in the detail pane (parity with the Notes
+        // box); fall back to the full Notes page when the pane is off.
+        if (noteInboxPaneEnabled) openNoteInPane(item.details.note_id);
+        else push(`${paths.notes()}?note=${encodeURIComponent(item.details.note_id)}`);
         return true;
       }
       return false;
     },
-    [push, paths],
+    [push, paths, noteInboxPaneEnabled, openNoteInPane],
   );
 
   const onSelect = (entry: DynInboxEntry) => {
@@ -315,6 +335,7 @@ export function DynamicInbox() {
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(null);
     setNewChat(null);
+    setSelectedNote(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
   };
@@ -323,6 +344,7 @@ export function DynamicInbox() {
     if (entry.kind === "notif" && routeNonIssueNotif(entry.item)) return;
     setSecretarySelectedKey(secretaryEntryKey(entry));
     setNewChat(null);
+    setSelectedNote(null);
     setSelected(entry);
     setSelectedSnapshot(entry);
   };
@@ -640,7 +662,23 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
-    if (!selected) return null;
+    // TECH-3690 — a note opened from the Notes box (or a note @-mention) shows
+    // in this same pane. Only when no feed row is selected; selecting a row
+    // clears selectedNote, so the two never collide.
+    if (!selected) {
+      if (selectedNote) {
+        return (
+          <ErrorBoundary resetKeys={[selectedNote]}>
+            <NoteInboxDetail
+              key={selectedNote}
+              noteId={selectedNote}
+              onClose={() => setSelectedNote(null)}
+            />
+          </ErrorBoundary>
+        );
+      }
+      return null;
+    }
     if (selected.kind === "channel") {
       return (
         <ErrorBoundary resetKeys={[selected.channel.id]}>
@@ -751,7 +789,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
+  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
@@ -1012,6 +1050,7 @@ export function DynamicInbox() {
                           onSetPinnedOnly={(v) => changeSection({ ...section, notesPinnedOnly: v })}
                           onSetSort={(s) => changeSection({ ...section, notesSort: s })}
                           onSetVisibility={(v) => changeSection({ ...section, notesVisibility: v })}
+                          onOpenNote={noteInboxPaneEnabled ? openNoteInPane : undefined}
                           onRemove={() => removeSection(section.id)}
                         />
                       ) : section.kind === "note" ? (
@@ -1132,7 +1171,7 @@ export function DynamicInbox() {
   // keeping the same `sectionsScrollRef` element alive under the overlay, its
   // scrollTop is preserved and Back returns to the exact previous position.
   if (isMobile) {
-    const detailOpen = Boolean(selected || newChat);
+    const detailOpen = Boolean(selected || newChat || selectedNote);
     return (
       <div className="relative flex h-full flex-col min-h-0">
         {leftColumn}

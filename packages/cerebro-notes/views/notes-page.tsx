@@ -20,6 +20,7 @@ import {
   MoreHorizontal,
   Link2,
   ListPlus,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -575,14 +576,19 @@ function NoteListSection({
   );
 }
 
-function NoteEditor({
+export function NoteEditor({
   note,
   wsId,
   onBack,
+  onOpenFull,
 }: {
   note: Note;
   wsId: string;
   onBack: () => void;
+  // TECH-3690: when set, renders an "Åbn fuldt" button in the action bar that
+  // jumps to the full Notes surface. Used when the editor is embedded in the
+  // inbox detail pane; undefined on the full Notes page (already full).
+  onOpenFull?: () => void;
 }) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
@@ -712,6 +718,19 @@ function NoteEditor({
         >
           <ChevronLeft className="size-4" /> Notes
         </Button>
+
+        {/* TECH-3690: embedded in the inbox detail pane → offer a jump to the
+            full Notes surface for more room (folder sidebar, history, etc.). */}
+        {onOpenFull && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 gap-1.5"
+            onClick={onOpenFull}
+          >
+            <ExternalLink className="size-4" /> Åbn fuldt
+          </Button>
+        )}
 
         {/* Folder first (request 4 — "folders skal ligge i række 1"). */}
         <DropdownMenu>
