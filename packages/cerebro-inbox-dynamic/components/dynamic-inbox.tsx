@@ -93,7 +93,7 @@ import { ArchivedInboxView } from "./archived-inbox-view";
 import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
-import { NotesInboxBox } from "@multica/cerebro-notes/views";
+import { NotesInboxBox, NoteInboxBox } from "@multica/cerebro-notes/views";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -831,6 +831,8 @@ export function DynamicInbox() {
                   )
                     // TECH-3421 — only offer the Notes box when Notes is enabled.
                     .filter((c) => c.kind !== "notes" || notesEnabled)
+                    // TECH-3690 — the Quick note box shares the Notes flag.
+                    .filter((c) => c.kind !== "note" || notesEnabled)
                     // TECH-3557 — only offer Secretary when its flag is enabled.
                     .filter((c) => c.kind !== "secretary" || secretaryEnabled)
                     // TECH-3579 — only offer the Favorites box when its flag is on.
@@ -919,6 +921,24 @@ export function DynamicInbox() {
                         <NotesInboxBox
                           title={section.title}
                           dragHandle={handle}
+                          limit={section.notesLimit}
+                          pinnedOnly={section.notesPinnedOnly}
+                          sort={section.notesSort}
+                          visibility={section.notesVisibility}
+                          onSetLimit={(n) => changeSection({ ...section, notesLimit: n })}
+                          onSetPinnedOnly={(v) => changeSection({ ...section, notesPinnedOnly: v })}
+                          onSetSort={(s) => changeSection({ ...section, notesSort: s })}
+                          onSetVisibility={(v) => changeSection({ ...section, notesVisibility: v })}
+                          onRemove={() => removeSection(section.id)}
+                        />
+                      ) : section.kind === "note" ? (
+                        <NoteInboxBox
+                          title={section.title}
+                          dragHandle={handle}
+                          noteId={section.noteId}
+                          onSetNoteId={(id) =>
+                            changeSection({ ...section, noteId: id ?? undefined })
+                          }
                           onRemove={() => removeSection(section.id)}
                         />
                       ) : section.kind === "team" ? (

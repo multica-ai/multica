@@ -45,6 +45,9 @@ export type SectionKind =
   // TECH-3421 — a self-contained box of the user's recent notes (custom
   // renderer, not a slice of the inbox feed). See NotesInboxBox.
   | "notes"
+  // TECH-3690 (Jesper) — a "Quick note": a single fixed note embedded in the
+  // inbox with an inline autosave editor. See NoteInboxBox.
+  | "note"
   | "all"
   // TECH-3413 #4 — a fully dynamic box: the user composes the filter
   // (unread / pinned / mentioned / project) instead of picking a fixed kind.
@@ -158,7 +161,28 @@ export interface InboxSectionConfig {
   // stay in their normal position (and can still be starred). No effect on
   // other box kinds (the standalone "favorites" box is all-favorites already).
   showFavoritesSection?: boolean;
+  // --- TECH-3690 (Jesper) — settings for the Notes (list) box. ---
+  /** Notes box: how many notes to show. Default 6. */
+  notesLimit?: number;
+  /** Notes box: only show pinned notes. Default false. */
+  notesPinnedOnly?: boolean;
+  /** Notes box: sort order ("pinned" first / "updated" latest changed /
+   *  "created" newest). Default "pinned". */
+  notesSort?: NotesBoxSort;
+  /** Notes box: which visibilities to include. undefined / empty = all. */
+  notesVisibility?: NoteVisibilityFilter[];
+  // --- TECH-3690 (Jesper) — config for the "note" (Quick note) box. ---
+  /** Quick-note box: the single note embedded in this block. */
+  noteId?: string;
 }
+
+/** TECH-3690 — how the Notes box sorts. Mirrors NotesBoxSort in cerebro-notes;
+ *  kept local so the layout model has no runtime dependency on that package. */
+export type NotesBoxSort = "pinned" | "updated" | "created";
+
+/** TECH-3690 — note visibility values the Notes box can filter on. Mirrors
+ *  NoteVisibility in cerebro-notes; kept local for the same reason. */
+export type NoteVisibilityFilter = "private" | "shared" | "workspace";
 
 export interface InboxTabConfig {
   id: string;
@@ -192,6 +216,8 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "pinned", label: "Pinned issues" },
   { kind: "project", label: "Project…", needsProject: true },
   { kind: "notes", label: "Notes" },
+  // TECH-3690 — gated behind the cerebro_notes flag (same as "notes").
+  { kind: "note", label: "Quick note" },
   { kind: "waiting", label: "Waiting" },
   { kind: "calm", label: "Done / calm" },
   { kind: "all", label: "All messages" },
