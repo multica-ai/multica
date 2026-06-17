@@ -73,7 +73,6 @@ import type {
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -1065,20 +1064,6 @@ function MessageList({
     onError: () => toast.error("发送失败"),
   });
 
-  const [convertedIssues, setConvertedIssues] = useState<Map<string, { issueId: string; issueNumber: number }>>(new Map());
-
-  const convertMutation = useMutation({
-    mutationFn: ({ messageId, title, description }: { messageId: string; title?: string; description?: string }) =>
-      api.convertMessageToIssue(channelId, messageId, { title, description }),
-    onSuccess: (data, variables) => {
-      toast.success(`已创建 Issue #${data.issue_number}`);
-      setConvertedIssues((prev) => new Map(prev).set(variables.messageId, { issueId: data.issue_id, issueNumber: data.issue_number }));
-      setConvertTarget(null);
-    },
-    onError: () => toast.error("转换失败"),
-  });
-
-  const [convertTarget, setConvertTarget] = useState<ChannelMessage | null>(null);
   const openModal = useModalStore((s) => s.open);
 
   const handleSend = useCallback(() => {
@@ -1115,9 +1100,8 @@ function MessageList({
                 message={msg}
                 onOpenReplies={onOpenReplies}
                 onCopyLink={handleCopyLink}
-                onConvertManual={(m) => setConvertTarget(m)}
+                onConvertManual={(m) => openModal("create-issue", { description: m.content })}
                 onConvertAgent={(m) => openModal("quick-create-issue", { description: m.content })}
-                linkedIssue={convertedIssues.get(msg.id)}
               />
             ))}
             <div ref={bottomRef} />
@@ -1182,16 +1166,6 @@ function MessageList({
         </div>
       )}
 
-      {convertTarget && (
-        <ConvertToIssueDialog
-          message={convertTarget}
-          isPending={convertMutation.isPending}
-          onConfirm={(title, description) =>
-            convertMutation.mutate({ messageId: convertTarget.id, title, description })
-          }
-          onClose={() => setConvertTarget(null)}
-        />
-      )}
     </>
   );
 }
@@ -1202,14 +1176,12 @@ function MessageRow({
   onConvertManual,
   onConvertAgent,
   onCopyLink,
-  linkedIssue,
 }: {
   message: ChannelMessage;
   onOpenReplies: (id: string) => void;
   onConvertManual: (msg: ChannelMessage) => void;
   onConvertAgent: (msg: ChannelMessage) => void;
   onCopyLink: (msg: ChannelMessage) => void;
-  linkedIssue?: { issueId: string; issueNumber: number };
 }) {
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
@@ -1256,12 +1228,6 @@ function MessageRow({
               </button>
             )}
             <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
-            {linkedIssue && (
-              <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-0.5 text-xs text-muted-foreground">
-                <FileText className="h-3 w-3" />
-                <span>已转为 Issue #{linkedIssue.issueNumber}</span>
-              </div>
-            )}
           </div>
         </li>
       </ContextMenuTrigger>
@@ -1413,6 +1379,26 @@ function RepliesPanel({
     onDrop: (files) => editorRef.current?.uploadFiles(files),
   });
   const [isEmpty, setIsEmpty] = useState(true);
+  const paths = useWorkspacePaths();
+  const nav = useNavigation();
+  const openModal = useModalStore((s) => s.open);
+
+  const handleCopyLink = useCallback(async (msg: ChannelMessage) => {
+    const url = nav.getShareableUrl(paths.channelDetail(channelId, { messageId: msg.id }));
+    if (await copyText(url)) {
+      toast.success("链接已复制");
+    } else {
+      toast.error("复制失败");
+    }
+  }, [channelId, nav, paths]);
+
+  const handleConvertManual = useCallback((msg: ChannelMessage) => {
+    openModal("create-issue", { description: msg.content });
+  }, [openModal]);
+
+  const handleConvertAgent = useCallback((msg: ChannelMessage) => {
+    openModal("quick-create-issue", { description: msg.content });
+  }, [openModal]);
 
   const replyMutation = useMutation({
     mutationFn: (content: string) => api.replyToMessage(channelId, messageId, { content }),
@@ -1442,10 +1428,24 @@ function RepliesPanel({
           </div>
         ) : data ? (
           <div className="space-y-4">
-            <PanelMessage message={data.root_message} framed />
+            <PanelMessage
+              message={data.root_message}
+              framed
+              onCopyLink={handleCopyLink}
+              onConvertManual={handleConvertManual}
+              onConvertAgent={handleConvertAgent}
+            />
             <div className="space-y-3">
               {data.replies.length > 0 ? (
-                data.replies.map((reply) => <PanelMessage key={reply.id} message={reply} />)
+                data.replies.map((reply) => (
+                  <PanelMessage
+                    key={reply.id}
+                    message={reply}
+                    onCopyLink={handleCopyLink}
+                    onConvertManual={handleConvertManual}
+                    onConvertAgent={handleConvertAgent}
+                  />
+                ))
               ) : (
                 <p className="py-4 text-center text-xs text-muted-foreground">还没有回复</p>
               )}
@@ -1511,14 +1511,21 @@ function RepliesPanel({
 function PanelMessage({
   message,
   framed,
+  onCopyLink,
+  onConvertManual,
+  onConvertAgent,
 }: {
   message?: ChannelMessage;
   framed?: boolean;
+  onCopyLink?: (msg: ChannelMessage) => void;
+  onConvertManual?: (msg: ChannelMessage) => void;
+  onConvertAgent?: (msg: ChannelMessage) => void;
 }) {
   if (!message) return null;
   const isSystem = message.author_type === "system" || !message.author_id;
   const authorId = message.author_id ?? "";
-  return (
+
+  const content = (
     <div className={cn("flex items-start gap-2", framed && "rounded-md border bg-muted/30 p-2")}>
       {isSystem ? (
         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -1543,6 +1550,36 @@ function PanelMessage({
         <ChannelAgentTaskStrip tasks={message.agent_tasks ?? []} />
       </div>
     </div>
+  );
+
+  if (!onCopyLink && !onConvertManual && !onConvertAgent) return content;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger className="block select-text">
+        {content}
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        {onCopyLink && (
+          <ContextMenuItem onClick={() => onCopyLink(message)}>
+            <Link className="mr-2 h-4 w-4" />
+            复制链接
+          </ContextMenuItem>
+        )}
+        {onConvertManual && (
+          <ContextMenuItem onClick={() => onConvertManual(message)}>
+            <FileText className="mr-2 h-4 w-4" />
+            转换为 Issue
+          </ContextMenuItem>
+        )}
+        {onConvertAgent && (
+          <ContextMenuItem onClick={() => onConvertAgent(message)}>
+            <Bot className="mr-2 h-4 w-4" />
+            由 Agent 转为 Issue
+          </ContextMenuItem>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -1825,51 +1862,3 @@ function CreateChannelDialog({
   );
 }
 
-function ConvertToIssueDialog({
-  message,
-  isPending,
-  onConfirm,
-  onClose,
-}: {
-  message: ChannelMessage;
-  isPending: boolean;
-  onConfirm: (title: string, description: string) => void;
-  onClose: () => void;
-}) {
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState(message.content);
-
-  return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>转换为 Issue</DialogTitle>
-          <DialogDescription>将消息转换为一个新的 Issue，可编辑标题和描述。</DialogDescription>
-        </DialogHeader>
-        <div className="space-y-3 py-2">
-          <Input
-            placeholder="Issue 标题（留空则自动截取消息内容）"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            autoFocus
-          />
-          <Textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={6}
-            className="resize-none"
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button onClick={() => onConfirm(title, description)} disabled={isPending}>
-            {isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}
-            创建 Issue
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
