@@ -346,14 +346,21 @@ function ProjectIssuesContent({
   );
 }
 
-function ProjectIssuesSurface({
+// CEREBRO-PATCH(sprint-board-reuse): TECH-3684 export so the dedicated sprint
+// board page can reuse the exact project board (create-in-sprint + drag-and-drop).
+export function ProjectIssuesSurface({
   projectId,
   scope,
   filter,
+  initialSprintId,
+  lockSprint,
 }: {
   projectId: string;
   scope: string;
   filter: MyIssuesFilter;
+  // CEREBRO-PATCH(sprint-board-reuse): TECH-3684 seed + lock the sprint for the sprint page.
+  initialSprintId?: string;
+  lockSprint?: boolean;
 }) {
   const wsId = useWorkspaceId();
   const viewMode = useViewStore((s) => s.viewMode);
@@ -370,7 +377,8 @@ function ProjectIssuesSurface({
   const onBehalfOfFilters = useViewStore((s) => s.onBehalfOfFilters);
   // CEREBRO-PATCH(project-detail-sprint-filter): TECH-3620 filter project board/list by real sprint membership.
   const sprintsFlag = useFeatureFlag("cerebro_sprints");
-  const [selectedSprintId, setSelectedSprintId] = useState("");
+  // CEREBRO-PATCH(sprint-board-reuse): TECH-3684 seed from the sprint page's route param.
+  const [selectedSprintId, setSelectedSprintId] = useState(initialSprintId ?? "");
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
   // Sprint is a cerebro_sprint row, not a project: keep the project scope and
@@ -435,7 +443,8 @@ function ProjectIssuesSurface({
     <CerebroStatusModelProvider projectId={projectId}>
       <IssuesHeader scopedIssues={projectIssues} allowGantt />
       {/* CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 sprint selector for project board/list. */}
-      {sprintsFlag && (viewMode === "board" || viewMode === "list") && (
+      {/* CEREBRO-PATCH(sprint-board-reuse): TECH-3684 hide the sprint switcher when locked to one sprint. */}
+      {sprintsFlag && !lockSprint && (viewMode === "board" || viewMode === "list") && (
         <div className="border-b px-4 py-2">
           <SprintFilter
             workspaceId={wsId}

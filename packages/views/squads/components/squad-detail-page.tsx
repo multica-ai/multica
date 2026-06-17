@@ -1128,13 +1128,14 @@ function SquadOverviewPane({
 // a neutral muted pill; this is the "downgrade, don't crash" defense from
 // CLAUDE.md > API Response Compatibility.
 const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
-  working: "bg-success",
-  idle: "bg-muted-foreground/40",
-  // CEREBRO-PATCH(status-red-green): offline/archived agents read red, not grey
-  // (idle stays neutral — an idle agent is online, just not working).
-  offline: "bg-destructive",
-  unstable: "bg-warning",
-  archived: "bg-destructive",
+  // CEREBRO-PATCH(status-slack-dot): Slack-style dot — grey outline ring on every
+  // state; offline/archived are hollow (empty centre), not red (TECH-3686).
+  // (idle stays neutral — an idle agent is online, just not working.)
+  working: "bg-success border border-muted-foreground",
+  idle: "bg-muted-foreground/40 border border-muted-foreground",
+  offline: "bg-background border border-muted-foreground",
+  unstable: "bg-warning border border-muted-foreground",
+  archived: "bg-background border border-muted-foreground",
 };
 
 // Members tab body — re-uses the existing list/role editing patterns.

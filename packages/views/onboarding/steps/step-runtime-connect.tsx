@@ -378,9 +378,9 @@ function FoundView({
         <span className={cn("flex items-center gap-1", statusTone)}>
           <span
             className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              // CEREBRO-PATCH(status-red-green): no runtime online reads red, not grey
-              onlineCount === 0 ? "bg-destructive" : "bg-success",
+              "h-1.5 w-1.5 rounded-full border border-muted-foreground",
+              // CEREBRO-PATCH(status-slack-dot): no runtime online = hollow grey-ringed dot (Slack), not red
+              onlineCount === 0 ? "bg-background" : "bg-success",
             )}
             aria-hidden
           />

@@ -19,6 +19,9 @@ const presenceState = vi.hoisted(() => ({
 // activity. Tests seed it before render; empty by default (no agent unread).
 const chatState = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>> }));
 
+// TECH-3664 — member user IDs the mocked useChannelTyping reports as typing.
+const typingState = vi.hoisted(() => ({ ids: new Set<string>() }));
+
 // Mutable favorites set + spy for the starring tests.
 const favState = vi.hoisted(() => ({
   keys: [] as string[],
@@ -235,6 +238,13 @@ vi.mock("@multica/core/presence", () => ({
     online_user_ids: Array.from(presenceState.online),
   }),
   postTyping: vi.fn(async () => {}),
+  // TECH-3664 — channel/DM typing hook now lives in core/presence. Return the
+  // seeded set so the slack-block render path can be tested in isolation; the
+  // WS-event → set logic is the hook's own concern (tested in core).
+  useChannelTyping: () => ({
+    typingUserIds: typingState.ids,
+    notifyTyping: vi.fn(),
+  }),
 }));
 
 vi.mock("@multica/views/common/actor-avatar", () => ({
@@ -279,6 +289,7 @@ describe("SlackBlock", () => {
     favState.keys = [];
     favState.toggle.mockClear();
     wsHandlers.clear();
+    typingState.ids = new Set();
   });
 
   it("renders a green online dot for a member in the online set, red otherwise", async () => {
@@ -289,7 +300,8 @@ describe("SlackBlock", () => {
 
     expect(onlineDot("alice").className).toContain("bg-success");
     expect(onlineDot("alice")).toHaveAttribute("data-online", "true");
-    expect(onlineDot("bob").className).toContain("bg-destructive");
+    // Offline = Slack-style hollow dot (empty centre on grey ring), not red (TECH-3686).
+    expect(onlineDot("bob").className).toContain("bg-background");
     expect(onlineDot("bob")).toHaveAttribute("data-online", "false");
   });
 
@@ -316,20 +328,19 @@ describe("SlackBlock", () => {
     );
   });
 
-  it("shows 'typing…' when a typing event arrives for a member's selected DM", async () => {
+  it("shows 'typing…' for a member typing in the selected DM", async () => {
+    // No one typing → no indicator.
     await act(async () => {
       renderBlock({ selectedChannelId: "dm-alice" });
     });
-
     expect(screen.queryByText("typing…")).not.toBeInTheDocument();
+    cleanup();
 
+    // Seed the hook's reported set, then render → indicator shows on the row.
+    typingState.ids = new Set(["alice"]);
     await act(async () => {
-      wsHandlers.get("cerebro:typing")?.({
-        channel_id: "dm-alice",
-        user_id: "alice",
-      });
+      renderBlock({ selectedChannelId: "dm-alice" });
     });
-
     expect(screen.getByText("typing…")).toBeInTheDocument();
   });
 
@@ -403,7 +414,7 @@ describe("SlackBlock", () => {
       renderBlock({ showAgents: true });
     });
 
-    expect(onlineDot("agent-sara").className).toContain("bg-destructive");
+    expect(onlineDot("agent-sara").className).toContain("bg-background");
     expect(onlineDot("agent-sara")).toHaveAttribute("data-online", "false");
   });
 

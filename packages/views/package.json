@@ -1,6 +1,7 @@
 {
   "_comment": "CEREBRO-PATCH(views-package-cerebro-deps): adds cerebro-* package deps (incl. cerebro-channels — JEH-718, cerebro-groups — JEH-1006, cerebro-pin-input — JEH-1065) + new exports for cerebro views (incl. ./agents/components/avatar-picker — FIR-1918). CEREBRO-PATCH(todo-list-editor): add Tiptap task-list dependencies.",
   "_comment_cerebro_agent_tools": "CEREBRO-PATCH(cerebro-agent-tools-dep): mounts the Cerebro-owned agent Tools tab extension from @multica/views",
+  "_comment_cerebro_agent_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — adds @multica/cerebro-agent-capabilities dep for the per-agent Capabilities detail tab (skills/tools/credentials/limits) mounted in agent-overview-pane",
   "_comment_cerebro_status_models": "CEREBRO-PATCH(settings-page-status-models): adds @multica/cerebro-status-models dep for the FIR-1550 workflow v2a status-model settings tab + board presentation seam",
   "_comment_cerebro_identity": "CEREBRO-PATCH(settings-page-google-identity): adds @multica/cerebro-identity dep for the FIR-2523 Auth & Permissions settings tab + Google Workspace auto-membership hook",
   "_comment_cerebro_search": "CEREBRO-PATCH(search-page-inline-filters-2595): adds @multica/cerebro-search dep for the FIR-2595 trin 1 Slack-style filter parser + chip row in SearchPage",
@@ -89,6 +90,7 @@
     "@floating-ui/dom": "^1.7.6",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
+    "@multica/cerebro-agent-capabilities": "workspace:*",
     "@multica/cerebro-agent-tools": "workspace:*",
     "@multica/cerebro-channels": "workspace:*",
     "@multica/cerebro-comment-drafts": "workspace:*",

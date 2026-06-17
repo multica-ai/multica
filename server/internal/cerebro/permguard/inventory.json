@@ -1587,6 +1587,10 @@
       "gate": "via:POST /api/work-sessions/{id}/fork"
     },
     {
+      "id": "get_agent_capabilities",
+      "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
+    },
+    {
       "id": "get_artifact",
       "exempt": "read-only \u2014 GET endpoints carry their own auth, no mutation"
     },
@@ -1803,6 +1807,10 @@
     {
       "id": "agent avatar",
       "gate": "via:POST /api/agents/{id}/avatar"
+    },
+    {
+      "id": "agent capabilities",
+      "exempt": "read-only — wraps GET /api/agents/{id}/capabilities"
     },
     {
       "id": "agent create",

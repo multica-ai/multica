@@ -1005,6 +1005,9 @@ importers:
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       '@multica/tsconfig':
         specifier: workspace:*
@@ -2407,6 +2410,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      sonner:
+        specifier: ^2.0.7
+        version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       zod:
         specifier: 'catalog:'
         version: 4.4.3
@@ -3798,6 +3804,9 @@ importers:
       '@floating-ui/dom':
         specifier: ^1.7.6
         version: 1.7.6
+      '@multica/cerebro-agent-capabilities':
+        specifier: workspace:*
+        version: link:../cerebro-agent-capabilities
       '@multica/cerebro-agent-tools':
         specifier: workspace:*
         version: link:../cerebro-agent-tools

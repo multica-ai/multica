@@ -212,7 +212,9 @@
     "infisical": "Infisical secrets",
     "sandbox": "Sandbox",
     "tools": "Tools",
-    "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label"
+    "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
+    "capabilities": "Capabilities",
+    "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label"
   },
   "create_dialog": {
     "title_create": "エージェントを作成",

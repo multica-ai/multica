@@ -404,8 +404,8 @@ export function SlackBlock({
               <span
                 data-testid={`presence-dot-${it.userId ?? it.agentId}`}
                 data-online={it.online ? "true" : "false"}
-                className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card ${
-                  it.online ? "bg-success" : "bg-destructive"
+                className={`absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border border-muted-foreground ${
+                  it.online ? "bg-success" : "bg-background"
                 }`}
                 aria-label={it.online ? "online" : "offline"}
               />

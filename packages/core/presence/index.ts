@@ -12,3 +12,8 @@ export {
   postTyping,
   type PresenceResponse,
 } from "./presence-api";
+// CEREBRO-PATCH(channel-typing-core): TECH-3664 — channel/DM typing hook.
+export {
+  useChannelTyping,
+  type UseChannelTypingResult,
+} from "./channel-typing";

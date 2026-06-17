@@ -52,9 +52,12 @@ interface CommentInputProps {
    * squad leader). Channels/DMs pass nothing — the bar stays hidden there.
    */
   triggerAgentId?: string;
+  // CEREBRO-PATCH(typing-emit): TECH-3664 — fired as the user composes so the
+  // host (channels/DMs) can send a throttled "is typing…" ping. Issue pages omit it.
+  onTyping?: () => void;
 }
 
-function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, triggerAgentId }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, triggerAgentId, onTyping }: CommentInputProps) {
   const { t } = useT("issues");
   const editorRef = useRef<ContentEditorRef>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -197,6 +200,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
                 setMarkdown(md);
                 setIsEmpty(!md.trim());
                 draft.save(md); // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist as you type.
+                if (md.trim()) onTyping?.(); // CEREBRO-PATCH(typing-emit): TECH-3664 — throttled host-side.
               }}
               onSubmit={handleSubmit}
               onUploadFile={handleUpload}

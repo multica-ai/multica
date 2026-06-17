@@ -46,9 +46,9 @@ export function CompactRuntimeRow({
       </div>
       <span
         className={cn(
-          "h-2 w-2 shrink-0 rounded-full",
-          // CEREBRO-PATCH(status-red-green): offline runtime reads red, not grey
-          online ? "bg-success" : "bg-destructive",
+          "h-2 w-2 shrink-0 rounded-full border border-muted-foreground",
+          // CEREBRO-PATCH(status-slack-dot): offline = hollow grey-ringed dot (Slack), not red
+          online ? "bg-success" : "bg-background",
         )}
         aria-label={online ? tAgents(($) => $.availability.online) : tAgents(($) => $.availability.offline)}
       />
