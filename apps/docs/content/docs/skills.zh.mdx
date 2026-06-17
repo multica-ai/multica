@@ -12,7 +12,7 @@ Skill 是给 [智能体](/agents) 的**专业知识包**——一个 `SKILL.md` 
 Multica 支持两种 Skill 来源：
 
 - **工作区 Skill（workspace skill）** —— 存在 Multica 云端。挂到智能体后，任务执行时自动同步到你本机的守护进程。这是**团队共享 Skill 的标准方式**。
-- **本机 Skill（local skill）** —— 直接存在你本机的某个目录里（每款 AI 编程工具有约定的默认路径，比如 Claude Code 的 `~/.claude/skills/`）。[守护进程](/daemon-runtimes) 按你的请求扫描本机，发现后由你手动选入工作区。
+- **本机 Skill（local skill）** —— 直接存在你本机的某个目录里。[守护进程](/daemon-runtimes) 按你的请求扫描本机，发现后由你手动选入工作区。守护进程会**按优先级扫描两个根目录**：先扫该运行时自己的 skill 目录（每款 AI 编程工具有约定的默认路径，比如 Claude Code 的 `~/.claude/skills/`），再扫跨工具通用目录 `~/.agents/skills/`——这是 Codex、Gemini CLI 等生态共用的位置。当同名 skill 在两处都存在时，**provider 专用目录优先**，所以通用根目录只会*额外*带出新的 skill，绝不会改变已有 skill 的解析结果。
 
 大多数情况用**工作区 Skill**：导入一次，团队所有成员的智能体都能用。本机 Skill 适合先在本地测试、或涉及敏感本地内容的场景。
 
