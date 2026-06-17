@@ -62,7 +62,7 @@ beforeEach(() => {
 });
 
 describe("CerebroCapabilitiesTab", () => {
-  it("renders every capability section from a well-formed response", async () => {
+  it("renders every section as pills from a well-formed response", async () => {
     mockCerebroRequest.mockResolvedValue({
       agent_id: "agent-1",
       name: "Tine",
@@ -71,11 +71,15 @@ describe("CerebroCapabilitiesTab", () => {
       skills: [{ id: "s1", name: "deploy", description: "Ship a PR" }],
       tools: [
         { key: "add_comment", permission: "allow", decided_by: "runtime" },
+        { key: "create_local_runtime", permission: "deny", decided_by: "agent" },
+      ],
+      repos: [
         {
-          key: "create_local_runtime",
-          permission: "deny",
-          decided_by: "group",
-          capped_by_groups: ["builders (Jesper)"],
+          url: "https://github.com/firtal-group/firtal-cerebro",
+          permissions: [
+            { key: "repo.read", title: "Read code", permission: "allow" },
+            { key: "repo.push", title: "Push changes", permission: "deny" },
+          ],
         },
       ],
       connections: [
@@ -85,13 +89,18 @@ describe("CerebroCapabilitiesTab", () => {
           type: "mcp_http",
           url: "https://bq-mcp.firtal.internal",
           internal: true,
-          tools: [{ name: "bigquery.query", description: "run a read query" }],
+          enabled: true,
+          tools: [
+            { name: "bigquery.query", permission: "allow" },
+            { name: "bigquery.insert", permission: "deny" },
+          ],
           endpoints: [],
         },
         {
           name: "registry",
           type: "api",
           url: "https://registry.firtal.com",
+          enabled: false,
           tools: [],
           endpoints: [{ path: "/datasets", methods: ["GET"] }],
         },
@@ -107,31 +116,32 @@ describe("CerebroCapabilitiesTab", () => {
 
     renderTab();
 
-    expect(await screen.findByText("Can do")).toBeInTheDocument();
-    expect(screen.getByText("May use")).toBeInTheDocument();
+    // Every section is present.
+    expect(await screen.findByText("Skills")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("Repos")).toBeInTheDocument();
     expect(screen.getByText("Connections")).toBeInTheDocument();
-    expect(screen.getByText("Has access to")).toBeInTheDocument();
-    expect(screen.getByText("Limited by")).toBeInTheDocument();
+    expect(screen.getByText("Credentials")).toBeInTheDocument();
+    expect(screen.getByText("Infisical secrets")).toBeInTheDocument();
+    expect(screen.getByText("Limits")).toBeInTheDocument();
 
-    // Skills.
+    // Pills render the names.
     expect(screen.getByText("deploy")).toBeInTheDocument();
-
-    // Tools with verdicts: allow renders "Allow", deny renders "Block". Each
-    // verdict word also appears once in the legend, so the allow-tool row makes
-    // "Allow" appear twice and the deny-tool row makes "Block" appear twice,
-    // while "Ask" (no tool) appears only in the legend.
     expect(screen.getByText("add_comment")).toBeInTheDocument();
     expect(screen.getByText("create_local_runtime")).toBeInTheDocument();
-    expect(screen.getAllByText("Allow")).toHaveLength(2);
-    expect(screen.getAllByText("Block")).toHaveLength(2);
-    expect(screen.getAllByText("Ask")).toHaveLength(1);
+
+    // Repo permissions as pills.
+    expect(screen.getByText("Read code")).toBeInTheDocument();
+    expect(screen.getByText("Push changes")).toBeInTheDocument();
     expect(
-      screen.getByText(/capped by builders \(Jesper\)/),
+      screen.getByText("github.com/firtal-group/firtal-cerebro"),
     ).toBeInTheDocument();
 
-    // Connections with their underlying tools + endpoints.
+    // Connection tools (with per-tool verdicts) + the disabled marker.
     expect(screen.getByText("BigQuery")).toBeInTheDocument();
     expect(screen.getByText("bigquery.query")).toBeInTheDocument();
+    expect(screen.getByText("bigquery.insert")).toBeInTheDocument();
+    expect(screen.getByText("disabled")).toBeInTheDocument();
     expect(screen.getByText("/datasets")).toBeInTheDocument();
 
     // Credentials + Infisical names (never values).
@@ -148,6 +158,7 @@ describe("CerebroCapabilitiesTab", () => {
       agent_id: 123,
       skills: null,
       tools: "not-an-array",
+      repos: 7,
       connections: undefined,
       credentials: undefined,
       infisical_secrets: 42,
@@ -158,9 +169,10 @@ describe("CerebroCapabilitiesTab", () => {
 
     // The card still renders its section scaffold and shows empty states
     // rather than white-screening.
-    expect(await screen.findByText("Can do")).toBeInTheDocument();
+    expect(await screen.findByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("No skills loaded.")).toBeInTheDocument();
     expect(screen.getByText("No tools resolved.")).toBeInTheDocument();
+    expect(screen.getByText("No repositories.")).toBeInTheDocument();
     expect(screen.getByText("No connections.")).toBeInTheDocument();
     expect(screen.getByText("No credentials bound.")).toBeInTheDocument();
     expect(screen.getByText("No Infisical folders.")).toBeInTheDocument();

@@ -50,6 +50,7 @@ const AgentCapabilityConnToolSchema = z
   .object({
     name: z.string().default(""),
     description: z.string().default(""),
+    permission: z.string().default(""),
   })
   .loose();
 
@@ -60,8 +61,16 @@ const AgentCapabilityConnectionSchema = z
     type: z.string().default(""),
     url: z.string().default(""),
     internal: z.boolean().default(false),
+    enabled: z.boolean().default(true),
     tools: z.array(AgentCapabilityConnToolSchema).default([]),
     endpoints: z.array(AgentCapabilityConnEndpointSchema).default([]),
+  })
+  .loose();
+
+const AgentCapabilityRepoSchema = z
+  .object({
+    url: z.string().default(""),
+    permissions: z.array(AgentCapabilityToolSchema).default([]),
   })
   .loose();
 
@@ -97,6 +106,7 @@ export const AgentCapabilitiesSchema = z
     description: z.string().default(""),
     skills: z.array(AgentCapabilitySkillSchema).default([]),
     tools: z.array(AgentCapabilityToolSchema).default([]),
+    repos: z.array(AgentCapabilityRepoSchema).default([]),
     connections: z.array(AgentCapabilityConnectionSchema).default([]),
     credentials: z.array(AgentCapabilityCredentialSchema).default([]),
     infisical_secrets: z
@@ -111,6 +121,7 @@ export const AgentCapabilitiesSchema = z
 
 export type AgentCapabilitySkill = z.infer<typeof AgentCapabilitySkillSchema>;
 export type AgentCapabilityTool = z.infer<typeof AgentCapabilityToolSchema>;
+export type AgentCapabilityRepo = z.infer<typeof AgentCapabilityRepoSchema>;
 export type AgentCapabilityConnection = z.infer<
   typeof AgentCapabilityConnectionSchema
 >;
@@ -130,6 +141,7 @@ const EMPTY_CAPABILITIES: AgentCapabilities = {
   description: "",
   skills: [],
   tools: [],
+  repos: [],
   connections: [],
   credentials: [],
   infisical_secrets: [],
