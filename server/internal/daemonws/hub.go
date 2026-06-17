@@ -21,11 +21,65 @@ const (
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
 type ClientIdentity struct {
-	DaemonID      string
-	UserID        string
+	DaemonID string
+	UserID   string
+	// WorkspaceID is the legacy single-workspace scope used by older callers
+	// and daemon-token auth. New code should populate WorkspaceIDs from the
+	// runtime rows authorized for this connection.
 	WorkspaceID   string
+	WorkspaceIDs  []string
 	RuntimeIDs    []string
 	ClientVersion string
+}
+
+// AuthorizedWorkspaceIDs returns the connection's workspace scope in stable
+// order, preferring the multi-workspace field and falling back to WorkspaceID
+// for older tests/callers.
+func (i ClientIdentity) AuthorizedWorkspaceIDs() []string {
+	seen := make(map[string]struct{}, len(i.WorkspaceIDs)+1)
+	out := make([]string, 0, len(i.WorkspaceIDs)+1)
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		if _, ok := seen[id]; ok {
+			return
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for _, id := range i.WorkspaceIDs {
+		add(id)
+	}
+	if len(out) == 0 {
+		add(i.WorkspaceID)
+	}
+	return out
+}
+
+func (i ClientIdentity) PrimaryWorkspaceID() string {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
+}
+
+// AllowsWorkspace reports whether workspaceID is within the connection scope.
+// An empty scope remains permissive for legacy unit tests that construct
+// ClientIdentity directly without workspace data.
+func (i ClientIdentity) AllowsWorkspace(workspaceID string) bool {
+	ids := i.AuthorizedWorkspaceIDs()
+	if len(ids) == 0 {
+		return true
+	}
+	for _, id := range ids {
+		if id == workspaceID {
+			return true
+		}
+	}
+	return false
 }
 
 type client struct {
@@ -365,11 +419,12 @@ func (h *Hub) register(c *client) {
 		}
 		conns[c] = true
 	}
-	if c.identity.WorkspaceID != "" {
-		conns := h.byWorkspace[c.identity.WorkspaceID]
+	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
+	for _, workspaceID := range workspaceIDs {
+		conns := h.byWorkspace[workspaceID]
 		if conns == nil {
 			conns = make(map[*client]bool)
-			h.byWorkspace[c.identity.WorkspaceID] = conns
+			h.byWorkspace[workspaceID] = conns
 		}
 		conns[c] = true
 	}
@@ -381,7 +436,8 @@ func (h *Hub) register(c *client) {
 	slog.Info("daemon websocket connected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,
-		"workspace_id", c.identity.WorkspaceID,
+		"workspace_id", c.identity.PrimaryWorkspaceID(),
+		"workspace_ids", workspaceIDs,
 		"runtimes", len(c.runtimes),
 		"client_version", c.identity.ClientVersion,
 		"total_clients", total,
@@ -403,11 +459,12 @@ func (h *Hub) unregister(c *client) {
 			}
 		}
 	}
-	if c.identity.WorkspaceID != "" {
-		if conns := h.byWorkspace[c.identity.WorkspaceID]; conns != nil {
+	workspaceIDs := c.identity.AuthorizedWorkspaceIDs()
+	for _, workspaceID := range workspaceIDs {
+		if conns := h.byWorkspace[workspaceID]; conns != nil {
 			delete(conns, c)
 			if len(conns) == 0 {
-				delete(h.byWorkspace, c.identity.WorkspaceID)
+				delete(h.byWorkspace, workspaceID)
 			}
 		}
 	}
@@ -420,7 +477,8 @@ func (h *Hub) unregister(c *client) {
 	slog.Info("daemon websocket disconnected",
 		"daemon_id", c.identity.DaemonID,
 		"user_id", c.identity.UserID,
-		"workspace_id", c.identity.WorkspaceID,
+		"workspace_id", c.identity.PrimaryWorkspaceID(),
+		"workspace_ids", workspaceIDs,
 		"runtimes", len(c.runtimes),
 		"total_clients", total,
 	)

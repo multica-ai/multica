@@ -874,7 +874,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, fmt.Errorf("get agent runtime: %w", err)
 	}
-	if identity.WorkspaceID != "" && identity.WorkspaceID != uuidToString(rt.WorkspaceID) {
+	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)

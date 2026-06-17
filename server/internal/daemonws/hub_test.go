@@ -122,6 +122,69 @@ func TestNotifyRuntimeProfilesChanged(t *testing.T) {
 	}
 }
 
+func TestNotifyRuntimeProfilesChangedIndexesAllAuthorizedWorkspaces(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{
+			WorkspaceIDs: []string{"ws-1", "ws-2"},
+			RuntimeIDs:   []string{"runtime-1", "runtime-2"},
+		})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.WorkspaceConnectionCount("ws-1") == 0 || hub.WorkspaceConnectionCount("ws-2") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("workspace connections not registered: ws-1=%d ws-2=%d",
+				hub.WorkspaceConnectionCount("ws-1"),
+				hub.WorkspaceConnectionCount("ws-2"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := hub.WorkspaceConnectionCount("ws-3"); got != 0 {
+		t.Fatalf("workspace ws-3 connection count = %d, want 0", got)
+	}
+
+	hub.NotifyRuntimeProfilesChanged("ws-1", "profile-1")
+	hub.NotifyRuntimeProfilesChanged("ws-2", "profile-2")
+
+	got := map[string]string{}
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	for len(got) < 2 {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("ReadMessage: %v", err)
+		}
+		var msg protocol.Message
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			t.Fatalf("unmarshal message: %v", err)
+		}
+		if msg.Type != protocol.EventDaemonRuntimeProfilesChanged {
+			t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonRuntimeProfilesChanged)
+		}
+		var payload protocol.RuntimeProfilesChangedPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+			t.Fatalf("unmarshal payload: %v", err)
+		}
+		got[payload.WorkspaceID] = payload.RuntimeProfileID
+	}
+	if got["ws-1"] != "profile-1" || got["ws-2"] != "profile-2" {
+		t.Fatalf("profile refresh payloads = %+v, want ws-1/profile-1 and ws-2/profile-2", got)
+	}
+}
+
 func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
 	M.Reset()
 	defer M.Reset()
