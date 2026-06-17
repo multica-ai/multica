@@ -386,10 +386,11 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	commentContent := "请把报告翻译成英文"
 
 	prompt := BuildPrompt(Task{
-		IssueID:               issueID,
-		TriggerCommentID:      commentID,
-		TriggerCommentContent: commentContent,
-		Agent:                 &AgentData{Name: "Test"},
+		IssueID:                 issueID,
+		TriggerCommentID:        commentID,
+		TriggerCommentContent:   commentContent,
+		TriggerCommentCreatedAt: "2026-06-17T14:35:32Z",
+		Agent:                   &AgentData{Name: "Test"},
 	}, "claude")
 
 	// Prompt should contain the comment content, the trigger comment id, and
@@ -399,6 +400,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		commentContent,
+		"Sent at: 2026-06-17T14:35:32Z",
 		"Focus on THIS comment",
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,

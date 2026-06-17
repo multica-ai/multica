@@ -101,6 +101,8 @@ export type CerebroFlagKey =
   | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
+  // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
+  | "cerebro_recurring_issues"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
@@ -172,6 +174,10 @@ export type CerebroFlagKey =
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
   | "cerebro_comment_drafts"
+  // TECH-3698: per-channel permission settings (who may rename / add-remove
+  // participants / leave) surfaced in the channel settings sheet and the
+  // create-channel dialog. Gates only the configuration UI.
+  | "cerebro_channel_permissions"
   // TECH-3582: Workspace copy console — a Settings tab to copy individual
   // entities (issues, channels, projects, agents, chats, autopilots) into
   // another workspace when merging two workspaces. Non-destructive.
@@ -195,6 +201,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_sandbox_ui: true,
   cerebro_mcp_guide: true,
   cerebro_channels: true,
+  cerebro_channel_permissions: true, // TECH-3698
   cerebro_chat_message_cost: true,
   cerebro_comment_cost: true,
   cerebro_web_push: true,
@@ -296,6 +303,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
   cerebro_sprints: false,
+  // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
+  // the recurring-issue sweeper.
+  cerebro_recurring_issues: false,
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
@@ -874,6 +884,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_recurring_issues",
+    label: "Recurring issues",
+    group: "workspace",
+    description:
+      "Let users mark an individual issue as recurring (frequency, on-status-change trigger, create-new-task, recur-forever, update-status-to, sync-to-due-date). When the issue reaches its trigger status, a sweeper spawns the next occurrence with a fresh due date and the same data (assignee, text, labels, attachments) and chains the rule onto the new issue. TECH-3064.",
   },
   {
     key: "cerebro_note_types",

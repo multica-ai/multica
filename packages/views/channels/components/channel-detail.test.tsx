@@ -48,6 +48,12 @@ vi.mock("@multica/core/channels", () => ({
     queryKey: ["channels", "ws", "agent-settings", "c1"],
     queryFn: () => Promise.resolve({ settings: [] }),
   }),
+  // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — settings sheet deps.
+  channelPermissionsOptions: () => ({
+    queryKey: ["channels", "ws", "permissions", "c1"],
+    queryFn: () => Promise.resolve(undefined),
+  }),
+  useUpdateChannelPermissions: () => ({ mutate: vi.fn(), isPending: false }),
   useMarkChannelRead: () => ({ mutate: mockMarkChannelRead }),
   useUpdateChannel: () => ({ mutate: mockUpdateChannel }),
   useToggleChannelParticipant: () => ({ mutate: mockToggleParticipant }),
@@ -56,6 +62,14 @@ vi.mock("@multica/core/channels", () => ({
     isPending: false,
   }),
 }));
+
+// CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — gate the permission UI on.
+vi.mock("@multica/cerebro-feature-flags", async () => {
+  const actual = await vi.importActual<typeof import("@multica/cerebro-feature-flags")>(
+    "@multica/cerebro-feature-flags",
+  );
+  return { ...actual, useFeatureFlag: () => true };
+});
 
 vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({
@@ -232,6 +246,11 @@ describe("ChannelDetail thread header", () => {
     expect(screen.getByTestId("avatar-lando")).toBeInTheDocument();
   });
 
+  // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — Pin/Archive moved from
+  // the header into the gear-opened settings sheet; open it first.
+  const openSettings = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByLabelText("Channel settings"));
+  };
   it("renders the composer without the old channel-only top border", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     const shell = screen.getByTestId("comment-input").parentElement;
@@ -245,10 +264,8 @@ describe("ChannelDetail thread header", () => {
     mockDeletePin.mockClear();
     const user = userEvent.setup();
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
-    const pin = screen.getByLabelText("Pin to sidebar");
-    expect(pin).not.toBeDisabled();
-    expect(pin).toHaveAttribute("aria-pressed", "false");
-    await user.click(pin);
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: "Pin to sidebar" }));
     expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "channel", item_id: "c1" });
     expect(mockDeletePin).not.toHaveBeenCalled();
   });
@@ -259,9 +276,8 @@ describe("ChannelDetail thread header", () => {
     mockDeletePin.mockClear();
     const user = userEvent.setup();
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
-    const pin = screen.getByLabelText("Unpin from sidebar");
-    expect(pin).toHaveAttribute("aria-pressed", "true");
-    await user.click(pin);
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: "Unpin from sidebar" }));
     expect(mockDeletePin).toHaveBeenCalledWith({ itemType: "channel", itemId: "c1" });
     expect(mockCreatePin).not.toHaveBeenCalled();
   });
@@ -272,7 +288,8 @@ describe("ChannelDetail thread header", () => {
     const user = userEvent.setup();
     const dm: Channel = { ...baseChannel, kind: "dm", title: "alice" };
     render(<ChannelDetail channelId="c1" initialChannel={dm} />);
-    await user.click(screen.getByLabelText("Pin to sidebar"));
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: "Pin to sidebar" }));
     expect(mockCreatePin).toHaveBeenCalledWith({ item_type: "dm", item_id: "c1" });
   });
 
@@ -286,7 +303,8 @@ describe("ChannelDetail thread header", () => {
         onArchive={onArchive}
       />,
     );
-    await user.click(screen.getByLabelText("Archive conversation"));
+    await openSettings(user);
+    await user.click(screen.getByRole("button", { name: "Archive conversation" }));
     // Channel archive always fires, regardless of whether an inbox row
     // exists. Parent is also told to clear its selection.
     expect(mockArchiveChannel).toHaveBeenCalledWith("c1");

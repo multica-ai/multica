@@ -23,7 +23,8 @@ export type CostSavingKey =
   | "bundled_read"
   | "model_routing"
   | "prune_tool_results"
-  | "context_duplication";
+  | "context_duplication"
+  | "graphify";
 
 /** The three states every saving can be in. */
 export type CostSavingMode = "off" | "shadow" | "on";
@@ -102,6 +103,7 @@ export const COST_SAVING_DEFAULTS: Record<CostSavingKey, CostSavingMode> = {
   model_routing: "off",
   prune_tool_results: "off",
   context_duplication: "off",
+  graphify: "off",
 };
 
 /**
@@ -243,5 +245,15 @@ export const COST_SAVINGS: CostSavingDefinition[] = [
     metric: "tokens",
     runtimeScope: "both",
     estimateNote: "Typical workspaces show 20–40% duplicate sentences before cleanup.",
+  },
+  {
+    key: "graphify",
+    label: "Graphify code graph",
+    description:
+      "Let agents answer \"where is X / what connects to Y\" from a prebuilt code knowledge graph instead of grepping and reading whole files. Unlike the server-applied savings above, this is an agent behavior: the saving is the tokens an agent avoids spending on navigation, attributed by comparing runs that used the graph against a control cohort (not a per-run server delta).",
+    metric: "tokens",
+    runtimeScope: "both",
+    estimateNote:
+      "Offline benchmark across three Firtal repos: a navigation query was 8.8–59.7× cheaper than reading the cited files. The real per-run saving is measured once agents use the graph in production.",
   },
 ];

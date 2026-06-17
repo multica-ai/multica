@@ -11,6 +11,7 @@ import type {
   ChannelAgentListenMode,
   ChannelAgentSettingsResponse,
   ChannelMember,
+  ChannelPermissions, // CEREBRO-PATCH(core-channels-perms-mut): TECH-3698
   CreateChannelRequest,
   InboxItem,
   UpdateIssueRequest,
@@ -223,6 +224,32 @@ export function useSetChannelAgentListenMode(channelId: string) {
         ],
       };
       qc.setQueryData<ChannelAgentSettingsResponse>(queryKey, next);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(queryKey, ctx.prev);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey });
+    },
+  });
+}
+
+// CEREBRO-PATCH(core-channels-perms-mut): TECH-3698 — update a channel's
+// permission settings (rename / add-remove members / leave). Optimistic so
+// the settings UI flips instantly and rolls back on error.
+export function useUpdateChannelPermissions(channelId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const queryKey = channelKeys.permissions(wsId, channelId);
+
+  return useMutation({
+    mutationFn: (perms: ChannelPermissions) =>
+      api.updateChannelPermissions(channelId, perms),
+    onMutate: async (perms) => {
+      await qc.cancelQueries({ queryKey });
+      const prev = qc.getQueryData<ChannelPermissions>(queryKey);
+      qc.setQueryData<ChannelPermissions>(queryKey, perms);
       return { prev };
     },
     onError: (_err, _vars, ctx) => {

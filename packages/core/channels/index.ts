@@ -5,6 +5,7 @@ export {
   channelListOptions,
   channelDetailOptions,
   channelAgentSettingsOptions,
+  channelPermissionsOptions, // CEREBRO-PATCH(core-channels-perms): TECH-3698
 } from "./queries";
 export {
   useCreateChannel,
@@ -12,4 +13,5 @@ export {
   useUpdateChannel,
   useToggleChannelParticipant,
   useSetChannelAgentListenMode,
+  useUpdateChannelPermissions, // CEREBRO-PATCH(core-channels-perms): TECH-3698
 } from "./mutations";

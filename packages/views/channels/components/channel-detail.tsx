@@ -3,11 +3,13 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Hash, MessageSquare, Pencil, Pin, PinOff } from "lucide-react"; // CEREBRO-PATCH(channel-detail-edit-icon): FIR-2660 edit-channel button.
+import { Hash, MessageSquare, Settings } from "lucide-react"; // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — single gear opens the consolidated settings sheet.
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
+// CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — current member role drives admin/owner moderation.
+import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   channelDetailOptions,
   useUpdateChannel,
@@ -17,7 +19,6 @@ import { useArchiveInbox } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channel-detail-archive): JEH-851 — per-user channel archive mutation.
 // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — open-time read hook.
 import { useArchiveChannel, useChannelAutoMarkRead } from "@multica/cerebro-channels";
-import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentInput } from "../../issues/components/comment-input";
@@ -40,8 +41,8 @@ import { useChannelDisplay } from "./use-channel-display";
 import { ParticipantsPanel } from "./participants-panel";
 // CEREBRO-PATCH(channel-detail-edit-dialog-import): FIR-2660 edit-channel modal (name + description in one round-trip).
 import { EditChannelDialog } from "./edit-channel-dialog";
-// CEREBRO-PATCH(channel-detail-listeners): JEH-699 — listeners popover.
-import { ChannelListenersPanel } from "./channel-listeners-panel";
+// CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — consolidated settings sheet (Pin/Archive/Agent mentions/Edit/Permissions).
+import { ChannelSettingsSheet } from "./channel-settings-sheet";
 // CEREBRO-PATCH(channel-agent-inline-row): JEH-698 inline "agent is working" row mounted between the comment stream and CommentInput.
 import { ChannelAgentInlineRow } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channel-typing): TECH-3664 — "X is typing…" line + typing ping.
@@ -71,6 +72,13 @@ interface ChannelDetailProps {
 export function ChannelDetail({ channelId, initialChannel, onArchive, initialCommentId }: ChannelDetailProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
+  // CEREBRO-PATCH(channel-moderation-delete): TECH-3698 — workspace admins/owners
+  // may delete other people's channel/DM messages (surfaced in the message menus).
+  const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const canModerate = (() => {
+    const role = wsMembers.find((m) => m.user_id === userId)?.role;
+    return role === "owner" || role === "admin";
+  })();
 
   // Channels are issues, so we reuse the issue timeline hook — same comment
   // model, same WS event handlers, same optimistic reaction logic.
@@ -170,21 +178,9 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
     return () => setHideFloatingChat(false);
   }, [setHideFloatingChat, setChatOpen]);
 
-  // --- Pin to sidebar ----------------------------------------------------
-  // Pins are scoped per user; we look up whether this channel/dm is already
-  // pinned to flip the button into "unpin" mode.
-  const { data: pinnedItems = [] } = useQuery({
-    ...pinListOptions(wsId, userId ?? ""),
-    enabled: !!userId,
-  });
-  const isPinned = pinnedItems.some(
-    (p) => p.item_type === channel?.kind && p.item_id === channelId,
-  );
-  const createPin = useCreatePin();
-  const deletePin = useDeletePin();
-
   const [participantsOpen, setParticipantsOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false); // CEREBRO-PATCH(channel-detail-edit-state): FIR-2660 edit-channel dialog state.
+  const [settingsOpen, setSettingsOpen] = useState(false); // CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — gear-opened settings sheet.
 
   // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — pin DM/Channel
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
@@ -280,67 +276,23 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           <div className="ml-auto flex items-center gap-1">
             {/* CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total cost. */}
             <ChannelCostChip channelId={channelId} />
-            <ChannelListenersPanel channel={channel} />
-            {display.isChannel && (
-              // CEREBRO-PATCH(channel-detail-edit-button): FIR-2660 edit-channel modal (name + description).
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      onClick={() => setEditOpen(true)}
-                      aria-label="Edit channel"
-                      className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
-                    />
-                  }
-                >
-                  <Pencil className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="bottom">Edit channel</TooltipContent>
-              </Tooltip>
-            )}
+            {/* CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — one gear opens
+                the consolidated settings (Edit, Permissions, Agent mentions,
+                Pin, Archive). */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    onClick={() => {
-                      if (isPinned) {
-                        deletePin.mutate({ itemType: channel.kind, itemId: channelId });
-                      } else {
-                        createPin.mutate({ item_type: channel.kind, item_id: channelId });
-                      }
-                    }}
-                    aria-label={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-                    aria-pressed={isPinned}
-                    className={
-                      isPinned
-                        ? "inline-flex size-7 items-center justify-center rounded border text-foreground hover:bg-accent"
-                        : "inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
-                    }
-                  />
-                }
-              >
-                {isPinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5" />}
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    onClick={handleArchive}
-                    aria-label="Archive conversation"
+                    onClick={() => setSettingsOpen(true)}
+                    aria-label="Channel settings"
                     className="inline-flex size-7 items-center justify-center rounded border text-muted-foreground hover:bg-accent hover:text-foreground"
                   />
                 }
               >
-                <Archive className="size-3.5" />
+                <Settings className="size-3.5" />
               </TooltipTrigger>
-              <TooltipContent side="bottom">Archive</TooltipContent>
+              <TooltipContent side="bottom">Settings</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -396,6 +348,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
                 topLevel={topLevel}
                 repliesByParent={repliesByParent}
                 currentUserId={userId}
+                canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
                 activeThreadId={activeThreadId}
                 onOpenThread={setActiveThreadId}
                 onEdit={editComment}
@@ -436,6 +389,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           onDelete={deleteComment}
           onToggleReaction={toggleReaction}
           currentUserId={userId}
+          canModerate={canModerate} // CEREBRO-PATCH(channel-moderation-delete): TECH-3698
         />
       </div>
 
@@ -452,6 +406,18 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           onOpenChange={setEditOpen}
         />
       )}
+      {/* CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — consolidated settings. */}
+      <ChannelSettingsSheet
+        channel={channel}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        canManage={
+          canModerate ||
+          (channel.creator_type === "member" && channel.creator_id === userId)
+        }
+        onEditChannel={() => setEditOpen(true)}
+        onArchive={handleArchive}
+      />
     </div>
   );
 }

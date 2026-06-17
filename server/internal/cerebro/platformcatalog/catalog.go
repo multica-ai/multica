@@ -202,6 +202,17 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/share-tokens/{tokenId}",
 		},
 	},
+	{
+		Key:         "manage_issue_recurrence",
+		Title:       "Manage issue recurrence",
+		Category:    CategoryIssues,
+		Description: "Configure or remove an issue's recurrence (repeat schedule), or manually run a recurrence to spawn the next issue.",
+		Ops: []string{
+			"PUT /api/cerebro/issues/{issueID}/recurrence/",
+			"DELETE /api/cerebro/issues/{issueID}/recurrence/",
+			"POST /api/cerebro/issue-recurrences/{id}/run",
+		},
+	},
 
 	// --- Comments -------------------------------------------------------------
 	{
@@ -827,11 +838,12 @@ var catalog = []Capability{
 		Key:         "manage_channels",
 		Title:       "Manage channels",
 		Category:    CategoryChannels,
-		Description: "Create or archive a channel and set an agent's listen mode in it.",
+		Description: "Create or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
 		Ops: []string{
 			"POST /api/channels/",
 			"POST /api/channels/{id}/archive",
 			"DELETE /api/channels/{id}/archive",
+			"PUT /api/channels/{id}/permissions",
 			"PUT /api/channels/{id}/agents/{agentId}/listen-mode",
 		},
 	},

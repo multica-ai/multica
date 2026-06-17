@@ -84,6 +84,14 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(channel-perms-add): TECH-3698 — gate adding *other* participants to a channel by its add-members policy.
+	if issue.Kind == "channel" && h.ChannelPerms != nil &&
+		!(targetUserType == callerActorType && targetUserID == callerActorID) &&
+		!h.ChannelPerms.CanManageMembers(r.Context(), issue.ID, callerActorType, callerActorID) {
+		writeError(w, http.StatusForbidden, "you do not have permission to add participants to this channel")
+		return
+	}
+
 	err := h.Queries.AddIssueSubscriber(r.Context(), db.AddIssueSubscriberParams{
 		IssueID:  issue.ID,
 		UserType: targetUserType,
@@ -137,6 +145,19 @@ func (h *Handler) UnsubscribeFromIssue(w http.ResponseWriter, r *http.Request) {
 	if !h.isWorkspaceEntity(r.Context(), targetUserType, targetUserID, workspaceID) {
 		writeError(w, http.StatusForbidden, "target user is not a member of this workspace")
 		return
+	}
+
+	// CEREBRO-PATCH(channel-perms-remove): TECH-3698 — gate leaving (self) and removing others by channel policy.
+	if issue.Kind == "channel" && h.ChannelPerms != nil {
+		isSelf := targetUserType == callerActorType && targetUserID == callerActorID
+		allowed := h.ChannelPerms.CanManageMembers(r.Context(), issue.ID, callerActorType, callerActorID)
+		if isSelf {
+			allowed = h.ChannelPerms.CanSelfLeave(r.Context(), issue.ID, callerActorType, callerActorID)
+		}
+		if !allowed {
+			writeError(w, http.StatusForbidden, "you do not have permission to remove this participant")
+			return
+		}
 	}
 
 	err := h.Queries.RemoveIssueSubscriber(r.Context(), db.RemoveIssueSubscriberParams{

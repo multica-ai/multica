@@ -189,6 +189,6 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     projects,
     agentMap,
     toggleFavorite,
-    loading: inboxQuery.isLoading,
+    loading: inboxQuery.isLoading || (channelsEnabled && channelQuery.isLoading),
   };
 }

@@ -37,6 +37,15 @@ export interface Channel {
   updated_at: string;
 }
 
+// CEREBRO-PATCH(core-types-channel-perms): TECH-3698 — per-channel permission settings.
+export type ChannelRenamePolicy = "admins" | "everyone";
+export type ChannelAddMembersPolicy = "admins" | "everyone";
+export interface ChannelPermissions {
+  rename_policy: ChannelRenamePolicy;
+  add_members_policy: ChannelAddMembersPolicy;
+  allow_self_leave: boolean;
+}
+
 export interface CreateChannelRequest {
   kind: ChannelKind;
   name: string;
@@ -44,6 +53,10 @@ export interface CreateChannelRequest {
   project_id?: string | null;
   member_ids: string[];
   agent_ids: string[];
+  // CEREBRO-PATCH(core-types-channel-perms): TECH-3698 — creator-chosen settings (optional; server defaults when omitted).
+  rename_policy?: ChannelRenamePolicy;
+  add_members_policy?: ChannelAddMembersPolicy;
+  allow_self_leave?: boolean;
 }
 
 // CEREBRO-PATCH(core-types-channel-listen): JEH-699 — per (channel ×

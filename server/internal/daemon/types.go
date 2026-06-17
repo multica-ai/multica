@@ -52,19 +52,20 @@ type Task struct {
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 
-	WorkspaceContext      string                `json:"workspace_context,omitempty"`
-	Agent                 *AgentData            `json:"agent,omitempty"`
-	Repos                 []RepoData            `json:"repos,omitempty"`
-	ProjectID             string                `json:"project_id,omitempty"`              // issue's project, when present
-	ProjectTitle          string                `json:"project_title,omitempty"`           // human-readable project title for context injection
-	ProjectResources      []ProjectResourceData `json:"project_resources,omitempty"`       // project-scoped resources to expose to the agent
-	PriorSessionID        string                `json:"prior_session_id,omitempty"`        // Claude session ID from a previous task on this issue
-	PriorWorkDir          string                `json:"prior_work_dir,omitempty"`          // work_dir from a previous task on this issue
-	TriggerCommentID      string                `json:"trigger_comment_id,omitempty"`      // comment that triggered this task
-	TriggerThreadID       string                `json:"trigger_thread_id,omitempty"`       // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
-	TriggerCommentContent string                `json:"trigger_comment_content,omitempty"` // content of the triggering comment
-	TriggerAuthorType     string                `json:"trigger_author_type,omitempty"`     // "agent" or "member" — author kind for the triggering comment
-	TriggerAuthorName     string                `json:"trigger_author_name,omitempty"`     // display name of the triggering comment author
+	WorkspaceContext        string                `json:"workspace_context,omitempty"`
+	Agent                   *AgentData            `json:"agent,omitempty"`
+	Repos                   []RepoData            `json:"repos,omitempty"`
+	ProjectID               string                `json:"project_id,omitempty"`                 // issue's project, when present
+	ProjectTitle            string                `json:"project_title,omitempty"`              // human-readable project title for context injection
+	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`          // project-scoped resources to expose to the agent
+	PriorSessionID          string                `json:"prior_session_id,omitempty"`           // Claude session ID from a previous task on this issue
+	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`             // work_dir from a previous task on this issue
+	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`         // comment that triggered this task
+	TriggerThreadID         string                `json:"trigger_thread_id,omitempty"`          // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
+	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`    // content of the triggering comment
+	TriggerCommentCreatedAt string                `json:"trigger_comment_created_at,omitempty"` // RFC3339 timestamp for the triggering comment
+	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`        // "agent" or "member" — author kind for the triggering comment
+	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`        // display name of the triggering comment author
 	// CEREBRO-PATCH(wakeup-system-activity): daemon receives wakeup context separately from comments.
 	WakeupPrompt            string               `json:"wakeup_prompt,omitempty"`             // prompt stored on a platform wakeup task
 	WakeupTriggerType       string               `json:"wakeup_trigger_type,omitempty"`       // time, issue_status, or github_ci for wakeup tasks

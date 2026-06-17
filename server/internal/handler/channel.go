@@ -82,6 +82,11 @@ type CreateChannelRequest struct {
 	ProjectID   *string  `json:"project_id"`
 	MemberIDs   []string `json:"member_ids"`
 	AgentIDs    []string `json:"agent_ids"`
+	// CEREBRO-PATCH(channel-perms-create): TECH-3698 — creator-chosen channel
+	// settings; omitted/invalid values fall back to defaults server-side.
+	RenamePolicy     string `json:"rename_policy"`
+	AddMembersPolicy string `json:"add_members_policy"`
+	AllowSelfLeave   *bool  `json:"allow_self_leave"`
 }
 
 // CreateChannel handles POST /api/channels. It is idempotent for DMs:
@@ -243,6 +248,12 @@ func (h *Handler) CreateChannel(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create channel")
 		return
+	}
+
+	// CEREBRO-PATCH(channel-perms-create): TECH-3698 — persist creator-chosen channel settings (best-effort).
+	if req.Kind == ChannelKindChannel && h.ChannelPerms != nil {
+		allowLeave := req.AllowSelfLeave == nil || *req.AllowSelfLeave
+		_ = h.ChannelPerms.SetCreatePermissions(r.Context(), issue.ID, req.RenamePolicy, req.AddMembersPolicy, allowLeave)
 	}
 
 	resp := h.channelToResponse(r.Context(), issue, userID)

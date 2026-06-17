@@ -3999,11 +3999,12 @@ func createCommentTriggeredClaimTask(t *testing.T, ctx context.Context, agentID,
 
 type claimCommentTaskResp struct {
 	Task *struct {
-		ID               string `json:"id"`
-		PriorSessionID   string `json:"prior_session_id"`
-		TriggerCommentID string `json:"trigger_comment_id"`
-		NewCommentCount  int    `json:"new_comment_count"`
-		NewCommentsSince string `json:"new_comments_since"`
+		ID                      string `json:"id"`
+		PriorSessionID          string `json:"prior_session_id"`
+		TriggerCommentID        string `json:"trigger_comment_id"`
+		TriggerCommentCreatedAt string `json:"trigger_comment_created_at"`
+		NewCommentCount         int    `json:"new_comment_count"`
+		NewCommentsSince        string `json:"new_comments_since"`
 	} `json:"task"`
 }
 
@@ -4088,6 +4089,12 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	resp := claimCommentTask(t, runtimeID, "comment-newcount-claim")
 	if resp.Task.TriggerCommentID != triggerID {
 		t.Fatalf("trigger_comment_id = %s, want %s", resp.Task.TriggerCommentID, triggerID)
+	}
+	if resp.Task.TriggerCommentCreatedAt == "" {
+		t.Fatalf("trigger_comment_created_at must be populated for comment-triggered tasks")
+	}
+	if _, err := time.Parse(time.RFC3339, resp.Task.TriggerCommentCreatedAt); err != nil {
+		t.Fatalf("trigger_comment_created_at must be RFC3339, got %q: %v", resp.Task.TriggerCommentCreatedAt, err)
 	}
 	if resp.Task.NewCommentsSince == "" {
 		t.Errorf("new_comments_since must be set when a prior run exists, got empty")

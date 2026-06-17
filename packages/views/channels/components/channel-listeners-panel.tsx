@@ -102,7 +102,8 @@ interface ListenersListProps {
   defaultMode: ChannelAgentListenMode;
 }
 
-function ListenersList({ channelId, agents, defaultMode }: ListenersListProps) {
+// CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — exported so the consolidated channel settings sheet can reuse the agent listen-mode rows.
+export function ListenersList({ channelId, agents, defaultMode }: ListenersListProps) {
   const wsId = useWorkspaceId();
   const { data, isLoading } = useQuery(channelAgentSettingsOptions(wsId, channelId));
   const setListenMode = useSetChannelAgentListenMode(channelId);

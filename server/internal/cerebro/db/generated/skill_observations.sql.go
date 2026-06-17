@@ -11,6 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getCerebroSkillLearningFlagForWorkspace = `-- name: GetCerebroSkillLearningFlagForWorkspace :one
+SELECT enabled FROM cerebro_feature_flags
+WHERE workspace_id = $1
+  AND user_id = '00000000-0000-0000-0000-000000000000'
+  AND flag_key = 'cerebro_skill_learning'
+`
+
+// Workspace-level value of the cerebro_skill_learning feature flag. pgx.ErrNoRows
+// means the flag has never been set and the default (OFF) applies — the
+// learning sweeper treats that as "skip this workspace".
+func (q *Queries) GetCerebroSkillLearningFlagForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, getCerebroSkillLearningFlagForWorkspace, workspaceID)
+	var enabled bool
+	err := row.Scan(&enabled)
+	return enabled, err
+}
+
 const insertSkillObservation = `-- name: InsertSkillObservation :one
 
 INSERT INTO skill_observation

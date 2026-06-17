@@ -24,6 +24,9 @@ import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useCreateChannel } from "@multica/core/channels";
 import { useChannelFavoritesStore, actorKey } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — creator picks who may change what.
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { Switch } from "@multica/ui/components/ui/switch";
 // CEREBRO-PATCH(new-message-modal-mobile-keyboard-follow-import): FIR-2547.
 import { useMobileViewportHeight } from "@multica/cerebro-duplicate-check/views";
 import type { Channel } from "@multica/core/types";
@@ -71,6 +74,11 @@ export function NewMessageModal({
   const [selected, setSelected] = useState<Actor[]>([]);
   const [nameOverride, setNameOverride] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — creator-chosen settings (recommended defaults pre-selected).
+  const permissionsEnabled = useFeatureFlag("cerebro_channel_permissions");
+  const [renameAdminsOnly, setRenameAdminsOnly] = useState(true);
+  const [manageAdminsOnly, setManageAdminsOnly] = useState(false);
+  const [allowSelfLeave, setAllowSelfLeave] = useState(true);
 
   const createChannel = useCreateChannel();
   const favorites = useChannelFavoritesStore((s) => s.favorites);
@@ -148,6 +156,10 @@ export function NewMessageModal({
     setGroupMode(false);
     setNameOverride(null);
     setSubmitting(false);
+    // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — back to recommended defaults.
+    setRenameAdminsOnly(true);
+    setManageAdminsOnly(false);
+    setAllowSelfLeave(true);
   };
 
   const close = () => {
@@ -213,6 +225,14 @@ export function NewMessageModal({
         name: effectiveName.trim(),
         member_ids: selected.filter((s) => s.type === "member").map((s) => s.id),
         agent_ids: selected.filter((s) => s.type === "agent").map((s) => s.id),
+        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — persist creator-chosen settings.
+        ...(permissionsEnabled
+          ? {
+              rename_policy: renameAdminsOnly ? "admins" : "everyone",
+              add_members_policy: manageAdminsOnly ? "admins" : "everyone",
+              allow_self_leave: allowSelfLeave,
+            }
+          : {}),
       });
       onCreated?.(channel);
       close();
@@ -384,6 +404,32 @@ export function NewMessageModal({
                 aria-label="Channel name"
               />
             )}
+            {/* CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — who can change what (changeable later in settings). */}
+            {selected.length > 0 && permissionsEnabled && (
+              <div className="rounded-md border bg-muted/30 px-3 py-2">
+                <p className="pb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Who can change what
+                </p>
+                <CreatePermToggle
+                  id="create-perm-rename"
+                  label="Only admins & owners can rename"
+                  checked={renameAdminsOnly}
+                  onChange={setRenameAdminsOnly}
+                />
+                <CreatePermToggle
+                  id="create-perm-manage"
+                  label="Only admins & owners can add/remove people"
+                  checked={manageAdminsOnly}
+                  onChange={setManageAdminsOnly}
+                />
+                <CreatePermToggle
+                  id="create-perm-leave"
+                  label="Members can leave on their own"
+                  checked={allowSelfLeave}
+                  onChange={setAllowSelfLeave}
+                />
+              </div>
+            )}
             <div className="flex justify-end">
               <Button
                 size="sm"
@@ -461,7 +507,13 @@ function PickerRow({
             {selected && "✓"}
           </span>
         )}
-        <ActorAvatar actorType={actor.type} actorId={actor.id} size={24} />
+        <ActorAvatar
+          actorType={actor.type}
+          actorId={actor.id}
+          size={24}
+          // CEREBRO-PATCH(agent-status-dots): show runtime presence for agents in Cerebro picker rows.
+          showStatusDot={actor.type === "agent"}
+        />
         <span className="truncate flex-1">{actor.name}</span>
         {actor.locked && (
           <Lock className="size-3 shrink-0 text-muted-foreground" />
@@ -482,6 +534,28 @@ function PickerRow({
       >
         <Star className="size-4" fill={favorite ? "currentColor" : "none"} />
       </button>
+    </div>
+  );
+}
+
+// CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — compact labelled switch for the create-channel permission picker.
+function CreatePermToggle({
+  id,
+  label,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1">
+      <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer text-xs">
+        {label}
+      </label>
+      <Switch id={id} checked={checked} onCheckedChange={onChange} />
     </div>
   );
 }

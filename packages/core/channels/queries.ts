@@ -8,6 +8,9 @@ export const channelKeys = {
     [...channelKeys.all(wsId), "detail", id] as const,
   agentSettings: (wsId: string, id: string) =>
     [...channelKeys.all(wsId), "agent-settings", id] as const,
+  // CEREBRO-PATCH(core-channels-perms-key): TECH-3698 — per-channel permission settings.
+  permissions: (wsId: string, id: string) =>
+    [...channelKeys.all(wsId), "permissions", id] as const,
 };
 
 export function channelListOptions(wsId: string) {
@@ -35,6 +38,18 @@ export function channelAgentSettingsOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: channelKeys.agentSettings(wsId, id),
     queryFn: () => api.listChannelAgentSettings(id),
+    enabled: !!id,
+    staleTime: Infinity,
+  });
+}
+
+// CEREBRO-PATCH(core-channels-perms-q): TECH-3698 — per-channel permission
+// settings (rename / add-remove members / leave). Server returns effective
+// settings (defaults when no row exists), so the client never needs to fill.
+export function channelPermissionsOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: channelKeys.permissions(wsId, id),
+    queryFn: () => api.getChannelPermissions(id),
     enabled: !!id,
     staleTime: Infinity,
   });

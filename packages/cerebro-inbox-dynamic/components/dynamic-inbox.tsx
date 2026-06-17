@@ -78,7 +78,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
-import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey } from "../message-link";
+import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam } from "../message-link";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
   SECTION_CATALOG,
@@ -483,17 +483,15 @@ export function DynamicInbox() {
       }
       return;
     }
-    const entry = entries.find(
-      (e) =>
-        (e.kind === "channel" && e.id === urlIssue) ||
-        (e.kind === "notif" && (e.item.issue_id ?? e.item.id) === urlIssue),
-    );
+    const entry = findEntryByInboxIssueParam(entries, urlIssue, {
+      deferIssueNotifications: loading,
+    });
     if (entry) {
       onSelect(entry);
       consume();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlChat, urlIssue, urlAgent, entries, replace, replaceSilent, paths]);
+  }, [urlChat, urlIssue, urlAgent, entries, loading, replace, replaceSilent, paths]);
 
   // TECH-3708 — per-message deep links. The inbox owns selection in local
   // state, so `?message=<key>` is what makes the open message linkable: opening
@@ -515,13 +513,14 @@ export function DynamicInbox() {
       return;
     }
     if (appliedMessageRef.current === urlMessage) return;
+    if (loading) return;
     const entry = findEntryByMessageKey(entries, urlMessage);
     if (entry) {
       appliedMessageRef.current = urlMessage;
       onSelect(entry);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlMessage, entries, selected]);
+  }, [urlMessage, entries, selected, loading]);
 
   // Keep the URL in sync with the open message so the browser address bar (and
   // the Copy link button) always reflects what is showing. `replaceSilent`
@@ -803,9 +802,14 @@ export function DynamicInbox() {
     <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
       <Search className="size-3.5 flex-none text-muted-foreground" />
       <input
-        type="text"
+        type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        role="searchbox"
+        aria-label="Search inbox"
         placeholder="Search inbox…"
         className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
       />

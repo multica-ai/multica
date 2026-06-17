@@ -31,9 +31,9 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID            string  `json:"id"`
+	ID string `json:"id"`
 
-	Kind          string  `json:"kind"`
+	Kind string `json:"kind"`
 
 	WorkspaceID   string  `json:"workspace_id"`
 	Number        int32   `json:"number"`
@@ -54,7 +54,7 @@ type IssueResponse struct {
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
 
-	IsPrivate     bool    `json:"is_private"`
+	IsPrivate bool `json:"is_private"`
 
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
@@ -164,13 +164,13 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
 
-		StartDate:     dateToPtr(i.StartDate),
-		DueDate:       dateToPtr(i.DueDate),
-		IsPrivate:     i.IsPrivate,
+		StartDate: dateToPtr(i.StartDate),
+		DueDate:   dateToPtr(i.DueDate),
+		IsPrivate: i.IsPrivate,
 
-		CreatedAt:     timestampToString(i.CreatedAt),
-		UpdatedAt:     timestampToString(i.UpdatedAt),
-		Metadata:      parseIssueMetadata(i.Metadata),
+		CreatedAt: timestampToString(i.CreatedAt),
+		UpdatedAt: timestampToString(i.UpdatedAt),
+		Metadata:  parseIssueMetadata(i.Metadata),
 	}
 }
 
@@ -2259,7 +2259,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		originID = oid
 	}
 
-
 	// CEREBRO-PATCH(issue-origin-agent-task): MUL-2553 — stamp agent-created issues
 	// with origin_type='agent_task' so the subscriber listener can resolve the
 	// triggering human via agent_task_queue.original_user_id and keep them in the inbox.
@@ -2415,7 +2414,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	writeJSON(w, http.StatusCreated, resp)
@@ -2482,6 +2480,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// COALESCE fields — only set when explicitly provided
 	if req.Title != nil {
+		// CEREBRO-PATCH(channel-perms-rename): TECH-3698 — enforce per-channel rename policy.
+		if prevIssue.Kind == "channel" && h.ChannelPerms != nil {
+			ct, cid := h.resolveActor(r, userID, workspaceID)
+			if !h.ChannelPerms.CanRenameChannel(r.Context(), prevIssue.ID, ct, cid) {
+				writeError(w, http.StatusForbidden, "you do not have permission to rename this channel")
+				return
+			}
+		}
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
 	}
 	if req.Description != nil {

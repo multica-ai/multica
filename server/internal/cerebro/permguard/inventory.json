@@ -33,6 +33,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/issues/{issueID}/recurrence/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/issues/{issueId}/custom-status/",
       "gate": "workspace_member"
     },
@@ -511,6 +515,10 @@
     {
       "id": "POST /api/cerebro/github/pull-requests",
       "exempt": "pre-auth service-to-service \u2014 CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push before any user JWT exists (FIR-2568)"
+    },
+    {
+      "id": "POST /api/cerebro/issue-recurrences/{id}/run",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/cerebro/issues/check-similar",
@@ -1305,6 +1313,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/cerebro/issues/{issueID}/recurrence/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/issues/{issueID}/sprint/",
       "gate": "via:PUT /api/cerebro/issues/{issueID}/sprint/"
     },
@@ -1350,6 +1362,10 @@
     },
     {
       "id": "PUT /api/channels/{id}/agents/{agentId}/listen-mode",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/channels/{id}/permissions",
       "gate": "workspace_member"
     },
     {

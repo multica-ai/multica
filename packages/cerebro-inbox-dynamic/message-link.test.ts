@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { InboxItem, Channel } from "@multica/core/types";
-import { messageKeyForEntry, findEntryByMessageKey } from "./message-link";
+import { messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam } from "./message-link";
 import type { DynInboxEntry } from "./section-filter";
 
 function notifEntry(id: string, over: Partial<InboxItem> = {}): DynInboxEntry {
@@ -66,5 +66,23 @@ describe("findEntryByMessageKey", () => {
     expect(findEntryByMessageKey(entries, "chat:")).toBeNull();
     expect(findEntryByMessageKey(entries, "garbage")).toBeNull();
     expect(findEntryByMessageKey(entries, "")).toBeNull();
+  });
+});
+
+describe("findEntryByInboxIssueParam", () => {
+  it("prefers the channel row over a notification with the same issue id", () => {
+    const channel = channelEntry("chan-1");
+    const notif = notifEntry("item-1", { issue_id: "chan-1" });
+
+    expect(findEntryByInboxIssueParam([notif, channel], "chan-1")).toBe(channel);
+  });
+
+  it("defers notification matches while channel data is still loading", () => {
+    const notif = notifEntry("item-1", { issue_id: "chan-1" });
+
+    expect(
+      findEntryByInboxIssueParam([notif], "chan-1", { deferIssueNotifications: true }),
+    ).toBeNull();
+    expect(findEntryByInboxIssueParam([notif], "chan-1")).toBe(notif);
   });
 });

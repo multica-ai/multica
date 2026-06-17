@@ -234,7 +234,12 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
                 size={AVATAR_SIZE}
               />
             ) : item.kind === "agent" ? (
-              <ActorAvatar type="agent" id={item.agent.id} size={AVATAR_SIZE} />
+              <ActorAvatar
+                type="agent"
+                id={item.agent.id}
+                size={AVATAR_SIZE}
+                showPresence
+              />
             ) : item.kind === "squad" ? (
               <ActorAvatar type="squad" id={item.squad.id} size={AVATAR_SIZE} />
             ) : (

@@ -181,8 +181,17 @@ vi.mock("@multica/ui/components/ui/button", () => ({
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
-  ActorAvatar: ({ actorId }: { actorId: string }) => (
-    <span data-testid={`avatar-${actorId}`} />
+  ActorAvatar: ({
+    actorId,
+    showStatusDot,
+  }: {
+    actorId: string;
+    showStatusDot?: boolean;
+  }) => (
+    <span
+      data-testid={`avatar-${actorId}`}
+      data-status-dot={showStatusDot ? "true" : "false"}
+    />
   ),
 }));
 
@@ -243,6 +252,19 @@ describe("NewMessageModal", () => {
     // No agent/member section labels — only "Everyone" / "Favorites".
     expect(screen.queryByText("People")).not.toBeInTheDocument();
     expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+  });
+
+  it("shows presence status dots on agent rows", () => {
+    render(<NewMessageModal open onClose={() => {}} />);
+
+    expect(screen.getByTestId("avatar-a1")).toHaveAttribute(
+      "data-status-dot",
+      "true",
+    );
+    expect(screen.getByTestId("avatar-alice")).toHaveAttribute(
+      "data-status-dot",
+      "false",
+    );
   });
 
   it("tapping a member immediately creates a DM (no extra confirm step)", async () => {
@@ -319,6 +341,10 @@ describe("NewMessageModal", () => {
         name: "Alice, Mads",
         member_ids: ["alice", "mads"],
         agent_ids: [],
+        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
+        rename_policy: "admins",
+        add_members_policy: "everyone",
+        allow_self_leave: true,
       });
     });
   });
@@ -364,6 +390,10 @@ describe("NewMessageModal", () => {
         name: "Alice, Reviewer",
         member_ids: ["alice"],
         agent_ids: ["a1"],
+        // CEREBRO-PATCH(channel-perms-create-ui): TECH-3698 — recommended defaults sent at creation.
+        rename_policy: "admins",
+        add_members_policy: "everyone",
+        allow_self_leave: true,
       });
     });
   });
