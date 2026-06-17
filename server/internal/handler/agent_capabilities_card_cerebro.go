@@ -39,6 +39,7 @@ const (
 	capSourceConnection        = "connection"
 	capSourceConnectionTool    = "connection-tool"
 	capSourceConnectionEndpnt  = "connection-endpoint"
+	capSourceScan              = "scan"
 	capConnectionToolKeyPrefix = "connection:"
 )
 
@@ -187,15 +188,17 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// MAY — every permission row resolved for this agent, split into tools,
-	// repos, and per-connection-tool verdicts (one tool-policy table read).
+	// repos, per-connection-tool verdicts, and the scanned MCP tools grouped
+	// under the connection that exposes them (one tool-policy table read).
 	rows := h.agentCapabilityRows(r, agent.WorkspaceID, agent.ID)
-	tools, repos, connPerms := classifyCapabilityRows(rows)
+	conns := h.listCapabilityConnections(r, agent.WorkspaceID)
+	tools, repos, connPerms, connTools := classifyCapabilityRows(rows, connectionNameSet(conns))
 	out.Tools = tools
 	out.Repos = repos
 
 	// CONNECTIONS — all workspace connections + endpoints/tools, each tool
 	// stamped with its effective permission from the rows above.
-	out.Connections = h.agentCapabilityConnections(r, agent.WorkspaceID, connPerms)
+	out.Connections = buildAgentCapabilityConnections(conns, connPerms, connTools)
 
 	// ACCESS — explicit credential bindings (names/types only, never values).
 	if h.CerebroQueries != nil {
@@ -252,18 +255,30 @@ func (h *Handler) agentCapabilityRows(r *http.Request, workspaceID, agentID pgty
 }
 
 // classifyCapabilityRows splits the flat tool-policy table into the card's
-// sections: general tools, per-repo permission groups, and a lookup of
-// connection-tool verdicts keyed by connection name then tool name. Connection
-// capability-wide and endpoint rows are dropped here because connections render
-// structurally from the connections store. Pure function — unit-tested.
-func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow) (
+// sections: general tools, per-repo permission groups, a lookup of
+// connection-tool verdicts (keyed by connection name then tool name), and the
+// scanned MCP tools grouped under the connection that exposes them (keyed by
+// connection name). Connection capability-wide and endpoint rows are dropped
+// here because connections render structurally from the connections store.
+//
+// connectionNames is the set of workspace connection names. A scanned tool row
+// (source 'scan') whose Category matches a connection name is a tool that
+// connection exposes — the scan→capability bridge stamps Category = MCP server
+// name = connection name, capability_key = "<conn>.<tool>", and Title = the bare
+// tool name. Those rows are routed under the connection instead of the flat
+// Tools list so each connection shows its own tools. Scanned tools whose
+// Category is not a connection (an mcp_config server the workspace never
+// registered as a connection) stay in the flat list. Pure function — unit-tested.
+func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow, connectionNames map[string]bool) (
 	tools []AgentCapabilityTool,
 	repos []AgentCapabilityRepo,
 	connPerms map[string]map[string]string,
+	connTools map[string][]AgentCapabilityTool,
 ) {
 	tools = []AgentCapabilityTool{}
 	repos = []AgentCapabilityRepo{}
 	connPerms = map[string]map[string]string{}
+	connTools = map[string][]AgentCapabilityTool{}
 
 	repoIndex := map[string]int{} // repo URL -> index into repos (preserves order)
 
@@ -287,10 +302,16 @@ func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow) (
 		case capSourceConnection, capSourceConnectionEndpnt:
 			// Rendered structurally from the connections store; skip here.
 		default:
+			// CEREBRO-PATCH(agent-capabilities-card-connection-nesting): TECH-3642
+			// nest a connection's scanned MCP tools under it instead of the flat list.
+			if row.Source == capSourceScan && connectionNames[row.Category] {
+				connTools[row.Category] = append(connTools[row.Category], capabilityToolFromRow(row))
+				continue
+			}
 			tools = append(tools, capabilityToolFromRow(row))
 		}
 	}
-	return tools, repos, connPerms
+	return tools, repos, connPerms, connTools
 }
 
 func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
@@ -314,19 +335,42 @@ func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 	return t
 }
 
-// agentCapabilityConnections lists ALL workspace connections (enabled and
-// disabled) with the endpoints/tools each exposes, stamping each MCP tool with
-// the agent's effective permission from connPerms. Auth secrets are dropped.
-// Returns an empty slice (never nil) on any error so the card renders.
-func (h *Handler) agentCapabilityConnections(r *http.Request, workspaceID pgtype.UUID, connPerms map[string]map[string]string) []AgentCapabilityConnection {
-	out := []AgentCapabilityConnection{}
+// listCapabilityConnections returns ALL workspace connections (enabled and
+// disabled) via the connections read seam. Returns nil on any error (or an unset
+// seam) so the card still renders.
+func (h *Handler) listCapabilityConnections(r *http.Request, workspaceID pgtype.UUID) []cerebroconnections.Connection {
 	if h.CapabilityConnections == nil {
-		return out
+		return nil
 	}
 	conns, err := h.CapabilityConnections.List(r.Context(), workspaceID)
 	if err != nil {
-		return out
+		return nil
 	}
+	return conns
+}
+
+// connectionNameSet collapses the connection list to the set of connection
+// names, used to recognise which scanned tools belong to a connection.
+func connectionNameSet(conns []cerebroconnections.Connection) map[string]bool {
+	out := make(map[string]bool, len(conns))
+	for _, c := range conns {
+		if c.Name != "" {
+			out[c.Name] = true
+		}
+	}
+	return out
+}
+
+// buildAgentCapabilityConnections turns the workspace connection list into the
+// card's connection section: each connection with the endpoints/tools it exposes,
+// each MCP tool stamped with the agent's effective permission. The tool list for
+// an MCP connection comes from the live scan inventory grouped in connTools (the
+// scan→capability bridge keys those tools under the connection name); it falls
+// back to the connection's persisted tools/list — which only a manual "Test
+// connection" populates — when no scanned rows exist. Auth secrets are never
+// read here. Returns an empty slice (never nil) so the card renders.
+func buildAgentCapabilityConnections(conns []cerebroconnections.Connection, connPerms map[string]map[string]string, connTools map[string][]AgentCapabilityTool) []AgentCapabilityConnection {
+	out := []AgentCapabilityConnection{}
 	for _, c := range conns {
 		entry := AgentCapabilityConnection{
 			Name:        c.Name,
@@ -336,12 +380,29 @@ func (h *Handler) agentCapabilityConnections(r *http.Request, workspaceID pgtype
 			Internal:    c.Internal,
 			Enabled:     c.Enabled,
 		}
-		for _, t := range c.Tools {
-			entry.Tools = append(entry.Tools, AgentCapabilityConnTool{
-				Name:        t.Name,
-				Description: t.Description,
-				Permission:  connPerms[c.Name][t.Name],
-			})
+		if scanned := connTools[c.Name]; len(scanned) > 0 {
+			for _, t := range scanned {
+				name := t.Title
+				if name == "" {
+					name = t.Key
+				}
+				perm := t.Permission
+				if p, ok := connPerms[c.Name][name]; ok && p != "" {
+					perm = p
+				}
+				entry.Tools = append(entry.Tools, AgentCapabilityConnTool{
+					Name:       name,
+					Permission: perm,
+				})
+			}
+		} else {
+			for _, t := range c.Tools {
+				entry.Tools = append(entry.Tools, AgentCapabilityConnTool{
+					Name:        t.Name,
+					Description: t.Description,
+					Permission:  connPerms[c.Name][t.Name],
+				})
+			}
 		}
 		for _, ep := range c.EndpointPermissions {
 			entry.Endpoints = append(entry.Endpoints, AgentCapabilityConnEndpoint{Path: ep.Path, Methods: ep.Methods})
