@@ -745,11 +745,16 @@ func callGateway(ctx context.Context, client *http.Client, cfg gatewayConfig, pr
 		client = http.DefaultClient
 	}
 	body := map[string]any{
-		"model":         cfg.model,
-		"prompt":        prompt,
-		"n":             1,
-		"size":          "1024x1024",
-		"output_format": "b64_json",
+		"model":  cfg.model,
+		"prompt": prompt,
+		"n":      1,
+		"size":   "1024x1024",
+		// output_format is the encoding of the returned image file (png/jpeg/webp),
+		// NOT the response envelope. gpt-image-1 always returns the image as base64
+		// in data[].b64_json regardless. The earlier "b64_json" here was the dall-e
+		// response_format value and is an invalid output_format enum for gpt-image-1,
+		// so OpenAI rejected every request with HTTP 400 ("image generation failed").
+		"output_format": "png",
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

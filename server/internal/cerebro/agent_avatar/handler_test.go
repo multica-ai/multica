@@ -251,7 +251,7 @@ func TestCallGatewayPostsToDataRegistryAndDecodesImage(t *testing.T) {
 		if body["prompt"] != "make an avatar" {
 			t.Fatalf("prompt = %v", body["prompt"])
 		}
-		if body["output_format"] != "b64_json" {
+		if body["output_format"] != "png" {
 			t.Fatalf("output_format = %v", body["output_format"])
 		}
 
