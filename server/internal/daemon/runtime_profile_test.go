@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -168,7 +169,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// Custom-only host: no built-in agents configured.
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	resp, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -201,7 +202,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 
 // TestRegisterRuntimes_SkipsProfileNotOnPath verifies a profile whose command
 // is missing on this host is skipped, and that a host with no built-in agents
-// and no resolvable profiles fails registration (len==0 guard preserved).
+// and no resolvable profiles fails registration with the documented sentinel
+// (the drift-refresh path keys off ErrNoRuntimesToRegister to take the
+// convergence-to-zero branch instead of treating it as a hard error).
 func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{}) // nothing resolves
@@ -218,9 +221,12 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
-	if err == nil {
-		t.Fatalf("expected error when no runtimes resolve, got nil")
+	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	if !errors.Is(err, ErrNoRuntimesToRegister) {
+		t.Fatalf("expected ErrNoRuntimesToRegister, got %v", err)
+	}
+	if sig == "" {
+		t.Errorf("profileSig must still be returned even when registration short-circuits, so the drift path can cache the converged-empty signature")
 	}
 	if _, ok := d.profileCommandPaths["prof-1"]; ok {
 		t.Errorf("profileCommandPaths should not record an unresolved profile")
@@ -238,7 +244,7 @@ func TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort(t *testing.T) {
 	// Built-in agent present so registration has something to register.
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registration should succeed despite profiles 404: %v", err)
 	}
@@ -273,7 +279,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/custom/company-codex"}
 
-	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
@@ -307,7 +313,7 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/stale/company-codex"}
 
-	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
