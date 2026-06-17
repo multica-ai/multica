@@ -498,8 +498,8 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
-              {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint. */}
-              <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" />
+              {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint; PillButton trigger matches the sibling chips. */}
+              <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" triggerRender={<PillButton />} />
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field
