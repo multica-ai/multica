@@ -27,6 +27,7 @@ import {
   Plus,
   MessageSquare,
   MessageSquareReply,
+  MessagesSquare,
   Square,
   Terminal,
   Tag,
@@ -768,16 +769,25 @@ function ActivityBlock({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
               {isReferencedBy ? (
-                <span className="truncate">
-                  {"referenced by "}
-                  <AppLink
-                    href={paths.issueDetail(details.source_issue_id ?? "")}
-                    className="font-medium text-foreground hover:underline"
-                  >
-                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
-                  </AppLink>
-                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
-                </span>
+                details.source_type === "channel_message" ? (
+                  <span className="truncate">
+                    {"mentioned in channel "}
+                    <span className="font-medium text-foreground">
+                      {details.source_channel_name || "channel"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {"referenced by "}
+                    <AppLink
+                      href={paths.issueDetail(details.source_issue_id ?? "")}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                    </AppLink>
+                    {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                  </span>
+                )
               ) : (
                 <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
               )}
@@ -2653,6 +2663,13 @@ export function IssueDetail({
                 );
               })()}
             </AppLink>
+          )}
+
+          {issue.source_channel_id && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5" />
+              <span>来自频道讨论</span>
+            </div>
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">

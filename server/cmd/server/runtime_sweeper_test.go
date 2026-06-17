@@ -11,6 +11,23 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestRunningTimeoutSecondsUsesEnvOverride(t *testing.T) {
+	t.Setenv("MULTICA_RUNNING_TIMEOUT", "")
+	if got, want := runningTimeoutSeconds(), 8*60*60.0; got != want {
+		t.Fatalf("default running timeout = %v, want %v", got, want)
+	}
+
+	t.Setenv("MULTICA_RUNNING_TIMEOUT", "12h")
+	if got, want := runningTimeoutSeconds(), 12*60*60.0; got != want {
+		t.Fatalf("env running timeout = %v, want %v", got, want)
+	}
+
+	t.Setenv("MULTICA_RUNNING_TIMEOUT", "0")
+	if got, want := runningTimeoutSeconds(), 8*60*60.0; got != want {
+		t.Fatalf("invalid env running timeout = %v, want default %v", got, want)
+	}
+}
+
 // setupSweeperTestFixture creates an issue and a task in the given status with
 // timestamps old enough to trigger the sweeper. Returns (issueID, agentID, taskID).
 func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, string) {

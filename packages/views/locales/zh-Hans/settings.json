@@ -172,7 +172,9 @@
   "labs": {
     "section_placeholder_title": "暂无实验",
     "section_placeholder_description": "实验性功能上线后会出现在这里。当前实验室页面是空的。",
-    "toast_failed": "更新设置失败"
+    "toast_failed": "更新设置失败",
+    "channels_title": "Channel 频道",
+    "channels_description": "开启后在侧栏显示 Channel 入口，体验频道式人机协作。"
   },
   "integrations": {
     "section_title": "集成",

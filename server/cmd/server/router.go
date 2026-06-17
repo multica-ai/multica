@@ -831,6 +831,54 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Channels (lightweight human+agent collaboration — OPE-1943)
+			r.Route("/api/channels", func(r chi.Router) {
+				r.Get("/", h.ListChannels)
+				r.Post("/", h.CreateChannel)
+				r.Route("/groups", func(r chi.Router) {
+					r.Get("/", h.ListChannelGroups)
+					r.Post("/", h.CreateChannelGroup)
+					r.Route("/{groupId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelGroup)
+						r.Delete("/", h.DeleteChannelGroup)
+						r.Patch("/position", h.UpdateChannelGroupPosition)
+					})
+				})
+				r.Patch("/move", h.MoveChannelToGroup)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetChannel)
+					r.Patch("/", h.UpdateChannel)
+					r.Delete("/", h.DeleteChannel)
+					r.Post("/read", h.MarkChannelRead)
+					r.Get("/members", h.ListChannelMembers)
+					r.Post("/members", h.AddChannelMember)
+					r.Delete("/members/{userId}", h.RemoveChannelMember)
+					r.Post("/join", h.JoinChannel)
+					r.Post("/leave", h.LeaveChannel)
+					r.Get("/context", h.GetChannelContext)
+					// V2 flat messages
+					r.Get("/messages", h.ListChannelMessages)
+					r.Post("/messages", h.SendChannelMessage)
+					r.Route("/messages/{msgId}", func(r chi.Router) {
+						r.Patch("/", h.UpdateChannelMessage)
+						r.Delete("/", h.DeleteChannelMessage)
+						r.Post("/reply", h.ReplyToMessage)
+						r.Get("/thread", h.GetMessageThread)
+						r.Post("/convert-issue", h.ConvertMessageToIssue)
+					})
+					// V1 threads (backward compat)
+					r.Get("/threads", h.ListChannelThreads)
+					r.Post("/threads", h.CreateChannelThread)
+					r.Route("/threads/{threadId}", func(r chi.Router) {
+						r.Get("/", h.GetChannelThreadByID)
+						r.Patch("/", h.UpdateChannelThread)
+						r.Get("/messages", h.ListThreadMessages)
+						r.Post("/messages", h.CreateChannelMessage)
+						r.Delete("/", h.DeleteChannelThread)
+					})
+				})
+			})
+
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
 				r.Get("/", h.ListSquads)

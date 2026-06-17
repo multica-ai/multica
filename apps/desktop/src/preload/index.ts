@@ -109,12 +109,14 @@ const desktopAPI = {
    * all round-tripped on click: slug pins routing to the source workspace
    * (the user may switch workspaces before clicking the banner), itemId
    * lets the renderer mark the row read, issueKey maps to the inbox URL
-   * param.
+   * param. `targetPath` optionally bypasses the inbox and opens a precise
+   * workspace-scoped destination such as a channel message.
    */
   showNotification: (payload: {
     slug: string;
     itemId: string;
     issueKey: string;
+    targetPath?: string;
     title: string;
     body: string;
   }) => ipcRenderer.send("notification:show", payload),
@@ -127,19 +129,20 @@ const desktopAPI = {
   /**
    * Subscribe to "open this inbox row" requests sent by the main process
    * when the user clicks an OS notification banner. Returns an unsubscribe
-   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
-   * were passed to `showNotification`.
+   * function. The payload echoes the values that were passed to
+   * `showNotification`.
    */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
       issueKey: string;
+      targetPath?: string;
     }) => void,
   ) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      payload: { slug: string; itemId: string; issueKey: string },
+      payload: { slug: string; itemId: string; issueKey: string; targetPath?: string },
     ) => callback(payload);
     ipcRenderer.on("inbox:open", handler);
     return () => {

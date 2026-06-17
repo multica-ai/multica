@@ -1458,6 +1458,86 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if task.ChannelID.Valid {
+		resp.ChannelID = uuidToString(task.ChannelID)
+		resp.ChannelMessageID = uuidToString(task.ChannelMessageID)
+		resp.ChannelThreadID = uuidToString(task.ChannelThreadID)
+		resp.ChannelReplyToID = uuidToString(task.ChannelReplyToID)
+		var chCtx service.ChannelMentionContext
+		if task.Context != nil {
+			_ = json.Unmarshal(task.Context, &chCtx)
+		}
+		if chCtx.Type == service.ChannelMentionContextType {
+			resp.WorkspaceID = chCtx.WorkspaceID
+			resp.ChannelName = chCtx.ChannelName
+			resp.ChannelTriggerContent = chCtx.TriggerContent
+			resp.ChannelMentionType = chCtx.MentionType
+			resp.ChannelThreadRootMsgID = chCtx.ThreadRootMessageID
+		}
+		if resp.WorkspaceID == "" || resp.ChannelName == "" {
+			workspaceID := parseUUID(resp.WorkspaceID)
+			if !workspaceID.Valid && task.ChannelMessageID.Valid {
+				if msg, err := h.Queries.GetChannelMessage(r.Context(), task.ChannelMessageID); err == nil {
+					workspaceID = msg.WorkspaceID
+					if resp.WorkspaceID == "" {
+						resp.WorkspaceID = uuidToString(msg.WorkspaceID)
+					}
+					if resp.ChannelTriggerContent == "" {
+						resp.ChannelTriggerContent = msg.Content
+					}
+				}
+			}
+			if workspaceID.Valid {
+				if channel, err := h.Queries.GetChannel(r.Context(), db.GetChannelParams{ID: task.ChannelID, WorkspaceID: workspaceID}); err == nil {
+					if resp.ChannelName == "" {
+						resp.ChannelName = channel.Name
+					}
+					if resp.WorkspaceID == "" {
+						resp.WorkspaceID = uuidToString(channel.WorkspaceID)
+					}
+				}
+			}
+		}
+		if resp.WorkspaceID != "" && len(resp.Repos) == 0 {
+			if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil && ws.Repos != nil {
+				var repos []RepoData
+				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
+					resp.Repos = repos
+				}
+			}
+		}
+		if resp.Agent != nil && chCtx.SquadID != "" {
+			if wsUUID, wsErr := util.ParseUUID(resp.WorkspaceID); wsErr == nil {
+				if squadUUID, sqErr := util.ParseUUID(chCtx.SquadID); sqErr == nil {
+					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+						ID:          squadUUID,
+						WorkspaceID: wsUUID,
+					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+						h.appendSquadLeaderBriefing(r.Context(), &resp, squad, "channel-mention")
+					}
+				}
+			}
+		}
+		if !task.ForceFreshSession {
+			// Scope resume to the message's context lane: the channel main
+			// timeline (ChannelThreadID invalid → NULL) is the parent lane,
+			// each thread its own child lane. Two unrelated threads never
+			// inherit each other's session/workdir.
+			if prior, err := h.Queries.GetLastChannelTaskSession(r.Context(), db.GetLastChannelTaskSessionParams{
+				AgentID:         task.AgentID,
+				ChannelID:       task.ChannelID,
+				ChannelThreadID: task.ChannelThreadID,
+			}); err == nil && prior.SessionID.Valid {
+				if prior.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = prior.SessionID.String
+				}
+				if prior.WorkDir.Valid {
+					resp.PriorWorkDir = prior.WorkDir.String
+				}
+			}
+		}
+	}
+
 	// Autopilot run_only task: resolve workspace from autopilot_run →
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.

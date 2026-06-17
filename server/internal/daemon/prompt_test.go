@@ -249,6 +249,104 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChannelMentionPromptUsesChannelContextNotIssueWorkflow(t *testing.T) {
+	out := BuildPromptWithRunMode(Task{
+		WorkspaceID:                      "ws-1",
+		ChannelID:                        "channel-1",
+		ChannelName:                      "release",
+		ChannelMessageID:                 "message-1",
+		ChannelTriggerContent:            "please inspect this",
+		ChannelMentionType:               "agent",
+		RequestingUserName:               "Guodage",
+		PriorSessionID:                   "prior-session",
+		PriorWorkDir:                     "/tmp/prior-workdir",
+		IssueID:                          "issue-should-not-drive-prompt",
+		TriggerCommentID:                 "comment-should-not-drive-prompt",
+		TriggerCommentContent:            "comment should be ignored",
+		TriggerAuthorType:                "member",
+		TriggerAuthorName:                "Member",
+		NewCommentCount:                  3,
+		NewCommentsSince:                 "2026-06-03T00:00:00Z",
+		ChatSessionID:                    "",
+		ChannelThreadID:                  "thread-1",
+		ChannelReplyToID:                 "reply-parent-1",
+		QuickCreatePrompt:                "",
+		RequestingUserProfileDescription: "prefers direct replies",
+	}, "normal")
+
+	mustContain := []string{
+		"Channel message mention",
+		"Channel ID: channel-1",
+		"Channel name: release",
+		"Triggering message ID: message-1",
+		"multica channel context channel-1 --message message-1 --include-replies --recent 20 --output json",
+		// No thread root → the agent must default to replying to the
+		// triggering message (IDs filled in), NOT to a top-level send.
+		"multica channel message reply channel-1 message-1",
+		"multica channel message send channel-1",
+		"Prior session available",
+		"Guodage",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("channel prompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	mustNotContain := []string{
+		"Your assigned issue ID",
+		"multica issue get",
+		"multica issue metadata list",
+		"multica issue comment list",
+		"multica issue status",
+		"multica issue comment add",
+		"Issue Metadata",
+		"triggering comment",
+		// The no-thread-root branch must NOT push the agent to post a
+		// top-level message as the default result carrier — that lands the
+		// reply in the main channel feed instead of the triggering message's
+		// reply area.
+		"default to a top-level channel message",
+	}
+	for _, s := range mustNotContain {
+		if strings.Contains(out, s) {
+			t.Errorf("channel prompt must not include issue workflow text %q\n--- output ---\n%s", s, out)
+		}
+	}
+}
+
+// When the triggering message lives in a thread (e.g. the user @-mentioned the
+// agent from the replies panel), the prompt must steer the agent to reply back
+// into that same thread via the thread root message, NOT default to a top-level
+// channel message. Otherwise the agent's answer lands in the main channel feed
+// instead of the reply thread the user was reading.
+func TestBuildChannelMentionPromptThreadReplyTargetsThreadRoot(t *testing.T) {
+	out := BuildPromptWithRunMode(Task{
+		WorkspaceID:            "ws-1",
+		ChannelID:              "channel-1",
+		ChannelName:            "release",
+		ChannelMessageID:       "message-1",
+		ChannelTriggerContent:  "please inspect this",
+		ChannelMentionType:     "agent",
+		ChannelThreadID:        "thread-1",
+		ChannelThreadRootMsgID: "root-msg-1",
+		ChannelReplyToID:       "message-1",
+	}, "normal")
+
+	mustContain := []string{
+		"Thread root message ID: root-msg-1",
+		"reply in the same thread: `multica channel message reply channel-1 root-msg-1",
+		"Do NOT reply to the triggering message directly",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(out, s) {
+			t.Errorf("thread-reply channel prompt missing %q\n--- output ---\n%s", s, out)
+		}
+	}
+	if strings.Contains(out, "default to a top-level channel message") {
+		t.Errorf("thread-reply channel prompt must NOT default to a top-level message\n--- output ---\n%s", out)
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{

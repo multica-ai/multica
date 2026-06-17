@@ -291,6 +291,14 @@ type AgentTaskResponse struct {
 	ChatSessionID           string               `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string               `json:"chat_message,omitempty"`              // user message for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChannelID               string               `json:"channel_id,omitempty"`                // non-empty for channel-origin mention tasks
+	ChannelName             string               `json:"channel_name,omitempty"`              // display name for the source channel
+	ChannelMessageID        string               `json:"channel_message_id,omitempty"`        // message that triggered a channel mention task
+	ChannelThreadID         string               `json:"channel_thread_id,omitempty"`         // optional thread associated with the trigger message
+	ChannelReplyToID        string               `json:"channel_reply_to_id,omitempty"`       // optional parent message for replies
+	ChannelThreadRootMsgID  string               `json:"channel_thread_root_msg_id,omitempty"` // root message of the thread (for replying back to the same thread)
+	ChannelTriggerContent   string               `json:"channel_trigger_content,omitempty"`   // triggering channel message content
+	ChannelMentionType      string               `json:"channel_mention_type,omitempty"`      // agent or squad
 	AutopilotRunID          string               `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string               `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string               `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -385,6 +393,10 @@ func taskToSlimResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskRespon
 		WorkDir:          workDir,
 		RelativeWorkDir:  relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		ChatSessionID:    uuidToString(t.ChatSessionID),
+		ChannelID:        uuidToString(t.ChannelID),
+		ChannelMessageID: uuidToString(t.ChannelMessageID),
+		ChannelThreadID:  uuidToString(t.ChannelThreadID),
+		ChannelReplyToID: uuidToString(t.ChannelReplyToID),
 		AutopilotRunID:   uuidToString(t.AutopilotRunID),
 		Kind:             computeTaskKind(t),
 	}
@@ -439,9 +451,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// Surface task source so the UI can distinguish issue-linked tasks
 		// from chat-spawned or autopilot-spawned ones; all three may arrive
 		// with issue_id = "" once a task has no linked issue.
-		ChatSessionID:  uuidToString(t.ChatSessionID),
-		AutopilotRunID: uuidToString(t.AutopilotRunID),
-		Kind:           computeTaskKind(t),
+		ChatSessionID:    uuidToString(t.ChatSessionID),
+		ChannelID:        uuidToString(t.ChannelID),
+		ChannelMessageID: uuidToString(t.ChannelMessageID),
+		ChannelThreadID:  uuidToString(t.ChannelThreadID),
+		ChannelReplyToID: uuidToString(t.ChannelReplyToID),
+		AutopilotRunID:   uuidToString(t.AutopilotRunID),
+		Kind:             computeTaskKind(t),
 	}
 }
 
@@ -569,6 +585,9 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 	}
 	if uuidToString(t.AutopilotRunID) != "" {
 		return "autopilot"
+	}
+	if uuidToString(t.ChannelID) != "" {
+		return "channel_mention"
 	}
 	if uuidToString(t.IssueID) == "" {
 		return "quick_create"

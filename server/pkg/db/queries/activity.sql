@@ -37,6 +37,14 @@ WHERE issue_id = $1
   AND details->>'source_id' = sqlc.arg(source_id)::text
 LIMIT 1;
 
+-- name: CheckChannelReferenceActivityExists :one
+SELECT 1 FROM activity_log
+WHERE issue_id = $1
+  AND action = 'referenced_by'
+  AND details->>'source_type' = 'channel_message'
+  AND details->>'source_id' = sqlc.arg(source_id)::text
+LIMIT 1;
+
 -- name: CountAssigneeChangesByActor :many
 -- Count how many times a user assigned each target via assignee_changed activities.
 SELECT

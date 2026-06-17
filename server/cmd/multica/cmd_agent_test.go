@@ -1337,52 +1337,12 @@ func TestAgentGetTableIncludesAvatarURL(t *testing.T) {
 // Agent skills add/remove tests
 // ---------------------------------------------------------------------------
 
-func TestAgentSkillsAdd_MergesAndDeduplicates(t *testing.T) {
-	var putBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/api/agents/agent-1/skills":
-			json.NewEncoder(w).Encode([]map[string]any{
-				{"id": "skill-a", "name": "A", "description": ""},
-				{"id": "skill-b", "name": "B", "description": ""},
-			})
-		case r.Method == http.MethodPut && r.URL.Path == "/api/agents/agent-1/skills":
-			json.NewDecoder(r.Body).Decode(&putBody)
-			json.NewEncoder(w).Encode(map[string]any{"ok": true})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
-
-	cmd := &cobra.Command{Use: "add"}
-	cmd.Flags().StringSlice("skill-ids", nil, "")
-	cmd.Flags().String("output", "json", "")
-	cmd.Flags().String("profile", "", "")
-	// Add skill-b (duplicate) and skill-c (new).
-	if err := cmd.Flags().Set("skill-ids", "skill-b,skill-c"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := runAgentSkillsAdd(cmd, []string{"agent-1"}); err != nil {
-		t.Fatalf("runAgentSkillsAdd: %v", err)
-	}
-
-	ids, _ := putBody["skill_ids"].([]any)
-	want := []string{"skill-a", "skill-b", "skill-c"}
-	if len(ids) != len(want) {
-		t.Fatalf("expected %d skill IDs, got %d: %v", len(want), len(ids), ids)
-	}
-	for i, w := range want {
-		if ids[i] != w {
-			t.Errorf("ids[%d] = %v, want %s", i, ids[i], w)
-		}
-	}
-}
+// NOTE: the old TestAgentSkillsAdd_MergesAndDeduplicates (OPE-1941) asserted
+// the CLI-side GET+merge+PUT flow. `agent skills add` now posts to the atomic
+// server endpoint /api/agents/{id}/skills/add (which owns merge/dedup), so
+// that test was deleted — TestAgentSkillsAddCallsAdditiveEndpoint covers the
+// current contract. `agent skills remove` still uses GET+filter+PUT, covered
+// by TestAgentSkillsRemove_FiltersCorrectly below.
 
 func TestAgentSkillsAdd_MissingFlag(t *testing.T) {
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:0")
