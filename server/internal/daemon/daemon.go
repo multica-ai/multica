@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,6 +109,14 @@ type workspaceState struct {
 	settings        json.RawMessage // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
+	// profileSetSig is a content hash of the workspace's custom runtime
+	// profile list (MUL-3332) as last seen from the server. The
+	// workspaceSyncLoop compares the live signature with this cached value;
+	// any drift triggers a re-register so newly-added (or edited / disabled)
+	// custom runtimes appear without a daemon restart. Empty before the
+	// first successful profile fetch (older server / network blip); guarded
+	// by Daemon.mu like every other field on this struct.
+	profileSetSig string
 }
 
 type repoCacheBackend interface {
@@ -476,7 +485,7 @@ func (d *Daemon) workspaceNeedsRuntimeRecovery(workspaceID string) bool {
 // The workspaceState pointer is NEVER replaced (see syncWorkspacesFromAPI's
 // invariant about repoRefreshMu). Only fields are mutated.
 func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, workspaceID string) error {
-	resp, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
+	resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("register runtimes: %w", err)
 	}
@@ -516,6 +525,13 @@ func (d *Daemon) reregisterWorkspaceAfterRuntimeGone(ctx context.Context, worksp
 	}
 	if len(resp.Settings) > 0 {
 		ws.settings = resp.Settings
+	}
+	// Refresh the cached profile signature only when the fetch succeeded;
+	// an empty sig means the GetRuntimeProfiles call failed and we must
+	// preserve the previous signature so the next sync tick can still
+	// detect a real drift instead of falsely thinking everything is in sync.
+	if profileSig != "" {
+		ws.profileSetSig = profileSig
 	}
 	d.mu.Unlock()
 
@@ -817,7 +833,7 @@ func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
 	return path, true
 }
 
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, error) {
+func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
 	for name, entry := range d.cfg.Agents {
@@ -849,10 +865,16 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// server returning 404) must never fail registration — the daemon simply
 	// continues with the built-in runtimes it already collected. A profile
 	// whose command_name is not on PATH is skipped (the host doesn't have it).
-	d.appendProfileRuntimes(ctx, workspaceID, &runtimes)
+	//
+	// profileSig is a content hash of the workspace's profile list captured
+	// here so the workspaceSyncLoop can detect server-side profile changes
+	// between sync ticks without making an extra round trip on every tick
+	// (MUL-3332). An empty string means the fetch failed and the caller must
+	// keep whatever signature was previously cached on the workspaceState.
+	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes)
 
 	if len(runtimes) == 0 {
-		return nil, fmt.Errorf("no agent runtimes could be registered")
+		return nil, "", fmt.Errorf("no agent runtimes could be registered")
 	}
 
 	req := map[string]any{
@@ -867,13 +889,13 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 
 	resp, err := d.client.Register(ctx, req)
 	if err != nil {
-		return nil, fmt.Errorf("register runtimes: %w", err)
+		return nil, "", fmt.Errorf("register runtimes: %w", err)
 	}
 	if len(resp.Runtimes) == 0 {
-		return nil, fmt.Errorf("register runtimes: empty response")
+		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
 	d.logger.Debug("register response", "workspace_id", workspaceID, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos), "repos_version", resp.ReposVersion)
-	return resp, nil
+	return resp, profileSig, nil
 }
 
 // appendProfileRuntimes fetches the workspace's enabled custom runtime
@@ -892,17 +914,28 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // (suffixed with the device name like the built-in path), type =
 // protocol_family (the routing provider), version = best-effort detected
 // version, status = "online", plus the profile_id the server validates.
-func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string) {
+//
+// Returns a content signature of the fetched profile list (MUL-3332). The
+// signature is used by the workspace sync loop to detect server-side profile
+// changes between sync ticks and trigger a re-register without a daemon
+// restart. Returns the empty string when the fetch failed — callers must
+// treat that as "unknown, do not overwrite a previously-stored signature"
+// (otherwise a transient 5xx would silently flip the daemon into thinking the
+// workspace has zero profiles).
+func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
 		// Best-effort: never fail registration because profiles couldn't be
 		// fetched. An older server with no profiles route returns 404.
 		d.logger.Info("skip custom runtime profiles: fetch failed (continuing with built-in runtimes)",
 			"workspace_id", workspaceID, "error", err)
-		return
+		return ""
 	}
 	if resp == nil {
-		return
+		// Empty payload — same shape as "server has zero profiles". Return
+		// the digest of an empty list so the sync loop can still detect a
+		// later transition (zero → first profile added).
+		return profileSetSignature(nil)
 	}
 	for _, profile := range resp.RuntimeProfiles {
 		if profile.CommandName == "" || profile.ProtocolFamily == "" {
@@ -972,6 +1005,46 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			"profile_id": profile.ID,
 		})
 	}
+	return profileSetSignature(resp.RuntimeProfiles)
+}
+
+// profileSetSignature is a stable content hash of the workspace's custom
+// runtime profile list (MUL-3332). The workspaceSyncLoop diffs this against
+// the cached value on each tick: a mismatch means the user added, edited, or
+// disabled a profile via the web UI / CLI between syncs and the daemon must
+// re-register so the new runtime instance shows up in the list without a
+// restart.
+//
+// The hashed projection covers exactly the fields that affect what the
+// daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
+// FixedArgs (the launch args every agent on this runtime inherits) and
+// Visibility (so a hypothetical future per-creator filter still triggers
+// drift). Profiles are sorted by ID first so the digest is order-independent
+// (the server is allowed to return them in any order).
+func profileSetSignature(profiles []RuntimeProfile) string {
+	if len(profiles) == 0 {
+		return "0"
+	}
+	sorted := append([]RuntimeProfile(nil), profiles...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	h := fnv.New64a()
+	// Field separator chosen to never appear in a UUID, slug, or arg.
+	const sep = "\x1f"
+	for _, p := range sorted {
+		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s",
+			p.ID, sep,
+			p.Enabled, sep,
+			p.ProtocolFamily, sep,
+			p.CommandName, sep,
+			p.Visibility, sep,
+		)
+		for _, a := range p.FixedArgs {
+			fmt.Fprintf(h, "%s%s", a, sep)
+		}
+		// Record list end so [a,b] and [ab] hash differently.
+		h.Write([]byte("\x1e"))
+	}
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion string, repos []RepoData, settings json.RawMessage) *workspaceState {
@@ -1170,6 +1243,66 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	d.mu.Unlock()
 
 	return resp, nil
+}
+
+// refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
+// runtime profile list (MUL-3332), compares its content signature against
+// the value cached on the workspaceState, and triggers a re-register when
+// the signature has drifted. This is the entry point that lets profiles
+// added / edited / disabled via the web UI or CLI become visible in the
+// runtime list within one workspaceSyncLoop tick instead of requiring a
+// daemon restart.
+//
+// Best-effort: a fetch error (older server, network blip) is logged and
+// swallowed — the cached signature is preserved so the next tick can still
+// detect a real drift. A successfully-fetched-but-unchanged signature is the
+// expected steady state and short-circuits without any further work.
+//
+// On drift the function calls reregisterWorkspaceAfterRuntimeGone, which
+// re-runs registerRuntimesForWorkspace and updates the workspaceState
+// (including profileSetSig) in place. The pointer is never replaced, which
+// matches the invariant documented on syncWorkspacesFromAPI and
+// reregisterWorkspaceAfterRuntimeGone.
+func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceID string) error {
+	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
+	if err != nil {
+		// Older server (no profiles route) returns 404; the daemon should not
+		// log a noisy warning on every sync tick in that case.
+		return err
+	}
+	var profiles []RuntimeProfile
+	if resp != nil {
+		profiles = resp.RuntimeProfiles
+	}
+	live := profileSetSignature(profiles)
+
+	d.mu.Lock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		d.mu.Unlock()
+		// Workspace was removed between sync ticks — nothing to do.
+		return nil
+	}
+	cached := ws.profileSetSig
+	d.mu.Unlock()
+
+	if cached == live {
+		return nil
+	}
+
+	d.logger.Info("custom runtime profile set changed; re-registering workspace",
+		"workspace_id", workspaceID, "previous_sig", cached, "current_sig", live,
+		"profile_count", len(profiles))
+	// reregisterWorkspaceAfterRuntimeGone re-runs registerRuntimesForWorkspace
+	// (which re-fetches the profile list and refreshes profileSetSig on the
+	// workspaceState) and converges the daemon's runtime set on whatever the
+	// server now returns. It is also the same code path the runtime_gone
+	// recovery uses, so we get a single, well-tested converger for both
+	// triggers.
+	return d.reregisterWorkspaceAfterRuntimeGone(ctx, workspaceID)
 }
 
 func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL string) error {
@@ -1376,6 +1509,18 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
 				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
 			}
+			// Pick up custom runtime profiles created/edited/disabled via
+			// the web UI or CLI between sync ticks (MUL-3332). Without this,
+			// a profile added on the server would only become a runtime row
+			// after a daemon restart or a runtime_gone recovery, because the
+			// already-tracked branch never re-runs registerRuntimesForWorkspace
+			// otherwise. refreshWorkspaceRuntimeProfiles is best-effort and
+			// only re-registers when it observes a real signature drift, so
+			// quiet workspaces incur exactly one cheap GetRuntimeProfiles
+			// round trip per sync tick.
+			if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+				d.logger.Debug("workspace sync: profile refresh failed", "workspace_id", id, "error", err)
+			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
 			// and its inline re-register failed). The pointer is not replaced
@@ -1392,7 +1537,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			registered++
 			continue
 		}
-		resp, err := d.registerRuntimesForWorkspace(ctx, id)
+		resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, id)
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
@@ -1403,7 +1548,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			d.logger.Info("registered runtime", "workspace_id", id, "runtime_id", rt.ID, "provider", rt.Provider)
 		}
 		d.mu.Lock()
-		d.workspaces[id] = newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
+		// Seed the profile signature so the next sync tick can detect drift
+		// without re-registering on a transient fetch failure (empty sig is
+		// the explicit "unknown — keep the previous value" sentinel from
+		// appendProfileRuntimes; on first registration there is no previous
+		// value, so empty stays empty).
+		ws.profileSetSig = profileSig
+		d.workspaces[id] = ws
 		for _, rt := range resp.Runtimes {
 			d.runtimeIndex[rt.ID] = rt
 		}

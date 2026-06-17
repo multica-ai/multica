@@ -168,7 +168,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// Custom-only host: no built-in agents configured.
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	resp, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	_, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
 	if err == nil {
 		t.Fatalf("expected error when no runtimes resolve, got nil")
 	}
@@ -238,7 +238,7 @@ func TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort(t *testing.T) {
 	// Built-in agent present so registration has something to register.
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registration should succeed despite profiles 404: %v", err)
 	}
@@ -273,7 +273,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/custom/company-codex"}
 
-	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/stale/company-codex"}
 
-	if _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
