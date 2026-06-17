@@ -803,9 +803,14 @@ export function DynamicInbox() {
     <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
       <Search className="size-3.5 flex-none text-muted-foreground" />
       <input
-        type="text"
+        type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
+        role="searchbox"
+        aria-label="Search inbox"
         placeholder="Search inbox…"
         className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
       />
