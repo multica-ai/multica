@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Lock } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,8 @@ export function ProjectEidetixSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const { role } = useCurrentMember(wsId);
+  const tokenId = useId();
+  const labelId = useId();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [token, setToken] = useState("");
@@ -129,11 +131,11 @@ export function ProjectEidetixSection({ projectId }: { projectId: string }) {
           {(!cfg.configured || editing) && (
             <div className="space-y-1.5">
               <div className="space-y-1">
-                <Label htmlFor="eidetix-token" className="text-xs">
+                <Label htmlFor={tokenId} className="text-xs">
                   {t(($) => $.eidetix.token_label)}
                 </Label>
                 <Input
-                  id="eidetix-token"
+                  id={tokenId}
                   type="password"
                   value={token}
                   placeholder={t(($) => $.eidetix.token_placeholder)}
@@ -141,11 +143,11 @@ export function ProjectEidetixSection({ projectId }: { projectId: string }) {
                 />
               </div>
               <div className="space-y-1">
-                <Label htmlFor="eidetix-label" className="text-xs">
+                <Label htmlFor={labelId} className="text-xs">
                   {t(($) => $.eidetix.graph_label)}
                 </Label>
                 <Input
-                  id="eidetix-label"
+                  id={labelId}
                   value={label}
                   placeholder={
                     cfg.graph_label ||

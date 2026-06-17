@@ -91,4 +91,13 @@ describe("ProjectEidetixSection", () => {
       expect.anything(),
     );
   });
+
+  it("never renders a token even if the server response carries one", () => {
+    // .loose() would pass an unexpected `token` field through; the UI must never surface it.
+    mockData = { configured: true, enabled: true, endpoint_url: "", graph_label: "Marketing", token: "SECRET-TOKEN" } as any;
+    render(<ProjectEidetixSection projectId="p1" />);
+    fireEvent.click(screen.getByRole("button", { name: /eidetix/i }));
+    expect(screen.queryByText(/SECRET-TOKEN/)).toBeNull();
+    expect(screen.queryByDisplayValue("SECRET-TOKEN")).toBeNull();
+  });
 });
