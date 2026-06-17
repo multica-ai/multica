@@ -184,6 +184,9 @@ import type {
   ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesParams,
   ListKnowledgeCandidatesResponse,
+  ListKnowledgeEffectParams,
+  ListKnowledgeEffectResponse,
+  KnowledgeEffectSummary,
   ListKnowledgeGovernanceFindingsParams,
   ListKnowledgeGovernanceFindingsResponse,
   ListKnowledgeParams,
@@ -300,6 +303,8 @@ import {
   EMPTY_KNOWLEDGE_ITEM,
   EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_CANDIDATES_RESPONSE,
+  EMPTY_LIST_KNOWLEDGE_EFFECT_RESPONSE,
+  EMPTY_KNOWLEDGE_EFFECT_SUMMARY,
   EMPTY_LIST_KNOWLEDGE_GOVERNANCE_FINDINGS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_SOURCES_RESPONSE,
@@ -311,6 +316,8 @@ import {
   KnowledgeItemSchema,
   ListKnowledgeAnalyticsResponseSchema,
   ListKnowledgeCandidatesResponseSchema,
+  ListKnowledgeEffectResponseSchema,
+  KnowledgeEffectSummarySchema,
   ListKnowledgeGovernanceFindingsResponseSchema,
   ListKnowledgeResponseSchema,
   ListKnowledgeSourcesResponseSchema,
@@ -2193,6 +2200,50 @@ export class ApiClient {
       ListKnowledgeAnalyticsResponseSchema,
       EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
       { endpoint: "GET /api/knowledge/analytics" },
+    );
+  }
+
+  async listKnowledgeEffect(
+    params?: ListKnowledgeEffectParams,
+  ): Promise<ListKnowledgeEffectResponse> {
+    const search = new URLSearchParams();
+    if (params?.agent_id) search.set("agent_id", params.agent_id);
+    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.task_kind) search.set("task_kind", params.task_kind);
+    if (params?.has_injection !== undefined && params.has_injection !== null)
+      search.set("has_injection", String(params.has_injection));
+    if (params?.model) search.set("model", params.model);
+    if (params?.since) search.set("since", params.since);
+    if (params?.until) search.set("until", params.until);
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const raw = await this.fetch<unknown>(`/api/knowledge/effect?${search}`);
+    return parseWithFallback(
+      raw,
+      ListKnowledgeEffectResponseSchema,
+      EMPTY_LIST_KNOWLEDGE_EFFECT_RESPONSE,
+      { endpoint: "GET /api/knowledge/effect" },
+    );
+  }
+
+  async getKnowledgeEffectSummary(
+    params?: Omit<ListKnowledgeEffectParams, "limit" | "offset">,
+  ): Promise<KnowledgeEffectSummary> {
+    const search = new URLSearchParams();
+    if (params?.agent_id) search.set("agent_id", params.agent_id);
+    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.task_kind) search.set("task_kind", params.task_kind);
+    if (params?.has_injection !== undefined && params.has_injection !== null)
+      search.set("has_injection", String(params.has_injection));
+    if (params?.model) search.set("model", params.model);
+    if (params?.since) search.set("since", params.since);
+    if (params?.until) search.set("until", params.until);
+    const raw = await this.fetch<unknown>(`/api/knowledge/effect/summary?${search}`);
+    return parseWithFallback(
+      raw,
+      KnowledgeEffectSummarySchema,
+      EMPTY_KNOWLEDGE_EFFECT_SUMMARY,
+      { endpoint: "GET /api/knowledge/effect/summary" },
     );
   }
 

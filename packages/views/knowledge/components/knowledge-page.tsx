@@ -25,6 +25,7 @@ import {
   knowledgeAnalyticsOptions,
   knowledgeCandidatesOptions,
   knowledgeDetailOptions,
+  knowledgeEffectOptions,
   knowledgeGovernanceFindingsOptions,
   knowledgeListOptions,
 } from "@multica/core/knowledge/queries";
@@ -43,6 +44,7 @@ import type {
   KnowledgeCandidate,
   KnowledgeAnalyticsRow,
   KnowledgeDetail,
+  KnowledgeEffectBucket,
   KnowledgeGovernanceFinding,
   KnowledgeItem,
   KnowledgeLifecycleStatus,
@@ -66,6 +68,7 @@ import { KnowledgePublishSkillDialog, KnowledgePublishWikiDialog } from "./knowl
 
 type KnowledgeStatusView = "all" | KnowledgeLifecycleStatus;
 type KnowledgeWorkspaceView = "knowledge" | "review" | "candidates" | "analytics";
+type AnalyticsSubView = "items" | "effect";
 
 type CandidateMetadata = {
   knowledge_item_id?: string;
@@ -819,6 +822,209 @@ function GovernanceFindingsQueue({ findings }: { findings: KnowledgeGovernanceFi
   );
 }
 
+type EffectComparisonGroup = {
+  task_kind: string;
+  model: string;
+  with_injection: KnowledgeEffectBucket | null;
+  without_injection: KnowledgeEffectBucket | null;
+};
+
+function EffectComparisonPanel({ wsId }: { wsId: string }) {
+  const { t } = useT("knowledge");
+  const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("30d");
+
+  const since = useMemo(() => {
+    const d = new Date();
+    if (timeRange === "7d") d.setDate(d.getDate() - 7);
+    else if (timeRange === "30d") d.setDate(d.getDate() - 30);
+    else d.setDate(d.getDate() - 90);
+    return d.toISOString();
+  }, [timeRange]);
+
+  const effectQuery = useQuery(
+    knowledgeEffectOptions(wsId, { since, limit: 500 }),
+  );
+
+  const buckets = effectQuery.data?.buckets ?? [];
+
+  const groups = useMemo(() => {
+    const map = new Map<string, EffectComparisonGroup>();
+    for (const b of buckets) {
+      const key = `${b.task_kind}|${b.model || b.provider || "unknown"}`;
+      let g = map.get(key);
+      if (!g) {
+        g = { task_kind: b.task_kind, model: b.model || b.provider || "unknown", with_injection: null, without_injection: null };
+        map.set(key, g);
+      }
+      if (b.has_injection) g.with_injection = b;
+      else g.without_injection = b;
+    }
+    return [...map.values()].sort((a, b) => {
+      const aTotal = (a.with_injection?.task_count ?? 0) + (a.without_injection?.task_count ?? 0);
+      const bTotal = (b.with_injection?.task_count ?? 0) + (b.without_injection?.task_count ?? 0);
+      return bTotal - aTotal;
+    });
+  }, [buckets]);
+
+  const summary = useMemo(() => {
+    const withInj = { tasks: 0, successful: 0, failed: 0, duration_secs: 0, duration_tasks: 0, tokens: 0, reruns: 0, follow_ups: 0 };
+    const withoutInj = { ...withInj };
+    for (const b of buckets) {
+      const target = b.has_injection ? withInj : withoutInj;
+      target.tasks += b.task_count;
+      target.successful += b.successful_count;
+      target.failed += b.failed_count;
+      target.duration_secs += b.total_duration_secs;
+      target.duration_tasks += b.duration_task_count;
+      target.tokens += b.input_tokens + b.output_tokens + b.cache_read_tokens + b.cache_write_tokens;
+      target.reruns += b.rerun_count;
+      target.follow_ups += b.follow_up_count;
+    }
+    return { with_injection: withInj, without_injection: withoutInj };
+  }, [buckets]);
+
+  const kindLabel = (k: string) => {
+    const key = `task_kind_${k}` as keyof ReturnType<typeof t>;
+    return t(($) => ($ as any).effect[key] ?? k);
+  };
+
+  const formatDuration = (secs: number, count: number) => {
+    if (count === 0) return t(($) => $.effect.no_duration_data);
+    const avg = secs / count;
+    if (avg < 60) return `${Math.round(avg)}s`;
+    if (avg < 3600) return `${(avg / 60).toFixed(1)}m`;
+    return `${(avg / 3600).toFixed(1)}h`;
+  };
+
+  const formatTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
+    return String(n);
+  };
+
+  if (buckets.length === 0 && !effectQuery.isLoading) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        <BookOpenCheck className="h-7 w-7 text-muted-foreground/50" />
+        <p className="text-sm font-medium">{t(($) => $.effect.empty_title)}</p>
+        <p className="text-sm text-muted-foreground">{t(($) => $.effect.empty_body)}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-6">
+      <div className="mx-auto max-w-5xl space-y-6">
+        {/* Filter bar */}
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-muted-foreground">{t(($) => $.effect.filter_time)}</span>
+          <div className="flex gap-1 rounded-md border p-1">
+            {(["7d", "30d", "90d"] as const).map((range) => (
+              <Button
+                key={range}
+                size="sm"
+                variant={timeRange === range ? "secondary" : "ghost"}
+                onClick={() => setTimeRange(range)}
+              >
+                {t(($) => ($ as any).effect[`time_${range}`])}
+              </Button>
+            ))}
+          </div>
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid gap-3 md:grid-cols-4">
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">{t(($) => $.effect.tasks)}</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-xl font-semibold">{summary.with_injection.tasks}</span>
+              <span className="text-xs text-muted-foreground">/</span>
+              <span className="text-lg">{summary.without_injection.tasks}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">{t(($) => $.effect.summary_with_injection)} / {t(($) => $.effect.summary_without_injection)}</p>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">{t(($) => $.effect.avg_duration)}</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-xl font-semibold">{formatDuration(summary.with_injection.duration_secs, summary.with_injection.duration_tasks)}</span>
+              <span className="text-xs text-muted-foreground">/</span>
+              <span className="text-lg">{formatDuration(summary.without_injection.duration_secs, summary.without_injection.duration_tasks)}</span>
+            </div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">{t(($) => $.effect.success_rate)}</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-xl font-semibold">
+                {summary.with_injection.tasks > 0 ? `${Math.round(summary.with_injection.successful / summary.with_injection.tasks * 100)}%` : "-"}
+              </span>
+              <span className="text-xs text-muted-foreground">/</span>
+              <span className="text-lg">
+                {summary.without_injection.tasks > 0 ? `${Math.round(summary.without_injection.successful / summary.without_injection.tasks * 100)}%` : "-"}
+              </span>
+            </div>
+          </div>
+          <div className="rounded-lg border p-3">
+            <p className="text-xs text-muted-foreground">{t(($) => $.effect.total_tokens)}</p>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-xl font-semibold">{formatTokens(summary.with_injection.tokens)}</span>
+              <span className="text-xs text-muted-foreground">/</span>
+              <span className="text-lg">{formatTokens(summary.without_injection.tokens)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Comparison table */}
+        <div className="rounded-lg border">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b bg-muted/50">
+                  <th className="px-4 py-2 text-left text-xs font-medium">{t(($) => $.effect.column_dimension)}</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium" colSpan={3}>{t(($) => $.effect.column_with)}</th>
+                  <th className="px-4 py-2 text-center text-xs font-medium" colSpan={3}>{t(($) => $.effect.column_without)}</th>
+                </tr>
+                <tr className="border-b bg-muted/30 text-xs text-muted-foreground">
+                  <th className="px-4 py-1" />
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.tasks)}</th>
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.avg_duration)}</th>
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.success_rate)}</th>
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.tasks)}</th>
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.avg_duration)}</th>
+                  <th className="px-3 py-1 text-right">{t(($) => $.effect.success_rate)}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => {
+                  const w = g.with_injection;
+                  const wo = g.without_injection;
+                  const wSuccess = w && w.task_count > 0 ? Math.round(w.successful_count / w.task_count * 100) : null;
+                  const woSuccess = wo && wo.task_count > 0 ? Math.round(wo.successful_count / wo.task_count * 100) : null;
+                  const wDur = w ? formatDuration(w.total_duration_secs, w.duration_task_count) : "-";
+                  const woDur = wo ? formatDuration(wo.total_duration_secs, wo.duration_task_count) : "-";
+                  return (
+                    <tr key={`${g.task_kind}|${g.model}`} className="border-b last:border-b-0 hover:bg-muted/30">
+                      <td className="px-4 py-2">
+                        <span className="font-medium">{kindLabel(g.task_kind)}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{g.model}</span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{w?.task_count ?? 0}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{wDur}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{wSuccess !== null ? `${wSuccess}%` : "-"}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{wo?.task_count ?? 0}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{woDur}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{woSuccess !== null ? `${woSuccess}%` : "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AnalyticsPanel({ rows }: { rows: KnowledgeAnalyticsRow[] }) {
   const { t } = useT("knowledge");
   const paths = useWorkspacePaths();
@@ -876,6 +1082,7 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
   const [workspaceView, setWorkspaceView] = useState<KnowledgeWorkspaceView>("knowledge");
   const [view, setView] = useState<KnowledgeStatusView>("all");
   const [search, setSearch] = useState("");
+  const [analyticsSubView, setAnalyticsSubView] = useState<AnalyticsSubView>("items");
   const listParams = useMemo(
     () => ({
       status: workspaceView === "review" ? undefined : view === "all" ? undefined : view,
@@ -942,6 +1149,20 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
             </Button>
           ))}
         </div>
+        {workspaceView === "analytics" && (
+          <div className="flex items-center gap-1 rounded-md border p-1">
+            {(["items", "effect"] as AnalyticsSubView[]).map((sub) => (
+              <Button
+                key={sub}
+                size="sm"
+                variant={analyticsSubView === sub ? "secondary" : "ghost"}
+                onClick={() => setAnalyticsSubView(sub)}
+              >
+                {sub === "items" ? t(($) => $.analytics.title) : t(($) => $.effect.title)}
+              </Button>
+            ))}
+          </div>
+        )}
         {workspaceView === "knowledge" && (
           <Select value={view} onValueChange={(value) => setView(value as KnowledgeStatusView)}>
             <SelectTrigger size="sm">
@@ -1016,7 +1237,9 @@ export function KnowledgePage({ knowledgeId }: { knowledgeId?: string }) {
               <CandidateQueue candidates={candidatesQuery.data?.candidates ?? []} />
             )
           ) : workspaceView === "analytics" ? (
-            analyticsQuery.isLoading ? (
+            analyticsSubView === "effect" ? (
+              <EffectComparisonPanel wsId={wsId} />
+            ) : analyticsQuery.isLoading ? (
               <div className="space-y-4 p-6">
                 <Skeleton className="h-24 w-full" />
                 <Skeleton className="h-24 w-full" />

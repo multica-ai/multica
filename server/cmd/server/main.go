@@ -412,6 +412,9 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.KnowledgeEmbeddingRebuildJob(pool, knowledgeSchedulerEngine)); err != nil {
 		slog.Warn("scheduler: failed to register knowledge embedding rebuild job", "error", err)
 	}
+	if err := schedulerMgr.Register(scheduler.KnowledgeEffectRollupJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register knowledge effect rollup job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

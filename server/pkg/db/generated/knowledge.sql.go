@@ -553,6 +553,83 @@ func (q *Queries) GetKnowledgeCandidate(ctx context.Context, arg GetKnowledgeCan
 	return i, err
 }
 
+const getKnowledgeEffectSummary = `-- name: GetKnowledgeEffectSummary :one
+SELECT
+    COALESCE(SUM(task_count), 0)::bigint AS total_tasks,
+    COALESCE(SUM(successful_count), 0)::bigint AS total_successful,
+    COALESCE(SUM(failed_count), 0)::bigint AS total_failed,
+    COALESCE(SUM(total_duration_secs), 0)::double precision AS total_duration_secs,
+    COALESCE(SUM(duration_task_count), 0)::bigint AS total_duration_tasks,
+    COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(rerun_count), 0)::bigint AS total_reruns,
+    COALESCE(SUM(follow_up_count), 0)::bigint AS total_follow_ups
+FROM knowledge_effect_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= $2::timestamptz
+  AND bucket_hour <  $3::timestamptz
+  AND ($4::uuid IS NULL OR agent_id = $4)
+  AND ($5::uuid IS NULL OR project_id = $5)
+  AND ($6::text IS NULL OR task_kind = $6)
+  AND ($7::boolean IS NULL OR has_injection = $7)
+  AND ($8::text IS NULL OR model = $8)
+`
+
+type GetKnowledgeEffectSummaryParams struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Since        pgtype.Timestamptz `json:"since"`
+	Until        pgtype.Timestamptz `json:"until"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	TaskKind     pgtype.Text        `json:"task_kind"`
+	HasInjection pgtype.Bool        `json:"has_injection"`
+	Model        pgtype.Text        `json:"model"`
+}
+
+type GetKnowledgeEffectSummaryRow struct {
+	TotalTasks            int64   `json:"total_tasks"`
+	TotalSuccessful       int64   `json:"total_successful"`
+	TotalFailed           int64   `json:"total_failed"`
+	TotalDurationSecs     float64 `json:"total_duration_secs"`
+	TotalDurationTasks    int64   `json:"total_duration_tasks"`
+	TotalInputTokens      int64   `json:"total_input_tokens"`
+	TotalOutputTokens     int64   `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64   `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64   `json:"total_cache_write_tokens"`
+	TotalReruns           int64   `json:"total_reruns"`
+	TotalFollowUps        int64   `json:"total_follow_ups"`
+}
+
+func (q *Queries) GetKnowledgeEffectSummary(ctx context.Context, arg GetKnowledgeEffectSummaryParams) (GetKnowledgeEffectSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeEffectSummary,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.Until,
+		arg.AgentID,
+		arg.ProjectID,
+		arg.TaskKind,
+		arg.HasInjection,
+		arg.Model,
+	)
+	var i GetKnowledgeEffectSummaryRow
+	err := row.Scan(
+		&i.TotalTasks,
+		&i.TotalSuccessful,
+		&i.TotalFailed,
+		&i.TotalDurationSecs,
+		&i.TotalDurationTasks,
+		&i.TotalInputTokens,
+		&i.TotalOutputTokens,
+		&i.TotalCacheReadTokens,
+		&i.TotalCacheWriteTokens,
+		&i.TotalReruns,
+		&i.TotalFollowUps,
+	)
+	return i, err
+}
+
 const getKnowledgeFeedbackSummary = `-- name: GetKnowledgeFeedbackSummary :many
 SELECT value, count(*)::bigint AS count
 FROM knowledge_feedback
@@ -1152,6 +1229,114 @@ func (q *Queries) ListKnowledgeCandidates(ctx context.Context, arg ListKnowledge
 			&i.EvaluatedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeEffectHourly = `-- name: ListKnowledgeEffectHourly :many
+SELECT bucket_hour, workspace_id, agent_id, project_id,
+       model, provider, task_kind, has_injection,
+       task_count, successful_count, failed_count,
+       total_duration_secs, duration_task_count,
+       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+       rerun_count, follow_up_count, max_attempt
+FROM knowledge_effect_hourly
+WHERE workspace_id = $1
+  AND bucket_hour >= $2::timestamptz
+  AND bucket_hour <  $3::timestamptz
+  AND ($4::uuid IS NULL OR agent_id = $4)
+  AND ($5::uuid IS NULL OR project_id = $5)
+  AND ($6::text IS NULL OR task_kind = $6)
+  AND ($7::boolean IS NULL OR has_injection = $7)
+  AND ($8::text IS NULL OR model = $8)
+ORDER BY bucket_hour DESC
+LIMIT $10 OFFSET $9
+`
+
+type ListKnowledgeEffectHourlyParams struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Since        pgtype.Timestamptz `json:"since"`
+	Until        pgtype.Timestamptz `json:"until"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	TaskKind     pgtype.Text        `json:"task_kind"`
+	HasInjection pgtype.Bool        `json:"has_injection"`
+	Model        pgtype.Text        `json:"model"`
+	Offset       int32              `json:"offset"`
+	Limit        int32              `json:"limit"`
+}
+
+type ListKnowledgeEffectHourlyRow struct {
+	BucketHour        pgtype.Timestamptz `json:"bucket_hour"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	Model             string             `json:"model"`
+	Provider          string             `json:"provider"`
+	TaskKind          string             `json:"task_kind"`
+	HasInjection      bool               `json:"has_injection"`
+	TaskCount         int64              `json:"task_count"`
+	SuccessfulCount   int64              `json:"successful_count"`
+	FailedCount       int64              `json:"failed_count"`
+	TotalDurationSecs float64            `json:"total_duration_secs"`
+	DurationTaskCount int64              `json:"duration_task_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	CacheReadTokens   int64              `json:"cache_read_tokens"`
+	CacheWriteTokens  int64              `json:"cache_write_tokens"`
+	RerunCount        int64              `json:"rerun_count"`
+	FollowUpCount     int64              `json:"follow_up_count"`
+	MaxAttempt        int32              `json:"max_attempt"`
+}
+
+func (q *Queries) ListKnowledgeEffectHourly(ctx context.Context, arg ListKnowledgeEffectHourlyParams) ([]ListKnowledgeEffectHourlyRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeEffectHourly,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.Until,
+		arg.AgentID,
+		arg.ProjectID,
+		arg.TaskKind,
+		arg.HasInjection,
+		arg.Model,
+		arg.Offset,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnowledgeEffectHourlyRow{}
+	for rows.Next() {
+		var i ListKnowledgeEffectHourlyRow
+		if err := rows.Scan(
+			&i.BucketHour,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.ProjectID,
+			&i.Model,
+			&i.Provider,
+			&i.TaskKind,
+			&i.HasInjection,
+			&i.TaskCount,
+			&i.SuccessfulCount,
+			&i.FailedCount,
+			&i.TotalDurationSecs,
+			&i.DurationTaskCount,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.RerunCount,
+			&i.FollowUpCount,
+			&i.MaxAttempt,
 		); err != nil {
 			return nil, err
 		}

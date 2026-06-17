@@ -72,6 +72,7 @@
     "open_draft": "Open draft"
   },
   "analytics": {
+    "title": "Per-Item Analytics",
     "empty_title": "No analytics yet",
     "empty_body": "Retrievals, injections, usage, and feedback will appear after knowledge is used.",
     "retrievals": "Retrievals",
@@ -154,5 +155,36 @@
     "draft_created": "Knowledge draft created",
     "publish_wiki": "Knowledge published to Wiki",
     "publish_skill": "Knowledge published to Skill"
+  },
+  "effect": {
+    "title": "Effect Comparison",
+    "subtitle": "Compare task efficiency with and without knowledge injection",
+    "summary_with_injection": "With Knowledge",
+    "summary_without_injection": "Without Knowledge",
+    "tasks": "Tasks",
+    "avg_duration": "Avg Duration",
+    "success_rate": "Success Rate",
+    "total_tokens": "Total Tokens",
+    "reruns": "Reruns",
+    "follow_ups": "Follow-ups",
+    "no_duration_data": "N/A",
+    "difference": "Diff",
+    "filter_agent": "Agent",
+    "filter_project": "Project",
+    "filter_task_kind": "Task Type",
+    "filter_time": "Time Range",
+    "time_7d": "Last 7 days",
+    "time_30d": "Last 30 days",
+    "time_90d": "Last 90 days",
+    "task_kind_chat": "Chat",
+    "task_kind_autopilot": "Autopilot",
+    "task_kind_quick_create": "Quick Create",
+    "task_kind_comment": "Comment",
+    "task_kind_direct": "Direct",
+    "column_dimension": "Dimension",
+    "column_with": "With Knowledge",
+    "column_without": "Without Knowledge",
+    "empty_title": "No effect data yet",
+    "empty_body": "Task effect data will appear here once tasks with knowledge injection complete."
   }
 }

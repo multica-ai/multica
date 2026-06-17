@@ -524,6 +524,51 @@ type KnowledgeCandidate struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type KnowledgeEffectHourly struct {
+	BucketHour        pgtype.Timestamptz `json:"bucket_hour"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	Model             string             `json:"model"`
+	Provider          string             `json:"provider"`
+	TaskKind          string             `json:"task_kind"`
+	HasInjection      bool               `json:"has_injection"`
+	TaskCount         int64              `json:"task_count"`
+	SuccessfulCount   int64              `json:"successful_count"`
+	FailedCount       int64              `json:"failed_count"`
+	TotalDurationSecs float64            `json:"total_duration_secs"`
+	DurationTaskCount int64              `json:"duration_task_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	CacheReadTokens   int64              `json:"cache_read_tokens"`
+	CacheWriteTokens  int64              `json:"cache_write_tokens"`
+	RerunCount        int64              `json:"rerun_count"`
+	FollowUpCount     int64              `json:"follow_up_count"`
+	MaxAttempt        int32              `json:"max_attempt"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeEffectHourlyDirty struct {
+	BucketHour   pgtype.Timestamptz `json:"bucket_hour"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	AgentID      pgtype.UUID        `json:"agent_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Model        string             `json:"model"`
+	Provider     string             `json:"provider"`
+	TaskKind     string             `json:"task_kind"`
+	HasInjection bool               `json:"has_injection"`
+	EnqueuedAt   pgtype.Timestamptz `json:"enqueued_at"`
+}
+
+type KnowledgeEffectHourlyRollupState struct {
+	ID                int16              `json:"id"`
+	WatermarkAt       pgtype.Timestamptz `json:"watermark_at"`
+	LastRunStartedAt  pgtype.Timestamptz `json:"last_run_started_at"`
+	LastRunFinishedAt pgtype.Timestamptz `json:"last_run_finished_at"`
+	LastRunRows       int64              `json:"last_run_rows"`
+	LastError         pgtype.Text        `json:"last_error"`
+}
+
 type KnowledgeEmbedding struct {
 	ID              pgtype.UUID        `json:"id"`
 	KnowledgeItemID pgtype.UUID        `json:"knowledge_item_id"`

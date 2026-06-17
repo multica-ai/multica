@@ -242,6 +242,60 @@ export interface ListKnowledgeAnalyticsResponse {
   total: number;
 }
 
+export interface KnowledgeEffectBucket {
+  bucket_hour: string;
+  workspace_id: string;
+  agent_id: string;
+  project_id: string | null;
+  model: string;
+  provider: string;
+  task_kind: string;
+  has_injection: boolean;
+  task_count: number;
+  successful_count: number;
+  failed_count: number;
+  total_duration_secs: number;
+  duration_task_count: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  rerun_count: number;
+  follow_up_count: number;
+  max_attempt: number;
+}
+
+export interface KnowledgeEffectSummary {
+  total_tasks: number;
+  total_successful: number;
+  total_failed: number;
+  total_duration_secs: number;
+  total_duration_tasks: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_reruns: number;
+  total_follow_ups: number;
+}
+
+export interface ListKnowledgeEffectParams {
+  agent_id?: string | null;
+  project_id?: string | null;
+  task_kind?: string | null;
+  has_injection?: boolean | null;
+  model?: string | null;
+  since?: string | null;
+  until?: string | null;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListKnowledgeEffectResponse {
+  buckets: KnowledgeEffectBucket[];
+  total: number;
+}
+
 export interface SearchKnowledgeRequest {
   query: string;
   embedding?: number[];

@@ -130,6 +130,43 @@ type KnowledgeAnalyticsRowResponse struct {
 	TotalTokens              int64   `json:"total_tokens"`
 }
 
+type KnowledgeEffectBucketResponse struct {
+	BucketHour         string  `json:"bucket_hour"`
+	WorkspaceID        string  `json:"workspace_id"`
+	AgentID            string  `json:"agent_id"`
+	ProjectID          *string `json:"project_id"`
+	Model              string  `json:"model"`
+	Provider           string  `json:"provider"`
+	TaskKind           string  `json:"task_kind"`
+	HasInjection       bool    `json:"has_injection"`
+	TaskCount          int64   `json:"task_count"`
+	SuccessfulCount    int64   `json:"successful_count"`
+	FailedCount        int64   `json:"failed_count"`
+	TotalDurationSecs  float64 `json:"total_duration_secs"`
+	DurationTaskCount  int64   `json:"duration_task_count"`
+	InputTokens        int64   `json:"input_tokens"`
+	OutputTokens       int64   `json:"output_tokens"`
+	CacheReadTokens    int64   `json:"cache_read_tokens"`
+	CacheWriteTokens   int64   `json:"cache_write_tokens"`
+	RerunCount         int64   `json:"rerun_count"`
+	FollowUpCount      int64   `json:"follow_up_count"`
+	MaxAttempt         int32   `json:"max_attempt"`
+}
+
+type KnowledgeEffectSummaryResponse struct {
+	TotalTasks            int64   `json:"total_tasks"`
+	TotalSuccessful       int64   `json:"total_successful"`
+	TotalFailed           int64   `json:"total_failed"`
+	TotalDurationSecs     float64 `json:"total_duration_secs"`
+	TotalDurationTasks    int64   `json:"total_duration_tasks"`
+	TotalInputTokens      int64   `json:"total_input_tokens"`
+	TotalOutputTokens     int64   `json:"total_output_tokens"`
+	TotalCacheReadTokens  int64   `json:"total_cache_read_tokens"`
+	TotalCacheWriteTokens int64   `json:"total_cache_write_tokens"`
+	TotalReruns           int64   `json:"total_reruns"`
+	TotalFollowUps        int64   `json:"total_follow_ups"`
+}
+
 type KnowledgeCandidateResponse struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
@@ -836,6 +873,132 @@ func (h *Handler) GetKnowledgeAnalytics(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"items": resp, "total": len(resp)})
 }
 
+func (h *Handler) GetKnowledgeEffect(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r)); !ok {
+		return
+	}
+	q := r.URL.Query()
+	limit, ok := parseLimitQuery(w, q.Get("limit"), 100, 500)
+	if !ok {
+		return
+	}
+	offset, ok := parseOffsetQuery(w, q.Get("offset"))
+	if !ok {
+		return
+	}
+	agentID, ok := parseOptionalUUIDQuery(w, q.Get("agent_id"), "agent_id")
+	if !ok {
+		return
+	}
+	projectID, ok := parseOptionalUUIDQuery(w, q.Get("project_id"), "project_id")
+	if !ok {
+		return
+	}
+	hasInjection := pgtype.Bool{}
+	if v := q.Get("has_injection"); v == "true" {
+		hasInjection = pgtype.Bool{Bool: true, Valid: true}
+	} else if v == "false" {
+		hasInjection = pgtype.Bool{Bool: false, Valid: true}
+	}
+	taskKind := pgtype.Text{}
+	if v := strings.TrimSpace(q.Get("task_kind")); v != "" {
+		taskKind = pgtype.Text{String: v, Valid: true}
+	}
+	model := pgtype.Text{}
+	if v := strings.TrimSpace(q.Get("model")); v != "" {
+		model = pgtype.Text{String: v, Valid: true}
+	}
+	since, ok := parseKnowledgeTimeQuery(w, q.Get("since"), time.Now().AddDate(0, 0, -30))
+	if !ok {
+		return
+	}
+	until, ok := parseKnowledgeTimeQuery(w, q.Get("until"), time.Now().Add(24*time.Hour))
+	if !ok {
+		return
+	}
+	rows, err := h.KnowledgeService.ListKnowledgeEffect(r.Context(), service.KnowledgeEffectParams{
+		WorkspaceID:  wsUUID,
+		AgentID:      agentID,
+		ProjectID:    projectID,
+		TaskKind:     taskKind,
+		HasInjection: hasInjection,
+		Model:        model,
+		Since:        since,
+		Until:        until,
+		Limit:        limit,
+		Offset:       offset,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to list knowledge effect")
+		return
+	}
+	resp := make([]KnowledgeEffectBucketResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = knowledgeEffectBucketToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"buckets": resp, "total": len(resp)})
+}
+
+func (h *Handler) GetKnowledgeEffectSummary(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := h.workspaceMember(w, r, h.resolveWorkspaceID(r)); !ok {
+		return
+	}
+	q := r.URL.Query()
+	agentID, ok := parseOptionalUUIDQuery(w, q.Get("agent_id"), "agent_id")
+	if !ok {
+		return
+	}
+	projectID, ok := parseOptionalUUIDQuery(w, q.Get("project_id"), "project_id")
+	if !ok {
+		return
+	}
+	hasInjection := pgtype.Bool{}
+	if v := q.Get("has_injection"); v == "true" {
+		hasInjection = pgtype.Bool{Bool: true, Valid: true}
+	} else if v == "false" {
+		hasInjection = pgtype.Bool{Bool: false, Valid: true}
+	}
+	taskKind := pgtype.Text{}
+	if v := strings.TrimSpace(q.Get("task_kind")); v != "" {
+		taskKind = pgtype.Text{String: v, Valid: true}
+	}
+	model := pgtype.Text{}
+	if v := strings.TrimSpace(q.Get("model")); v != "" {
+		model = pgtype.Text{String: v, Valid: true}
+	}
+	since, ok := parseKnowledgeTimeQuery(w, q.Get("since"), time.Now().AddDate(0, 0, -30))
+	if !ok {
+		return
+	}
+	until, ok := parseKnowledgeTimeQuery(w, q.Get("until"), time.Now().Add(24*time.Hour))
+	if !ok {
+		return
+	}
+	summary, err := h.KnowledgeService.GetKnowledgeEffectSummary(r.Context(), service.KnowledgeEffectSummaryParams{
+		WorkspaceID:  wsUUID,
+		AgentID:      agentID,
+		ProjectID:    projectID,
+		TaskKind:     taskKind,
+		HasInjection: hasInjection,
+		Model:        model,
+		Since:        since,
+		Until:        until,
+	})
+	if err != nil {
+		h.writeKnowledgeError(w, err, "failed to get knowledge effect summary")
+		return
+	}
+	writeJSON(w, http.StatusOK, knowledgeEffectSummaryToResponse(summary))
+}
+
 func (h *Handler) ListKnowledgeCandidates(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
@@ -1363,6 +1526,47 @@ func knowledgeAnalyticsRowToResponse(row db.ListKnowledgeAnalyticsRow) Knowledge
 		FailedTaskCount:          row.FailedTaskCount,
 		TotalTaskSeconds:         row.TotalTaskSeconds,
 		TotalTokens:              row.TotalTokens,
+	}
+}
+
+func knowledgeEffectBucketToResponse(row db.ListKnowledgeEffectHourlyRow) KnowledgeEffectBucketResponse {
+	return KnowledgeEffectBucketResponse{
+		BucketHour:        timestampToString(row.BucketHour),
+		WorkspaceID:       uuidToString(row.WorkspaceID),
+		AgentID:           uuidToString(row.AgentID),
+		ProjectID:         uuidToPtr(row.ProjectID),
+		Model:             row.Model,
+		Provider:          row.Provider,
+		TaskKind:          row.TaskKind,
+		HasInjection:      row.HasInjection,
+		TaskCount:         row.TaskCount,
+		SuccessfulCount:   row.SuccessfulCount,
+		FailedCount:       row.FailedCount,
+		TotalDurationSecs: row.TotalDurationSecs,
+		DurationTaskCount: row.DurationTaskCount,
+		InputTokens:       row.InputTokens,
+		OutputTokens:      row.OutputTokens,
+		CacheReadTokens:   row.CacheReadTokens,
+		CacheWriteTokens:  row.CacheWriteTokens,
+		RerunCount:        row.RerunCount,
+		FollowUpCount:     row.FollowUpCount,
+		MaxAttempt:        row.MaxAttempt,
+	}
+}
+
+func knowledgeEffectSummaryToResponse(row db.GetKnowledgeEffectSummaryRow) KnowledgeEffectSummaryResponse {
+	return KnowledgeEffectSummaryResponse{
+		TotalTasks:            row.TotalTasks,
+		TotalSuccessful:       row.TotalSuccessful,
+		TotalFailed:           row.TotalFailed,
+		TotalDurationSecs:     row.TotalDurationSecs,
+		TotalDurationTasks:    row.TotalDurationTasks,
+		TotalInputTokens:      row.TotalInputTokens,
+		TotalOutputTokens:     row.TotalOutputTokens,
+		TotalCacheReadTokens:  row.TotalCacheReadTokens,
+		TotalCacheWriteTokens: row.TotalCacheWriteTokens,
+		TotalReruns:           row.TotalReruns,
+		TotalFollowUps:        row.TotalFollowUps,
 	}
 }
 

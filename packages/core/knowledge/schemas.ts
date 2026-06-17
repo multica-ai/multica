@@ -2,6 +2,8 @@ import { z } from "zod";
 import type {
   KnowledgeCandidate,
   KnowledgeDetail,
+  KnowledgeEffectBucket,
+  KnowledgeEffectSummary,
   KnowledgeFeedback,
   KnowledgeGovernanceFinding,
   KnowledgeItem,
@@ -9,6 +11,7 @@ import type {
   KnowledgeSourceDetail,
   ListKnowledgeAnalyticsResponse,
   ListKnowledgeCandidatesResponse,
+  ListKnowledgeEffectResponse,
   ListKnowledgeGovernanceFindingsResponse,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
@@ -320,6 +323,92 @@ export const EMPTY_KNOWLEDGE_FEEDBACK: KnowledgeFeedback = {
   value: "helpful",
   note: null,
   created_at: "",
+};
+
+// Knowledge Effect Schemas
+
+export const KnowledgeEffectBucketSchema = z.object({
+  bucket_hour: z.string().default(""),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  project_id: NullableString,
+  model: z.string().default(""),
+  provider: z.string().default(""),
+  task_kind: z.string().default("direct"),
+  has_injection: z.boolean().default(false),
+  task_count: z.number().default(0),
+  successful_count: z.number().default(0),
+  failed_count: z.number().default(0),
+  total_duration_secs: z.number().default(0),
+  duration_task_count: z.number().default(0),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+  rerun_count: z.number().default(0),
+  follow_up_count: z.number().default(0),
+  max_attempt: z.number().default(1),
+}).passthrough();
+
+export const KnowledgeEffectSummarySchema = z.object({
+  total_tasks: z.number().default(0),
+  total_successful: z.number().default(0),
+  total_failed: z.number().default(0),
+  total_duration_secs: z.number().default(0),
+  total_duration_tasks: z.number().default(0),
+  total_input_tokens: z.number().default(0),
+  total_output_tokens: z.number().default(0),
+  total_cache_read_tokens: z.number().default(0),
+  total_cache_write_tokens: z.number().default(0),
+  total_reruns: z.number().default(0),
+  total_follow_ups: z.number().default(0),
+}).passthrough();
+
+export const ListKnowledgeEffectResponseSchema = z.object({
+  buckets: z.array(KnowledgeEffectBucketSchema).default([]),
+  total: z.number().default(0),
+}).passthrough();
+
+export const EMPTY_KNOWLEDGE_EFFECT_BUCKET: KnowledgeEffectBucket = {
+  bucket_hour: "",
+  workspace_id: "",
+  agent_id: "",
+  project_id: null,
+  model: "",
+  provider: "",
+  task_kind: "direct",
+  has_injection: false,
+  task_count: 0,
+  successful_count: 0,
+  failed_count: 0,
+  total_duration_secs: 0,
+  duration_task_count: 0,
+  input_tokens: 0,
+  output_tokens: 0,
+  cache_read_tokens: 0,
+  cache_write_tokens: 0,
+  rerun_count: 0,
+  follow_up_count: 0,
+  max_attempt: 1,
+};
+
+export const EMPTY_KNOWLEDGE_EFFECT_SUMMARY: KnowledgeEffectSummary = {
+  total_tasks: 0,
+  total_successful: 0,
+  total_failed: 0,
+  total_duration_secs: 0,
+  total_duration_tasks: 0,
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
+  total_reruns: 0,
+  total_follow_ups: 0,
+};
+
+export const EMPTY_LIST_KNOWLEDGE_EFFECT_RESPONSE: ListKnowledgeEffectResponse = {
+  buckets: [],
+  total: 0,
 };
 
 export type {

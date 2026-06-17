@@ -249,6 +249,30 @@ type KnowledgeAnalyticsParams struct {
 	Offset          int32
 }
 
+type KnowledgeEffectParams struct {
+	WorkspaceID  pgtype.UUID
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	TaskKind     pgtype.Text
+	HasInjection pgtype.Bool
+	Model        pgtype.Text
+	Since        time.Time
+	Until        time.Time
+	Limit        int32
+	Offset       int32
+}
+
+type KnowledgeEffectSummaryParams struct {
+	WorkspaceID  pgtype.UUID
+	AgentID      pgtype.UUID
+	ProjectID    pgtype.UUID
+	TaskKind     pgtype.Text
+	HasInjection pgtype.Bool
+	Model        pgtype.Text
+	Since        time.Time
+	Until        time.Time
+}
+
 type KnowledgeGovernanceParams struct {
 	WorkspaceID pgtype.UUID
 	Limit       int32
@@ -1444,6 +1468,58 @@ func (s *KnowledgeService) ListAnalytics(ctx context.Context, p KnowledgeAnalyti
 		IncludeZero:     p.IncludeZero,
 		Limit:           p.Limit,
 		Offset:          p.Offset,
+	})
+}
+
+func (s *KnowledgeService) ListKnowledgeEffect(ctx context.Context, p KnowledgeEffectParams) ([]db.ListKnowledgeEffectHourlyRow, error) {
+	if p.Since.IsZero() {
+		p.Since = time.Now().AddDate(0, 0, -30)
+	}
+	if p.Until.IsZero() {
+		p.Until = time.Now().Add(24 * time.Hour)
+	}
+	if !p.Until.After(p.Since) {
+		return nil, validationError("until must be after since")
+	}
+	if p.Limit <= 0 {
+		p.Limit = 100
+	}
+	if p.Limit > 500 {
+		p.Limit = 500
+	}
+	return s.Queries.ListKnowledgeEffectHourly(ctx, db.ListKnowledgeEffectHourlyParams{
+		WorkspaceID:  p.WorkspaceID,
+		AgentID:      p.AgentID,
+		ProjectID:    p.ProjectID,
+		TaskKind:     p.TaskKind,
+		HasInjection: p.HasInjection,
+		Model:        p.Model,
+		Since:        pgtype.Timestamptz{Time: p.Since, Valid: true},
+		Until:        pgtype.Timestamptz{Time: p.Until, Valid: true},
+		Limit:        p.Limit,
+		Offset:       p.Offset,
+	})
+}
+
+func (s *KnowledgeService) GetKnowledgeEffectSummary(ctx context.Context, p KnowledgeEffectSummaryParams) (db.GetKnowledgeEffectSummaryRow, error) {
+	if p.Since.IsZero() {
+		p.Since = time.Now().AddDate(0, 0, -30)
+	}
+	if p.Until.IsZero() {
+		p.Until = time.Now().Add(24 * time.Hour)
+	}
+	if !p.Until.After(p.Since) {
+		return db.GetKnowledgeEffectSummaryRow{}, validationError("until must be after since")
+	}
+	return s.Queries.GetKnowledgeEffectSummary(ctx, db.GetKnowledgeEffectSummaryParams{
+		WorkspaceID:  p.WorkspaceID,
+		AgentID:      p.AgentID,
+		ProjectID:    p.ProjectID,
+		TaskKind:     p.TaskKind,
+		HasInjection: p.HasInjection,
+		Model:        p.Model,
+		Since:        pgtype.Timestamptz{Time: p.Since, Valid: true},
+		Until:        pgtype.Timestamptz{Time: p.Until, Valid: true},
 	})
 }
 

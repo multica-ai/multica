@@ -792,3 +792,45 @@ WHERE a.workspace_id = sqlc.arg('workspace_id')
   AND atq.issue_id = sqlc.arg('issue_id')
 ORDER BY atq.created_at ASC
 LIMIT sqlc.arg('limit');
+
+-- name: ListKnowledgeEffectHourly :many
+SELECT bucket_hour, workspace_id, agent_id, project_id,
+       model, provider, task_kind, has_injection,
+       task_count, successful_count, failed_count,
+       total_duration_secs, duration_task_count,
+       input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+       rerun_count, follow_up_count, max_attempt
+FROM knowledge_effect_hourly
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND bucket_hour >= sqlc.arg('since')::timestamptz
+  AND bucket_hour <  sqlc.arg('until')::timestamptz
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('task_kind')::text IS NULL OR task_kind = sqlc.narg('task_kind'))
+  AND (sqlc.narg('has_injection')::boolean IS NULL OR has_injection = sqlc.narg('has_injection'))
+  AND (sqlc.narg('model')::text IS NULL OR model = sqlc.narg('model'))
+ORDER BY bucket_hour DESC
+LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
+
+-- name: GetKnowledgeEffectSummary :one
+SELECT
+    COALESCE(SUM(task_count), 0)::bigint AS total_tasks,
+    COALESCE(SUM(successful_count), 0)::bigint AS total_successful,
+    COALESCE(SUM(failed_count), 0)::bigint AS total_failed,
+    COALESCE(SUM(total_duration_secs), 0)::double precision AS total_duration_secs,
+    COALESCE(SUM(duration_task_count), 0)::bigint AS total_duration_tasks,
+    COALESCE(SUM(input_tokens), 0)::bigint AS total_input_tokens,
+    COALESCE(SUM(output_tokens), 0)::bigint AS total_output_tokens,
+    COALESCE(SUM(cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
+    COALESCE(SUM(cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(rerun_count), 0)::bigint AS total_reruns,
+    COALESCE(SUM(follow_up_count), 0)::bigint AS total_follow_ups
+FROM knowledge_effect_hourly
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND bucket_hour >= sqlc.arg('since')::timestamptz
+  AND bucket_hour <  sqlc.arg('until')::timestamptz
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('task_kind')::text IS NULL OR task_kind = sqlc.narg('task_kind'))
+  AND (sqlc.narg('has_injection')::boolean IS NULL OR has_injection = sqlc.narg('has_injection'))
+  AND (sqlc.narg('model')::text IS NULL OR model = sqlc.narg('model'));

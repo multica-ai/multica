@@ -3,6 +3,7 @@ import { api } from "../api";
 import type {
   ListKnowledgeAnalyticsParams,
   ListKnowledgeCandidatesParams,
+  ListKnowledgeEffectParams,
   ListKnowledgeGovernanceFindingsParams,
   ListKnowledgeParams,
 } from "./types";
@@ -21,6 +22,10 @@ export const knowledgeKeys = {
     [...knowledgeKeys.all(wsId), "governance-findings", params ?? {}] as const,
   analytics: (wsId: string, params?: ListKnowledgeAnalyticsParams) =>
     [...knowledgeKeys.all(wsId), "analytics", params ?? {}] as const,
+  effect: (wsId: string, params?: ListKnowledgeEffectParams) =>
+    [...knowledgeKeys.all(wsId), "effect", params ?? {}] as const,
+  effectSummary: (wsId: string, params?: Omit<ListKnowledgeEffectParams, "limit" | "offset">) =>
+    [...knowledgeKeys.all(wsId), "effect-summary", params ?? {}] as const,
 };
 
 export function knowledgeListOptions(wsId: string, params?: ListKnowledgeParams) {
@@ -73,5 +78,25 @@ export function knowledgeAnalyticsOptions(
   return queryOptions({
     queryKey: knowledgeKeys.analytics(wsId, params),
     queryFn: () => api.listKnowledgeAnalytics(params),
+  });
+}
+
+export function knowledgeEffectOptions(
+  wsId: string,
+  params?: ListKnowledgeEffectParams,
+) {
+  return queryOptions({
+    queryKey: knowledgeKeys.effect(wsId, params),
+    queryFn: () => api.listKnowledgeEffect(params),
+  });
+}
+
+export function knowledgeEffectSummaryOptions(
+  wsId: string,
+  params?: Omit<ListKnowledgeEffectParams, "limit" | "offset">,
+) {
+  return queryOptions({
+    queryKey: knowledgeKeys.effectSummary(wsId, params),
+    queryFn: () => api.getKnowledgeEffectSummary(params),
   });
 }
