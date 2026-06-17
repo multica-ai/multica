@@ -440,24 +440,49 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 	}
 
 	// Walk the roots in the same priority order as listRuntimeLocalSkills so
-	// import resolves to exactly the skill the list endpoint surfaced.
+	// import resolves to exactly the skill the list endpoint surfaced. The
+	// guiding invariant is list/load agreement: a root "has" the skill at this
+	// key only when it is a directory carrying a SKILL.md — the exact
+	// condition listRuntimeLocalSkills registers on. Anything that is not a
+	// valid skill at this key (no entry, not a directory, or a directory
+	// without a SKILL.md) means "this root doesn't have it" and we fall
+	// through to the next root. Only a genuine IO/permission fault is
+	// returned, so we never silently substitute a different-content same-key
+	// skill from a lower-priority root.
 	for _, root := range roots {
 		skillDir := filepath.Join(root.path, filepath.FromSlash(key))
 		info, err := os.Stat(skillDir)
 		if err != nil {
-			// Only a genuine "this root does not have the skill" (IsNotExist)
-			// lets us fall through to the next root. Any other stat error
-			// (permission, IO) is returned as-is rather than silently skipped:
-			// skipping could load a DIFFERENT skill that happens to share the
-			// key from a lower-priority root, so the imported bundle would not
-			// match what the user picked in the list.
+			// IsNotExist => this root simply lacks the skill, try the next.
+			// Any other stat error (permission, IO) is returned as-is rather
+			// than silently skipped, since skipping could load a DIFFERENT
+			// same-key skill from a lower-priority root that does not match
+			// what the user picked in the list (Eve review #1).
 			if os.IsNotExist(err) {
 				continue
 			}
 			return nil, true, err
 		}
 		if !info.IsDir() {
-			return nil, true, fmt.Errorf("local skill is not a directory")
+			// Not a directory: listRuntimeLocalSkills never surfaces a non-dir
+			// as a skill, so this root has no skill at this key. Fall through
+			// to the next root instead of erroring.
+			continue
+		}
+
+		// A directory only counts as a skill when it actually contains a
+		// SKILL.md. A same-key directory WITHOUT one (e.g. ~/.claude/skills/foo
+		// that is just an empty/unrelated folder) is NOT this skill — list
+		// would have descended past it — so it must not shadow a valid
+		// ~/.agents/skills/foo. Treat a missing SKILL.md as "this root doesn't
+		// have it" and continue; only a non-IsNotExist stat error on the
+		// SKILL.md (permission, IO) is returned.
+		mainPath := filepath.Join(skillDir, "SKILL.md")
+		if _, err := os.Stat(mainPath); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, true, err
 		}
 
 		content, err := readLocalSkillMainFile(skillDir)
