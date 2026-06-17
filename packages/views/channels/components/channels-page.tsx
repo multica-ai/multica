@@ -34,6 +34,7 @@ import {
   FileText,
   FolderPlus,
   Hash,
+  Link,
   Loader2,
   Lock,
   MessageCircleReply,
@@ -42,6 +43,7 @@ import {
   Search,
   Send,
   Settings,
+  Square,
   Users,
   X,
 } from "lucide-react";
@@ -115,7 +117,9 @@ import {
 import { useNavigation } from "../../navigation";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { TranscriptButton } from "../../common/task-transcript";
+import { TerminateTaskConfirmDialog } from "../../issues/components/terminate-task-confirm-dialog";
 import { taskStatusConfig } from "../../agents/config";
+import { copyText } from "@multica/ui/lib/clipboard";
 
 interface ChannelsPageProps {
   channelId?: string;
@@ -1001,22 +1005,37 @@ function MessageList({
   });
   const [isEmpty, setIsEmpty] = useState(true);
   const prevMsgCount = useRef(messages.length);
+  const paths = useWorkspacePaths();
+  const nav = useNavigation();
+  const linkedMessageId = nav.searchParams.get("message")?.trim() || null;
+  const didScrollToLinked = useRef<string | null>(null);
 
   useEffect(() => {
     if (messages.length > prevMsgCount.current) {
       const isNewMessage = messages.length - prevMsgCount.current <= 2;
-      if (isNewMessage) {
+      if (isNewMessage && !linkedMessageId) {
         bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
       }
-    } else if (prevMsgCount.current === 0 && messages.length > 0) {
+    } else if (prevMsgCount.current === 0 && messages.length > 0 && !linkedMessageId) {
       bottomRef.current?.scrollIntoView({ block: "end" });
     }
     prevMsgCount.current = messages.length;
-  }, [messages.length]);
+  }, [messages.length, linkedMessageId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [channelId]);
+
+  useEffect(() => {
+    if (!linkedMessageId || messages.length === 0) return;
+    if (didScrollToLinked.current === linkedMessageId) return;
+    const el = document.getElementById(`channel-msg-${linkedMessageId}`);
+    if (!el) return;
+    didScrollToLinked.current = linkedMessageId;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("ring-2", "ring-brand/50", "rounded-md");
+    setTimeout(() => el.classList.remove("ring-2", "ring-brand/50", "rounded-md"), 3000);
+  }, [linkedMessageId, messages.length]);
 
   const handleScroll = useCallback(() => {
     const el = scrollRef.current;
@@ -1025,6 +1044,15 @@ function MessageList({
       loadMore?.();
     }
   }, [hasMore, loadMore, loadingMore]);
+
+  const handleCopyLink = useCallback(async (msg: ChannelMessage) => {
+    const url = nav.getShareableUrl(paths.channelDetail(channelId, { messageId: msg.id }));
+    if (await copyText(url)) {
+      toast.success("链接已复制");
+    } else {
+      toast.error("复制失败");
+    }
+  }, [channelId, nav, paths]);
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => api.sendChannelMessage(channelId, { content }),
@@ -1086,6 +1114,7 @@ function MessageList({
                 key={msg.id}
                 message={msg}
                 onOpenReplies={onOpenReplies}
+                onCopyLink={handleCopyLink}
                 onConvertManual={(m) => setConvertTarget(m)}
                 onConvertAgent={(m) => openModal("quick-create-issue", { description: m.content })}
                 linkedIssue={convertedIssues.get(msg.id)}
@@ -1172,12 +1201,14 @@ function MessageRow({
   onOpenReplies,
   onConvertManual,
   onConvertAgent,
+  onCopyLink,
   linkedIssue,
 }: {
   message: ChannelMessage;
   onOpenReplies: (id: string) => void;
   onConvertManual: (msg: ChannelMessage) => void;
   onConvertAgent: (msg: ChannelMessage) => void;
+  onCopyLink: (msg: ChannelMessage) => void;
   linkedIssue?: { issueId: string; issueNumber: number };
 }) {
   const isSystem = message.author_type === "system" || !message.author_id;
@@ -1185,7 +1216,7 @@ function MessageRow({
   return (
     <ContextMenu>
       <ContextMenuTrigger className="block select-text">
-        <li className={cn(
+        <li id={`channel-msg-${message.id}`} className={cn(
           "group flex items-start gap-3 rounded-md p-2 hover:bg-muted/50",
           isSystem && "bg-muted/25",
         )}>
@@ -1235,6 +1266,10 @@ function MessageRow({
         </li>
       </ContextMenuTrigger>
       <ContextMenuContent>
+        <ContextMenuItem onClick={() => onCopyLink(message)}>
+          <Link className="mr-2 h-4 w-4" />
+          复制链接
+        </ContextMenuItem>
         <ContextMenuItem onClick={() => onOpenReplies(message.id)}>
           <MessageCircleReply className="mr-2 h-4 w-4" />
           回复
@@ -1253,12 +1288,27 @@ function MessageRow({
 }
 
 function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"] }) {
+  const [cancelTaskId, setCancelTaskId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+
+  const handleConfirmCancel = useCallback(async () => {
+    if (!cancelTaskId) return;
+    setCancelling(true);
+    try {
+      await api.cancelTaskById(cancelTaskId);
+    } finally {
+      setCancelling(false);
+      setCancelTaskId(null);
+    }
+  }, [cancelTaskId]);
+
   if (!tasks || tasks.length === 0) return null;
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5">
       {tasks.map((task) => {
         const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
         const Icon = cfg.icon;
+        const isActive = task.status === "running" || task.status === "dispatched" || task.status === "queued";
         const isRunning = task.status === "running";
         const agentName = task.agent_name || "Agent";
         return (
@@ -1283,9 +1333,36 @@ function ChannelAgentTaskStrip({ tasks }: { tasks: ChannelMessage["agent_tasks"]
                 title="查看执行历史"
               />
             )}
+            {isActive && (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="-mr-1 inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setCancelTaskId(task.id)}
+                      disabled={cancelling}
+                    >
+                      {cancelling && cancelTaskId === task.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Square className="h-3 w-3" />
+                      )}
+                    </button>
+                  }
+                />
+                <TooltipContent side="top">停止</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         );
       })}
+      <TerminateTaskConfirmDialog
+        open={!!cancelTaskId}
+        onOpenChange={(open) => { if (!open) setCancelTaskId(null); }}
+        onConfirm={handleConfirmCancel}
+        showRunningNote={tasks.some((t) => t.id === cancelTaskId && t.status === "running")}
+      />
     </div>
   );
 }
