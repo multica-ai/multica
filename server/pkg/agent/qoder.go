@@ -3,7 +3,6 @@ package agent
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
@@ -39,52 +38,6 @@ type qoderBackend struct {
 
 var qoderReaderDrainGrace = 2 * time.Second
 
-// convertMcpConfigForACP converts MCP server config from the Claude object-map
-// format ({"mcpServers": {"name": {...}}}) into the ACP array format
-// ([{"name": "...", "command": "...", ...}]) expected by session/new.
-func convertMcpConfigForACP(raw json.RawMessage) []any {
-	var wrapper struct {
-		McpServers map[string]json.RawMessage `json:"mcpServers"`
-	}
-	if err := json.Unmarshal(raw, &wrapper); err != nil || len(wrapper.McpServers) == 0 {
-		return nil
-	}
-	var servers []any
-	for name, cfg := range wrapper.McpServers {
-		var parsed map[string]any
-		if err := json.Unmarshal(cfg, &parsed); err != nil {
-			continue
-		}
-		entry := map[string]any{"name": name}
-		if v, ok := parsed["command"]; ok {
-			entry["command"] = v
-		}
-		if v, ok := parsed["args"]; ok {
-			entry["args"] = v
-		}
-		if envMap, ok := parsed["env"].(map[string]any); ok && len(envMap) > 0 {
-			envArr := make([]any, 0, len(envMap))
-			for k, v := range envMap {
-				envArr = append(envArr, map[string]any{"name": k, "value": fmt.Sprintf("%v", v)})
-			}
-			entry["env"] = envArr
-		} else {
-			entry["env"] = []any{}
-		}
-		// SSE / HTTP remote servers
-		if v, ok := parsed["url"]; ok {
-			entry["url"] = v
-			if t, ok := parsed["type"]; ok {
-				entry["type"] = t
-			} else {
-				entry["type"] = "sse"
-			}
-		}
-		servers = append(servers, entry)
-	}
-	return servers
-}
-
 func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -92,6 +45,17 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("qoder executable not found at %q: %w", execPath, err)
+	}
+
+	// Translate the agent's mcp_config (Claude-style object of objects) into
+	// the array shape ACP session/new and session/resume expect. Reuse the
+	// shared converter so remote MCP `headers` (e.g. Authorization) survive as
+	// [{name, value}] and output is deterministic. Fail closed on malformed
+	// JSON so the launch surfaces the real error instead of silently dropping
+	// every MCP server.
+	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		return nil, fmt.Errorf("qoder: invalid mcp_config: %w", err)
 	}
 
 	timeout := opts.Timeout
@@ -122,13 +86,29 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("qoder stdin pipe: %w", err)
 	}
+	// StderrPipe + an explicit copier give us a join point (`stderrDone`)
+	// that fires before the failure-promotion decision; see the matching
+	// comment in hermes.go for why the io.MultiWriter form races with
+	// stopReason=end_turn under load (a terminal provider error can land
+	// after we've already read finalOutput and reported "completed").
 	providerErr := newACPProviderErrorSniffer("qoder")
-	cmd.Stderr = io.MultiWriter(newLogWriter(b.cfg.Logger, "[qoder:stderr] "), providerErr)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("qoder stderr pipe: %w", err)
+	}
 
 	if err := cmd.Start(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start qoder: %w", err)
 	}
+
+	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[qoder:stderr] "), providerErr)
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		_, _ = io.Copy(stderrSink, stderr)
+	}()
 
 	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
@@ -221,13 +201,6 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
-		}
-
-		mcpServers := []any{}
-		if len(opts.McpConfig) > 0 {
-			if servers := convertMcpConfigForACP(opts.McpConfig); len(servers) > 0 {
-				mcpServers = servers
-			}
 		}
 
 		if opts.ResumeSessionID != "" {
@@ -339,15 +312,25 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		stdin.Close()
 		cancel()
 
+		// Qoder ACP may keep the process — and the stdout/stderr pipes — open
+		// after session/prompt returns (it can leave a child holding the
+		// inherited fds). The prompt response is already terminal, so bound the
+		// drain: wait for both the stdout reader and the stderr copier, but no
+		// longer than the grace window. CommandContext cancellation above is
+		// what actually tears the process down. Draining stderr here is what
+		// makes the provider-error promotion below see a terminal marker before
+		// we decide the final status.
+		drainCtx, drainCancel := context.WithTimeout(context.Background(), qoderReaderDrainGrace)
 		select {
 		case <-readerDone:
-		case <-time.After(qoderReaderDrainGrace):
-			// Qoder ACP may keep the process alive after session/prompt returns.
-			// The prompt response is already terminal, so don't block Result
-			// delivery on process shutdown; CommandContext cancellation below
-			// remains responsible for cleanup.
+		case <-drainCtx.Done():
 		}
-		// The stdout reader may still run after the grace timer; forbid further
+		select {
+		case <-stderrDone:
+		case <-drainCtx.Done():
+		}
+		drainCancel()
+		// The stdout reader may still run after the grace window; forbid further
 		// forwarding to msgCh before this goroutine's defer closes it (panic on send).
 		streamingCurrentTurn.Store(false)
 
@@ -355,12 +338,12 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		finalOutput := output.String()
 		outputMu.Unlock()
 
-		if finalStatus == "completed" && finalOutput == "" {
-			if msg := providerErr.message(); msg != "" {
-				finalStatus = "failed"
-				finalError = msg
-			}
-		}
+		// Promote completed→failed when stderr or the agent text stream show a
+		// terminal upstream-LLM failure (HTTP 4xx / rate-limit / expired token).
+		// Mirrors hermes/kimi/kiro; without it a run that exhausts retries still
+		// reports "completed" because session/prompt ends with stopReason=end_turn
+		// even though qodercli wrote a terminal error to stderr.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
 
 		c.usageMu.Lock()
 		u := c.usage

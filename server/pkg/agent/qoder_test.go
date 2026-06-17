@@ -66,6 +66,57 @@ done
 `
 }
 
+// fakeQoderACPScriptCapturingRPC records every JSON-RPC line it receives to
+// $QODER_RPC_FILE so a test can inspect the session/new mcpServers payload that
+// qoder actually sent (e.g. that remote MCP headers survived the conversion).
+func fakeQoderACPScriptCapturingRPC() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  if [ -n "$QODER_RPC_FILE" ]; then printf '%s\n' "$line" >> "$QODER_RPC_FILE"; fi
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"ok"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// fakeQoderACPScriptTerminalProviderError streams a normal text chunk (so the
+// final output is non-empty) but writes a terminal upstream-LLM error to stderr
+// before ending the turn with end_turn. This is the case promoteACPResultOnProviderError
+// must catch: a successful-looking end_turn with output, masking a real failure.
+func fakeQoderACPScriptTerminalProviderError() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"partial answer"}}}}\n'
+      printf '%s\n' '[ERROR] API call failed after 3 retries: HTTP 429 RateLimitError' >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
 func TestQoderBackendSetModelFailureFailsTask(t *testing.T) {
 	t.Parallel()
 
@@ -257,81 +308,109 @@ func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 	}
 }
 
-func TestConvertMcpConfigForACP_Stdio(t *testing.T) {
+// TestQoderForwardsMcpAuthHeaderToSessionNew is the end-to-end guard for the
+// header-drop bug: qoder must reuse the shared buildACPMcpServers converter so a
+// remote MCP server's Authorization header reaches the session/new payload as
+// [{name, value}] instead of being silently stripped. We inspect the exact
+// JSON-RPC the backend wrote to the (fake) qodercli stdin.
+func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	t.Parallel()
-	raw := json.RawMessage(`{"mcpServers":{"github":{"command":"npx","args":["-y","@modelcontextprotocol/server-github"],"env":{"GITHUB_TOKEN":"ghp_abc"}}}}`)
-	servers := convertMcpConfigForACP(raw)
-	if len(servers) != 1 {
-		t.Fatalf("expected 1 server, got %d", len(servers))
+
+	tempDir := t.TempDir()
+	rpcFile := filepath.Join(tempDir, "rpc.txt")
+	fakePath := filepath.Join(tempDir, "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptCapturingRPC()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_RPC_FILE": rpcFile},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
 	}
-	srv, ok := servers[0].(map[string]any)
-	if !ok {
-		t.Fatalf("expected map, got %T", servers[0])
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"fetch":{"type":"sse","url":"https://example.com/sse","headers":{"Authorization":"Bearer tok"}}}}`)
+	session, err := backend.Execute(ctx, "hi", ExecOptions{
+		Timeout:   30 * time.Second,
+		McpConfig: mcpConfig,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if srv["name"] != "github" {
-		t.Errorf("name=%v", srv["name"])
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(rpcFile)
+	if err != nil {
+		t.Fatalf("read rpc file: %v", err)
 	}
-	if srv["command"] != "npx" {
-		t.Errorf("command=%v", srv["command"])
+	var sessionNew string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"method":"session/new"`) {
+			sessionNew = line
+			break
+		}
 	}
-	args, ok := srv["args"].([]any)
-	if !ok || len(args) != 2 {
-		t.Errorf("args=%v", srv["args"])
+	if sessionNew == "" {
+		t.Fatalf("no session/new request captured; rpc log:\n%s", raw)
 	}
-	env, ok := srv["env"].([]any)
-	if !ok || len(env) != 1 {
-		t.Fatalf("env=%v", srv["env"])
+	if !strings.Contains(sessionNew, "Authorization") || !strings.Contains(sessionNew, "Bearer tok") {
+		t.Fatalf("Authorization header did not survive into session/new mcpServers:\n%s", sessionNew)
 	}
-	envEntry, ok := env[0].(map[string]any)
-	if !ok || envEntry["name"] != "GITHUB_TOKEN" || envEntry["value"] != "ghp_abc" {
-		t.Errorf("env entry=%v", envEntry)
+	// The shared converter emits headers as {name, value} pairs, not the raw
+	// Claude object-map; assert that wire shape too.
+	if !strings.Contains(sessionNew, `"name":"Authorization"`) || !strings.Contains(sessionNew, `"value":"Bearer tok"`) {
+		t.Fatalf("expected headers as [{name,value}] in session/new payload:\n%s", sessionNew)
 	}
 }
 
-func TestConvertMcpConfigForACP_SSE(t *testing.T) {
+// TestQoderPromotesTerminalProviderErrorWithOutput guards the second bug: a turn
+// that ends with stopReason=end_turn AND non-empty output must still be reported
+// as failed when stderr carried a terminal upstream-LLM error. Without the
+// StderrPipe drain + promoteACPResultOnProviderError, this run reports
+// "completed" and hides the failure.
+func TestQoderPromotesTerminalProviderErrorWithOutput(t *testing.T) {
 	t.Parallel()
-	raw := json.RawMessage(`{"mcpServers":{"fetch":{"type":"sse","url":"https://example.com/sse","headers":{"Authorization":"Bearer tok"}}}}`)
-	servers := convertMcpConfigForACP(raw)
-	if len(servers) != 1 {
-		t.Fatalf("expected 1 server, got %d", len(servers))
-	}
-	srv := servers[0].(map[string]any)
-	if srv["name"] != "fetch" {
-		t.Errorf("name=%v", srv["name"])
-	}
-	if srv["type"] != "sse" {
-		t.Errorf("type=%v", srv["type"])
-	}
-	if srv["url"] != "https://example.com/sse" {
-		t.Errorf("url=%v", srv["url"])
-	}
-}
 
-func TestConvertMcpConfigForACP_EmptyAndNil(t *testing.T) {
-	t.Parallel()
-	if s := convertMcpConfigForACP(nil); s != nil {
-		t.Errorf("nil input: got %v, want nil", s)
-	}
-	if s := convertMcpConfigForACP(json.RawMessage(`{}`)); s != nil {
-		t.Errorf("empty mcpServers: got %v, want nil", s)
-	}
-	if s := convertMcpConfigForACP(json.RawMessage(`{"mcpServers":{}}`)); s != nil {
-		t.Errorf("empty mcpServers map: got %v, want nil", s)
-	}
-}
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptTerminalProviderError()))
 
-func TestConvertMcpConfigForACP_Multiple(t *testing.T) {
-	t.Parallel()
-	raw := json.RawMessage(`{"mcpServers":{"a":{"command":"echo","args":["a"]},"b":{"command":"echo","args":["b"]}}}`)
-	servers := convertMcpConfigForACP(raw)
-	if len(servers) != 2 {
-		t.Fatalf("expected 2 servers, got %d", len(servers))
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
 	}
-	names := map[string]bool{}
-	for _, s := range servers {
-		names[s.(map[string]any)["name"].(string)] = true
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "hi", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if !names["a"] || !names["b"] {
-		t.Errorf("expected names a and b, got %v", names)
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed for a terminal provider error, got %q (output=%q error=%q)", result.Status, result.Output, result.Error)
+		}
+		if result.Output != "partial answer" {
+			t.Errorf("expected the partial output to be preserved, got %q", result.Output)
+		}
+		if !strings.Contains(result.Error, "provider error") || !strings.Contains(result.Error, "429") {
+			t.Errorf("expected error to surface the terminal stderr marker, got %q", result.Error)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("timeout waiting for result")
 	}
 }
