@@ -17,6 +17,7 @@ import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries"
 import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -30,6 +31,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -119,6 +121,16 @@ export function RuntimesPage({
   );
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+
+  // Custom runtime management is an admin-only affordance, gated the same
+  // way the runtime list gates delete: workspace owner/admin role.
+  const currentMember = currentUserId
+    ? members.find((m) => m.user_id === currentUserId)
+    : null;
+  const canManageProfiles =
+    currentMember?.role === "owner" || currentMember?.role === "admin";
+  const [showProfilesDialog, setShowProfilesDialog] = useState(false);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -197,6 +209,8 @@ export function RuntimesPage({
         onConnectRemote={() => setShowConnectDialog(true)}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
+        canManageProfiles={canManageProfiles}
+        onAddRuntime={() => setShowProfilesDialog(true)}
       />
 
       {showEmpty ? (
@@ -276,6 +290,12 @@ export function RuntimesPage({
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
+      {canManageProfiles && showProfilesDialog && (
+        <RuntimeProfilesDialog
+          wsId={wsId}
+          onClose={() => setShowProfilesDialog(false)}
+        />
+      )}
     </div>
   );
 }
@@ -290,11 +310,15 @@ function PageHeaderBar({
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
+  canManageProfiles,
+  onAddRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
+  canManageProfiles: boolean;
+  onAddRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -309,6 +333,17 @@ function PageHeaderBar({
         )}
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {canManageProfiles && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onAddRuntime}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {t(($) => $.profiles.cta)}
+          </Button>
+        )}
         {cloudRuntimeEnabled && (
           <Button
             type="button"

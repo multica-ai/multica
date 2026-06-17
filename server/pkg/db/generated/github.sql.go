@@ -91,6 +91,15 @@ func (q *Queries) DeleteGitHubInstallationByInstallationID(ctx context.Context, 
 	return i, err
 }
 
+const deletePendingGitHubInstallation = `-- name: DeletePendingGitHubInstallation :exec
+DELETE FROM github_pending_installation WHERE installation_id = $1
+`
+
+func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installationID int64) error {
+	_, err := q.db.Exec(ctx, deletePendingGitHubInstallation, installationID)
+	return err
+}
+
 const getGitHubInstallationByID = `-- name: GetGitHubInstallationByID :one
 SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
 WHERE id = $1
@@ -209,6 +218,24 @@ func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID
 	row := q.db.QueryRow(ctx, getIssuePullRequestCloseAggregate, issueID)
 	var i GetIssuePullRequestCloseAggregateRow
 	err := row.Scan(&i.OpenCount, &i.MergedWithCloseIntentCount)
+	return i, err
+}
+
+const getPendingGitHubInstallation = `-- name: GetPendingGitHubInstallation :one
+SELECT installation_id, account_login, account_type, account_avatar_url, received_at, updated_at FROM github_pending_installation WHERE installation_id = $1
+`
+
+func (q *Queries) GetPendingGitHubInstallation(ctx context.Context, installationID int64) (GithubPendingInstallation, error) {
+	row := q.db.QueryRow(ctx, getPendingGitHubInstallation, installationID)
+	var i GithubPendingInstallation
+	err := row.Scan(
+		&i.InstallationID,
+		&i.AccountLogin,
+		&i.AccountType,
+		&i.AccountAvatarUrl,
+		&i.ReceivedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -595,6 +622,46 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		&i.Additions,
 		&i.Deletions,
 		&i.ChangedFiles,
+	)
+	return i, err
+}
+
+const upsertPendingGitHubInstallation = `-- name: UpsertPendingGitHubInstallation :one
+INSERT INTO github_pending_installation (
+    installation_id, account_login, account_type, account_avatar_url
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (installation_id) DO UPDATE SET
+    account_login = EXCLUDED.account_login,
+    account_type = EXCLUDED.account_type,
+    account_avatar_url = EXCLUDED.account_avatar_url,
+    updated_at = now()
+RETURNING installation_id, account_login, account_type, account_avatar_url, received_at, updated_at
+`
+
+type UpsertPendingGitHubInstallationParams struct {
+	InstallationID   int64       `json:"installation_id"`
+	AccountLogin     string      `json:"account_login"`
+	AccountType      string      `json:"account_type"`
+	AccountAvatarUrl pgtype.Text `json:"account_avatar_url"`
+}
+
+func (q *Queries) UpsertPendingGitHubInstallation(ctx context.Context, arg UpsertPendingGitHubInstallationParams) (GithubPendingInstallation, error) {
+	row := q.db.QueryRow(ctx, upsertPendingGitHubInstallation,
+		arg.InstallationID,
+		arg.AccountLogin,
+		arg.AccountType,
+		arg.AccountAvatarUrl,
+	)
+	var i GithubPendingInstallation
+	err := row.Scan(
+		&i.InstallationID,
+		&i.AccountLogin,
+		&i.AccountType,
+		&i.AccountAvatarUrl,
+		&i.ReceivedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -262,8 +262,8 @@ upgrade_cli_brew() {
 install_cli() {
   if command_exists multica; then
     local current_ver
-    # `multica version` outputs "multica v0.1.13 (commit: abc1234)" — extract just the version
-    current_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    # `multica version` outputs "multica 0.3.23 (commit: f46b929eb, built: 2026-06-16T10:11:56Z)" — extract just the version
+    current_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
 
     local latest_ver
     latest_ver=$(get_latest_version)
@@ -285,7 +285,7 @@ install_cli() {
     fi
 
     local new_ver
-    new_ver=$(multica version 2>/dev/null | awk '{print $2}' || echo "unknown")
+    new_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
     ok "Multica CLI upgraded ($current_ver → $new_ver)"
     return 0
   fi
