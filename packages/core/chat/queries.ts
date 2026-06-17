@@ -48,6 +48,17 @@ export function chatSessionsOptions(wsId: string) {
 // consumers created before upstream collapsed active+archived into one query.
 export const allChatSessionsOptions = chatSessionsOptions;
 
+// CEREBRO-PATCH(workspace-copy): TECH-3766 — every chat in the workspace,
+// creator-agnostic (via ?all=true). Used by the owner/admin-only workspace-copy
+// console so "Copy all N" carries all chats, not just the caller's own.
+export function workspaceChatSessionsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: [...chatKeys.all(wsId), "sessions", "workspace-all"] as const,
+    queryFn: () => api.listChatSessions({ all: true }),
+    staleTime: Infinity,
+  });
+}
+
 export function archivedChatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.archivedSessions(wsId),

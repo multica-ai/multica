@@ -3193,9 +3193,13 @@ export class ApiClient {
   }
 
   // Chat Sessions
-  async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
+  async listChatSessions(params?: { status?: string; all?: boolean }): Promise<ChatSession[]> {
     const qs = new URLSearchParams();
     if (params?.status) qs.set("status", params.status);
+    // CEREBRO-PATCH(workspace-copy): TECH-3766 — ?all=true returns every chat in
+    // the workspace (creator-agnostic), so an owner/admin can copy all chats, not
+    // just their own. Gated server-side by the owner/admin-only copy route.
+    if (params?.all) qs.set("all", "true");
     const query = qs.toString() ? `?${qs.toString()}` : "";
     return this.fetch(`/api/chat/sessions${query}`);
   }

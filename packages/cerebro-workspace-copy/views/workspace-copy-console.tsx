@@ -57,7 +57,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects";
 import { channelListOptions } from "@multica/core/channels";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { workspaceChatSessionsOptions } from "@multica/core/chat/queries";
 import { autopilotListOptions } from "@multica/core/autopilots";
 import { issueListOptions } from "@multica/core/issues";
 import type { IssueStatus } from "@multica/core/types";
@@ -159,7 +159,9 @@ export function WorkspaceCopyConsole() {
   const projects = useQuery({ ...projectListOptions(wsId), enabled: entityType === "project" });
   const agents = useQuery({ ...agentListOptions(wsId), enabled: entityType === "agent" });
   const skills = useQuery({ ...skillListOptions(wsId), enabled: entityType === "skill" });
-  const chats = useQuery({ ...chatSessionsOptions(wsId), enabled: entityType === "chat" });
+  // TECH-3766: list every chat in the workspace (creator-agnostic) so an
+  // owner/admin can copy all chats, not just their own.
+  const chats = useQuery({ ...workspaceChatSessionsOptions(wsId), enabled: entityType === "chat" });
   const autopilots = useQuery({ ...autopilotListOptions(wsId), enabled: entityType === "autopilot" });
 
   const active: { isLoading: boolean } =
