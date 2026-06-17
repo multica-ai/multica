@@ -58,6 +58,13 @@ graphify affected "Symbol"         # reverse-traversal: what breaks if you chang
 that budget is the whole point: an architectural answer in ~2k tokens instead
 of reading many files.
 
+## Measuring the saving
+
+A re-runnable benchmark lives in `bench/` — it measures graphify-query tokens vs.
+the tokens to read the files the answer cites, on any corpus. See
+`bench/README.md`. Baseline across our three repos (2026-06-17): a realistic
+**8.8×–59.7×** saving on navigation questions.
+
 ## firtal-cerebro specifics
 
 - **Generated output is git-ignored.** `graphify extract`/`update` writes a

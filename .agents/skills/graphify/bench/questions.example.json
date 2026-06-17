@@ -1,0 +1,19 @@
+{
+  "corpora": [
+    {
+      "name": "cerebro-feature-flags",
+      "path": "packages/cerebro-feature-flags",
+      "questions": [
+        "how is a cerebro feature flag resolved and where is it consumed",
+        "what does the feature flag registry export and who depends on it"
+      ]
+    },
+    {
+      "name": "server-cerebro-permguard",
+      "path": "server/internal/cerebro/permguard",
+      "questions": [
+        "how does permguard decide if an endpoint is gated and where is that checked"
+      ]
+    }
+  ]
+}
