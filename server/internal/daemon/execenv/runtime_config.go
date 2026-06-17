@@ -366,6 +366,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+	writeBackgroundTaskSafetyInstructions(&b)
 
 	// Always emit agent identity so the agent knows who it is, even when
 	// dispatched via @mention on an issue assigned to a different agent.
@@ -793,4 +794,14 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	return b.String()
+}
+
+func writeBackgroundTaskSafetyInstructions(b *strings.Builder) {
+	b.WriteString("## Background Task Safety\n\n")
+	b.WriteString("Multica marks this task terminal when your top-level agent process/turn exits. Any background work you started but did not collect before exiting can be orphaned: its result may be lost, and the user may see a completed/failed task even though the delegated work was never synthesized.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
+	b.WriteString("- If a tool or runtime offers a background mode, use it only when you can explicitly wait for completion and collect the result before your final response.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder instead of collecting now, do not rely on that in Multica-managed runs. Block on the appropriate wait/output/collect operation before exiting.\n")
+	b.WriteString("- If you cannot observe or collect a background task's result, do not spawn it in the background; run the work synchronously instead.\n")
+	b.WriteString("- Before posting your final result or exiting silently, account for every background task you started and incorporate its output or failure into your response.\n\n")
 }
