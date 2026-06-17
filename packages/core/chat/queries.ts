@@ -28,6 +28,10 @@ export function isTaskMessageTaskId(taskId: string | null | undefined): taskId i
   return typeof taskId === "string" && UUID_PATTERN.test(taskId);
 }
 
+export function shouldPollPendingChatTask(taskId: string | null | undefined): taskId is string {
+  return typeof taskId === "string" && taskId.length > 0;
+}
+
 export function chatSessionsOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.sessions(wsId),

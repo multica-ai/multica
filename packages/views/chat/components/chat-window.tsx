@@ -37,6 +37,7 @@ import {
   pendingChatTasksOptions,
   chatKeys,
   isTaskMessageTaskId,
+  shouldPollPendingChatTask,
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
@@ -249,7 +250,7 @@ export function ChatWindow() {
   const markRead = useMarkChatSessionRead();
 
   useEffect(() => {
-    if (!activeSessionId || !isTaskMessageTaskId(pendingTaskId)) return;
+    if (!activeSessionId || !shouldPollPendingChatTask(pendingTaskId)) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
 
