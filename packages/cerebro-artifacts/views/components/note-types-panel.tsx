@@ -148,8 +148,11 @@ export function NoteTypesPanel() {
   const [draft, setDraft] = React.useState<DraftState | null>(null);
 
   // "Start ny": materialise the note type now, tell the user what happened, and
-  // open the document. created=false means this period was already materialised
-  // (idempotent no-op) — we still open the existing document.
+  // open the note. A materialised note type is a Notes-feature note (kind='note'
+  // registered via UpsertNote, see note_types/apply.go) — so it opens on the
+  // Notes surface, not in the Documents file manager (TECH-3780). created=false
+  // means this period was already materialised (idempotent no-op) — we still
+  // open the existing note.
   const handleRun = React.useCallback(
     async (id: string) => {
       try {
@@ -163,7 +166,9 @@ export function NoteTypesPanel() {
             ? "Ny note oprettet."
             : "Findes allerede for denne periode — åbner den.",
         );
-        router.push(wsPaths.documentDetail(result.artifact_id));
+        router.push(
+          `${wsPaths.notes()}?note=${encodeURIComponent(result.artifact_id)}`,
+        );
       } catch {
         toast.error("Kunne ikke starte noten. Prøv igen.");
       }
