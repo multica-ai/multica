@@ -6,7 +6,6 @@
 // only reads cerebro-sprints/core (no new package cycle).
 
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange } from "lucide-react";
 
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -60,7 +59,8 @@ export function ProjectSprintsNav({ projectId, level }: Props) {
                   "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
                 )}
               >
-                <CalendarRange className="size-3.5 shrink-0" />
+                {/* CEREBRO-PATCH(sidebar-sprints-row-parity): FIR-1457 render a sprint with the exact same leading element as a childless sub-project row in app-sidebar (an empty size-3.5 spacer, no icon) so a sprint is displayed the same way as a sub-project, not as a distinct calendar-marked entry. */}
+                <span className="size-3.5 shrink-0" />
                 <span className="truncate">{sprint.name}</span>
               </SidebarMenuButton>
             </div>
