@@ -859,7 +859,14 @@ export function NoteEditor({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               variant="destructive"
-              onClick={() => deleteNote.mutate(note.id)}
+              onClick={() =>
+                // Navigate back to the overview once the note is gone. Without
+                // this we only invalidate the list cache and leave selectedId
+                // pointing at the deleted note — on mobile that hides both the
+                // list rail and the (now empty) editor, leaving a blank screen
+                // instead of the note list (TECH-3770).
+                deleteNote.mutate(note.id, { onSuccess: () => onBack() })
+              }
             >
               <Trash2 className="size-4" />
               Delete
