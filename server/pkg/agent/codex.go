@@ -1716,6 +1716,13 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		return
 	}
 
+	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+		item, _ := params["item"].(map[string]any)
+		itemType, _ := item["type"].(string)
+		itemID, _ := item["id"].(string)
+		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
+	}
+
 	switch method {
 	case "turn/started":
 		c.turnStarted = true
@@ -1813,9 +1820,6 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
-	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
-		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
-	}
 	if item == nil {
 		return
 	}
