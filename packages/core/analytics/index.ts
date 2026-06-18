@@ -15,6 +15,7 @@
 import posthog from "posthog-js";
 import { redactExceptionProperties } from "./redact-exception";
 import { shouldDropException } from "./exception-dedupe";
+import { isBenignException } from "./benign-exceptions";
 
 export const EVENT_SCHEMA_VERSION = 2;
 
@@ -166,6 +167,11 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     capture_exceptions: true,
     before_send: (event) => {
       if (event && event.event === "$exception") {
+        // Drop known-benign browser noise (e.g. ResizeObserver loop) entirely
+        // — checked on the raw message before redaction. These dominate the
+        // stream and carry no signal, so they skip both redaction and the
+        // dedupe fuse. See benign-exceptions.ts.
+        if (isBenignException(event.properties)) return null;
         redactExceptionProperties(event.properties);
         if (shouldDropException(event.properties)) return null;
       }
