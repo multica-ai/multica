@@ -259,25 +259,31 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   // --- Mutation functions ---
 
+  // Returns true on success, false on failure. The composer keeps the user's
+  // text (editor locked + button spinning) until this settles and clears only
+  // on success — so a slow send no longer leaves the box full next to an
+  // already-posted comment, and a failed send keeps the draft.
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+      if (!content.trim() || !userId) return false;
       try {
         await createComment({ content, attachmentIds, suppressAgentIds });
+        return true;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_failed),
         );
+        return false;
       }
     },
     [userId, createComment, t],
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
-      if (!content.trim() || !userId) return;
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
+      if (!content.trim() || !userId) return false;
       try {
         await createComment({
           content,
@@ -286,12 +292,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           attachmentIds,
           suppressAgentIds,
         });
+        return true;
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.send_reply_failed),
         );
+        return false;
       }
     },
     [userId, createComment, t],

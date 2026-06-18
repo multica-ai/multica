@@ -26,7 +26,9 @@ interface ReplyInputProps {
   placeholder?: string;
   avatarType: string;
   avatarId: string;
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  /** Resolves true on success, false on failure — the reply box keeps its text
+   *  (locked + spinning) until then, clearing only on success. */
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
   size?: "sm" | "default";
   /** When set, hydrates/persists the in-progress reply via the draft store.
    *  Required for replies inside virtualized timeline threads, where the
@@ -128,19 +130,23 @@ function ReplyInput({
     const suppressAgentIds = triggerPreview.agents
       .filter((agent) => suppressedAgentIds.has(agent.id))
       .map((agent) => agent.id);
+    // Pessimistic submit (see CommentInput): keep the text, lock + spin, clear
+    // only once the server accepts it.
     setSubmitting(true);
     try {
-      await onSubmit(
+      const ok = await onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
       );
-      editorRef.current?.clearContent();
-      setContent("");
-      setIsEmpty(true);
-      setSuppressedAgentIds(new Set());
-      setPendingAttachments([]);
-      if (draftKey) clearDraft(draftKey);
+      if (ok) {
+        editorRef.current?.clearContent();
+        setContent("");
+        setIsEmpty(true);
+        setSuppressedAgentIds(new Set());
+        setPendingAttachments([]);
+        if (draftKey) clearDraft(draftKey);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -163,7 +169,14 @@ function ReplyInput({
           !isEmpty && "pb-9",
         )}
       >
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* Lock the editor while the reply is in flight — see CommentInput. */}
+        <div
+          className={cn(
+            "flex-1 min-h-0 overflow-y-auto",
+            submitting && "pointer-events-none opacity-60",
+          )}
+          aria-busy={submitting || undefined}
+        >
           <ContentEditor
             ref={editorRef}
             defaultValue={initialDraft}

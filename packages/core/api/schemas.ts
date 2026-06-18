@@ -469,6 +469,9 @@ const CancelledChatMessageSchema = z.object({
   message_id: z.string(),
   content: z.string(),
   restore_to_input: z.boolean().default(false),
+  // Attachments detached from the deleted message so a restored draft can
+  // re-bind them on re-send. Absent on servers that predate the field.
+  attachments: z.array(AttachmentSchema).optional(),
 }).loose();
 
 export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({

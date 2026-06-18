@@ -825,6 +825,10 @@ type CancelledChatMessageResult struct {
 	MessageID      string
 	Content        string
 	RestoreToInput bool
+	// Attachments are the rows detached from the deleted user message so they
+	// survive the ON DELETE CASCADE and can re-bind when the restored draft is
+	// re-sent.
+	Attachments []db.Attachment
 }
 
 type CancelTaskResult struct {
@@ -884,6 +888,13 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
 		if len(messages) == 0 {
+			// Detach attachments BEFORE deleting the user message — the
+			// attachment FK is ON DELETE CASCADE, so deleting first would
+			// destroy rows the restored draft needs to re-bind.
+			detached, err := qtx.DetachAttachmentsFromUserChatMessageByTask(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("detach cancelled chat message attachments: %w", err)
+			}
 			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, task.ID)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return nil
@@ -896,6 +907,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 				MessageID:      util.UUIDToString(deleted.ID),
 				Content:        deleted.Content,
 				RestoreToInput: true,
+				Attachments:    detached,
 			}
 			return nil
 		}

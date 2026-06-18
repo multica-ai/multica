@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createChatStore, newSessionDraftKey } from "./store";
 import type { StorageAdapter } from "../types";
+import type { Attachment } from "../types";
 
 function memStorage(): StorageAdapter {
   const m = new Map<string, string>();
@@ -15,6 +16,26 @@ function memStorage(): StorageAdapter {
   };
 }
 
+function makeAttachment(id: string): Attachment {
+  return {
+    id,
+    workspace_id: "ws-1",
+    issue_id: null,
+    comment_id: null,
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "user-1",
+    filename: `${id}.png`,
+    url: `/uploads/${id}.png`,
+    download_url: `/api/attachments/${id}/download`,
+    markdown_url: `/api/attachments/${id}/download`,
+    content_type: "image/png",
+    size_bytes: 1,
+    created_at: new Date(0).toISOString(),
+  };
+}
+
 describe("newSessionDraftKey", () => {
   it("derives a stable per-agent slot for an uncreated chat", () => {
     expect(newSessionDraftKey("agent-1")).toBe("__new__:agent-1");
@@ -22,38 +43,31 @@ describe("newSessionDraftKey", () => {
   });
 });
 
-describe("chat store — migrateInputDraft", () => {
+describe("chat store — draft attachments", () => {
   let store: ReturnType<typeof createChatStore>;
 
   beforeEach(() => {
     store = createChatStore({ storage: memStorage() });
   });
 
-  it("moves a draft to the new key and clears the source", () => {
-    const from = newSessionDraftKey("agent-1");
-    store.getState().setInputDraft(from, "!file[x.pdf]()");
+  it("deduplicates attachment drafts by id", () => {
+    store.getState().addInputDraftAttachment("draft-1", makeAttachment("att-1"));
+    store.getState().addInputDraftAttachment("draft-1", {
+      ...makeAttachment("att-1"),
+      filename: "updated.png",
+    });
 
-    store.getState().migrateInputDraft(from, "session-1");
-
-    const drafts = store.getState().inputDrafts;
-    expect(drafts["session-1"]).toBe("!file[x.pdf]()");
-    // Source slot is cleared so it can't resurface in the next new chat.
-    expect(from in drafts).toBe(false);
+    expect(store.getState().inputDraftAttachments["draft-1"]).toHaveLength(1);
+    expect(store.getState().inputDraftAttachments["draft-1"]?.[0]?.filename).toBe("updated.png");
   });
 
-  it("is a no-op when the source draft is absent", () => {
-    store.getState().setInputDraft("session-1", "keep me");
+  it("clearInputDraft clears both text and attachment records", () => {
+    store.getState().setInputDraft("draft-1", "hello");
+    store.getState().addInputDraftAttachment("draft-1", makeAttachment("att-1"));
 
-    store.getState().migrateInputDraft(newSessionDraftKey("agent-1"), "session-1");
+    store.getState().clearInputDraft("draft-1");
 
-    expect(store.getState().inputDrafts["session-1"]).toBe("keep me");
-  });
-
-  it("is a no-op when from === to", () => {
-    store.getState().setInputDraft("session-1", "keep me");
-
-    store.getState().migrateInputDraft("session-1", "session-1");
-
-    expect(store.getState().inputDrafts["session-1"]).toBe("keep me");
+    expect(store.getState().inputDrafts["draft-1"]).toBeUndefined();
+    expect(store.getState().inputDraftAttachments["draft-1"]).toBeUndefined();
   });
 });
