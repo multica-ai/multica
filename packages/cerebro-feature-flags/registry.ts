@@ -190,7 +190,10 @@ export type CerebroFlagKey =
   // FIR-recent-chats: show the 3 most recent chat sessions at the top of the
   // inbox new-chat screen, with a "see earlier" expander to scroll & resume
   // older ones in place.
-  | "cerebro_chat_recent_list";
+  | "cerebro_chat_recent_list"
+  // FIR-1412: folders (with sub-folders) for the Skills and Autopilots lists.
+  | "cerebro_skill_folders"
+  | "cerebro_autopilot_folders";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -415,6 +418,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // appears in Settings once an admin opts in to run a one-time workspace merge.
   cerebro_workspace_copy: false,
   cerebro_chat_recent_list: true,
+  // FIR-1412: default ON — folders are additive and harmless when unused.
+  cerebro_skill_folders: true,
+  cerebro_autopilot_folders: true,
 };
 
 /**
@@ -926,6 +932,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+  },
+  {
+    key: "cerebro_skill_folders",
+    label: "Skill folders",
+    group: "workspace",
+    description:
+      "Organise skills into folders (with sub-folders) on the Skills page. A folder sidebar lets you create, rename and delete folders and file skills into them; off hides the sidebar and shows the flat list. FIR-1412.",
+  },
+  {
+    key: "cerebro_autopilot_folders",
+    label: "Autopilot folders",
+    group: "workspace",
+    description:
+      "Organise autopilots into folders (with sub-folders) on the Autopilots page. A folder sidebar lets you create, rename and delete folders and file autopilots into them; off hides the sidebar and shows the flat list. FIR-1412.",
   },
   {
     key: "cerebro_pdf_inline_render",

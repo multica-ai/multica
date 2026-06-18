@@ -48,6 +48,8 @@ import {
   SkillCategoryFilter,
   skillCategoryKey,
 } from "@multica/cerebro-skill-metadata";
+// CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar + grouping for skills.
+import { useEntityFolderView } from "@multica/cerebro-entity-folders";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
 
@@ -207,6 +209,16 @@ export default function SkillsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   // CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter state.
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  // CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar + filter for skills.
+  const folderItems = useMemo(
+    () => skills.map((s) => ({ id: s.id, label: s.name })),
+    [skills],
+  );
+  const folderView = useEntityFolderView({
+    kind: "skill",
+    items: folderItems,
+    itemNoun: "skills",
+  });
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -246,9 +258,19 @@ export default function SkillsPage() {
       if (filter === "mine" && s.created_by !== currentUserId) return false;
       // CEREBRO-PATCH(skill-category-filter): TECH-3077 — filter by category.
       if (categoryFilter && skillCategoryKey(s) !== categoryFilter) return false;
+      // CEREBRO-PATCH(skill-folders): FIR-1412 — filter by selected folder.
+      if (!folderView.includes(s.id)) return false;
       return true;
     });
-  }, [skills, assignments, search, filter, currentUserId, categoryFilter]);
+  }, [
+    skills,
+    assignments,
+    search,
+    filter,
+    currentUserId,
+    categoryFilter,
+    folderView,
+  ]);
 
   const handleCreated = (skill: Skill) => {
     navigation.push(paths.skillDetail(skill.id));
@@ -389,7 +411,10 @@ export default function SkillsPage() {
             <EmptyState onCreate={() => setCreateOpen(true)} />
           </div>
         ) : (
-          <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-lg border bg-background">
+          // CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar beside the list.
+          <div className="flex flex-1 min-h-0 overflow-hidden rounded-lg border bg-background">
+            {folderView.sidebar}
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
             <CardToolbar
               search={search}
               setSearch={setSearch}
@@ -429,6 +454,7 @@ export default function SkillsPage() {
                 }
               />
             )}
+            </div>
           </div>
         )}
       </div>

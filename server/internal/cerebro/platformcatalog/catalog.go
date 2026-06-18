@@ -347,6 +347,18 @@ var catalog = []Capability{
 			"POST /api/cerebro/note-types/{id}/run",
 		},
 	},
+	{
+		Key:         "manage_entity_folders",
+		Title:       "Create / edit / delete skill & autopilot folders",
+		Category:    CategoryWorkspace,
+		Description: "Create, rename, delete, and file skills or autopilots into folders (with sub-folders) on the Skills and Autopilots pages (FIR-1412).",
+		Ops: []string{
+			"POST /api/cerebro/entity-folders/",
+			"PUT /api/cerebro/entity-folders/{id}",
+			"DELETE /api/cerebro/entity-folders/{id}",
+			"PUT /api/cerebro/entity-folder-items/",
+		},
+	},
 
 	// --- Agents (styring af agenter) -----------------------------------------
 	{

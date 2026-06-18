@@ -29,6 +29,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "DELETE /api/cerebro/entity-folders/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/focus-list/{id}",
       "gate": "workspace_member"
     },
@@ -494,6 +498,10 @@
     },
     {
       "id": "POST /api/cerebro/channels/{id}/typing",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/entity-folders/",
       "gate": "workspace_member"
     },
     {
@@ -1323,6 +1331,14 @@
     {
       "id": "PUT /api/autopilots/{id}/triggers/{triggerId}/signing-secret",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/cerebro/entity-folder-items/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/entity-folders/{id}",
+      "gate": "workspace_member"
     },
     {
       "id": "PUT /api/cerebro/issues/{issueID}/recurrence/",

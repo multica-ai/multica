@@ -1,6 +1,7 @@
 "use client";
 
 // CEREBRO-PATCH(autopilot-list-nav-no-usestate): useState unused after dialog removal (JEH-1766)
+import { useMemo } from "react"; // CEREBRO-PATCH(autopilot-folders): FIR-1412 folder filtering
 import { Plus, Zap, Play, Pause, AlertCircle, Newspaper, GitPullRequest, Bug, BarChart3, Shield, FileSearch } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
@@ -16,6 +17,8 @@ import { cn } from "@multica/ui/lib/utils";
 // CEREBRO-PATCH(autopilot-list-nav-dialog-removed): dialog removed, navigates to full page (JEH-1766)
 // CEREBRO-PATCH(autopilot-private-badge-list-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(autopilot-folders): FIR-1412 — folder sidebar + grouping for autopilots.
+import { useEntityFolderView } from "@multica/cerebro-entity-folders";
 import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
 import { useT } from "../../i18n";
@@ -191,6 +194,20 @@ export function AutopilotsPage() {
   // CEREBRO-PATCH(autopilot-list-nav-state): navigate to full-page create instead of dialog (JEH-1766)
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
+  // CEREBRO-PATCH(autopilot-folders): FIR-1412 — folder sidebar + filter for autopilots.
+  const folderItems = useMemo(
+    () => autopilots.map((a) => ({ id: a.id, label: a.title })),
+    [autopilots],
+  );
+  const folderView = useEntityFolderView({
+    kind: "autopilot",
+    items: folderItems,
+    itemNoun: "autopilots",
+  });
+  const visibleAutopilots = useMemo(
+    () => autopilots.filter((a) => folderView.includes(a.id)),
+    [autopilots, folderView],
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -210,7 +227,10 @@ export function AutopilotsPage() {
       </PageHeader>
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto">
+      {/* CEREBRO-PATCH(autopilot-folders): FIR-1412 — folder sidebar beside the list. */}
+      <div className="flex min-h-0 flex-1">
+        {folderView.sidebar}
+        <div className="min-w-0 flex-1 overflow-y-auto">
         {isLoading ? (
           <>
             <div className="sticky top-0 z-[1] hidden h-8 items-center gap-2 border-b bg-muted/30 px-5 sm:flex">
@@ -273,11 +293,12 @@ export function AutopilotsPage() {
               <span className="w-20 text-center shrink-0">{t(($) => $.page.table.status)}</span>
               <span className="w-20 text-right shrink-0">{t(($) => $.page.table.last_run)}</span>
             </div>
-            {autopilots.map((autopilot) => (
+            {visibleAutopilots.map((autopilot) => (
               <AutopilotRow key={autopilot.id} autopilot={autopilot} />
             ))}
           </>
         )}
+        </div>
       </div>
 
       {/* CEREBRO-PATCH(autopilot-list-nav-no-dialog): create dialog removed, uses /autopilots/new page (JEH-1766) */}

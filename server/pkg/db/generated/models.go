@@ -529,6 +529,24 @@ type CerebroCredentialBinding struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroEntityFolder struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ParentID    pgtype.UUID        `json:"parent_id"`
+	Kind        string             `json:"kind"`
+	Name        string             `json:"name"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroEntityFolderItem struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Kind        string             `json:"kind"`
+	ItemID      pgtype.UUID        `json:"item_id"`
+	FolderID    pgtype.UUID        `json:"folder_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroExchangeRate struct {
 	BaseCurrency   string             `json:"base_currency"`
 	TargetCurrency string             `json:"target_currency"`
