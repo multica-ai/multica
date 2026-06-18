@@ -23,6 +23,8 @@ export type CerebroFlagKey =
   | "cerebro_dashboard"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
+  // FIR-407: in-conversation message search for channels + DMs.
+  | "cerebro_channel_message_search"
   | "cerebro_typing_indicators"
   | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
@@ -217,6 +219,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_dashboard: true,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
+  cerebro_channel_message_search: true,
   cerebro_typing_indicators: true,
   cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
@@ -581,6 +584,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Give channels and DMs the same inbox row controls as notifications: \"remind me\" (snooze) and \"mark as unread\", via the hover menu, mobile swipe gestures, and long-press menu.",
+  },
+  {
+    key: "cerebro_channel_message_search",
+    label: "Search in conversation",
+    group: "inbox",
+    description:
+      "Add a search icon to every channel and DM header. Opens a search bar that highlights matching messages, dims the rest, and lets you step between results with the up/down arrows or Enter/Shift+Enter — Esc closes it. Searches the currently loaded message history of the open conversation.",
   },
   {
     key: "cerebro_typing_indicators",

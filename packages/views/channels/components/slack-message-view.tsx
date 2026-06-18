@@ -229,6 +229,8 @@ const MessageRow = memo(function MessageRow({
 
   return (
     <div
+      // CEREBRO-PATCH(channel-message-search): FIR-407 — stable anchor so the in-conversation search can highlight/dim/scroll this row.
+      data-message-id={entry.id}
       onPointerDown={startLongPress}
       onPointerUp={clearLongPressTimer}
       onPointerCancel={clearLongPressTimer}

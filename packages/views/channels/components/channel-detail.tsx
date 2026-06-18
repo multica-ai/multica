@@ -55,6 +55,8 @@ import { ChannelTypingIndicator } from "@multica/cerebro-channels";
 import { useChannelTyping } from "@multica/core/presence";
 // CEREBRO-PATCH(channel-cost-chip-import): FIR-39 channel-wide total cost chip in the header.
 import { ChannelCostChip } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(channel-message-search): FIR-407 — in-conversation message search (icon + bar + highlight/scroll).
+import { useChannelMessageSearch, ChannelMessageSearchButton, ChannelMessageSearchBar } from "@multica/cerebro-channels";
 // CEREBRO-PATCH(channels-scroll-to-bottom): FIR-2522 — DM/Channel åbner i bunden + sticky-bottom + "Ny besked"-pille.
 import { useStickyBottom } from "@multica/cerebro-ui/hooks/use-sticky-bottom";
 import { JumpToLatestButton } from "@multica/cerebro-ui/components/jump-to-latest-button";
@@ -191,6 +193,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
   const scrollRef = useRef<HTMLDivElement>(null);
   const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
+  // CEREBRO-PATCH(channel-message-search): FIR-407 — search over the loaded message stream (icon toggles the bar below the header).
+  const messageSearch = useChannelMessageSearch(topLevel, scrollRef);
   // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — keep latest channel messages visible on open and after sending.
   const openedChannelRef = useRef<string | null>(null);
   const lastOwnMessageRef = useRef<string | null>(null);
@@ -293,6 +297,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             </button>
           )}
           <div className="ml-auto flex items-center gap-1">
+            {/* CEREBRO-PATCH(channel-message-search): FIR-407 — open in-conversation message search. */}
+            <ChannelMessageSearchButton active={messageSearch.open} onToggle={messageSearch.toggle} />
             {/* CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total cost. */}
             <ChannelCostChip channelId={channelId} />
             {/* CEREBRO-PATCH(channel-settings-sheet): TECH-3698 — one gear opens
@@ -328,6 +334,9 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           </p>
         ) : null}
       </header>
+
+      {/* CEREBRO-PATCH(channel-message-search): FIR-407 — search bar under the header (hidden while a thread is full-screen). */}
+      {messageSearch.open && !threadFullScreen && <ChannelMessageSearchBar search={messageSearch} />}
 
       {/* CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — horizontal
           split so the right-slide-in ThreadSidePanel can dock against the

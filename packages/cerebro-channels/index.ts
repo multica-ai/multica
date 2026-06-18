@@ -24,3 +24,16 @@ export { CommentCostBadge } from "./comment-cost-badge";
 // CEREBRO-PATCH(channel-cost-chip): FIR-39 channel-wide total chip mounted in
 // the channel header (mirrors the chat SessionCostChip).
 export { ChannelCostChip } from "./channel-cost-chip";
+// CEREBRO-PATCH(channel-message-search): FIR-407 — in-conversation message
+// search (header toggle + search bar + in-place highlight/dim/scroll).
+export {
+  useChannelMessageSearch,
+  ChannelMessageSearchButton,
+  ChannelMessageSearchBar,
+  findMessageMatches,
+} from "./channel-message-search";
+export type {
+  ChannelMessageSearch,
+  ChannelMessageSearchButtonProps,
+  ChannelMessageSearchBarProps,
+} from "./channel-message-search";
