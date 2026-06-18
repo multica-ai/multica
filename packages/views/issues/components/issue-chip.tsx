@@ -7,7 +7,7 @@ import { StatusIcon } from "./status-icon";
 
 /**
  * Compact, presentation-only representation of an issue —
- * `<StatusIcon> <identifier> <title>`, bordered, truncating to max-w-72.
+ * `<StatusIcon> <identifier> <title>`, bordered, capped at 18rem or parent width.
  *
  * This is the single source of truth for the "issue-mention card" look.
  * It is intentionally **not** a link or button: callers wrap it in whatever
@@ -28,7 +28,7 @@ export interface IssueChipProps {
 }
 
 const BASE_CLASS =
-  "issue-mention inline-flex items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs max-w-72";
+  "issue-mention inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-xs";
 
 export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
   const wsId = useWorkspaceId();
@@ -47,7 +47,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   if (!issue) {
     return (
       <span className={cls}>
-        <span className="font-medium text-muted-foreground">
+        <span className="min-w-0 truncate font-medium text-muted-foreground">
           {fallbackLabel ?? issueId.slice(0, 8)}
         </span>
       </span>
@@ -60,7 +60,7 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
       <span className="font-medium text-muted-foreground shrink-0">
         {issue.identifier}
       </span>
-      <span className="text-foreground truncate">{issue.title}</span>
+      <span className="min-w-0 truncate text-foreground">{issue.title}</span>
     </span>
   );
 }
