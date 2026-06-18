@@ -739,122 +739,128 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     </div>
   );
 
+  const detailContent = (
+    <div className="flex h-full flex-col">
+      <BreadcrumbHeader
+        segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
+        leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
+        actions={
+          <>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={cn("text-muted-foreground", isPinned && "text-foreground")}
+            title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+            onClick={() => {
+              if (isPinned) {
+                deletePinMut.mutate({ itemType: "project", itemId: projectId });
+              } else {
+                createPin.mutate({ item_type: "project", item_id: projectId });
+              }
+            }}
+          >
+            {isPinned ? <PinOff /> : <Pin />}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                  <MoreHorizontal />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-auto">
+              <DropdownMenuItem onClick={() => {
+                void copyText(window.location.href).then((ok) => {
+                  if (ok) toast.success(t(($) => $.detail.toast_link_copied));
+                });
+              }}>
+                <Link2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.copy_link)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() => setDeleteDialogOpen(true)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                {t(($) => $.detail.delete_action)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant={sidebarOpen ? "secondary" : "ghost"}
+                  size="icon-sm"
+                  className={sidebarOpen ? "" : "text-muted-foreground"}
+                  onClick={() => {
+                    if (isMobile) {
+                      setMobileSidebarOpen((open) => !open);
+                    } else {
+                      const panel = sidebarRef.current;
+                      if (!panel) return;
+                      if (panel.isCollapsed()) panel.expand();
+                      else panel.collapse();
+                    }
+                  }}
+                >
+                  <PanelRight />
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+          </Tooltip>
+          </>
+        }
+      />
+
+      <ViewStoreProvider store={projectViewStore}>
+        <ProjectIssuesSurface
+          projectId={projectId}
+          scope={projectScope}
+          filter={projectFilter}
+        />
+      </ViewStoreProvider>
+    </div>
+  );
+
   return (
     <>
-    <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
-      <ResizablePanel id="content" minSize="50%">
-        <div className="flex h-full flex-col">
-          <BreadcrumbHeader
-            segments={[{ href: wsPaths.projects(), label: t(($) => $.detail.breadcrumb_fallback) }]}
-            leaf={<span className="truncate font-medium text-foreground">{project.title}</span>}
-            actions={
-              <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                className={cn("text-muted-foreground", isPinned && "text-foreground")}
-                title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                onClick={() => {
-                  if (isPinned) {
-                    deletePinMut.mutate({ itemType: "project", itemId: projectId });
-                  } else {
-                    createPin.mutate({ item_type: "project", item_id: projectId });
-                  }
-                }}
-              >
-                {isPinned ? <PinOff /> : <Pin />}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                      <MoreHorizontal />
-                    </Button>
-                  }
-                />
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuItem onClick={() => {
-                    void copyText(window.location.href).then((ok) => {
-                      if (ok) toast.success(t(($) => $.detail.toast_link_copied));
-                    });
-                  }}>
-                    <Link2 className="h-3.5 w-3.5" />
-                    {t(($) => $.detail.copy_link)}
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t(($) => $.detail.delete_action)}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={sidebarOpen ? "secondary" : "ghost"}
-                      size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
-                      onClick={() => {
-                        if (isMobile) {
-                          setMobileSidebarOpen((open) => !open);
-                        } else {
-                          const panel = sidebarRef.current;
-                          if (!panel) return;
-                          if (panel.isCollapsed()) panel.expand();
-                          else panel.collapse();
-                        }
-                      }}
-                    >
-                      <PanelRight />
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-              </Tooltip>
-              </>
-            }
-          />
-
-          <ViewStoreProvider store={projectViewStore}>
-              <ProjectIssuesSurface
-                projectId={projectId}
-                scope={projectScope}
-                filter={projectFilter}
-              />
-            </ViewStoreProvider>
-          </div>
-        </ResizablePanel>
-        {!isMobile && <ResizableHandle />}
-        {!isMobile && (
-        <ResizablePanel
-          id="sidebar"
-          defaultSize={desktopSidebarOpen ? 320 : 0}
-          minSize={260}
-          maxSize={420}
-          collapsible
-          groupResizeBehavior="preserve-pixel-size"
-          panelRef={sidebarRef}
-          onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
-        >
-          <div className="overflow-y-auto border-l h-full">
-            <div className="p-4">
-              {sidebarContent}
-            </div>
-          </div>
-        </ResizablePanel>
-        )}
-        {isMobile && (
+      {isMobile ? (
+        <div className="flex flex-1 min-h-0">
+          {detailContent}
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
             <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
               {sidebarContent}
             </SheetContent>
           </Sheet>
-        )}
-      </ResizablePanelGroup>
+        </div>
+      ) : (
+        <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
+          <ResizablePanel id="content" minSize="50%">
+            {detailContent}
+          </ResizablePanel>
+          <ResizableHandle />
+          <ResizablePanel
+            id="sidebar"
+            defaultSize={desktopSidebarOpen ? 320 : 0}
+            minSize={260}
+            maxSize={420}
+            collapsible
+            groupResizeBehavior="preserve-pixel-size"
+            panelRef={sidebarRef}
+            onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
+          >
+            <div className="overflow-y-auto border-l h-full">
+              <div className="p-4">
+                {sidebarContent}
+              </div>
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
 
       {/* Delete confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
