@@ -46,7 +46,30 @@ var runtimeProfileListCmd = &cobra.Command{
 var runtimeProfileCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a custom runtime profile",
-	RunE:  runRuntimeProfileCreate,
+	Long: `Create a custom runtime profile.
+
+A profile binds a workspace-named runtime to a base protocol family (the
+launch arguments and output protocol the daemon will speak) and a
+command_name (the executable the daemon resolves on PATH at registration
+time).
+
+The base protocol family is NOT a generic CLI adapter. The daemon spawns
+the configured command with the family's fixed launch arguments
+(claude / cursor / codex / gemini / copilot / hermes / openclaw / kiro /
+kimi) and parses its stdout against that protocol's output schema. So the
+command MUST already speak the chosen family's wire format. Same-protocol
+wrappers and rebranded forks of an existing CLI are the supported use
+case (e.g. an internal launcher that injects credentials before exec'ing
+the real claude binary).
+
+Pointing a custom profile at a non-compatible CLI — for example
+'protocol_family=cursor command_name=grok' or
+'protocol_family=claude command_name=droid' — produces a runtime that
+registers, comes online, and emits heartbeats, but every claimed task
+fails with a clear "incompatible with the selected <family> protocol
+family" error. To add a genuinely new CLI (Grok, Droid, …), open a
+first-class provider request rather than reusing an existing family.`,
+	RunE: runRuntimeProfileCreate,
 }
 
 var runtimeProfileUpdateCmd = &cobra.Command{
@@ -90,8 +113,8 @@ func init() {
 	runtimeProfileListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// create
-	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Supported backend the profile routes to (required)")
-	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
+	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Base protocol family this runtime speaks (required). The launch arguments and output protocol the daemon will use — pick the family the underlying command already implements; not a generic CLI adapter.")
+	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required). MUST be compatible with --protocol-family's launch arguments and output format. Wrappers around the same CLI are fine; non-compatible CLIs (e.g. grok under cursor, droid under claude) come online but fail every task.")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")

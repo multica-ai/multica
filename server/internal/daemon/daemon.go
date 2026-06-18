@@ -887,6 +887,39 @@ func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
 	return path, true
 }
 
+// wrapCustomProfileExecError rewrites a raw backend.Execute error or a failed
+// agent.Result.Error string into a user-facing comment that names the actual
+// failure mode for custom runtime profiles (MUL-3414): the user pointed an
+// incompatible CLI at a built-in protocol family, so the runtime came online
+// but cannot speak the family's launch arguments / output protocol. The
+// runTask error path uses this together with
+// taskfailure.ReasonAgentRuntimeVersionUnsupported so the run leaves a
+// blocked task whose failure_reason and comment together tell the user
+// exactly what is wrong, instead of a generic "agent backend failed".
+//
+// The wording deliberately calls out the boundary that the UI/CLI hints
+// already document — same-protocol wrappers work, arbitrary CLIs (grok,
+// droid, …) do not — so a single read of the failed task in the issue
+// timeline matches what the dialog warned about at create time.
+func wrapCustomProfileExecError(provider, commandPath, rawError string) string {
+	raw := strings.TrimSpace(rawError)
+	if raw == "" {
+		raw = "no error detail captured"
+	}
+	cmd := strings.TrimSpace(commandPath)
+	if cmd == "" {
+		cmd = "the configured command"
+	}
+	return fmt.Sprintf(
+		"Custom runtime profile is incompatible with the selected %s protocol family. "+
+			"Custom profiles require a command that accepts %s-compatible launch arguments "+
+			"and produces %s-compatible output; %s does not. "+
+			"Use a same-protocol wrapper or open a first-class provider request to add "+
+			"genuinely new CLIs (e.g. grok, droid). Original error: %s",
+		provider, provider, provider, cmd, raw,
+	)
+}
+
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
 	var runtimes []map[string]string
@@ -3127,12 +3160,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Critically, a custom runtime can live on a host that has NO built-in
 	// agent of the same provider installed, so when the runtime is custom we
 	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
-	if customPath, isCustom := d.customCommandPathForRuntime(task.RuntimeID); isCustom {
-		entry.Path = customPath
+	customCommandPath, isCustomProfile := d.customCommandPathForRuntime(task.RuntimeID)
+	if isCustomProfile {
+		entry.Path = customCommandPath
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
-			"provider", provider, "command_path", customPath)
+			"provider", provider, "command_path", customCommandPath)
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -3545,6 +3579,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
+		// MUL-3414: when a custom runtime profile is in use, surface the
+		// real failure mode — the user pointed an incompatible CLI at a
+		// built-in protocol family — instead of letting handleTask's
+		// generic FailTask classify it as a runner crash. Returning a
+		// TaskResult with status=blocked + a refined failure_reason
+		// preserves the SessionID/WorkDir that the error path otherwise
+		// drops, AND lets us pin failure_reason directly without going
+		// through Classify's string heuristics.
+		if isCustomProfile {
+			wrapped := wrapCustomProfileExecError(provider, customCommandPath, err.Error())
+			taskLog.Warn("custom runtime profile execute failed; classifying as runtime_version_unsupported",
+				"provider", provider, "command_path", customCommandPath, "raw_error", err.Error())
+			return TaskResult{
+				Status:        "blocked",
+				Comment:       wrapped,
+				WorkDir:       env.WorkDir,
+				EnvRoot:       env.RootDir,
+				FailureReason: taskfailure.ReasonAgentRuntimeVersionUnsupported.String(),
+			}, nil
+		}
 		return TaskResult{}, err
 	}
 
@@ -3733,6 +3787,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// MUL-1949 offline backfill to re-classify after the
 			// fact.
 			failureReason = taskfailure.Classify(errMsg).String()
+		}
+		// MUL-3414: for custom runtime profiles, replace the generic
+		// classifier output with a refined "runtime_version_unsupported"
+		// reason and rewrite the comment so users see "incompatible with
+		// the selected protocol family" instead of a raw "exit status 2"
+		// or "returned no parseable output". Done after the poisoned-API
+		// classifier so a genuine upstream 400 is still classified
+		// correctly even when triggered through a custom profile.
+		if isCustomProfile && failureReason != taskfailure.ReasonAPIInvalidRequest.String() {
+			taskLog.Warn("custom runtime profile execution failed; rewriting failure_reason",
+				"provider", provider, "command_path", customCommandPath,
+				"original_failure_reason", failureReason, "raw_error", errMsg,
+			)
+			errMsg = wrapCustomProfileExecError(provider, customCommandPath, errMsg)
+			failureReason = taskfailure.ReasonAgentRuntimeVersionUnsupported.String()
 		}
 		return TaskResult{
 			Status:        "blocked",
