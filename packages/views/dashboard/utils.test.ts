@@ -122,6 +122,30 @@ describe("computeDailyTotals", () => {
     expect(totals.cost).toBe(9); // 3M × $3/M
     expect(totals.taskCount).toBe(5);
   });
+
+  it("includes Codex auto-review aliases in usage dashboard cost totals", () => {
+    const totals = computeDailyTotals([
+      {
+        date: "2026-06-16",
+        model: "codex-auto-review",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 0,
+        task_count: 1,
+      },
+      {
+        date: "2026-06-16",
+        model: "openai:codex-auto-review",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        task_count: 1,
+      },
+    ]);
+    expect(totals.cost).toBeCloseTo(0.75 + 4.5 + 0.075 + 0.75, 5);
+  });
 });
 
 describe("mergeAgentDashboardRows", () => {

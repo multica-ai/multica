@@ -248,6 +248,13 @@ const MODEL_PRICING: Record<
   "cursor":             { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
+const MODEL_ALIASES: Record<string, string> = {
+  // Codex emits this internal label for the auto-review subagent / guardian
+  // path. It is not a public model SKU, so map it to OpenAI's published
+  // GPT-5.4 mini tier for coding / computer-use / subagent work.
+  "codex-auto-review": "gpt-5.4-mini",
+};
+
 // Resolve a model string to its pricing tier. Exact match, with four
 // tolerances applied in order:
 //
@@ -297,11 +304,20 @@ function canonicalCandidates(model: string): string[] {
     seen.add(s);
     out.push(s);
   };
+  const pushAlias = (s: string) => {
+    const alias = MODEL_ALIASES[s];
+    if (alias) push(alias);
+  };
   const stripDate = (s: string) =>
     s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
   const stripProvider = (s: string) => {
-    const i = s.indexOf("/");
-    return i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i)) ? s.slice(i + 1) : s;
+    for (const sep of ["/", ":"]) {
+      const i = s.indexOf(sep);
+      if (i > 0 && /^[a-z][a-z0-9_-]*$/i.test(s.slice(0, i))) {
+        return s.slice(i + 1);
+      }
+    }
+    return s;
   };
   // Only Anthropic IDs are dot↔dash equivalent. OpenAI separators are
   // semantic, so we leave `gpt-5.4` etc. alone.
@@ -313,18 +329,33 @@ function canonicalCandidates(model: string): string[] {
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
   const raw = model;
+  const normalized = raw.trim().toLowerCase();
   const noProvider = stripProvider(raw);
+  const normalizedNoProvider = stripProvider(normalized);
   const dashed = canonAnthropic(noProvider);
+  const normalizedDashed = canonAnthropic(normalizedNoProvider);
   const noTag = stripContextTag(dashed);
+  const normalizedNoTag = stripContextTag(normalizedDashed);
 
   push(raw);
+  push(normalized);
   push(noProvider);
+  push(normalizedNoProvider);
   push(dashed);
+  push(normalizedDashed);
   push(noTag);
+  push(normalizedNoTag);
   push(stripDate(raw));
+  push(stripDate(normalized));
   push(stripDate(noProvider));
+  push(stripDate(normalizedNoProvider));
   push(stripDate(dashed));
+  push(stripDate(normalizedDashed));
   push(stripDate(noTag));
+  push(stripDate(normalizedNoTag));
+  for (const candidate of [...out]) {
+    pushAlias(candidate);
+  }
   return out;
 }
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban } from "lucide-react";
+import { AlertCircle, BarChart3, FolderKanban } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   Select,
@@ -21,6 +22,7 @@ import {
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import type { DashboardUsageDaily } from "@multica/core/types";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
@@ -39,9 +41,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import {
   addDaysIso,
   aggregateByWeek,
+  collectUnmappedModels,
   formatTokens,
   todayIso,
 } from "../../runtimes/utils";
+import { CustomPricingDialog } from "../../runtimes/components/custom-pricing-dialog";
 import { useT } from "../../i18n";
 import {
   aggregateAgentTokens,
@@ -94,7 +98,7 @@ const ALL_PROJECTS = "__all__";
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
 // reference-equality dep check and trips the exhaustive-deps lint rule.
-const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
+const EMPTY_DAILY: DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
@@ -353,6 +357,8 @@ export function DashboardPage() {
             <DashboardEmpty />
           ) : (
             <>
+              <DashboardUnmappedPricingNotice usage={dailyUsageInWindow} />
+
               {/* KPI row — same 3-divide-x card grid the runtime usage
                   section uses, expanded to four tiles. */}
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
@@ -419,6 +425,47 @@ export function DashboardPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DashboardUnmappedPricingNotice({
+  usage,
+}: {
+  usage: DashboardUsageDaily[];
+}) {
+  const { t } = useT("runtimes");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const unmapped = collectUnmappedModels(usage);
+  if (unmapped.length === 0) return null;
+
+  return (
+    <div
+      role="alert"
+      className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs"
+    >
+      <AlertCircle className="h-4 w-4 shrink-0 text-warning" />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-foreground">
+          {t(($) => $.usage.unmapped_notice, { count: unmapped.length })}
+        </p>
+        <p className="truncate font-mono text-[11px] text-muted-foreground">
+          {unmapped.join(", ")}
+        </p>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setDialogOpen(true)}
+      >
+        {t(($) => $.usage.custom_pricing.open_button)}
+      </Button>
+      <CustomPricingDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        unmappedModels={unmapped}
+      />
     </div>
   );
 }
