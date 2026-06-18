@@ -32,6 +32,36 @@ type toolAccessResult struct {
 	Tools     []toolAccessEntry `json:"tools"`
 }
 
+// effectiveTool mirrors toolaccess.EffectiveTool — the full read-only 5-layer
+// preview returned by GET /api/runtimes/{id}/tools/effective. Only the fields
+// the CLI renders are kept.
+type effectiveTool struct {
+	Descriptor struct {
+		ToolKey string `json:"tool_key"`
+	} `json:"descriptor"`
+	Inventory struct {
+		Enabled bool `json:"enabled"`
+	} `json:"inventory"`
+	Policy struct {
+		Effective string `json:"effective"`
+		Reason    string `json:"reason"`
+	} `json:"policy"`
+	RuntimeGrant struct {
+		Effective string `json:"effective"`
+		Reason    string `json:"reason"`
+	} `json:"runtime_grant"`
+	Protocol struct {
+		Effective string `json:"effective"`
+	} `json:"protocol"`
+	Credential struct {
+		Effective string `json:"effective"`
+	} `json:"credential"`
+	ExposureEffective struct {
+		Effective bool   `json:"effective"`
+		Reason    string `json:"reason"`
+	} `json:"exposure_effective"`
+}
+
 func init() {
 	cmd := &cobra.Command{
 		Use:   "tool-access <agent-id>",
@@ -45,6 +75,7 @@ func init() {
 	}
 	cmd.Flags().String("user", "", "User to check access for (UUID or email)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
+	cmd.Flags().Bool("full", false, "Show the full 5-layer effective decision per tool (inventory · policy · grant · protocol · credential)")
 	_ = cmd.MarkFlagRequired("user")
 	agentCmd.AddCommand(cmd)
 }
@@ -68,6 +99,14 @@ func runAgentToolAccess(cmd *cobra.Command, args []string) error {
 	}
 
 	output, _ := cmd.Flags().GetString("output")
+
+	// --full upgrades from the grant-cascade diagnostic to the complete 5-layer
+	// read-only preview, so an operator sees policy / protocol / credential
+	// blocks too — not only the runtime grant layer.
+	if full, _ := cmd.Flags().GetBool("full"); full {
+		return runAgentToolAccessFull(ctx, client, res, output)
+	}
+
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, res)
 	}
@@ -87,4 +126,56 @@ func runAgentToolAccess(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// runAgentToolAccessFull renders the complete 5-layer effective preview by
+// calling GET /api/runtimes/{id}/tools/effective with the agent + user context
+// resolved by the diagnostic endpoint.
+func runAgentToolAccessFull(ctx context.Context, client *cli.APIClient, base toolAccessResult, output string) error {
+	if base.RuntimeID == "" {
+		return fmt.Errorf("agent has no runtime; cannot compute the full 5-layer view")
+	}
+	path := fmt.Sprintf("/api/runtimes/%s/tools/effective?agent_id=%s&user_id=%s",
+		url.PathEscape(base.RuntimeID), url.QueryEscape(base.AgentID), url.QueryEscape(base.UserID))
+
+	var tools []effectiveTool
+	if err := client.GetJSON(ctx, path, &tools); err != nil {
+		return fmt.Errorf("get effective tool access: %w", err)
+	}
+
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, tools)
+	}
+
+	headers := []string{"TOOL", "EXPOSED", "INVENTORY", "POLICY", "GRANT", "PROTOCOL", "CREDENTIAL", "WHY"}
+	rows := make([][]string, 0, len(tools))
+	for _, t := range tools {
+		exposed := "yes"
+		if !t.ExposureEffective.Effective {
+			exposed = "NO"
+		}
+		inv := "on"
+		if !t.Inventory.Enabled {
+			inv = "off"
+		}
+		rows = append(rows, []string{
+			t.Descriptor.ToolKey,
+			exposed,
+			inv,
+			dash(t.Policy.Effective),
+			dash(t.RuntimeGrant.Effective),
+			dash(t.Protocol.Effective),
+			dash(t.Credential.Effective),
+			t.ExposureEffective.Reason,
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }

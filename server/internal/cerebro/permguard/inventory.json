@@ -1,7 +1,15 @@
 {
   "http": [
     {
+      "id": "DELETE /api/agents/{id}/tool-grants",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/agents/{id}/tool-grants",
       "gate": "workspace_admin"
     },
     {
@@ -1907,6 +1915,14 @@
     {
       "id": "agent tool-access",
       "exempt": "read-only — wraps GET /api/agents/{id}/tool-access"
+    },
+    {
+      "id": "agent tool-grant add",
+      "gate": "via:POST /api/agents/{id}/tool-grants"
+    },
+    {
+      "id": "agent tool-grant remove",
+      "gate": "via:DELETE /api/agents/{id}/tool-grants"
     },
     {
       "id": "agent usage",
