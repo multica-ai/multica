@@ -178,6 +178,9 @@ export interface InboxSectionConfig {
   // --- TECH-3690 (Jesper) — config for the "note" (Quick note) box. ---
   /** Quick-note box: the single note embedded in this block. */
   noteId?: string;
+  // FIR-1487 — Quick-note box: user-controlled font size for the inline editor.
+  /** Quick-note box: editor font size. Default "sm" (matches inbox text). */
+  noteFontSize?: "xs" | "sm" | "base" | "lg";
 }
 
 /** TECH-3690 — how the Notes box sorts. Mirrors NotesBoxSort in cerebro-notes;

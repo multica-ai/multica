@@ -36,6 +36,23 @@ import {
 /** Debounce window for the inline autosave. */
 const SAVE_DEBOUNCE_MS = 600;
 
+/** FIR-1487 — available font sizes for the Quick note editor. */
+export type NoteFontSize = "xs" | "sm" | "base" | "lg";
+
+const FONT_SIZE_CLASS: Record<NoteFontSize, string> = {
+  xs: "text-xs",
+  sm: "text-sm",
+  base: "text-base",
+  lg: "text-lg",
+};
+
+const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
+  xs: "X-Small",
+  sm: "Small",
+  base: "Medium",
+  lg: "Large",
+};
+
 export interface NoteInboxBoxProps {
   title?: string;
   /** The note embedded in this block. undefined = nothing picked yet. */
@@ -45,6 +62,10 @@ export interface NoteInboxBoxProps {
   onRemove: () => void;
   /** Drag handle injected by the dynamic inbox's sortable wrapper. */
   dragHandle?: ReactNode;
+  /** FIR-1487 — editor font size. Default "sm" (matches inbox text). */
+  fontSize?: NoteFontSize;
+  /** FIR-1487 — persist the font size choice into the section config. */
+  onSetFontSize?: (size: NoteFontSize) => void;
 }
 
 export function NoteInboxBox({
@@ -53,6 +74,8 @@ export function NoteInboxBox({
   onSetNoteId,
   onRemove,
   dragHandle,
+  fontSize,
+  onSetFontSize,
 }: NoteInboxBoxProps) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -98,6 +121,8 @@ export function NoteInboxBox({
           onPick={onSetNoteId}
           onDetach={() => onSetNoteId(null)}
           onCreate={handleCreate}
+          fontSize={fontSize}
+          onSetFontSize={onSetFontSize}
         />
         <button
           type="button"
@@ -151,7 +176,7 @@ export function NoteInboxBox({
       </div>
     );
   } else {
-    bodySlot = <NoteEditor note={note} />;
+    bodySlot = <NoteEditor note={note} fontSize={fontSize} />;
   }
 
   return (
@@ -163,7 +188,7 @@ export function NoteInboxBox({
 }
 
 /** Inline, debounced-autosave body editor for the embedded note. */
-function NoteEditor({ note }: { note: Note }) {
+function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize }) {
   const updateNote = useUpdateNote();
   const [body, setBody] = React.useState(note.body);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,27 +243,35 @@ function NoteEditor({ note }: { note: Note }) {
         onChange={(e) => onChange(e.target.value)}
         onBlur={flush}
         placeholder="Write a note… (the first line becomes the title)"
-        className="min-h-28 resize-y border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+        className={`min-h-28 resize-y border-0 bg-transparent ${FONT_SIZE_CLASS[fontSize ?? "sm"]} shadow-none focus-visible:ring-0`}
       />
     </div>
   );
 }
 
-/** Dropdown to create / pick / detach the note this block shows. */
+const FONT_SIZE_OPTIONS: NoteFontSize[] = ["xs", "sm", "base", "lg"];
+
+/** Dropdown to create / pick / detach the note this block shows, and to
+ *  control per-block settings like font size. */
 function NotePicker({
   wsId,
   activeId,
   onPick,
   onDetach,
   onCreate,
+  fontSize,
+  onSetFontSize,
 }: {
   wsId: string;
   activeId?: string;
   onPick: (id: string) => void;
   onDetach: () => void;
   onCreate: () => void;
+  fontSize?: NoteFontSize;
+  onSetFontSize?: (size: NoteFontSize) => void;
 }) {
   const { data: notes = [] } = useQuery(notesListOptions(wsId, { limit: 20 }));
+  const activeFontSize = fontSize ?? "sm";
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -261,6 +294,27 @@ function NotePicker({
             <DropdownMenuItem onClick={onDetach}>Detach note</DropdownMenuItem>
           )}
         </DropdownMenuGroup>
+        {onSetFontSize && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Font size</DropdownMenuLabel>
+              {FONT_SIZE_OPTIONS.map((size) => (
+                <DropdownMenuItem
+                  key={size}
+                  onClick={() => onSetFontSize(size)}
+                >
+                  <span className="flex w-full items-center justify-between">
+                    <span>{FONT_SIZE_LABELS[size]}</span>
+                    {size === activeFontSize && (
+                      <span className="text-muted-foreground">✓</span>
+                    )}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </>
+        )}
         {notes.length > 0 && (
           <>
             <DropdownMenuSeparator />

@@ -1047,6 +1047,10 @@ export function DynamicInbox() {
                             changeSection({ ...section, noteId: id ?? undefined })
                           }
                           onRemove={() => removeSection(section.id)}
+                          fontSize={section.noteFontSize}
+                          onSetFontSize={(size) =>
+                            changeSection({ ...section, noteFontSize: size })
+                          }
                         />
                       ) : section.kind === "team" ? (
                         <div className="relative">
