@@ -48,7 +48,7 @@ multica daemon restart
 
 ### Codex (OpenAI)
 
-よりきめ細かい承認ゲートを備えた JSON-RPC 2.0 のトランスポートです。**セッション再開のコードは存在しますが、現在は到達できません** — 再開が必要な場合は Claude Code か ACP 系列のいずれかを選んでください。
+よりきめ細かい承認ゲートを備えた JSON-RPC 2.0 のトランスポートです。**セッション再開は動作します** — Multica は Codex app-server の `thread/resume` で再開し、古いまたは存在しない thread では新しい thread にフォールバックします。
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ multica daemon restart
 
 ### Cursor (Anysphere)
 
-Cursor エディタに対応する CLI です。**セッション再開は動作しません** — Cursor の CLI がセッション id を返さないため、再開時に渡す値は常に無効です。
+Cursor エディタに対応する CLI です。**セッション再開は動作します** — 現在の Cursor Agent は stream-json イベントで `session_id` を返し、Multica は次回実行時に `--resume <id>` でそれを渡します。
 
 | | |
 |---|---|

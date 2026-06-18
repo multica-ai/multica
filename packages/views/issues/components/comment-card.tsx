@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -103,7 +103,7 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -245,6 +245,60 @@ function initialStandaloneAttachmentIds(entry: TimelineEntry): Set<string> {
     (entry.attachments ?? [])
       .filter((attachment) => !contentReferencesAttachment(content, attachment))
       .map((attachment) => attachment.id),
+  );
+}
+
+function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEntry & { source_task_id: string } {
+  return (
+    entry.actor_type === "agent" &&
+    entry.comment_type === "system" &&
+    typeof entry.source_task_id === "string" &&
+    entry.source_task_id.length > 0
+  );
+}
+
+function TaskCommentRetryButton({
+  issueId,
+  taskId,
+  className,
+}: {
+  issueId: string;
+  taskId: string;
+  className?: string;
+}) {
+  const { t } = useT("issues");
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    try {
+      await api.rerunIssue(issueId, taskId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  return (
+    <div className={cn("flex", className)}>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={handleRetry}
+        disabled={retrying}
+        aria-label={t(($) => $.execution_log.retry_task_aria)}
+      >
+        {retrying ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <RotateCcw className="h-3.5 w-3.5" />
+        )}
+        {t(($) => $.execution_log.retry_task_tooltip)}
+      </Button>
+    </div>
   );
 }
 
@@ -564,34 +618,33 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
-          <div className="flex items-center justify-between mt-2">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              {edit.standaloneEditAttachments.length > 0 && (
-                <AttachmentList
-                  attachments={edit.standaloneEditAttachments}
-                  className="max-w-full"
-                  onRemove={(attachmentId) =>
-                    edit.setRetainedStandaloneIds((ids) => {
-                      const next = new Set(ids ?? []);
-                      next.delete(attachmentId);
-                      return next;
-                    })
-                  }
-                  />
-                )}
+          {edit.standaloneEditAttachments.length > 0 && (
+            <AttachmentList
+              attachments={edit.standaloneEditAttachments}
+              className="mt-2 max-w-full"
+              onRemove={(attachmentId) =>
+                edit.setRetainedStandaloneIds((ids) => {
+                  const next = new Set(ids ?? []);
+                  next.delete(attachmentId);
+                  return next;
+                })
+              }
+            />
+          )}
+          <div className="flex items-center justify-between gap-2 mt-2">
+            <div className="min-w-0 flex-1">
               <CommentTriggerChips
                 agents={edit.triggerPreview.agents}
                 suppressedAgentIds={edit.suppressedAgentIds}
                 onToggle={edit.toggleSuppressedAgent}
-                context="edit"
               />
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
               <FileUploadButton
                 size="sm"
                 multiple
                 onSelect={(file) => edit.editorRef.current?.uploadFile(file)}
               />
-            </div>
-            <div className="flex items-center gap-2">
               <Button size="sm" variant="ghost" onClick={edit.cancelEdit}>{t(($) => $.comment.cancel_edit)}</Button>
               <Button size="sm" variant="outline" onClick={edit.saveEdit}>{t(($) => $.comment.save_action)}</Button>
             </div>
@@ -604,6 +657,13 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4" />
+          {retryableAgentFailureComment(entry) && (
+            <TaskCommentRetryButton
+              issueId={issueId}
+              taskId={entry.source_task_id}
+              className="mt-2 pl-12 pr-4"
+            />
+          )}
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -864,7 +924,6 @@ function CommentCardImpl({
                       agents={edit.triggerPreview.agents}
                       suppressedAgentIds={edit.suppressedAgentIds}
                       onToggle={edit.toggleSuppressedAgent}
-                      context="edit"
                     />
                     <FileUploadButton
                       size="sm"
@@ -885,6 +944,13 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
+                {retryableAgentFailureComment(entry) && (
+                  <TaskCommentRetryButton
+                    issueId={issueId}
+                    taskId={entry.source_task_id}
+                    className="mt-2 pl-10"
+                  />
+                )}
                 <ReactionBar
                   reactions={reactions}
                   currentUserId={currentUserId}

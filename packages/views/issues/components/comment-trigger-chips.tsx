@@ -29,11 +29,9 @@ interface CommentTriggerChipsProps {
   agents: CommentTriggerPreviewAgent[];
   suppressedAgentIds: Set<string>;
   onToggle: (agentId: string) => void;
-  context?: CommentTriggerContext;
 }
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
-type CommentTriggerContext = "comment" | "reply" | "edit";
 
 function sourceLabel(source: string, t: IssuesT): string {
   switch (source) {
@@ -48,38 +46,19 @@ function sourceLabel(source: string, t: IssuesT): string {
   }
 }
 
-function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string {
+// Assignee / @mention reasons are intentionally omitted: the header
+// (name · source) already says why they fire, so a reason line there would
+// just restate it. Only the squad-leader link (non-obvious) and the unknown
+// fallback carry information the header doesn't.
+function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string | null {
   switch (agent.source) {
     case "issue_assignee":
-      return t(($) => $.comment.trigger_reason_issue_assignee, { name: agent.name });
     case "mention_agent":
-      return t(($) => $.comment.trigger_reason_mention_agent, { name: agent.name });
+      return null;
     case "mention_squad_leader":
-      return t(($) => $.comment.trigger_reason_mention_squad_leader, { name: agent.name });
+      return t(($) => $.comment.trigger_reason_mention_squad_leader);
     default:
-      return agent.reason || t(($) => $.comment.trigger_reason_unknown, { name: agent.name });
-  }
-}
-
-function triggerContextLabel(context: CommentTriggerContext, t: IssuesT): string {
-  switch (context) {
-    case "reply":
-      return t(($) => $.comment.trigger_context_reply);
-    case "edit":
-      return t(($) => $.comment.trigger_context_edit);
-    default:
-      return t(($) => $.comment.trigger_context_comment);
-  }
-}
-
-function triggerPreviewTitle(context: CommentTriggerContext, t: IssuesT): string {
-  switch (context) {
-    case "reply":
-      return t(($) => $.comment.trigger_preview_title_reply);
-    case "edit":
-      return t(($) => $.comment.trigger_preview_title_edit);
-    default:
-      return t(($) => $.comment.trigger_preview_title_comment);
+      return agent.reason || t(($) => $.comment.trigger_reason_unknown);
   }
 }
 
@@ -116,10 +95,12 @@ function TriggerAgentTooltipBody({
         <div>{t(($) => $.comment.trigger_click_to_restore)}</div>
       ) : (
         <>
-          <div>
-            {sourceReason(agent, t)}
-            {presenceLine ? ` ${presenceLine}` : ""}
-          </div>
+          {(() => {
+            // Reason (when present) and presence share one line; either may be
+            // absent, so join only the parts that exist to avoid a stray space.
+            const line = [sourceReason(agent, t), presenceLine].filter(Boolean).join(" ");
+            return line ? <div>{line}</div> : null;
+          })()}
           <div className="text-muted-foreground">{t(($) => $.comment.trigger_click_to_skip)}</div>
         </>
       )}
@@ -131,7 +112,6 @@ export function CommentTriggerChips({
   agents,
   suppressedAgentIds,
   onToggle,
-  context = "comment",
 }: CommentTriggerChipsProps) {
   const { t } = useT("issues");
 
@@ -146,7 +126,6 @@ export function CommentTriggerChips({
         agent={agent}
         suppressed={suppressedAgentIds.has(agent.id)}
         onToggle={onToggle}
-        context={context}
         t={t}
       />
     );
@@ -157,28 +136,8 @@ export function CommentTriggerChips({
       agents={agents}
       suppressedAgentIds={suppressedAgentIds}
       onToggle={onToggle}
-      context={context}
       t={t}
     />
-  );
-}
-
-function TriggerContextPrefix({
-  context,
-  t,
-}: {
-  context: CommentTriggerContext;
-  t: IssuesT;
-}) {
-  return (
-    <>
-      <span className="shrink-0 text-[10px] font-semibold tracking-normal text-muted-foreground/80">
-        {triggerContextLabel(context, t)}
-      </span>
-      <span aria-hidden="true" className="shrink-0 text-muted-foreground/50">
-        ·
-      </span>
-    </>
   );
 }
 
@@ -186,13 +145,11 @@ function SingleTriggerChip({
   agent,
   suppressed,
   onToggle,
-  context,
   t,
 }: {
   agent: CommentTriggerPreviewAgent;
   suppressed: boolean;
   onToggle: (agentId: string) => void;
-  context: CommentTriggerContext;
   t: IssuesT;
 }) {
   const state = suppressed
@@ -220,7 +177,6 @@ function SingleTriggerChip({
               suppressed && "opacity-60",
             )}
           >
-            <TriggerContextPrefix context={context} t={t} />
             <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
             <span className="truncate">{sentence}</span>
           </button>
@@ -237,13 +193,11 @@ function MultiTriggerChip({
   agents,
   suppressedAgentIds,
   onToggle,
-  context,
   t,
 }: {
   agents: CommentTriggerPreviewAgent[];
   suppressedAgentIds: Set<string>;
   onToggle: (agentId: string) => void;
-  context: CommentTriggerContext;
   t: IssuesT;
 }) {
   const [open, setOpen] = useState(false);
@@ -276,7 +230,6 @@ function MultiTriggerChip({
         />
       }
     >
-      <TriggerContextPrefix context={context} t={t} />
       <span className="inline-flex items-center">
         {heads.map((agent, i) => (
           <span
@@ -319,7 +272,7 @@ function MultiTriggerChip({
       </Tooltip>
       <PopoverContent align="start" className="w-64 p-2">
         <div className="px-1.5 pb-1 text-xs font-medium text-muted-foreground">
-          {triggerPreviewTitle(context, t)}
+          {t(($) => $.comment.trigger_preview_title)}
         </div>
         <div className="flex flex-col">
           {agents.map((agent) => {

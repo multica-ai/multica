@@ -25,6 +25,7 @@ import { useCreateWorkspace } from "@multica/core/workspace/mutations";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { useConfigStore } from "@multica/core/config";
+import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
 import { DragStrip } from "@multica/views/platform";
 import { useLogout } from "../../auth";
 import { StepHeader } from "../components/step-header";
@@ -51,7 +52,9 @@ import { isReservedSlug } from "@multica/core/paths";
  * shared form's own button would fight the footer CTA.
  *
  * The create-fields block doubles as a pedagogical preview: the URL is
- * rendered as a `multica.ai/[slug]` pill, and a live `Issues will look
+ * rendered as a `<host>/[slug]` pill (host derived from the deployment's
+ * app URL so self-hosted instances show their own domain), and a live
+ * `Issues will look
  * like ACME-123` line shows the user what their issue IDs will read
  * like before they've created anything.
  *
@@ -81,6 +84,7 @@ export function StepWorkspace({
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   // Single source of truth for "can the user reach the create path on this
   // instance?" — drives the resume-mode picker, the eyebrow/headline/lede
   // copy, the side panel, and the footer CTA so the disabled state can't
@@ -242,7 +246,7 @@ export function StepWorkspace({
         </Label>
         <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
-            {"multica.ai/"}
+            {`${urlHost}/`}
           </span>
           <Input
             id="ws-slug"
@@ -425,6 +429,7 @@ function ExistingWorkspaceCard({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   return (
     <button
       type="button"
@@ -444,7 +449,7 @@ function ExistingWorkspaceCard({
           {workspace.name}
         </div>
         <div className="truncate font-mono text-xs text-muted-foreground">
-          {`multica.ai/${workspace.slug}`}
+          {`${urlHost}/${workspace.slug}`}
         </div>
       </div>
       <RadioMark selected={selected} />
@@ -571,6 +576,7 @@ function WorkspacePreviewCard({
   slug: string;
 }) {
   const { t } = useT("onboarding");
+  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
   return (
     <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
       <div className="flex items-center gap-3 border-b px-4 py-3.5">
@@ -580,7 +586,7 @@ function WorkspacePreviewCard({
             {name}
           </div>
           <div className="truncate font-mono text-[11.5px] text-muted-foreground">
-            {`multica.ai/${slug}`}
+            {`${urlHost}/${slug}`}
           </div>
         </div>
         <Lock

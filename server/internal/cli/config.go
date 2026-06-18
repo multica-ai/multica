@@ -23,6 +23,19 @@ type CLIConfig struct {
 	// machine). Empty / absent means "discover from PATH and use vendor
 	// defaults" — the historical behavior. See issue #3875.
 	Backends *BackendOverrides `json:"backends,omitempty"`
+
+	// ProfileCommandOverrides is a per-machine map of custom runtime
+	// profile_id -> absolute executable path (MUL-3284). A workspace custom
+	// runtime profile records the command_name the daemon resolves on PATH,
+	// but the same logical profile may live at a different path on each
+	// machine (or not be on PATH at all). This map lets an operator pin the
+	// exact binary for a profile on this host via
+	// `multica runtime profile set-path`; the daemon prefers it over the
+	// PATH lookup in appendProfileRuntimes. Empty / absent means "resolve the
+	// profile's command_name on PATH" — the default behavior. The mapping is
+	// intentionally local-only (it is never sent to the server) because the
+	// path is a property of this machine, not of the shared profile.
+	ProfileCommandOverrides map[string]string `json:"profile_command_overrides,omitempty"`
 }
 
 // BackendOverrides holds per-backend configuration overrides. Each field is

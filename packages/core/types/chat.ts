@@ -79,6 +79,13 @@ export interface SendChatMessageResponse {
    * timer "snaps backwards" later when WS events update the cache.
    */
   created_at: string;
+  /**
+   * Attachment ids the server actually bound to this message. The client
+   * diffs these against the ids it requested to warn when an attachment
+   * silently failed to bind — no extra fetch needed. Optional for forward
+   * compat with servers that predate the field.
+   */
+  attachment_ids?: string[];
 }
 
 export interface CancelledChatMessage {
@@ -86,6 +93,11 @@ export interface CancelledChatMessage {
   message_id: string;
   content: string;
   restore_to_input: boolean;
+  /**
+   * Attachments detached from the deleted message so a restored draft can
+   * re-bind them on re-send. Absent on servers that predate the field.
+   */
+  attachments?: import("./attachment").Attachment[];
 }
 
 export interface CancelTaskResponse extends AgentTask {

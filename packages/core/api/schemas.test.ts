@@ -13,6 +13,7 @@ import {
   RuntimeUsageListSchema,
   SquadListSchema,
   SquadSchema,
+  TimelineEntriesSchema,
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -72,6 +73,25 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+});
+
+describe("TimelineEntriesSchema", () => {
+  it("preserves source_task_id for agent failure comments", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "API Error: 500 Internal server error",
+        comment_type: "system",
+        source_task_id: "task-1",
+      },
+    ]);
+
+    expect(parsed[0]?.source_task_id).toBe("task-1");
   });
 });
 
@@ -257,6 +277,20 @@ describe("dashboard + runtime usage schema drift", () => {
     expect(RuntimeHourlyActivityListSchema.parse([{ hour: 9 }])[0]?.count).toBe(0);
     expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.agent_id).toBe("");
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
+  });
+
+  it("defaults a missing provider to \"\" so an older server's rows still price by bare model", () => {
+    // provider was added for cross-provider model disambiguation; a server
+    // predating it omits the field. The schema must fill "" (→ bare-model
+    // pricing lookup) rather than drop the row.
+    expect(
+      DashboardUsageDailyListSchema.parse([{ date: "2026-05-19", model: "claude-opus-4-7" }])[0]
+        ?.provider,
+    ).toBe("");
+    expect(
+      DashboardUsageByAgentListSchema.parse([{ model: "claude-opus-4-7" }])[0]?.provider,
+    ).toBe("");
+    expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.provider).toBe("");
   });
 
   it("rejects a non-array body so parseWithFallback can return its fallback", () => {

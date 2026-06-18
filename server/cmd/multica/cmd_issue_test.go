@@ -2107,3 +2107,100 @@ func TestValidIssueStatuses(t *testing.T) {
 		t.Errorf("validIssueStatuses has %d entries, expected %d", len(validIssueStatuses), len(expected))
 	}
 }
+
+func TestValidateIssueStatus(t *testing.T) {
+	for _, s := range validIssueStatuses {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("status %q should be valid, got: %v", s, err)
+		}
+	}
+	err := validateIssueStatus("active")
+	if err == nil {
+		t.Fatal("status \"active\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "backlog") {
+		t.Errorf("error should list valid statuses, got: %v", err)
+	}
+}
+
+func TestValidateIssuePriority(t *testing.T) {
+	expected := map[string]bool{
+		"urgent": true,
+		"high":   true,
+		"medium": true,
+		"low":    true,
+		"none":   true,
+	}
+	for _, p := range validIssuePriorities {
+		if !expected[p] {
+			t.Errorf("unexpected priority in validIssuePriorities: %q", p)
+		}
+		if err := validateIssuePriority(p); err != nil {
+			t.Errorf("priority %q should be valid, got: %v", p, err)
+		}
+	}
+	if len(validIssuePriorities) != len(expected) {
+		t.Errorf("validIssuePriorities has %d entries, expected %d", len(validIssuePriorities), len(expected))
+	}
+	err := validateIssuePriority("P1")
+	if err == nil {
+		t.Fatal("priority \"P1\" should be rejected")
+	}
+	if !strings.Contains(err.Error(), "urgent") {
+		t.Errorf("error should list valid priorities, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid status")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueCreateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Invalid priority")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("runIssueCreate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("status", "active")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid status")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}
+
+func TestRunIssueUpdateRejectsInvalidPriorityBeforeRequest(t *testing.T) {
+	cmd := &cobra.Command{Use: "update"}
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	_ = cmd.Flags().Set("priority", "P1")
+	err := runIssueUpdate(cmd, []string{"MUL-1"})
+	if err == nil {
+		t.Fatal("runIssueUpdate should reject invalid priority")
+	}
+	if !strings.Contains(err.Error(), "valid values") {
+		t.Fatalf("expected valid values error, got: %v", err)
+	}
+}

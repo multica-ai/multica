@@ -86,8 +86,8 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
   useEffect(() => {
     if (!open) return;
     const fresh: Record<string, DraftRow> = {};
-    for (const model of rows) {
-      fresh[model] = toDraft(pricings[model]);
+    for (const key of rows) {
+      fresh[key] = toDraft(pricings[key]);
     }
     setDrafts(fresh);
     // We intentionally don't depend on `rows` (a new array each render) —
@@ -96,16 +96,16 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, rows.join("\n")]);
 
-  const updateField = (model: string, field: keyof DraftRow, value: string) => {
+  const updateField = (key: string, field: keyof DraftRow, value: string) => {
     setDrafts((d) => ({
       ...d,
-      [model]: { ...(d[model] ?? EMPTY_DRAFT), [field]: value },
+      [key]: { ...(d[key] ?? EMPTY_DRAFT), [field]: value },
     }));
   };
 
   const handleSave = () => {
-    for (const model of rows) {
-      const draft = drafts[model] ?? EMPTY_DRAFT;
+    for (const key of rows) {
+      const draft = drafts[key] ?? EMPTY_DRAFT;
       const parsed = parseRow(draft);
       const allEmpty =
         draft.input.trim() === "" &&
@@ -114,10 +114,10 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
         draft.cacheWrite.trim() === "";
       if (allEmpty) {
         // Treat clearing every field as "remove this override".
-        if (pricings[model]) removeCustomPricing(model);
+        if (pricings[key]) removeCustomPricing(key);
         continue;
       }
-      if (parsed) setCustomPricing(model, parsed);
+      if (parsed) setCustomPricing(key, parsed);
     }
     onOpenChange(false);
   };
@@ -138,19 +138,19 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
               {t(($) => $.usage.custom_pricing.empty)}
             </p>
           ) : (
-            rows.map((model) => {
-              const draft = drafts[model] ?? EMPTY_DRAFT;
-              const hasOverride = Boolean(pricings[model]);
+            rows.map((key) => {
+              const draft = drafts[key] ?? EMPTY_DRAFT;
+              const hasOverride = Boolean(pricings[key]);
               return (
-                <div key={model} className="space-y-2 rounded-md border p-3">
+                <div key={key} className="space-y-2 rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <code className="truncate font-mono text-xs">{model}</code>
+                    <code className="truncate font-mono text-xs">{key}</code>
                     {hasOverride && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => removeCustomPricing(model)}
+                        onClick={() => removeCustomPricing(key)}
                         aria-label={t(($) => $.usage.custom_pricing.remove_aria)}
                         title={t(($) => $.usage.custom_pricing.remove_aria)}
                       >
@@ -162,22 +162,22 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
                     <PriceField
                       label={t(($) => $.usage.custom_pricing.field_input)}
                       value={draft.input}
-                      onChange={(v) => updateField(model, "input", v)}
+                      onChange={(v) => updateField(key, "input", v)}
                     />
                     <PriceField
                       label={t(($) => $.usage.custom_pricing.field_output)}
                       value={draft.output}
-                      onChange={(v) => updateField(model, "output", v)}
+                      onChange={(v) => updateField(key, "output", v)}
                     />
                     <PriceField
                       label={t(($) => $.usage.custom_pricing.field_cache_read)}
                       value={draft.cacheRead}
-                      onChange={(v) => updateField(model, "cacheRead", v)}
+                      onChange={(v) => updateField(key, "cacheRead", v)}
                     />
                     <PriceField
                       label={t(($) => $.usage.custom_pricing.field_cache_write)}
                       value={draft.cacheWrite}
-                      onChange={(v) => updateField(model, "cacheWrite", v)}
+                      onChange={(v) => updateField(key, "cacheWrite", v)}
                     />
                   </div>
                 </div>

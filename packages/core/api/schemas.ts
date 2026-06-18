@@ -146,6 +146,7 @@ const TimelineEntrySchema = z.object({
   comment_type: z.string().optional(),
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
+  source_task_id: z.string().nullable().optional(),
   coalesced_count: z.number().optional(),
 }).loose();
 
@@ -202,6 +203,7 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
+  source_task_id: z.string().nullable().optional(),
 }).loose();
 
 export const CommentsListSchema = z.array(CommentSchema);
@@ -337,6 +339,7 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
 
 const DashboardUsageDailySchema = z.object({
   date: z.string().default(""),
+  provider: z.string().default(""),
   model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
@@ -349,6 +352,7 @@ export const DashboardUsageDailyListSchema = z.array(DashboardUsageDailySchema);
 
 const DashboardUsageByAgentSchema = z.object({
   agent_id: z.string().default(""),
+  provider: z.string().default(""),
   model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
@@ -406,6 +410,7 @@ export const RuntimeHourlyActivityListSchema = z.array(RuntimeHourlyActivitySche
 
 const RuntimeUsageByAgentSchema = z.object({
   agent_id: z.string().default(""),
+  provider: z.string().default(""),
   model: z.string().default(""),
   input_tokens: z.number().default(0),
   output_tokens: z.number().default(0),
@@ -467,6 +472,9 @@ const CancelledChatMessageSchema = z.object({
   message_id: z.string(),
   content: z.string(),
   restore_to_input: z.boolean().default(false),
+  // Attachments detached from the deleted message so a restored draft can
+  // re-bind them on re-send. Absent on servers that predate the field.
+  attachments: z.array(AttachmentSchema).optional(),
 }).loose();
 
 export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({

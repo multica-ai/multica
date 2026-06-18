@@ -10,6 +10,52 @@ function ClaudeLogo({ className }: { className: string }) {
   );
 }
 
+// Tencent CodeBuddy — official mark from the @tencent-ai/codebuddy-code CLI
+// package (dist/web-ui/logo.svg), the same CLI this runtime spawns. Dark
+// rounded tile + white "claw" glyph. The artwork overflows the 24×24 box and
+// is cropped by a clipPath; the clip id is per-instance (useId) so multiple
+// logos on one page don't collide on a shared id.
+function CodeBuddyLogo({ className }: { className: string }) {
+  const clipId = `codebuddy-logo-clip-${useId().replace(/:/g, "")}`;
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <g clipPath={`url(#${clipId})`}>
+        <rect width="24" height="24" rx="5.17895" fill="#191A23" />
+        <path
+          fillRule="evenodd"
+          clipRule="evenodd"
+          d="M18.3558 1.87667C18.5907 1.666 18.6047 1.65742 18.7769 1.64707C19.0564 1.62665 19.3132 1.76029 19.749 2.15706C20.7674 3.08246 22.1851 4.98576 23.0667 6.61049L23.4069 7.24066L23.8889 7.47992C24.3535 7.71467 25.1155 8.19627 25.4337 8.45431C25.5772 8.57302 25.5976 8.57504 25.7472 8.51687C26.4225 8.25409 27.3897 8.60307 28.2428 9.42149C29.011 10.1577 29.7468 11.4159 30.0286 12.4657C30.0698 12.6348 30.1247 12.9979 30.1446 13.2682C30.2089 14.2179 29.904 14.9765 29.3175 15.3199C29.1976 15.3891 29.189 15.4079 29.1924 15.7068C29.2194 17.1293 28.8365 18.5491 28.0662 19.9338C27.1967 21.4886 25.6481 23.097 23.5527 24.6123C22.4273 25.4312 19.7654 26.982 18.5618 27.5265C15.6785 28.8246 13.367 29.3226 11.3592 29.0767C10.1618 28.9316 8.80631 28.4643 8.00415 27.9217C7.79297 27.7758 7.75862 27.7666 7.59727 27.8127C6.73865 28.0591 5.61445 27.5518 4.65922 26.4914C4.27824 26.0674 3.66368 25.0274 3.46425 24.4705C3.00307 23.167 3.09427 21.9907 3.70857 21.2882C3.86727 21.1073 3.87248 21.0995 3.8378 20.7953C3.78057 20.2973 3.75451 19.5606 3.78064 19.0849L3.80119 18.6401L3.13361 17.4603C2.10069 15.6224 1.44471 14.0785 1.19159 12.8994C1.05803 12.253 1.06635 11.966 1.23046 11.7538C1.33035 11.6257 1.6579 11.493 2.05265 11.4201C3.04693 11.2455 5.2159 11.4037 7.62846 11.8296L7.87915 11.8732L8.43005 11.386C9.34424 10.5762 9.95159 10.1217 11.0713 9.42358C12.2382 8.69349 13.5553 8.09254 15.0383 7.61696L15.5144 7.465L15.7755 6.77862C16.7121 4.30622 17.6719 2.48301 18.3558 1.87667ZM10.5102 14.5456C9.4521 15.1565 8.92313 15.4625 8.53428 15.8048C6.95941 17.1916 6.37074 19.3885 7.04122 21.377C7.20679 21.8679 7.5119 22.3973 8.12283 23.4554C8.73397 24.514 9.04008 25.0433 9.38253 25.4322C10.7693 27.0071 12.9663 27.5958 14.9547 26.9253C15.4456 26.7597 15.9746 26.4537 17.0327 25.8428L23.1219 22.3272C24.1804 21.7161 24.7103 21.4108 25.0992 21.0683C26.674 19.6816 27.2627 17.4846 26.5922 15.4962C26.4267 15.0052 26.1204 14.4758 25.5093 13.4173C24.8984 12.3593 24.5933 11.8298 24.2509 11.4409C22.8642 9.86609 20.6672 9.27746 18.6788 9.94787C18.1878 10.1134 17.658 10.4188 16.5995 11.03L10.5102 14.5456Z"
+          fill="white"
+        />
+        <rect
+          x="11.0972"
+          y="18.8006"
+          width="2.40542"
+          height="4.99588"
+          rx="1.20271"
+          transform="rotate(-30 11.0972 18.8006)"
+          fill="white"
+        />
+        <rect
+          x="17.5869"
+          y="15.0537"
+          width="2.40542"
+          height="4.99588"
+          rx="1.20271"
+          transform="rotate(-30 17.5869 15.0537)"
+          fill="white"
+        />
+      </g>
+      <defs>
+        <clipPath id={clipId}>
+          <rect width="24" height="24" rx="5.17895" fill="white" />
+        </clipPath>
+      </defs>
+    </svg>
+  );
+}
+
 // Codex (OpenAI) — official mark, sourced from Bootstrap Icons (bi-openai)
 function CodexLogo({ className }: { className: string }) {
   return (
@@ -203,7 +249,7 @@ export function ProviderLogo({
     case "claude":
       return <ClaudeLogo className={className} />;
     case "codebuddy":
-      return <ClaudeLogo className={className} />;
+      return <CodeBuddyLogo className={className} />;
     case "codex":
       return <CodexLogo className={className} />;
     case "opencode":

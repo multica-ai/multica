@@ -197,6 +197,25 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("create issue: %w", err)
 	}
 
+	// Fan out the default subscriber template inside the same tx as the
+	// issue insert, before EventIssueCreated fires — so notification
+	// listeners see the full subscriber set on the first event instead of
+	// racing the listener that would otherwise hydrate the template.
+	templateSubs, err := qtx.ListAutopilotSubscribers(ctx, ap.ID)
+	if err != nil {
+		return fmt.Errorf("list autopilot subscribers: %w", err)
+	}
+	for _, sub := range templateSubs {
+		if err := qtx.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
+			IssueID:  issue.ID,
+			UserType: sub.UserType,
+			UserID:   sub.UserID,
+			Reason:   "autopilot",
+		}); err != nil {
+			return fmt.Errorf("add autopilot subscriber to issue: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit tx: %w", err)
 	}
@@ -227,6 +246,17 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	})
 	s.captureIssueCreatedFromAutopilot(ap, run, issue, leader.ID)
 
+	// The issue:created notification listener only handles handler.IssueResponse
+	// payloads and only direct-notifies the assignee + @mentions; subscribers
+	// don't get an inbox at creation time on the manual path because there are
+	// none yet. The autopilot path is different: the template subscribers were
+	// fanned out into issue_subscriber inside the tx above, so they exist at the
+	// moment of creation and OQ3 says they should receive the same subscription
+	// events as reason='manual'. Issue creation is one such event — so write
+	// the inbox rows directly here. Done after commit so a failure here doesn't
+	// roll back the issue itself.
+	s.notifyAutopilotSubscribersOnCreate(ctx, ap, issue, leader.ID, templateSubs)
+
 	// Enqueue agent task via the existing flow. Squad-assigned autopilots
 	// route to the resolved leader as the executing agent (Path A from
 	// MUL-2429); agent-assigned autopilots go through the standard issue
@@ -255,6 +285,85 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"run_id", util.UUIDToString(run.ID),
 	)
 	return nil
+}
+
+// notifyAutopilotSubscribersOnCreate writes an inbox_item for each template
+// subscriber of an autopilot-created issue and broadcasts an inbox:new event
+// so the recipient's inbox updates in real time. Mirrors the inbox payload
+// shape from notification_listeners.go so the WS consumer sees the same fields
+// the listener-driven path produces. Failures are logged, not propagated:
+// the issue and its subscriber rows are already committed, and an inbox-write
+// hiccup must not bubble up as a dispatch failure.
+func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
+	ctx context.Context,
+	ap db.Autopilot,
+	issue db.Issue,
+	leaderID pgtype.UUID,
+	subscribers []db.AutopilotSubscriber,
+) {
+	if len(subscribers) == 0 {
+		return
+	}
+	details, _ := json.Marshal(map[string]string{
+		"autopilot_id": util.UUIDToString(ap.ID),
+		"reason":       "autopilot",
+	})
+	for _, sub := range subscribers {
+		// Autopilot subscribers are restricted to user_type='member' at the
+		// handler boundary; defend in case that constraint is ever relaxed
+		// (agents don't have inbox).
+		if sub.UserType != "member" {
+			continue
+		}
+		item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   ap.WorkspaceID,
+			RecipientType: "member",
+			RecipientID:   sub.UserID,
+			Type:          "issue_subscribed",
+			Severity:      "info",
+			IssueID:       issue.ID,
+			Title:         issue.Title,
+			Body:          pgtype.Text{},
+			ActorType:     pgtype.Text{String: "agent", Valid: true},
+			ActorID:       leaderID,
+			Details:       details,
+		})
+		if err != nil {
+			slog.Error("autopilot subscriber inbox write failed",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"recipient_id", util.UUIDToString(sub.UserID),
+				"error", err,
+			)
+			continue
+		}
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
+			ActorType:   "agent",
+			ActorID:     util.UUIDToString(leaderID),
+			Payload: map[string]any{
+				"item": map[string]any{
+					"id":             util.UUIDToString(item.ID),
+					"workspace_id":   util.UUIDToString(item.WorkspaceID),
+					"recipient_type": item.RecipientType,
+					"recipient_id":   util.UUIDToString(item.RecipientID),
+					"type":           item.Type,
+					"severity":       item.Severity,
+					"issue_id":       util.UUIDToPtr(item.IssueID),
+					"issue_status":   issue.Status,
+					"title":          item.Title,
+					"body":           util.TextToPtr(item.Body),
+					"read":           item.Read,
+					"archived":       item.Archived,
+					"created_at":     util.TimestampToString(item.CreatedAt),
+					"actor_type":     util.TextToPtr(item.ActorType),
+					"actor_id":       util.UUIDToPtr(item.ActorID),
+					"details":        json.RawMessage(item.Details),
+				},
+			},
+		})
+	}
 }
 
 // errDispatchSkipped wraps a readiness failure encountered after the

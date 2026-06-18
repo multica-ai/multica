@@ -63,6 +63,23 @@ type IssueResponse struct {
 	Labels *[]LabelResponse `json:"labels,omitempty"`
 }
 
+// validIssueStatuses / validIssuePriorities mirror the CHECK constraints on
+// the issue table. Write handlers pre-validate these so callers get a clean
+// 400 with the allowed values instead of a database CHECK violation bubbling
+// up as a 500.
+var validIssueStatuses = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+var validIssuePriorities = []string{"urgent", "high", "medium", "low", "none"}
+
+func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
+	for _, a := range allowed {
+		if value == a {
+			return true
+		}
+	}
+	writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid %s %q; valid values: %s", field, value, strings.Join(allowed, ", ")))
+	return false
+}
+
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -2082,6 +2099,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if priority == "" {
 		priority = "none"
 	}
+	if !validateIssueEnum(w, "status", status, validIssueStatuses) {
+		return
+	}
+	if !validateIssueEnum(w, "priority", priority, validIssuePriorities) {
+		return
+	}
 
 	var assigneeType pgtype.Text
 	var assigneeID pgtype.UUID
@@ -2327,9 +2350,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.Description = pgtype.Text{String: *req.Description, Valid: true}
 	}
 	if req.Status != nil {
+		if !validateIssueEnum(w, "status", *req.Status, validIssueStatuses) {
+			return
+		}
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
 	if req.Priority != nil {
+		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
+			return
+		}
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
 	if req.Position != nil {
@@ -2820,6 +2849,16 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	if !hasMutation {
 		writeJSON(w, http.StatusOK, map[string]any{"updated": 0})
 		return
+	}
+	if req.Updates.Status != nil {
+		if !validateIssueEnum(w, "status", *req.Updates.Status, validIssueStatuses) {
+			return
+		}
+	}
+	if req.Updates.Priority != nil {
+		if !validateIssueEnum(w, "priority", *req.Updates.Priority, validIssuePriorities) {
+			return
+		}
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)

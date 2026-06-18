@@ -39,4 +39,7 @@ WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
+WITH deleted_pending_check_suites AS (
+    DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+)
 DELETE FROM workspace WHERE id = $1;

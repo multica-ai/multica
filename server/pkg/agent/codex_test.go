@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,9 +23,10 @@ func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	var messages []Message
 
 	c := &codexClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   fs,
-		pending: make(map[int]*pendingRPC),
+		cfg:         Config{Logger: slog.Default()},
+		stdin:       fs,
+		pending:     make(map[int]*pendingRPC),
+		processDone: make(chan struct{}),
 		onMessage: func(msg Message) {
 			mu.Lock()
 			messages = append(messages, msg)
@@ -763,6 +765,55 @@ func TestCodexCloseAllPending(t *testing.T) {
 	}
 }
 
+func TestCodexRequestFailsImmediatelyAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	c.markProcessExited(errCodexProcessExited)
+
+	_, err := c.request(context.Background(), "thread/start", map[string]any{})
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("request error = %v, want errCodexProcessExited", err)
+	}
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("request should not write after process exit, wrote %d lines", len(lines))
+	}
+}
+
+func TestCodexRequestPrefersContextCancellationOverProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				cancel()
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for request write")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	_, err := c.request(ctx, "thread/start", map[string]any{})
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("request error = %v, want context.Canceled", err)
+	}
+}
+
 func TestCodexHandleInvalidJSON(t *testing.T) {
 	t.Parallel()
 
@@ -1080,6 +1131,61 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 }
 
+func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	processExitMarked := make(chan error, 1)
+	go func() {
+		deadline := time.Now().Add(2 * time.Second)
+		for {
+			if len(fs.Lines()) >= 1 {
+				c.markProcessExited(errCodexProcessExited)
+				processExitMarked <- nil
+				return
+			}
+			if time.Now().After(deadline) {
+				processExitMarked <- fmt.Errorf("timed out waiting for thread/resume request")
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx,
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale"},
+		slog.Default(),
+	)
+	if markErr := <-processExitMarked; markErr != nil {
+		t.Fatal(markErr)
+	}
+	if !errors.Is(err, errCodexProcessExited) {
+		t.Fatalf("startOrResumeThread error = %v, want errCodexProcessExited", err)
+	}
+	if threadID != "" {
+		t.Fatalf("threadID = %q, want empty", threadID)
+	}
+	if resumed {
+		t.Fatal("resumed should be false on process exit")
+	}
+	lines := fs.Lines()
+	if len(lines) != 1 {
+		t.Fatalf("expected only thread/resume request, got %d lines: %v", len(lines), lines)
+	}
+	var req struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.Method != "thread/resume" {
+		t.Fatalf("request method = %q, want thread/resume", req.Method)
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackWhenResumeReturnsNoID(t *testing.T) {
 	t.Parallel()
 
@@ -1331,6 +1437,74 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 		}
+	}
+}
+
+func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-crash"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-crash","turn":{"id":"turn-crash"}}}'`+"\n"+
+		`echo 'fatal: app-server crashed after turn/start' >&2`+"\n"+
+		`exit 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("expected process-exit error, got %q", result.Error)
+	}
+	if !strings.Contains(result.Error, "fatal: app-server crashed after turn/start") {
+		t.Fatalf("expected stderr tail in error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "timeout") {
+		t.Fatalf("process exit should fail fast instead of timeout, got %q", result.Error)
+	}
+}
+
+func TestCodexExecuteTimeoutWinsOverProcessExitDuringActiveTurn(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-timeout","turn":{"id":"turn-timeout"}}}'`+"\n"+
+		`read line`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 30 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "codex timed out after") {
+		t.Fatalf("expected timeout error, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, "codex process exited") {
+		t.Fatalf("timeout should win over process EOF, got %q", result.Error)
 	}
 }
 
