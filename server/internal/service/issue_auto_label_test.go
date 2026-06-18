@@ -89,7 +89,7 @@ func TestIssueAutoLabelServiceAttachesExistingLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLabel: %v", err)
 	}
-	issueID := createAutoLabelIssue(t, pool, workspaceID, "member", userID, "Fix crash on login", "The login screen fails after submit.")
+	issueID := createAutoLabelIssue(t, pool, workspaceID, "member", userID, "Fix crash in billing worker", "The background job crashes while processing invoices.")
 
 	svc := NewIssueAutoLabelService(queries, events.New(), nil)
 	if err := svc.AutoLabelCreatedIssue(context.Background(), issueID); err != nil {
