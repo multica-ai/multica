@@ -452,7 +452,11 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	out, err := openclawExec(ctx, bin, "config", "file")
 	if err != nil {
 		if isOpenclawConfigFileUnsupported(err) {
-			return openclawFallbackActiveConfigPath()
+			path, exists, ferr := openclawFallbackActiveConfigPath()
+			if ferr != nil {
+				return "", false, fmt.Errorf("fallback after unsupported `openclaw config file` (%v): %w", err, ferr)
+			}
+			return path, exists, nil
 		}
 		return "", false, err
 	}

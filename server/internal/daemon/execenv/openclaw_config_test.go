@@ -254,6 +254,137 @@ func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
 	}
 }
 
+func TestOpenclawActiveConfigPathFallbackSources(t *testing.T) {
+	cases := map[string]struct {
+		setup func(t *testing.T) string
+	}{
+		"config_path": {
+			setup: func(t *testing.T) string {
+				path := filepath.Join(t.TempDir(), "custom-openclaw.json")
+				t.Setenv("OPENCLAW_CONFIG_PATH", path)
+				return path
+			},
+		},
+		"state_dir": {
+			setup: func(t *testing.T) string {
+				stateDir := t.TempDir()
+				path := filepath.Join(stateDir, "openclaw.json")
+				t.Setenv("OPENCLAW_STATE_DIR", stateDir)
+				return path
+			},
+		},
+		"openclaw_home": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".openclaw", "openclaw.json")
+				t.Setenv("OPENCLAW_HOME", home)
+				return path
+			},
+		},
+		"default_home": {
+			setup: func(t *testing.T) string {
+				home := t.TempDir()
+				path := filepath.Join(home, ".openclaw", "openclaw.json")
+				t.Setenv("HOME", home)
+				return path
+			},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			clearOpenclawPathEnv(t)
+			want := tc.setup(t)
+			if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
+				t.Fatalf("mkdir config dir: %v", err)
+			}
+			if err := os.WriteFile(want, []byte(`{}`), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			stub := installOpenclawStub(t, map[string]openclawResponse{
+				"config file": {err: openclawConfigFileUnsupportedErr()},
+			})
+
+			got, exists, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+			if err != nil {
+				t.Fatalf("openclawActiveConfigPath: %v", err)
+			}
+			if !exists {
+				t.Fatal("exists = false, want true")
+			}
+			if got != want {
+				t.Errorf("path = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestOpenclawActiveConfigPathFallbackErrorIncludesOriginalCLIError(t *testing.T) {
+	clearOpenclawPathEnv(t)
+	badPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.MkdirAll(badPath, 0o755); err != nil {
+		t.Fatalf("mkdir bad config path: %v", err)
+	}
+	t.Setenv("OPENCLAW_CONFIG_PATH", badPath)
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: openclawConfigFileUnsupportedErr()},
+	})
+
+	_, _, err := openclawActiveConfigPath(stub.bin, openclawCLITimeout)
+	if err == nil {
+		t.Fatal("openclawActiveConfigPath succeeded with directory config path; expected error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "too many arguments for 'config'") {
+		t.Errorf("error %q lost original unsupported CLI stderr", msg)
+	}
+	if !strings.Contains(msg, "is a directory") {
+		t.Errorf("error %q lost fallback failure detail", msg)
+	}
+}
+
+func TestIsOpenclawConfigFileUnsupportedMatchesKnownShapes(t *testing.T) {
+	cases := map[string]struct {
+		err  error
+		want bool
+	}{
+		"reported_too_many_arguments": {
+			err:  errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config')"),
+			want: true,
+		},
+		"reported_expected_zero_args": {
+			err:  errors.New("Expected 0 arguments but got 1."),
+			want: true,
+		},
+		"unknown_config_file": {
+			err:  errors.New("unknown subcommand `file` for `openclaw config`"),
+			want: true,
+		},
+		"real_config_validation_error": {
+			err:  errors.New("openclaw config validation failed: missing gateway.auth.token"),
+			want: false,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := isOpenclawConfigFileUnsupported(tc.err); got != tc.want {
+				t.Errorf("isOpenclawConfigFileUnsupported(%q) = %t, want %t", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func clearOpenclawPathEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("OPENCLAW_CONFIG_PATH", "")
+	t.Setenv("OPENCLAW_STATE_DIR", "")
+	t.Setenv("OPENCLAW_HOME", "")
+}
+
+func openclawConfigFileUnsupportedErr() error {
+	return errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config'. Expected 0 arguments but got 1.)")
+}
+
 // TestPrepareOpenclawConfigFailsClosedOnMalformedAgentsList — the second
 // fail-closed surface. When `openclaw config get agents.list --json`
 // returns junk we can't parse, we fail rather than guess.
