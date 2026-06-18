@@ -88,6 +88,9 @@ export type WSEventType =
   | "cerebro_channel_unarchived"
   // CEREBRO-PATCH(channel-state-events): TECH-3352 — per-user snooze/mark-unread WS event.
   | "cerebro_channel_state_changed"
+  // CEREBRO-PATCH(channel-leave-delete-events): TECH-3758 — leave (per-user) + delete (everyone).
+  | "cerebro_channel_left"
+  | "cerebro_channel_deleted"
   // CEREBRO-PATCH(cerebro-group-events): JEH-1006 — workspace groups CRUD + membership.
   | "group:created"
   | "group:updated"

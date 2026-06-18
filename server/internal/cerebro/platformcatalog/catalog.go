@@ -838,11 +838,12 @@ var catalog = []Capability{
 		Key:         "manage_channels",
 		Title:       "Manage channels",
 		Category:    CategoryChannels,
-		Description: "Create or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
+		Description: "Create, delete or archive a channel, set its per-channel permissions, and set an agent's listen mode in it.",
 		Ops: []string{
 			"POST /api/channels/",
 			"POST /api/channels/{id}/archive",
 			"DELETE /api/channels/{id}/archive",
+			"DELETE /api/channels/{id}", // TECH-3758 — delete a channel for everyone (creator/admin/owner).
 			"PUT /api/channels/{id}/permissions",
 			"PUT /api/channels/{id}/agents/{agentId}/listen-mode",
 		},
@@ -884,6 +885,7 @@ var excluded = map[string]string{
 	// actor to gate on, so the tool-policy engine has nothing to decide.
 	"POST /api/workspaces/":                        "self_only — create-workspace is pre-workspace; any authenticated user, no workspace context to gate within",
 	"POST /api/workspaces/{id}/leave":              "self_only — leaving is the caller's own membership",
+	"POST /api/channels/{id}/leave":                "self_only — TECH-3758, leaving a channel removes the caller's own subscription",
 	"POST /api/workspaces/{id}/connections/test":   "admin_only — validates a connection config for the current workspace; not an agent runtime tool",
 	"POST /api/workspaces/{id}/cerebro/copy":       "admin_only — owner/admin-gated workspace copy (TECH-3582); RequireWorkspaceRoleFromURL, not wired to the tool-policy engine, no agent runtime tool equivalent",
 	"POST /api/inbox/add-issue":                    "self_only — caller pinning any issue into their own inbox",

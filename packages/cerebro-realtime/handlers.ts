@@ -133,6 +133,11 @@ export function registerCerebroHandlers(
     "cerebro_channel_state_changed",
     invalidateChannelList,
   );
+  // TECH-3758 — leaving removes the caller's subscription (per-user); deleting
+  // removes the channel for everyone (workspace-wide). Both drop the row from
+  // the inbox list and the include-archived chat roster (shared cache prefix).
+  const unsubChannelLeft = ws.on("cerebro_channel_left", invalidateChannelList);
+  const unsubChannelDeleted = ws.on("cerebro_channel_deleted", invalidateChannelList);
 
   // JEH-838b — issue references. Server emits the reference row (with
   // issue_id) as the payload on create/update/delete. Invalidate the
@@ -195,6 +200,8 @@ export function registerCerebroHandlers(
     unsubChannelArchived();
     unsubChannelUnarchived();
     unsubChannelStateChanged();
+    unsubChannelLeft();
+    unsubChannelDeleted();
     unsubReferenceCreated();
     unsubReferenceUpdated();
     unsubReferenceDeleted();

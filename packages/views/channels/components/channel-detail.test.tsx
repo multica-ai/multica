@@ -5,6 +5,8 @@ import type { Channel } from "@multica/core/types";
 
 const mockArchive = vi.hoisted(() => vi.fn());
 const mockArchiveChannel = vi.hoisted(() => vi.fn());
+const mockLeaveChannel = vi.hoisted(() => vi.fn());
+const mockDeleteChannel = vi.hoisted(() => vi.fn());
 const mockMarkChannelRead = vi.hoisted(() => vi.fn());
 const mockCreatePin = vi.hoisted(() => vi.fn());
 const mockDeletePin = vi.hoisted(() => vi.fn());
@@ -89,6 +91,8 @@ vi.mock("@multica/cerebro-channels", async () => {
   return {
     ...actual,
     useArchiveChannel: () => ({ mutate: mockArchiveChannel }),
+    useLeaveChannel: () => ({ mutate: mockLeaveChannel }),
+    useDeleteChannel: () => ({ mutate: mockDeleteChannel }),
   };
 });
 

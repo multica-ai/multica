@@ -2581,8 +2581,12 @@ export class ApiClient {
   }
 
   // Channels (multi-party chat — issues with kind in channel,dm)
-  async listChannels(): Promise<Channel[]> {
-    return this.fetch("/api/channels");
+  // CEREBRO-PATCH(channel-list-include-archived): TECH-3758 — the Chat roster
+  // passes include_archived so inbox-archived channels still show in the chat
+  // interface (archive only hides them from the inbox feed, not the roster).
+  async listChannels(params?: { include_archived?: boolean }): Promise<Channel[]> {
+    const qs = params?.include_archived ? "?include_archived=true" : "";
+    return this.fetch(`/api/channels${qs}`);
   }
 
   async getChannel(id: string): Promise<Channel> {
@@ -2610,6 +2614,17 @@ export class ApiClient {
 
   async unarchiveChannel(id: string): Promise<void> {
     await this.fetch(`/api/channels/${id}/archive`, { method: "DELETE" });
+  }
+
+  // CEREBRO-PATCH(channel-leave-delete-client): TECH-3758 — leave a channel
+  // (remove own subscription; deliberate "remove from my chat list", distinct
+  // from inbox archive) and delete a channel for everyone (creator/admin/owner).
+  async leaveChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}/leave`, { method: "POST" });
+  }
+
+  async deleteChannel(id: string): Promise<void> {
+    await this.fetch(`/api/channels/${id}`, { method: "DELETE" });
   }
 
   // CEREBRO-PATCH(channel-state-client): TECH-3352 — per-user snooze ("remind

@@ -19,7 +19,11 @@
 import { useMemo, useState } from "react";
 import { Hash, Star, Settings2, X, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { channelListOptions, useCreateChannel } from "@multica/core/channels";
+import {
+  channelListOptions,
+  channelRosterListOptions,
+  useCreateChannel,
+} from "@multica/core/channels";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import {
   memberListOptions,
@@ -173,7 +177,12 @@ export function SlackBlock({
   const enabled = useFeatureFlag("cerebro_inbox_slack_block");
 
   const selfUserId = useAuthStore((s) => s.user?.id);
+  // `channels` (non-archived) backs DM↔member matching so inbox-archived DMs
+  // stay hidden from People. `rosterChannels` (include-archived) backs the
+  // Channels group so a named channel persists in the chat roster even after
+  // it is archived in the inbox — TECH-3758.
   const { data: channels = [] } = useQuery(channelListOptions(wsId));
+  const { data: rosterChannels = [] } = useQuery(channelRosterListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   // Agents + their chat sessions are only fetched when the user opts in.
   const { data: agents = [] } = useQuery({
@@ -253,7 +262,7 @@ export function SlackBlock({
   const allItems = useMemo<ChatItem[]>(() => {
     const items: ChatItem[] = [];
 
-    for (const c of channels) {
+    for (const c of rosterChannels) {
       if (c.kind !== "channel") continue;
       items.push({
         key: `channel:${c.id}`,
@@ -305,6 +314,7 @@ export function SlackBlock({
     return items;
   }, [
     channels,
+    rosterChannels,
     members,
     agents,
     showAgents,

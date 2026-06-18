@@ -144,6 +144,9 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@multica/core/channels", () => ({
   channelListOptions: () => ({ queryKey: ["channels", "ws", "channels"] }),
+  // TECH-3758 — the Chat roster reads the include-archived list; in the test it
+  // resolves to the same channel fixtures so the Channels group still renders.
+  channelRosterListOptions: () => ({ queryKey: ["channels", "ws", "channels"] }),
   useCreateChannel: () => ({ mutateAsync: mockCreateChannel }),
 }));
 

@@ -6,9 +6,9 @@
 // rename, who may add/remove others, whether members may leave).
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Archive, Pencil, Pin, PinOff } from "lucide-react";
+import { Archive, LogOut, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -27,6 +27,16 @@ import {
   SheetTitle,
   SheetDescription,
 } from "@multica/ui/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Button } from "@multica/ui/components/ui/button";
 import { ListenersList } from "./channel-listeners-panel";
@@ -43,6 +53,13 @@ interface ChannelSettingsSheetProps {
   onEditChannel: () => void;
   /** Archives the conversation (same gesture the old header button used). */
   onArchive: () => void;
+  /** TECH-3758 — leaves the channel (removes the caller's own subscription).
+   *  Distinct from archive: the channel is gone from the chat roster, not just
+   *  hidden from the inbox feed. */
+  onLeave: () => void;
+  /** TECH-3758 — deletes the channel for everyone. Only offered to privileged
+   *  callers (canManage). */
+  onDelete: () => void;
 }
 
 export function ChannelSettingsSheet({
@@ -52,11 +69,16 @@ export function ChannelSettingsSheet({
   canManage,
   onEditChannel,
   onArchive,
+  onLeave,
+  onDelete,
 }: ChannelSettingsSheetProps) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const isChannel = channel.kind === "channel";
   const permissionsEnabled = useFeatureFlag("cerebro_channel_permissions");
+  // CEREBRO-PATCH(channel-leave-delete-actions): TECH-3758 — Leave/Delete
+  // actions + confirm gate for the destructive "delete for everyone" action.
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   // --- Pin to sidebar -----------------------------------------------------
   const { data: pinnedItems = [] } = useQuery({
@@ -160,10 +182,66 @@ export function ChannelSettingsSheet({
                 <Archive className="size-3.5" />
                 Archive conversation
               </Button>
+              {/* TECH-3758 — leave removes the caller from the channel (gone
+                  from the chat roster), distinct from inbox archive. Channels
+                  only: a DM has no "leave". */}
+              {isChannel && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2 text-muted-foreground"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onLeave();
+                  }}
+                >
+                  <LogOut className="size-3.5" />
+                  Leave channel
+                </Button>
+              )}
+              {/* TECH-3758 — delete removes the channel for everyone; offered
+                  only to the creator / workspace admins & owners. */}
+              {isChannel && canManage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full justify-start gap-2 text-destructive hover:text-destructive"
+                  onClick={() => setConfirmDelete(true)}
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete channel
+                </Button>
+              )}
             </div>
           </section>
         </div>
       </SheetContent>
+
+      {/* TECH-3758 — destructive delete confirmation. */}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this channel?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes &ldquo;{channel.title}&rdquo; and all its
+              messages for everyone. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                setConfirmDelete(false);
+                onOpenChange(false);
+                onDelete();
+              }}
+            >
+              Delete channel
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Sheet>
   );
 }

@@ -340,6 +340,98 @@ func (s *Service) publishChannelState(r *http.Request, channelID pgtype.UUID, us
 // requireChannelMember resolves the {id} path param to a channel/dm issue and
 // confirms the calling member is subscribed to it. Returns the channel UUID
 // for downstream queries.
+// LeaveChannelHandler handles POST /api/channels/{id}/leave. Removes the
+// caller's own subscription so the channel disappears from their chat roster.
+// TECH-3758 — distinct from inbox archive (which only hides the channel from
+// the inbox feed): leaving is a deliberate "remove from my chat list" gesture.
+// Gated by the channel's allow_self_leave policy; privileged callers (creator,
+// admins/owners) may always leave.
+func (s *Service) LeaveChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	if !s.CanSelfLeave(r.Context(), channelID, "member", userID) {
+		writeError(w, http.StatusForbidden, "leaving this channel is not allowed")
+		return
+	}
+	if err := s.Queries.RemoveIssueSubscriber(r.Context(), db.RemoveIssueSubscriberParams{
+		IssueID:  channelID,
+		UserType: "member",
+		UserID:   userUUID,
+	}); err != nil {
+		slog.Error("channel leave failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to leave channel")
+		return
+	}
+
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelLeft,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id": util.UUIDToString(channelID),
+			"user_id":    userID,
+		},
+		AudienceUserIDs: []string{userID},
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteChannelHandler handles DELETE /api/channels/{id}. Permanently deletes
+// the channel/DM for everyone. TECH-3758 — restricted to privileged callers:
+// the channel creator, or a workspace admin/owner. DB children (messages,
+// subscribers, per-user channel state) are removed by ON DELETE CASCADE.
+func (s *Service) DeleteChannelHandler(w http.ResponseWriter, r *http.Request) {
+	channelID, ok := s.requireChannelMember(w, r)
+	if !ok {
+		return
+	}
+	userID := r.Header.Get("X-User-ID")
+	if !s.isChannelPrivileged(r.Context(), channelID, "member", userID) {
+		writeError(w, http.StatusForbidden, "only the channel creator, admins or owners can delete this channel")
+		return
+	}
+	issue, err := s.Queries.GetIssue(r.Context(), channelID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+
+	// Cancel in-flight agent work and detach autopilot runs before the row goes.
+	if s.TaskService != nil {
+		_ = s.TaskService.CancelTasksForIssue(r.Context(), channelID)
+	}
+	_ = s.Queries.FailAutopilotRunsByIssue(r.Context(), channelID)
+
+	if err := s.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
+		ID:          channelID,
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		slog.Error("channel delete failed", "channel_id", util.UUIDToString(channelID), "user_id", userID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+
+	s.Bus.Publish(events.Event{
+		Type:        EventChannelDeleted,
+		WorkspaceID: middleware.WorkspaceIDFromContext(r.Context()),
+		ActorType:   "member",
+		ActorID:     userID,
+		Payload: map[string]any{
+			"channel_id": util.UUIDToString(channelID),
+		},
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Service) requireChannelMember(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {

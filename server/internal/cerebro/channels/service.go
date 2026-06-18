@@ -62,6 +62,16 @@ const EventChannelUnarchived = "cerebro_channel_unarchived"
 // other channel members must not learn about someone else's inbox flip.
 const EventChannelStateChanged = "cerebro_channel_state_changed"
 
+// EventChannelLeft is the WS event published when a member leaves a channel
+// (TECH-3758) — removes their own subscription. Per-user: only the leaver's
+// own sessions are notified so their chat roster refetches.
+const EventChannelLeft = "cerebro_channel_left"
+
+// EventChannelDeleted is the WS event published when a channel/DM is deleted
+// for everyone (TECH-3758). Workspace-wide so every participant's roster drops
+// the row and any open detail view of it closes.
+const EventChannelDeleted = "cerebro_channel_deleted"
+
 // AgentTriggerGateFn gates listen-mode triggered agents through the cerebro
 // group-permission allowlist (JEH-1727). The router wires it to a closure
 // that resolves the comment author's viewer (admin flag + group IDs) and

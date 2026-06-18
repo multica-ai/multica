@@ -6,6 +6,7 @@ export {
   channelDetailOptions,
   channelAgentSettingsOptions,
   channelPermissionsOptions, // CEREBRO-PATCH(core-channels-perms): TECH-3698
+  channelRosterListOptions, // CEREBRO-PATCH(channel-roster-list-q): TECH-3758
 } from "./queries";
 export {
   useCreateChannel,

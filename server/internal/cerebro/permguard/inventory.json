@@ -609,6 +609,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/channels/{id}/leave",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/channels/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/channels/{id}/mute",
       "gate": "workspace_member"
     },

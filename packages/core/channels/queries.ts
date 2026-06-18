@@ -21,6 +21,18 @@ export function channelListOptions(wsId: string) {
   });
 }
 
+// CEREBRO-PATCH(channel-roster-list-q): TECH-3758 — the Chat block roster
+// includes inbox-archived channels (archive only hides them from the inbox
+// feed, not from the persistent chat interface). Separate cache key from the
+// inbox list above so archiving still hides the row from the inbox boxes.
+export function channelRosterListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: [...channelKeys.list(wsId), "roster"] as const,
+    queryFn: () => api.listChannels({ include_archived: true }),
+    staleTime: Infinity,
+  });
+}
+
 export function channelDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: channelKeys.detail(wsId, id),

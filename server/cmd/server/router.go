@@ -1695,6 +1695,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/mute", channelListenSvc.MuteChannelHandler)
 				r.Delete("/{id}/mute", channelListenSvc.UnmuteChannelHandler)
 				r.Post("/{id}/unread", channelListenSvc.MarkChannelUnreadHandler)
+				// CEREBRO-PATCH(channel-leave-delete-routes): TECH-3758 — leave a
+				// channel (remove own subscription) and delete it for everyone.
+				r.Post("/{id}/leave", channelListenSvc.LeaveChannelHandler)
+				r.Delete("/{id}", channelListenSvc.DeleteChannelHandler)
 			})
 
 			// Workspace-wide agent task snapshot for presence derivation:

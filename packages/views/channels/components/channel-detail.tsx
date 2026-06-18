@@ -18,7 +18,12 @@ import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useArchiveInbox } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channel-detail-archive): JEH-851 — per-user channel archive mutation.
 // CEREBRO-PATCH(channel-auto-mark-read-hook): TECH-3352 — open-time read hook.
-import { useArchiveChannel, useChannelAutoMarkRead } from "@multica/cerebro-channels";
+import {
+  useArchiveChannel,
+  useChannelAutoMarkRead,
+  useLeaveChannel,
+  useDeleteChannel,
+} from "@multica/cerebro-channels";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
 import { CommentInput } from "../../issues/components/comment-input";
@@ -234,6 +239,20 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
     onArchive?.();
   };
 
+  // CEREBRO-PATCH(channel-leave-delete-wire): TECH-3758 — leave (remove own
+  // subscription) / delete (for everyone). Both remove the channel from the
+  // caller's view, so reuse onArchive to navigate out of the now-gone convo.
+  const leaveChannelMutation = useLeaveChannel();
+  const deleteChannelMutation = useDeleteChannel();
+  const handleLeave = () => {
+    leaveChannelMutation.mutate(channelId);
+    onArchive?.();
+  };
+  const handleDelete = () => {
+    deleteChannelMutation.mutate(channelId);
+    onArchive?.();
+  };
+
   if (!channel) {
     return (
       <div className="flex flex-1 flex-col p-4 gap-4">
@@ -417,6 +436,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
         }
         onEditChannel={() => setEditOpen(true)}
         onArchive={handleArchive}
+        onLeave={handleLeave}
+        onDelete={handleDelete}
       />
     </div>
   );

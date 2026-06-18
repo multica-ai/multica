@@ -78,6 +78,8 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   agent_comment_member_tag: "Agent tagged you",
   agent_comment_agent_tag: "Agent hand-off",
   manually_added: "Added to inbox", // CEREBRO-PATCH(cerebro-inbox-add-issue): label for manually added inbox items.
+  // Mirrors agent_capability_drift label in packages/views/inbox/components/inbox-detail-label.tsx (TECH-3738).
+  agent_capability_drift: "Capability drift",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
