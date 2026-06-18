@@ -4,10 +4,12 @@ import {
   CopyResultSchema,
   EMPTY_COPY_RESULT,
   FoundationResultSchema,
+  InboxCopyResultSchema,
   RelinkResultSchema,
   type CopyResult,
   type CopyToWorkspaceInput,
   type FoundationResult,
+  type InboxCopyResult,
   type RelinkResult,
 } from "./types";
 
@@ -77,6 +79,25 @@ export async function copyWorkspaceArtifacts(
     EMPTY_COPY_RESULT("workspace_artifacts", ""),
     { endpoint: "POST /api/workspaces/:id/cerebro/copy (workspace_artifacts)" },
   );
+}
+
+// copyInbox copies every issue the current user has open in their inbox
+// (route='inbox', not archived) into the target, then heals links/references —
+// the curated set the user works with, without copying the whole issue archive.
+export async function copyInbox(
+  wsId: string,
+  targetWorkspaceId: string,
+): Promise<InboxCopyResult> {
+  const raw = await api.cerebroRequest<unknown>(copyPath(wsId), {
+    method: "POST",
+    body: JSON.stringify({
+      target_workspace_id: targetWorkspaceId,
+      entity_type: "inbox",
+    }),
+  });
+  return parseWithFallback(raw, InboxCopyResultSchema, {}, {
+    endpoint: "POST /api/workspaces/:id/cerebro/copy (inbox)",
+  });
 }
 
 // relinkGroupAccess heals group→agent access grants after the agents are copied.

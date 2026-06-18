@@ -10,6 +10,8 @@
 //	         entity_type = "workspace_artifacts" bulk-copies the source
 //	         workspace's folder tree + workspace-scoped artifacts (no source_id).
 //	         Issue- and project-scoped artifacts travel with their parent copy.
+//	         entity_type = "inbox" copies every issue the calling member has open
+//	         in their inbox (no source_id; recipient = the authenticated caller).
 //
 // Copy is non-destructive: the source is never modified. See store.go.
 //
@@ -145,6 +147,27 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, relinkResponse{RelinkResult: rel, RewriteResult: rew, FilesMaterializedResult: mat})
+		return
+	}
+
+	// inbox is a per-user bulk pass: copy every issue the calling member has open
+	// in their inbox (route='inbox', not archived) into the target — the curated
+	// set they actually work with, not the whole issue archive. No source_id; the
+	// recipient is the authenticated caller. Links/references/files heal inside
+	// the pass (it ends with the same relink + rewrite passes a cascade runs).
+	if req.EntityType == "inbox" {
+		member, ok := middleware.MemberFromContext(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+		runID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		res, err := h.Store.CopyInbox(r.Context(), runID, sourceWS, target, member.UserID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "copy failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, res)
 		return
 	}
 

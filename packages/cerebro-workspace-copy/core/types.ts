@@ -122,6 +122,14 @@ export const RelinkResultSchema = z.object({
 });
 export type RelinkResult = z.infer<typeof RelinkResultSchema>;
 
+// Mirrors workspacecopy.InboxCopyResult (copy_inbox.go) — the "copy my inbox"
+// pass: every issue the caller has open in their inbox, copied in one go.
+export const InboxCopyResultSchema = z.object({
+  inbox_issues: z.number().optional(),
+  issues_copied: z.number().optional(),
+});
+export type InboxCopyResult = z.infer<typeof InboxCopyResultSchema>;
+
 export const EMPTY_COPY_RESULT = (
   entityType: string,
   sourceId: string,

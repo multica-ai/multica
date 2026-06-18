@@ -20,6 +20,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Copy,
   CopyCheck,
+  Inbox,
   Layers,
   Link2,
   Loader2,
@@ -64,6 +65,7 @@ import type { IssueStatus } from "@multica/core/types";
 
 import {
   copyFoundation,
+  copyInbox,
   copyWorkspaceArtifacts,
   relinkGroupAccess,
   relinkIssues,
@@ -133,6 +135,7 @@ export function WorkspaceCopyConsole() {
   const [relinking, setRelinking] = useState(false);
   const [foundationRunning, setFoundationRunning] = useState(false);
   const [docsRunning, setDocsRunning] = useState(false);
+  const [inboxRunning, setInboxRunning] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
   const [cascade, setCascade] = useState(false);
   const [conflict, setConflict] = useState<ConflictPolicy>("skip");
@@ -358,6 +361,30 @@ export function WorkspaceCopyConsole() {
     }
   };
 
+  // Copy my inbox — a shortcut that copies exactly the issues the current user
+  // has open in their inbox (what they actually work with), not the whole issue
+  // archive. The backend resolves the set + heals links/files in one pass.
+  const runInbox = async () => {
+    if (!requireTarget()) return;
+    setInboxRunning(true);
+    try {
+      const r = await copyInbox(wsId, targetId);
+      const found = r.inbox_issues ?? 0;
+      const copied = r.issues_copied ?? 0;
+      const already = found - copied;
+      toast.success(
+        found === 0
+          ? "Your inbox is empty — nothing to copy."
+          : `Copied your inbox: ${copied} of ${found} issue${found === 1 ? "" : "s"}` +
+              `${already > 0 ? ` (${already} already in the target)` : ""}.`,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Inbox copy failed.");
+    } finally {
+      setInboxRunning(false);
+    }
+  };
+
   const runRelink = async () => {
     if (!requireTarget()) return;
     setRelinking(true);
@@ -449,6 +476,27 @@ export function WorkspaceCopyConsole() {
             Copy documents &amp; notes
           </Button>
         </div>
+      </div>
+
+      {/* Copy my inbox — a shortcut that copies exactly the issues the admin has
+          open in their own inbox (with their documents, files and links), without
+          copying the whole issue archive. Run foundation first so labels/roles
+          resolve; links and files heal inside this pass. */}
+      <div className="rounded-md border bg-muted/30 p-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <Inbox className="size-4" />
+          <h3 className="text-sm font-semibold">Copy my inbox</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Copies every issue you currently have open in your inbox — with its
+          documents, files and parent / blocks links — into the target, without
+          copying the whole issue archive. Run <strong>Copy foundation</strong>{" "}
+          first so labels and roles resolve.
+        </p>
+        <Button size="sm" disabled={!targetId || inboxRunning} onClick={() => void runInbox()}>
+          {inboxRunning ? <Loader2 className="mr-1 size-4 animate-spin" /> : <Inbox className="mr-1 size-4" />}
+          Copy my inbox
+        </Button>
       </div>
 
       {/* Steps 2-6 — per-item copies in the fixed order. */}
