@@ -29,6 +29,22 @@ import {
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
 
+// Guards against registering the will-download handler more than once on the
+// same session. window.webContents.session is shared, and createWindow() can
+// be called again on macOS (app "activate" after all windows are closed).
+const downloadDialogSessions = new WeakSet<Electron.Session>();
+
+function installDownloadSaveDialogHandler(window: BrowserWindow): void {
+  const { session } = window.webContents;
+  if (downloadDialogSessions.has(session)) return;
+  downloadDialogSessions.add(session);
+  session.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({
+      defaultPath: join(app.getPath("downloads"), item.getFilename()),
+    });
+  });
+}
+
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
 // but Linux production needs an explicit BrowserWindow `icon` — AppImage
@@ -219,15 +235,7 @@ function createWindow(): void {
     window.webContents.send("locale:system-changed", current);
   });
 
-  // Without this handler, Electron derives the save-dialog filename from the
-  // URL path (e.g. "/api/attachments/<id>/download" → "download.txt") and
-  // ignores the Content-Disposition header sent by the server. Forwarding
-  // getFilename() restores the correct name from Content-Disposition.
-  window.webContents.session.on("will-download", (_event, item) => {
-    item.setSaveDialogOptions({
-      defaultPath: join(app.getPath("downloads"), item.getFilename()),
-    });
-  });
+  installDownloadSaveDialogHandler(window);
 
   window.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
