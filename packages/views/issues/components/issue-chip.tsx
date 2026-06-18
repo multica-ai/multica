@@ -7,7 +7,7 @@ import { StatusIcon } from "./status-icon";
 
 /**
  * Compact, presentation-only representation of an issue —
- * `<StatusIcon> <identifier> <title>`, bordered, truncating to max-w-72.
+ * `<StatusIcon> <identifier> <title>`, bordered, capped at 18rem or parent width.
  *
  * This is the single source of truth for the "issue-mention card" look.
  * It is intentionally **not** a link or button: callers wrap it in whatever
