@@ -722,9 +722,14 @@ func (s *KnowledgeService) PublishToWiki(ctx context.Context, p KnowledgePublish
 			UpdatedBy:   p.ActorUserID,
 		})
 		if err != nil {
-			return KnowledgeDetail{}, knowledgePublishTargetErr(err, "wiki page not found")
+			if errors.Is(err, pgx.ErrNoRows) {
+				pageID = pgtype.UUID{} // target was deleted, create a new one
+			} else {
+				return KnowledgeDetail{}, knowledgePublishTargetErr(err, "wiki page not found")
+			}
 		}
-	} else {
+	}
+	if !pageID.Valid {
 		position, err := qtx.GetMaxWikiPagePosition(ctx, db.GetMaxWikiPagePositionParams{WorkspaceID: p.WorkspaceID, ParentID: p.ParentID})
 		if err != nil {
 			return KnowledgeDetail{}, err
@@ -826,12 +831,18 @@ func (s *KnowledgeService) PublishToSkill(ctx context.Context, p KnowledgePublis
 			Config:      config,
 		})
 		if err != nil {
-			return KnowledgeDetail{}, knowledgePublishTargetErr(err, "skill not found")
+			if errors.Is(err, pgx.ErrNoRows) {
+				skillID = pgtype.UUID{} // target was deleted, create a new one
+			} else {
+				return KnowledgeDetail{}, knowledgePublishTargetErr(err, "skill not found")
+			}
+		} else {
+			if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
+				return KnowledgeDetail{}, err
+			}
 		}
-		if err := qtx.DeleteSkillFilesBySkill(ctx, skill.ID); err != nil {
-			return KnowledgeDetail{}, err
-		}
-	} else {
+	}
+	if !skillID.Valid {
 		skill, err = qtx.CreateSkill(ctx, db.CreateSkillParams{
 			WorkspaceID: p.WorkspaceID,
 			Name:        name,

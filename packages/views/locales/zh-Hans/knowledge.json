@@ -116,7 +116,8 @@
     "parent": "父级文件夹",
     "no_parent": "无父级",
     "page_title": "页面标题",
-    "content": "内容"
+    "content": "内容",
+    "republish_notice": "此知识条目已发布到 Wiki，再次发布会更新已有页面。"
   },
   "publish_skill": {
     "title": "发布为 Skill",
@@ -129,7 +130,8 @@
     "include_source_map": "包含 source map",
     "files": "支持文件",
     "add_file": "添加文件",
-    "no_files": "没有支持文件。"
+    "no_files": "没有支持文件。",
+    "republish_notice": "此知识条目已发布为 Skill，再次发布会更新已有 skill。"
   },
   "toast": {
     "saved": "Knowledge 已保存",

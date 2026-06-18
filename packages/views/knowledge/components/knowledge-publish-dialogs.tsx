@@ -59,22 +59,24 @@ function knowledgeMarkdown(detail: KnowledgeDetail | null): string {
 }
 
 function wikiDraft(detail: KnowledgeDetail | null): PublishKnowledgeToWikiRequest {
+  const existing = detail?.publish_targets?.find((t) => t.target_type === "wiki");
   return {
     title: detail?.item.title ?? "",
     content: knowledgeMarkdown(detail),
-    wiki_page_id: null,
+    wiki_page_id: existing?.target_id ?? null,
     parent_id: null,
   };
 }
 
 function skillDraft(detail: KnowledgeDetail | null): PublishKnowledgeToSkillRequest {
+  const existing = detail?.publish_targets?.find((t) => t.target_type === "skill");
   return {
     name: detail?.item.title ?? "",
     description: detail?.item.problem_pattern ?? "",
     content: knowledgeMarkdown(detail),
     include_source_map: true,
     files: [],
-    skill_id: null,
+    skill_id: existing?.target_id ?? null,
   };
 }
 
@@ -85,6 +87,8 @@ export function KnowledgePublishWikiDialog({ detail }: { detail: KnowledgeDetail
   const publishWiki = usePublishKnowledgeToWiki();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<PublishKnowledgeToWikiRequest>(() => wikiDraft(detail));
+
+  const existingWikiTarget = detail.publish_targets?.find((t) => t.target_type === "wiki");
 
   useEffect(() => {
     if (open) setDraft(wikiDraft(detail));
@@ -120,6 +124,11 @@ export function KnowledgePublishWikiDialog({ detail }: { detail: KnowledgeDetail
           <DialogTitle>{t(($) => $.publish_wiki.title)}</DialogTitle>
           <DialogDescription>{t(($) => $.publish_wiki.description)}</DialogDescription>
         </DialogHeader>
+        {existingWikiTarget && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            {t(($) => $.publish_wiki.republish_notice)}
+          </div>
+        )}
         <div className="grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
           <div className="grid gap-2">
             <Label>{t(($) => $.publish_wiki.target)}</Label>
@@ -198,6 +207,8 @@ export function KnowledgePublishSkillDialog({ detail }: { detail: KnowledgeDetai
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<PublishKnowledgeToSkillRequest>(() => skillDraft(detail));
 
+  const existingSkillTarget = detail.publish_targets?.find((t) => t.target_type === "skill");
+
   useEffect(() => {
     if (open) setDraft(skillDraft(detail));
   }, [detail.item.id, open]);
@@ -238,6 +249,11 @@ export function KnowledgePublishSkillDialog({ detail }: { detail: KnowledgeDetai
           <DialogTitle>{t(($) => $.publish_skill.title)}</DialogTitle>
           <DialogDescription>{t(($) => $.publish_skill.description)}</DialogDescription>
         </DialogHeader>
+        {existingSkillTarget && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+            {t(($) => $.publish_skill.republish_notice)}
+          </div>
+        )}
         <div className="grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
           <div className="grid gap-2">
             <Label>{t(($) => $.publish_skill.target)}</Label>

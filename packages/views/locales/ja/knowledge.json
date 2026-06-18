@@ -122,7 +122,8 @@
     "parent": "Parent folder",
     "no_parent": "No parent",
     "page_title": "Page title",
-    "content": "Content"
+    "content": "Content",
+    "republish_notice": "This knowledge item has already been published to Wiki. Re-publishing will update the existing page."
   },
   "publish_skill": {
     "title": "Publish as Skill",
@@ -135,7 +136,8 @@
     "include_source_map": "Include source map",
     "files": "Supporting files",
     "add_file": "Add file",
-    "no_files": "No supporting files."
+    "no_files": "No supporting files.",
+    "republish_notice": "This knowledge item has already been published as a Skill. Re-publishing will update the existing skill."
   },
   "toast": {
     "saved": "Knowledge saved",
