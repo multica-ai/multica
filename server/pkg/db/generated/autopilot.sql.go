@@ -28,6 +28,43 @@ func (q *Queries) AddAutopilotSubscriber(ctx context.Context, arg AddAutopilotSu
 	return err
 }
 
+const cancelAutopilotRun = `-- name: CancelAutopilotRun :one
+UPDATE autopilot_run
+SET status = 'cancelled',
+    completed_at = COALESCE(completed_at, now()),
+    failure_reason = COALESCE(failure_reason, $2)
+WHERE id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id
+`
+
+type CancelAutopilotRunParams struct {
+	ID            pgtype.UUID `json:"id"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+}
+
+func (q *Queries) CancelAutopilotRun(ctx context.Context, arg CancelAutopilotRunParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, cancelAutopilotRun, arg.ID, arg.FailureReason)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+	)
+	return i, err
+}
+
 const advanceTriggerNextRun = `-- name: AdvanceTriggerNextRun :exec
 UPDATE autopilot_trigger
 SET next_run_at = $2,

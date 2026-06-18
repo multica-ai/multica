@@ -227,6 +227,15 @@ SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: CancelAutopilotRun :one
+UPDATE autopilot_run
+SET status = 'cancelled',
+    completed_at = COALESCE(completed_at, now()),
+    failure_reason = COALESCE(failure_reason, $2)
+WHERE id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+RETURNING *;
+
 -- name: UpdateAutopilotRunSkipped :one
 -- Marks an autopilot_run as skipped without enqueueing any task. Used by the
 -- pre-flight admission check when the assignee agent's runtime is offline:
@@ -373,4 +382,3 @@ ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
 -- Paired with a re-insert loop to implement full-replace PATCH semantics.
 DELETE FROM autopilot_subscriber
 WHERE autopilot_id = $1;
-

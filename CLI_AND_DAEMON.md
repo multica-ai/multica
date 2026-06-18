@@ -668,6 +668,7 @@ multica autopilot trigger <id>            # Fires the autopilot once, returns th
 ```bash
 multica autopilot runs <id>
 multica autopilot runs <id> --limit 50 --output json
+multica autopilot runs cancel <run-id>
 ```
 
 ### Schedule Triggers

@@ -40,6 +40,12 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newAutopilotRunCancelTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "cancel"}
+	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
 func TestResolveAgent(t *testing.T) {
 	agentsResp := []map[string]any{
 		{"id": "11111111-1111-1111-1111-111111111111", "name": "Lambda"},
@@ -126,6 +132,44 @@ func TestResolveAgent(t *testing.T) {
 			t.Errorf("got %q, want %q", got, id)
 		}
 	})
+}
+
+func TestRunAutopilotRunCancelPostsRunScopedEndpoint(t *testing.T) {
+	const runID = "11111111-1111-1111-1111-111111111111"
+
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilot-runs/"+runID+"/cancel" {
+			http.NotFound(w, r)
+			return
+		}
+		called = true
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"cancelled":        true,
+			"already_terminal": false,
+			"cancelled_tasks":  1,
+			"run": map[string]any{
+				"id":     runID,
+				"status": "cancelled",
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotRunCancelTestCmd()
+	if err := runAutopilotRunCancel(cmd, []string{runID}); err != nil {
+		t.Fatalf("runAutopilotRunCancel: %v", err)
+	}
+	if !called {
+		t.Fatal("cancel endpoint was not called")
+	}
 }
 
 func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
