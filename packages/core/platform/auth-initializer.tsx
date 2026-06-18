@@ -3,6 +3,10 @@
 import { useEffect, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getApi } from "../api";
+import {
+  isTransientAuthProbeError,
+  isUnauthorizedError,
+} from "../api/client";
 import { useAuthStore } from "../auth";
 import {
   captureSignupSource,
@@ -20,6 +24,10 @@ import type { StorageAdapter } from "../types/storage";
 import type { User } from "../types";
 
 const logger = createLogger("auth");
+
+function authRetryDelayMs(attempt: number): number {
+  return Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5));
+}
 
 export function AuthInitializer({
   children,
@@ -40,6 +48,16 @@ export function AuthInitializer({
 
   useEffect(() => {
     const api = getApi();
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let authAttempt = 0;
+
+    const clearRetry = () => {
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    };
 
     // Stamp attribution before anything else — the signup event (server-side)
     // reads this cookie, so it has to be present before the user hits submit.
@@ -81,15 +99,96 @@ export function AuthInitializer({
       });
 
     const onAuthSuccess = (user: User) => {
+      if (cancelled) return;
+      authAttempt = 0;
       onLogin?.();
-      useAuthStore.setState({ user, isLoading: false });
+      useAuthStore.setState({
+        user,
+        isLoading: false,
+        authStatus: "authenticated",
+        authUnavailableSince: null,
+      });
       identifyAnalytics(user.id, { email: user.email, name: user.name });
     };
 
     const onAuthFailure = () => {
+      if (cancelled) return;
       onLogout?.();
       resetAnalytics();
-      useAuthStore.setState({ user: null, isLoading: false });
+      api.setToken(null);
+      setCurrentWorkspace(null, null);
+      useAuthStore.setState({
+        user: null,
+        isLoading: false,
+        authStatus: "unauthenticated",
+        authUnavailableSince: null,
+      });
+    };
+
+    const onAuthTemporarilyUnavailable = (err: unknown) => {
+      if (cancelled) return;
+      logger.warn("auth init temporarily unavailable", err);
+      useAuthStore.setState((state) => ({
+        user: state.user,
+        isLoading: false,
+        authStatus: "temporarily_unreachable",
+        authUnavailableSince: state.authUnavailableSince ?? Date.now(),
+      }));
+      const delay = authRetryDelayMs(authAttempt);
+      authAttempt += 1;
+      clearRetry();
+      retryTimer = setTimeout(runAuthProbe, delay);
+    };
+
+    const seedWorkspaceList = () => {
+      api
+        .listWorkspaces()
+        .then((wsList) => {
+          if (!cancelled) qc.setQueryData(workspaceKeys.list(), wsList);
+        })
+        .catch((err) => {
+          logger.warn("workspace list seed failed during auth init", err);
+        });
+    };
+
+    const handleAuthProbeError = (err: unknown) => {
+      if (isUnauthorizedError(err)) {
+        onAuthFailure();
+        return;
+      }
+      if (isTransientAuthProbeError(err)) {
+        onAuthTemporarilyUnavailable(err);
+        return;
+      }
+      onAuthFailure();
+    };
+
+    function runAuthProbe() {
+      if (cancelled) return;
+      api
+        .getMe()
+        .then((user) => {
+          onAuthSuccess(user);
+          seedWorkspaceList();
+        })
+        .catch(handleAuthProbeError);
+    }
+
+    const startTokenAuthProbe = () => {
+      const token = storage.getItem("multica_token");
+      if (!token) {
+        onLogout?.();
+        useAuthStore.setState({
+          user: null,
+          isLoading: false,
+          authStatus: "unauthenticated",
+          authUnavailableSince: null,
+        });
+        return;
+      }
+
+      api.setToken(token);
+      runAuthProbe();
     };
 
     if (cookieAuth) {
@@ -100,43 +199,18 @@ export function AuthInitializer({
       // resolve the slug without a second fetch. The active workspace itself
       // is derived from the URL by [workspaceSlug]/layout.tsx — no imperative
       // selection here.
-      Promise.all([api.getMe(), api.listWorkspaces()])
-        .then(([user, wsList]) => {
-          onAuthSuccess(user);
-          qc.setQueryData(workspaceKeys.list(), wsList);
-        })
-        .catch((err) => {
-          logger.error("cookie auth init failed", err);
-          onAuthFailure();
-        });
-      return;
+      runAuthProbe();
+      return () => {
+        cancelled = true;
+        clearRetry();
+      };
     }
 
-    // Token mode: read from localStorage (Electron / legacy).
-    const token = storage.getItem("multica_token");
-    if (!token) {
-      onLogout?.();
-      useAuthStore.setState({ isLoading: false });
-      return;
-    }
-
-    api.setToken(token);
-
-    Promise.all([api.getMe(), api.listWorkspaces()])
-      .then(([user, wsList]) => {
-        onAuthSuccess(user);
-        // Seed React Query cache so the URL-driven layout can resolve the
-        // slug without a second fetch.
-        qc.setQueryData(workspaceKeys.list(), wsList);
-      })
-      .catch((err) => {
-        logger.error("auth init failed", err);
-        api.setToken(null);
-        setCurrentWorkspace(null, null);
-        storage.removeItem("multica_token");
-        onAuthFailure();
-      });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    startTokenAuthProbe();
+    return () => {
+      cancelled = true;
+      clearRetry();
+    };
   }, []);
 
   return <>{children}</>;

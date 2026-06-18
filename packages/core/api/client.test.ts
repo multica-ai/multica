@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError } from "./client";
+import { ApiClient, ApiError, isTransientAuthProbeError, isUnauthorizedError } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -31,6 +31,48 @@ describe("ApiClient", () => {
         statusText: "Conflict",
       });
     }
+  });
+
+  it("calls onUnauthorized only for confirmed 401 responses", async () => {
+    const onUnauthorized = vi.fn();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "missing authorization" }), {
+          status: 401,
+          statusText: "Unauthorized",
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "starting up" }), {
+          status: 503,
+          statusText: "Service Unavailable",
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+
+    await expect(client.getMe()).rejects.toMatchObject({ status: 401 });
+    await expect(client.getMe()).rejects.toMatchObject({ status: 503 });
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not call onUnauthorized for network failures", async () => {
+    const onUnauthorized = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+
+    const client = new ApiClient("https://api.example.test", {
+      onUnauthorized,
+    });
+
+    await expect(client.getMe()).rejects.toThrow("fetch failed");
+    expect(onUnauthorized).not.toHaveBeenCalled();
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
@@ -681,4 +723,60 @@ describe("ApiClient", () => {
       expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
     });
   });
+
+describe("isTransientAuthProbeError", () => {
+  it("returns false for 401 Unauthorized (genuine auth failure)", () => {
+    const err = new ApiError("Unauthorized", 401, "Unauthorized");
+    expect(isTransientAuthProbeError(err)).toBe(false);
+  });
+
+  it("returns false for 403 Forbidden", () => {
+    const err = new ApiError("Forbidden", 403, "Forbidden");
+    expect(isTransientAuthProbeError(err)).toBe(false);
+  });
+
+  it("returns true for 500 Internal Server Error (transient)", () => {
+    const err = new ApiError("Internal Server Error", 500, "Internal Server Error");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for 503 Service Unavailable (transient)", () => {
+    const err = new ApiError("Service Unavailable", 503, "Service Unavailable");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for 408 Request Timeout (transient)", () => {
+    const err = new ApiError("Request Timeout", 408, "Request Timeout");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for non-ApiError (network error, DNS failure)", () => {
+    const err = new TypeError("Failed to fetch");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+
+  it("returns true for generic Error (unknown error treated as transient)", () => {
+    const err = new Error("unknown");
+    expect(isTransientAuthProbeError(err)).toBe(true);
+  });
+});
+
+describe("isUnauthorizedError", () => {
+  it("returns true for ApiError with status 401", () => {
+    const err = new ApiError("Unauthorized", 401, "Unauthorized");
+    expect(isUnauthorizedError(err)).toBe(true);
+  });
+
+  it("returns false for ApiError with status 403", () => {
+    const err = new ApiError("Forbidden", 403, "Forbidden");
+    expect(isUnauthorizedError(err)).toBe(false);
+  });
+
+  it("returns false for non-ApiError", () => {
+    expect(isUnauthorizedError(new Error("network error"))).toBe(false);
+    expect(isUnauthorizedError(null)).toBe(false);
+    expect(isUnauthorizedError(undefined)).toBe(false);
+  });
+});
+
 });

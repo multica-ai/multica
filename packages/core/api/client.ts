@@ -263,6 +263,18 @@ export class PreviewUnsupportedError extends Error {
   }
 }
 
+export function isUnauthorizedError(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 401;
+}
+
+export function isTransientAuthProbeError(error: unknown): boolean {
+  if (isUnauthorizedError(error)) return false;
+  if (error instanceof ApiError) {
+    return error.status >= 500 || error.status === 408;
+  }
+  return true;
+}
+
 export class ApiClient {
   private baseUrl: string;
   private token: string | null = null;

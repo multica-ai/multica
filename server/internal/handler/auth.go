@@ -150,12 +150,13 @@ func isSixDigitCode(code string) bool {
 }
 
 func (h *Handler) issueJWT(user db.User) (string, error) {
+	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":   uuidToString(user.ID),
 		"email": user.Email,
 		"name":  user.Name,
-		"exp":   time.Now().Add(auth.AuthTokenTTL()).Unix(),
-		"iat":   time.Now().Unix(),
+		"exp":   now.Add(auth.AuthTokenTTL()).Unix(),
+		"iat":   now.Unix(),
 	})
 	return token.SignedString(auth.JWTSecret())
 }

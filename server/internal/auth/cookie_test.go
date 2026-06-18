@@ -43,7 +43,10 @@ func TestCookieDomain(t *testing.T) {
 		{"IPv4 rejected", "192.168.5.5", ""},
 		{"IPv4 with leading dot rejected", ".192.168.5.5", ""},
 		{"IPv6 rejected", "::1", ""},
-		{"IPv6 bracketed is not a valid IP literal → passthrough", "[::1]", "[::1]"},
+		{"IPv6 bracketed rejected", "[::1]", ""},
+		{"localhost rejected", "localhost", ""},
+		{"URL rejected", "https://example.com", ""},
+		{"single-label rejected", "example", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

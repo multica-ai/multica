@@ -12,16 +12,21 @@ export default function Page() {
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
+  const authStatus = useAuthStore((s) => s.authStatus);
+  const authTemporarilyUnavailable =
+    authStatus === "temporarily_unreachable";
   const { data: wsList = [] } = useQuery({
     ...workspaceListOptions(),
     enabled: !!user,
   });
 
   useEffect(() => {
-    if (!isLoading && !user) router.replace(paths.login());
-  }, [isLoading, user, router]);
+    if (!isLoading && !authTemporarilyUnavailable && !user) {
+      router.replace(paths.login());
+    }
+  }, [isLoading, authTemporarilyUnavailable, user, router]);
 
-  if (isLoading || !user) return null;
+  if (isLoading || authTemporarilyUnavailable || !user) return null;
 
   // Back goes to the root path — the workspace layout redirects from
   // there to the user's default workspace. Only show Back when there's

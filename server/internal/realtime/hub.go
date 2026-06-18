@@ -761,17 +761,16 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	}
 
 	var userID string
+	var cookieAuthErr string
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
 		if errMsg != "" {
-			http.Error(w, errMsg, http.StatusUnauthorized)
-			return
+			cookieAuthErr = errMsg
+		} else if !mc.IsMember(r.Context(), uid, workspaceID) {
+			cookieAuthErr = `{"error":"not a member of this workspace"}`
+		} else {
+			userID = uid
 		}
-		if !mc.IsMember(r.Context(), uid, workspaceID) {
-			http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
-			return
-		}
-		userID = uid
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -780,6 +779,15 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		return
 	}
 
+	if cookieAuthErr != "" {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(cookieAuthErr)); err != nil {
+			slog.Error("ws: failed to send cookie auth error to client", "error", err)
+		}
+		conn.Close()
+		return
+	}
+
+	// First-message auth for non-cookie clients (desktop, CLI).
 	if userID == "" {
 		tokenStr, errMsg := firstMessageAuth(conn)
 		if errMsg != "" {

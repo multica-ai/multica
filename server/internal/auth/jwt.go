@@ -6,10 +6,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 )
 
 const defaultJWTSecret = "multica-dev-secret-change-in-production"
+const placeholderJWTSecret = "change-me-in-production"
 
 var (
 	jwtSecret     []byte
@@ -26,6 +28,18 @@ func JWTSecret() []byte {
 	})
 
 	return jwtSecret
+}
+
+func JWTSecretIsConfigured() bool {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	return secret != "" && secret != defaultJWTSecret && secret != placeholderJWTSecret
+}
+
+func ValidateJWTSecretConfiguration() error {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") && !JWTSecretIsConfigured() {
+		return fmt.Errorf("JWT_SECRET is required in production and must be a persistent random value")
+	}
+	return nil
 }
 
 // GeneratePATToken creates a new personal access token: "mul_" + 40 random hex chars.
