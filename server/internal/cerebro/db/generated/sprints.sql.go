@@ -93,27 +93,30 @@ INSERT INTO cerebro_sprint_recurring_task (
     cadence_unit, cadence_count,
     title, description, priority,
     assignee_type, assignee_id,
+    sprint_day_offset,
     enabled
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id, workspace_id, project_id,
           cadence_unit, cadence_count,
           title, description, priority,
           assignee_type, assignee_id,
+          sprint_day_offset,
           enabled, created_at, updated_at
 `
 
 type CreateCerebroSprintRecurringTaskParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	ProjectID    pgtype.UUID `json:"project_id"`
-	CadenceUnit  string      `json:"cadence_unit"`
-	CadenceCount int32       `json:"cadence_count"`
-	Title        string      `json:"title"`
-	Description  pgtype.Text `json:"description"`
-	Priority     pgtype.Text `json:"priority"`
-	AssigneeType pgtype.Text `json:"assignee_type"`
-	AssigneeID   pgtype.UUID `json:"assignee_id"`
-	Enabled      bool        `json:"enabled"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ProjectID       pgtype.UUID `json:"project_id"`
+	CadenceUnit     string      `json:"cadence_unit"`
+	CadenceCount    int32       `json:"cadence_count"`
+	Title           string      `json:"title"`
+	Description     pgtype.Text `json:"description"`
+	Priority        pgtype.Text `json:"priority"`
+	AssigneeType    pgtype.Text `json:"assignee_type"`
+	AssigneeID      pgtype.UUID `json:"assignee_id"`
+	SprintDayOffset int32       `json:"sprint_day_offset"`
+	Enabled         bool        `json:"enabled"`
 }
 
 // ===========================================================================
@@ -130,6 +133,7 @@ func (q *Queries) CreateCerebroSprintRecurringTask(ctx context.Context, arg Crea
 		arg.Priority,
 		arg.AssigneeType,
 		arg.AssigneeID,
+		arg.SprintDayOffset,
 		arg.Enabled,
 	)
 	var i CerebroSprintRecurringTask
@@ -144,6 +148,7 @@ func (q *Queries) CreateCerebroSprintRecurringTask(ctx context.Context, arg Crea
 		&i.Priority,
 		&i.AssigneeType,
 		&i.AssigneeID,
+		&i.SprintDayOffset,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -269,6 +274,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE id = $1
@@ -288,6 +294,7 @@ func (q *Queries) GetCerebroSprintRecurringTask(ctx context.Context, id pgtype.U
 		&i.Priority,
 		&i.AssigneeType,
 		&i.AssigneeID,
+		&i.SprintDayOffset,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -302,7 +309,7 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone,
+       move_incomplete_enabled, move_incomplete_target_status, timezone,
        created_at, updated_at
 FROM cerebro_sprint_settings
 WHERE project_id = $1
@@ -328,6 +335,7 @@ func (q *Queries) GetCerebroSprintSettings(ctx context.Context, projectID pgtype
 		&i.AutoCreateEnabled,
 		&i.AutoCreateLeadDays,
 		&i.MoveIncompleteEnabled,
+		&i.MoveIncompleteTargetStatus,
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -418,6 +426,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE project_id = $1
@@ -444,6 +453,7 @@ func (q *Queries) ListCerebroSprintRecurringTasksByProject(ctx context.Context, 
 			&i.Priority,
 			&i.AssigneeType,
 			&i.AssigneeID,
+			&i.SprintDayOffset,
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -463,6 +473,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE project_id = $1
@@ -499,6 +510,7 @@ func (q *Queries) ListCerebroSprintRecurringTasksForCadence(ctx context.Context,
 			&i.Priority,
 			&i.AssigneeType,
 			&i.AssigneeID,
+			&i.SprintDayOffset,
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -518,7 +530,7 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone,
+       move_incomplete_enabled, move_incomplete_target_status, timezone,
        created_at, updated_at
 FROM cerebro_sprint_settings
 WHERE workspace_id = $1
@@ -544,6 +556,7 @@ func (q *Queries) ListCerebroSprintSettingsByWorkspace(ctx context.Context, work
 			&i.AutoCreateEnabled,
 			&i.AutoCreateLeadDays,
 			&i.MoveIncompleteEnabled,
+			&i.MoveIncompleteTargetStatus,
 			&i.Timezone,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -563,24 +576,25 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone
+       move_incomplete_enabled, move_incomplete_target_status, timezone
 FROM cerebro_sprint_settings
 WHERE enabled = TRUE
   AND auto_create_enabled = TRUE
 `
 
 type ListCerebroSprintSettingsForAutoCreateRow struct {
-	ProjectID             pgtype.UUID `json:"project_id"`
-	WorkspaceID           pgtype.UUID `json:"workspace_id"`
-	Enabled               bool        `json:"enabled"`
-	DurationUnit          string      `json:"duration_unit"`
-	DurationCount         int32       `json:"duration_count"`
-	StartWeekday          int16       `json:"start_weekday"`
-	NameTemplate          string      `json:"name_template"`
-	AutoCreateEnabled     bool        `json:"auto_create_enabled"`
-	AutoCreateLeadDays    int32       `json:"auto_create_lead_days"`
-	MoveIncompleteEnabled bool        `json:"move_incomplete_enabled"`
-	Timezone              string      `json:"timezone"`
+	ProjectID                  pgtype.UUID `json:"project_id"`
+	WorkspaceID                pgtype.UUID `json:"workspace_id"`
+	Enabled                    bool        `json:"enabled"`
+	DurationUnit               string      `json:"duration_unit"`
+	DurationCount              int32       `json:"duration_count"`
+	StartWeekday               int16       `json:"start_weekday"`
+	NameTemplate               string      `json:"name_template"`
+	AutoCreateEnabled          bool        `json:"auto_create_enabled"`
+	AutoCreateLeadDays         int32       `json:"auto_create_lead_days"`
+	MoveIncompleteEnabled      bool        `json:"move_incomplete_enabled"`
+	MoveIncompleteTargetStatus string      `json:"move_incomplete_target_status"`
+	Timezone                   string      `json:"timezone"`
 }
 
 // Sweeper hot path: every settings row that opted into auto-create AND
@@ -607,6 +621,7 @@ func (q *Queries) ListCerebroSprintSettingsForAutoCreate(ctx context.Context) ([
 			&i.AutoCreateEnabled,
 			&i.AutoCreateLeadDays,
 			&i.MoveIncompleteEnabled,
+			&i.MoveIncompleteTargetStatus,
 			&i.Timezone,
 		); err != nil {
 			return nil, err
@@ -749,6 +764,23 @@ func (q *Queries) MoveCerebroSprintIssuesBatch(ctx context.Context, arg MoveCere
 	return err
 }
 
+const moveIncompleteCerebroSprintIssuesToStatus = `-- name: MoveIncompleteCerebroSprintIssuesToStatus :exec
+UPDATE issue
+SET status = $2,
+    updated_at = now()
+WHERE id = ANY($1::uuid[])
+`
+
+type MoveIncompleteCerebroSprintIssuesToStatusParams struct {
+	Column1 []pgtype.UUID `json:"column_1"`
+	Status  string        `json:"status"`
+}
+
+func (q *Queries) MoveIncompleteCerebroSprintIssuesToStatus(ctx context.Context, arg MoveIncompleteCerebroSprintIssuesToStatusParams) error {
+	_, err := q.db.Exec(ctx, moveIncompleteCerebroSprintIssuesToStatus, arg.Column1, arg.Status)
+	return err
+}
+
 const removeIssueFromCerebroSprint = `-- name: RemoveIssueFromCerebroSprint :exec
 DELETE FROM cerebro_sprint_issue WHERE issue_id = $1
 `
@@ -832,26 +864,29 @@ SET cadence_unit  = $2,
     priority      = $6,
     assignee_type = $7,
     assignee_id   = $8,
-    enabled       = $9,
+    sprint_day_offset = $9,
+    enabled       = $10,
     updated_at    = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id,
           cadence_unit, cadence_count,
           title, description, priority,
           assignee_type, assignee_id,
+          sprint_day_offset,
           enabled, created_at, updated_at
 `
 
 type UpdateCerebroSprintRecurringTaskParams struct {
-	ID           pgtype.UUID `json:"id"`
-	CadenceUnit  string      `json:"cadence_unit"`
-	CadenceCount int32       `json:"cadence_count"`
-	Title        string      `json:"title"`
-	Description  pgtype.Text `json:"description"`
-	Priority     pgtype.Text `json:"priority"`
-	AssigneeType pgtype.Text `json:"assignee_type"`
-	AssigneeID   pgtype.UUID `json:"assignee_id"`
-	Enabled      bool        `json:"enabled"`
+	ID              pgtype.UUID `json:"id"`
+	CadenceUnit     string      `json:"cadence_unit"`
+	CadenceCount    int32       `json:"cadence_count"`
+	Title           string      `json:"title"`
+	Description     pgtype.Text `json:"description"`
+	Priority        pgtype.Text `json:"priority"`
+	AssigneeType    pgtype.Text `json:"assignee_type"`
+	AssigneeID      pgtype.UUID `json:"assignee_id"`
+	SprintDayOffset int32       `json:"sprint_day_offset"`
+	Enabled         bool        `json:"enabled"`
 }
 
 func (q *Queries) UpdateCerebroSprintRecurringTask(ctx context.Context, arg UpdateCerebroSprintRecurringTaskParams) (CerebroSprintRecurringTask, error) {
@@ -864,6 +899,7 @@ func (q *Queries) UpdateCerebroSprintRecurringTask(ctx context.Context, arg Upda
 		arg.Priority,
 		arg.AssigneeType,
 		arg.AssigneeID,
+		arg.SprintDayOffset,
 		arg.Enabled,
 	)
 	var i CerebroSprintRecurringTask
@@ -878,6 +914,7 @@ func (q *Queries) UpdateCerebroSprintRecurringTask(ctx context.Context, arg Upda
 		&i.Priority,
 		&i.AssigneeType,
 		&i.AssigneeID,
+		&i.SprintDayOffset,
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -891,9 +928,9 @@ INSERT INTO cerebro_sprint_settings (
     duration_unit, duration_count, start_weekday,
     name_template,
     auto_create_enabled, auto_create_lead_days,
-    move_incomplete_enabled, timezone
+    move_incomplete_enabled, move_incomplete_target_status, timezone
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (project_id) DO UPDATE
 SET enabled                 = EXCLUDED.enabled,
     duration_unit           = EXCLUDED.duration_unit,
@@ -903,28 +940,30 @@ SET enabled                 = EXCLUDED.enabled,
     auto_create_enabled     = EXCLUDED.auto_create_enabled,
     auto_create_lead_days   = EXCLUDED.auto_create_lead_days,
     move_incomplete_enabled = EXCLUDED.move_incomplete_enabled,
+    move_incomplete_target_status = EXCLUDED.move_incomplete_target_status,
     timezone                = EXCLUDED.timezone,
     updated_at              = now()
 RETURNING project_id, workspace_id, enabled,
           duration_unit, duration_count, start_weekday,
           name_template,
           auto_create_enabled, auto_create_lead_days,
-          move_incomplete_enabled, timezone,
+          move_incomplete_enabled, move_incomplete_target_status, timezone,
           created_at, updated_at
 `
 
 type UpsertCerebroSprintSettingsParams struct {
-	ProjectID             pgtype.UUID `json:"project_id"`
-	WorkspaceID           pgtype.UUID `json:"workspace_id"`
-	Enabled               bool        `json:"enabled"`
-	DurationUnit          string      `json:"duration_unit"`
-	DurationCount         int32       `json:"duration_count"`
-	StartWeekday          int16       `json:"start_weekday"`
-	NameTemplate          string      `json:"name_template"`
-	AutoCreateEnabled     bool        `json:"auto_create_enabled"`
-	AutoCreateLeadDays    int32       `json:"auto_create_lead_days"`
-	MoveIncompleteEnabled bool        `json:"move_incomplete_enabled"`
-	Timezone              string      `json:"timezone"`
+	ProjectID                  pgtype.UUID `json:"project_id"`
+	WorkspaceID                pgtype.UUID `json:"workspace_id"`
+	Enabled                    bool        `json:"enabled"`
+	DurationUnit               string      `json:"duration_unit"`
+	DurationCount              int32       `json:"duration_count"`
+	StartWeekday               int16       `json:"start_weekday"`
+	NameTemplate               string      `json:"name_template"`
+	AutoCreateEnabled          bool        `json:"auto_create_enabled"`
+	AutoCreateLeadDays         int32       `json:"auto_create_lead_days"`
+	MoveIncompleteEnabled      bool        `json:"move_incomplete_enabled"`
+	MoveIncompleteTargetStatus string      `json:"move_incomplete_target_status"`
+	Timezone                   string      `json:"timezone"`
 }
 
 func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCerebroSprintSettingsParams) (CerebroSprintSetting, error) {
@@ -939,6 +978,7 @@ func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCer
 		arg.AutoCreateEnabled,
 		arg.AutoCreateLeadDays,
 		arg.MoveIncompleteEnabled,
+		arg.MoveIncompleteTargetStatus,
 		arg.Timezone,
 	)
 	var i CerebroSprintSetting
@@ -953,6 +993,7 @@ func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCer
 		&i.AutoCreateEnabled,
 		&i.AutoCreateLeadDays,
 		&i.MoveIncompleteEnabled,
+		&i.MoveIncompleteTargetStatus,
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,

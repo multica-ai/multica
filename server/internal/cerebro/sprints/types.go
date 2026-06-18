@@ -13,36 +13,38 @@ const dateLayout = "2006-01-02"
 
 // SettingsResponse is the JSON shape returned by the settings endpoints.
 type SettingsResponse struct {
-	ProjectID             string `json:"project_id"`
-	WorkspaceID           string `json:"workspace_id"`
-	Enabled               bool   `json:"enabled"`
-	DurationUnit          string `json:"duration_unit"`
-	DurationCount         int32  `json:"duration_count"`
-	StartWeekday          int    `json:"start_weekday"`
-	NameTemplate          string `json:"name_template"`
-	AutoCreateEnabled     bool   `json:"auto_create_enabled"`
-	AutoCreateLeadDays    int32  `json:"auto_create_lead_days"`
-	MoveIncompleteEnabled bool   `json:"move_incomplete_enabled"`
-	Timezone              string `json:"timezone"`
-	CreatedAt             string `json:"created_at"`
-	UpdatedAt             string `json:"updated_at"`
+	ProjectID                  string `json:"project_id"`
+	WorkspaceID                string `json:"workspace_id"`
+	Enabled                    bool   `json:"enabled"`
+	DurationUnit               string `json:"duration_unit"`
+	DurationCount              int32  `json:"duration_count"`
+	StartWeekday               int    `json:"start_weekday"`
+	NameTemplate               string `json:"name_template"`
+	AutoCreateEnabled          bool   `json:"auto_create_enabled"`
+	AutoCreateLeadDays         int32  `json:"auto_create_lead_days"`
+	MoveIncompleteEnabled      bool   `json:"move_incomplete_enabled"`
+	MoveIncompleteTargetStatus string `json:"move_incomplete_target_status"`
+	Timezone                   string `json:"timezone"`
+	CreatedAt                  string `json:"created_at"`
+	UpdatedAt                  string `json:"updated_at"`
 }
 
 func settingsToResponse(s cerebrodb.CerebroSprintSetting) SettingsResponse {
 	return SettingsResponse{
-		ProjectID:             util.UUIDToString(s.ProjectID),
-		WorkspaceID:           util.UUIDToString(s.WorkspaceID),
-		Enabled:               s.Enabled,
-		DurationUnit:          s.DurationUnit,
-		DurationCount:         s.DurationCount,
-		StartWeekday:          int(s.StartWeekday),
-		NameTemplate:          s.NameTemplate,
-		AutoCreateEnabled:     s.AutoCreateEnabled,
-		AutoCreateLeadDays:    s.AutoCreateLeadDays,
-		MoveIncompleteEnabled: s.MoveIncompleteEnabled,
-		Timezone:              s.Timezone,
-		CreatedAt:             tsString(s.CreatedAt),
-		UpdatedAt:             tsString(s.UpdatedAt),
+		ProjectID:                  util.UUIDToString(s.ProjectID),
+		WorkspaceID:                util.UUIDToString(s.WorkspaceID),
+		Enabled:                    s.Enabled,
+		DurationUnit:               s.DurationUnit,
+		DurationCount:              s.DurationCount,
+		StartWeekday:               int(s.StartWeekday),
+		NameTemplate:               s.NameTemplate,
+		AutoCreateEnabled:          s.AutoCreateEnabled,
+		AutoCreateLeadDays:         s.AutoCreateLeadDays,
+		MoveIncompleteEnabled:      s.MoveIncompleteEnabled,
+		MoveIncompleteTargetStatus: s.MoveIncompleteTargetStatus,
+		Timezone:                   s.Timezone,
+		CreatedAt:                  tsString(s.CreatedAt),
+		UpdatedAt:                  tsString(s.UpdatedAt),
 	}
 }
 
@@ -83,32 +85,34 @@ func sprintToResponse(s cerebrodb.CerebroSprint) SprintResponse {
 // RecurringTaskResponse is the JSON shape returned by the recurring-task
 // endpoints.
 type RecurringTaskResponse struct {
-	ID           string `json:"id"`
-	WorkspaceID  string `json:"workspace_id"`
-	ProjectID    string `json:"project_id"`
-	CadenceUnit  string `json:"cadence_unit"`
-	CadenceCount int32  `json:"cadence_count"`
-	Title        string `json:"title"`
-	Description  string `json:"description,omitempty"`
-	Priority     string `json:"priority,omitempty"`
-	AssigneeType string `json:"assignee_type,omitempty"`
-	AssigneeID   string `json:"assignee_id,omitempty"`
-	Enabled      bool   `json:"enabled"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	ProjectID       string `json:"project_id"`
+	CadenceUnit     string `json:"cadence_unit"`
+	CadenceCount    int32  `json:"cadence_count"`
+	Title           string `json:"title"`
+	Description     string `json:"description,omitempty"`
+	Priority        string `json:"priority,omitempty"`
+	AssigneeType    string `json:"assignee_type,omitempty"`
+	AssigneeID      string `json:"assignee_id,omitempty"`
+	SprintDayOffset int32  `json:"sprint_day_offset"`
+	Enabled         bool   `json:"enabled"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 func recurringTaskToResponse(t cerebrodb.CerebroSprintRecurringTask) RecurringTaskResponse {
 	out := RecurringTaskResponse{
-		ID:           util.UUIDToString(t.ID),
-		WorkspaceID:  util.UUIDToString(t.WorkspaceID),
-		ProjectID:    util.UUIDToString(t.ProjectID),
-		CadenceUnit:  t.CadenceUnit,
-		CadenceCount: t.CadenceCount,
-		Title:        t.Title,
-		Enabled:      t.Enabled,
-		CreatedAt:    tsString(t.CreatedAt),
-		UpdatedAt:    tsString(t.UpdatedAt),
+		ID:              util.UUIDToString(t.ID),
+		WorkspaceID:     util.UUIDToString(t.WorkspaceID),
+		ProjectID:       util.UUIDToString(t.ProjectID),
+		CadenceUnit:     t.CadenceUnit,
+		CadenceCount:    t.CadenceCount,
+		Title:           t.Title,
+		SprintDayOffset: t.SprintDayOffset,
+		Enabled:         t.Enabled,
+		CreatedAt:       tsString(t.CreatedAt),
+		UpdatedAt:       tsString(t.UpdatedAt),
 	}
 	if t.Description.Valid {
 		out.Description = t.Description.String

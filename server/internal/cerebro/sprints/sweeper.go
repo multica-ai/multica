@@ -313,7 +313,7 @@ func (s *Sweeper) maybeCreateNext(ctx context.Context, settings cerebrodb.Cerebr
 	nextStart := ComputeNextStart(active.EndDate.Time, settings.DurationUnit, int(settings.StartWeekday))
 	nextEnd := ComputeEnd(nextStart, settings.DurationUnit, int(settings.DurationCount))
 	nextSeq := active.SequenceNo + 1
-	nextName := ApplyNameTemplate(settings.NameTemplate, nextSeq)
+	nextName := ApplyNameTemplateWithDates(settings.NameTemplate, nextSeq, nextStart, nextEnd)
 
 	var (
 		newSprintID pgtype.UUID
@@ -350,6 +350,16 @@ func (s *Sweeper) maybeCreateNext(ctx context.Context, settings cerebrodb.Cerebr
 					Column2:  ids,
 				}); err != nil {
 					return fmt.Errorf("move incomplete issues: %w", err)
+				}
+				targetStatus := settings.MoveIncompleteTargetStatus
+				if targetStatus == "" {
+					targetStatus = "todo"
+				}
+				if err := cqtx.MoveIncompleteCerebroSprintIssuesToStatus(ctx, cerebrodb.MoveIncompleteCerebroSprintIssuesToStatusParams{
+					Column1: ids,
+					Status:  targetStatus,
+				}); err != nil {
+					return fmt.Errorf("move incomplete issue statuses: %w", err)
 				}
 				moved = len(ids)
 			}
@@ -404,6 +414,17 @@ func (s *Sweeper) cloneRecurringTasks(ctx context.Context, tx pgx.Tx, cqtx *cere
 		if t.Priority.Valid && t.Priority.String != "" {
 			priority = t.Priority.String
 		}
+		taskDate := sprint.StartDate
+		if sprint.StartDate.Valid {
+			offset := int(t.SprintDayOffset)
+			if offset < 1 {
+				offset = 1
+			}
+			taskDate = pgtype.Date{Time: sprint.StartDate.Time.AddDate(0, 0, offset-1), Valid: true}
+			if sprint.EndDate.Valid && taskDate.Time.After(sprint.EndDate.Time) {
+				taskDate = sprint.EndDate
+			}
+		}
 		issue, err := dqtx.CreateIssue(ctx, db.CreateIssueParams{
 			WorkspaceID:  settings.WorkspaceID,
 			Title:        t.Title,
@@ -417,6 +438,8 @@ func (s *Sweeper) cloneRecurringTasks(ctx context.Context, tx pgx.Tx, cqtx *cere
 			Position:     position,
 			Number:       number,
 			ProjectID:    settings.ProjectID,
+			StartDate:    taskDate,
+			DueDate:      taskDate,
 		})
 		if err != nil {
 			return cloned, fmt.Errorf("create recurring issue: %w", err)
@@ -443,4 +466,3 @@ func (s *Sweeper) runInTx(ctx context.Context, fn func(pgx.Tx) error) error {
 	}
 	return tx.Commit(ctx)
 }
-

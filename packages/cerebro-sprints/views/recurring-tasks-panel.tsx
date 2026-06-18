@@ -43,6 +43,7 @@ const DEFAULT_FORM: RecurringTaskWriteInput = {
   title: "",
   description: "",
   priority: "",
+  sprint_day_offset: 1,
   enabled: true,
 };
 
@@ -132,6 +133,24 @@ export function RecurringTasksPanel({ workspaceId, projectId }: Props) {
                 </div>
               </div>
               <div className="grid gap-1.5">
+                <Label htmlFor="rt-sprint-day">Sprint day</Label>
+                <Input
+                  id="rt-sprint-day"
+                  type="number"
+                  min={1}
+                  value={form.sprint_day_offset ?? 1}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      sprint_day_offset: Math.max(1, Number(e.target.value)),
+                    })
+                  }
+                />
+                <span className="text-xs text-muted-foreground">
+                  Day 1 is the sprint start date.
+                </span>
+              </div>
+              <div className="grid gap-1.5">
                 <Label htmlFor="rt-desc">Description (optional)</Label>
                 <Textarea
                   id="rt-desc"
@@ -170,6 +189,7 @@ export function RecurringTasksPanel({ workspaceId, projectId }: Props) {
               <span className="font-medium">{task.title}</span>
               <span className="text-xs text-muted-foreground">
                 Every {task.cadence_count} {task.cadence_unit}
+                {` · day ${task.sprint_day_offset}`}
                 {task.description ? ` · ${task.description}` : ""}
               </span>
             </div>
@@ -188,6 +208,7 @@ export function RecurringTasksPanel({ workspaceId, projectId }: Props) {
                         priority: task.priority,
                         assignee_type: task.assignee_type,
                         assignee_id: task.assignee_id,
+                        sprint_day_offset: task.sprint_day_offset,
                         enabled: v,
                       },
                     },

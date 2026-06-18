@@ -88,8 +88,27 @@ func ComputeEnd(start time.Time, unit string, count int) time.Time {
 // 1-based sequence number. Missing placeholder produces a trailing " N"
 // suffix so admins can't accidentally have every sprint share a name.
 func ApplyNameTemplate(template string, sequenceNo int32) string {
+	return ApplyNameTemplateWithDates(template, sequenceNo, time.Time{}, time.Time{})
+}
+
+// ApplyNameTemplateWithDates substitutes {n}, {start}, and {end}. Dates use
+// YYYY-MM-DD so the template is unambiguous across locales and timezones.
+func ApplyNameTemplateWithDates(template string, sequenceNo int32, start time.Time, end time.Time) string {
+	replaced := false
 	if strings.Contains(template, "{n}") {
-		return strings.ReplaceAll(template, "{n}", fmt.Sprintf("%d", sequenceNo))
+		template = strings.ReplaceAll(template, "{n}", fmt.Sprintf("%d", sequenceNo))
+		replaced = true
+	}
+	if !start.IsZero() && strings.Contains(template, "{start}") {
+		template = strings.ReplaceAll(template, "{start}", truncateDay(start).Format(dateLayout))
+		replaced = true
+	}
+	if !end.IsZero() && strings.Contains(template, "{end}") {
+		template = strings.ReplaceAll(template, "{end}", truncateDay(end).Format(dateLayout))
+		replaced = true
+	}
+	if replaced {
+		return template
 	}
 	if template == "" {
 		return fmt.Sprintf("Sprint %d", sequenceNo)

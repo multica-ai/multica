@@ -2,10 +2,11 @@
 
 // CEREBRO-PATCH(projects-page-cerebro): cerebro modification of upstream file
 
-import { useState, useCallback } from "react";
-import { Plus, FolderKanban, UserMinus, Check } from "lucide-react";
+import { useState, useCallback, useMemo } from "react";
+import { Plus, FolderKanban, UserMinus, Check, CalendarRange } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { projectTreeOptions } from "@multica/core/projects/nesting";
+import { projectSprintsOptions } from "@multica/cerebro-sprints/core/queries";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import {
   PROJECT_STATUS_CONFIG,
@@ -35,7 +36,7 @@ import {
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Project, ProjectStatus, ProjectPriority, UpdateProjectRequest } from "@multica/core/types";
+import type { Project, ProjectStatus, ProjectPriority, ProjectTreeItem, UpdateProjectRequest } from "@multica/core/types";
 import { PageHeader } from "../../layout/page-header";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 // CEREBRO-PATCH(projects-page-restricted-lock): RestrictedLock indicator from cerebro-access
@@ -49,7 +50,7 @@ import {
 } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
-function ProjectRow({ project }: { project: Project }) {
+function ProjectRow({ project, depth = 0 }: { project: Project; depth?: number }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -83,6 +84,7 @@ function ProjectRow({ project }: { project: Project }) {
         href={wsPaths.projectDetail(project.id)}
         className="flex min-w-0 flex-1 items-center gap-2"
         data-testid={`project-row-${project.id}`}
+        style={{ paddingLeft: depth * 18 }}
       >
         <ProjectIcon project={project} size="md" />
         <span className="min-w-0 flex-1 truncate font-medium">
@@ -237,11 +239,70 @@ function ProjectRow({ project }: { project: Project }) {
   );
 }
 
+// CEREBRO-PATCH(projects-page-sprint-tree): render sub-projects and project sprints in the project list.
+function ProjectSprintRows({ project, depth = 0 }: { project: Project; depth?: number }) {
+  const wsId = useWorkspaceId();
+  const wsPaths = useWorkspacePaths();
+  const { data } = useQuery(projectSprintsOptions(wsId, project.id));
+  const sprints = data?.sprints ?? [];
+
+  if (sprints.length === 0) return null;
+
+  return (
+    <>
+      {sprints.map((sprint) => (
+        <div
+          key={sprint.id}
+          className="flex h-9 items-center gap-2 px-3 sm:px-5 text-sm text-muted-foreground hover:bg-accent/30"
+        >
+          <AppLink
+            href={wsPaths.sprintDetail(sprint.id)}
+            className="flex min-w-0 flex-1 items-center gap-2 hover:text-foreground"
+            style={{ paddingLeft: (depth + 1) * 18 }}
+          >
+            <CalendarRange className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{sprint.name}</span>
+            <span className="hidden sm:inline text-xs tabular-nums">
+              {sprint.start_date} - {sprint.end_date}
+            </span>
+          </AppLink>
+          <span className="w-20 sm:w-28 shrink-0 text-center text-xs capitalize">
+            {sprint.status}
+          </span>
+          <span className="hidden sm:inline w-24 shrink-0" />
+          <span className="hidden sm:inline w-10 shrink-0" />
+          <span className="hidden sm:inline w-20 shrink-0" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+function ProjectTreeRows({ projects, depth = 0 }: { projects: ProjectTreeItem[]; depth?: number }) {
+  return (
+    <>
+      {projects.map((project) => (
+        <div key={project.id}>
+          <ProjectRow project={project} depth={depth} />
+          <ProjectSprintRows project={project} depth={depth} />
+          {project.children?.length ? (
+            <ProjectTreeRows projects={project.children} depth={depth + 1} />
+          ) : null}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function countProjectTree(projects: ProjectTreeItem[]): number {
+  return projects.reduce((sum, project) => sum + 1 + countProjectTree(project.children ?? []), 0);
+}
 
 export function ProjectsPage() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
-  const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const { data: projectTree = [], isLoading } = useQuery(projectTreeOptions(wsId));
+  const projectCount = useMemo(() => countProjectTree(projectTree), [projectTree]);
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
   return (
@@ -251,8 +312,8 @@ export function ProjectsPage() {
         <div className="flex items-center gap-2">
           <FolderKanban className="h-4 w-4 text-muted-foreground" />
           <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {!isLoading && projects.length > 0 && (
-            <span className="text-xs text-muted-foreground tabular-nums">{projects.length}</span>
+          {!isLoading && projectCount > 0 && (
+            <span className="text-xs text-muted-foreground tabular-nums">{projectCount}</span>
           )}
         </div>
         <Button size="sm" variant="outline" onClick={openCreateProject}>
@@ -280,7 +341,7 @@ export function ProjectsPage() {
               ))}
             </div>
           </>
-        ) : projects.length === 0 ? (
+        ) : projectTree.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
             <FolderKanban className="h-10 w-10 mb-3 opacity-30" />
             <p className="text-sm">{t(($) => $.page.empty)}</p>
@@ -302,9 +363,7 @@ export function ProjectsPage() {
               <span className="hidden sm:inline w-20 text-right shrink-0">{t(($) => $.table.created)}</span>
             </div>
             {/* Rows */}
-            {projects.map((project) => (
-              <ProjectRow key={project.id} project={project} />
-            ))}
+            <ProjectTreeRows projects={projectTree} />
           </>
         )}
       </div>

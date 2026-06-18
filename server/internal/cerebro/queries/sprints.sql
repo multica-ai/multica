@@ -11,7 +11,7 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone,
+       move_incomplete_enabled, move_incomplete_target_status, timezone,
        created_at, updated_at
 FROM cerebro_sprint_settings
 WHERE project_id = $1;
@@ -21,7 +21,7 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone,
+       move_incomplete_enabled, move_incomplete_target_status, timezone,
        created_at, updated_at
 FROM cerebro_sprint_settings
 WHERE workspace_id = $1;
@@ -32,9 +32,9 @@ INSERT INTO cerebro_sprint_settings (
     duration_unit, duration_count, start_weekday,
     name_template,
     auto_create_enabled, auto_create_lead_days,
-    move_incomplete_enabled, timezone
+    move_incomplete_enabled, move_incomplete_target_status, timezone
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (project_id) DO UPDATE
 SET enabled                 = EXCLUDED.enabled,
     duration_unit           = EXCLUDED.duration_unit,
@@ -44,13 +44,14 @@ SET enabled                 = EXCLUDED.enabled,
     auto_create_enabled     = EXCLUDED.auto_create_enabled,
     auto_create_lead_days   = EXCLUDED.auto_create_lead_days,
     move_incomplete_enabled = EXCLUDED.move_incomplete_enabled,
+    move_incomplete_target_status = EXCLUDED.move_incomplete_target_status,
     timezone                = EXCLUDED.timezone,
     updated_at              = now()
 RETURNING project_id, workspace_id, enabled,
           duration_unit, duration_count, start_weekday,
           name_template,
           auto_create_enabled, auto_create_lead_days,
-          move_incomplete_enabled, timezone,
+          move_incomplete_enabled, move_incomplete_target_status, timezone,
           created_at, updated_at;
 
 -- name: DeleteCerebroSprintSettings :exec
@@ -65,7 +66,7 @@ SELECT project_id, workspace_id, enabled,
        duration_unit, duration_count, start_weekday,
        name_template,
        auto_create_enabled, auto_create_lead_days,
-       move_incomplete_enabled, timezone
+       move_incomplete_enabled, move_incomplete_target_status, timezone
 FROM cerebro_sprint_settings
 WHERE enabled = TRUE
   AND auto_create_enabled = TRUE;
@@ -178,6 +179,12 @@ JOIN issue i ON i.id = csi.issue_id
 WHERE csi.sprint_id = $1
   AND i.status NOT IN ('done', 'cancelled');
 
+-- name: MoveIncompleteCerebroSprintIssuesToStatus :exec
+UPDATE issue
+SET status = $2,
+    updated_at = now()
+WHERE id = ANY($1::uuid[]);
+
 -- name: MoveCerebroSprintIssuesBatch :exec
 -- Sweeper helper: bulk reassign the given issue IDs to the new sprint.
 UPDATE cerebro_sprint_issue
@@ -195,13 +202,15 @@ INSERT INTO cerebro_sprint_recurring_task (
     cadence_unit, cadence_count,
     title, description, priority,
     assignee_type, assignee_id,
+    sprint_day_offset,
     enabled
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id, workspace_id, project_id,
           cadence_unit, cadence_count,
           title, description, priority,
           assignee_type, assignee_id,
+          sprint_day_offset,
           enabled, created_at, updated_at;
 
 -- name: GetCerebroSprintRecurringTask :one
@@ -209,6 +218,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE id = $1;
@@ -218,6 +228,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE project_id = $1
@@ -230,6 +241,7 @@ SELECT id, workspace_id, project_id,
        cadence_unit, cadence_count,
        title, description, priority,
        assignee_type, assignee_id,
+       sprint_day_offset,
        enabled, created_at, updated_at
 FROM cerebro_sprint_recurring_task
 WHERE project_id = $1
@@ -246,13 +258,15 @@ SET cadence_unit  = $2,
     priority      = $6,
     assignee_type = $7,
     assignee_id   = $8,
-    enabled       = $9,
+    sprint_day_offset = $9,
+    enabled       = $10,
     updated_at    = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id,
           cadence_unit, cadence_count,
           title, description, priority,
           assignee_type, assignee_id,
+          sprint_day_offset,
           enabled, created_at, updated_at;
 
 -- name: DeleteCerebroSprintRecurringTask :exec

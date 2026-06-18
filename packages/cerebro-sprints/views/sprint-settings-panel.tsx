@@ -37,6 +37,31 @@ const WEEKDAY_LABELS = [
   { value: "7", label: "Sunday" },
 ];
 
+const TIMEZONE_OPTIONS = [
+  "UTC",
+  "Europe/Copenhagen",
+  "Europe/London",
+  "Europe/Berlin",
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "Asia/Dubai",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+];
+
+const ISSUE_STATUS_OPTIONS = [
+  { value: "backlog", label: "Backlog" },
+  { value: "todo", label: "Todo" },
+  { value: "in_progress", label: "In progress" },
+  { value: "in_review", label: "In review" },
+  { value: "blocked", label: "Blocked" },
+  { value: "done", label: "Done" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
 const DEFAULT_FORM: Required<SprintSettingsWriteInput> = {
   enabled: true,
   duration_unit: "week",
@@ -46,6 +71,7 @@ const DEFAULT_FORM: Required<SprintSettingsWriteInput> = {
   auto_create_enabled: true,
   auto_create_lead_days: 2,
   move_incomplete_enabled: true,
+  move_incomplete_target_status: "todo",
   timezone: "UTC",
 };
 
@@ -67,6 +93,7 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
         auto_create_enabled: settingsQuery.data.auto_create_enabled,
         auto_create_lead_days: settingsQuery.data.auto_create_lead_days,
         move_incomplete_enabled: settingsQuery.data.move_incomplete_enabled,
+        move_incomplete_target_status: settingsQuery.data.move_incomplete_target_status,
         timezone: settingsQuery.data.timezone,
       });
     }
@@ -163,18 +190,27 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
             onChange={(e) => setForm({ ...form, name_template: e.target.value })}
           />
           <span className="text-xs text-muted-foreground">
-            {"Use {n} for the sprint number."}
+            {"Use {n}, {start}, and {end}. Example: Sprint {n} ({start} - {end})."}
           </span>
         </div>
 
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="timezone">Timezone</Label>
-          <Input
-            id="timezone"
+          <Select
             value={form.timezone}
-            onChange={(e) => setForm({ ...form, timezone: e.target.value })}
-            placeholder="UTC, Europe/Copenhagen, …"
-          />
+            onValueChange={(v) => setForm({ ...form, timezone: v ?? form.timezone })}
+          >
+            <SelectTrigger id="timezone">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMEZONE_OPTIONS.map((tz) => (
+                <SelectItem key={tz} value={tz}>
+                  {tz}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -218,6 +254,28 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
             onCheckedChange={(v) => setForm({ ...form, move_incomplete_enabled: v })}
           />
         </div>
+        {form.move_incomplete_enabled && (
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="move-incomplete-target">Move them to status</Label>
+            <Select
+              value={form.move_incomplete_target_status}
+              onValueChange={(v) =>
+                setForm({ ...form, move_incomplete_target_status: v ?? "todo" })
+              }
+            >
+              <SelectTrigger id="move-incomplete-target">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ISSUE_STATUS_OPTIONS.map((status) => (
+                  <SelectItem key={status.value} value={status.value}>
+                    {status.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">

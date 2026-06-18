@@ -910,35 +910,37 @@ type CerebroSprintIssue struct {
 }
 
 type CerebroSprintRecurringTask struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	ProjectID    pgtype.UUID        `json:"project_id"`
-	CadenceUnit  string             `json:"cadence_unit"`
-	CadenceCount int32              `json:"cadence_count"`
-	Title        string             `json:"title"`
-	Description  pgtype.Text        `json:"description"`
-	Priority     pgtype.Text        `json:"priority"`
-	AssigneeType pgtype.Text        `json:"assignee_type"`
-	AssigneeID   pgtype.UUID        `json:"assignee_id"`
-	Enabled      bool               `json:"enabled"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	CadenceUnit     string             `json:"cadence_unit"`
+	CadenceCount    int32              `json:"cadence_count"`
+	Title           string             `json:"title"`
+	Description     pgtype.Text        `json:"description"`
+	Priority        pgtype.Text        `json:"priority"`
+	AssigneeType    pgtype.Text        `json:"assignee_type"`
+	AssigneeID      pgtype.UUID        `json:"assignee_id"`
+	SprintDayOffset int32              `json:"sprint_day_offset"`
+	Enabled         bool               `json:"enabled"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroSprintSetting struct {
-	ProjectID             pgtype.UUID        `json:"project_id"`
-	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
-	Enabled               bool               `json:"enabled"`
-	DurationUnit          string             `json:"duration_unit"`
-	DurationCount         int32              `json:"duration_count"`
-	StartWeekday          int16              `json:"start_weekday"`
-	NameTemplate          string             `json:"name_template"`
-	AutoCreateEnabled     bool               `json:"auto_create_enabled"`
-	AutoCreateLeadDays    int32              `json:"auto_create_lead_days"`
-	MoveIncompleteEnabled bool               `json:"move_incomplete_enabled"`
-	Timezone              string             `json:"timezone"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ProjectID                  pgtype.UUID        `json:"project_id"`
+	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
+	Enabled                    bool               `json:"enabled"`
+	DurationUnit               string             `json:"duration_unit"`
+	DurationCount              int32              `json:"duration_count"`
+	StartWeekday               int16              `json:"start_weekday"`
+	NameTemplate               string             `json:"name_template"`
+	AutoCreateEnabled          bool               `json:"auto_create_enabled"`
+	AutoCreateLeadDays         int32              `json:"auto_create_lead_days"`
+	MoveIncompleteEnabled      bool               `json:"move_incomplete_enabled"`
+	MoveIncompleteTargetStatus string             `json:"move_incomplete_target_status"`
+	Timezone                   string             `json:"timezone"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroStatusModel struct {

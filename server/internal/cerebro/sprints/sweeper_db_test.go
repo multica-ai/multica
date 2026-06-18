@@ -164,17 +164,18 @@ func seedSettingsWithLeadDays(t *testing.T, ctx context.Context, leadDays int32)
 	t.Helper()
 	q := cerebrodb.New(sweeperTestPool)
 	if _, err := q.UpsertCerebroSprintSettings(ctx, cerebrodb.UpsertCerebroSprintSettingsParams{
-		ProjectID:             sweeperTestProjectID,
-		WorkspaceID:           sweeperTestWorkspaceID,
-		Enabled:               true,
-		DurationUnit:          UnitWeek,
-		DurationCount:         2,
-		StartWeekday:          1,
-		NameTemplate:          "Sprint {n}",
-		AutoCreateEnabled:     true,
-		AutoCreateLeadDays:    leadDays,
-		MoveIncompleteEnabled: true,
-		Timezone:              "UTC",
+		ProjectID:                  sweeperTestProjectID,
+		WorkspaceID:                sweeperTestWorkspaceID,
+		Enabled:                    true,
+		DurationUnit:               UnitWeek,
+		DurationCount:              2,
+		StartWeekday:               1,
+		NameTemplate:               "Sprint {n}",
+		AutoCreateEnabled:          true,
+		AutoCreateLeadDays:         leadDays,
+		MoveIncompleteEnabled:      true,
+		MoveIncompleteTargetStatus: "todo",
+		Timezone:                   "UTC",
 	}); err != nil {
 		t.Fatalf("upsert settings: %v", err)
 	}
@@ -271,11 +272,11 @@ func TestSweeperTick_RunsWhenFlagOn(t *testing.T) {
 
 // TestSweeperSweepProject_ReportsCountersAndHonorsFlag covers the manual
 // sweep trigger added for FIR-2699 QA. It proves:
-//   1. The endpoint reports flag_enabled=false and does nothing when the
-//      workspace-level cerebro_sprints flag is OFF.
-//   2. With the flag ON + an active sprint within the lead-days window,
-//      SweepProject creates the next sprint, clones a recurring task, and
-//      reports both counts in the returned ProjectSweepResult.
+//  1. The endpoint reports flag_enabled=false and does nothing when the
+//     workspace-level cerebro_sprints flag is OFF.
+//  2. With the flag ON + an active sprint within the lead-days window,
+//     SweepProject creates the next sprint, clones a recurring task, and
+//     reports both counts in the returned ProjectSweepResult.
 func TestSweeperSweepProject_ReportsCountersAndHonorsFlag(t *testing.T) {
 	if sweeperTestPool == nil {
 		t.Skip("no test database")
@@ -288,12 +289,13 @@ func TestSweeperSweepProject_ReportsCountersAndHonorsFlag(t *testing.T) {
 	seedSettingsWithLeadDays(t, ctx, 2)
 	seedActiveSprintEndingOn(t, ctx, now)
 	if _, err := q.CreateCerebroSprintRecurringTask(ctx, cerebrodb.CreateCerebroSprintRecurringTaskParams{
-		WorkspaceID:  sweeperTestWorkspaceID,
-		ProjectID:    sweeperTestProjectID,
-		CadenceUnit:  UnitWeek,
-		CadenceCount: 2,
-		Title:        "Sweep-endpoint recurring",
-		Enabled:      true,
+		WorkspaceID:     sweeperTestWorkspaceID,
+		ProjectID:       sweeperTestProjectID,
+		CadenceUnit:     UnitWeek,
+		CadenceCount:    2,
+		Title:           "Sweep-endpoint recurring",
+		SprintDayOffset: 1,
+		Enabled:         true,
 	}); err != nil {
 		t.Fatalf("create recurring task: %v", err)
 	}
@@ -360,13 +362,14 @@ func TestSweeperTick_ClonesRecurringTaskWithWorkspaceOwnerCreator(t *testing.T) 
 	seedActiveSprintEndingOn(t, ctx, now)
 
 	if _, err := q.CreateCerebroSprintRecurringTask(ctx, cerebrodb.CreateCerebroSprintRecurringTaskParams{
-		WorkspaceID:  sweeperTestWorkspaceID,
-		ProjectID:    sweeperTestProjectID,
-		CadenceUnit:  UnitWeek,
-		CadenceCount: 2,
-		Title:        "Weekly stand-up notes",
-		Description:  pgtype.Text{String: "auto-cloned", Valid: true},
-		Enabled:      true,
+		WorkspaceID:     sweeperTestWorkspaceID,
+		ProjectID:       sweeperTestProjectID,
+		CadenceUnit:     UnitWeek,
+		CadenceCount:    2,
+		Title:           "Weekly stand-up notes",
+		Description:     pgtype.Text{String: "auto-cloned", Valid: true},
+		SprintDayOffset: 1,
+		Enabled:         true,
 	}); err != nil {
 		t.Fatalf("create recurring task: %v", err)
 	}

@@ -20,6 +20,7 @@ export interface SprintSettings {
   /** "X days before" — the setting Jesper explicitly called out as not-hardcoded. */
   auto_create_lead_days: number;
   move_incomplete_enabled: boolean;
+  move_incomplete_target_status: string;
   timezone: string;
   created_at: string;
   updated_at: string;
@@ -34,6 +35,7 @@ export interface SprintSettingsWriteInput {
   auto_create_enabled?: boolean;
   auto_create_lead_days?: number;
   move_incomplete_enabled?: boolean;
+  move_incomplete_target_status?: string;
   timezone?: string;
 }
 
@@ -94,6 +96,7 @@ export interface RecurringTask {
   priority?: string;
   assignee_type?: "member" | "agent";
   assignee_id?: string;
+  sprint_day_offset: number;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -111,5 +114,6 @@ export interface RecurringTaskWriteInput {
   priority?: string;
   assignee_type?: "member" | "agent";
   assignee_id?: string;
+  sprint_day_offset?: number;
   enabled?: boolean;
 }

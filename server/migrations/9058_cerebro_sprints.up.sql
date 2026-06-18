@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS cerebro_sprint_settings (
     -- When TRUE the sweeper moves issues that are not in a terminal status
     -- (cancelled/done) from the closing sprint to the new sprint.
     move_incomplete_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    move_incomplete_target_status TEXT NOT NULL DEFAULT 'todo'
+        CHECK (move_incomplete_target_status IN ('backlog', 'todo', 'in_progress', 'in_review', 'done', 'blocked', 'cancelled')),
 
     -- Timezone used to interpret start_date/end_date as wall-clock days.
     -- Default UTC so an unconfigured workspace still produces consistent
@@ -120,6 +122,8 @@ CREATE TABLE IF NOT EXISTS cerebro_sprint_recurring_task (
 
     assignee_type   TEXT CHECK (assignee_type IN ('member', 'agent')),
     assignee_id     UUID,
+
+    sprint_day_offset INTEGER NOT NULL DEFAULT 1 CHECK (sprint_day_offset > 0),
 
     enabled         BOOLEAN NOT NULL DEFAULT TRUE,
 

@@ -45,15 +45,16 @@ func NewHandler(cerebro *cerebrodb.Queries, pool *pgxpool.Pool, upstream *db.Que
 // ---------------------------------------------------------------------------
 
 type settingsRequest struct {
-	Enabled               *bool   `json:"enabled,omitempty"`
-	DurationUnit          string  `json:"duration_unit,omitempty"`
-	DurationCount         *int32  `json:"duration_count,omitempty"`
-	StartWeekday          *int    `json:"start_weekday,omitempty"`
-	NameTemplate          *string `json:"name_template,omitempty"`
-	AutoCreateEnabled     *bool   `json:"auto_create_enabled,omitempty"`
-	AutoCreateLeadDays    *int32  `json:"auto_create_lead_days,omitempty"`
-	MoveIncompleteEnabled *bool   `json:"move_incomplete_enabled,omitempty"`
-	Timezone              *string `json:"timezone,omitempty"`
+	Enabled                    *bool   `json:"enabled,omitempty"`
+	DurationUnit               string  `json:"duration_unit,omitempty"`
+	DurationCount              *int32  `json:"duration_count,omitempty"`
+	StartWeekday               *int    `json:"start_weekday,omitempty"`
+	NameTemplate               *string `json:"name_template,omitempty"`
+	AutoCreateEnabled          *bool   `json:"auto_create_enabled,omitempty"`
+	AutoCreateLeadDays         *int32  `json:"auto_create_lead_days,omitempty"`
+	MoveIncompleteEnabled      *bool   `json:"move_incomplete_enabled,omitempty"`
+	MoveIncompleteTargetStatus *string `json:"move_incomplete_target_status,omitempty"`
+	Timezone                   *string `json:"timezone,omitempty"`
 }
 
 // GetSettings returns the sprint settings for a project. 404 when none
@@ -135,19 +136,24 @@ func (h *Handler) UpsertSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "start_weekday must be between 1 and 7")
 		return
 	}
+	if !isValidIssueStatus(merged.MoveIncompleteTargetStatus) {
+		writeError(w, http.StatusBadRequest, "move_incomplete_target_status is invalid")
+		return
+	}
 
 	out, err := h.Cerebro.UpsertCerebroSprintSettings(r.Context(), cerebrodb.UpsertCerebroSprintSettingsParams{
-		ProjectID:             projectID,
-		WorkspaceID:           wsUUID,
-		Enabled:               merged.Enabled,
-		DurationUnit:          merged.DurationUnit,
-		DurationCount:         merged.DurationCount,
-		StartWeekday:          int16(merged.StartWeekday),
-		NameTemplate:          merged.NameTemplate,
-		AutoCreateEnabled:     merged.AutoCreateEnabled,
-		AutoCreateLeadDays:    merged.AutoCreateLeadDays,
-		MoveIncompleteEnabled: merged.MoveIncompleteEnabled,
-		Timezone:              merged.Timezone,
+		ProjectID:                  projectID,
+		WorkspaceID:                wsUUID,
+		Enabled:                    merged.Enabled,
+		DurationUnit:               merged.DurationUnit,
+		DurationCount:              merged.DurationCount,
+		StartWeekday:               int16(merged.StartWeekday),
+		NameTemplate:               merged.NameTemplate,
+		AutoCreateEnabled:          merged.AutoCreateEnabled,
+		AutoCreateLeadDays:         merged.AutoCreateLeadDays,
+		MoveIncompleteEnabled:      merged.MoveIncompleteEnabled,
+		MoveIncompleteTargetStatus: merged.MoveIncompleteTargetStatus,
+		Timezone:                   merged.Timezone,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "save settings failed")
@@ -546,14 +552,15 @@ func (h *Handler) GetIssueAssignment(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type recurringTaskRequest struct {
-	CadenceUnit  string  `json:"cadence_unit"`
-	CadenceCount int32   `json:"cadence_count"`
-	Title        string  `json:"title"`
-	Description  string  `json:"description,omitempty"`
-	Priority     string  `json:"priority,omitempty"`
-	AssigneeType string  `json:"assignee_type,omitempty"`
-	AssigneeID   string  `json:"assignee_id,omitempty"`
-	Enabled      *bool   `json:"enabled,omitempty"`
+	CadenceUnit     string `json:"cadence_unit"`
+	CadenceCount    int32  `json:"cadence_count"`
+	Title           string `json:"title"`
+	Description     string `json:"description,omitempty"`
+	Priority        string `json:"priority,omitempty"`
+	AssigneeType    string `json:"assignee_type,omitempty"`
+	AssigneeID      string `json:"assignee_id,omitempty"`
+	SprintDayOffset int32  `json:"sprint_day_offset,omitempty"`
+	Enabled         *bool  `json:"enabled,omitempty"`
 }
 
 // ListRecurringTasks returns the recurring-task templates for a project.
@@ -604,6 +611,10 @@ func (h *Handler) CreateRecurringTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cadence_count must be > 0")
 		return
 	}
+	sprintDayOffset := req.SprintDayOffset
+	if sprintDayOffset <= 0 {
+		sprintDayOffset = 1
+	}
 	assigneeType, assigneeID, err := decodeAssignee(req.AssigneeType, req.AssigneeID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -615,16 +626,17 @@ func (h *Handler) CreateRecurringTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := h.Cerebro.CreateCerebroSprintRecurringTask(r.Context(), cerebrodb.CreateCerebroSprintRecurringTaskParams{
-		WorkspaceID:  wsUUID,
-		ProjectID:    projectID,
-		CadenceUnit:  req.CadenceUnit,
-		CadenceCount: req.CadenceCount,
-		Title:        req.Title,
-		Description:  pgTextFromString(req.Description),
-		Priority:     pgTextFromString(req.Priority),
-		AssigneeType: assigneeType,
-		AssigneeID:   assigneeID,
-		Enabled:      enabled,
+		WorkspaceID:     wsUUID,
+		ProjectID:       projectID,
+		CadenceUnit:     req.CadenceUnit,
+		CadenceCount:    req.CadenceCount,
+		Title:           req.Title,
+		Description:     pgTextFromString(req.Description),
+		Priority:        pgTextFromString(req.Priority),
+		AssigneeType:    assigneeType,
+		AssigneeID:      assigneeID,
+		SprintDayOffset: sprintDayOffset,
+		Enabled:         enabled,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "create recurring task failed")
@@ -668,6 +680,10 @@ func (h *Handler) UpdateRecurringTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "cadence_count must be > 0")
 		return
 	}
+	sprintDayOffset := req.SprintDayOffset
+	if sprintDayOffset <= 0 {
+		sprintDayOffset = existing.SprintDayOffset
+	}
 	assigneeType, assigneeID, err := decodeAssignee(req.AssigneeType, req.AssigneeID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -679,15 +695,16 @@ func (h *Handler) UpdateRecurringTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out, err := h.Cerebro.UpdateCerebroSprintRecurringTask(r.Context(), cerebrodb.UpdateCerebroSprintRecurringTaskParams{
-		ID:           id,
-		CadenceUnit:  req.CadenceUnit,
-		CadenceCount: req.CadenceCount,
-		Title:        req.Title,
-		Description:  pgTextFromString(req.Description),
-		Priority:     pgTextFromString(req.Priority),
-		AssigneeType: assigneeType,
-		AssigneeID:   assigneeID,
-		Enabled:      enabled,
+		ID:              id,
+		CadenceUnit:     req.CadenceUnit,
+		CadenceCount:    req.CadenceCount,
+		Title:           req.Title,
+		Description:     pgTextFromString(req.Description),
+		Priority:        pgTextFromString(req.Priority),
+		AssigneeType:    assigneeType,
+		AssigneeID:      assigneeID,
+		SprintDayOffset: sprintDayOffset,
+		Enabled:         enabled,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "update recurring task failed")
@@ -731,34 +748,36 @@ func (h *Handler) DeleteRecurringTask(w http.ResponseWriter, r *http.Request) {
 // mergedSettings is the in-memory projection of cerebro_sprint_settings
 // used to merge a partial update on top of an existing row.
 type mergedSettings struct {
-	ProjectID             pgtype.UUID
-	WorkspaceID           pgtype.UUID
-	Enabled               bool
-	DurationUnit          string
-	DurationCount         int32
-	StartWeekday          int
-	NameTemplate          string
-	AutoCreateEnabled     bool
-	AutoCreateLeadDays    int32
-	MoveIncompleteEnabled bool
-	Timezone              string
+	ProjectID                  pgtype.UUID
+	WorkspaceID                pgtype.UUID
+	Enabled                    bool
+	DurationUnit               string
+	DurationCount              int32
+	StartWeekday               int
+	NameTemplate               string
+	AutoCreateEnabled          bool
+	AutoCreateLeadDays         int32
+	MoveIncompleteEnabled      bool
+	MoveIncompleteTargetStatus string
+	Timezone                   string
 }
 
 func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting, hasExisting bool) mergedSettings {
 	merged := defaultsForUpsert()
 	if hasExisting {
 		merged = mergedSettings{
-			ProjectID:             existing.ProjectID,
-			WorkspaceID:           existing.WorkspaceID,
-			Enabled:               existing.Enabled,
-			DurationUnit:          existing.DurationUnit,
-			DurationCount:         existing.DurationCount,
-			StartWeekday:          int(existing.StartWeekday),
-			NameTemplate:          existing.NameTemplate,
-			AutoCreateEnabled:     existing.AutoCreateEnabled,
-			AutoCreateLeadDays:    existing.AutoCreateLeadDays,
-			MoveIncompleteEnabled: existing.MoveIncompleteEnabled,
-			Timezone:              existing.Timezone,
+			ProjectID:                  existing.ProjectID,
+			WorkspaceID:                existing.WorkspaceID,
+			Enabled:                    existing.Enabled,
+			DurationUnit:               existing.DurationUnit,
+			DurationCount:              existing.DurationCount,
+			StartWeekday:               int(existing.StartWeekday),
+			NameTemplate:               existing.NameTemplate,
+			AutoCreateEnabled:          existing.AutoCreateEnabled,
+			AutoCreateLeadDays:         existing.AutoCreateLeadDays,
+			MoveIncompleteEnabled:      existing.MoveIncompleteEnabled,
+			MoveIncompleteTargetStatus: existing.MoveIncompleteTargetStatus,
+			Timezone:                   existing.Timezone,
 		}
 	}
 	if req.Enabled != nil {
@@ -785,6 +804,9 @@ func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting,
 	if req.MoveIncompleteEnabled != nil {
 		merged.MoveIncompleteEnabled = *req.MoveIncompleteEnabled
 	}
+	if req.MoveIncompleteTargetStatus != nil {
+		merged.MoveIncompleteTargetStatus = strings.TrimSpace(*req.MoveIncompleteTargetStatus)
+	}
 	if req.Timezone != nil {
 		merged.Timezone = *req.Timezone
 	}
@@ -793,15 +815,25 @@ func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting,
 
 func defaultsForUpsert() mergedSettings {
 	return mergedSettings{
-		Enabled:               true,
-		DurationUnit:          UnitWeek,
-		DurationCount:         2,
-		StartWeekday:          1,
-		NameTemplate:          "Sprint {n}",
-		AutoCreateEnabled:     true,
-		AutoCreateLeadDays:    2,
-		MoveIncompleteEnabled: true,
-		Timezone:              "UTC",
+		Enabled:                    true,
+		DurationUnit:               UnitWeek,
+		DurationCount:              2,
+		StartWeekday:               1,
+		NameTemplate:               "Sprint {n}",
+		AutoCreateEnabled:          true,
+		AutoCreateLeadDays:         2,
+		MoveIncompleteEnabled:      true,
+		MoveIncompleteTargetStatus: "todo",
+		Timezone:                   "UTC",
+	}
+}
+
+func isValidIssueStatus(status string) bool {
+	switch status {
+	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":
+		return true
+	default:
+		return false
 	}
 }
 

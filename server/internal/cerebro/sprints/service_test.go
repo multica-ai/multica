@@ -84,6 +84,17 @@ func TestApplyNameTemplate(t *testing.T) {
 	}
 }
 
+func TestApplyNameTemplateWithDates(t *testing.T) {
+	start := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC)
+
+	got := ApplyNameTemplateWithDates("Sprint {n}: {start} - {end}", 7, start, end)
+	want := "Sprint 7: 2026-06-01 - 2026-06-14"
+	if got != want {
+		t.Fatalf("ApplyNameTemplateWithDates = %q, want %q", got, want)
+	}
+}
+
 func TestValidateUnit(t *testing.T) {
 	for _, ok := range []string{"day", "week", "month"} {
 		if err := ValidateUnit(ok); err != nil {
