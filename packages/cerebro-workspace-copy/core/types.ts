@@ -115,6 +115,10 @@ export const RelinkResultSchema = z.object({
   skills_rewritten: z.number().optional(),
   autopilots_rewritten: z.number().optional(),
   chat_messages_rewritten: z.number().optional(),
+  // TECH-3766: file blobs physically copied into the target so the source can be deleted.
+  artifact_files_materialized: z.number().optional(),
+  attachments_materialized: z.number().optional(),
+  files_skipped: z.number().optional(),
 });
 export type RelinkResult = z.infer<typeof RelinkResultSchema>;
 

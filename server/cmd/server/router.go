@@ -554,8 +554,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
 	h.IdentityProvisioner = cerebroIdentityService
-	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler.
-	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool)
+	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler; store materializes copied file blobs (TECH-3766).
+	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool, store)
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.

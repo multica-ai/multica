@@ -19,6 +19,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 // ErrNameConflict is returned when an entity (e.g. agent) cannot be copied
@@ -38,11 +40,23 @@ var ErrAssigneeNotCopied = errors.New("autopilot assignee has not been copied in
 // Store is the database layer for the workspace-copy engine.
 type Store struct {
 	pool *pgxpool.Pool
+	// storage materializes copied file blobs into the target workspace. Nil in
+	// pure-DB unit tests; set via NewHandler in production. MaterializeCopiedFiles
+	// is the only method that needs it.
+	storage storage.Storage
 }
 
-// New constructs a Store bound to the given pool.
+// New constructs a Store bound to the given pool. The blob store is left unset
+// (pure-DB callers and tests). Use WithStorage to enable file materialization.
 func New(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+// WithStorage sets the blob store used by MaterializeCopiedFiles and returns the
+// Store for chaining.
+func (s *Store) WithStorage(st storage.Storage) *Store {
+	s.storage = st
+	return s
 }
 
 // CopyResult summarizes one entity copy.

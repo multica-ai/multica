@@ -369,7 +369,8 @@ export function WorkspaceCopyConsole() {
           `rewrote references in ${res.issues_rewritten ?? 0} issues, ${res.comments_rewritten ?? 0} comments, ` +
           `${res.agents_rewritten ?? 0} agents, ${res.skills_rewritten ?? 0} skills, ` +
           `${res.autopilots_rewritten ?? 0} autopilots, ${res.chat_messages_rewritten ?? 0} chat messages; ` +
-          `${ga.group_agent_access_relinked ?? 0} group→agent grants.`,
+          `${ga.group_agent_access_relinked ?? 0} group→agent grants; ` +
+          `copied ${(res.artifact_files_materialized ?? 0) + (res.attachments_materialized ?? 0)} files into the target.`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Relink failed.");

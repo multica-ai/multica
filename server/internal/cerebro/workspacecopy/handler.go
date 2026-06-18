@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -35,9 +36,11 @@ type Handler struct {
 	Store *Store
 }
 
-// NewHandler builds a Handler bound to the given pool.
-func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{Store: New(pool)}
+// NewHandler builds a Handler bound to the given pool and blob store. The blob
+// store lets the relink post-pass materialize copied file blobs into the target
+// workspace (TECH-3766).
+func NewHandler(pool *pgxpool.Pool, st storage.Storage) *Handler {
+	return &Handler{Store: New(pool).WithStorage(st)}
 }
 
 type copyRequest struct {
@@ -58,10 +61,11 @@ type copyRequest struct {
 }
 
 // relinkResponse is the combined result of the target-only post-pass: structural
-// link healing plus internal-reference rewriting.
+// link healing, internal-reference rewriting, and file-blob materialization.
 type relinkResponse struct {
 	RelinkResult
 	RewriteResult
+	FilesMaterializedResult
 }
 
 // Copy copies one entity from the URL workspace into the target workspace.
@@ -133,7 +137,14 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "reference rewrite failed: "+err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, relinkResponse{RelinkResult: rel, RewriteResult: rew})
+		// Give every shared file blob its own physical copy in the target so the
+		// source workspace can be deleted without the copies losing their files.
+		mat, err := h.Store.MaterializeCopiedFiles(r.Context(), target)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "file materialization failed: "+err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, relinkResponse{RelinkResult: rel, RewriteResult: rew, FilesMaterializedResult: mat})
 		return
 	}
 
