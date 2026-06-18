@@ -84,14 +84,14 @@ if docker ps --filter "label=com.docker.compose.project=${project_name}" -q 2>/d
   exit 0
 fi
 
-# Stop any leftover containers (e.g. exited) before allocating ports
+# Clean up any leftover containers (stopped/exited) before allocating ports
 echo "==> Stopping any previous preview containers for '${profile}'..."
 if ! COMPOSE_PROJECT_NAME="$project_name" \
   docker compose \
     -p "$project_name" \
     -f docker-compose.selfhost.yml \
     -f docker-compose.selfhost.build.yml \
-    down 2>/dev/null; then
+    down; then
   echo "❌ Failed to stop previous preview containers. Check docker status and retry." >&2
   exit 1
 fi
