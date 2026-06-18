@@ -266,6 +266,15 @@ SET status = 'failed', completed_at = now(), failure_reason = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: CancelAutopilotRun :one
+UPDATE autopilot_run
+SET status = 'cancelled',
+    completed_at = COALESCE(completed_at, now()),
+    failure_reason = COALESCE(failure_reason, $2)
+WHERE id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+RETURNING *;
+
 -- name: UpdateAutopilotRunSkipped :one
 -- Marks an autopilot_run as skipped without enqueueing any task. Used by the
 -- pre-flight admission check when the assignee agent's runtime is offline:
@@ -451,4 +460,3 @@ SELECT EXISTS (
 -- Powers the per-row can_write flag on the list endpoint without an N+1.
 SELECT autopilot_id FROM autopilot_collaborator
 WHERE user_type = 'member' AND user_id = $1;
-
