@@ -169,7 +169,13 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
               onValueChange={(v) => setForm({ ...form, start_weekday: Number(v) })}
             >
               <SelectTrigger id="start-weekday">
-                <SelectValue />
+                <SelectValue>
+                  {() =>
+                    WEEKDAY_LABELS.find(
+                      (w) => w.value === String(form.start_weekday)
+                    )?.label ?? String(form.start_weekday)
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {WEEKDAY_LABELS.map((w) => (
@@ -264,7 +270,13 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
               }
             >
               <SelectTrigger id="move-incomplete-target">
-                <SelectValue />
+                <SelectValue>
+                  {() =>
+                    ISSUE_STATUS_OPTIONS.find(
+                      (s) => s.value === form.move_incomplete_target_status
+                    )?.label ?? form.move_incomplete_target_status
+                  }
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {ISSUE_STATUS_OPTIONS.map((status) => (
