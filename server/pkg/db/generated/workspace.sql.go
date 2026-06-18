@@ -111,11 +111,16 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 }
 
 const incrementIssueCounter = `-- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
+UPDATE workspace
+SET issue_counter = GREATEST(
+    issue_counter,
+    (SELECT COALESCE(MAX(number), 0) FROM issue WHERE issue.workspace_id = workspace.id)
+) + 1
+WHERE workspace.id = $1
 RETURNING issue_counter
 `
 
+// CEREBRO-PATCH(issue-counter-imported-high-numbers): avoid reusing numbers after copied/imported high-number issues.
 func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (int32, error) {
 	row := q.db.QueryRow(ctx, incrementIssueCounter, id)
 	var issue_counter int32

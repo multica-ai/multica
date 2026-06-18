@@ -113,6 +113,64 @@ func TestCreateIssuePositionBelowExplicitMinimum(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(issue-counter-imported-high-numbers): regression for copied/imported issues above workspace.issue_counter.
+func TestCreateIssueCounterSkipsImportedHighNumbers(t *testing.T) {
+	ctx := context.Background()
+	importedTitle := fmt.Sprintf("imported high-number issue %d", time.Now().UnixNano())
+	newTitle := fmt.Sprintf("post-import issue %d", time.Now().UnixNano())
+
+	const importedNumber = 5000
+
+	var importedID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority,
+			creator_type, creator_id, number
+		)
+		VALUES ($1, $2, 'todo', 'none', 'member', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, importedTitle, testUserID, importedNumber).Scan(&importedID); err != nil {
+		t.Fatalf("insert imported issue: %v", err)
+	}
+
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE workspace
+			SET issue_counter = COALESCE((
+				SELECT MAX(number) FROM issue WHERE workspace_id = $1
+			), 0)
+			WHERE id = $1
+		`, testWorkspaceID); err != nil {
+			t.Fatalf("restore issue counter: %v", err)
+		}
+	})
+	t.Cleanup(func() { deleteTestIssue(t, importedID) })
+
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET issue_counter = 10 WHERE id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("lower issue counter: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    newTitle,
+		"status":   "todo",
+		"priority": "low",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+	t.Cleanup(func() { deleteTestIssue(t, created.ID) })
+
+	if created.Number != importedNumber+1 {
+		t.Fatalf("created issue number = %d, want %d", created.Number, importedNumber+1)
+	}
+}
+
 func TestAutopilotCreateIssuePositionBelowCurrentMinimum(t *testing.T) {
 	ctx := context.Background()
 	seedTitle := fmt.Sprintf("position-autopilot seed %d", time.Now().UnixNano())

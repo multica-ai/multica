@@ -35,8 +35,13 @@ WHERE id = $1
 RETURNING *;
 
 -- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
+-- CEREBRO-PATCH(issue-counter-imported-high-numbers): avoid reusing numbers after copied/imported high-number issues.
+UPDATE workspace
+SET issue_counter = GREATEST(
+    issue_counter,
+    (SELECT COALESCE(MAX(number), 0) FROM issue WHERE issue.workspace_id = workspace.id)
+) + 1
+WHERE workspace.id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
