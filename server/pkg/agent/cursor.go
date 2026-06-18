@@ -35,6 +35,19 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// CEREBRO-PATCH(agent-cursor-managed-mcp): FIR-1459 - materialize workspace MCP config for cursor-agent.
+	managedMCPCleanup, err := ensureCursorProjectMCPConfig(opts.Cwd, opts.McpConfig, opts.DisallowedMCPTools, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("apply cursor mcp_config: %w", err)
+	}
+	managedMCPOwned := true
+	defer func() {
+		if managedMCPOwned {
+			managedMCPCleanup()
+		}
+	}()
+
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
 	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
 
@@ -71,6 +84,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start cursor-agent: %w", err)
 	}
 	sandboxOwned = false
+	managedMCPOwned = false
 
 	b.cfg.Logger.Info("cursor-agent started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -82,6 +96,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		defer sandboxCleanup()
+		defer managedMCPCleanup()
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {

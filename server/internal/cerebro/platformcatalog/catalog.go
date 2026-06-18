@@ -464,8 +464,10 @@ var catalog = []Capability{
 		Key:         "manage_runtime_tool_access",
 		Title:       "Grant runtime tool access",
 		Category:    CategoryRuntimes,
-		Description: "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine).",
+		Description: "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine, or through an agent's assigned runtime).",
 		Ops: []string{
+			"POST /api/agents/{id}/tool-grants",
+			"DELETE /api/agents/{id}/tool-grants",
 			"POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
 			"DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
 			"POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",

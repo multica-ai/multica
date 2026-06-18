@@ -3183,15 +3183,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	} else {
 		mcpConfig = task.RuntimeToolsConfig
 	}
+	// CEREBRO-PATCH(daemon-local-mcp-runtimes): FIR-1459 - pass provider-native MCP denies into local runtimes.
+	var disallowedMCPTools []string
 	// CEREBRO-PATCH(daemon-connection-tool-deny): TECH-3156 — enforce per-tool connection
-	// denies. On Claude Code we pass them as --disallowedTools (kept alongside the base
-	// AskUserQuestion deny so a last-wins parser cannot re-enable it). On any other
-	// provider --disallowedTools does not exist, so we FAIL CLOSED (Sara's decision):
-	// withhold every connection that has a denied tool rather than expose it.
+	// denies. Claude Code consumes --disallowedTools; Gemini consumes per-server
+	// excludeTools; Cursor consumes a project-level CLI permission deny. Providers
+	// without a native per-tool MCP deny still fail closed by losing the whole
+	// connection rather than exposing an admin-denied tool.
 	if len(task.DisallowedMCPTools) > 0 {
 		if provider == "claude" {
 			denied := append([]string{"AskUserQuestion"}, task.DisallowedMCPTools...)
 			customArgs = append(customArgs, "--disallowedTools", strings.Join(denied, " "))
+		} else if provider == "gemini" {
+			mcpConfig = daemonmcp.AddExcludedTools(mcpConfig, task.DisallowedMCPTools)
+		} else if provider == "cursor" {
+			disallowedMCPTools = append(disallowedMCPTools, task.DisallowedMCPTools...)
 		} else {
 			mcpConfig = daemonmcp.StripServers(mcpConfig, connectionsFromMCPTokens(task.DisallowedMCPTools))
 		}
@@ -3245,6 +3251,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
 		McpConfig:                 mcpConfig,
+		DisallowedMCPTools:        disallowedMCPTools,
 		ThinkingLevel:             thinkingLevel,
 	}
 	// Some providers do not reliably load the per-task runtime config files we

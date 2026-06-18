@@ -31,6 +31,19 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// CEREBRO-PATCH(agent-gemini-managed-mcp): FIR-1459 - materialize workspace MCP config for gemini.
+	managedMCPCleanup, err := ensureGeminiProjectMCPConfig(opts.Cwd, opts.McpConfig, b.cfg.Logger)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("apply gemini mcp_config: %w", err)
+	}
+	managedMCPOwned := true
+	defer func() {
+		if managedMCPOwned {
+			managedMCPCleanup()
+		}
+	}()
+
 	args := buildGeminiArgs(prompt, opts, b.cfg.Logger)
 
 	// CEREBRO-PATCH(agent-gemini-sandbox): prepareCommand wraps the agent in
@@ -66,6 +79,7 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start gemini: %w", err)
 	}
 	sandboxOwned = false
+	managedMCPOwned = false
 
 	b.cfg.Logger.Info("gemini started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -83,6 +97,7 @@ func (b *geminiBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		defer sandboxCleanup()
+		defer managedMCPCleanup()
 
 		startTime := time.Now()
 		var output strings.Builder
@@ -195,10 +210,10 @@ func (b *geminiBackend) accumulateUsage(usage map[string]TokenUsage, stats *gemi
 // ── Gemini stream-json event types ──
 
 type geminiStreamEvent struct {
-	Type      string          `json:"type"`
-	Timestamp string          `json:"timestamp,omitempty"`
-	SessionID string          `json:"session_id,omitempty"`
-	Model     string          `json:"model,omitempty"`
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Model     string `json:"model,omitempty"`
 
 	// message fields
 	Role    string `json:"role,omitempty"`
@@ -229,12 +244,12 @@ type geminiStreamError struct {
 }
 
 type geminiStreamStats struct {
-	TotalTokens  int                          `json:"total_tokens"`
-	InputTokens  int                          `json:"input_tokens"`
-	OutputTokens int                          `json:"output_tokens"`
-	DurationMs   int                          `json:"duration_ms"`
-	ToolCalls    int                          `json:"tool_calls"`
-	Models       map[string]geminiModelStats  `json:"models,omitempty"`
+	TotalTokens  int                         `json:"total_tokens"`
+	InputTokens  int                         `json:"input_tokens"`
+	OutputTokens int                         `json:"output_tokens"`
+	DurationMs   int                         `json:"duration_ms"`
+	ToolCalls    int                         `json:"tool_calls"`
+	Models       map[string]geminiModelStats `json:"models,omitempty"`
 }
 
 type geminiModelStats struct {
@@ -255,6 +270,7 @@ type geminiModelStats struct {
 //	-o stream-json        streaming NDJSON output for live events
 //	-m <model>            optional model override
 //	-r <session>          resume a previous session (if provided)
+//
 // geminiBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var geminiBlockedArgs = map[string]blockedArgMode{

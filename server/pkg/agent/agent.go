@@ -38,6 +38,8 @@ type ExecOptions struct {
 	ExtraArgs                 []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
 	CustomArgs                []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig                 json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	// CEREBRO-PATCH(agent-local-mcp-runtimes): FIR-1459 - local runtimes consume workspace MCP tool deny tokens differently.
+	DisallowedMCPTools []string // Claude-style mcp__<server>__<tool> deny tokens from workspace tool policy
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
@@ -205,13 +207,13 @@ var launchHeaders = map[string]string{
 	openaiEUProvider: "OpenAI EU (api.eu.openai.com, HTTP)",
 	// CEREBRO-PATCH(agent-firtal-local): TECH-3226
 	firtalLocalProvider: "Firtal Local Ollama (tool loop, HTTP)",
-	"gemini":              "gemini (stream-json)",
-	"hermes":              "hermes acp",
-	"kimi":                "kimi acp",
-	"kiro":                "kiro-cli acp",
-	"openclaw":            "openclaw agent (json)",
-	"opencode":            "opencode run (json)",
-	"pi":                  "pi (json mode)",
+	"gemini":            "gemini (stream-json)",
+	"hermes":            "hermes acp",
+	"kimi":              "kimi acp",
+	"kiro":              "kiro-cli acp",
+	"openclaw":          "openclaw agent (json)",
+	"opencode":          "opencode run (json)",
+	"pi":                "pi (json mode)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an
