@@ -61,6 +61,14 @@ type Task struct {
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
 	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	ChannelID               string                `json:"channel_id,omitempty"`                // non-empty for channel-origin mention tasks
+	ChannelName             string                `json:"channel_name,omitempty"`              // display name for the source channel
+	ChannelMessageID        string                `json:"channel_message_id,omitempty"`        // message that triggered a channel mention task
+	ChannelThreadID         string                `json:"channel_thread_id,omitempty"`         // optional thread associated with the trigger message
+	ChannelReplyToID        string                `json:"channel_reply_to_id,omitempty"`       // optional parent message for replies
+	ChannelThreadRootMsgID  string                `json:"channel_thread_root_msg_id,omitempty"` // root message of the thread (for replying back to the same thread)
+	ChannelTriggerContent   string                `json:"channel_trigger_content,omitempty"`   // triggering channel message content
+	ChannelMentionType      string                `json:"channel_mention_type,omitempty"`      // agent or squad
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context

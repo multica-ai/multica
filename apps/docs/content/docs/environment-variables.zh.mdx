@@ -33,6 +33,12 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 
 **不设时**使用上表默认值，**不是** pgx 内置的 4/NumCPU——后者在生产曾引发连接池耗尽。
 
+### Server 任务兜底超时
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_RUNNING_TIMEOUT` | `8h` | 服务端 sweeper 对 `running` 任务的粗粒度兜底上限。它只按 `started_at` 计算，不看任务是否仍有输出；主要用于 daemon 已死亡但没有回报结果的孤儿任务。正常长任务应优先由 daemon 的 activity watchdog 判断是否卡死。设置为正的 Go duration（如 `12h`）可覆盖默认值 |
+
 ## 怎么配邮件
 
 Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合公网部署，SMTP relay 适合内网/自部署。同时设置时 `SMTP_HOST` 优先级高于 `RESEND_API_KEY`。

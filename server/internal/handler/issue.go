@@ -62,6 +62,11 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+
+	// SourceChannelID / SourceThreadID reference the channel thread this issue
+	// was produced from (OPE-1943). nil when the issue was created directly.
+	SourceChannelID *string `json:"source_channel_id,omitempty"`
+	SourceThreadID  *string `json:"source_thread_id,omitempty"`
 }
 
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
@@ -89,6 +94,8 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ArchivedAt:    timestampToPtr(i.ArchivedAt),
 		ArchivedBy:    uuidToPtr(i.ArchivedBy),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		SourceChannelID: uuidToPtr(i.SourceChannelID),
+		SourceThreadID:  uuidToPtr(i.SourceThreadID),
 	}
 }
 
@@ -1468,6 +1475,14 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		))
 	}
 
+	if r.URL.Query().Get("include_archived") == "true" {
+		// No filter — show both archived and non-archived.
+	} else if r.URL.Query().Get("archived") == "true" {
+		where = append(where, "i.archived_at IS NOT NULL")
+	} else {
+		where = append(where, "i.archived_at IS NULL")
+	}
+
 	if groupAssigneeType := r.URL.Query().Get("group_assignee_type"); groupAssigneeType != "" {
 		if groupAssigneeType == "none" {
 			where = append(where, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
@@ -2121,6 +2136,11 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+
+	// SourceThreadID, when set, links the new issue back to the channel thread
+	// it was produced from (OPE-1943 Channel feature). The thread receives a
+	// "created from thread" system message and future status changes reflow back.
+	SourceThreadID *string `json:"source_thread_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2371,6 +2391,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
+
+	// Link the issue back to its source channel thread (OPE-1943) if produced
+	// from one, and reflow a "created from thread" note into that thread.
+	if req.SourceThreadID != nil && strings.TrimSpace(*req.SourceThreadID) != "" {
+		h.linkIssueToThread(r.Context(), &issue, strings.TrimSpace(*req.SourceThreadID))
+	}
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
@@ -2677,6 +2703,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
+	if statusChanged {
+		// Reflow the new status into the issue's source channel thread (OPE-1943).
+		h.reflowIssueStatus(r.Context(), issue)
+	}
 	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
 	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
 	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
@@ -2951,7 +2981,7 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 }
 
 // canManageIssue checks whether the current user can delete an issue.
-// Only the issue creator or workspace owner/admin can delete an issue.
+// Only the issue creator, agent owner, or workspace owner/admin can delete an issue.
 func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue db.Issue) bool {
 	wsID := uuidToString(issue.WorkspaceID)
 	member, ok := h.requireWorkspaceRole(w, r, wsID, "issue not found", "owner", "admin", "member")
@@ -2960,8 +2990,14 @@ func (h *Handler) canManageIssue(w http.ResponseWriter, r *http.Request, issue d
 	}
 	isAdmin := roleAllowed(member.Role, "owner", "admin")
 	isCreator := uuidToString(issue.CreatorID) == requestUserID(r)
-	if !isAdmin && !isCreator {
-		writeError(w, http.StatusForbidden, "only the issue creator can delete this issue")
+	var isAgentOwner bool
+	if issue.CreatorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == requestUserID(r)
+		}
+	}
+	if !isAdmin && !isCreator && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only the issue creator or agent owner can delete this issue")
 		return false
 	}
 	return true
@@ -3284,6 +3320,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
+		if statusChanged {
+			h.reflowIssueStatus(r.Context(), issue)
+		}
 
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 			"issue":            resp,
@@ -3385,9 +3424,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		// Only the issue creator or workspace admin can delete.
-		if !isAdmin && uuidToString(issue.CreatorID) != userID {
-			slog.Warn("batch delete skipped: not issue creator", "issue_id", issueID, "user_id", userID)
+		// Only the issue creator, agent owner, or workspace admin can delete.
+		var isAgentOwner bool
+		if issue.CreatorType == "agent" {
+			if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+				isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == userID
+			}
+		}
+		if !isAdmin && uuidToString(issue.CreatorID) != userID && !isAgentOwner {
+			slog.Warn("batch delete skipped: not issue creator or agent owner", "issue_id", issueID, "user_id", userID)
 			continue
 		}
 
@@ -3443,8 +3488,16 @@ func (h *Handler) ClearIssueHistory(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !roleAllowed(member.Role, "owner", "admin") && uuidToString(issue.CreatorID) != uuidToString(member.UserID) {
-		writeError(w, http.StatusForbidden, "only workspace owner, admin, or issue creator can clear issue history")
+	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isCreator := uuidToString(issue.CreatorID) == uuidToString(member.UserID)
+	var isAgentOwner bool
+	if issue.CreatorType == "agent" {
+		if agent, err := h.Queries.GetAgent(r.Context(), issue.CreatorID); err == nil {
+			isAgentOwner = agent.OwnerID.Valid && uuidToString(agent.OwnerID) == uuidToString(member.UserID)
+		}
+	}
+	if !isAdmin && !isCreator && !isAgentOwner {
+		writeError(w, http.StatusForbidden, "only workspace owner, admin, issue creator, or agent owner can clear issue history")
 		return
 	}
 

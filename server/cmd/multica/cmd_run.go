@@ -145,6 +145,7 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	reporter := newLocalRunReporterWithSpool(client, run.ID, spool)
 	usageReporter := newLocalRunUsageReporter(client, run.ID, localRunUsageDebounce)
 	stopHeartbeat := startLocalRunHeartbeat(client, run.ID, localRunHeartbeatInterval)
+	startTime := time.Now()
 	exitCode, runErr := executeLocalCLIForRun(childArgs, cwd, cliName, localCLIEnv{
 		RunID:       run.ID,
 		IssueID:     issueRef.ID,
@@ -155,6 +156,20 @@ func runLocalCLI(cmd *cobra.Command, args []string) error {
 	usageReporter.Close()
 	reporter.Close()
 	stopHeartbeat()
+	elapsed := time.Since(startTime)
+	activeMs := reporter.ActiveMs()
+	if activeMs > 0 {
+		fmt.Fprintf(os.Stderr, "Local run finished in %s (active %s, exit %d)\n",
+			elapsed.Round(time.Second),
+			time.Duration(activeMs)*time.Millisecond,
+			exitCode,
+		)
+	} else {
+		fmt.Fprintf(os.Stderr, "Local run finished in %s (exit %d)\n",
+			elapsed.Round(time.Second),
+			exitCode,
+		)
+	}
 	status := "completed"
 	errText := ""
 	if runErr != nil || exitCode != 0 {
@@ -263,6 +278,7 @@ type localRunReporter struct {
 	seq          atomic.Int64
 	mu           sync.Mutex
 	closed       bool
+	activeMs     int64 // cumulative active time in ms, set by tracker
 }
 
 func newLocalRunReporter(client localRunMessagePoster, runID string) *localRunReporter {
@@ -294,6 +310,19 @@ func newLocalRunReporterWithOptions(client localRunMessagePoster, runID string, 
 	}
 	go r.loop()
 	return r
+}
+
+func (r *localRunReporter) SetActiveMs(ms int64) {
+	if r != nil {
+		r.activeMs = ms
+	}
+}
+
+func (r *localRunReporter) ActiveMs() int64 {
+	if r == nil {
+		return 0
+	}
+	return r.activeMs
 }
 
 func (r *localRunReporter) Post(msg localCLIMessage) {

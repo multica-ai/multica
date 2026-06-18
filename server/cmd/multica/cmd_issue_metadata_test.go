@@ -62,7 +62,7 @@ func newIssueMetadataDeleteTestCmd() *cobra.Command {
 	return c
 }
 
-func captureStdout(t *testing.T, fn func() error) (string, error) {
+func captureMetadataStdout(t *testing.T, fn func() error) (string, error) {
 	t.Helper()
 
 	old := os.Stdout
@@ -124,7 +124,7 @@ func TestRunIssueMetadataListDegradesOn404JSON(t *testing.T) {
 	cmd := newIssueMetadataListTestCmd()
 	_ = cmd.Flags().Set("output", "json")
 
-	out, runErr := captureStdout(t, func() error {
+	out, runErr := captureMetadataStdout(t, func() error {
 		return runIssueMetadataList(cmd, []string{testIssueUUID})
 	})
 	if runErr != nil {
@@ -146,7 +146,7 @@ func TestRunIssueMetadataListDegradesOn404Table(t *testing.T) {
 	cmd := newIssueMetadataListTestCmd()
 	_ = cmd.Flags().Set("output", "table")
 
-	out, runErr := captureStdout(t, func() error {
+	out, runErr := captureMetadataStdout(t, func() error {
 		return runIssueMetadataList(cmd, []string{testIssueUUID})
 	})
 	if runErr != nil {
@@ -176,7 +176,7 @@ func TestRunIssueMetadataListSuccessReturnsServerMetadata(t *testing.T) {
 	cmd := newIssueMetadataListTestCmd()
 	_ = cmd.Flags().Set("output", "json")
 
-	out, runErr := captureStdout(t, func() error {
+	out, runErr := captureMetadataStdout(t, func() error {
 		return runIssueMetadataList(cmd, []string{testIssueUUID})
 	})
 	if runErr != nil {
@@ -204,7 +204,7 @@ func TestRunIssueMetadataListPropagatesNon404Error(t *testing.T) {
 
 	// Drop stdout to keep test output clean even if the implementation
 	// regresses and prints something.
-	_, err := captureStdout(t, func() error {
+	_, err := captureMetadataStdout(t, func() error {
 		return runIssueMetadataList(cmd, []string{testIssueUUID})
 	})
 	if err == nil {
@@ -230,7 +230,7 @@ func TestRunIssueMetadataListPropagates401Error(t *testing.T) {
 	cmd := newIssueMetadataListTestCmd()
 	_ = cmd.Flags().Set("output", "json")
 
-	_, err := captureStdout(t, func() error {
+	_, err := captureMetadataStdout(t, func() error {
 		return runIssueMetadataList(cmd, []string{testIssueUUID})
 	})
 	if err == nil {
@@ -253,7 +253,7 @@ func TestRunIssueMetadataGetReturnsErrorOn404(t *testing.T) {
 	_ = cmd.Flags().Set("key", "pr_url")
 	_ = cmd.Flags().Set("output", "json")
 
-	_, err := captureStdout(t, func() error {
+	_, err := captureMetadataStdout(t, func() error {
 		return runIssueMetadataGet(cmd, []string{testIssueUUID})
 	})
 	if err == nil {
@@ -272,7 +272,7 @@ func TestRunIssueMetadataSetReturnsErrorOn404(t *testing.T) {
 	_ = cmd.Flags().Set("value", "https://example.com/pr/1")
 	_ = cmd.Flags().Set("output", "json")
 
-	_, err := captureStdout(t, func() error {
+	_, err := captureMetadataStdout(t, func() error {
 		return runIssueMetadataSet(cmd, []string{testIssueUUID})
 	})
 	if err == nil {
@@ -292,7 +292,7 @@ func TestRunIssueMetadataDeleteReturnsErrorOn404(t *testing.T) {
 	_ = cmd.Flags().Set("key", "pr_url")
 	_ = cmd.Flags().Set("output", "json")
 
-	_, err := captureStdout(t, func() error {
+	_, err := captureMetadataStdout(t, func() error {
 		return runIssueMetadataDelete(cmd, []string{testIssueUUID})
 	})
 	if err == nil {

@@ -20,6 +20,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     inbox: () => "/ws-test/inbox",
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    channelDetail: (id: string) => `/ws-test/channels/${id}`,
   }),
 }));
 
@@ -185,5 +186,34 @@ describe("InboxPage", () => {
       assigneeId: undefined,
     });
     expect(mockOpenModal).toHaveBeenCalledWith("create-issue");
+  });
+
+  it("opens channel mention inbox items at the channel message", async () => {
+    const user = userEvent.setup();
+    mockListInbox.mockResolvedValue([
+      inboxItem({
+        id: "channel-inbox-1",
+        type: "mentioned",
+        severity: "info",
+        issue_id: null,
+        title: "You were mentioned in #design",
+        body: "please check this thread",
+        details: {
+          source_type: "channel_message",
+          channel_id: "channel-1",
+          channel_name: "design",
+          message_id: "message-1",
+        },
+      }),
+    ]);
+
+    renderPage();
+
+    await user.click(await screen.findByText("#design"));
+
+    expect(mockReplace).toHaveBeenCalledWith(
+      "/ws-test/channels/channel-1?message=message-1",
+    );
+    expect(screen.queryByTestId("issue-detail")).not.toBeInTheDocument();
   });
 });

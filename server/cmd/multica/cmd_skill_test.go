@@ -3,13 +3,40 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+// captureStdout redirects os.Stdout through a pipe for the duration of fn and
+// returns everything written to it, alongside fn's error. Commands that print
+// JSON/table output directly to os.Stdout (rather than cobra's out writer) are
+// asserted through this helper. Shared across cmd_*_test.go in this package.
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	outCh := make(chan string, 1)
+	go func() {
+		buf, _ := io.ReadAll(r)
+		outCh <- string(buf)
+	}()
+	runErr := fn()
+	os.Stdout = orig
+	_ = w.Close()
+	out := <-outCh
+	_ = r.Close()
+	return out, runErr
+}
 
 func newSkillImportTestCmd(input string, output *bytes.Buffer, stderr *bytes.Buffer) *cobra.Command {
 	cmd := &cobra.Command{Use: "import"}

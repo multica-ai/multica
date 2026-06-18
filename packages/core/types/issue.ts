@@ -60,4 +60,6 @@ export interface Issue {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  source_channel_id?: string | null;
+  source_thread_id?: string | null;
 }

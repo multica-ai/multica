@@ -24,9 +24,12 @@ import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 
 type Step = "instructions" | "success";
+type Platform = "mac" | "windows";
 
-const INSTALL_CMD =
+const INSTALL_CMD_MAC =
   "curl -fsSL https://multica.wujieai.com/install.sh | bash";
+const INSTALL_CMD_WINDOWS =
+  "irm https://multica.wujieai.com/install.ps1 | iex";
 const CLOUD_SERVER_URL = "https://multica.wujieai.com";
 const CLOUD_APP_URL = "https://multica.wujieai.com";
 
@@ -193,6 +196,14 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
   const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
   const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
   const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  const [platform, setPlatform] = useState<Platform>(
+    typeof navigator !== "undefined" && /win/i.test(navigator.userAgent)
+      ? "windows"
+      : "mac",
+  );
+
+  const installCmd = platform === "windows" ? INSTALL_CMD_WINDOWS : INSTALL_CMD_MAC;
+
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -206,10 +217,38 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div className="space-y-4">
+          {/* Platform toggle */}
+          <div className="flex gap-1 rounded-lg bg-muted p-1 text-xs">
+            <button
+              type="button"
+              onClick={() => setPlatform("mac")}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 font-medium transition-colors",
+                platform === "mac"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t(($) => $.connect.platform_mac)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPlatform("windows")}
+              className={cn(
+                "flex-1 rounded-md px-3 py-1.5 font-medium transition-colors",
+                platform === "windows"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t(($) => $.connect.platform_windows)}
+            </button>
+          </div>
+
           <CommandStep
             n={1}
             label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
+            cmd={installCmd}
             copyAria={t(($) => $.connect.copy_aria)}
           />
 

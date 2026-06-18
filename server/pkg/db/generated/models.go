@@ -110,6 +110,10 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	WaitReason        pgtype.Text        `json:"wait_reason"`
+	ChannelID         pgtype.UUID        `json:"channel_id"`
+	ChannelMessageID  pgtype.UUID        `json:"channel_message_id"`
+	ChannelThreadID   pgtype.UUID        `json:"channel_thread_id"`
+	ChannelReplyToID  pgtype.UUID        `json:"channel_reply_to_id"`
 }
 
 type Attachment struct {
@@ -214,6 +218,65 @@ type AutopilotTrigger struct {
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
 	EventFilters   []byte             `json:"event_filters"`
+}
+
+type Channel struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Slug        string             `json:"slug"`
+	Description string             `json:"description"`
+	AccessMode  string             `json:"access_mode"`
+	IsLocked    bool               `json:"is_locked"`
+	IsArchived  bool               `json:"is_archived"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	GroupID     pgtype.UUID        `json:"group_id"`
+	Position    float64            `json:"position"`
+}
+
+type ChannelGroup struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Position    float64            `json:"position"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChannelMember struct {
+	ChannelID  pgtype.UUID        `json:"channel_id"`
+	UserID     pgtype.UUID        `json:"user_id"`
+	Role       string             `json:"role"`
+	LastReadAt pgtype.Timestamptz `json:"last_read_at"`
+	JoinedAt   pgtype.Timestamptz `json:"joined_at"`
+}
+
+type ChannelMessage struct {
+	ID          pgtype.UUID        `json:"id"`
+	ThreadID    pgtype.UUID        `json:"thread_id"`
+	ChannelID   pgtype.UUID        `json:"channel_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Content     string             `json:"content"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ReplyToID   pgtype.UUID        `json:"reply_to_id"`
+}
+
+type ChannelThread struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChannelID     pgtype.UUID        `json:"channel_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Title         string             `json:"title"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	MessageCount  int32              `json:"message_count"`
+	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	RootMessageID pgtype.UUID        `json:"root_message_id"`
 }
 
 type ChatMessage struct {
@@ -451,6 +514,8 @@ type Issue struct {
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
+	SourceChannelID    pgtype.UUID        `json:"source_channel_id"`
+	SourceThreadID     pgtype.UUID        `json:"source_thread_id"`
 }
 
 type IssueDependency struct {
@@ -593,6 +658,22 @@ type LocalCliMessage struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Source    pgtype.Text        `json:"source"`
 	SourceKey pgtype.Text        `json:"source_key"`
+}
+
+type LocalCliMessageOutbox struct {
+	ID            pgtype.UUID        `json:"id"`
+	MessageID     pgtype.UUID        `json:"message_id"`
+	RunID         pgtype.UUID        `json:"run_id"`
+	Kind          string             `json:"kind"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	AppOrigin     pgtype.Text        `json:"app_origin"`
+	LastError     pgtype.Text        `json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LockedUntil   pgtype.Timestamptz `json:"locked_until"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LocalCliRun struct {
