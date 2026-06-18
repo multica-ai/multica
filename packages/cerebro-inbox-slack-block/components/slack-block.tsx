@@ -43,7 +43,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuSeparator,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Input } from "@multica/ui/components/ui/input";
 import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { canAssignAgent } from "@multica/views/issues/components";
 import type { Channel } from "@multica/core/types";
@@ -73,6 +72,10 @@ export interface SlackBlockProps {
   /** TECH-3494 — also list the workspace's agents (opt-in). Default off. */
   showAgents?: boolean;
   onSetShowAgents: (v: boolean) => void;
+  /** TECH-3769 — show the search field by default instead of behind the header
+   *  search button. Default off (search revealed via the button). */
+  searchDefaultOpen?: boolean;
+  onSetSearchDefaultOpen: (v: boolean) => void;
   /** Opens an agent chat in the parent's detail panel (no DM channel). */
   onOpenAgentChat: (agentId: string) => void;
   /** TECH-3664 — opens an EXISTING (unread) agent chat session so clicking an
@@ -159,6 +162,8 @@ export function SlackBlock({
   onSetGroupBy,
   showAgents = false,
   onSetShowAgents,
+  searchDefaultOpen = false,
+  onSetSearchDefaultOpen,
   onOpenAgentChat,
   onOpenAgentSession,
   onRemove,
@@ -191,8 +196,19 @@ export function SlackBlock({
   // Watch typing for the currently selected conversation so a member's DM row
   // can surface "typing…" when they type.
   const { typingUserIds } = useChannelTyping(selectedChannelId);
-  const [searchOpen, setSearchOpen] = useState(false);
+  // TECH-3769 — the search field starts visible when the box is set to show it
+  // by default; otherwise it stays behind the header search button.
+  const [searchOpen, setSearchOpen] = useState(searchDefaultOpen);
   const [search, setSearch] = useState("");
+
+  // TECH-3769 — flipping "Search shown by default" persists the choice and
+  // reflects it immediately: turning it on reveals the field, off hides + clears.
+  const toggleSearchDefault = () => {
+    const next = !searchDefaultOpen;
+    onSetSearchDefaultOpen(next);
+    setSearchOpen(next);
+    if (!next) setSearch("");
+  };
 
   const createChannel = useCreateChannel();
 
@@ -536,6 +552,11 @@ export function SlackBlock({
                 <DropdownMenuItem onClick={() => onSetShowAgents(!showAgents)}>
                   Show agents {showAgents ? "✓" : ""}
                 </DropdownMenuItem>
+                {/* TECH-3769 — choose whether the search field is shown by
+                    default or revealed via the header search button. */}
+                <DropdownMenuItem onClick={toggleSearchDefault}>
+                  Search shown by default {searchDefaultOpen ? "✓" : ""}
+                </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -552,19 +573,25 @@ export function SlackBlock({
 
       <div className="flex flex-col gap-3 p-3">
         {searchOpen && (
-          <div className="relative px-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
+          // TECH-3769 — same design as the "All messages" box search bar.
+          <div className="mx-1 flex items-center gap-2 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+            <Search className="size-3.5 flex-none text-muted-foreground" />
+            <input
+              type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              role="searchbox"
               placeholder="Search conversations..."
               aria-label="Search conversations"
-              className="h-8 pl-8 pr-7 text-xs"
+              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             {search && (
               <button
                 type="button"
-                className="absolute right-2 top-1/2 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                className="flex-none rounded p-0.5 text-muted-foreground hover:bg-muted"
                 onClick={() => setSearch("")}
                 aria-label="Clear search"
                 title="Clear search"

@@ -1072,6 +1072,10 @@ export function DynamicInbox() {
                             onSetGroupBy={(g) => changeSection({ ...section, teamGroupBy: g })}
                             showAgents={section.showAgents}
                             onSetShowAgents={(v) => changeSection({ ...section, showAgents: v })}
+                            searchDefaultOpen={section.teamSearchDefaultOpen}
+                            onSetSearchDefaultOpen={(v) =>
+                              changeSection({ ...section, teamSearchDefaultOpen: v })
+                            }
                             onOpenAgentChat={handleAgentChatStarted}
                             onOpenAgentSession={handleOpenAgentSession}
                             onRemove={() => removeSection(section.id)}

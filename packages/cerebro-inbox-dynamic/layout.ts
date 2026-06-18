@@ -156,6 +156,10 @@ export interface InboxSectionConfig {
   /** TECH-3494 — for the "team" (Chat) section: also list workspace agents.
    *  undefined / false = only people + channels. Opt-in via section settings. */
   showAgents?: boolean;
+  /** TECH-3769 (Jesper) — for the "team" (Chat) section: show the search field
+   *  by default instead of behind the header search button. undefined / false =
+   *  search is revealed via the button (default). Opt-in via section settings. */
+  teamSearchDefaultOpen?: boolean;
   // TECH-3579 — "All messages" box only: float starred conversations into a
   // "Favorites" sub-section at the very top. Default on; when false, favorites
   // stay in their normal position (and can still be starred). No effect on

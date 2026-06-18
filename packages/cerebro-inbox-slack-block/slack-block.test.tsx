@@ -272,6 +272,7 @@ function renderBlock(
     onSetUnreadFirst: () => {},
     onSetGroupBy: () => {},
     onSetShowAgents: () => {},
+    onSetSearchDefaultOpen: () => {},
     onOpenAgentChat: () => {},
     onRemove: () => {},
     ...overrides,
@@ -540,6 +541,38 @@ describe("SlackBlock", () => {
 
     expect(screen.getByText("Bob")).toBeInTheDocument();
     expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+  });
+
+  // TECH-3769 — with the box set to show search by default, the field is
+  // visible without clicking the header search button.
+  it("shows the search field by default when searchDefaultOpen is on", async () => {
+    await act(async () => {
+      renderBlock({ searchDefaultOpen: true });
+    });
+    expect(
+      screen.getByPlaceholderText("Search conversations..."),
+    ).toBeInTheDocument();
+  });
+
+  // TECH-3769 — the field stays behind the button by default.
+  it("hides the search field by default when searchDefaultOpen is off", async () => {
+    await act(async () => {
+      renderBlock();
+    });
+    expect(
+      screen.queryByPlaceholderText("Search conversations..."),
+    ).not.toBeInTheDocument();
+  });
+
+  // TECH-3769 — toggling the "Search shown by default" setting persists it.
+  it("toggling 'Search shown by default' calls onSetSearchDefaultOpen", async () => {
+    const onSetSearchDefaultOpen = vi.fn();
+    const user = userEvent.setup();
+    await act(async () => {
+      renderBlock({ onSetSearchDefaultOpen });
+    });
+    await user.click(screen.getByText(/Search shown by default/));
+    expect(onSetSearchDefaultOpen).toHaveBeenCalledWith(true);
   });
 
   // Starred conversations float to the top and the star toggles the favorite.
