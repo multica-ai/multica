@@ -1905,6 +1905,10 @@
       "exempt": "read-only \u2014 wraps GET /api/agents/{id}/tasks"
     },
     {
+      "id": "agent tool-access",
+      "exempt": "read-only — wraps GET /api/agents/{id}/tool-access"
+    },
+    {
       "id": "agent usage",
       "exempt": "read-only \u2014 wraps GET /api/dashboard/usage/by-agent"
     },
