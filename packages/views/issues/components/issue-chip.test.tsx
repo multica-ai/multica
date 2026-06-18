@@ -49,7 +49,7 @@ describe("IssueChip", () => {
     render(<IssueChip issueId="issue-1" />);
 
     const chip = screen.getByText("MUL-3405").closest(".issue-mention");
-    expect(chip).toHaveClass("min-w-0", "max-w-[min(18rem,100%)]");
+    expect(chip).toHaveClass("min-w-0", "max-w-full");
     expect(screen.getByText("A very long issue title that should stay inside a narrow chat bubble"))
       .toHaveClass("min-w-0", "truncate");
   });
