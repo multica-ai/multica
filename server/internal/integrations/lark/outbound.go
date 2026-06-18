@@ -361,7 +361,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	}
 	target := threadReplyTarget(binding)
 	if containsMarkdown(content) {
-		return p.sendWithThreadFallback("send markdown card", target, func(t ReplyTarget) error {
+		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
 			_, err := p.client.SendMarkdownCard(ctx, SendMarkdownCardParams{
 				InstallationID: creds,
 				ChatID:         ChatID(binding.LarkChatID),
@@ -371,7 +371,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 			return err
 		})
 	}
-	return p.sendWithThreadFallback("send text message", target, func(t ReplyTarget) error {
+	return sendWithThreadFallback(p.cfg.Logger, "send text message", target, func(t ReplyTarget) error {
 		_, err := p.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         ChatID(binding.LarkChatID),
@@ -397,25 +397,37 @@ func threadReplyTarget(binding db.LarkChatSessionBinding) ReplyTarget {
 	return ReplyTarget{}
 }
 
-// sendWithThreadFallback runs send with the thread reply target; if a
-// threaded send fails it retries once at the chat level so the agent's
-// reply is never silently lost. This covers the cases where the topic
-// reply legitimately can't land — the trigger message was deleted, the
-// group has topics disabled, or the message was aggregated (Lark error
-// 23007). When target is already chat-level there is nothing to fall
-// back to and the original error is returned.
-func (p *Patcher) sendWithThreadFallback(op string, target ReplyTarget, send func(ReplyTarget) error) error {
+// sendWithThreadFallback runs send with the thread reply target and,
+// ONLY when the threaded attempt fails with a Lark error that means the
+// topic reply legitimately cannot land (trigger message recalled, topic
+// gone, topics disabled, aggregated message — see
+// threadReplyUnsupportedCodes), retries once at the chat level so the
+// reply is not silently lost. Any other failure — transport error,
+// 5xx, timeout, rate limit, or an ambiguous "the server may have
+// received it" error — is logged and returned as a failure rather than
+// retried: a blind chat-level retry could duplicate the reply or leak a
+// thread-only reply into the main group chat. When target is already
+// chat-level there is nothing to fall back to and the error is returned.
+//
+// It is a package-level function (rather than a Patcher method) so the
+// event-driven Patcher and the immediate OutcomeReplier share one
+// classified fallback path.
+func sendWithThreadFallback(log *slog.Logger, op string, target ReplyTarget, send func(ReplyTarget) error) error {
 	err := send(target)
 	if err == nil {
 		return nil
 	}
-	if target.IsSet() {
-		p.cfg.Logger.Warn("lark patcher: thread reply failed, retrying at chat level",
+	if target.IsSet() && isThreadReplyUnsupported(err) {
+		log.Warn("lark: thread reply unsupported for target, retrying at chat level",
 			"op", op, "reply_message_id", target.MessageID, "error", err)
 		if fallbackErr := send(ReplyTarget{}); fallbackErr != nil {
-			return fmt.Errorf("%s (chat-level fallback after thread reply failed: %v): %w", op, err, fallbackErr)
+			return fmt.Errorf("%s (chat-level fallback after thread-unsupported reply: %v): %w", op, err, fallbackErr)
 		}
 		return nil
+	}
+	if target.IsSet() {
+		log.Warn("lark: thread reply failed; not falling back (non-classified error)",
+			"op", op, "reply_message_id", target.MessageID, "error", err)
 	}
 	return fmt.Errorf("%s: %w", op, err)
 }
@@ -458,7 +470,7 @@ func (p *Patcher) fail(ctx context.Context, creds InstallationCredentials, bindi
 	if err != nil {
 		return fmt.Errorf("render error card: %w", err)
 	}
-	return p.sendWithThreadFallback("send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
+	return sendWithThreadFallback(p.cfg.Logger, "send error card", threadReplyTarget(binding), func(t ReplyTarget) error {
 		_, err := p.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
 			ChatID:         ChatID(binding.LarkChatID),

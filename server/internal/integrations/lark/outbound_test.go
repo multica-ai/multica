@@ -82,16 +82,22 @@ type fakeAPIClient struct {
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
-	// failOnThreadReply makes the three send methods return an error
-	// whenever the call carries a thread ReplyTarget, while still
-	// recording the attempt. Used to exercise the patcher's chat-level
-	// fallback: the thread reply fails, the retry (chat-level) succeeds.
-	failOnThreadReply bool
+	// threadReplyErr, when non-nil, is returned by the three send
+	// methods whenever the call carries a thread ReplyTarget, while the
+	// attempt is still recorded. Tests inject either a classified
+	// *APIError (to exercise the chat-level fallback) or an ambiguous
+	// transport error (to assert no fallback happens).
+	threadReplyErr error
 }
 
-// errThreadReply is the synthetic failure the fake returns for threaded
-// sends when failOnThreadReply is set.
-var errThreadReply = errors.New("fake: thread reply rejected")
+// errThreadReplyClassified is a Lark business error the fallback path
+// recognizes (230071 = group does not support reply in thread), so a
+// thread send that returns it triggers the chat-level retry.
+var errThreadReplyClassified = &APIError{Op: "send text message", Code: 230071, Msg: "group does not support reply in thread"}
+
+// errThreadReplyTransport is an ambiguous, non-classified failure: the
+// fallback path must NOT retry it at chat level.
+var errThreadReplyTransport = errors.New("fake: transport failure")
 
 func (f *fakeAPIClient) IsConfigured() bool { return true }
 
@@ -99,8 +105,8 @@ func (f *fakeAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, p)
-	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
-		return "", errThreadReply
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
 	}
 	return f.sendReturn, f.sendErr
 }
@@ -114,8 +120,8 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.textSent = append(f.textSent, p)
-	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
-		return "", errThreadReply
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
 	}
 	return f.textSendReturn, f.textSendErr
 }
@@ -123,8 +129,8 @@ func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mdCardSent = append(f.mdCardSent, p)
-	if f.failOnThreadReply && p.ReplyTarget.IsSet() {
-		return "", errThreadReply
+	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
+		return "", f.threadReplyErr
 	}
 	return f.mdCardReturn, f.mdCardErr
 }
@@ -567,12 +573,13 @@ func TestPatcherThreadReplyMarkdownRoutesToThread(t *testing.T) {
 }
 
 // TestPatcherThreadReplyFallsBackToChatLevel verifies that when a
-// threaded send fails (e.g. the trigger message was deleted or the
-// topic was aggregated), the patcher retries once at the chat level so
-// the agent's reply is never silently lost.
+// threaded send fails with a classified "topic cannot receive this
+// reply" Lark error (e.g. the trigger message was recalled or the topic
+// was aggregated), the patcher retries once at the chat level so the
+// agent's reply is never silently lost.
 func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
 	p, q, api := newTestPatcher(t)
-	api.failOnThreadReply = true
+	api.threadReplyErr = errThreadReplyClassified
 	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
 	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
 	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
@@ -594,5 +601,33 @@ func TestPatcherThreadReplyFallsBackToChatLevel(t *testing.T) {
 	}
 	if api.textSent[1].ReplyTarget.IsSet() {
 		t.Errorf("fallback attempt must be chat-level (empty ReplyTarget); got %+v", api.textSent[1].ReplyTarget)
+	}
+}
+
+// TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError verifies that a
+// non-classified failure (transport error, 5xx, timeout, rate limit)
+// from the threaded send is NOT retried at chat level: a blind retry
+// could duplicate the reply or leak a thread-only reply into the group.
+func TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	api.threadReplyErr = errThreadReplyTransport
+	q.binding.LastLarkMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastLarkThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "reply that must not duplicate"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected a single thread attempt with no chat-level fallback; got %d sends", len(api.textSent))
+	}
+	if !api.textSent[0].ReplyTarget.IsSet() {
+		t.Errorf("the single attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
 	}
 }

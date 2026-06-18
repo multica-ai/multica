@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -720,6 +721,70 @@ func TestHTTPClient_SendInteractiveCard_LarkErrorCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "code=230001") {
 		t.Errorf("error should surface code: %v", err)
+	}
+}
+
+// TestHTTPClient_SendMethods_ReturnTypedAPIError pins that the three
+// send methods used for threaded replies surface a non-zero Lark code
+// as a structured *APIError, so the outbound fallback can classify
+// "topic cannot receive this reply" codes without string matching.
+func TestHTTPClient_SendMethods_ReturnTypedAPIError(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(c *httpAPIClient) error
+	}{
+		{"interactive", func(c *httpAPIClient) error {
+			_, err := c.SendInteractiveCard(context.Background(), SendCardParams{InstallationID: testCreds(), ChatID: "oc", CardJSON: `{}`})
+			return err
+		}},
+		{"text", func(c *httpAPIClient) error {
+			_, err := c.SendTextMessage(context.Background(), SendTextParams{InstallationID: testCreds(), ChatID: "oc", Text: "hi"})
+			return err
+		}},
+		{"markdown", func(c *httpAPIClient) error {
+			_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{InstallationID: testCreds(), ChatID: "oc", Markdown: "**hi**"})
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newLarkFake(t)
+			fake.stubToken("tok_e", 7200)
+			fake.stubSend(map[string]any{"code": 230071, "msg": "group does not support reply in thread"}, nil)
+			c := newTestClient(fake, time.Now)
+			err := tc.call(c)
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("want *APIError, got %T (%v)", err, err)
+			}
+			if apiErr.Code != 230071 {
+				t.Errorf("APIError.Code = %d; want 230071", apiErr.Code)
+			}
+			if !isThreadReplyUnsupported(err) {
+				t.Errorf("230071 should classify as thread-reply-unsupported")
+			}
+			if !strings.Contains(err.Error(), "code=230071") {
+				t.Errorf("error string should preserve code=230071: %v", err)
+			}
+		})
+	}
+}
+
+// TestIsThreadReplyUnsupported_ExcludesAmbiguous guards that ambiguous
+// and rate-limit failures are NOT treated as classified thread errors,
+// so they never trigger a chat-level fallback.
+func TestIsThreadReplyUnsupported_ExcludesAmbiguous(t *testing.T) {
+	if isThreadReplyUnsupported(errors.New("transport failure")) {
+		t.Error("plain transport error must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230020, Msg: "rate limit"}) {
+		t.Error("rate limit (230020) must not classify as thread-reply-unsupported")
+	}
+	if isThreadReplyUnsupported(&APIError{Code: 230049, Msg: "message is being sent"}) {
+		t.Error("ambiguous 'being sent' (230049) must not classify as thread-reply-unsupported")
+	}
+	if !isThreadReplyUnsupported(&APIError{Code: 230072, Msg: "aggregated"}) {
+		t.Error("aggregated message (230072) should classify as thread-reply-unsupported")
 	}
 }
 

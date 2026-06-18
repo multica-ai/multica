@@ -283,7 +283,7 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 		if isTokenError(resp.Code) {
 			c.invalidateToken(p.InstallationID.AppID)
 		}
-		return "", fmt.Errorf("lark http client: send interactive card: code=%d msg=%q", resp.Code, resp.Msg)
+		return "", &APIError{Op: "send interactive card", Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.MessageID, nil
 }
@@ -327,7 +327,7 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 		if isTokenError(resp.Code) {
 			c.invalidateToken(p.InstallationID.AppID)
 		}
-		return "", fmt.Errorf("lark http client: send text message: code=%d msg=%q", resp.Code, resp.Msg)
+		return "", &APIError{Op: "send text message", Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.MessageID, nil
 }
@@ -390,7 +390,7 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 		if isTokenError(resp.Code) {
 			c.invalidateToken(p.InstallationID.AppID)
 		}
-		return "", fmt.Errorf("lark http client: send markdown card: code=%d msg=%q", resp.Code, resp.Msg)
+		return "", &APIError{Op: "send markdown card", Code: resp.Code, Msg: resp.Msg}
 	}
 	return resp.Data.MessageID, nil
 }
@@ -917,6 +917,57 @@ func (c *httpAPIClient) doJSON(ctx context.Context, baseURL, method, path, token
 
 func isTokenError(code int) bool {
 	return code == codeTokenExpired || code == codeTokenInvalid
+}
+
+// APIError is a structured Lark business error: the request reached
+// Lark, returned HTTP 200, but Lark rejected it with a non-zero
+// `code`. This is distinct from the transport-level errors doJSON
+// surfaces (network failure, 5xx, timeout), which are returned as
+// plain wrapped errors. The distinction matters for the threaded-reply
+// fallback: a business code is definitive ("nothing was sent, and here
+// is exactly why"), whereas a transport error is ambiguous ("the
+// message may or may not have been delivered") and must NOT trigger a
+// chat-level retry that could duplicate or leak the reply.
+type APIError struct {
+	Op   string
+	Code int
+	Msg  string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("lark http client: %s: code=%d msg=%q", e.Op, e.Code, e.Msg)
+}
+
+// threadReplyUnsupportedCodes are the reply-endpoint business codes
+// that definitively mean "this specific trigger message / topic cannot
+// receive a threaded reply" AND nothing was sent, while a plain
+// chat-level send to the same chat is unaffected. Only these justify
+// the chat-level fallback. Rate limits (230020), "message is being
+// sent" (230049, ambiguous), permission/content errors (which would
+// also fail at chat level), and all transport/5xx/timeout failures are
+// deliberately excluded: those stay failures so we never duplicate a
+// reply or leak a thread-only reply into the main group chat.
+// Codes are from the IM reply-message endpoint error table.
+var threadReplyUnsupportedCodes = map[int]struct{}{
+	230011: {}, // the trigger message has been recalled
+	230019: {}, // the topic does not exist
+	230050: {}, // the trigger message is invisible to the operator
+	230071: {}, // the group does not support reply in thread
+	230072: {}, // aggregated messages do not support reply in thread
+	230111: {}, // cannot reply to a self-destructing message
+}
+
+// isThreadReplyUnsupported reports whether err is a Lark APIError whose
+// code means the threaded reply cannot land on this target. Only such
+// errors are safe to retry at the chat level. Transport errors and
+// other business codes return false.
+func isThreadReplyUnsupported(err error) bool {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		_, ok := threadReplyUnsupportedCodes[apiErr.Code]
+		return ok
+	}
+	return false
 }
 
 func truncate(s string, n int) string {
