@@ -596,3 +596,74 @@ func TestAutopilotDispatchSkipsInboxWhenNoSubscribers(t *testing.T) {
 		t.Fatalf("issue_subscribed inbox rows = %d, want 0 (no subscribers)", inboxCount)
 	}
 }
+
+// TestDeleteAutopilotRemovesSubscribers guards the app-layer cleanup that
+// replaced the dropped autopilot_subscriber → autopilot ON DELETE CASCADE:
+// deleting an autopilot must also delete its subscriber template rows in the
+// same transaction, leaving no orphans behind.
+func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
+	ctx := context.Background()
+	var autopilotID string
+	defer func() {
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID)
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "Delete-with-subscribers autopilot",
+		"assignee_id":    agentID,
+		"execution_mode": "create_issue",
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	autopilotID = created.ID
+
+	var before int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID).Scan(&before); err != nil {
+		t.Fatalf("count subscribers before delete: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("subscriber rows before delete = %d, want 1", before)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil)
+	req = withURLParam(req, "id", autopilotID)
+	testHandler.DeleteAutopilot(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteAutopilot: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID).Scan(&after); err != nil {
+		t.Fatalf("count subscribers after delete: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("subscriber rows after delete = %d, want 0 (app-layer cleanup)", after)
+	}
+
+	var autopilotRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot WHERE id = $1`, autopilotID).Scan(&autopilotRows); err != nil {
+		t.Fatalf("count autopilot after delete: %v", err)
+	}
+	if autopilotRows != 0 {
+		t.Fatalf("autopilot rows after delete = %d, want 0", autopilotRows)
+	}
+}
