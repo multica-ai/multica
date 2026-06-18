@@ -1135,7 +1135,7 @@ func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Ti
 // logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
 // exceeds 500ms, splitting auth / claim / response-build phases so the prod
 // tail can be diagnosed without flooding logs at normal poll rates.
-func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64) {
+func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes int) {
 	totalMs := time.Since(start).Milliseconds()
 	if totalMs < 500 {
 		return
@@ -1147,6 +1147,10 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 		"auth_ms", authMs,
 		"claim_ms", claimMs,
 		"build_ms", buildMs,
+		"payload_bytes", payloadBytes,
+		"agent_skill_count", agentSkillCount,
+		"builtin_skill_count", builtinSkillCount,
+		"skill_payload_bytes", skillPayloadBytes,
 	)
 }
 
@@ -1159,6 +1163,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	var (
 		outcome                  = "unauth"
 		authMs, claimMs, buildMs int64
+		payloadBytes             int
+		agentSkillCount          int
+		builtinSkillCount        int
+		skillPayloadBytes        int
 		buildStart               time.Time
 	)
 	defer func() {
@@ -1168,7 +1176,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if !buildStart.IsZero() {
 			buildMs = time.Since(buildStart).Milliseconds()
 		}
-		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs)
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
 	}()
 
 	// Verify the caller owns this runtime's workspace. The runtime's
@@ -1194,7 +1202,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 		outcome = "no_task"
 		return
 	}
@@ -1209,7 +1217,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		// names carry a "multica-" prefix so their on-disk slugs never collide
 		// with a user-authored workspace skill (see writeSkillFiles).
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		skills = append(skills, h.TaskService.BuiltinSkills()...)
+		agentSkillCount = len(skills)
+		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkillCount = len(builtinSkills)
+		skills = append(skills, builtinSkills...)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -1800,7 +1811,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
+		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
+			skillPayloadBytes = len(skillPayload)
+		}
+	}
+	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
 }
 
 // trailingUserMessages returns the run of user messages after the last
