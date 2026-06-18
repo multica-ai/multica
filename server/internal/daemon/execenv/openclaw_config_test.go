@@ -1115,7 +1115,7 @@ func TestBuildPerTaskOpenclawConfigOmitsGatewayWhenZero(t *testing.T) {
 	t.Parallel()
 
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, "/workdir", nil, false,
+		"", false, "", nil, false, "/workdir", nil, false,
 		OpenclawGatewayPin{},
 	)
 	if _, present := cfg["gateway"]; present {
@@ -1133,7 +1133,7 @@ func TestBuildPerTaskOpenclawConfigWritesGatewayBlock(t *testing.T) {
 		TLS:   true,
 	}
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, "/workdir", nil, false,
+		"", false, "", nil, false, "/workdir", nil, false,
 		pin,
 	)
 
@@ -1172,7 +1172,7 @@ func TestBuildPerTaskOpenclawConfigPartialGatewayOmitsZeroFields(t *testing.T) {
 	// fields must not land in the wrapper as empty strings/zeros — that
 	// would override the user's value with junk.
 	cfg := buildPerTaskOpenclawConfig(
-		"", false, "", nil, "/workdir", nil, false,
+		"", false, "", nil, false, "/workdir", nil, false,
 		OpenclawGatewayPin{Host: "gw.internal", Port: 18789},
 	)
 	gw := cfg["gateway"].(map[string]any)
@@ -1219,14 +1219,20 @@ func TestIsOpenclawKeyMissing(t *testing.T) {
 	}
 }
 
-// TestPrepareOpenclawConfigNewSchemaFallsBackToRegistry — OpenClaw 2026.6.x
+// TestPrepareOpenclawConfigNewSchemaOmitsAgentsList — OpenClaw 2026.6.x
 // removed the `agents.list` config path; `config get agents.list` exits
 // non-zero with "Config path not found" and the agents live in a sqlite
-// registry reachable via the `openclaw agents list --json` subcommand. The
-// preparer must (a) treat the config-path error as "missing, fall back" and
-// (b) source the per-agent workspace from the registry subcommand so each
-// agent's workspace is still pinned to the task workdir (not just defaults).
-func TestPrepareOpenclawConfigNewSchemaFallsBackToRegistry(t *testing.T) {
+// registry reachable via the `openclaw agents list --json` subcommand.
+//
+// The preparer must (a) treat the config-path error as "missing, fall back"
+// (read-side, #3028 first half) and (b) NOT write the registry-sourced agents
+// back into the wrapper as `agents.list` (write-side, #3028 second half).
+// `agents.list` is not a valid 2026.6.x config path — its schema validator
+// rejects the registry shape ("agents.list.0: Invalid input") and fails
+// closed before the agent runs. Per-task workspace pinning for the new schema
+// rides on `agents.defaults.workspace` alone, which OpenClaw applies to the
+// agent it selects from the registry.
+func TestPrepareOpenclawConfigNewSchemaOmitsAgentsList(t *testing.T) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -1237,7 +1243,10 @@ func TestPrepareOpenclawConfigNewSchemaFallsBackToRegistry(t *testing.T) {
 		t.Fatalf("write user cfg: %v", err)
 	}
 
-	registry := `[{"id":"main","identityName":"Beau","workspace":"/Users/cob/.openclaw/workspace","model":"anthropic/claude-sonnet-4-6","isDefault":true}]`
+	// Real registry shape from `openclaw agents list --json` on 2026.6.8 —
+	// carries CLI-only fields (identityName, agentDir, bindings, isDefault)
+	// that the config schema rejects if written back as agents.list[].
+	registry := `[{"id":"main","identityName":"Beau","identitySource":"identity","workspace":"/Users/cob/.openclaw/workspace","agentDir":"/Users/cob/.openclaw/agents/main/agent","model":"anthropic/claude-sonnet-4-6","bindings":0,"isDefault":true}]`
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file": {stdout: userConfigPath},
 		// New-schema error, verbatim #3028 string.
@@ -1255,19 +1264,8 @@ func TestPrepareOpenclawConfigNewSchemaFallsBackToRegistry(t *testing.T) {
 	if agents["defaults"].(map[string]any)["workspace"] != workDir {
 		t.Errorf("defaults.workspace not pinned to workDir")
 	}
-	list, present := agents["list"].([]any)
-	if !present {
-		t.Fatalf("agents.list missing — registry fallback did not emit per-agent overrides, got %v", agents)
-	}
-	if len(list) != 1 {
-		t.Fatalf("agents.list len = %d, want 1", len(list))
-	}
-	entry := list[0].(map[string]any)
-	if entry["id"] != "main" {
-		t.Errorf("agents.list[0].id = %v, want main", entry["id"])
-	}
-	if entry["workspace"] != workDir {
-		t.Errorf("agents.list[0].workspace = %v, want %s (per-task pin)", entry["workspace"], workDir)
+	if _, present := agents["list"]; present {
+		t.Fatalf("agents.list must be omitted for a registry-sourced (2026.6.x) host — OpenClaw rejects it; got %v", agents["list"])
 	}
 }
 
