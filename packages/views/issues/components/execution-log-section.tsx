@@ -18,6 +18,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { InlineTranscriptPanel } from "./execution-log/inline-transcript-panel";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge. Mirrors the pattern used by the desktop tab bar
@@ -291,51 +292,54 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   };
 
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
-      {/* Status + time always visible — actions append on hover, never
-          replace. Same pattern as desktop tab bar / sidebar pins. */}
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        {showTranscript && (
-          <TranscriptButton
-            task={task}
-            agentName=""
-            isLive
-            title={t(($) => $.execution_log.transcript_tooltip)}
-          />
-        )}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                onClick={requestCancel}
-                disabled={cancelling}
-                aria-label={t(($) => $.execution_log.cancel_task_aria)}
-              />
-            }
-            className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {cancelling ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Square className="h-3.5 w-3.5" />
-            )}
-          </TooltipTrigger>
-          <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
-        </Tooltip>
-      </RowActions>
-      <TerminateTaskConfirmDialog
-        open={confirmOpen}
-        onOpenChange={setConfirmOpen}
-        onConfirm={() => void handleCancel()}
-        showRunningNote={task.status === "running" || task.status === "dispatched"}
-      />
-    </RowShell>
+    <>
+      <RowShell task={task}>
+        <TriggerText text={trigger} />
+        {/* Status + time always visible — actions append on hover, never
+            replace. Same pattern as desktop tab bar / sidebar pins. */}
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          {showTranscript && (
+            <TranscriptButton
+              task={task}
+              agentName=""
+              isLive
+              title={t(($) => $.execution_log.transcript_tooltip)}
+            />
+          )}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  onClick={requestCancel}
+                  disabled={cancelling}
+                  aria-label={t(($) => $.execution_log.cancel_task_aria)}
+                />
+              }
+              className="flex items-center justify-center rounded p-1 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {cancelling ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Square className="h-3.5 w-3.5" />
+              )}
+            </TooltipTrigger>
+            <TooltipContent>{t(($) => $.execution_log.cancel_task_tooltip)}</TooltipContent>
+          </Tooltip>
+        </RowActions>
+        <TerminateTaskConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          onConfirm={() => void handleCancel()}
+          showRunningNote={task.status === "running" || task.status === "dispatched"}
+        />
+      </RowShell>
+      {showTranscript && <InlineTranscriptPanel task={task} isLive defaultOpen />}
+    </>
   );
 }
 
@@ -376,38 +380,41 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   };
 
   return (
-    <RowShell task={task}>
-      <TriggerText text={trigger} />
-      <span className="shrink-0 whitespace-nowrap text-xs">
-        <span className={tone}>{failureLabel ?? label}</span>
-        <span className="text-muted-foreground"> · {time}</span>
-      </span>
-      <RowActions>
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
-        {canRetry && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  disabled={retrying}
-                  aria-label={t(($) => $.execution_log.retry_task_aria)}
-                />
-              }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {retrying ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCcw className="h-3.5 w-3.5" />
-              )}
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
-      </RowActions>
-    </RowShell>
+    <>
+      <RowShell task={task}>
+        <TriggerText text={trigger} />
+        <span className="shrink-0 whitespace-nowrap text-xs">
+          <span className={tone}>{failureLabel ?? label}</span>
+          <span className="text-muted-foreground"> · {time}</span>
+        </span>
+        <RowActions>
+          <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+          {canRetry && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    disabled={retrying}
+                    aria-label={t(($) => $.execution_log.retry_task_aria)}
+                  />
+                }
+                className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {retrying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RotateCcw className="h-3.5 w-3.5" />
+                )}
+              </TooltipTrigger>
+              <TooltipContent>{t(($) => $.execution_log.retry_task_tooltip)}</TooltipContent>
+            </Tooltip>
+          )}
+        </RowActions>
+      </RowShell>
+      <InlineTranscriptPanel task={task} isLive={false} defaultOpen={false} />
+    </>
   );
 }
 
