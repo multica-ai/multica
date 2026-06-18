@@ -81,6 +81,10 @@ selfhost_frontend_port() {
   env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
 }
 
+selfhost_bind_host() {
+  env_file_value "${1:-.env}" "BIND_HOST" "localhost"
+}
+
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -376,6 +380,8 @@ setup_server() {
     ok "Using existing .env"
   fi
 
+  bash scripts/selfhost-preflight.sh .env
+
   # Start Docker Compose
   info "Pulling official Multica images..."
   pull_official_selfhost_images
@@ -450,11 +456,12 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  local frontend_port backend_port
+  local frontend_port backend_port bind_host
   frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
   backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$frontend_port"
-  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$backend_port"
+  bind_host="$(selfhost_bind_host "$INSTALL_DIR/.env")"
+  printf "  ${BOLD}Frontend:${RESET}  http://%s:%s\n" "$bind_host" "$frontend_port"
+  printf "  ${BOLD}Backend:${RESET}   http://%s:%s\n" "$bind_host" "$backend_port"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"

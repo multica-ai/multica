@@ -42,9 +42,24 @@ config="$(
 
 require_config "$config" 'published: "3100"'
 require_config "$config" 'published: "9100"'
+require_config "$config" 'host_ip: 127.0.0.1'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
+
+lan_tmp_env="$(mktemp)"
+trap 'rm -f "$tmp_env" "$lan_tmp_env"' EXIT
+sed 's/^BIND_HOST=.*/BIND_HOST=192.168.1.50/' "$tmp_env" >"$lan_tmp_env"
+
+lan_config="$(
+  docker compose \
+    --env-file "$lan_tmp_env" \
+    -f docker-compose.selfhost.yml \
+    config
+)"
+
+require_config "$lan_config" 'host_ip: 192.168.1.50'
+require_config "$lan_config" 'RATE_LIMIT_TRUSTED_PROXIES: ""'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then

@@ -23,14 +23,42 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ```bash
 multica daemon logs --lines 100    # look for daemon-side errors
-echo $MULTICA_SERVER_URL          # confirm the address is set
 curl -i http://<server-host>:8080/health   # hit the server directly
 curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
-cat ~/.multica/config.json        # verify api_token exists
 multica workspace list            # confirm you're a member of the target workspace
 ```
 
+공유해도 되는 것은 `/health`와 `/readyz` 상태, redact된 daemon 오류 일부, 의도한 hostname/port입니다. `~/.multica/config.json`, PAT, daemon token, redact하지 않은 전체 daemon 로그는 공유하지 마세요.
+
 **해결 방법**: 위의 각 원인을 하나씩 처리하세요. 가장 흔한 두 가지 해결책은 **`MULTICA_SERVER_URL`을 변경하고 데몬을 재시작**하는 것(`multica daemon restart`)과 **다시 로그인**하는 것(`multica logout && multica login`)입니다.
+
+## Self-host preflight가 시작을 막음
+
+**증상**: `make selfhost`, `make selfhost-build`, `start.sh`, 또는 Unix installer가 Docker 시작 전에 `self-host preflight failed`로 종료됩니다.
+
+**가능한 원인**:
+
+1. **raw all-interface bind** — `BIND_HOST=0.0.0.0`은 backend/frontend Docker 포트를 모든 인터페이스에 게시합니다
+2. **example secrets** — `JWT_SECRET`, `POSTGRES_PASSWORD`, 또는 `DATABASE_URL`이 아직 예시 값입니다
+3. **LAN/공개 접근 전 hardening 부족** — `APP_ENV`가 `production`이 아니거나, 고정 dev code가 설정되어 있거나, 이메일 provider가 없거나, signup/workspace creation이 열려 있거나, origin이 localhost로 남아 있습니다
+4. **unsafe proxy trust** — `MULTICA_TRUSTED_PROXIES` 또는 `RATE_LIMIT_TRUSTED_PROXIES`가 `0.0.0.0/0` 같은 넓은 범위입니다
+
+**진단 방법**:
+
+```bash
+bash scripts/selfhost-preflight.sh .env
+grep -E '^(BIND_HOST|APP_ENV|FRONTEND_ORIGIN|CORS_ALLOWED_ORIGINS|ALLOW_SIGNUP|DISABLE_WORKSPACE_CREATION)=' .env
+```
+
+preflight는 실패한 변수 이름만 출력하고 secret 값은 출력하지 않습니다. 위 `grep`은 로컬에서만 사용하세요. 전체 `.env`, `docker compose config`, container env, PAT/config 파일, 전체 로그를 support thread에 붙이지 마세요.
+
+**해결 방법**:
+
+- Localhost → `BIND_HOST=127.0.0.1`을 유지합니다.
+- 신뢰할 수 있는 비공개 LAN → `BIND_HOST`를 특정 LAN IP로 설정하고 정확한 `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS`를 설정합니다.
+- 공개 접근 → Docker는 loopback에 두고 TLS 리버스 프록시나 tunnel을 사용합니다. `/ws`는 WebSocket `Upgrade` header를 전달해야 합니다.
+- `JWT_SECRET`과 `POSTGRES_PASSWORD`를 교체하고, `DATABASE_URL`을 동기화하고, Resend 또는 SMTP를 구성하고, `MULTICA_DEV_VERIFICATION_CODE`를 비우고, bootstrap 후 `ALLOW_SIGNUP=false`와 `DISABLE_WORKSPACE_CREATION=true`를 설정합니다.
+- `MULTICA_TRUSTED_PROXIES`와 `RATE_LIMIT_TRUSTED_PROXIES`에는 정확한 proxy/CDN CIDR만 사용하고, `0.0.0.0/0` 또는 `::/0`은 사용하지 마세요.
 
 ## 작업이 `queued`에서 멈춤
 
@@ -99,7 +127,7 @@ multica issue show <issue-id>             # inspect task history
 docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"
 ```
 
-기대했던 줄이 보이지 않는다면 환경 변수가 프로세스에 도달하지 않은 것입니다 — `.env`와 `docker compose -f docker-compose.selfhost.yml exec backend env | grep -E 'RESEND_|SMTP_'`를 확인하세요. 이 시작 로그 줄에는 자격 증명이 절대 기록되지 않습니다.
+이 provider 선택 줄은 공유해도 됩니다. provider와 relay host/port는 포함하지만 API key, SMTP password, verification code는 포함하지 않습니다. 기대한 줄이 없다면 `.env`를 로컬에서 확인하고 backend를 재시작하세요. 실제 `.env`, `docker compose config`, container env 출력은 붙이지 마세요.
 
 ### Resend가 활성 제공자일 때
 
@@ -112,7 +140,7 @@ docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:
 
 **진단 방법**:
 
-- 서버 로그에서 `"[DEV] Verification code for"`를 grep하세요 — 있다면 Resend가 구성되지 않았고 코드가 stdout에 기록된 것입니다
+- 로컬 서버 로그에서만 `"[DEV] Verification code for"`를 grep하세요 — 있다면 Resend가 구성되지 않았고 코드가 stdout에 기록된 것입니다. 코드 줄은 공유하지 마세요.
 - [Resend 대시보드](https://resend.com/) → Emails에서 발송 이력을 확인하세요
 - `RESEND_FROM_EMAIL`의 도메인이 Resend 콘솔의 "Verified Domains" 목록에 나타나는지 확인하세요
 
@@ -140,8 +168,8 @@ SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 
 **진단 방법**:
 
 - 시작 시 `"EmailService: SMTP relay"`를 한 번 grep하고, 런타임 실패에 대해서는 `"failed to send"`를 grep하세요
-- 백엔드 컨테이너 내부에서 연결성을 점검하세요: `docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz $SMTP_HOST $SMTP_PORT'`
-- 환경 변수가 프로세스에 도달했는지 확인하세요: `docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP_`(출력에 비밀번호가 포함되므로 신뢰할 수 있는 셸에서만 실행하세요)
+- 백엔드 컨테이너 내부에서 연결성을 점검하세요: `docker compose -f docker-compose.selfhost.yml exec backend sh -c 'nc -vz "$SMTP_HOST" "$SMTP_PORT"'`
+- provider 선택은 위 startup line으로 확인하세요. 꼭 환경 변수를 봐야 한다면 신뢰할 수 있는 셸에서 로컬로만 확인하고 출력을 공유하지 마세요. SMTP password나 API key가 포함될 수 있습니다.
 
 **해결 방법**:
 
@@ -163,9 +191,10 @@ SMTP 경로는 모든 실패를 실패한 단계와 함께 감싸므로, 서버 
 **진단 방법**:
 
 ```bash
-cat .env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
-docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
+grep -E '^(APP_ENV|MULTICA_DEV_VERIFICATION_CODE)=' .env
 ```
+
+이 확인은 로컬 전용입니다. 실제 `.env`나 container env dump를 공유하지 마세요. API key, password, token, 고정 verification code가 포함될 수 있습니다.
 
 인박스(스팸 포함)에서 실제 인증 코드를 확인하세요.
 

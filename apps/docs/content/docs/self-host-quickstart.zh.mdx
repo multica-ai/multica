@@ -49,7 +49,13 @@ make selfhost
 - **后端**：[http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**所有端口只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免服务密钥和 Postgres 凭据被直接暴露到公网。要做跨机访问，请用反向代理在前面终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
+**端口默认绑定到 loopback。** `docker-compose.selfhost.yml` 默认把 backend/frontend 发布到 `127.0.0.1`，所以首次启动时其它机器连不到 raw Docker 端口。这是有意的安全默认值：初次配置时可能还没配 TLS、邮件、精确 origin、注册/工作区策略，或者手动绕过 `make selfhost` 后仍在用示例密钥。
+
+三种暴露方式：
+
+- 本机：保留 `BIND_HOST=127.0.0.1`，在同一台机器上跑 `multica setup self-host`。
+- 可信私有 LAN：把 `BIND_HOST` 设成一个具体 LAN IP，不要用 `0.0.0.0`，并先轮换密钥、设置精确浏览器 origin。
+- 公网/跨机：保持 Docker 绑定 loopback，在前面放 TLS 反向代理或 tunnel。
 </Callout>
 
 ## 2. 重要：保持生产安全配置
@@ -60,6 +66,10 @@ make selfhost
 只在本地或私有测试自动化里设置 `MULTICA_DEV_VERIFICATION_CODE`。如果在 `APP_ENV` 非 production 时启用了固定验证码，任何能请求验证码的人都能用这个固定值登录。详见 [登录与注册配置 → 固定本地测试验证码](/auth-setup#固定本地测试验证码)。
 
 公网部署前一定检查 `.env` 里 `APP_ENV=production`，且 `MULTICA_DEV_VERIFICATION_CODE` 为空。
+</Callout>
+
+<Callout type="warning">
+**不要把 raw Docker 端口直接暴露到公网。** `BIND_HOST=0.0.0.0` 会被 self-host preflight 拒绝，除非显式设置 `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1`。这个 override 只适合经过安全评审的私有基础设施；公网推荐路径是 TLS 反向代理或 tunnel，并配置精确 origin 与窄 trusted proxy CIDR。
 </Callout>
 
 ## 3. 配置邮件服务（可选但推荐）
@@ -134,7 +144,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 打开 [http://localhost:3000](http://localhost:3000)：
 
 - 输入你的邮箱
-- 从你配置的邮件后端（Resend 或 SMTP relay）收到的邮件里拿验证码；两者都没配的话，从 server 容器的 stdout 里抄 `[DEV] Verification code` 这行
+- 从你配置的邮件后端（Resend 或 SMTP relay）收到的邮件里拿验证码；两者都没配的话，只在本机查看 server 容器 stdout 并复制 `[DEV] Verification code` 这行，不要把这行贴出去
 - 不要直接使用 `888888`；只有在非 production 私有实例上显式设置 `MULTICA_DEV_VERIFICATION_CODE=888888` 后它才会生效
 - 登录后创建第一个工作区
 
@@ -152,9 +162,42 @@ multica setup self-host
 
 会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。
 
-### 5b. 跨机访问：用反向代理把服务挡在前面
+### 5b. 可信私有 LAN：绑定一个主机 IP
 
-因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则服务密钥会直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
+可信私有 LAN 可以把 raw Docker 端口发布到一个具体主机网卡上，但这只适合私网，不是公网替代方案。
+
+在 `.env` 里设置 server 的具体 LAN IP 和用户浏览器打开的 origin：
+
+```bash
+BIND_HOST=192.168.1.50
+FRONTEND_ORIGIN=http://192.168.1.50:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.50:3000
+```
+
+重启前还要轮换 `JWT_SECRET` 和 `POSTGRES_PASSWORD`，保持 `APP_ENV=production`，清空 `MULTICA_DEV_VERIFICATION_CODE`，配置 Resend 或 SMTP，并在引导完成后锁住注册/工作区创建：
+
+```bash
+ALLOW_SIGNUP=false
+DISABLE_WORKSPACE_CREATION=true
+```
+
+然后运行 `docker compose -f docker-compose.selfhost.yml up -d`。preflight 会检查这些项，并且不会打印真实 secret。
+
+其它 LAN 机器上的 daemon 可以这样配置：
+
+```bash
+multica setup self-host \
+  --server-url http://192.168.1.50:8080 \
+  --app-url http://192.168.1.50:3000
+```
+
+<Callout type="warning">
+**Docker volume 里有敏感数据。** Compose 创建的 `pgdata` 存 PostgreSQL 数据，`backend_uploads` 存本地上传文件。备份/恢复时一起处理，限制 host 和 Docker daemon 权限，不要公开分享原始 volume 归档、`pg_dump` 或上传文件 tarball。
+</Callout>
+
+### 5c. 跨机/公网访问：用反向代理把服务挡在前面
+
+公网访问时保持 compose 只监听 `127.0.0.1`。在 server 上跑一个反向代理或 tunnel（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
 
 ```bash
 multica setup self-host \
@@ -188,9 +231,18 @@ multica.example.com {
 }
 ```
 
-代理起好之后，记得在 server 的 `.env` 里把 `FRONTEND_ORIGIN` 设成 `https://multica.example.com` 并重启后端，否则 WebSocket 的 origin 校验会把浏览器拒掉（见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)）。
+代理起好之后，记得在 server 的 `.env` 里设置并重启后端：
 
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、并在 `/ws` 上转发 `Upgrade` 头。
+```bash
+FRONTEND_ORIGIN=https://multica.example.com
+CORS_ALLOWED_ORIGINS=https://multica.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+把 `127.0.0.1/32` 换成你的实际代理/CDN CIDR；不要用 `0.0.0.0/0` 或 `::/0`。origin 配置同时用于 HTTP CORS 和 WebSocket `Origin` 校验，否则 `/ws` 会被 `403` 拒绝（见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)）。
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、在 `/ws` 上转发 `Upgrade` 头、精确 origin allowlist，以及窄 trusted proxy CIDR。
 
 ## 6. 创建智能体 + 分配第一个任务
 
@@ -267,7 +319,7 @@ multica setup self-host \
 ## 常见问题
 
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
-- **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
+- **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 先看可分享的 provider 选择行：`docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"`；真实验证码日志只在本机查看，不要贴出去
 - **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
 - **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-usage-rollup-no-operator-action-required) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
 - **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。从 MUL-2957 起 migrate 命令在应用 migration 103 之前会自动跑 backfill —— 见 [第 7 步](#7-usage-rollup-no-operator-action-required)

@@ -63,6 +63,8 @@ Once ready:
 - **Frontend:** http://localhost:3000
 - **Backend API:** http://localhost:8080
 
+`docker-compose.selfhost.yml` binds published ports to `127.0.0.1` by default. That localhost-only default is intentional: first-run self-hosts may still have open signup/workspace creation, no email provider, no TLS, and example secrets if you bypass `make selfhost`. For private LAN access, set `BIND_HOST` to one specific LAN IP after hardening the instance. For public or cross-machine access, keep Docker bound to loopback and use a TLS reverse proxy or tunnel.
+
 > **Note:** If you prefer to run the Docker Compose steps manually, see [Manual Docker Compose Setup](#manual-docker-compose-setup) below.
 
 ### Step 2 — Log In
@@ -70,12 +72,14 @@ Once ready:
 Open http://localhost:3000 in your browser. The Docker self-host stack defaults to `APP_ENV=production` (set in `docker-compose.selfhost.yml`), and there is no fixed verification code by default. Pick one of the following to log in:
 
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
-- **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
+- **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:` locally). Useful for one-off testing on a single machine. Do not share verification-code log lines.
 - **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.
 
 Changes to `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` also take effect after restarting the backend / compose stack. The web UI reads all three from `/api/config` at runtime, so no web rebuild is needed. See [Advanced Configuration → Signup Controls](SELF_HOSTING_ADVANCED.md#signup-controls-optional) for the recommended sequence to lock down workspace creation.
 
 > **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
+
+Before exposing the instance beyond localhost, rotate `JWT_SECRET` and `POSTGRES_PASSWORD`, keep `APP_ENV=production`, leave `MULTICA_DEV_VERIFICATION_CODE` empty, configure Resend or SMTP, set exact origins, and lock down signup/workspace creation after bootstrap. The self-host preflight runs automatically in `make selfhost`, `make selfhost-build`, `start.sh`, and the Unix installer.
 
 ### Step 3 — Install CLI & Start Daemon
 
@@ -250,7 +254,7 @@ The chart defaults to `APP_ENV=production` (set in `values.yaml` under `backend.
 
   Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 
-- **Without email configured:** the verification code is generated server-side and printed to the backend pod logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing.
+- **Without email configured:** the verification code is generated server-side and printed to the backend pod logs (look for `[DEV] Verification code for ...:` locally). Useful for one-off testing. Do not share verification-code log lines.
 
   ```bash
   kubectl -n multica logs -f deploy/multica-backend | grep "Verification code"
@@ -447,12 +451,47 @@ Edit `.env` — at minimum, change `JWT_SECRET`:
 JWT_SECRET=$(openssl rand -hex 32)
 ```
 
+Also change `POSTGRES_PASSWORD` and keep `DATABASE_URL` in sync if you are not using the Makefile, which does this for you.
+
+Before running Compose, validate the env file without printing secrets:
+
+```bash
+bash scripts/selfhost-preflight.sh .env
+```
+
 Then start everything:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
+
+### Exposure modes
+
+**Localhost (default):** leave `BIND_HOST=127.0.0.1`; `multica setup self-host` points the CLI at `localhost`.
+
+**Trusted private LAN:** set `BIND_HOST` to one specific host IP, not `0.0.0.0`, and set exact browser origins:
+
+```bash
+BIND_HOST=192.168.1.50
+FRONTEND_ORIGIN=http://192.168.1.50:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.50:3000
+ALLOW_SIGNUP=false
+DISABLE_WORKSPACE_CREATION=true
+```
+
+**Public or cross-machine:** keep `BIND_HOST=127.0.0.1` and put Caddy, Nginx, or Cloudflare Tunnel in front. Terminate TLS, forward `/ws` with the WebSocket `Upgrade` header, set `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS` to the exact public origin, and set `MULTICA_TRUSTED_PROXIES` plus `RATE_LIMIT_TRUSTED_PROXIES` to the exact proxy/CDN CIDRs. Never use `0.0.0.0/0` or `::/0` as trusted proxy ranges.
+
+`BIND_HOST=0.0.0.0` publishes raw Docker ports on every interface and is refused unless `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1` is set. Treat that override as a reviewed infrastructure exception, not normal public setup.
+
+### Docker volumes are sensitive
+
+Compose creates two persistent named volumes:
+
+- `pgdata` stores the PostgreSQL database: users, workspaces, issues, comments, tokens, OAuth state, and other application records.
+- `backend_uploads` stores local attachment/upload files when S3 is not configured.
+
+Back them up and restore them together for point-in-time recovery. Restrict host and Docker daemon access to the machine, and do not share raw volume archives, `pg_dump` output, or upload tarballs publicly. If support needs diagnostics, share schema/version/error snippets with secrets and user content redacted instead of database dumps.
 
 ## Manual CLI Configuration
 

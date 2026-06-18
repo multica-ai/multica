@@ -50,7 +50,13 @@ Once it's up:
 - **Backend**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**Ports listen on `127.0.0.1` only.** `docker-compose.selfhost.yml` binds every published port to loopback — `ss -tlnp` will not show `0.0.0.0:8080`, and the services are unreachable from other machines by design. Secrets and Postgres credentials must never sit on the open internet. For cross-machine access, front the stack with a reverse proxy that terminates TLS — see [Step 5b — Cross-machine: front with a reverse proxy](#5b-cross-machine-front-with-a-reverse-proxy).
+**Ports bind to loopback by default.** `docker-compose.selfhost.yml` publishes backend/frontend ports on `127.0.0.1`, so other machines cannot reach raw Docker ports during first setup. This is intentional: the first-run stack may still have open signup/workspace creation, no email provider, no TLS, and example secrets if you bypass `make selfhost`.
+
+There are three supported exposure tiers:
+
+- Localhost: keep `BIND_HOST=127.0.0.1` and use `multica setup self-host` on the same machine.
+- Trusted private LAN: set `BIND_HOST` to one specific LAN IP, never `0.0.0.0`, after rotating secrets and setting the exact browser origin.
+- Public or cross-machine: keep Docker bound to loopback and put a TLS reverse proxy or tunnel in front.
 </Callout>
 
 ## 2. Important: keep production safety on
@@ -61,6 +67,10 @@ Once it's up:
 Only set `MULTICA_DEV_VERIFICATION_CODE` for local or private test automation. If a fixed code is enabled while `APP_ENV` is non-production, anyone who can request a code can sign in with that fixed value. See [Auth setup → Fixed local testing codes](/auth-setup#fixed-local-testing-codes).
 
 Before any public deployment, make sure `.env` has `APP_ENV=production` and `MULTICA_DEV_VERIFICATION_CODE` is empty.
+</Callout>
+
+<Callout type="warning">
+**Do not expose raw Docker ports publicly.** `BIND_HOST=0.0.0.0` is refused by the self-host preflight unless you set `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1`. That override is for reviewed, private infrastructure only; the recommended public path is a reverse proxy or tunnel with TLS, exact origins, and narrow trusted proxy CIDRs.
 </Callout>
 
 ## 3. Configure the email service (optional but recommended)
@@ -135,7 +145,7 @@ For more auth configuration (OAuth, signup allowlist) and the full SMTP variable
 Open [http://localhost:3000](http://localhost:3000):
 
 - Enter your email
-- Grab the verification code from your configured email backend (Resend or SMTP relay); if neither is configured, copy it from the server container stdout — look for the `[DEV] Verification code` line
+- Grab the verification code from your configured email backend (Resend or SMTP relay); if neither is configured, inspect the server container stdout locally and copy the `[DEV] Verification code` line. Do not share that line.
 - Do not use `888888` unless you explicitly set `MULTICA_DEV_VERIFICATION_CODE=888888` on a non-production private instance
 - Log in and create your first workspace
 
@@ -153,9 +163,42 @@ multica setup self-host
 
 That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3000` (frontend), takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
 
-### 5b. Cross-machine: front with a reverse proxy
+### 5b. Trusted private LAN: bind one host IP
 
-Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since server secrets would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
+For a trusted private LAN, you may publish raw Docker ports on a single host interface. This is for private networks only; it is not a replacement for TLS or a public reverse proxy.
+
+In `.env`, set the host's specific LAN IP and the browser origin that users will open:
+
+```bash
+BIND_HOST=192.168.1.50
+FRONTEND_ORIGIN=http://192.168.1.50:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.50:3000
+```
+
+Before restarting, also rotate `JWT_SECRET` and `POSTGRES_PASSWORD`, keep `APP_ENV=production`, leave `MULTICA_DEV_VERIFICATION_CODE` empty, configure Resend or SMTP, and lock down signup/workspace creation after bootstrap:
+
+```bash
+ALLOW_SIGNUP=false
+DISABLE_WORKSPACE_CREATION=true
+```
+
+Then run `docker compose -f docker-compose.selfhost.yml up -d`. The preflight checks these settings and fails without printing secret values.
+
+For daemon setup from another LAN machine:
+
+```bash
+multica setup self-host \
+  --server-url http://192.168.1.50:8080 \
+  --app-url http://192.168.1.50:3000
+```
+
+<Callout type="warning">
+**Docker volumes contain sensitive data.** Compose creates `pgdata` for PostgreSQL and `backend_uploads` for local attachment files. Back them up and restore them together, restrict host/Docker daemon access, and do not share raw volume archives, `pg_dump` output, or upload tarballs publicly.
+</Callout>
+
+### 5c. Cross-machine/public: front with a reverse proxy
+
+For public access, keep the compose stack listening on `127.0.0.1`. Put a reverse proxy or tunnel on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the HTTPS URL:
 
 ```bash
 multica setup self-host \
@@ -189,9 +232,18 @@ multica.example.com {
 }
 ```
 
-After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` in the server's `.env` and restart the backend — otherwise the WebSocket origin check will reject the browser ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+After bringing the proxy up, set these in the server's `.env` and restart the backend:
 
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination and forwarding the `Upgrade` header on `/ws`.
+```bash
+FRONTEND_ORIGIN=https://multica.example.com
+CORS_ALLOWED_ORIGINS=https://multica.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+Use the actual proxy/CDN CIDRs for your deployment; do not use `0.0.0.0/0` or `::/0`. The origin settings are required because the backend validates both HTTP CORS and the WebSocket `Origin` header. Without them, `/ws` upgrades are rejected with `403` ([Troubleshooting → WebSocket can't connect](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination, forwarding the `Upgrade` header on `/ws`, exact origin allowlists, and narrow trusted proxy CIDRs.
 
 ## 6. Create an agent + assign your first task
 
@@ -266,7 +318,7 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 ## Common issues
 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
-- **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
+- **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → check the safe provider-selection line with `docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"`; only inspect verification-code log lines locally
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
 - **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
 - **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)

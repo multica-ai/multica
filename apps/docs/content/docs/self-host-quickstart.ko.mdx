@@ -49,7 +49,13 @@ make selfhost
 - **백엔드**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**포트는 `127.0.0.1`에서만 수신합니다.** `docker-compose.selfhost.yml`은 공개된 모든 포트를 loopback에 바인딩합니다 — `ss -tlnp`에서는 `0.0.0.0:8080`이 보이지 않으며, 설계상 다른 기기에서는 서비스에 접근할 수 없습니다. 서버 시크릿과 Postgres 자격 증명이 공개 인터넷에 노출되어서는 절대 안 됩니다. 기기 간 접근이 필요하면 TLS를 종료하는 리버스 프록시를 스택 앞에 두세요 — [5b단계 — 기기 간: 리버스 프록시를 앞에 두기](#5b-cross-machine-front-with-a-reverse-proxy)를 참고하세요.
+**포트는 기본적으로 loopback에 바인딩됩니다.** `docker-compose.selfhost.yml`은 backend/frontend를 `127.0.0.1`에 게시하므로, 첫 설정 중에는 다른 기기가 raw Docker 포트에 접근할 수 없습니다. 이는 의도된 안전 설계입니다. TLS, 이메일, 정확한 origin, 가입/워크스페이스 정책, 시크릿이 준비되기 전에 공개되는 일을 막습니다.
+
+지원되는 노출 단계는 세 가지입니다.
+
+- Localhost: `BIND_HOST=127.0.0.1`을 유지하고 같은 기기에서 `multica setup self-host`를 사용합니다.
+- 신뢰할 수 있는 비공개 LAN: `BIND_HOST`를 특정 LAN IP로 설정합니다. `0.0.0.0`은 사용하지 말고, 먼저 시크릿을 교체하고 정확한 브라우저 origin을 설정하세요.
+- 공개/기기 간: Docker는 loopback에 둔 채 TLS 리버스 프록시나 tunnel을 앞에 둡니다.
 </Callout>
 
 ## 2. 중요: 프로덕션 안전 설정 유지하기
@@ -60,6 +66,10 @@ make selfhost
 `MULTICA_DEV_VERIFICATION_CODE`는 로컬 또는 비공개 테스트 자동화에서만 설정하세요. `APP_ENV`가 non-production일 때 고정 코드가 활성화되어 있으면, 코드를 요청할 수 있는 누구나 그 고정 값으로 로그인할 수 있습니다. [인증 설정 → 고정 로컬 테스트 코드](/auth-setup#fixed-local-testing-codes)를 참고하세요.
 
 공개 배포 전에는 `.env`에 `APP_ENV=production`이 설정되어 있고 `MULTICA_DEV_VERIFICATION_CODE`가 비어 있는지 반드시 확인하세요.
+</Callout>
+
+<Callout type="warning">
+**raw Docker 포트를 공개 인터넷에 직접 노출하지 마세요.** `BIND_HOST=0.0.0.0`은 `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1`을 명시하지 않으면 self-host preflight에서 거부됩니다. 이 override는 검토된 비공개 인프라용입니다. 일반적인 공개 경로는 TLS 리버스 프록시나 tunnel, 정확한 origin, 좁은 trusted proxy CIDR입니다.
 </Callout>
 
 ## 3. 이메일 서비스 구성하기(선택 사항이지만 권장)
@@ -134,7 +144,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 [http://localhost:3000](http://localhost:3000)을 엽니다.
 
 - 이메일을 입력합니다
-- 구성한 이메일 백엔드(Resend 또는 SMTP relay)에서 인증 코드를 받습니다. 둘 다 구성하지 않았다면 서버 컨테이너 stdout에서 복사하세요 — `[DEV] Verification code` 줄을 찾으면 됩니다
+- 구성한 이메일 백엔드(Resend 또는 SMTP relay)에서 인증 코드를 받습니다. 둘 다 구성하지 않았다면 서버 컨테이너 stdout을 로컬에서 확인하고 `[DEV] Verification code` 줄을 복사하세요. 이 줄은 공유하지 마세요.
 - non-production 비공개 인스턴스에서 `MULTICA_DEV_VERIFICATION_CODE=888888`을 명시적으로 설정한 경우가 아니라면 `888888`을 사용하지 마세요
 - 로그인하고 첫 워크스페이스를 생성합니다
 
@@ -152,9 +162,42 @@ multica setup self-host
 
 이렇게 하면 CLI가 `http://localhost:8080`(백엔드)과 `http://localhost:3000`(프런트엔드)을 가리키고, 브라우저 로그인을 안내하며, PAT를 로컬에 저장하고, **데몬을 자동으로 시작합니다**.
 
-### 5b. 기기 간: 리버스 프록시를 앞에 두기
+### 5b. 신뢰할 수 있는 비공개 LAN: 하나의 호스트 IP에 바인딩
 
-compose 스택은 `127.0.0.1`에서만 수신하므로, 다른 기기에 있는 데몬은 `http://<server-ip>:8080`에 직접 연결할 수 없습니다 — 그리고 그렇게 되기를 원해서도 안 됩니다. 그렇지 않으면 서버 시크릿이 공개 인터넷에서 접근 가능해지기 때문입니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시를 두고, CLI를 공개 HTTPS URL로 연결하세요.
+신뢰할 수 있는 비공개 LAN에서는 raw Docker 포트를 하나의 호스트 인터페이스에 게시할 수 있습니다. 이는 비공개 네트워크 전용이며 공개용 대체 경로가 아닙니다.
+
+`.env`에서 서버의 구체적인 LAN IP와 브라우저 origin을 설정하세요.
+
+```bash
+BIND_HOST=192.168.1.50
+FRONTEND_ORIGIN=http://192.168.1.50:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.50:3000
+```
+
+재시작 전에 `JWT_SECRET`과 `POSTGRES_PASSWORD`를 교체하고, `APP_ENV=production`을 유지하며, `MULTICA_DEV_VERIFICATION_CODE`를 비우고, Resend 또는 SMTP를 구성하고, bootstrap 후 가입/워크스페이스 생성을 잠그세요.
+
+```bash
+ALLOW_SIGNUP=false
+DISABLE_WORKSPACE_CREATION=true
+```
+
+그런 다음 `docker compose -f docker-compose.selfhost.yml up -d`를 실행합니다. preflight는 이를 확인하며 시크릿 값은 출력하지 않습니다.
+
+다른 LAN 기기의 daemon은 다음처럼 설정할 수 있습니다.
+
+```bash
+multica setup self-host \
+  --server-url http://192.168.1.50:8080 \
+  --app-url http://192.168.1.50:3000
+```
+
+<Callout type="warning">
+**Docker volume에는 민감한 데이터가 들어 있습니다.** Compose는 PostgreSQL용 `pgdata`와 로컬 업로드용 `backend_uploads`를 만듭니다. 백업/복원은 함께 처리하고, 호스트와 Docker daemon 접근을 제한하며, raw volume archive, `pg_dump`, 업로드 tarball을 공개 공유하지 마세요.
+</Callout>
+
+### 5c. 기기 간/공개: 리버스 프록시를 앞에 두기
+
+공개 접근에서는 compose 스택을 `127.0.0.1`에 둡니다. 서버에 TLS를 종료하고 `127.0.0.1:8080`(백엔드)과 `127.0.0.1:3000`(프런트엔드)으로 전달하는 리버스 프록시나 tunnel을 두고, CLI를 공개 HTTPS URL로 연결하세요.
 
 ```bash
 multica setup self-host \
@@ -188,9 +231,18 @@ multica.example.com {
 }
 ```
 
-프록시를 올린 후에는 서버의 `.env`에 `FRONTEND_ORIGIN=https://multica.example.com`을 설정하고 백엔드를 재시작하세요 — 그렇지 않으면 WebSocket origin 검사가 브라우저를 거부합니다([문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-cant-connect)).
+프록시를 올린 후에는 서버의 `.env`에 다음을 설정하고 백엔드를 재시작하세요.
 
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)도 견고한 선택지입니다 — 호스트에 어떤 포트도 노출하지 않고도 TLS와 공개 호스트네임을 제공합니다. Nginx로 동등하게 구성하는 방법(`app.` / `api.`을 별도 호스트네임으로 분리, WebSocket용 `proxy_set_header Upgrade`)도 똑같이 잘 동작합니다. 핵심 요구 사항은 TLS 종료와 `/ws`에서의 `Upgrade` 헤더 전달입니다.
+```bash
+FRONTEND_ORIGIN=https://multica.example.com
+CORS_ALLOWED_ORIGINS=https://multica.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+`127.0.0.1/32`는 실제 프록시/CDN CIDR로 바꾸세요. `0.0.0.0/0` 또는 `::/0`은 사용하지 마세요. origin 설정은 HTTP CORS와 WebSocket `Origin` 검사 모두에 필요합니다. 없으면 `/ws`가 `403`으로 거부됩니다([문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-cant-connect)).
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)도 견고한 선택지입니다 — 호스트에 어떤 포트도 노출하지 않고도 TLS와 공개 호스트네임을 제공합니다. Nginx로 동등하게 구성하는 방법(`app.` / `api.`을 별도 호스트네임으로 분리, WebSocket용 `proxy_set_header Upgrade`)도 똑같이 잘 동작합니다. 핵심 요구 사항은 TLS 종료, `/ws`에서의 `Upgrade` 헤더 전달, 정확한 origin allowlist, 좁은 trusted proxy CIDR입니다.
 
 ## 6. 에이전트 생성 + 첫 작업 할당
 
@@ -267,7 +319,7 @@ multica setup self-host \
 ## 자주 발생하는 문제
 
 - **백엔드가 시작되지 않음**: `docker compose -f docker-compose.selfhost.yml logs backend`로 컨테이너 로그를 확인하세요. 보통 `.env`의 잘못된 `DATABASE_URL` 또는 `JWT_SECRET`이 원인입니다
-- **인증 코드를 받지 못함**: 이메일 백엔드가 구성되지 않은 경우(Resend도 SMTP도 없음) → `docker compose logs backend`에서 `[DEV] Verification code`를 찾으세요
+- **인증 코드를 받지 못함**: 이메일 백엔드가 구성되지 않은 경우(Resend도 SMTP도 없음) → 공유 가능한 provider 선택 줄을 확인하세요: `docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"`; verification-code log는 로컬에서만 확인하세요.
 - **WebSocket이 연결되지 않음**: 공개 배포에서는 반드시 `FRONTEND_ORIGIN`을 실제 프런트엔드 도메인으로 설정해야 합니다. [문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-wont-connect)을 참고하세요
 - **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-usage-rollup-no-operator-action-required)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
 - **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. MUL-2957부터 migrate 명령이 migration 103을 적용하기 전에 백필을 자동으로 실행합니다 — [7단계](#7-usage-rollup-no-operator-action-required)를 참고하세요

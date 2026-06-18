@@ -14,6 +14,24 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
+### Exposure Modes and Preflight Guard
+
+Docker Compose publishes backend and frontend ports on `127.0.0.1` by default. This is the safe first-run shape: secrets, signup/workspace policy, email, TLS, origins, and trusted proxy CIDRs can be configured before anything is reachable from another machine.
+
+| Mode | Settings | Notes |
+|------|----------|-------|
+| Localhost | `BIND_HOST=127.0.0.1` | Default. Use `multica setup self-host` on the same machine. |
+| Trusted private LAN | `BIND_HOST=<specific LAN IP>` plus exact `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS` | Private network only. Rotate secrets, configure email, keep `APP_ENV=production`, clear fixed dev codes, and lock down signup/workspace creation first. |
+| Public / cross-machine | Keep `BIND_HOST=127.0.0.1`; use Caddy, Nginx, or Cloudflare Tunnel | Recommended public path. Terminate TLS, forward `/ws` Upgrade, set exact origins, and use narrow trusted proxy CIDRs. |
+
+The self-host preflight runs before Docker starts in `make selfhost`, `make selfhost-build`, `start.sh`, and the Unix installer. You can also run it manually:
+
+```bash
+bash scripts/selfhost-preflight.sh .env
+```
+
+`BIND_HOST=0.0.0.0` publishes raw Docker ports on every interface and is refused unless `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1` is set. Use that override only after security review; it does not skip the secret/origin/email/signup checks.
+
 ### Database Pool Tuning (Optional)
 
 These have sensible defaults and only need to be set when tuning a large or constrained deployment. Precedence (highest first): env var → `pool_*` query params on `DATABASE_URL` → built-in default.
@@ -100,6 +118,15 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
 
+### Docker Volume Security
+
+The default Compose stack creates two persistent named volumes:
+
+- `pgdata` (`/var/lib/postgresql/data`) contains the full PostgreSQL data directory, including account records, workspace data, task/comment history, tokens, and integration state.
+- `backend_uploads` (`/app/data/uploads`) contains local uploaded files when S3 is not configured.
+
+Treat both as sensitive data surfaces. Back them up and restore them together, restrict host and Docker daemon access, and avoid sharing raw volume archives, full `pg_dump` output, or upload tarballs outside the trusted operator group. For support cases, prefer schema/version/error snippets and redact secrets, tokens, user content, and uploaded file data.
+
 ### Cookies
 
 | Variable | Description |
@@ -114,8 +141,12 @@ The `Secure` flag on session cookies is derived automatically from the scheme of
 |----------|---------|-------------|
 | `PORT` | `8080` | Backend server port |
 | `METRICS_ADDR` | empty | Optional Prometheus metrics listener, for example `127.0.0.1:9090` |
+| `BIND_HOST` | `127.0.0.1` | Docker Compose host interface for published backend/frontend ports. Use a specific LAN IP for private LAN only; do not use `0.0.0.0` for normal public exposure. |
+| `MULTICA_SELFHOST_ALLOW_PUBLIC_BIND` | empty | Emergency override for `BIND_HOST=0.0.0.0`; still requires the rest of the preflight hardening checks to pass. |
 | `FRONTEND_PORT` | `3000` | Frontend port |
 | `CORS_ALLOWED_ORIGINS` | Value of `FRONTEND_ORIGIN` | Comma-separated list of allowed origins. Governs **both** the HTTP CORS allowlist **and** the WebSocket `Origin` check. A browser origin that isn't listed here (and isn't `localhost`) has its real-time WebSocket upgrade rejected with `403`, so live updates stop working until a manual refresh. |
+| `MULTICA_TRUSTED_PROXIES` | empty | CIDRs whose forwarded headers may be trusted for autopilot webhook rate limiting. Leave empty for direct/raw backend exposure. Behind a proxy, use exact proxy/CDN CIDRs only; never `0.0.0.0/0` or `::/0`. |
+| `RATE_LIMIT_TRUSTED_PROXIES` | empty | Separate CIDRs for auth endpoint per-IP rate limiting. Required behind a reverse proxy to avoid all users sharing one proxy bucket. Use exact proxy/CDN CIDRs only. |
 | `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 
 ### CLI / Daemon
@@ -272,7 +303,18 @@ REMOTE_API_URL=http://localhost:8080 pnpm start
 
 ## Reverse Proxy
 
-In production, put a reverse proxy in front of both the backend and frontend to handle TLS and routing.
+In production, keep Docker published ports on `127.0.0.1` and put a reverse proxy or tunnel in front of both the backend and frontend. The proxy must terminate TLS, forward `/ws` with WebSocket `Upgrade` headers, and be the only public listener.
+
+After the proxy is configured, set exact origins and trusted proxy CIDRs in `.env`:
+
+```bash
+FRONTEND_ORIGIN=https://multica.example.com
+CORS_ALLOWED_ORIGINS=https://multica.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+Replace `127.0.0.1/32` with the actual same-host proxy, load balancer, or CDN CIDRs. Do not use `0.0.0.0/0` or `::/0`; that lets untrusted clients spoof forwarded IP headers.
 
 ### Caddy (Recommended)
 
@@ -373,6 +415,8 @@ When using separate domains for frontend and backend, set these environment vari
 # Backend
 FRONTEND_ORIGIN=https://app.example.com
 CORS_ALLOWED_ORIGINS=https://app.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
 
 # Frontend (only if you are building the web image from source via docker-compose.selfhost.build.yml)
 REMOTE_API_URL=https://api.example.com
@@ -382,13 +426,16 @@ NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 
 ## LAN / Non-localhost Access
 
-By default, Multica works on `localhost`. If you access it from another machine on the LAN (e.g. `http://192.168.1.100:3000`), you need to tell the backend to accept that origin:
+By default, Multica publishes Docker ports on `127.0.0.1`. If you access it from another machine on a trusted private LAN (e.g. `http://192.168.1.100:3000`), bind to one specific LAN IP and tell the backend to accept that browser origin:
 
 ```bash
 # .env — replace with your server's LAN IP
+BIND_HOST=192.168.1.100
 FRONTEND_ORIGIN=http://192.168.1.100:3000
 CORS_ALLOWED_ORIGINS=http://192.168.1.100:3000
 ```
+
+Do not use `BIND_HOST=0.0.0.0` for normal LAN/public setup. Before restarting, rotate example secrets, keep `APP_ENV=production`, leave `MULTICA_DEV_VERIFICATION_CODE` empty, configure Resend or SMTP, and lock down `ALLOW_SIGNUP` / `DISABLE_WORKSPACE_CREATION` after bootstrap. The preflight checks these before Compose starts.
 
 Then restart the stack:
 

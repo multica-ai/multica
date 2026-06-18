@@ -49,7 +49,13 @@ make selfhost
 - **バックエンド**: [http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**ポートは `127.0.0.1` でのみ待ち受けます。** `docker-compose.selfhost.yml` は公開されるすべてのポートを loopback にバインドします — `ss -tlnp` には `0.0.0.0:8080` は表示されず、設計上、他のマシンからはサービスにアクセスできません。サーバーのシークレットと Postgres の認証情報は、公開インターネット上に置いては絶対にいけません。マシン間アクセスが必要な場合は、TLS を終端するリバースプロキシをスタックの前に置いてください — [ステップ5b — マシン間: リバースプロキシを前に置く](#5b-cross-machine-front-with-a-reverse-proxy)を参照してください。
+**ポートはデフォルトで loopback にバインドされます。** `docker-compose.selfhost.yml` は backend/frontend を `127.0.0.1` に公開するため、初回セットアップ中に他のマシンから raw Docker ポートへは到達できません。これは意図した安全設計です。TLS、メール、正確な origin、サインアップ/ワークスペースポリシー、シークレットが整う前に公開されないようにします。
+
+サポートされる公開範囲は3つです。
+
+- Localhost: `BIND_HOST=127.0.0.1` のまま、同じマシンで `multica setup self-host` を使います。
+- 信頼済みプライベート LAN: `BIND_HOST` を特定の LAN IP に設定します。`0.0.0.0` は使わず、先にシークレットをローテートし、正確なブラウザ origin を設定します。
+- 公開/マシン間: Docker は loopback のままにし、TLS リバースプロキシまたは tunnel を前段に置きます。
 </Callout>
 
 ## 2. 重要: プロダクションの安全設定を維持する
@@ -60,6 +66,10 @@ make selfhost
 `MULTICA_DEV_VERIFICATION_CODE` はローカルまたは非公開のテスト自動化でのみ設定してください。`APP_ENV` が non-production のときに固定コードが有効になっていると、コードをリクエストできる誰もがその固定値でサインインできてしまいます。[認証設定 → 固定のローカルテストコード](/auth-setup#fixed-local-testing-codes)を参照してください。
 
 公開デプロイの前には、`.env` に `APP_ENV=production` が設定され、`MULTICA_DEV_VERIFICATION_CODE` が空であることを必ず確認してください。
+</Callout>
+
+<Callout type="warning">
+**raw Docker ポートを公開インターネットへ直接出さないでください。** `BIND_HOST=0.0.0.0` は、`MULTICA_SELFHOST_ALLOW_PUBLIC_BIND=1` を明示しない限り self-host preflight に拒否されます。この override はレビュー済みのプライベート基盤向けです。通常の公開経路は TLS リバースプロキシまたは tunnel、正確な origin、狭い trusted proxy CIDR です。
 </Callout>
 
 ## 3. メールサービスを構成する（任意ですが推奨）
@@ -134,7 +144,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com
 [http://localhost:3000](http://localhost:3000) を開きます。
 
 - メールアドレスを入力します
-- 構成したメールバックエンド（Resend または SMTP relay）から認証コードを受け取ります。どちらも構成していない場合は、サーバーコンテナの stdout からコピーしてください — `[DEV] Verification code` の行を探します
+- 構成したメールバックエンド（Resend または SMTP relay）から認証コードを受け取ります。どちらも構成していない場合は、サーバーコンテナの stdout をローカルで確認し、`[DEV] Verification code` の行をコピーしてください。その行は共有しないでください。
 - non-production の非公開インスタンスで `MULTICA_DEV_VERIFICATION_CODE=888888` を明示的に設定した場合を除き、`888888` を使わないでください
 - ログインして最初のワークスペースを作成します
 
@@ -152,9 +162,42 @@ multica setup self-host
 
 これにより CLI が `http://localhost:8080`（バックエンド）と `http://localhost:3000`（フロントエンド）を指すようになり、ブラウザログインを案内し、PAT をローカルに保存して、**デーモンを自動的に起動します**。
 
-### 5b. マシン間: リバースプロキシを前に置く
+### 5b. 信頼済みプライベート LAN: 1つのホスト IP にバインドする
 
-compose スタックは `127.0.0.1` でのみ待ち受けるため、別のマシンにあるデーモンは `http://<server-ip>:8080` に直接接続できません — そして、そうなることを望むべきでもありません。さもなければサーバーのシークレットが公開インターネットから到達可能になってしまうからです。TLS を終端し、`127.0.0.1:8080`（バックエンド）と `127.0.0.1:3000`（フロントエンド）へ転送するリバースプロキシをサーバーに置き、CLI を公開 HTTPS URL に向けてください。
+信頼済みプライベート LAN では、raw Docker ポートを1つのホストインターフェイスに公開できます。これはプライベートネットワーク専用であり、公開用の代替ではありません。
+
+`.env` でサーバーの具体的な LAN IP とブラウザ origin を設定します。
+
+```bash
+BIND_HOST=192.168.1.50
+FRONTEND_ORIGIN=http://192.168.1.50:3000
+CORS_ALLOWED_ORIGINS=http://192.168.1.50:3000
+```
+
+再起動前に `JWT_SECRET` と `POSTGRES_PASSWORD` をローテートし、`APP_ENV=production` を維持し、`MULTICA_DEV_VERIFICATION_CODE` を空にし、Resend または SMTP を設定し、bootstrap 後にサインアップ/ワークスペース作成をロックしてください。
+
+```bash
+ALLOW_SIGNUP=false
+DISABLE_WORKSPACE_CREATION=true
+```
+
+その後、`docker compose -f docker-compose.selfhost.yml up -d` を実行します。preflight はこれらを確認し、シークレット値は出力しません。
+
+別の LAN マシンの daemon は次のように設定できます。
+
+```bash
+multica setup self-host \
+  --server-url http://192.168.1.50:8080 \
+  --app-url http://192.168.1.50:3000
+```
+
+<Callout type="warning">
+**Docker volume には機密データが含まれます。** Compose は PostgreSQL 用の `pgdata` とローカルアップロード用の `backend_uploads` を作成します。バックアップ/リストアは一緒に扱い、ホストと Docker daemon へのアクセスを制限し、raw volume archive、`pg_dump`、アップロード tarball を公開共有しないでください。
+</Callout>
+
+### 5c. マシン間/公開: リバースプロキシを前に置く
+
+公開アクセスでは、compose スタックは `127.0.0.1` のままにします。TLS を終端し、`127.0.0.1:8080`（バックエンド）と `127.0.0.1:3000`（フロントエンド）へ転送するリバースプロキシまたは tunnel をサーバーに置き、CLI を公開 HTTPS URL に向けてください。
 
 ```bash
 multica setup self-host \
@@ -188,9 +231,18 @@ multica.example.com {
 }
 ```
 
-プロキシを立ち上げたら、サーバーの `.env` に `FRONTEND_ORIGIN=https://multica.example.com` を設定してバックエンドを再起動してください — そうしないと WebSocket の origin チェックがブラウザを拒否します（[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-cant-connect)）。
+プロキシを立ち上げたら、サーバーの `.env` に次を設定してバックエンドを再起動してください。
 
-[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) も堅実な選択肢です — ホストにポートを一切公開せずに TLS と公開ホスト名を提供してくれます。Nginx で同等に構成する方法（`app.` / `api.` を別々のホスト名に分離、WebSocket 用の `proxy_set_header Upgrade`）も同じくらいうまく動作します。重要な要件は、TLS の終端と `/ws` での `Upgrade` ヘッダーの転送です。
+```bash
+FRONTEND_ORIGIN=https://multica.example.com
+CORS_ALLOWED_ORIGINS=https://multica.example.com
+MULTICA_TRUSTED_PROXIES=127.0.0.1/32
+RATE_LIMIT_TRUSTED_PROXIES=127.0.0.1/32
+```
+
+`127.0.0.1/32` は実際のプロキシ/CDN CIDR に置き換えてください。`0.0.0.0/0` や `::/0` は使わないでください。origin は HTTP CORS と WebSocket `Origin` チェックの両方に必要です。未設定だと `/ws` は `403` で拒否されます（[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-cant-connect)）。
+
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) も堅実な選択肢です — ホストにポートを一切公開せずに TLS と公開ホスト名を提供してくれます。Nginx で同等に構成する方法（`app.` / `api.` を別々のホスト名に分離、WebSocket 用の `proxy_set_header Upgrade`）も同じくらいうまく動作します。重要な要件は、TLS の終端、`/ws` での `Upgrade` ヘッダー転送、正確な origin allowlist、狭い trusted proxy CIDR です。
 
 ## 6. エージェントの作成 + 最初のタスクの割り当て
 
@@ -267,7 +319,7 @@ multica setup self-host \
 ## よくある問題
 
 - **バックエンドが起動しない**: `docker compose -f docker-compose.selfhost.yml logs backend` でコンテナのログを確認してください。たいていは `.env` の不正な `DATABASE_URL` または `JWT_SECRET` が原因です
-- **認証コードが届かない**: メールバックエンドが構成されていない場合（Resend も SMTP もない）→ `docker compose logs backend` で `[DEV] Verification code` を探してください
+- **認証コードが届かない**: メールバックエンドが構成されていない場合（Resend も SMTP もない）→ 共有可能な provider 選択行を確認してください: `docker compose -f docker-compose.selfhost.yml logs backend | grep "EmailService:"`。verification-code log はローカルでのみ確認してください。
 - **WebSocket が接続できない**: 公開デプロイでは、`FRONTEND_ORIGIN` を実際のフロントエンドのドメインに必ず設定する必要があります。[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-wont-connect)を参照してください
 - **使用量 / ランタイムのダッシュボードがゼロのまま**: `rollup_task_usage_hourly()` がスケジューリングされていません — 上記の [ステップ7](#7-usage-rollup-no-operator-action-required)と[トラブルシューティング → 使用量ダッシュボードがゼロと表示される](/troubleshooting#usage-dashboard-stays-at-zero)を参照してください
 - **`migrate up` が `refusing to drop legacy daily rollups` で失敗する**: `v0.3.4 → v0.3.5+` のアップグレード経路ガードです。MUL-2957 以降、migrate コマンドは migration 103 を適用する前に自動でバックフィルを実行します — [ステップ7](#7-usage-rollup-no-operator-action-required)を参照してください
