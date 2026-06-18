@@ -40,10 +40,10 @@ const SAVE_DEBOUNCE_MS = 600;
 export type NoteFontSize = "xs" | "sm" | "base" | "lg";
 
 const FONT_SIZE_CLASS: Record<NoteFontSize, string> = {
-  xs: "text-xs",
-  sm: "text-sm",
-  base: "text-xl",
-  lg: "text-3xl",
+  xs: "text-[8px]",
+  sm: "text-[11px]",
+  base: "text-sm",
+  lg: "text-lg",
 };
 
 const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
