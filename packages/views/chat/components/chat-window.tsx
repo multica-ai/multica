@@ -51,6 +51,7 @@ import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -77,6 +78,7 @@ function seedChatMessagesPageCache(
 
 export function ChatWindow() {
   const { t } = useT("chat");
+  const { pathname } = useNavigation();
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -463,6 +465,10 @@ export function ChatWindow() {
   };
 
   const contextItems = useChatContextItems(wsId);
+
+  // Channel pages own the bottom-right send button; the chat FAB/window would
+  // overlap it. Bail after all hooks have run to respect the rules of hooks.
+  if (/^\/[^/]+\/channels(?:\/|$)?/.test(pathname)) return null;
 
   return (
     <motion.div

@@ -30,6 +30,7 @@ interface DesktopAPI {
     slug: string;
     itemId: string;
     issueKey: string;
+    targetPath?: string;
     title: string;
     body: string;
   }) => void;
@@ -41,6 +42,7 @@ interface DesktopAPI {
       slug: string;
       itemId: string;
       issueKey: string;
+      targetPath?: string;
     }) => void,
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */

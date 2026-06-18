@@ -77,6 +77,14 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID           string                  // non-empty for chat tasks
+	ChannelID               string                  // non-empty for channel-origin mention tasks
+	ChannelName             string                  // display name for the source channel
+	ChannelMessageID        string                  // message that triggered a channel mention task
+	ChannelThreadID         string                  // optional thread associated with the trigger message
+	ChannelReplyToID        string                  // optional parent message for replies
+	ChannelThreadRootMsgID  string                  // root message of the thread (for replying back to the same thread)
+	ChannelTriggerContent   string                  // triggering channel message content
+	ChannelMentionType      string                  // agent or squad
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string

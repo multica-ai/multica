@@ -177,6 +177,22 @@ INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, 
 VALUES ($1, $2, NULL, 'queued', $3, $4)
 RETURNING *;
 
+-- name: CreateChannelMentionTask :one
+-- Channel mention tasks are independent from Issues: issue_id and
+-- trigger_comment_id stay NULL, while channel_* columns provide indexed
+-- source identity for dedupe, resume, and analytics.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, context,
+    trigger_summary, is_leader_task,
+    channel_id, channel_message_id, channel_thread_id, channel_reply_to_id
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.narg('trigger_summary'), COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
+    $5, $6, sqlc.narg('channel_thread_id'), sqlc.narg('channel_reply_to_id')
+)
+RETURNING *;
+
 -- name: LinkTaskToIssue :exec
 -- Attaches the issue a quick-create task produced back to the task row, once
 -- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
@@ -292,6 +308,9 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
 -- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
+-- Channel mention tasks use channel_id so one agent does not process two
+-- mentions from the same channel concurrently while still allowing other
+-- channels to run in parallel.
 -- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
@@ -308,13 +327,16 @@ WHERE id = (
             AND (
               (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
               OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (atq.channel_id IS NOT NULL AND active.channel_id = atq.channel_id)
               OR (
                 atq.issue_id IS NULL
                 AND atq.chat_session_id IS NULL
                 AND atq.autopilot_run_id IS NULL
+                AND atq.channel_id IS NULL
                 AND active.issue_id IS NULL
                 AND active.chat_session_id IS NULL
                 AND active.autopilot_run_id IS NULL
+                AND active.channel_id IS NULL
               )
             )
       )
@@ -423,6 +445,43 @@ WHERE agent_id = $1 AND issue_id = $2
   AND session_id IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
 LIMIT 1;
+
+-- name: GetLastChannelTaskSession :one
+-- Resume channel-origin mentions scoped to a single context lane:
+-- (agent_id, channel_id, channel_thread_id). The channel main timeline
+-- (channel_thread_id IS NULL) is the parent lane; every thread is its own
+-- child lane. Scoping the resume key this way keeps each thread's
+-- conversation/workdir isolated, so two unrelated threads in the same
+-- channel never inherit each other's session — the channel analog of
+-- per-issue isolation. Cross-lane context stays reachable on demand via
+-- `multica channel context`, so no session inheritance across lanes is
+-- needed. Failures known to poison session history are excluded just like
+-- issue/chat resume.
+SELECT session_id, work_dir, runtime_id FROM agent_task_queue
+WHERE agent_id = $1 AND channel_id = $2
+  AND channel_thread_id IS NOT DISTINCT FROM sqlc.narg('channel_thread_id')
+  AND (
+    status = 'completed'
+    OR (
+      status = 'failed'
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'parse_error', 'upstream_failure')
+      AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
+    )
+  )
+  AND session_id IS NOT NULL
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
+-- name: HasChannelMentionTaskForMessageAndAgent :one
+SELECT count(*) > 0 AS has_task FROM agent_task_queue
+WHERE channel_message_id = $1 AND agent_id = $2;
+
+-- name: ListChannelMentionTasksForMessages :many
+-- Returns channel-origin agent tasks keyed by their triggering message so the
+-- channel timeline can render per-message run state and transcript history.
+SELECT * FROM agent_task_queue
+WHERE channel_message_id = ANY(sqlc.arg('message_ids')::uuid[])
+ORDER BY created_at ASC;
 
 -- name: GetLastTaskStartedAtForIssueAndAgent :one
 -- Returns the started_at of the most recent prior task for this (agent, issue)

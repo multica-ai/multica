@@ -228,7 +228,7 @@ describe("workspace task invalidation", () => {
 
     invalidateWorkspaceTaskQueries(qc, wsId);
 
-    expect(invalidate).toHaveBeenCalledTimes(7);
+    expect(invalidate).toHaveBeenCalledTimes(8);
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: agentTaskSnapshotKeys.list(wsId),
       refetchType: "active",
@@ -247,6 +247,10 @@ describe("workspace task invalidation", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.tasksAll(),
+      refetchType: "active",
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.myTaskRunsAll(),
       refetchType: "active",
     });
     expect(invalidate).toHaveBeenCalledWith({
@@ -277,7 +281,7 @@ describe("workspace task invalidation", () => {
 
       vi.advanceTimersByTime(1);
 
-      expect(invalidate).toHaveBeenCalledTimes(7);
+      expect(invalidate).toHaveBeenCalledTimes(8);
       invalidator.dispose();
     } finally {
       vi.useRealTimers();

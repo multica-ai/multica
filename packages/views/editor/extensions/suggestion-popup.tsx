@@ -148,6 +148,7 @@ export function createSuggestionPopupRender<
 
         const doc = props.editor.view.dom.ownerDocument;
         popup = doc.createElement("div");
+        popup.dataset.slot = "mention-suggestion-content";
         popup.style.position = "fixed";
         popup.style.zIndex = "50";
         popup.appendChild(renderer.element);

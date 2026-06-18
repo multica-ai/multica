@@ -12,6 +12,7 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
 import { wikiKeys } from "../wiki/queries";
+import { channelKeys } from "../channels/queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -43,6 +44,7 @@ import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { buildChannelInboxPathForSlug } from "../inbox/channel";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -194,6 +196,7 @@ export function invalidateWorkspaceTaskQueries(
   invalidateActiveQueries(qc, agentRunCountsKeys.last30d(wsId));
   invalidateActiveQueries(qc, agentTasksKeys.all(wsId));
   invalidateActiveQueries(qc, issueKeys.tasksAll());
+  invalidateActiveQueries(qc, issueKeys.myTaskRunsAll());
   invalidateActiveQueries(qc, issueKeys.usageAll());
   invalidateActiveQueries(qc, workspaceKeys.squads(wsId));
 }
@@ -309,12 +312,20 @@ export async function handleInboxNew(
           slug: string;
           itemId: string;
           issueKey: string;
+          targetPath?: string;
           title: string;
           body: string;
         }) => void;
       };
     }
   ).desktopAPI;
+  // Channel-origin items carry `targetPath` so the desktop bridge can navigate
+  // directly to the channel message instead of treating it as an issue. Needs
+  // a resolved slug; without one we omit it and the click falls back to a
+  // no-op (empty slug) like issue items.
+  const targetPath = slug
+    ? (buildChannelInboxPathForSlug(item, slug) ?? undefined)
+    : undefined;
   // `issueKey` matches the inbox page's URL selector (issue id when the
   // item is attached to an issue, otherwise the inbox item id). `itemId`
   // is the inbox row's own id, needed to fire markInboxRead on click.
@@ -326,6 +337,7 @@ export async function handleInboxNew(
     slug: slug ?? "",
     itemId: item.id,
     issueKey: item.issue_id ?? item.id,
+    targetPath,
     title: item.title,
     body: item.body ?? "",
   });
@@ -417,6 +429,22 @@ export function useRealtimeSync(
     const scheduleTaskRefresh = (wsId: string) => {
       taskInvalidator.schedule(wsId);
     };
+    const invalidateChannelTaskSource = (payload: { channel_id?: string; channel_message_id?: string }) => {
+      const wsId = getCurrentWsId();
+      if (!wsId || !payload.channel_id) return;
+      qc.invalidateQueries({
+        queryKey: channelKeys.channelMessages(wsId, payload.channel_id),
+      });
+      if (payload.channel_message_id) {
+        qc.invalidateQueries({
+          queryKey: channelKeys.messageThread(
+            wsId,
+            payload.channel_id,
+            payload.channel_message_id,
+          ),
+        });
+      }
+    };
 
     const refreshMap: Record<string, () => void> = {
       inbox: () => {
@@ -458,6 +486,18 @@ export function useRealtimeSync(
       wiki_page: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wikiKeys.all(wsId) });
+      },
+      channel: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_thread: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
+      },
+      channel_message: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: channelKeys.all(wsId) });
       },
       squad: () => {
         const wsId = getCurrentWsId();
@@ -930,6 +970,9 @@ export function useRealtimeSync(
     // when reconnect replays the event for an already-running task).
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -950,6 +993,9 @@ export function useRealtimeSync(
     // taskMessages → "Thinking · Ns".
     const unsubTaskDispatch = ws.on("task:dispatch", (p) => {
       const payload = p as TaskDispatchPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -967,6 +1013,9 @@ export function useRealtimeSync(
     // would stay parked even after the daemon resumed work.
     const unsubTaskRunning = ws.on("task:running", (p) => {
       const payload = p as TaskRunningPayload;
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
@@ -986,6 +1035,9 @@ export function useRealtimeSync(
       "task:waiting_local_directory",
       (p) => {
         const payload = p as TaskWaitingLocalDirectoryPayload;
+        if (payload.channel_id) {
+          invalidateChannelTaskSource(payload);
+        }
         if (!payload.chat_session_id) return;
         qc.setQueryData<ChatPendingTask>(
           chatKeys.pendingTask(payload.chat_session_id),
@@ -1005,6 +1057,9 @@ export function useRealtimeSync(
     const unsubTaskCancelled = ws.on("task:cancelled", (p) => {
       const payload = p as TaskCancelledPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence and task caches
         if (wsId) {
@@ -1023,6 +1078,9 @@ export function useRealtimeSync(
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
       const payload = p as TaskCompletedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: invalidate agent presence, task lists, and activity caches
         // so the execution log, agent cards, and activity charts refresh.
@@ -1047,6 +1105,9 @@ export function useRealtimeSync(
     const unsubTaskFailed = ws.on("task:failed", (p) => {
       const payload = p as TaskFailedPayload;
       const wsId = getCurrentWsId();
+      if (payload.channel_id) {
+        invalidateChannelTaskSource(payload);
+      }
       if (!payload.chat_session_id) {
         // Issue task: same invalidation as task:completed
         if (wsId) {

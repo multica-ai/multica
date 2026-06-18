@@ -27,6 +27,7 @@ import {
   Plus,
   MessageSquare,
   MessageSquareReply,
+  MessagesSquare,
   Square,
   Terminal,
   Tag,
@@ -99,7 +100,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -768,16 +769,25 @@ function ActivityBlock({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
               {isReferencedBy ? (
-                <span className="truncate">
-                  {"referenced by "}
-                  <AppLink
-                    href={paths.issueDetail(details.source_issue_id ?? "")}
-                    className="font-medium text-foreground hover:underline"
-                  >
-                    {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
-                  </AppLink>
-                  {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
-                </span>
+                details.source_type === "channel_message" ? (
+                  <span className="truncate">
+                    {"mentioned in channel "}
+                    <span className="font-medium text-foreground">
+                      {details.source_channel_name || "channel"}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="truncate">
+                    {"referenced by "}
+                    <AppLink
+                      href={paths.issueDetail(details.source_issue_id ?? "")}
+                      className="font-medium text-foreground hover:underline"
+                    >
+                      {details.source_issue_identifier ?? details.source_issue_id ?? "?"}
+                    </AppLink>
+                    {details.source_issue_title ? `: ${details.source_issue_title}` : ""}
+                  </span>
+                )
               ) : (
                 <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
               )}
@@ -982,7 +992,6 @@ export function IssueDetail({
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
-  const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const { uploadWithToast } = useFileUpload(api, (err) => toast.error(err.message));
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
@@ -1155,16 +1164,8 @@ export function IssueDetail({
   const [markdownPreviewOpen, setMarkdownPreviewOpen] = useState(false);
   const clearHistoryMutation = useClearIssueHistory();
 
-  // Issue data from TQ — uses detail query, seeded from list cache if available.
-  // Only seed when description is present; list API omits it, and ContentEditor
-  // reads defaultValue on mount only — seeding null description shows an empty editor.
-  const { data: issue = null, isLoading: issueLoading } = useQuery({
-    ...issueDetailOptions(wsId, id),
-    initialData: () => {
-      const cached = allIssues.find((i) => i.id === id || i.identifier === id);
-      return cached?.description != null ? cached : undefined;
-    },
-  });
+  // Issue data from TQ — single detail fetch (no full-list pull).
+  const { data: issue = null, isLoading: issueLoading } = useQuery(issueDetailOptions(wsId, id));
   const setActiveIssueContext = useActiveIssueContextStore((s) => s.setCurrent);
   const clearActiveIssueContext = useActiveIssueContextStore((s) => s.clearCurrent);
   useEffect(() => {
@@ -1543,7 +1544,6 @@ export function IssueDetail({
   const { data: parentIssue = null } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
-    initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
   // Project segment in the breadcrumb. The issue's project_id is the source of
@@ -2663,6 +2663,13 @@ export function IssueDetail({
                 );
               })()}
             </AppLink>
+          )}
+
+          {issue.source_channel_id && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-muted/30 px-2 py-1 text-xs text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5" />
+              <span>来自频道讨论</span>
+            </div>
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">

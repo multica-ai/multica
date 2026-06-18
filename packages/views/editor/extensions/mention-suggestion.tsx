@@ -74,6 +74,11 @@ export interface MentionListRef {
   onKeyDown: (props: { event: KeyboardEvent }) => boolean;
 }
 
+export interface MentionSuggestionScope {
+  memberIds?: string[];
+  getMemberIds?: () => string[] | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Group items by section
 // ---------------------------------------------------------------------------
@@ -506,6 +511,8 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  /** Restricts member candidates to a channel's roster. */
+  scope?: MentionSuggestionScope;
 }
 
 export function createMentionSuggestion(
@@ -526,7 +533,7 @@ export function createMentionSuggestion(
     const wsId = getCurrentWsId();
     if (!wsId) return [];
 
-    const members: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
+    const allMembers: MemberWithUser[] = qc.getQueryData(workspaceKeys.members(wsId)) ?? [];
     const agents: Agent[] = qc.getQueryData(workspaceKeys.agents(wsId)) ?? [];
     const squads: Squad[] = qc.getQueryData(workspaceKeys.squads(wsId)) ?? [];
     const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
@@ -539,8 +546,13 @@ export function createMentionSuggestion(
     // store. Used to gate personal agents in the @mention list so no user
     // (including admins) can @mention agents owned by other users.
     const userId = useAuthStore.getState().user?.id ?? null;
+    const scopedIds = options.scope?.getMemberIds?.() ?? options.scope?.memberIds;
+    const scopedMemberIds = scopedIds ? new Set(scopedIds) : null;
+    const members = scopedMemberIds
+      ? allMembers.filter((m) => scopedMemberIds.has(m.user_id))
+      : allMembers;
     const myRole =
-      members.find((m) => m.user_id === userId)?.role ?? null;
+      allMembers.find((m) => m.user_id === userId)?.role ?? null;
 
     const q = query.toLowerCase();
 

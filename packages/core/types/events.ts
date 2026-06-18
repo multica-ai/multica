@@ -240,6 +240,8 @@ export interface TaskQueuedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
 }
 
@@ -249,6 +251,8 @@ export interface TaskDispatchPayload {
   issue_id: string;
   runtime_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
 }
 
 export interface TaskRunningPayload {
@@ -256,6 +260,8 @@ export interface TaskRunningPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
 }
 
@@ -269,6 +275,8 @@ export interface TaskWaitingLocalDirectoryPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
   wait_reason?: string;
 }
@@ -278,6 +286,8 @@ export interface TaskCompletedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
 }
 
@@ -286,6 +296,8 @@ export interface TaskFailedPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
 }
 
@@ -294,6 +306,8 @@ export interface TaskCancelledPayload {
   agent_id: string;
   issue_id: string;
   chat_session_id?: string;
+  channel_id?: string;
+  channel_message_id?: string;
   status: string;
 }
 

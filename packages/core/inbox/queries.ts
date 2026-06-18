@@ -1,6 +1,7 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
 import type { InboxItem } from "../types";
+import { getInboxItemSelectionKey } from "./channel";
 
 export const inboxKeys = {
   all: (wsId: string) => ["inbox", wsId] as const,
@@ -39,7 +40,7 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
   const active = items.filter((i) => !i.archived);
   const groups = new Map<string, InboxItem[]>();
   for (const item of active) {
-    const key = item.issue_id ?? item.id;
+    const key = getInboxItemSelectionKey(item);
     const group = groups.get(key) ?? [];
     group.push(item);
     groups.set(key, group);
