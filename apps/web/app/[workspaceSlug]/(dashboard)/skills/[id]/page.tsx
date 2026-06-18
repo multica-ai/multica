@@ -1,7 +1,8 @@
 "use client";
 
 import { use } from "react";
-import { SkillDetailPage } from "@multica/views/skills";
+// CEREBRO-PATCH(skills-direct-exports): import the detail route directly so /skills can stay lightweight.
+import { SkillDetailPage } from "@multica/views/skills/components/skill-detail-page";
 
 export default function SkillDetailRoute({
   params,
