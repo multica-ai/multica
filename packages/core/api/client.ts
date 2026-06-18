@@ -194,6 +194,8 @@ import type {
   EvaluateKnowledgeCandidateRequest,
   KnowledgeCandidate,
   KnowledgeDetail,
+  KnowledgeDraftDispatched,
+  CuratorDraftTask,
   KnowledgeFeedback,
   KnowledgeGovernanceFinding,
   KnowledgeItem,
@@ -330,6 +332,8 @@ import {
   EMPTY_SEARCH_KNOWLEDGE_RESPONSE,
   KnowledgeCandidateSchema,
   KnowledgeDetailSchema,
+  KnowledgeDraftDispatchedSchema,
+  CuratorDraftTaskSchema,
   KnowledgeFeedbackSchema,
   KnowledgeGovernanceFindingSchema,
   KnowledgeItemSchema,
@@ -2433,11 +2437,19 @@ export class ApiClient {
     });
   }
 
-  async createKnowledgeDraftFromIssue(data: { issue_id: string }): Promise<KnowledgeDetail> {
+  async createKnowledgeDraftFromIssue(data: { issue_id: string }): Promise<KnowledgeDetail | KnowledgeDraftDispatched> {
     const raw = await this.fetch<unknown>("/api/knowledge/drafts/from-issue", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    const dispatched = parseWithFallback(raw, KnowledgeDraftDispatchedSchema, {
+      status: "queued" as const,
+      task_id: "",
+      message: "",
+    }, {
+      endpoint: "POST /api/knowledge/drafts/from-issue",
+    });
+    if (dispatched.task_id) return dispatched;
     return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
       endpoint: "POST /api/knowledge/drafts/from-issue",
     });
@@ -2446,11 +2458,19 @@ export class ApiClient {
   async createKnowledgeDraftFromCandidate(
     candidateId: string,
     data?: { regenerate?: boolean },
-  ): Promise<KnowledgeDetail> {
+  ): Promise<KnowledgeDetail | KnowledgeDraftDispatched> {
     const raw = await this.fetch<unknown>(`/api/knowledge/candidates/${candidateId}/draft`, {
       method: "POST",
       body: JSON.stringify({ regenerate: data?.regenerate ?? false }),
     });
+    const dispatched = parseWithFallback(raw, KnowledgeDraftDispatchedSchema, {
+      status: "queued" as const,
+      task_id: "",
+      message: "",
+    }, {
+      endpoint: "POST /api/knowledge/candidates/:id/draft",
+    });
+    if (dispatched.task_id) return dispatched;
     return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
       endpoint: "POST /api/knowledge/candidates/:id/draft",
     });
@@ -2459,13 +2479,32 @@ export class ApiClient {
   async createKnowledgeDraftFromGovernanceFinding(
     findingId: string,
     data?: { regenerate?: boolean },
-  ): Promise<KnowledgeDetail> {
+  ): Promise<KnowledgeDetail | KnowledgeDraftDispatched> {
     const raw = await this.fetch<unknown>(`/api/knowledge/governance-findings/${findingId}/draft`, {
       method: "POST",
       body: JSON.stringify({ regenerate: data?.regenerate ?? false }),
     });
+    const dispatched = parseWithFallback(raw, KnowledgeDraftDispatchedSchema, {
+      status: "queued" as const,
+      task_id: "",
+      message: "",
+    }, {
+      endpoint: "POST /api/knowledge/governance-findings/:id/draft",
+    });
+    if (dispatched.task_id) return dispatched;
     return parseWithFallback(raw, KnowledgeDetailSchema, EMPTY_KNOWLEDGE_DETAIL, {
       endpoint: "POST /api/knowledge/governance-findings/:id/draft",
+    });
+  }
+
+  async getCuratorDraftTask(taskId: string): Promise<CuratorDraftTask> {
+    const raw = await this.fetch<unknown>(`/api/knowledge/curator-drafts/${taskId}`);
+    return parseWithFallback(raw, CuratorDraftTaskSchema, {
+      id: taskId,
+      status: "queued" as const,
+      draft_kind: "",
+    }, {
+      endpoint: "GET /api/knowledge/curator-drafts/:taskId",
     });
   }
 

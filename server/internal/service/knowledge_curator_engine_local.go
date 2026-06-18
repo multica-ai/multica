@@ -70,13 +70,12 @@ func (e *LocalCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDra
 		createdBy = input.Candidate.CreatedBy
 	}
 
-	_, err = e.draftService.EnqueueDraftTask(ctx, workspaceID, runtime.ID, draftKind, taskInput, createdBy)
+	taskID, err := e.draftService.EnqueueDraftTask(ctx, workspaceID, runtime.ID, draftKind, taskInput, createdBy)
 	if err != nil {
 		return CuratorDraft{}, err
 	}
 
-	// Return the sentinel error so the caller knows the draft was dispatched.
-	return CuratorDraft{}, ErrCuratorDraftDispatched
+	return CuratorDraft{}, &CuratorDraftDispatchedError{TaskID: taskID}
 }
 
 func (e *LocalCuratorEngine) SummarizeSource(ctx context.Context, source CuratorSourceBundle) (string, error) {

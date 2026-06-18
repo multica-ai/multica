@@ -16,6 +16,16 @@ var ErrCuratorDraftTaskNotFound = errors.New("curator draft task not found")
 var ErrCuratorLocalSummarizeUnavailable = errors.New("summarize source is not available in local runtime mode")
 var ErrCuratorLocalEmbeddingUnavailable = errors.New("build embedding is not available in local runtime mode")
 
+// CuratorDraftDispatchedError wraps ErrCuratorDraftDispatched with the queued
+// task ID so callers can poll for completion.
+type CuratorDraftDispatchedError struct {
+	TaskID pgtype.UUID
+}
+
+func (e *CuratorDraftDispatchedError) Error() string { return ErrCuratorDraftDispatched.Error() }
+
+func (e *CuratorDraftDispatchedError) Is(target error) bool { return target == ErrCuratorDraftDispatched }
+
 // CuratorDraftTaskService manages the lifecycle of curator draft tasks
 // dispatched to local daemon runtimes.
 type CuratorDraftTaskService struct {
@@ -125,7 +135,7 @@ func (s *CuratorDraftTaskService) CompleteDraftTask(ctx context.Context, taskID,
 		}
 	}
 
-	resultJSON, _ := json.Marshal(draft)
+	resultJSON, _ := json.Marshal(detail)
 	if _, err := s.Queries.CompleteCuratorDraftTask(ctx, db.CompleteCuratorDraftTaskParams{
 		ID:          taskID,
 		RuntimeID:   runtimeID,

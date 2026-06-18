@@ -110,3 +110,16 @@ export function knowledgeInjectionsOptions(wsId: string, issueId: string | null)
     enabled: !!issueId,
   });
 }
+
+export function curatorDraftTaskOptions(wsId: string, taskId: string | null) {
+  return queryOptions({
+    queryKey: [...knowledgeKeys.all(wsId), "curator-draft", taskId],
+    queryFn: () => api.getCuratorDraftTask(taskId!),
+    enabled: !!taskId,
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (data && (data.status === "completed" || data.status === "failed")) return false;
+      return 2000;
+    },
+  });
+}

@@ -1161,7 +1161,7 @@ func (h *Handler) CreateKnowledgeDraftFromIssue(w http.ResponseWriter, r *http.R
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrCuratorDraftDispatched) {
-			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse(err))
 			return
 		}
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
@@ -1201,7 +1201,7 @@ func (h *Handler) CreateKnowledgeDraftFromCandidate(w http.ResponseWriter, r *ht
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrCuratorDraftDispatched) {
-			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse(err))
 			return
 		}
 		h.writeKnowledgeError(w, err, "failed to create knowledge draft")
@@ -1239,7 +1239,7 @@ func (h *Handler) CreateKnowledgeDraftFromGovernanceFinding(w http.ResponseWrite
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrCuratorDraftDispatched) {
-			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse())
+			writeJSON(w, http.StatusAccepted, curatorDraftDispatchedResponse(err))
 			return
 		}
 		h.writeKnowledgeError(w, err, "failed to create governance update draft")
@@ -1373,11 +1373,16 @@ func (h *Handler) parseKnowledgePath(w http.ResponseWriter, r *http.Request) (pg
 	return wsUUID, itemID, true
 }
 
-func curatorDraftDispatchedResponse() map[string]any {
-	return map[string]any{
+func curatorDraftDispatchedResponse(err error) map[string]any {
+	resp := map[string]any{
 		"status":  "queued",
 		"message": "Knowledge curator draft dispatched to local runtime. Poll GET /api/knowledge/curator-drafts/{taskId} for status.",
 	}
+	var dispatchedErr *service.CuratorDraftDispatchedError
+	if errors.As(err, &dispatchedErr) {
+		resp["task_id"] = uuidToString(dispatchedErr.TaskID)
+	}
+	return resp
 }
 
 func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback string) {

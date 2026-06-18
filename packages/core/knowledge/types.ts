@@ -487,3 +487,17 @@ export interface CreateKnowledgeDraftFromGovernanceFindingRequest {
   finding_id: string;
   regenerate?: boolean;
 }
+
+export interface KnowledgeDraftDispatched {
+  status: "queued";
+  task_id: string;
+  message: string;
+}
+
+export interface CuratorDraftTask {
+  id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  draft_kind: string;
+  result?: unknown;
+  error?: string;
+}

@@ -2147,7 +2147,6 @@ func (d *Daemon) runRuntimePoller(
 			// Try to claim a curator draft task before sleeping.
 			curatorTask, err := d.client.ClaimCuratorDraft(pollerCtx, rid)
 			if err == nil && curatorTask != nil {
-				sem <- slot // Release the slot — curator drafts are lightweight.
 				d.handleCuratorDraft(parentCtx, *curatorTask, rid)
 				continue
 			}
@@ -4220,12 +4219,23 @@ func (d *Daemon) handleCuratorDraft(ctx context.Context, task CuratorDraftTask, 
 }
 
 // buildCuratorDraftPrompt constructs the draft generation prompt from the
-// serialized curator draft input.
+// serialized curator draft input. The input map keys use PascalCase because
+// CuratorDraftInput has no json struct tags, so encoding/json serializes
+// exported fields with their Go names.
 func buildCuratorDraftPrompt(input map[string]any) string {
-	// Extract key fields from the draft input for prompt construction.
-	issueTitle, _ := input["issue"].(string)
-	sourceSummary, _ := input["source_summary"].(string)
-	evidence, _ := input["evidence"].(string)
+	issueTitle := ""
+	if issue, ok := input["Issue"].(map[string]any); ok {
+		if t, ok := issue["title"].(string); ok {
+			issueTitle = t
+		}
+		if desc, ok := issue["description"].(map[string]any); ok {
+			if s, ok := desc["String"].(string); ok && s != "" {
+				issueTitle += "\n" + s
+			}
+		}
+	}
+	sourceSummary, _ := input["SourceSummary"].(string)
+	evidence := buildCuratorEvidenceText(input)
 
 	return strings.Join([]string{
 		"Generate a reusable Multica knowledge draft from the issue evidence.",
@@ -4238,6 +4248,83 @@ func buildCuratorDraftPrompt(input map[string]any) string {
 		"Evidence:",
 		evidence,
 	}, "\n\n")
+}
+
+// buildCuratorEvidenceText builds evidence text from the serialized draft
+// input map, mirroring curatorEvidenceText + sourceEvidenceText on the server
+// but operating on json.Unmarshal'd map[string]any instead of typed structs.
+func buildCuratorEvidenceText(input map[string]any) string {
+	var parts []string
+
+	// Comments
+	if comments, ok := input["Comments"].([]any); ok {
+		for _, c := range comments {
+			if cm, ok := c.(map[string]any); ok {
+				if content, ok := cm["content"].(string); ok && content != "" {
+					parts = append(parts, "Comment:\n"+excerpt(content, 800))
+				}
+			}
+		}
+	}
+
+	// Agent tasks
+	if tasks, ok := input["AgentTasks"].([]any); ok {
+		for _, t := range tasks {
+			if tm, ok := t.(map[string]any); ok {
+				var lines []string
+				if status, ok := tm["status"].(string); ok {
+					lines = append(lines, status)
+				}
+				// Skip result — []byte serialises as base64, not meaningful for the LLM.
+				if errObj, ok := tm["error"].(map[string]any); ok {
+					if s, ok := errObj["String"].(string); ok && s != "" {
+						lines = append(lines, "error: "+s)
+					}
+				}
+				if fr, ok := tm["failure_reason"].(map[string]any); ok {
+					if s, ok := fr["String"].(string); ok && s != "" {
+						lines = append(lines, "failure: "+s)
+					}
+				}
+				if len(lines) > 0 {
+					parts = append(parts, "Agent task:\n"+excerpt(strings.Join(lines, "\n"), 500))
+				}
+			}
+		}
+	}
+
+	// Pull requests
+	if prs, ok := input["PullRequests"].([]any); ok {
+		for _, p := range prs {
+			if pr, ok := p.(map[string]any); ok {
+				owner, _ := pr["repo_owner"].(string)
+				name, _ := pr["repo_name"].(string)
+				num, _ := pr["pr_number"].(float64)
+				title, _ := pr["title"].(string)
+				state, _ := pr["state"].(string)
+				parts = append(parts, fmt.Sprintf("Pull request: %s/%s#%d %s state=%s", owner, name, int(num), title, state))
+			}
+		}
+	}
+
+	// Candidate
+	if cand, ok := input["Candidate"].(map[string]any); ok {
+		reason, _ := cand["trigger_reason"].(string)
+		strength, _ := cand["signal_strength"].(string)
+		score, _ := cand["score"].(float64)
+		parts = append(parts, fmt.Sprintf("Candidate reason=%s strength=%s score=%d", reason, strength, int(score)))
+	}
+
+	// Governance finding
+	if gov, ok := input["Governance"].(map[string]any); ok {
+		ftype, _ := gov["finding_type"].(string)
+		sev, _ := gov["severity"].(float64)
+		reason, _ := gov["reason"].(string)
+		action, _ := gov["suggested_action"].(string)
+		parts = append(parts, fmt.Sprintf("Governance finding type=%s severity=%d reason=%s suggested_action=%s", ftype, int(sev), reason, action))
+	}
+
+	return strings.Join(parts, "\n\n")
 }
 
 // callLLMAPI makes a synchronous HTTP POST to an OpenAI-compatible chat
@@ -4314,6 +4401,14 @@ func parseCuratorDraftJSON(text string) (map[string]any, error) {
 		return nil, fmt.Errorf("curator returned invalid JSON: %w", err)
 	}
 	return draft, nil
+}
+
+func excerpt(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return strings.TrimSpace(value[:max]) + "..."
 }
 
 // guard sites in this file from drifting apart when we add more

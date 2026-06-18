@@ -296,8 +296,8 @@ BEGIN
         a.workspace_id,
         atq.agent_id,
         i.project_id,
-        OLD.provider,
         OLD.model,
+        OLD.provider,
         compute_task_kind(atq.chat_session_id, atq.autopilot_run_id, atq.issue_id, atq.trigger_comment_id),
         inj.has_inj
     FROM agent_task_queue atq
@@ -393,7 +393,6 @@ BEGIN
             COUNT(DISTINCT atq.id) FILTER (WHERE atq.parent_task_id IS NOT NULL)::bigint AS follow_up_count,
             COALESCE(MAX(atq.attempt), 1)::int AS max_attempt
         FROM dirty_keys dk
-        JOIN agent a ON a.workspace_id = dk.workspace_id
         JOIN agent_task_queue atq ON atq.agent_id = dk.agent_id
         JOIN task_usage tu ON tu.task_id = atq.id
             AND tu.model = dk.model

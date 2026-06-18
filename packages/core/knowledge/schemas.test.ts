@@ -5,6 +5,8 @@ import {
   EMPTY_LIST_KNOWLEDGE_ANALYTICS_RESPONSE,
   EMPTY_LIST_KNOWLEDGE_RESPONSE,
   KnowledgeDetailSchema,
+  KnowledgeDraftDispatchedSchema,
+  CuratorDraftTaskSchema,
   ListKnowledgeAnalyticsResponseSchema,
   ListKnowledgeResponseSchema,
 } from "./schemas";
@@ -65,5 +67,47 @@ describe("knowledge response schemas", () => {
     );
 
     expect(parsed).toEqual(EMPTY_KNOWLEDGE_DETAIL);
+  });
+
+  it("accepts dispatched response with task_id", () => {
+    const parsed = parseWithFallback(
+      { status: "queued", task_id: "task-1", message: "dispatched" },
+      KnowledgeDraftDispatchedSchema,
+      { status: "queued" as const, task_id: "", message: "" },
+      { endpoint: "POST /api/knowledge/drafts/from-issue" },
+    );
+    expect(parsed.task_id).toBe("task-1");
+    expect(parsed.status).toBe("queued");
+  });
+
+  it("CuratorDraftTaskSchema accepts running status from server", () => {
+    const parsed = parseWithFallback(
+      { id: "t1", status: "running", draft_kind: "issue" },
+      CuratorDraftTaskSchema,
+      { id: "t1", status: "queued" as const, draft_kind: "" },
+      { endpoint: "GET /api/knowledge/curator-drafts/:id" },
+    );
+    expect(parsed.status).toBe("running");
+  });
+
+  it("CuratorDraftTaskSchema falls back for unknown status", () => {
+    const parsed = parseWithFallback(
+      { id: "t1", status: "processing", draft_kind: "issue" },
+      CuratorDraftTaskSchema,
+      { id: "t1", status: "queued" as const, draft_kind: "" },
+      { endpoint: "GET /api/knowledge/curator-drafts/:id" },
+    );
+    expect(parsed.status).toBe("queued");
+  });
+
+  it("CuratorDraftTaskSchema accepts completed with result", () => {
+    const parsed = CuratorDraftTaskSchema.safeParse({
+      id: "t1", status: "completed", draft_kind: "issue", result: { item: { id: "k1" } },
+    });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      const result = parsed.data.result as Record<string, unknown> | undefined;
+      expect(result?.item).toEqual({ id: "k1" });
+    }
   });
 });

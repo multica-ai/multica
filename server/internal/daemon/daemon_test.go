@@ -2415,3 +2415,109 @@ func TestApprovalPolicyResolution(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildCuratorDraftPrompt_PascalCaseKeys(t *testing.T) {
+	input := map[string]any{
+		"Issue": map[string]any{
+			"title": "Login timeout after 30s",
+			"description": map[string]any{
+				"String": "Users report session expiry during active use.",
+				"Valid":  true,
+			},
+		},
+		"SourceSummary": "Auth middleware latency spike on high load.",
+		"Comments": []any{
+			map[string]any{"content": "Retry with exponential backoff fixed it."},
+		},
+	}
+
+	prompt := buildCuratorDraftPrompt(input)
+
+	if !strings.Contains(prompt, "Login timeout after 30s") {
+		t.Error("prompt should contain issue title")
+	}
+	if !strings.Contains(prompt, "session expiry") {
+		t.Error("prompt should contain issue description")
+	}
+	if !strings.Contains(prompt, "Auth middleware latency spike") {
+		t.Error("prompt should contain SourceSummary")
+	}
+	// Evidence section must contain comment content (not empty).
+	if !strings.Contains(prompt, "exponential backoff") {
+		t.Error("prompt evidence should contain comment text")
+	}
+	// Verify that lowercase snake_case keys resolve to zero values (empty strings).
+	// If they accidentally worked, the prompt builder is reading wrong keys.
+	if strings.Contains(prompt, "Issue:\n\nSource summary:") {
+		t.Error("Issue section should not be empty — PascalCase key 'Issue' not read correctly")
+	}
+	if strings.Contains(prompt, "Source summary:\n\nEvidence:") {
+		t.Error("SourceSummary section should not be empty — PascalCase key not read correctly")
+	}
+}
+
+func TestBuildCuratorEvidenceText_ReadableFields(t *testing.T) {
+	input := map[string]any{
+		"Comments": []any{
+			map[string]any{"content": "Root cause: missing index on session table."},
+		},
+		"AgentTasks": []any{
+			map[string]any{
+				"status": "failed",
+				"error": map[string]any{
+					"String": "connection refused",
+					"Valid":  true,
+				},
+				"failure_reason": map[string]any{
+					"String": "timeout after 30s",
+					"Valid":  true,
+				},
+				"result": "dGhpcyBpcyBiYXNlNjQgZW5jb2RlZCBieXRlcw==", // base64 bytes
+			},
+		},
+		"PullRequests": []any{
+			map[string]any{
+				"repo_owner": "multica",
+				"repo_name":  "server",
+				"pr_number":  float64(42),
+				"title":      "Add session index",
+				"state":      "merged",
+			},
+		},
+		"Candidate": map[string]any{
+			"trigger_reason":  "repeated_failure",
+			"signal_strength": "high",
+			"score":           float64(85),
+		},
+	}
+
+	text := buildCuratorEvidenceText(input)
+
+	if !strings.Contains(text, "Root cause: missing index") {
+		t.Error("evidence should contain comment content")
+	}
+	if !strings.Contains(text, "failed") {
+		t.Error("evidence should contain task status")
+	}
+	if !strings.Contains(text, "connection refused") {
+		t.Error("evidence should contain task error")
+	}
+	if !strings.Contains(text, "timeout after 30s") {
+		t.Error("evidence should contain failure reason")
+	}
+	if strings.Contains(text, "base64") || strings.Contains(text, "dGhpcy") {
+		t.Error("evidence must NOT contain base64-encoded task result bytes")
+	}
+	if !strings.Contains(text, "multica/server#42") {
+		t.Error("evidence should contain PR reference")
+	}
+	if !strings.Contains(text, "repeated_failure") {
+		t.Error("evidence should contain candidate trigger reason")
+	}
+	if !strings.Contains(text, "high") {
+		t.Error("evidence should contain candidate signal strength")
+	}
+	if !strings.Contains(text, "85") {
+		t.Error("evidence should contain candidate score")
+	}
+}

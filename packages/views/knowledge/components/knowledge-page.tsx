@@ -24,6 +24,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import {
   knowledgeAnalyticsOptions,
   knowledgeCandidatesOptions,
+  curatorDraftTaskOptions,
   knowledgeDetailOptions,
   knowledgeEffectOptions,
   knowledgeGovernanceFindingsOptions,
@@ -655,10 +656,37 @@ function CandidateEvidenceView({ evidence }: { evidence: CandidateEvidence }) {
 function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
   const { t, i18n } = useT("knowledge");
   const paths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
   const createDraft = useCreateKnowledgeDraftFromCandidate();
+  const [curatorDraftTaskId, setCuratorDraftTaskId] = useState<string | null>(null);
+  const { data: curatorDraftTask } = useQuery({
+    ...curatorDraftTaskOptions(wsId, curatorDraftTaskId),
+  });
+  const router = useNavigation();
+
+  useEffect(() => {
+    if (!curatorDraftTask || !curatorDraftTaskId) return;
+    if (curatorDraftTask.status === "completed") {
+      const detail = curatorDraftTask.result as { item?: { id?: string } } | undefined;
+      if (detail?.item?.id) {
+        toast.success(t(($) => $.toast.draft_created));
+        router.push(paths.knowledgeDetail(detail.item.id));
+      }
+      setCuratorDraftTaskId(null);
+    } else if (curatorDraftTask.status === "failed") {
+      toast.error(curatorDraftTask.error ?? t(($) => $.toast.action_failed));
+      setCuratorDraftTaskId(null);
+    }
+  }, [curatorDraftTask, curatorDraftTaskId, router, paths, t]);
+
   const generate = async (candidate: KnowledgeCandidate, regenerate = false) => {
     try {
-      await createDraft.mutateAsync({ candidate_id: candidate.id, regenerate });
+      const result = await createDraft.mutateAsync({ candidate_id: candidate.id, regenerate });
+      if ("task_id" in result) {
+        setCuratorDraftTaskId(result.task_id);
+        toast.success(t(($) => $.issue.generating));
+        return;
+      }
       toast.success(t(($) => $.toast.draft_created));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));
@@ -786,11 +814,38 @@ function governanceFindingStatusLabel(status: string, t: ReturnType<typeof useT<
 function GovernanceFindingsQueue({ findings }: { findings: KnowledgeGovernanceFinding[] }) {
   const { t, i18n } = useT("knowledge");
   const paths = useWorkspacePaths();
+  const wsId = useWorkspaceId();
   const createDraft = useCreateKnowledgeDraftFromGovernanceFinding();
   const resolveFinding = useResolveKnowledgeGovernanceFinding();
+  const [curatorDraftTaskId, setCuratorDraftTaskId] = useState<string | null>(null);
+  const { data: curatorDraftTask } = useQuery({
+    ...curatorDraftTaskOptions(wsId, curatorDraftTaskId),
+  });
+  const router = useNavigation();
+
+  useEffect(() => {
+    if (!curatorDraftTask || !curatorDraftTaskId) return;
+    if (curatorDraftTask.status === "completed") {
+      const detail = curatorDraftTask.result as { item?: { id?: string } } | undefined;
+      if (detail?.item?.id) {
+        toast.success(t(($) => $.toast.draft_created));
+        router.push(paths.knowledgeDetail(detail.item.id));
+      }
+      setCuratorDraftTaskId(null);
+    } else if (curatorDraftTask.status === "failed") {
+      toast.error(curatorDraftTask.error ?? t(($) => $.toast.action_failed));
+      setCuratorDraftTaskId(null);
+    }
+  }, [curatorDraftTask, curatorDraftTaskId, router, paths, t]);
+
   const generate = async (finding: KnowledgeGovernanceFinding, regenerate = false) => {
     try {
-      await createDraft.mutateAsync({ finding_id: finding.id, regenerate });
+      const result = await createDraft.mutateAsync({ finding_id: finding.id, regenerate });
+      if ("task_id" in result) {
+        setCuratorDraftTaskId(result.task_id);
+        toast.success(t(($) => $.issue.generating));
+        return;
+      }
       toast.success(t(($) => $.toast.draft_created));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t(($) => $.toast.action_failed));

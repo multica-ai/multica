@@ -103,7 +103,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
-import { knowledgeCandidatesOptions, knowledgeInjectionsOptions } from "@multica/core/knowledge/queries";
+import { knowledgeCandidatesOptions, knowledgeInjectionsOptions, curatorDraftTaskOptions } from "@multica/core/knowledge/queries";
 import { useCreateKnowledgeDraftFromIssue, useCreateKnowledgeFeedback } from "@multica/core/knowledge/mutations";
 import type { KnowledgeCandidate, KnowledgeFeedbackValue } from "@multica/core/knowledge/types";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -1256,6 +1256,10 @@ export function IssueDetail({
   const resolvedId = issue?.id ?? id;
   const createKnowledgeDraft = useCreateKnowledgeDraftFromIssue();
   const createKnowledgeFeedback = useCreateKnowledgeFeedback();
+  const [curatorDraftTaskId, setCuratorDraftTaskId] = useState<string | null>(null);
+  const { data: curatorDraftTask } = useQuery({
+    ...curatorDraftTaskOptions(wsId, curatorDraftTaskId),
+  });
   const { data: knowledgeCandidatesData } = useQuery({
     ...knowledgeCandidatesOptions(wsId, { issue_id: resolvedId, limit: 20 }),
     enabled: !!issue,
@@ -1987,15 +1991,37 @@ export function IssueDetail({
 
   const handleCreateKnowledgeDraft = async () => {
     try {
-      const detail = await createKnowledgeDraft.mutateAsync({ issue_id: resolvedId });
+      const result = await createKnowledgeDraft.mutateAsync({ issue_id: resolvedId });
+      if ("task_id" in result) {
+        setCuratorDraftTaskId(result.task_id);
+        toast.success(tKnowledge(($) => $.issue.generating));
+        return;
+      }
       toast.success(tKnowledge(($) => $.issue.generated));
-      if (detail.item.id) {
-        router.push(paths.knowledgeDetail(detail.item.id));
+      if (result.item.id) {
+        router.push(paths.knowledgeDetail(result.item.id));
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : tKnowledge(($) => $.issue.generate_failed));
     }
   };
+
+  // Poll curator draft task status and redirect on completion.
+  useEffect(() => {
+    if (!curatorDraftTask || !curatorDraftTaskId) return;
+    if (curatorDraftTask.status === "completed") {
+      const detail = curatorDraftTask.result as { item?: { id?: string } } | undefined;
+      const itemId = detail?.item?.id;
+      if (itemId) {
+        toast.success(tKnowledge(($) => $.issue.generated));
+        router.push(paths.knowledgeDetail(itemId));
+      }
+      setCuratorDraftTaskId(null);
+    } else if (curatorDraftTask.status === "failed") {
+      toast.error(curatorDraftTask.error ?? tKnowledge(($) => $.issue.generate_failed));
+      setCuratorDraftTaskId(null);
+    }
+  }, [curatorDraftTask, curatorDraftTaskId, router]);
 
   const handleKnowledgeFeedback = async (knowledgeId: string, value: KnowledgeFeedbackValue) => {
     try {

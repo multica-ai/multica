@@ -2,6 +2,7 @@ import { z } from "zod";
 import type {
   KnowledgeCandidate,
   KnowledgeDetail,
+  KnowledgeDraftDispatched,
   KnowledgeEffectBucket,
   KnowledgeEffectSummary,
   KnowledgeFeedback,
@@ -503,9 +504,24 @@ export const EMPTY_LIST_KNOWLEDGE_INJECTIONS_RESPONSE: ListKnowledgeInjectionsRe
   injections: [],
 };
 
+export const KnowledgeDraftDispatchedSchema = z.object({
+  status: z.literal("queued"),
+  task_id: z.string(),
+  message: z.string(),
+});
+
+export const CuratorDraftTaskSchema = z.object({
+  id: z.string(),
+  status: z.enum(["queued", "running", "completed", "failed"]),
+  draft_kind: z.string(),
+  result: z.unknown().optional(),
+  error: z.string().optional(),
+});
+
 export type {
   KnowledgeCandidate,
   KnowledgeDetail,
+  KnowledgeDraftDispatched,
   KnowledgeFeedback,
   KnowledgeGovernanceFinding,
   KnowledgeInjectionDetail,
