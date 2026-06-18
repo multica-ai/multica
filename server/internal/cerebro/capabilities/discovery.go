@@ -121,6 +121,16 @@ var providerRegistry = map[string]Set{
 			"WebFetch",
 			"WebSearch",
 			"Write",
+			// agent-browser is a Multica skill-driven local CLI that drives a
+			// real Chrome over a Unix socket — not a native Claude tool. It is
+			// listed here so it surfaces as a capability ("tools:agent-browser")
+			// in the tool-policy table's Tools tab, where an admin sets
+			// Allow/Ask/Deny at every layer (FIR-1428). Its real enforcement
+			// point is the sandbox unix-socket gate at task-claim time, not the
+			// PreToolUse hook (the agent invokes it via Bash, so no tool call by
+			// that name ever reaches the hook). Default stays Deny: the socket is
+			// sealed until the policy explicitly resolves to allow/ask.
+			"agent-browser",
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},

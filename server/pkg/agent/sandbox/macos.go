@@ -131,6 +131,15 @@ type Profile struct {
 	// Empty list means no items are authorised (the deny default stands
 	// and no env-var injection is expected).
 	KeychainItemsAllowed []string
+	// AllowUnixSocketBind opens binding of local Unix domain sockets inside
+	// the sandbox. The default (false) leaves only the loopback TCP bind
+	// rule, which blocks tools that talk to a local helper over a Unix socket
+	// — most notably agent-browser, which drives a real Chrome over a Unix
+	// socket and fails to start with "Operation not permitted" otherwise
+	// (FIR-1428). The daemon sets this true only when the agent's
+	// agent-browser tool policy resolves to allow/ask; deny/default keeps the
+	// socket sealed.
+	AllowUnixSocketBind bool
 }
 
 // Generate renders the Seatbelt profile as a Scheme-DSL string.
@@ -366,6 +375,14 @@ func Generate(p Profile) (string, error) {
 	b.WriteString("(allow network-outbound (literal \"/private/var/run/mDNSResponder\"))\n")
 	b.WriteString("(allow network-outbound (remote udp \"*:53\"))\n")
 	b.WriteString("(allow network-bind (local ip \"localhost:*\"))\n")
+	// Unix domain sockets are denied by default. agent-browser (FIR-1428)
+	// binds and connects to a local Unix socket to drive Chrome; without
+	// these rules its daemon fails to start with "Operation not permitted".
+	// Gated on the per-agent agent-browser tool policy via AllowUnixSocketBind.
+	if p.AllowUnixSocketBind {
+		b.WriteString("(allow network-bind (local unix-socket))\n")
+		b.WriteString("(allow network-outbound (local unix-socket))\n")
+	}
 	b.WriteString("\n")
 
 	return b.String(), nil

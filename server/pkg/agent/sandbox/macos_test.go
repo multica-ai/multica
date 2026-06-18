@@ -131,6 +131,34 @@ func TestGenerate_WritablePathsEmittedBeforeDenies(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-sandbox-macos-test): FIR-1428 Unix-socket bind gate.
+// agent-browser drives Chrome over a local Unix domain socket; the default
+// profile only permits loopback TCP bind, so the socket is sealed until the
+// per-agent agent-browser tool policy opens it via AllowUnixSocketBind.
+func TestGenerate_UnixSocketBind_Gated(t *testing.T) {
+	const bindRule = `(allow network-bind (local unix-socket))`
+	const outRule = `(allow network-outbound (local unix-socket))`
+
+	off, err := Generate(Profile{Workdir: "/Users/sandbox/work", Home: "/Users/sandbox"})
+	if err != nil {
+		t.Fatalf("Generate (off): %v", err)
+	}
+	if strings.Contains(off, bindRule) {
+		t.Errorf("unix-socket bind must be denied by default; profile:\n%s", off)
+	}
+
+	on, err := Generate(Profile{Workdir: "/Users/sandbox/work", Home: "/Users/sandbox", AllowUnixSocketBind: true})
+	if err != nil {
+		t.Fatalf("Generate (on): %v", err)
+	}
+	if !strings.Contains(on, bindRule) {
+		t.Errorf("AllowUnixSocketBind must emit %q\nprofile:\n%s", bindRule, on)
+	}
+	if !strings.Contains(on, outRule) {
+		t.Errorf("AllowUnixSocketBind must emit %q\nprofile:\n%s", outRule, on)
+	}
+}
+
 // CEREBRO-PATCH(agent-sandbox-macos-test): JEH-1774 keychain mode unit
 // tests — read-only legacy path, deny-by-default path, and audit-only
 // item-allowlist comment emission.

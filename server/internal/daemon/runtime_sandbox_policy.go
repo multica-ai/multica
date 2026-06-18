@@ -16,6 +16,13 @@ type RuntimeSandboxPolicy struct {
 	DeniedPaths        []string `json:"denied_paths,omitempty"`
 	DenyShell          bool     `json:"deny_shell,omitempty"`
 	DeniedExecutables  []string `json:"denied_executables,omitempty"`
+	// AllowAgentBrowser is injected by the server at task-claim time when the
+	// agent's agent-browser tool policy resolves to allow/ask (FIR-1428). It
+	// tells buildSandboxConfig to open the sandbox Unix-socket bind and make
+	// ~/.agent-browser writable so the agent-browser CLI can drive Chrome.
+	// Default (false) keeps the socket sealed — browser access is off until
+	// explicitly granted.
+	AllowAgentBrowser bool `json:"allow_agent_browser,omitempty"`
 }
 
 func parseRuntimeSandboxPolicy(raw json.RawMessage) RuntimeSandboxPolicy {

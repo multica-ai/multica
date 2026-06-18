@@ -62,6 +62,13 @@ type SandboxConfig struct {
 	// forensics and represents the contract the higher-level token
 	// injector must honour.
 	KeychainItemsAllowed []string
+	// AllowUnixSocketBind opens binding/connecting local Unix domain sockets
+	// inside the sandbox. The zero value keeps them sealed (only loopback TCP
+	// bind is allowed). The daemon sets this true only when the agent's
+	// agent-browser tool policy resolves to allow/ask, so agent-browser can
+	// drive a real Chrome over its local socket (FIR-1428); deny/default keeps
+	// the socket shut.
+	AllowUnixSocketBind bool
 }
 
 // errSandboxRequiredButUnavailable is returned when SandboxConfig.Enabled is
@@ -121,6 +128,7 @@ func prepareCommand(
 		DeniedExecutables:    sb.DeniedExecutables,
 		KeychainAccess:       sb.KeychainAccess,
 		KeychainItemsAllowed: sb.KeychainItemsAllowed,
+		AllowUnixSocketBind:  sb.AllowUnixSocketBind,
 	})
 	if err != nil {
 		return nil, noopCleanup, fmt.Errorf("agent: write sandbox profile: %w", err)

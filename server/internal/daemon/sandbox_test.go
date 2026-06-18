@@ -129,6 +129,46 @@ func TestBuildSandboxConfig_RuntimePolicyShellAndPaths(t *testing.T) {
 	}
 }
 
+// TestBuildSandboxConfig_AgentBrowserGate guards FIR-1428: the Unix-socket bind
+// and ~/.agent-browser write rule open ONLY when the server resolved the agent's
+// agent-browser tool policy to allow/ask and stamped allow_agent_browser into the
+// runtime sandbox policy. Default (flag absent) keeps both sealed.
+func TestBuildSandboxConfig_AgentBrowserGate(t *testing.T) {
+	d := sandboxTestDaemon(Config{SandboxConfig: cerebroruntime.SandboxConfig{EnableSandbox: true}, HealthPort: 19514})
+
+	// Sealed by default: no flag → no socket, no ~/.agent-browser write rule.
+	sealed := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{}, nil)
+	if sealed == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if sealed.AllowUnixSocketBind {
+		t.Error("default must keep Unix-socket bind sealed")
+	}
+	for _, p := range sealed.WritablePaths {
+		if strings.HasSuffix(p, "/.agent-browser") {
+			t.Errorf("default must not make ~/.agent-browser writable: %v", sealed.WritablePaths)
+		}
+	}
+
+	// Granted: allow_agent_browser → socket open + ~/.agent-browser writable.
+	open := d.buildSandboxConfig("claude", nil, RuntimeSandboxPolicy{AllowAgentBrowser: true}, nil)
+	if open == nil {
+		t.Fatal("expected sandbox config")
+	}
+	if !open.AllowUnixSocketBind {
+		t.Error("allow_agent_browser must open the Unix-socket bind")
+	}
+	hasAgentBrowser := false
+	for _, p := range open.WritablePaths {
+		if strings.HasSuffix(p, "/.agent-browser") {
+			hasAgentBrowser = true
+		}
+	}
+	if !hasAgentBrowser {
+		t.Errorf("allow_agent_browser must make ~/.agent-browser writable: %v", open.WritablePaths)
+	}
+}
+
 // boolPtr is a tiny helper for the per-runtime override tests below.
 func boolPtr(b bool) *bool { return &b }
 

@@ -263,6 +263,61 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// agentBrowserToolKey is the capability key agent-browser is registered under.
+// capabilities.For("claude").Tools lists "agent-browser", which the capability
+// mirror writes to cerebro_capability as "tools:agent-browser" (same shape as
+// PolicyToolKey produces). The sandbox unix-socket gate keys on it (FIR-1428).
+const agentBrowserToolKey = "tools:agent-browser"
+
+// resolveAgentBrowserAllowed reports whether the agent-browser local CLI may run
+// for this agent — i.e. whether the daemon should open the sandbox Unix-socket
+// bind agent-browser needs to drive Chrome (FIR-1428).
+//
+// Unlike the generic tool-policy table (Base=Allow), agent-browser is resolved
+// with Base=Deny: an unconfigured workspace keeps the socket sealed, matching
+// the security requirement that browser access is OFF until explicitly granted.
+// Only an explicit allow/ask at some layer opens it; deny — or no grant at all —
+// keeps it shut. A resolve error fails closed (sealed), never open.
+func (h *Handler) resolveAgentBrowserAllowed(ctx context.Context, wsID, runtimeID, agentID, ownerID pgtype.UUID) bool {
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	eff, err := store.Resolve(ctx, toolpolicy.Query{
+		WorkspaceID: wsID,
+		ToolKey:     agentBrowserToolKey,
+		RuntimeID:   runtimeID,
+		AgentID:     agentID,
+		UserID:      ownerID,
+		Base:        toolpolicy.SettingDeny,
+	})
+	if err != nil {
+		slog.Warn("agent-browser sandbox gate: resolve failed — keeping socket sealed",
+			"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "error", err)
+		return false
+	}
+	return eff.Setting == toolpolicy.SettingAllow || eff.Setting == toolpolicy.SettingAsk
+}
+
+// withAgentBrowserSandbox returns the runtime sandbox policy JSON with
+// allow_agent_browser=true merged in, so the daemon's buildSandboxConfig opens
+// the Unix-socket bind and ~/.agent-browser write rule for this claim (FIR-1428).
+// An empty/invalid input policy yields a fresh object carrying just the flag.
+// On a marshal error it returns the original policy unchanged (fail closed: the
+// daemon keeps the socket sealed) rather than dropping the rest of the policy.
+func withAgentBrowserSandbox(policy json.RawMessage) json.RawMessage {
+	obj := map[string]any{}
+	if len(policy) > 0 {
+		if err := json.Unmarshal(policy, &obj); err != nil {
+			slog.Warn("agent-browser sandbox gate: existing sandbox policy is not an object — keeping socket sealed")
+			return policy
+		}
+	}
+	obj["allow_agent_browser"] = true
+	merged, err := json.Marshal(obj)
+	if err != nil {
+		return policy
+	}
+	return merged
+}
+
 // connectionToolFromName extracts the bare MCP tool name from a Claude tool name
 // of shape "mcp__<connection>__<tool>". Returns "" for any non-MCP (built-in)
 // tool name, so built-in tools skip the connection chain entirely. It mirrors the

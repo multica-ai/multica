@@ -141,15 +141,40 @@ func (d *Daemon) buildSandboxConfig(provider string, runtimeOverride *bool, runt
 		keychainAccess = sandbox.KeychainAccessReadOnly
 	}
 
+	writablePaths := append(providerWritablePaths(provider), runtimePolicy.ExtraWritablePaths...)
+	// agent-browser (FIR-1428): when the server resolved this agent's
+	// agent-browser tool policy to allow/ask, open the Unix-socket bind it
+	// needs to drive Chrome and make its ~/.agent-browser state dir writable.
+	// Both stay sealed by default (deny / no grant), so browser access is off
+	// until an admin grants it in the tool-policy table.
+	if runtimePolicy.AllowAgentBrowser {
+		if dir := agentBrowserStateDir(); dir != "" {
+			writablePaths = append(writablePaths, dir)
+		}
+	}
+
 	return &agent.SandboxConfig{
 		Enabled:              true,
 		NetworkAllowlist:     hosts,
-		WritablePaths:        append(providerWritablePaths(provider), runtimePolicy.ExtraWritablePaths...),
+		WritablePaths:        writablePaths,
 		DeniedPaths:          runtimePolicy.DeniedPaths,
 		DeniedExecutables:    runtimeShellDenyExecutables(runtimePolicy),
 		KeychainAccess:       keychainAccess,
 		KeychainItemsAllowed: providerKeychainItems[provider],
+		AllowUnixSocketBind:  runtimePolicy.AllowAgentBrowser,
 	}
+}
+
+// agentBrowserStateDir resolves the agent-browser CLI's per-user state
+// directory (~/.agent-browser — auth, browsers, sessions, tmp, socket). Returns
+// "" when the home dir is unresolvable, so the caller simply omits the write
+// rule rather than emitting a bogus path (FIR-1428).
+func agentBrowserStateDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".agent-browser")
 }
 
 // providerWritablePaths resolves the provider's $HOME-relative state paths
