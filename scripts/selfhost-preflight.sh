@@ -86,6 +86,22 @@ has_nonlocal_origin_value() {
   return 1
 }
 
+has_wildcard_origin_value() {
+  local value=$1
+  local item
+
+  IFS=',' read -ra items <<<"$value"
+  for item in "${items[@]}"; do
+    item="${item#"${item%%[![:space:]]*}"}"
+    item="${item%"${item##*[![:space:]]}"}"
+    if [[ -n "$item" && "$item" == *"*"* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 has_broad_cidr() {
   local value=$1
   value="${value//[[:space:]]/}"
@@ -189,6 +205,14 @@ if [ "$exposure_requested" = true ]; then
   fi
   if ! has_nonlocal_origin_value "$frontend_origin" && ! has_nonlocal_origin_value "$cors_allowed_origins"; then
     fail_msg "FRONTEND_ORIGIN or CORS_ALLOWED_ORIGINS must be set to the exact LAN/public browser origin."
+    errors=$((errors + 1))
+  fi
+  if has_wildcard_origin_value "$frontend_origin"; then
+    fail_msg "FRONTEND_ORIGIN must use exact origins; wildcard values or patterns are not allowed before non-loopback or public access."
+    errors=$((errors + 1))
+  fi
+  if has_wildcard_origin_value "$cors_allowed_origins"; then
+    fail_msg "CORS_ALLOWED_ORIGINS must use exact origins; wildcard values or patterns are not allowed before non-loopback or public access."
     errors=$((errors + 1))
   fi
   if [ "$allow_signup" != "false" ]; then

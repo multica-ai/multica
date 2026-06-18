@@ -118,6 +118,22 @@ sed -i '/^ALLOW_SIGNUP=/d' "$lan_missing_signup_env"
 lan_missing_signup_output="$(run_preflight_expect_fail "$lan_missing_signup_env")"
 require_contains "$lan_missing_signup_output" "ALLOW_SIGNUP defaults to true"
 
+lan_wildcard_cors_env="$tmp_dir/lan-wildcard-cors.env"
+make_env "$lan_wildcard_cors_env" \
+  "BIND_HOST=192.168.1.50" \
+  "FRONTEND_ORIGIN=" \
+  "CORS_ALLOWED_ORIGINS=*"
+lan_wildcard_cors_output="$(run_preflight_expect_fail "$lan_wildcard_cors_env")"
+require_contains "$lan_wildcard_cors_output" "CORS_ALLOWED_ORIGINS must use exact origins"
+
+lan_wildcard_frontend_env="$tmp_dir/lan-wildcard-frontend.env"
+make_env "$lan_wildcard_frontend_env" \
+  "BIND_HOST=192.168.1.50" \
+  "FRONTEND_ORIGIN=https://*.example.com" \
+  "CORS_ALLOWED_ORIGINS="
+lan_wildcard_frontend_output="$(run_preflight_expect_fail "$lan_wildcard_frontend_env")"
+require_contains "$lan_wildcard_frontend_output" "FRONTEND_ORIGIN must use exact origins"
+
 all_interface_env="$tmp_dir/all-interface.env"
 make_env "$all_interface_env" "BIND_HOST=0.0.0.0"
 all_interface_output="$(run_preflight_expect_fail "$all_interface_env")"
