@@ -64,6 +64,14 @@ backend:
   # leader-elected workload split — increase this only if you actually
   # need horizontal scale of the API/WS server.
   replicas: 1
+  podSecurityContext:
+    fsGroup: 10001
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    allowPrivilegeEscalation: false
   uploads:
     persistence:
       # When true (default) the chart provisions a PersistentVolumeClaim for
@@ -76,8 +84,9 @@ backend:
       # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
       # second pod (Multi-Attach error); disabling persistence — or switching
       # accessModes to a ReadWriteMany class — removes that constraint on the
-      # storage side. Note: backend startup migrations are not yet serialized
-      # across pods, so multi-replica still requires care beyond the chart.
+      # storage side. Startup migrations are serialized by cmd/migrate, but
+      # multi-replica still requires care around uploads storage and API/WS
+      # capacity planning.
       enabled: true
       size: 5Gi
       # Leave empty to use the cluster's default StorageClass.

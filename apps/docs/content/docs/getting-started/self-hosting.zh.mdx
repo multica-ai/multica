@@ -63,7 +63,7 @@ Once ready:
 - **Backend API:** http://localhost:8080
 
 <Callout>
-If you prefer running the Docker Compose steps manually: `cp .env.example .env`, edit `JWT_SECRET`, `POSTGRES_PASSWORD`, and the password segment in `DATABASE_URL`, then `docker compose -f docker-compose.selfhost.yml pull && docker compose -f docker-compose.selfhost.yml up -d`.
+If you prefer running the Docker Compose steps manually: `cp .env.example .env`, edit `JWT_SECRET` and `POSTGRES_PASSWORD`, then `docker compose -f docker-compose.selfhost.yml pull && docker compose -f docker-compose.selfhost.yml up -d`. Leave `DATABASE_URL` unset for the bundled Compose PostgreSQL service; set it only when the backend should use an external PostgreSQL instance.
 </Callout>
 
 ### Step 2 — Log In
@@ -226,8 +226,8 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string. Keep the password segment in sync with `POSTGRES_PASSWORD`. | `postgres://multica:<postgres-password>@localhost:5432/multica?sslmode=disable` |
-| `POSTGRES_PASSWORD` | **Must change from default.** Password used by the bundled Postgres container. Keep it in sync with `DATABASE_URL`. | `openssl rand -hex 24` |
+| `DATABASE_URL` | Optional external PostgreSQL connection string. Leave unset for the bundled Compose PostgreSQL service. | `postgres://user:password@postgres.example.com:5432/multica?sslmode=require` |
+| `POSTGRES_PASSWORD` | **Must change from default.** Password used by the bundled Postgres container. | `openssl rand -hex 24` |
 | `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 

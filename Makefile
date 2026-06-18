@@ -82,12 +82,12 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	docker compose -f docker-compose.selfhost.yml up -d
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+		if curl -sf http://localhost:$${PORT:-8080}/readyz > /dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 2; \
 	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@if curl -sf http://localhost:$${PORT:-8080}/readyz > /dev/null 2>&1; then \
 		echo ""; \
 		echo "✓ Multica is running!"; \
 		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
@@ -129,12 +129,12 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
 	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+		if curl -sf http://localhost:$${PORT:-8080}/readyz > /dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 2; \
 	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@if curl -sf http://localhost:$${PORT:-8080}/readyz > /dev/null 2>&1; then \
 		echo ""; \
 		echo "✓ Multica is running!"; \
 		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \

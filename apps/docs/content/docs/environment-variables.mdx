@@ -13,7 +13,7 @@ These are the core variables you must think about before deploying — some have
 
 | Variable | Default | Required in production? |
 |---|---|---|
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Yes** |
+| `DATABASE_URL` | unset in Docker Compose; server binary falls back to `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **Yes** outside the bundled Compose database |
 | `PORT` | `8080` | No (unless you change the port) |
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **Yes** (the default is unsafe) |
 | `APP_ENV` | empty | **Yes** (must be `production`) |

@@ -56,6 +56,10 @@ make selfhost
 
 By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
 If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
+
+The backend Compose healthcheck and the `make selfhost` wait loop use
+`/readyz`, not `/health`. `/health` only proves the process is listening;
+`/readyz` fails until PostgreSQL is reachable and all migrations are applied.
 `make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
 
 Once ready:
@@ -235,6 +239,15 @@ curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
 ```
 
 Then open http://multica.dev.lan in your browser.
+
+For single-host Docker Compose, the backend entrypoint runs `migrate up`
+automatically before starting the server. In Kubernetes or any multi-replica
+release, run migrations through a pre-upgrade Job or a single controlled
+preflight before scaling new backend pods. Keep backend `startupProbe` generous
+enough for cold database starts, wire readiness to `/readyz` or `/healthz`, and
+do not treat `/health` as deploy-ready. If migrations fail, leave the rollout
+stopped, keep the previous backend image running, inspect the migration logs, and
+rerun or roll back only after an operator decision.
 
 ### Step 5 — Log In
 

@@ -56,10 +56,14 @@ spec:
         {{- include "multica.labels" . | nindent 8 }}
         app.kubernetes.io/component: backend
     spec:
+      securityContext:
+        {{- toYaml .Values.backend.podSecurityContext | nindent 8 }}
       containers:
         - name: backend
           image: "{{ .Values.images.backend.repository }}:{{ $backendImageTag }}"
           imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.backend.securityContext | nindent 12 }}
           ports:
             - containerPort: 8080
               name: http

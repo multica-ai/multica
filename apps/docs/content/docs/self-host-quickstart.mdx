@@ -33,12 +33,14 @@ make selfhost
 1. Generate a `.env` from `.env.example` if missing, with a **random JWT_SECRET and Postgres password**
 2. Pull the official Docker images (PostgreSQL, Multica backend, Multica frontend)
 3. Bring up every service using `docker-compose.selfhost.yml`
-4. Wait until the backend's `/health` endpoint is ready
+4. Wait until the backend's `/readyz` endpoint is ready
 
-For ongoing production probes after startup, use `/readyz` when you want the
-check to fail on database or migration problems.
+`/health` only proves the backend process is listening. `/readyz` and `/healthz`
+also check PostgreSQL and migration state, so use them for Compose healthchecks,
+production readiness probes, and startup diagnostics that should fail on
+database or migration problems.
 
-The backend container **runs database migrations automatically** on startup (`docker/entrypoint.sh` runs `./migrate up` before the server starts) — you'll see the migration output in the backend logs. Version upgrades are handled the same way.
+The backend container **runs database migrations automatically** on startup (`docker/entrypoint.sh` runs `./migrate up` before the server starts) — you'll see the migration output in the backend logs. Version upgrades are handled the same way for single-host Docker Compose. For Kubernetes or multi-replica releases, run migrations once through a Job or controlled preflight before rolling backend pods; keep readiness on `/readyz` or `/healthz` and stop the rollout if migrations fail.
 
 <Callout type="info">
 **Image not published yet?** If `make selfhost` fails to pull images, you may be on an unreleased version tag. Switch to a stable release, or build from source: `make selfhost-build`.
@@ -265,7 +267,7 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 
 ## Common issues
 
-- **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
+- **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; common causes are a bad `JWT_SECRET`, an external `DATABASE_URL` that the container cannot reach, or an old upload volume whose files are still owned by a previous root-running image
 - **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
 - **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
 - **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)

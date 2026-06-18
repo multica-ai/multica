@@ -10,7 +10,7 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
+| `DATABASE_URL` | External PostgreSQL connection string. Leave unset for the bundled Compose PostgreSQL service. | `postgres://user:password@postgres.example.com:5432/multica?sslmode=require` |
 | `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
@@ -100,6 +100,16 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |
 
+When `S3_BUCKET` is unset, uploads use local disk at
+`LOCAL_UPLOAD_DIR` (`./data/uploads` by default). The Docker image runs the
+backend as the non-root `multica` user and the Compose stack mounts
+`backend_uploads` at `/app/data/uploads`, so fresh installs keep the upload path
+writable without granting root runtime privileges. If an older root-running
+image already created files in that named volume, fix the volume ownership once
+before upgrading or move to S3/CloudFront for shared storage. Do not enable a
+read-only root filesystem until uploads, temp files, migrations, and backfill
+commands have been validated for that deployment shape.
+
 ### Cookies
 
 | Variable | Description |
@@ -168,11 +178,33 @@ If you prefer to use an existing PostgreSQL instance, ensure the pgvector extens
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-Set `DATABASE_URL` in your `.env` and remove the `postgres` service from the compose file.
+Set `DATABASE_URL` in `.env`. `docker-compose.selfhost.yml` passes that exact
+value to the backend when it is set; otherwise it builds the internal Compose
+URL from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
+
+The bundled `postgres` service may stay in the file for local testing, but it is
+not used by the backend when `DATABASE_URL` points at your external database. For
+production, remove or override the bundled service if you do not want the extra
+container or volume.
 
 ### Running Migrations Manually
 
-The Docker Compose setup runs migrations automatically. If you need to run them manually:
+The single-host Docker Compose setup runs migrations automatically: the backend
+entrypoint executes `./migrate up` and exits without starting the server if a
+required migration fails. The migration command is idempotent and guarded by the
+database migration table plus advisory locks where long-running hooks need
+serialization, so restarting the Compose backend is the normal retry path after
+fixing the cause.
+
+For Kubernetes, multiple backend replicas, and formal releases, do not rely on
+every replica racing through startup migrations as the rollout policy. Run
+migrations once through a pre-upgrade Job or an operator-controlled preflight,
+then roll backend pods with a `startupProbe` that allows cold DB/migration
+duration and a readiness probe on `/readyz` or `/healthz`. If the Job/preflight
+fails, stop the rollout and keep the previous image serving; schema rollbacks or
+data repair need an explicit operator decision based on the failed migration.
+
+If you need to run migrations manually:
 
 ```bash
 # Using the built binary
@@ -433,10 +465,12 @@ GET /healthz
 → same response as /readyz
 ```
 
-Use `/health` for basic liveness / reachability checks. Use `/readyz` for
+Use `/health` for basic liveness / reachability checks only. Use `/readyz` for
 dependency-aware readiness probes and external monitoring that should fail when
 the database is unavailable or migrations are not fully applied. `/healthz` is
-kept as an alias for operator familiarity.
+kept as an alias for operator familiarity. The self-host Compose backend
+healthcheck also uses `/readyz`, so `healthy` means the process is live and the
+database/migration checks are passing.
 
 ## Prometheus Metrics
 
@@ -469,3 +503,9 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 Pin `MULTICA_IMAGE_TAG` in `.env` to an exact release like `v0.2.4` if you want to stay on a specific version. Migrations run automatically on backend startup. They are idempotent — running them multiple times has no effect.
 If the selected GHCR tag has not been published yet, fall back to `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+
+Release provenance should be recorded outside the running container before
+promotion: backend image digest, frontend image digest, base image digests,
+source commit, version, build date, and the exact chart/Compose/deploy inputs.
+The Docker build accepts `VERSION`, `COMMIT`, and `DATE` build args for binary
+metadata, but those values do not replace digest-pinned release records.

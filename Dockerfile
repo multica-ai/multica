@@ -36,7 +36,13 @@ COPY --from=builder /src/server/bin/backfill_task_usage_hourly .
 COPY --from=builder /src/server/bin/backfill_codex_usage_cache .
 COPY server/migrations/ ./migrations/
 COPY docker/entrypoint.sh .
-RUN sed -i 's/\r$//' entrypoint.sh && chmod +x entrypoint.sh
+RUN sed -i 's/\r$//' entrypoint.sh \
+    && chmod +x entrypoint.sh \
+    && addgroup -S -g 10001 multica \
+    && adduser -S -D -H -u 10001 -G multica multica \
+    && install -d -o multica -g multica /app/data/uploads
+
+USER multica:multica
 
 EXPOSE 8080
 

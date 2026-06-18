@@ -365,11 +365,9 @@ setup_server() {
     if [ "$(uname -s)" = "Darwin" ]; then
       sed -i '' "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i '' "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
-      sed -i '' -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$pgpass\2#" .env
     else
       sed -i "s/^JWT_SECRET=.*/JWT_SECRET=$jwt/" .env
       sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$pgpass/" .env
-      sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$pgpass\2#" .env
     fi
     ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
   else
@@ -388,7 +386,7 @@ setup_server() {
   backend_port="$(selfhost_backend_port .env)"
   local ready=false
   for i in $(seq 1 45); do
-    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
+    if curl -sf "http://localhost:${backend_port}/readyz" >/dev/null 2>&1; then
       ready=true
       break
     fi

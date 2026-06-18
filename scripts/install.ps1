@@ -431,7 +431,6 @@ function Install-Server {
         $content = Get-Content ".env"
         $content = $content -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt"
         $content = $content -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$pgpass"
-        $content = $content -replace '^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)', "`${1}$pgpass`${2}"
         $content | Set-Content ".env"
         Write-Ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
     } else {
@@ -448,7 +447,7 @@ function Install-Server {
     $ready = $false
     for ($i = 1; $i -le 45; $i++) {
         try {
-            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
+            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/readyz" -UseBasicParsing -TimeoutSec 2
             $ready = $true
             break
         } catch {
