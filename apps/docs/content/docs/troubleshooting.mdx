@@ -70,19 +70,33 @@ On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see t
 1. **Origin check failure** — your frontend domain isn't in the server's CORS allowlist. The default allowlist only includes `localhost:3000/5173/5174`; self-hosting on the public internet requires `FRONTEND_ORIGIN`
 2. **Protocol mismatch** — frontend on `https://` needs `wss://`; HTTP uses `ws://`
 3. **Reverse proxy doesn't enable WebSocket upgrade** — Nginx / Envoy / HAProxy don't forward the `Upgrade` header by default
-4. **JWT cookie expired or missing** — no re-sign-in after the 30-day expiry
+4. **Wrong bundled WebSocket URL** — `NEXT_PUBLIC_WS_URL` is baked into the web image at build time; changing runtime env on a prebuilt image does not change the browser URL
+5. **JWT cookie expired or missing** — no re-sign-in after the 30-day expiry
 
 **How to diagnose**:
 
 - Browser DevTools → Network → filter by "WS" and check connection state and status code
 - Grep server logs for `"rejected origin"` / `"websocket"` — an origin issue spells itself out
-- `curl -i http://<server-host>:8080/ws` should return `101 Switching Protocols` (with the `Upgrade` header)
+- Probe the upgrade path with headers, for example:
+
+  ```bash
+  curl -i \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    -H 'Origin: https://multica.yourdomain.com' \
+    https://multica.yourdomain.com/ws
+  ```
+
+  `101 Switching Protocols` means the upgrade path works; `403` usually means the backend rejected `Origin`; HTML/404/426 usually means `/ws` reached the frontend or a proxy path without WebSocket upgrade support.
 
 **How to fix**:
 
 - Wrong origin → set `FRONTEND_ORIGIN=https://multica.yourdomain.com` in the server's `.env` (or comma-separated `CORS_ALLOWED_ORIGINS`) and restart the server
 - Protocol mismatch → make sure `FRONTEND_ORIGIN`'s protocol matches the frontend's
 - Reverse proxy → in Nginx, add `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`
+- Wrong bundled URL → use a same-origin reverse proxy for `/ws`, or rebuild the web image from source with `NEXT_PUBLIC_WS_URL=wss://.../ws`; runtime env on the prebuilt image is not enough
 - Cookie expired → refresh the page and sign in again
 
 ## Emails not received

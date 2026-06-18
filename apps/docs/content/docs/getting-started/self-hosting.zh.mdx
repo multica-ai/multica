@@ -374,12 +374,20 @@ For the frontend:
 
 ```bash
 pnpm install
-pnpm build
+
+# Build-time values: set these before `pnpm build`.
+REMOTE_API_URL=http://localhost:8080 pnpm build
 
 # Start the frontend (production mode)
 cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
+pnpm start
 ```
+
+`REMOTE_API_URL`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_WS_URL` are build-time
+inputs for the production web bundle. Setting them only on `pnpm start` or in the
+runtime environment of an already-built web image does not change the bundled
+API base URL, Next rewrite destinations, or browser WebSocket URL. Rebuild the
+frontend whenever those values change.
 
 ## Reverse Proxy
 
@@ -488,6 +496,11 @@ REMOTE_API_URL=https://api.example.com
 NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
+
+For prebuilt web images, these `NEXT_PUBLIC_*` values are already bundled. Runtime
+environment overrides affect the container process only; they do not rewrite the
+client bundle. Use the source-build override and rebuild when the browser must
+call a different API or WebSocket origin.
 
 ## Health Check
 

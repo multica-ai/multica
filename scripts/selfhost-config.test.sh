@@ -46,6 +46,18 @@ require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 
+build_config="$(
+  env NEXT_PUBLIC_API_URL=https://api.example.com NEXT_PUBLIC_WS_URL=wss://api.example.com/ws \
+    docker compose \
+      --env-file "$tmp_env" \
+      -f docker-compose.selfhost.yml \
+      -f docker-compose.selfhost.build.yml \
+      config
+)"
+
+require_config "$build_config" 'NEXT_PUBLIC_API_URL: https://api.example.com'
+require_config "$build_config" 'NEXT_PUBLIC_WS_URL: wss://api.example.com/ws'
+
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
     echo "$script must source scripts/local-env.sh for shared local env derivation."

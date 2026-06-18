@@ -28,9 +28,10 @@ function hasLegacyToken(): boolean {
   }
 }
 
-// Derive WebSocket URL from the page origin so self-hosted / LAN deployments
-// work without explicit NEXT_PUBLIC_WS_URL.  The Next.js rewrite rule
-// (/ws → backend) handles proxying.
+// Derive the default browser WebSocket URL from the page origin. This works
+// when a reverse proxy forwards /ws upgrades to the backend on the same host.
+// Plain Next.js rewrites are for HTTP routes and should not be treated as the
+// WebSocket upgrade path for LAN / self-host deployments.
 function deriveWsUrl(): string | undefined {
   if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
   if (typeof window === "undefined") return undefined;

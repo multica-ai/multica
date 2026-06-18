@@ -192,6 +192,10 @@ multica.example.com {
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) 也是不错的选择——它直接给一个公开域名 + TLS，host 上不用对外暴露任何端口。Nginx 也能做（分 `app.` / `api.` 两个域名 + `proxy_set_header Upgrade` 转 WebSocket），关键就是终结 TLS、并在 `/ws` 上转发 `Upgrade` 头。
 
+<Callout type="warning">
+浏览器使用的 WebSocket URL 是在 web 镜像构建时打进 bundle 的。使用预构建镜像时，在容器运行期改 `NEXT_PUBLIC_WS_URL` 或 `NEXT_PUBLIC_API_URL` 不会改变浏览器行为。默认同源 `/ws` 请用反向代理转发，或者通过 `docker-compose.selfhost.build.yml` 重新构建。高级指南里有 localhost / LAN / 单域名 / 分域名 smoke 矩阵。
+</Callout>
+
 ## 6. 创建智能体 + 分配第一个任务
 
 流程和 Cloud 一样——见 [Cloud 快速上手 → 5-6 步](/cloud-quickstart#5-创建智能体)。
@@ -268,7 +272,7 @@ multica setup self-host \
 
 - **后端起不来**：看容器日志 `docker compose -f docker-compose.selfhost.yml logs backend`；常见是 `.env` 里 `DATABASE_URL` 或 `JWT_SECRET` 有问题
 - **验证码收不到**：没配任何邮件后端（Resend 和 SMTP 都没设） → 从 `docker compose logs backend` 里找 `[DEV] Verification code`
-- **WebSocket 连不上**：公网部署必须设 `FRONTEND_ORIGIN` 成你真实的前端域名；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
+- **WebSocket 连不上**：同时检查反向代理或构建期 `NEXT_PUBLIC_WS_URL`，以及后端 `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS`；见 [故障排查 → WebSocket 连不上](/troubleshooting#websocket-连不上)
 - **Usage / Runtime 看板一直是 0**：没人调度 `rollup_task_usage_hourly()` —— 见上面的 [第 7 步](#7-usage-rollup-no-operator-action-required) 和 [故障排查 → Usage 看板一直是 0](/troubleshooting#usage-看板一直是-0)
 - **`migrate up` 报 `refusing to drop legacy daily rollups`**：`v0.3.4 → v0.3.5+` 升级路径的 fail-closed guard。从 MUL-2957 起 migrate 命令在应用 migration 103 之前会自动跑 backfill —— 见 [第 7 步](#7-usage-rollup-no-operator-action-required)
 

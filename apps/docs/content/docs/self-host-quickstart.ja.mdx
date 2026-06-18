@@ -192,6 +192,10 @@ multica.example.com {
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) も堅実な選択肢です — ホストにポートを一切公開せずに TLS と公開ホスト名を提供してくれます。Nginx で同等に構成する方法（`app.` / `api.` を別々のホスト名に分離、WebSocket 用の `proxy_set_header Upgrade`）も同じくらいうまく動作します。重要な要件は、TLS の終端と `/ws` での `Upgrade` ヘッダーの転送です。
 
+<Callout type="warning">
+ブラウザが使う WebSocket URL は web イメージのビルド時に bundle に焼き込まれます。prebuilt イメージでは、コンテナ実行時の環境変数で `NEXT_PUBLIC_WS_URL` や `NEXT_PUBLIC_API_URL` を変えてもブラウザの挙動は変わりません。デフォルトの同一オリジン `/ws` はリバースプロキシで転送するか、`docker-compose.selfhost.build.yml` で再ビルドしてください。高度なガイドには localhost / LAN / 単一ドメイン / 分離ドメインの smoke matrix があります。
+</Callout>
+
 ## 6. エージェントの作成 + 最初のタスクの割り当て
 
 Cloud と同じ流れです — [Cloud クイックスタート → ステップ5-6](/cloud-quickstart#5-create-an-agent)を参照してください。
@@ -268,7 +272,7 @@ multica setup self-host \
 
 - **バックエンドが起動しない**: `docker compose -f docker-compose.selfhost.yml logs backend` でコンテナのログを確認してください。たいていは `.env` の不正な `DATABASE_URL` または `JWT_SECRET` が原因です
 - **認証コードが届かない**: メールバックエンドが構成されていない場合（Resend も SMTP もない）→ `docker compose logs backend` で `[DEV] Verification code` を探してください
-- **WebSocket が接続できない**: 公開デプロイでは、`FRONTEND_ORIGIN` を実際のフロントエンドのドメインに必ず設定する必要があります。[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-wont-connect)を参照してください
+- **WebSocket が接続できない**: リバースプロキシまたはビルド時の `NEXT_PUBLIC_WS_URL` と、バックエンドの `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS` の両方を確認してください。[トラブルシューティング → WebSocket が接続できない](/troubleshooting#websocket-wont-connect)を参照してください
 - **使用量 / ランタイムのダッシュボードがゼロのまま**: `rollup_task_usage_hourly()` がスケジューリングされていません — 上記の [ステップ7](#7-usage-rollup-no-operator-action-required)と[トラブルシューティング → 使用量ダッシュボードがゼロと表示される](/troubleshooting#usage-dashboard-stays-at-zero)を参照してください
 - **`migrate up` が `refusing to drop legacy daily rollups` で失敗する**: `v0.3.4 → v0.3.5+` のアップグレード経路ガードです。MUL-2957 以降、migrate コマンドは migration 103 を適用する前に自動でバックフィルを実行します — [ステップ7](#7-usage-rollup-no-operator-action-required)を参照してください
 

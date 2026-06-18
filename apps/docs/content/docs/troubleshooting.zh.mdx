@@ -70,19 +70,33 @@ multica issue show <issue-id>             # 看 task 历史
 1. **Origin 校验失败** —— 你的前端域名不在 server 的 CORS 白名单里。默认白名单只包含 `localhost:3000/5173/5174`，self-host 到公网必须配 `FRONTEND_ORIGIN`
 2. **协议不匹配** —— 前端用 `https://` 需要 `wss://`，HTTP 用 `ws://`
 3. **反向代理没开 WebSocket upgrade** —— Nginx / Envoy / HAProxy 默认不转发 `Upgrade` header
-4. **JWT cookie 过期或丢失** —— 30 天过期后没重登
+4. **打包进去的 WebSocket URL 不对** —— `NEXT_PUBLIC_WS_URL` 是 web 镜像构建期值；在预构建镜像运行期改 env 不会改变浏览器 URL
+5. **JWT cookie 过期或丢失** —— 30 天过期后没重登
 
 **怎么查**：
 
 - 浏览器 DevTools → Network → 筛选 "WS"，看连接状态和状态码
 - Server 日志里 grep `"rejected origin"` / `"websocket"` —— 如果是 origin 问题会明确写出来
-- `curl -i http://<server-host>:8080/ws` 应该返回 `101 Switching Protocols`（需要带 `Upgrade` header）
+- 用完整 upgrade header 探测路径，例如：
+
+  ```bash
+  curl -i \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    -H 'Origin: https://multica.yourdomain.com' \
+    https://multica.yourdomain.com/ws
+  ```
+
+  `101 Switching Protocols` 表示 upgrade 路径正常；`403` 通常是后端拒绝 `Origin`；HTML/404/426 通常表示 `/ws` 打到了前端或没有 WebSocket upgrade 的代理路径。
 
 **怎么修**：
 
 - Origin 错 → 在 server 的 `.env` 设 `FRONTEND_ORIGIN=https://multica.yourdomain.com`（或逗号分隔的 `CORS_ALLOWED_ORIGINS`），重启 server
 - 协议不匹配 → 确保 `FRONTEND_ORIGIN` 的协议和前端一致
 - 反向代理 → 在 Nginx 加 `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`
+- 打包 URL 错 → 默认同源 `/ws` 请用反向代理，或者用 `NEXT_PUBLIC_WS_URL=wss://.../ws` 从源码重新构建 web 镜像；只改预构建镜像运行期 env 不够
 - Cookie 过期 → 刷新页面重新登录
 
 ## 邮件没收到

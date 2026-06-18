@@ -263,12 +263,20 @@ For the frontend:
 
 ```bash
 pnpm install
-pnpm build
+
+# Build-time values: set these before `pnpm build`.
+REMOTE_API_URL=http://localhost:8080 pnpm build
 
 # Start the frontend (production mode)
 cd apps/web
-REMOTE_API_URL=http://localhost:8080 pnpm start
+pnpm start
 ```
+
+`REMOTE_API_URL`, `NEXT_PUBLIC_API_URL`, and `NEXT_PUBLIC_WS_URL` are build-time
+inputs for the production web bundle. Setting them only on `pnpm start` or in the
+runtime environment of an already-built web image does not change the bundled
+API base URL, Next rewrite destinations, or browser WebSocket URL. Rebuild the
+frontend whenever those values change.
 
 ## Reverse Proxy
 
@@ -380,6 +388,11 @@ NEXT_PUBLIC_API_URL=https://api.example.com
 NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 ```
 
+For prebuilt web images, these `NEXT_PUBLIC_*` values are already bundled. Runtime
+environment overrides affect the container process only; they do not rewrite the
+client bundle. Use the source-build override and rebuild when the browser must
+call a different API or WebSocket origin.
+
 ## LAN / Non-localhost Access
 
 By default, Multica works on `localhost`. If you access it from another machine on the LAN (e.g. `http://192.168.1.100:3000`), you need to tell the backend to accept that origin:
@@ -398,7 +411,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ### WebSocket for LAN / Non-localhost Access
 
-HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
+HTTP requests (issues, comments, uploads) work on LAN out of the box when the browser talks to the frontend origin — Next.js rewrites proxy `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not use that HTTP rewrite path**: the frontend derives `ws(s)://<page-host>/ws` when `NEXT_PUBLIC_WS_URL` is empty, so the browser needs either a reverse proxy that forwards `/ws` upgrades on that same origin or a rebuild with an explicit backend WebSocket URL. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
 
 1. **Put a reverse proxy in front of the stack (recommended).** Nginx or Caddy terminates the WebSocket upgrade and forwards it to the backend on port 8080. See the [Reverse Proxy](#reverse-proxy) section above — the Nginx example already includes a `location /ws { ... }` block with the correct `Upgrade` / `Connection` headers. Once a proxy is in place the browser connects directly through it, so no frontend rebuild is needed.
 
@@ -412,11 +425,43 @@ HTTP requests (issues, comments, uploads) work on LAN out of the box — Next.js
    docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
    ```
 
-   `NEXT_PUBLIC_WS_URL` is a build-time variable (see `Dockerfile.web`), so setting it only in `environment:` on the pre-built image has no effect — you must use the `selfhost.build.yml` override that rebuilds the image.
+   `NEXT_PUBLIC_WS_URL` is a build-time variable (see `Dockerfile.web`), so setting it only in `environment:` on the prebuilt image has no effect — you must use the `selfhost.build.yml` override that rebuilds the image.
 
 **Also required: allowlist the browser origin.** The two options above fix the WebSocket *upgrade proxying*, but a second, independent setting gates the connection: the backend validates the WebSocket `Origin` header against an allowlist that defaults to `localhost` only. When you open Multica from any other origin — a LAN IP **or a public domain behind a reverse proxy** — set `CORS_ALLOWED_ORIGINS` (or `FRONTEND_ORIGIN`) on the backend to that exact origin and restart, exactly as shown under [LAN / Non-localhost Access](#lan--non-localhost-access) above. Otherwise the upgrade is refused with `403`: the backend logs `websocket: request origin not allowed by Upgrader.CheckOrigin` and the browser console loops `disconnected, reconnecting in 3s`, while HTTP requests (and manual page refreshes) keep working because they are same-origin to the page. The single value covers both HTTP CORS and the WebSocket origin check.
 
 > **Note:** If you need to hard-code a different public API / WebSocket endpoint into the web image for any other reason, use the same source-build override: `docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build`.
+
+### Web/API Smoke Matrix
+
+Use this matrix before declaring a self-host network shape ready. It keeps four
+checks separate because a deployment can pass HTTP API reachability while still
+failing login cookies, WebSocket upgrades, or backend origin validation.
+
+| Mode | HTTP API smoke | Login cookie smoke | WebSocket smoke | Backend origin allowlist |
+|---|---|---|---|---|
+| Localhost (`http://localhost:3000` + backend `:8080`) | `curl -i http://localhost:3000/api/config` should return `200` from the frontend rewrite; `curl -i http://localhost:8080/readyz` should return ready | Sign in from `http://localhost:3000`; cookies are plain HTTP because `FRONTEND_ORIGIN` is empty or `http://localhost:3000` | Browser DevTools → WS should connect to `ws://localhost:3000/ws`; if it fails in standalone mode, put a local proxy in front or rebuild with `NEXT_PUBLIC_WS_URL=ws://localhost:8080/ws` | Defaults include localhost origins; no extra allowlist needed for localhost |
+| LAN IP (`http://<lan-ip>:3000`, optional backend `:8080`) | `curl -i http://<lan-ip>:3000/api/config` and, if baking direct WS, `curl -i http://<lan-ip>:8080/readyz` | Set `FRONTEND_ORIGIN=http://<lan-ip>:3000`; leave `COOKIE_DOMAIN` empty for IP hosts; sign in from another LAN machine | Recommended: reverse proxy `/ws` on the frontend origin. Without proxy, rebuild with `NEXT_PUBLIC_WS_URL=ws://<lan-ip>:8080/ws` and make backend port reachable | Set `CORS_ALLOWED_ORIGINS=http://<lan-ip>:3000` or matching `FRONTEND_ORIGIN` before testing WS |
+| Single-domain reverse proxy (`https://multica.example.com`) | `curl -i https://multica.example.com/api/config` and `curl -i https://multica.example.com/readyz` if the proxy exposes readiness | Set `FRONTEND_ORIGIN=https://multica.example.com`; sign in and confirm `Secure` cookies are stored | DevTools → WS should connect to `wss://multica.example.com/ws`; proxy must route `/ws` before the frontend catch-all and forward `Upgrade` | Set `CORS_ALLOWED_ORIGINS=https://multica.example.com` or matching `FRONTEND_ORIGIN` |
+| Separate-domain reverse proxy (`https://app.example.com` + `https://api.example.com`) | `curl -i https://api.example.com/readyz`; rebuild source web image with `NEXT_PUBLIC_API_URL=https://api.example.com` if the browser should call the API host directly | Use HTTPS. Set `FRONTEND_ORIGIN=https://app.example.com`; if setting `COOKIE_DOMAIN`, use a real shared parent domain, never an IP literal | Rebuild with `NEXT_PUBLIC_WS_URL=wss://api.example.com/ws`; proxy on `api.example.com` must forward `/ws` `Upgrade` | Set `CORS_ALLOWED_ORIGINS=https://app.example.com` or matching `FRONTEND_ORIGIN`; this covers both HTTP CORS and WebSocket `Origin` |
+
+For a protocol-level WebSocket probe, use headers that actually request an
+upgrade, for example:
+
+```bash
+curl -i \
+  -H 'Connection: Upgrade' \
+  -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Origin: https://multica.example.com' \
+  https://multica.example.com/ws
+```
+
+Expected results: `101 Switching Protocols` means the proxy/backend accepted the
+upgrade; `403` with backend logs mentioning origin rejection means fix
+`FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS`; `404`, `426`, or a plain HTML/Next
+response means `/ws` is still reaching the frontend or a proxy path that does
+not forward WebSocket upgrades.
 
 ## Health Check
 

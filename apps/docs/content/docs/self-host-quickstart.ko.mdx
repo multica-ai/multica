@@ -192,6 +192,10 @@ multica.example.com {
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)도 견고한 선택지입니다 — 호스트에 어떤 포트도 노출하지 않고도 TLS와 공개 호스트네임을 제공합니다. Nginx로 동등하게 구성하는 방법(`app.` / `api.`을 별도 호스트네임으로 분리, WebSocket용 `proxy_set_header Upgrade`)도 똑같이 잘 동작합니다. 핵심 요구 사항은 TLS 종료와 `/ws`에서의 `Upgrade` 헤더 전달입니다.
 
+<Callout type="warning">
+브라우저가 사용하는 WebSocket URL은 web 이미지 빌드 시 bundle에 포함됩니다. prebuilt 이미지를 사용할 때 컨테이너 런타임 env에서 `NEXT_PUBLIC_WS_URL` 또는 `NEXT_PUBLIC_API_URL`을 바꿔도 브라우저 동작은 바뀌지 않습니다. 기본 동일 origin `/ws` 경로는 리버스 프록시로 전달하거나 `docker-compose.selfhost.build.yml`로 다시 빌드하세요. 고급 가이드에는 localhost / LAN / 단일 도메인 / 분리 도메인 smoke matrix가 있습니다.
+</Callout>
+
 ## 6. 에이전트 생성 + 첫 작업 할당
 
 Cloud와 동일한 흐름입니다 — [Cloud 빠른 시작 → 5-6단계](/cloud-quickstart#5-create-an-agent)를 참고하세요.
@@ -268,7 +272,7 @@ multica setup self-host \
 
 - **백엔드가 시작되지 않음**: `docker compose -f docker-compose.selfhost.yml logs backend`로 컨테이너 로그를 확인하세요. 보통 `.env`의 잘못된 `DATABASE_URL` 또는 `JWT_SECRET`이 원인입니다
 - **인증 코드를 받지 못함**: 이메일 백엔드가 구성되지 않은 경우(Resend도 SMTP도 없음) → `docker compose logs backend`에서 `[DEV] Verification code`를 찾으세요
-- **WebSocket이 연결되지 않음**: 공개 배포에서는 반드시 `FRONTEND_ORIGIN`을 실제 프런트엔드 도메인으로 설정해야 합니다. [문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-wont-connect)을 참고하세요
+- **WebSocket이 연결되지 않음**: 리버스 프록시 또는 빌드 시 `NEXT_PUBLIC_WS_URL`, 그리고 백엔드 `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS`를 모두 확인하세요. [문제 해결 → WebSocket이 연결되지 않음](/troubleshooting#websocket-wont-connect)을 참고하세요
 - **사용량 / 런타임 대시보드가 0에 머무름**: `rollup_task_usage_hourly()`가 스케줄링되지 않고 있습니다 — 위의 [7단계](#7-usage-rollup-no-operator-action-required)와 [문제 해결 → 사용량 대시보드가 0으로 표시됨](/troubleshooting#usage-dashboard-stays-at-zero)을 참고하세요
 - **`migrate up`이 `refusing to drop legacy daily rollups`로 실패함**: `v0.3.4 → v0.3.5+` 업그레이드 경로 가드입니다. MUL-2957부터 migrate 명령이 migration 103을 적용하기 전에 백필을 자동으로 실행합니다 — [7단계](#7-usage-rollup-no-operator-action-required)를 참고하세요
 

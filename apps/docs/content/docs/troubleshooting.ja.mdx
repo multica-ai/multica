@@ -70,19 +70,33 @@ multica issue show <issue-id>             # inspect task history
 1. **Origin チェックの失敗** — フロントエンドのドメインがサーバーの CORS 許可リストにありません。デフォルトの許可リストには `localhost:3000/5173/5174` のみが含まれ、公開インターネットでセルフホストするには `FRONTEND_ORIGIN` が必要です
 2. **プロトコルの不一致** — `https://` のフロントエンドには `wss://` が必要で、HTTP は `ws://` を使います
 3. **リバースプロキシが WebSocket アップグレードを有効にしていない** — Nginx / Envoy / HAProxy はデフォルトでは `Upgrade` ヘッダーを転送しません
-4. **JWT クッキーの期限切れまたは欠落** — 30 日の有効期限後にログインし直していない
+4. **bundle に焼き込まれた WebSocket URL が誤っている** — `NEXT_PUBLIC_WS_URL` は web イメージのビルド時の値です。prebuilt イメージの実行時 env を変えてもブラウザ URL は変わりません
+5. **JWT クッキーの期限切れまたは欠落** — 30 日の有効期限後にログインし直していない
 
 **診断方法**:
 
 - ブラウザの DevTools → Network → 「WS」でフィルタリングし、接続状態とステータスコードを確認してください
 - サーバーログで `"rejected origin"` / `"websocket"` を grep してください — origin の問題であれば明示的に表示されます
-- `curl -i http://<server-host>:8080/ws` は（`Upgrade` ヘッダー付きで）`101 Switching Protocols` を返すはずです
+- 完全な upgrade header 付きで経路を確認してください。例:
+
+  ```bash
+  curl -i \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    -H 'Origin: https://multica.yourdomain.com' \
+    https://multica.yourdomain.com/ws
+  ```
+
+  `101 Switching Protocols` は upgrade 経路が動作していることを示します。`403` は通常バックエンドが `Origin` を拒否しています。HTML/404/426 は通常 `/ws` がフロントエンド、または WebSocket upgrade 非対応のプロキシ経路に到達しています。
 
 **解決方法**:
 
 - Origin エラー → サーバーの `.env` に `FRONTEND_ORIGIN=https://multica.yourdomain.com` を設定（またはカンマ区切りの `CORS_ALLOWED_ORIGINS`）し、サーバーを再起動してください
 - プロトコルの不一致 → `FRONTEND_ORIGIN` のプロトコルがフロントエンドと一致しているか確認してください
 - リバースプロキシ → Nginx に `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";` を追加してください
+- bundle の URL エラー → デフォルトの同一オリジン `/ws` にはリバースプロキシを使うか、`NEXT_PUBLIC_WS_URL=wss://.../ws` で web イメージをソースから再ビルドしてください。prebuilt イメージの実行時 env だけでは不十分です
 - クッキーの期限切れ → ページを再読み込みしてログインし直してください
 
 ## メールが届かない

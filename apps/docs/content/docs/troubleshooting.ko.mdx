@@ -70,19 +70,33 @@ multica issue show <issue-id>             # inspect task history
 1. **Origin 검사 실패** — 여러분의 프런트엔드 도메인이 서버의 CORS 허용 목록에 없습니다. 기본 허용 목록에는 `localhost:3000/5173/5174`만 포함되며, 공개 인터넷에서 자체 호스팅하려면 `FRONTEND_ORIGIN`이 필요합니다
 2. **프로토콜 불일치** — `https://` 프런트엔드에는 `wss://`가 필요하고, HTTP는 `ws://`를 사용합니다
 3. **리버스 프록시가 WebSocket 업그레이드를 활성화하지 않음** — Nginx / Envoy / HAProxy는 기본적으로 `Upgrade` 헤더를 전달하지 않습니다
-4. **JWT 쿠키 만료 또는 누락** — 30일 만료 후 다시 로그인하지 않음
+4. **번들에 포함된 WebSocket URL이 잘못됨** — `NEXT_PUBLIC_WS_URL`은 web 이미지 빌드 시 값입니다. prebuilt 이미지의 런타임 env를 바꿔도 브라우저 URL은 바뀌지 않습니다
+5. **JWT 쿠키 만료 또는 누락** — 30일 만료 후 다시 로그인하지 않음
 
 **진단 방법**:
 
 - 브라우저 DevTools → Network → "WS"로 필터링하여 연결 상태와 상태 코드를 확인하세요
 - 서버 로그에서 `"rejected origin"` / `"websocket"`을 grep하세요 — origin 문제라면 명시적으로 표기됩니다
-- `curl -i http://<server-host>:8080/ws`는 `101 Switching Protocols`를 반환해야 합니다(`Upgrade` 헤더 포함)
+- 전체 upgrade header로 경로를 확인하세요. 예:
+
+  ```bash
+  curl -i \
+    -H 'Connection: Upgrade' \
+    -H 'Upgrade: websocket' \
+    -H 'Sec-WebSocket-Version: 13' \
+    -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+    -H 'Origin: https://multica.yourdomain.com' \
+    https://multica.yourdomain.com/ws
+  ```
+
+  `101 Switching Protocols`는 upgrade 경로가 동작한다는 뜻입니다. `403`은 보통 백엔드가 `Origin`을 거부한 것입니다. HTML/404/426은 보통 `/ws`가 프런트엔드 또는 WebSocket upgrade를 전달하지 않는 프록시 경로에 도달했다는 뜻입니다.
 
 **해결 방법**:
 
 - Origin 오류 → 서버의 `.env`에 `FRONTEND_ORIGIN=https://multica.yourdomain.com`을 설정(또는 쉼표로 구분한 `CORS_ALLOWED_ORIGINS`)하고 서버를 재시작하세요
 - 프로토콜 불일치 → `FRONTEND_ORIGIN`의 프로토콜이 프런트엔드와 일치하는지 확인하세요
 - 리버스 프록시 → Nginx에 `proxy_http_version 1.1; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`를 추가하세요
+- 번들 URL 오류 → 기본 동일 origin `/ws`에는 리버스 프록시를 사용하거나 `NEXT_PUBLIC_WS_URL=wss://.../ws`로 web 이미지를 소스에서 다시 빌드하세요. prebuilt 이미지의 런타임 env만으로는 충분하지 않습니다
 - 쿠키 만료 → 페이지를 새로고침하고 다시 로그인하세요
 
 ## 이메일이 수신되지 않음

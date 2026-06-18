@@ -193,6 +193,10 @@ After bringing the proxy up, set `FRONTEND_ORIGIN=https://multica.example.com` i
 
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) is another solid option — it gives you TLS and a public hostname without exposing any port on the host at all. An Nginx equivalent (separate `app.` / `api.` hostnames, `proxy_set_header Upgrade` for WebSockets) works just as well; the key requirements are TLS termination and forwarding the `Upgrade` header on `/ws`.
 
+<Callout type="warning">
+The browser WebSocket URL is bundled into the web image at build time. With the prebuilt image, changing `NEXT_PUBLIC_WS_URL` or `NEXT_PUBLIC_API_URL` in container runtime env does not change browser behavior. Use a reverse proxy for the default same-origin `/ws` path, or rebuild with `docker-compose.selfhost.build.yml`. The advanced guide includes a localhost / LAN / single-domain / separate-domain smoke matrix.
+</Callout>
+
 ## 6. Create an agent + assign your first task
 
 Same flow as Cloud — see [Cloud quickstart → Steps 5-6](/cloud-quickstart#5-create-an-agent).
@@ -267,7 +271,7 @@ The full reference — three login modes, the `backend` ExternalName workaround 
 
 - **Backend won't start**: check container logs with `docker compose -f docker-compose.selfhost.yml logs backend`; usually it's a bad `DATABASE_URL` or `JWT_SECRET` in `.env`
 - **Verification code not received**: no email backend is configured (neither Resend nor SMTP) → look for `[DEV] Verification code` in `docker compose logs backend`
-- **WebSocket won't connect**: for public deployments you must set `FRONTEND_ORIGIN` to your real frontend domain; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
+- **WebSocket won't connect**: check both the reverse proxy or build-time `NEXT_PUBLIC_WS_URL` and the backend `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS`; see [Troubleshooting → WebSocket won't connect](/troubleshooting#websocket-wont-connect)
 - **Usage / Runtime dashboard stays at zero**: `rollup_task_usage_hourly()` isn't being scheduled — see [Step 7](#7-usage-rollup-no-operator-action-required) above and [Troubleshooting → Usage dashboard shows zero](/troubleshooting#usage-dashboard-stays-at-zero)
 - **`migrate up` fails with `refusing to drop legacy daily rollups`**: upgrade-path guard from `v0.3.4 → v0.3.5+`. As of MUL-2957 the migrate command runs the backfill automatically before applying migration 103 — see [Step 7](#7-usage-rollup-no-operator-action-required)
 
