@@ -33,11 +33,11 @@ make selfhost
 1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份，并**生成随机 JWT_SECRET 和 Postgres 密码**
 2. 拉取官方 Docker 镜像（PostgreSQL、Multica backend、Multica frontend）
 3. 用 `docker-compose.selfhost.yml` 启动全部服务
-4. 等后端 `/health` 端点准备就绪
+4. 等后端 `/readyz` 端点准备就绪
 
-如果是启动完成后的生产探针，想让数据库或 migration 异常也体现为失败，请改用 `/readyz`。
+`/health` 只证明 backend 进程在监听。`/readyz` 和 `/healthz` 还会检查 PostgreSQL 和 migration 状态，所以 Compose healthcheck、生产 readiness probe、以及需要在数据库或 migration 异常时失败的启动诊断都应该使用它们。
 
-后端容器启动时会**自动跑数据库 migration**（`docker/entrypoint.sh` 在启动 server 前执行 `./migrate up`）——你会在 backend 日志里看到 migration 输出。升级版本时同样自动处理。
+后端容器启动时会**自动跑数据库 migration**（`docker/entrypoint.sh` 在启动 server 前执行 `./migrate up`）——你会在 backend 日志里看到 migration 输出。单机 Docker Compose 的版本升级也按同样方式处理。对于 Kubernetes 或多副本 release，请在滚动 backend pod 之前通过 Job 或受控 preflight 只运行一次 migration；readiness 保持使用 `/readyz` 或 `/healthz`，migration 失败时停止 rollout。
 
 <Callout type="info">
 **镜像还没发布？** 如果 `make selfhost` 报拉不到镜像，可能是你在某个未发布的版本标签上。切到稳定版本或直接从源码构建：`make selfhost-build`。

@@ -13,7 +13,7 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 
 | 环境变量 | 默认值 | 生产必须设？ |
 |---|---|---|
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |
+| `DATABASE_URL` | Docker Compose 中不设置；server binary 会回退到 `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | bundled Compose 数据库外部才必填 |
 | `PORT` | `8080` | 否（除非换端口）|
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **是**（默认值不安全）|
 | `APP_ENV` | 空 | **是**（必须 `production`）|

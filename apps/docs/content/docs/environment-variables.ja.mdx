@@ -13,7 +13,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 | 変数 | デフォルト | プロダクションで必須？ |
 |---|---|---|
-| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **はい** |
+| `DATABASE_URL` | Docker Compose では未設定。server binary は `postgres://multica:multica@localhost:5432/multica?sslmode=disable` にフォールバックします | 同梱 Compose データベースの外部では **はい** |
 | `PORT` | `8080` | いいえ（ポートを変更する場合を除く） |
 | `JWT_SECRET` | `multica-dev-secret-change-in-production` | **はい**（デフォルトは安全ではありません） |
 | `APP_ENV` | 空 | **はい**（`production` である必要があります） |

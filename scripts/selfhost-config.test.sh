@@ -39,6 +39,17 @@ require_file_contains() {
   fi
 }
 
+require_file_not_contains() {
+  local file=$1
+  local unexpected=$2
+
+  if grep -Fq "$unexpected" "$file"; then
+    echo "$file contains stale value:"
+    echo "  $unexpected"
+    exit 1
+  fi
+}
+
 require_file_line_count() {
   local file=$1
   local expected=$2
@@ -106,6 +117,28 @@ require_file_line_count deploy/helm/multica/templates/backend.yaml '            
 require_file_line_count deploy/helm/multica/templates/backend.yaml '              path: /health' 1
 require_file_contains SELF_HOSTING_ADVANCED.md 'Even when `DATABASE_URL` points at an external database, the stock Compose file'
 require_file_contains SELF_HOSTING_ADVANCED.md 'still starts and waits for the bundled `postgres` service.'
+
+require_file_contains apps/docs/content/docs/self-host-quickstart.mdx "Wait until the backend's \`/readyz\` endpoint is ready"
+require_file_contains apps/docs/content/docs/self-host-quickstart.zh.mdx '等后端 `/readyz` 端点准备就绪'
+require_file_contains apps/docs/content/docs/self-host-quickstart.ja.mdx 'バックエンドの `/readyz` エンドポイントが準備できるまで待機します'
+require_file_contains apps/docs/content/docs/self-host-quickstart.ko.mdx '백엔드의 `/readyz` 엔드포인트가 준비될 때까지 기다립니다'
+require_file_not_contains apps/docs/content/docs/self-host-quickstart.zh.mdx '等后端 `/health` 端点准备就绪'
+require_file_not_contains apps/docs/content/docs/self-host-quickstart.ja.mdx 'バックエンドの `/health` エンドポイントが準備できるまで待機します'
+require_file_not_contains apps/docs/content/docs/self-host-quickstart.ko.mdx '백엔드의 `/health` 엔드포인트가 준비될 때까지 기다립니다'
+require_file_contains apps/docs/content/docs/self-host-quickstart.zh.mdx '对于 Kubernetes 或多副本 release'
+require_file_contains apps/docs/content/docs/self-host-quickstart.ja.mdx 'Kubernetes または複数レプリカのリリース'
+require_file_contains apps/docs/content/docs/self-host-quickstart.ko.mdx 'Kubernetes 또는 다중 replica release'
+
+require_file_contains apps/docs/content/docs/environment-variables.mdx 'unset in Docker Compose; server binary falls back to'
+require_file_contains apps/docs/content/docs/environment-variables.zh.mdx 'Docker Compose 中不设置；server binary 会回退到'
+require_file_contains apps/docs/content/docs/environment-variables.ja.mdx 'Docker Compose では未設定。server binary は'
+require_file_contains apps/docs/content/docs/environment-variables.ko.mdx 'Docker Compose에서는 설정되지 않음; server binary는'
+require_file_contains apps/docs/content/docs/environment-variables.zh.mdx 'bundled Compose 数据库外部才必填'
+require_file_contains apps/docs/content/docs/environment-variables.ja.mdx '同梱 Compose データベースの外部では **はい**'
+require_file_contains apps/docs/content/docs/environment-variables.ko.mdx '번들 Compose 데이터베이스 외부에서는 **예**'
+require_file_not_contains apps/docs/content/docs/environment-variables.zh.mdx '| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **是** |'
+require_file_not_contains apps/docs/content/docs/environment-variables.ja.mdx '| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **はい** |'
+require_file_not_contains apps/docs/content/docs/environment-variables.ko.mdx '| `DATABASE_URL` | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` | **예** |'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then

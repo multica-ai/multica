@@ -33,11 +33,11 @@ make selfhost
 1. `.env` がなければ `.env.example` から生成し、**ランダムな JWT_SECRET と Postgres パスワード** を併せて作成します
 2. 公式の Docker イメージ（PostgreSQL、Multica backend、Multica frontend）を取得します
 3. `docker-compose.selfhost.yml` を使ってすべてのサービスを起動します
-4. バックエンドの `/health` エンドポイントが準備できるまで待機します
+4. バックエンドの `/readyz` エンドポイントが準備できるまで待機します
 
-起動後の継続的なプロダクションプローブには、データベースや migration の問題でチェックが失敗するようにしたい場合は `/readyz` を使ってください。
+`/health` はバックエンドプロセスが待ち受けていることだけを示します。`/readyz` と `/healthz` は PostgreSQL と migration の状態も確認するため、Compose healthcheck、プロダクションの readiness probe、データベースや migration の問題で失敗すべき起動診断にはこれらを使ってください。
 
-バックエンドのコンテナは起動時に **データベースの migration を自動で実行します**（`docker/entrypoint.sh` がサーバー起動前に `./migrate up` を実行）— バックエンドのログで migration の出力を確認できます。バージョンアップグレードも同じ方法で処理されます。
+バックエンドのコンテナは起動時に **データベースの migration を自動で実行します**（`docker/entrypoint.sh` がサーバー起動前に `./migrate up` を実行）— バックエンドのログで migration の出力を確認できます。単一ホストの Docker Compose ではバージョンアップグレードも同じ方法で処理されます。Kubernetes または複数レプリカのリリースでは、バックエンド Pod をローリングする前に Job または管理された preflight で migration を一度だけ実行してください。readiness は `/readyz` または `/healthz` のままにし、migration が失敗したら rollout を停止します。
 
 <Callout type="info">
 **イメージがまだ公開されていませんか?** `make selfhost` がイメージを取得できない場合、まだリリースされていないバージョンタグにいる可能性があります。安定リリースに切り替えるか、ソースからビルドしてください: `make selfhost-build`。

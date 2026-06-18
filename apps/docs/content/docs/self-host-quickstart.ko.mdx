@@ -33,11 +33,11 @@ make selfhost
 1. `.env`가 없으면 `.env.example`로부터 생성하며 **무작위 JWT_SECRET과 Postgres 비밀번호**를 함께 만듭니다
 2. 공식 Docker 이미지(PostgreSQL, Multica backend, Multica frontend)를 받아옵니다
 3. `docker-compose.selfhost.yml`을 사용해 모든 서비스를 시작합니다
-4. 백엔드의 `/health` 엔드포인트가 준비될 때까지 기다립니다
+4. 백엔드의 `/readyz` 엔드포인트가 준비될 때까지 기다립니다
 
-시작 이후 프로덕션 프로브에는, 데이터베이스나 migration 문제 시 검사가 실패하도록 하려면 `/readyz`를 사용하세요.
+`/health`는 백엔드 프로세스가 수신 중이라는 것만 증명합니다. `/readyz`와 `/healthz`는 PostgreSQL과 migration 상태도 확인하므로, Compose healthcheck, 프로덕션 readiness probe, 데이터베이스나 migration 문제가 있을 때 실패해야 하는 시작 진단에는 이들을 사용하세요.
 
-백엔드 컨테이너는 시작 시 **데이터베이스 migration을 자동으로 실행합니다**(`docker/entrypoint.sh`가 서버 시작 전에 `./migrate up`을 실행) — 백엔드 로그에서 migration 출력을 확인할 수 있습니다. 버전 업그레이드도 같은 방식으로 처리됩니다.
+백엔드 컨테이너는 시작 시 **데이터베이스 migration을 자동으로 실행합니다**(`docker/entrypoint.sh`가 서버 시작 전에 `./migrate up`을 실행) — 백엔드 로그에서 migration 출력을 확인할 수 있습니다. 단일 호스트 Docker Compose의 버전 업그레이드도 같은 방식으로 처리됩니다. Kubernetes 또는 다중 replica release에서는 백엔드 pod를 롤링하기 전에 Job이나 통제된 preflight로 migration을 한 번만 실행하세요. readiness는 `/readyz` 또는 `/healthz`로 유지하고, migration이 실패하면 rollout을 중지하세요.
 
 <Callout type="info">
 **이미지가 아직 공개되지 않았나요?** `make selfhost`가 이미지를 받아오지 못한다면 아직 릴리스되지 않은 버전 태그에 있을 수 있습니다. 안정 릴리스로 전환하거나 소스에서 빌드하세요: `make selfhost-build`.
