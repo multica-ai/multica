@@ -74,11 +74,26 @@ type AgentCapabilityConnectionsLister interface {
 }
 
 // AgentCapabilitySkill is one skill the agent can load (what it CAN do).
+// Source distinguishes the two layers the runtime actually loads at claim time
+// (see daemon.go): workspace-bound skills (the same set `multica agent get`
+// lists) and the platform built-in skills every agent additionally receives.
+// Labelling the source is why the card's skill total can exceed `agent get`'s
+// count without the two views disagreeing.
 type AgentCapabilitySkill struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	Source      string `json:"source"` // capSkillSourceWorkspace | capSkillSourceBuiltin
 }
+
+const (
+	// capSkillSourceWorkspace marks a skill bound to this agent in the
+	// workspace (agent_skill join) — what `multica agent get` returns.
+	capSkillSourceWorkspace = "workspace"
+	// capSkillSourceBuiltin marks a platform built-in skill that every agent
+	// receives on top of its workspace skills (TaskService.BuiltinSkills).
+	capSkillSourceBuiltin = "builtin"
+)
 
 // AgentCapabilityTool is one tool/permission resolved for this agent, with the
 // effective verdict and which layer decided it.
@@ -172,7 +187,7 @@ type AgentCapabilitySecretSet struct {
 type AgentCapabilityObservedTool struct {
 	Name       string `json:"name"`
 	Uses       int64  `json:"uses"`
-	LastUsed   string `json:"last_used,omitempty"` // RFC3339, empty if unknown
+	LastUsed   string `json:"last_used,omitempty"`  // RFC3339, empty if unknown
 	Permission string `json:"permission,omitempty"` // allow | ask | deny | "" (no row)
 	Status     string `json:"status"`               // allowed | needs_approval | blocked | unmapped
 	Drift      bool   `json:"drift"`
@@ -246,13 +261,29 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 		InfisicalSecrets: []AgentCapabilityInfisicalSecret{},
 	}
 
-	// CAN — skills the agent loads.
+	// CAN — skills the agent loads. Two layers, mirroring exactly what the
+	// runtime assembles at claim time (daemon.go: LoadAgentSkills +
+	// BuiltinSkills): first the workspace-bound skills (agent_skill join — the
+	// same set `multica agent get` lists), then the platform built-in skills
+	// every agent additionally receives. Both are tagged with Source so a
+	// reviewer can see the full loaded set and understand why the total exceeds
+	// the workspace-only count shown by the CLI.
 	if skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID); err == nil {
 		for _, s := range skills {
 			out.Skills = append(out.Skills, AgentCapabilitySkill{
 				ID:          uuidToString(s.ID),
 				Name:        s.Name,
 				Description: s.Description,
+				Source:      capSkillSourceWorkspace,
+			})
+		}
+	}
+	if h.TaskService != nil {
+		for _, b := range h.TaskService.BuiltinSkills() {
+			out.Skills = append(out.Skills, AgentCapabilitySkill{
+				Name:        b.Name,
+				Description: builtinSkillCardDescription(b.Description, b.Content),
+				Source:      capSkillSourceBuiltin,
 			})
 		}
 	}
@@ -312,6 +343,33 @@ func (h *Handler) GetAgentCapabilities(w http.ResponseWriter, r *http.Request) {
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
 
 	writeJSON(w, http.StatusOK, out)
+}
+
+// builtinSkillCardDescription resolves a one-line description for a built-in
+// skill shown on the card. BuiltinSkills() leaves Description empty, so fall
+// back to the `description:` field in the SKILL.md YAML frontmatter (the
+// authoritative one-liner). Returns "" when neither is available rather than
+// inventing copy.
+func builtinSkillCardDescription(desc, content string) string {
+	if d := strings.TrimSpace(desc); d != "" {
+		return d
+	}
+	const marker = "---"
+	body := content
+	if strings.HasPrefix(strings.TrimSpace(body), marker) {
+		// Scan only the frontmatter block (between the first two `---` fences).
+		trimmed := strings.TrimSpace(body)
+		rest := strings.TrimPrefix(trimmed, marker)
+		if end := strings.Index(rest, marker); end >= 0 {
+			rest = rest[:end]
+		}
+		for _, line := range strings.Split(rest, "\n") {
+			if after, ok := strings.CutPrefix(strings.TrimSpace(line), "description:"); ok {
+				return strings.TrimSpace(after)
+			}
+		}
+	}
+	return ""
 }
 
 // agentCapabilityRows resolves the full per-tool policy table for this agent in

@@ -29,6 +29,7 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   getAgentCapabilities,
   type AgentCapabilities,
+  type AgentCapabilitySkill,
   type AgentCapabilityTool,
   type AgentCapabilityConnection,
   type AgentCapabilityRepo,
@@ -122,20 +123,8 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
         allowed, amber = needs approval, red = blocked.
       </p>
 
-      {/* Skills */}
-      <Section icon={BookOpenText} title="Skills" count={caps.skills.length}>
-        {caps.skills.length === 0 ? (
-          <Empty>No skills loaded.</Empty>
-        ) : (
-          <PillRow>
-            {caps.skills.map((s) => (
-              <Pill key={s.id || s.name} title={s.description}>
-                {s.name}
-              </Pill>
-            ))}
-          </PillRow>
-        )}
-      </Section>
+      {/* Skills — two layers the runtime loads: workspace-bound + built-in */}
+      <SkillsSection skills={caps.skills} />
 
       {/* Tools + permissions */}
       <Section icon={Wrench} title="Tools" count={caps.tools.length}>
@@ -380,6 +369,57 @@ function Section({
   );
 }
 
+// SkillsSection renders the skills the agent loads in two clearly-labelled
+// layers, mirroring what the runtime assembles at claim time: workspace-bound
+// skills (the set `multica agent get` lists) and the platform built-in skills
+// every agent additionally receives. Showing both — and naming the source —
+// is why the card's total can exceed the CLI's workspace-only count without
+// the two views contradicting each other.
+function SkillsSection({ skills }: { skills: AgentCapabilitySkill[] }) {
+  const builtin = skills.filter((s) => s.source === "builtin");
+  const workspace = skills.filter((s) => s.source !== "builtin");
+  return (
+    <Section icon={BookOpenText} title="Skills" count={skills.length}>
+      {skills.length === 0 ? (
+        <Empty>No skills loaded.</Empty>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
+            {workspace.length} workspace · {builtin.length} built-in — the runtime
+            loads both. <code>multica agent get</code> lists only the{" "}
+            {workspace.length} workspace skill
+            {workspace.length === 1 ? "" : "s"}; the built-in skills load for
+            every agent.
+          </p>
+          {workspace.length > 0 && (
+            <PillRow>
+              {workspace.map((s) => (
+                <Pill key={s.id || s.name} title={s.description}>
+                  {s.name}
+                </Pill>
+              ))}
+            </PillRow>
+          )}
+          {builtin.length > 0 && (
+            <PillRow>
+              {builtin.map((s) => (
+                <Pill
+                  key={s.id || s.name}
+                  className="border-dashed text-muted-foreground"
+                  title={s.description || "Platform built-in skill"}
+                >
+                  {s.name}
+                  <span className="text-muted-foreground">· built-in</span>
+                </Pill>
+              ))}
+            </PillRow>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 // SecretSetSection renders one names-only secret group (agent custom_env or
 // runtime bindings). It always shows an explicit status badge so an empty list
 // is never ambiguous, and it honours the backend's redaction: when names are
@@ -482,10 +522,17 @@ function ObservedAccessSection({
       </div>
 
       {observed.drift_count > 0 && (
-        <p className="mt-1.5 flex items-center gap-1 text-xs text-destructive">
-          <AlertTriangle className="h-3 w-3" />
-          {observed.drift_count} tool{observed.drift_count === 1 ? "" : "s"} used
-          that the declared policy does not allow (blocked or unmapped) — review.
+        <p className="mt-1.5 flex items-start gap-1 text-xs text-destructive">
+          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>
+            <strong>
+              Reviewer: {observed.drift_count} of the {observed.tools.length} tools
+              below (red) were used but the declared policy does not account for
+              them
+            </strong>{" "}
+            — blocked or unmapped. Confirm each is expected, or tighten the
+            policy. The other tools match the declared policy.
+          </span>
         </p>
       )}
 
@@ -502,6 +549,16 @@ function ObservedAccessSection({
             : "No tool use recorded in this window."}
         </Empty>
       )}
+
+      {/* Honest-scope disclaimer: only tool use is recorded. Secret/credential
+          use is not tracked anywhere, so this section can never show which
+          secrets an agent actually read — an empty secret signal here would be
+          false assurance, so we say so explicitly. */}
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        Tool use only. Secret and credential <em>use</em> is not tracked — this
+        section cannot show which secrets an agent actually read, only which
+        tools it ran.
+      </p>
     </Section>
   );
 }

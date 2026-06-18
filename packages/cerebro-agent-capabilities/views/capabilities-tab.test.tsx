@@ -184,12 +184,42 @@ describe("CerebroCapabilitiesTab", () => {
     // Limits.
     expect(screen.getByText("multica")).toBeInTheDocument();
 
-    // Observed access (TECH-3738 Bid B): the used tools + the drift banner.
+    // Observed access (TECH-3738 Bid B): the used tools + the drift verdict.
     expect(screen.getByText("Observed access")).toBeInTheDocument();
     expect(screen.getByText("WebFetch")).toBeInTheDocument();
     expect(
-      screen.getByText(/used that the declared policy does not allow/i),
+      screen.getByText(/the declared policy does not account for them/i),
     ).toBeInTheDocument();
+    // Honest-scope disclaimer: secret use is not tracked.
+    expect(
+      screen.getByText(/Secret and credential/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders workspace and built-in skills as labelled layers", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      skills: [
+        { id: "s1", name: "deploy", description: "Ship a PR", source: "workspace" },
+        {
+          id: "",
+          name: "multica-mentioning",
+          description: "How to @mention",
+          source: "builtin",
+        },
+      ],
+    });
+
+    renderTab();
+
+    expect(await screen.findByText("deploy")).toBeInTheDocument();
+    expect(screen.getByText("multica-mentioning")).toBeInTheDocument();
+    // The built-in pill carries an explicit "built-in" tag.
+    expect(screen.getByText("· built-in")).toBeInTheDocument();
+    // The layer note explains why the CLI count differs.
+    expect(screen.getByText(/workspace ·.*built-in/i)).toBeInTheDocument();
   });
 
   it("redacts secret names for non-privileged callers but keeps the count", async () => {

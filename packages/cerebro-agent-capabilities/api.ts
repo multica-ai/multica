@@ -20,6 +20,10 @@ const AgentCapabilitySkillSchema = z
     id: z.string().default(""),
     name: z.string().default(""),
     description: z.string().default(""),
+    // "workspace" = bound to this agent (what `multica agent get` lists);
+    // "builtin" = platform skill every agent also loads. Unknown values
+    // default to "workspace" so a drifting backend still renders.
+    source: z.string().default("workspace"),
   })
   .loose();
 
