@@ -516,6 +516,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                           <Button
                             variant="ghost"
                             size="icon-sm"
+                            nativeButton={false}
                             render={<AppLink href={paths.issueDetail(source.source_id ?? "")} />}
                           >
                             <ExternalLink className="h-4 w-4" />
@@ -525,6 +526,7 @@ function KnowledgeDetailPanel({ detail }: { detail: KnowledgeDetail | null }) {
                           <Button
                             variant="ghost"
                             size="icon-sm"
+                            nativeButton={false}
                             render={<AppLink href={paths.knowledgeDetail(source.source_id ?? "")} />}
                           >
                             <ExternalLink className="h-4 w-4" />
@@ -725,7 +727,7 @@ function CandidateQueue({ candidates }: { candidates: KnowledgeCandidate[] }) {
               </p>
               <div className="mt-3 flex gap-2">
                 {itemId && (
-                  <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(itemId)} />}>
+                  <Button size="sm" variant="outline" nativeButton={false} render={<AppLink href={paths.knowledgeDetail(itemId)} />}>
                     {t(($) => $.candidates.open_draft)}
                   </Button>
                 )}
@@ -902,12 +904,12 @@ function GovernanceFindingsQueue({ findings }: { findings: KnowledgeGovernanceFi
                 {sourceMap && <span>{sourceMap}</span>}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(finding.knowledge_item_id)} />}>
+                <Button size="sm" variant="outline" nativeButton={false} render={<AppLink href={paths.knowledgeDetail(finding.knowledge_item_id)} />}>
                   <ExternalLink className="h-4 w-4" />
                   {t(($) => $.governance_queue.open_original)}
                 </Button>
                 {hasDraft && (
-                  <Button size="sm" variant="outline" render={<AppLink href={paths.knowledgeDetail(finding.draft_knowledge_item_id ?? "")} />}>
+                  <Button size="sm" variant="outline" nativeButton={false} render={<AppLink href={paths.knowledgeDetail(finding.draft_knowledge_item_id ?? "")} />}>
                     <FileText className="h-4 w-4" />
                     {t(($) => $.governance_queue.open_draft)}
                   </Button>

@@ -18,10 +18,29 @@ import type {
   ListKnowledgeInjectionsResponse,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
+  ProbeKnowledgeCuratorResponse,
   SearchKnowledgeResponse,
 } from "./types";
 
 const NullableString = z.string().nullable().default(null);
+
+export const ProbeKnowledgeCuratorResponseSchema = z.object({
+  provider: z.string().default("custom"),
+  model: z.string().default(""),
+  embedding_model: z.string().default(""),
+  chat_supported: z.boolean().default(false),
+  embedding_supported: z.boolean().default(false),
+  warnings: z.array(z.string()).default([]),
+}).passthrough();
+
+export const EMPTY_PROBE_KNOWLEDGE_CURATOR_RESPONSE: ProbeKnowledgeCuratorResponse = {
+  provider: "custom",
+  model: "",
+  embedding_model: "",
+  chat_supported: false,
+  embedding_supported: false,
+  warnings: [],
+};
 
 export const KnowledgeItemSchema = z.object({
   id: z.string().default(""),

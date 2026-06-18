@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,64 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestWriteKnowledgeErrorMapsCuratorProviderErrors(t *testing.T) {
+	w := httptest.NewRecorder()
+	(&Handler{}).writeKnowledgeError(w, fmt.Errorf("%w: model not found", service.ErrCuratorProvider), "fallback")
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d: %s", w.Code, http.StatusBadGateway, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "fallback") || !strings.Contains(w.Body.String(), "model not found") {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestProbeKnowledgeCuratorEndpointRequiresAdmin(t *testing.T) {
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"gpt-4.1-mini"},{"id":"text-embedding-3-small"}]}`))
+		case "/embeddings":
+			embedding := make([]float32, service.KnowledgeEmbeddingDimensions)
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": embedding}}})
+		default:
+			t.Fatalf("unexpected provider path %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(provider.Close)
+
+	req := newRequest("POST", "/api/knowledge/curator/probe", map[string]any{"base_url": provider.URL})
+	w := httptest.NewRecorder()
+	testHandler.ProbeKnowledgeCuratorEndpoint(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner probe: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var memberUserID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email) VALUES ('Curator Probe Member', 'curator-probe-member@multica.ai')
+		RETURNING id
+	`).Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, memberUserID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+
+	req = newRequest("POST", "/api/knowledge/curator/probe", map[string]any{"base_url": provider.URL})
+	req.Header.Set("X-User-ID", memberUserID)
+	w = httptest.NewRecorder()
+	testHandler.ProbeKnowledgeCuratorEndpoint(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("member probe: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
 
 func TestKnowledgeCreateRequiresSource(t *testing.T) {
 	w := httptest.NewRecorder()

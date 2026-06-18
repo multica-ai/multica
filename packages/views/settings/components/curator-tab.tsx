@@ -1,12 +1,27 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Save, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  BrainCircuit,
+  CheckCircle2,
+  CircleHelp,
+  Loader2,
+  Save,
+  WandSparkles,
+} from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import {
@@ -22,21 +37,26 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
+import type { ProbeKnowledgeCuratorResponse } from "@multica/core/knowledge/types";
 import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useT } from "../../i18n";
 
-type CuratorRuntimeMode = "local" | "cloud" | "external";
 type KnowledgeTypeFilter = "lesson" | "playbook" | "reference";
 type RAGConfidenceThreshold = "low" | "medium" | "high";
-type RAGCuratorRuntimePolicy = "workspace_default" | "cloud" | "local";
+type CuratorProbeState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "success"; result: ProbeKnowledgeCuratorResponse }
+  | { status: "warning"; result: ProbeKnowledgeCuratorResponse }
+  | { status: "error"; message: string };
 
 interface KnowledgeCuratorSettings {
   enabled: boolean;
   provider: string;
   model: string;
   embedding_model: string;
-  runtime_mode: CuratorRuntimeMode;
   base_url: string;
+  secret_ref?: string;
 }
 
 interface KnowledgeRAGSettings {
@@ -44,7 +64,6 @@ interface KnowledgeRAGSettings {
   limit: number;
   type_filters: KnowledgeTypeFilter[];
   confidence_threshold: RAGConfidenceThreshold;
-  curator_runtime_policy: RAGCuratorRuntimePolicy;
   token_budget: number;
 }
 
@@ -53,7 +72,6 @@ const DEFAULT_CURATOR_SETTINGS: KnowledgeCuratorSettings = {
   provider: "",
   model: "",
   embedding_model: "",
-  runtime_mode: "external",
   base_url: "",
 };
 
@@ -62,7 +80,6 @@ const DEFAULT_RAG_SETTINGS: KnowledgeRAGSettings = {
   limit: 5,
   type_filters: [],
   confidence_threshold: "high",
-  curator_runtime_policy: "workspace_default",
   token_budget: 2000,
 };
 
@@ -72,16 +89,13 @@ function readCuratorSettings(settings: Record<string, unknown> | undefined): Kno
     return DEFAULT_CURATOR_SETTINGS;
   }
   const data = raw as Record<string, unknown>;
-  const runtimeMode = data.runtime_mode === "local" || data.runtime_mode === "cloud" || data.runtime_mode === "external"
-    ? data.runtime_mode
-    : DEFAULT_CURATOR_SETTINGS.runtime_mode;
   return {
     enabled: data.enabled === true,
     provider: typeof data.provider === "string" ? data.provider : "",
     model: typeof data.model === "string" ? data.model : "",
     embedding_model: typeof data.embedding_model === "string" ? data.embedding_model : "",
-    runtime_mode: runtimeMode,
     base_url: typeof data.base_url === "string" ? data.base_url : "",
+    ...(typeof data.secret_ref === "string" ? { secret_ref: data.secret_ref } : {}),
   };
 }
 
@@ -94,9 +108,6 @@ function readRAGSettings(settings: Record<string, unknown> | undefined): Knowled
   const threshold = data.confidence_threshold === "low" || data.confidence_threshold === "medium" || data.confidence_threshold === "high"
     ? data.confidence_threshold
     : DEFAULT_RAG_SETTINGS.confidence_threshold;
-  const runtimePolicy = data.curator_runtime_policy === "cloud" || data.curator_runtime_policy === "local" || data.curator_runtime_policy === "workspace_default"
-    ? data.curator_runtime_policy
-    : DEFAULT_RAG_SETTINGS.curator_runtime_policy;
   const typeFilters = Array.isArray(data.type_filters)
     ? data.type_filters.filter((value): value is KnowledgeTypeFilter =>
       value === "lesson" || value === "playbook" || value === "reference",
@@ -109,7 +120,6 @@ function readRAGSettings(settings: Record<string, unknown> | undefined): Knowled
     limit: Math.max(1, Math.min(8, Math.round(rawLimit))),
     type_filters: typeFilters,
     confidence_threshold: threshold,
-    curator_runtime_policy: runtimePolicy,
     token_budget: Math.max(500, Math.min(8000, Math.round(rawTokenBudget))),
   };
 }
@@ -120,6 +130,73 @@ function sameSettings(a: KnowledgeCuratorSettings, b: KnowledgeCuratorSettings):
 
 function sameRAGSettings(a: KnowledgeRAGSettings, b: KnowledgeRAGSettings): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function CuratorProbeNotice({
+  state,
+  t,
+  onUseRecommendation,
+}: {
+  state: CuratorProbeState;
+  t: ReturnType<typeof useT<"settings">>["t"];
+  onUseRecommendation: () => void;
+}) {
+  if (state.status === "idle") return null;
+  if (state.status === "loading") {
+    return (
+      <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span>{t(($) => $.curator.probe_loading)}</span>
+      </div>
+    );
+  }
+  if (state.status === "error") {
+    return (
+      <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <span>{state.message}</span>
+      </div>
+    );
+  }
+  const warning = state.status === "warning";
+  return (
+    <div
+      className={`space-y-2 rounded-md border p-3 text-sm ${
+        warning
+          ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+          : "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          {warning ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+          <div className="space-y-1">
+            <p className="font-medium">
+              {warning ? t(($) => $.curator.probe_warning) : t(($) => $.curator.probe_success)}
+            </p>
+            <p>
+              {t(($) => $.curator.probe_recommendation, {
+                provider: state.result.provider,
+                model: state.result.model || "-",
+                embeddingModel: state.result.embedding_model || "-",
+              })}
+            </p>
+          </div>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onUseRecommendation}>
+          <WandSparkles className="h-3.5 w-3.5" />
+          {t(($) => $.curator.probe_use_recommendation)}
+        </Button>
+      </div>
+      {state.result.warnings.length > 0 && (
+        <ul className="space-y-1 pl-6 text-xs list-disc">
+          {state.result.warnings.map((warningText) => (
+            <li key={warningText}>{warningText}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 export function CuratorTab() {
@@ -140,6 +217,13 @@ export function CuratorTab() {
   const [settings, setSettings] = useState<KnowledgeCuratorSettings>(savedSettings);
   const [ragSettings, setRAGSettings] = useState<KnowledgeRAGSettings>(savedRAGSettings);
   const [saving, setSaving] = useState(false);
+  const [probeState, setProbeState] = useState<CuratorProbeState>({ status: "idle" });
+  const [typeHelpOpen, setTypeHelpOpen] = useState(false);
+  const [manualFields, setManualFields] = useState({
+    provider: false,
+    model: false,
+    embedding_model: false,
+  });
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -151,7 +235,37 @@ export function CuratorTab() {
   useEffect(() => {
     setSettings(savedSettings);
     setRAGSettings(savedRAGSettings);
+    setProbeState({ status: "idle" });
+    setManualFields({ provider: false, model: false, embedding_model: false });
   }, [savedSettings, savedRAGSettings]);
+
+  function applyProbeResult(result: ProbeKnowledgeCuratorResponse, force: boolean) {
+    setSettings((current) => ({
+      ...current,
+      provider: (force || !manualFields.provider) && result.provider ? result.provider : current.provider,
+      model: (force || !manualFields.model) && result.model ? result.model : current.model,
+      embedding_model: (force || !manualFields.embedding_model) && result.embedding_model
+        ? result.embedding_model
+        : current.embedding_model,
+    }));
+  }
+
+  async function runProbe(forceApply = false) {
+    const baseURL = settings.base_url.trim();
+    if (!baseURL || probeState.status === "loading") return;
+    setProbeState({ status: "loading" });
+    try {
+      const result = await api.probeKnowledgeCurator({
+        base_url: baseURL,
+        model: settings.model,
+        embedding_model: settings.embedding_model,
+      });
+      setProbeState(result.warnings.length > 0 ? { status: "warning", result } : { status: "success", result });
+      applyProbeResult(result, forceApply);
+    } catch (e) {
+      setProbeState({ status: "error", message: e instanceof Error ? e.message : t(($) => $.curator.probe_failed) });
+    }
+  }
 
   async function handleSave() {
     if (!workspace || !dirty || saving) return;
@@ -223,35 +337,22 @@ export function CuratorTab() {
                 <span className="text-xs font-medium">{t(($) => $.curator.provider_label)}</span>
                 <Input
                   value={settings.provider}
-                  onChange={(e) => setSettings((s) => ({ ...s, provider: e.target.value }))}
+                  onChange={(e) => {
+                    setManualFields((s) => ({ ...s, provider: true }));
+                    setSettings((s) => ({ ...s, provider: e.target.value }));
+                  }}
                   disabled={!canManageWorkspace || saving}
                   placeholder={t(($) => $.curator.provider_placeholder)}
                 />
               </label>
               <label className="space-y-1.5">
-                <span className="text-xs font-medium">{t(($) => $.curator.runtime_mode_label)}</span>
-                <Select
-                  value={settings.runtime_mode}
-                  onValueChange={(runtime_mode) =>
-                    setSettings((s) => ({ ...s, runtime_mode: runtime_mode as CuratorRuntimeMode }))
-                  }
-                  disabled={!canManageWorkspace || saving}
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue>{t(($) => $.curator.runtime_modes[settings.runtime_mode])}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="external">{t(($) => $.curator.runtime_modes.external)}</SelectItem>
-                    <SelectItem value="cloud">{t(($) => $.curator.runtime_modes.cloud)}</SelectItem>
-                    <SelectItem value="local">{t(($) => $.curator.runtime_modes.local)}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
-              <label className="space-y-1.5">
                 <span className="text-xs font-medium">{t(($) => $.curator.model_label)}</span>
                 <Input
                   value={settings.model}
-                  onChange={(e) => setSettings((s) => ({ ...s, model: e.target.value }))}
+                  onChange={(e) => {
+                    setManualFields((s) => ({ ...s, model: true }));
+                    setSettings((s) => ({ ...s, model: e.target.value }));
+                  }}
                   disabled={!canManageWorkspace || saving}
                   placeholder={t(($) => $.curator.model_placeholder)}
                 />
@@ -260,7 +361,10 @@ export function CuratorTab() {
                 <span className="text-xs font-medium">{t(($) => $.curator.embedding_model_label)}</span>
                 <Input
                   value={settings.embedding_model}
-                  onChange={(e) => setSettings((s) => ({ ...s, embedding_model: e.target.value }))}
+                  onChange={(e) => {
+                    setManualFields((s) => ({ ...s, embedding_model: true }));
+                    setSettings((s) => ({ ...s, embedding_model: e.target.value }));
+                  }}
                   disabled={!canManageWorkspace || saving}
                   placeholder={t(($) => $.curator.embedding_model_placeholder)}
                 />
@@ -269,13 +373,27 @@ export function CuratorTab() {
                 <span className="text-xs font-medium">{t(($) => $.curator.base_url_label)}</span>
                 <Input
                   value={settings.base_url}
-                  onChange={(e) => setSettings((s) => ({ ...s, base_url: e.target.value }))}
-                  disabled={!canManageWorkspace || saving}
+                  onChange={(e) => {
+                    setProbeState({ status: "idle" });
+                    setSettings((s) => ({ ...s, base_url: e.target.value }));
+                  }}
+                  onBlur={() => void runProbe(false)}
+                  disabled={!canManageWorkspace || saving || probeState.status === "loading"}
                   placeholder={t(($) => $.curator.base_url_placeholder)}
                 />
               </label>
             </div>
-
+            {canManageWorkspace && (
+              <CuratorProbeNotice
+                state={probeState}
+                t={t}
+                onUseRecommendation={() => {
+                  if ("result" in probeState) {
+                    applyProbeResult(probeState.result, true);
+                  }
+                }}
+              />
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -343,27 +461,20 @@ export function CuratorTab() {
                   </SelectContent>
                 </Select>
               </label>
-              <label className="space-y-1.5 md:col-span-2">
-                <span className="text-xs font-medium">{t(($) => $.curator.rag_runtime_policy_label)}</span>
-                <Select
-                  value={ragSettings.curator_runtime_policy}
-                  onValueChange={(curator_runtime_policy) =>
-                    setRAGSettings((s) => ({ ...s, curator_runtime_policy: curator_runtime_policy as RAGCuratorRuntimePolicy }))
-                  }
-                  disabled={!canManageWorkspace || saving}
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue>{t(($) => $.curator.rag_runtime_policy[ragSettings.curator_runtime_policy])}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="workspace_default">{t(($) => $.curator.rag_runtime_policy.workspace_default)}</SelectItem>
-                    <SelectItem value="cloud">{t(($) => $.curator.rag_runtime_policy.cloud)}</SelectItem>
-                    <SelectItem value="local">{t(($) => $.curator.rag_runtime_policy.local)}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </label>
               <div className="space-y-2 md:col-span-2">
-                <span className="text-xs font-medium">{t(($) => $.curator.rag_type_filters_label)}</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-medium">{t(($) => $.curator.rag_type_filters_label)}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setTypeHelpOpen(true)}
+                    disabled={saving}
+                    aria-label={t(($) => $.curator.rag_type_help_open)}
+                  >
+                    <CircleHelp className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
                 <div className="flex flex-wrap gap-3">
                   {(["lesson", "playbook", "reference"] as KnowledgeTypeFilter[]).map((type) => (
                     <label key={type} className="flex items-center gap-2 text-sm">
@@ -399,6 +510,22 @@ export function CuratorTab() {
           </p>
         )}
       </section>
+      <Dialog open={typeHelpOpen} onOpenChange={setTypeHelpOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.curator.rag_type_help_title)}</DialogTitle>
+            <DialogDescription>{t(($) => $.curator.rag_type_help_description)}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            {(["lesson", "playbook", "reference"] as KnowledgeTypeFilter[]).map((type) => (
+              <div key={type} className="space-y-1">
+                <p className="font-medium">{t(($) => $.curator.rag_types[type])}</p>
+                <p className="text-muted-foreground">{t(($) => $.curator.rag_type_help[type])}</p>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -92,7 +92,6 @@ type Config struct {
 	KnowledgeCuratorAPIKey         string
 	KnowledgeCuratorModel          string
 	KnowledgeCuratorEmbeddingModel string
-	KnowledgeCuratorRuntimeMode    string
 	KnowledgeCuratorTimeout        time.Duration
 	// WorkspaceSecretBox is the secretbox.Box used to encrypt/decrypt
 	// workspace secrets. When nil, workspace secret endpoints return 503.
@@ -105,31 +104,33 @@ type cloudRuntimeProxy interface {
 }
 
 type Handler struct {
-	Queries               *db.Queries
-	DB                    dbExecutor
-	TxStarter             txStarter
-	Hub                   *realtime.Hub
-	DaemonHub             *daemonws.Hub
-	Bus                   *events.Bus
-	TaskService           *service.TaskService
-	IssueService          *service.IssueService
-	AutopilotService      *service.AutopilotService
-	KnowledgeService      *service.KnowledgeService
-	KnowledgeCurator       *service.KnowledgeCuratorService
-	WorkspaceSecretService *service.WorkspaceSecretService
-	CuratorDraftService    *service.CuratorDraftTaskService
-	EmailService           *service.EmailService
-	UpdateStore           UpdateStore
-	ModelListStore        ModelListStore
-	LocalSkillListStore   LocalSkillListStore
-	LocalSkillImportStore LocalSkillImportStore
-	InteractionStore      *InteractionStore
-	LivenessStore         LivenessStore
-	HeartbeatScheduler    HeartbeatScheduler
-	Storage               storage.Storage
-	LegacyLocalStorage    *storage.LocalStorage
-	CFSigner              *auth.CloudFrontSigner
-	Analytics             analytics.Client
+	Queries                 *db.Queries
+	DB                      dbExecutor
+	TxStarter               txStarter
+	Hub                     *realtime.Hub
+	DaemonHub               *daemonws.Hub
+	Bus                     *events.Bus
+	TaskService             *service.TaskService
+	IssueService            *service.IssueService
+	AutopilotService        *service.AutopilotService
+	KnowledgeService        *service.KnowledgeService
+	KnowledgeCurator        *service.KnowledgeCuratorService
+	WorkspaceSecretService  *service.WorkspaceSecretService
+	CuratorDraftService     *service.CuratorDraftTaskService
+	KnowledgeCuratorAPIKey  string
+	KnowledgeCuratorTimeout time.Duration
+	EmailService            *service.EmailService
+	UpdateStore             UpdateStore
+	ModelListStore          ModelListStore
+	LocalSkillListStore     LocalSkillListStore
+	LocalSkillImportStore   LocalSkillImportStore
+	InteractionStore        *InteractionStore
+	LivenessStore           LivenessStore
+	HeartbeatScheduler      HeartbeatScheduler
+	Storage                 storage.Storage
+	LegacyLocalStorage      *storage.LocalStorage
+	CFSigner                *auth.CloudFrontSigner
+	Analytics               analytics.Client
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
@@ -214,7 +215,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		APIKey:         cfg.KnowledgeCuratorAPIKey,
 		Model:          cfg.KnowledgeCuratorModel,
 		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
-		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
 		Timeout:        cfg.KnowledgeCuratorTimeout,
 	}, nil) // draftService set below after curator is created
 	knowledgeCurator := service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
@@ -228,7 +228,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		APIKey:         cfg.KnowledgeCuratorAPIKey,
 		Model:          cfg.KnowledgeCuratorModel,
 		EmbeddingModel: cfg.KnowledgeCuratorEmbeddingModel,
-		RuntimeMode:    cfg.KnowledgeCuratorRuntimeMode,
 		Timeout:        cfg.KnowledgeCuratorTimeout,
 	}, curatorDraftSvc)
 	knowledgeCurator = service.NewKnowledgeCuratorService(queries, txStarter, knowledgeSvc, knowledgeEngine)
@@ -239,32 +238,34 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc.Knowledge = knowledgeSvc
 
 	return &Handler{
-		Queries:               queries,
-		DB:                    executor,
-		TxStarter:             txStarter,
-		Hub:                   hub,
-		DaemonHub:             daemonHub,
-		Bus:                   bus,
-		TaskService:           taskSvc,
-		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
-		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		KnowledgeService:      knowledgeSvc,
-		KnowledgeCurator:       knowledgeCurator,
-		WorkspaceSecretService: workspaceSecretSvc,
-		CuratorDraftService:    curatorDraftSvc,
-		EmailService:           emailService,
-		UpdateStore:           NewInMemoryUpdateStore(),
-		ModelListStore:        NewInMemoryModelListStore(),
-		LocalSkillListStore:   NewInMemoryLocalSkillListStore(),
-		LocalSkillImportStore: NewInMemoryLocalSkillImportStore(),
-		InteractionStore:      NewInteractionStore(),
-		LivenessStore:         NewNoopLivenessStore(),
-		HeartbeatScheduler:    NewPassthroughHeartbeatScheduler(queries),
-		Storage:               store,
-		CFSigner:              cfSigner,
-		Analytics:             analyticsClient,
-		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
-		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
+		Queries:                 queries,
+		DB:                      executor,
+		TxStarter:               txStarter,
+		Hub:                     hub,
+		DaemonHub:               daemonHub,
+		Bus:                     bus,
+		TaskService:             taskSvc,
+		IssueService:            service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
+		AutopilotService:        service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		KnowledgeService:        knowledgeSvc,
+		KnowledgeCurator:        knowledgeCurator,
+		WorkspaceSecretService:  workspaceSecretSvc,
+		CuratorDraftService:     curatorDraftSvc,
+		KnowledgeCuratorAPIKey:  cfg.KnowledgeCuratorAPIKey,
+		KnowledgeCuratorTimeout: cfg.KnowledgeCuratorTimeout,
+		EmailService:            emailService,
+		UpdateStore:             NewInMemoryUpdateStore(),
+		ModelListStore:          NewInMemoryModelListStore(),
+		LocalSkillListStore:     NewInMemoryLocalSkillListStore(),
+		LocalSkillImportStore:   NewInMemoryLocalSkillImportStore(),
+		InteractionStore:        NewInteractionStore(),
+		LivenessStore:           NewNoopLivenessStore(),
+		HeartbeatScheduler:      NewPassthroughHeartbeatScheduler(queries),
+		Storage:                 store,
+		CFSigner:                cfSigner,
+		Analytics:               analyticsClient,
+		WebhookRateLimiter:      NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
+		WebhookIPRateLimiter:    NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

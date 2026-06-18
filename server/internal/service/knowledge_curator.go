@@ -18,12 +18,13 @@ import (
 )
 
 var ErrCuratorEngineUnavailable = errors.New("knowledge curator engine is not configured")
+var ErrCuratorProvider = errors.New("knowledge curator provider error")
+var ErrCuratorInvalidResponse = errors.New("knowledge curator returned invalid response")
 
 type CuratorEngineInfo struct {
 	Provider       string `json:"provider"`
 	Model          string `json:"model"`
 	EmbeddingModel string `json:"embedding_model,omitempty"`
-	RuntimeMode    string `json:"runtime_mode,omitempty"`
 }
 
 type CuratorEngine interface {
@@ -119,6 +120,65 @@ type CuratorDraft struct {
 	AntiPatterns        string   `json:"anti_patterns"`
 	Applicability       string   `json:"applicability"`
 	ConfidenceStatus    string   `json:"confidence_status"`
+}
+
+func (d *CuratorDraft) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Title               string           `json:"title"`
+		Type                string           `json:"type"`
+		DomainLabels        []string         `json:"domain_labels"`
+		ProblemPattern      curatorDraftText `json:"problem_pattern"`
+		TriggerConditions   curatorDraftText `json:"trigger_conditions"`
+		DiagnosticSteps     curatorDraftText `json:"diagnostic_steps"`
+		RecommendedPractice curatorDraftText `json:"recommended_practice"`
+		AntiPatterns        curatorDraftText `json:"anti_patterns"`
+		Applicability       curatorDraftText `json:"applicability"`
+		ConfidenceStatus    string           `json:"confidence_status"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	d.Title = strings.TrimSpace(raw.Title)
+	d.Type = strings.TrimSpace(raw.Type)
+	d.DomainLabels = raw.DomainLabels
+	d.ProblemPattern = string(raw.ProblemPattern)
+	d.TriggerConditions = string(raw.TriggerConditions)
+	d.DiagnosticSteps = string(raw.DiagnosticSteps)
+	d.RecommendedPractice = string(raw.RecommendedPractice)
+	d.AntiPatterns = string(raw.AntiPatterns)
+	d.Applicability = string(raw.Applicability)
+	d.ConfidenceStatus = strings.TrimSpace(raw.ConfidenceStatus)
+	return nil
+}
+
+type curatorDraftText string
+
+func (t *curatorDraftText) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*t = ""
+		return nil
+	}
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*t = curatorDraftText(strings.TrimSpace(text))
+		return nil
+	}
+	var items []string
+	if err := json.Unmarshal(data, &items); err == nil {
+		*t = curatorDraftText(joinCuratorDraftTextItems(items))
+		return nil
+	}
+	return fmt.Errorf("expected string or string array")
+}
+
+func joinCuratorDraftTextItems(items []string) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		if value := strings.TrimSpace(item); value != "" {
+			lines = append(lines, "- "+value)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 type MissingCuratorEngine struct{}

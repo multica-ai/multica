@@ -22,24 +22,22 @@ func TestLocalCuratorEngine_BuildEmbedding_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestWorkspaceConfiguredCuratorEngine_BuildEmbedding_LocalMode(t *testing.T) {
+func TestWorkspaceConfiguredCuratorEngine_BuildEmbedding_UsesBaseHTTPConfig(t *testing.T) {
 	engine := &WorkspaceConfiguredCuratorEngine{
-		base: OpenAICompatibleCuratorConfig{RuntimeMode: "local"},
-	}
-	_, err := engine.BuildEmbedding(context.Background(), "content")
-	if !errors.Is(err, ErrCuratorLocalEmbeddingUnavailable) {
-		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorLocalEmbeddingUnavailable", err)
-	}
-}
-
-func TestWorkspaceConfiguredCuratorEngine_BuildEmbedding_CloudMode_UsesBase(t *testing.T) {
-	// When not in local mode, should delegate to base engine.
-	// With empty config the engine is a MissingCuratorEngine which returns ErrCuratorEngineUnavailable.
-	engine := &WorkspaceConfiguredCuratorEngine{
-		base: OpenAICompatibleCuratorConfig{RuntimeMode: "cloud"},
+		base: OpenAICompatibleCuratorConfig{},
 	}
 	_, err := engine.BuildEmbedding(context.Background(), "content")
 	if !errors.Is(err, ErrCuratorEngineUnavailable) {
-		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorEngineUnavailable (from MissingCuratorEngine)", err)
+		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorEngineUnavailable", err)
+	}
+}
+
+func TestWorkspaceConfiguredCuratorEngine_BuildEmbedding_IgnoresRemovedRuntimeMode(t *testing.T) {
+	engine := &WorkspaceConfiguredCuratorEngine{
+		base: OpenAICompatibleCuratorConfig{},
+	}
+	_, err := engine.BuildEmbedding(context.Background(), "content")
+	if !errors.Is(err, ErrCuratorEngineUnavailable) {
+		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorEngineUnavailable", err)
 	}
 }

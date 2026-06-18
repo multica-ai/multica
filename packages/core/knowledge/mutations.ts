@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { knowledgeKeys } from "./queries";
+import { workspaceKeys } from "../workspace/queries";
 import type {
   CreateKnowledgeDraftFromCandidateRequest,
   CreateKnowledgeDraftFromGovernanceFindingRequest,
@@ -84,6 +85,7 @@ export function usePublishKnowledgeToSkill() {
     onSettled: (_data, _err, vars) => {
       qc.invalidateQueries({ queryKey: knowledgeKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     },
   });
 }

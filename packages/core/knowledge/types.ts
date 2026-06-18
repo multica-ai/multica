@@ -8,6 +8,22 @@ export type KnowledgeLifecycleStatus =
 export type KnowledgeConfidenceStatus = "low" | "medium" | "high";
 export type KnowledgeFeedbackValue = "helpful" | "not_helpful" | "misleading" | "outdated";
 
+export interface ProbeKnowledgeCuratorRequest {
+  base_url: string;
+  api_key?: string;
+  model?: string;
+  embedding_model?: string;
+}
+
+export interface ProbeKnowledgeCuratorResponse {
+  provider: string;
+  model: string;
+  embedding_model: string;
+  chat_supported: boolean;
+  embedding_supported: boolean;
+  warnings: string[];
+}
+
 export interface KnowledgeItem {
   id: string;
   workspace_id: string;

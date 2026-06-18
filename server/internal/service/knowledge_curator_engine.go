@@ -21,7 +21,6 @@ type OpenAICompatibleCuratorConfig struct {
 	APIKey         string
 	Model          string
 	EmbeddingModel string
-	RuntimeMode    string
 	Timeout        time.Duration
 }
 
@@ -31,22 +30,20 @@ type OpenAICompatibleCuratorEngine struct {
 }
 
 type WorkspaceConfiguredCuratorEngine struct {
-	queries      *db.Queries
-	base         OpenAICompatibleCuratorConfig
-	draftService *CuratorDraftTaskService
+	queries *db.Queries
+	base    OpenAICompatibleCuratorConfig
 }
 
 func NewWorkspaceConfiguredCuratorEngine(queries *db.Queries, base OpenAICompatibleCuratorConfig, draftService *CuratorDraftTaskService) CuratorEngine {
 	return &WorkspaceConfiguredCuratorEngine{
-		queries:      queries,
-		base:         normalizeOpenAICompatibleCuratorConfig(base),
-		draftService: draftService,
+		queries: queries,
+		base:    normalizeOpenAICompatibleCuratorConfig(base),
 	}
 }
 
 func NewOpenAICompatibleCuratorEngine(cfg OpenAICompatibleCuratorConfig) CuratorEngine {
 	cfg = normalizeOpenAICompatibleCuratorConfig(cfg)
-	if cfg.Provider == "" || cfg.BaseURL == "" || cfg.APIKey == "" || cfg.Model == "" || cfg.EmbeddingModel == "" {
+	if cfg.Provider == "" || cfg.BaseURL == "" || cfg.Model == "" {
 		return MissingCuratorEngine{}
 	}
 	return &OpenAICompatibleCuratorEngine{cfg: cfg, client: &http.Client{Timeout: cfg.Timeout}}
@@ -58,7 +55,6 @@ func normalizeOpenAICompatibleCuratorConfig(cfg OpenAICompatibleCuratorConfig) O
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.EmbeddingModel = strings.TrimSpace(cfg.EmbeddingModel)
-	cfg.RuntimeMode = strings.TrimSpace(cfg.RuntimeMode)
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 60 * time.Second
 	}
@@ -75,15 +71,6 @@ func (e *WorkspaceConfiguredCuratorEngine) ForWorkspace(ctx context.Context, wor
 		return NewOpenAICompatibleCuratorEngine(cfg)
 	}
 	cfg = applyWorkspaceCuratorSettings(cfg, workspace.Settings)
-
-	// When runtime_mode is "local", use the local daemon dispatch engine.
-	if cfg.RuntimeMode == "local" {
-		if e.draftService == nil {
-			return NewOpenAICompatibleCuratorEngine(cfg)
-		}
-		return NewLocalCuratorEngine(e.queries, e.draftService, cfg)
-	}
-
 	return NewOpenAICompatibleCuratorEngine(cfg)
 }
 
@@ -96,9 +83,6 @@ func (e *WorkspaceConfiguredCuratorEngine) SummarizeSource(ctx context.Context, 
 }
 
 func (e *WorkspaceConfiguredCuratorEngine) BuildEmbedding(ctx context.Context, content string) ([]float32, error) {
-	if e.base.RuntimeMode == "local" {
-		return nil, ErrCuratorLocalEmbeddingUnavailable
-	}
 	return NewOpenAICompatibleCuratorEngine(e.base).BuildEmbedding(ctx, content)
 }
 
@@ -134,9 +118,6 @@ func applyWorkspaceCuratorSettings(base OpenAICompatibleCuratorConfig, rawSettin
 	if value, ok := nonEmptySetting(curator, "embedding_model"); ok {
 		base.EmbeddingModel = value
 	}
-	if value, ok := nonEmptySetting(curator, "runtime_mode"); ok {
-		base.RuntimeMode = value
-	}
 	return normalizeOpenAICompatibleCuratorConfig(base)
 }
 
@@ -162,6 +143,231 @@ func curatorSetting(rawSettings []byte, key string) (string, bool) {
 		return "", false
 	}
 	return nonEmptySetting(curator, key)
+}
+
+type CuratorEndpointProbeInput struct {
+	BaseURL        string
+	APIKey         string
+	Model          string
+	EmbeddingModel string
+	Timeout        time.Duration
+}
+
+type CuratorEndpointProbeResult struct {
+	Provider           string   `json:"provider"`
+	Model              string   `json:"model"`
+	EmbeddingModel     string   `json:"embedding_model"`
+	ChatSupported      bool     `json:"chat_supported"`
+	EmbeddingSupported bool     `json:"embedding_supported"`
+	Warnings           []string `json:"warnings"`
+}
+
+type curatorModelInfo struct {
+	ID string `json:"id"`
+}
+
+type curatorModelsResponse struct {
+	Data []curatorModelInfo `json:"data"`
+}
+
+func ProbeCuratorEndpoint(ctx context.Context, input CuratorEndpointProbeInput) (CuratorEndpointProbeResult, error) {
+	cfg := normalizeOpenAICompatibleCuratorConfig(OpenAICompatibleCuratorConfig{
+		BaseURL:        input.BaseURL,
+		APIKey:         input.APIKey,
+		Model:          input.Model,
+		EmbeddingModel: input.EmbeddingModel,
+		Timeout:        input.Timeout,
+	})
+	if cfg.BaseURL == "" {
+		return CuratorEndpointProbeResult{}, validationError("base_url is required")
+	}
+	client := &http.Client{Timeout: cfg.Timeout}
+	models, err := fetchCuratorModels(ctx, client, cfg)
+	if err != nil {
+		return CuratorEndpointProbeResult{}, err
+	}
+	provider := detectCuratorProvider(cfg.BaseURL)
+	modelIDs := curatorModelIDs(models)
+	model := chooseCuratorChatModel(provider, cfg.Model, modelIDs)
+	embeddingModel := chooseCuratorEmbeddingModel(provider, cfg.EmbeddingModel, modelIDs)
+	result := CuratorEndpointProbeResult{
+		Provider:           provider,
+		Model:              model,
+		EmbeddingModel:     embeddingModel,
+		ChatSupported:      model != "",
+		EmbeddingSupported: false,
+		Warnings:           []string{},
+	}
+	if !result.ChatSupported {
+		result.Warnings = append(result.Warnings, "No likely chat model was found in /models. Select a chat-capable model manually.")
+	}
+	if embeddingModel == "" {
+		result.Warnings = append(result.Warnings, "No likely embedding model was found in /models. Draft generation can work, but vectorization/RAG will be unavailable.")
+		return result, nil
+	}
+	if err := probeCuratorEmbedding(ctx, client, cfg, embeddingModel); err != nil {
+		result.Warnings = append(result.Warnings, err.Error())
+		return result, nil
+	}
+	result.EmbeddingSupported = true
+	return result, nil
+}
+
+func fetchCuratorModels(ctx context.Context, client *http.Client, cfg OpenAICompatibleCuratorConfig) ([]curatorModelInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.BaseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("cannot reach /models: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, fmt.Errorf("/models returned %d. Check the API key and endpoint permissions.", resp.StatusCode)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("/models returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out curatorModelsResponse
+	if err := json.Unmarshal(body, &out); err != nil || out.Data == nil {
+		return nil, errors.New("/models did not return an OpenAI-compatible model list")
+	}
+	return out.Data, nil
+}
+
+func probeCuratorEmbedding(ctx context.Context, client *http.Client, cfg OpenAICompatibleCuratorConfig, model string) error {
+	raw, err := json.Marshal(map[string]any{"model": model, "input": "multica probe"})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/embeddings", bytes.NewReader(raw))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("/embeddings is not reachable. Draft generation can work, but vectorization/RAG will be unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("/embeddings returned %d. Draft generation can work, but vectorization/RAG will be unavailable.", resp.StatusCode)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("/embeddings returned %d. Draft generation can work, but vectorization/RAG will be unavailable.", resp.StatusCode)
+	}
+	var out struct {
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil || len(out.Data) == 0 {
+		return errors.New("/embeddings did not return an OpenAI-compatible embedding response. Draft generation can work, but vectorization/RAG will be unavailable.")
+	}
+	if len(out.Data[0].Embedding) != KnowledgeEmbeddingDimensions {
+		return fmt.Errorf("Embedding dimension is %d, but Multica expects %d. Draft generation can work, but vectorization/RAG will be unavailable.", len(out.Data[0].Embedding), KnowledgeEmbeddingDimensions)
+	}
+	return nil
+}
+
+func detectCuratorProvider(baseURL string) string {
+	value := strings.ToLower(baseURL)
+	switch {
+	case strings.Contains(value, "api.openai.com"):
+		return "openai"
+	case strings.Contains(value, "deepseek"):
+		return "deepseek"
+	case strings.Contains(value, "ollama") || strings.Contains(value, ":11434"):
+		return "ollama"
+	default:
+		return "custom"
+	}
+}
+
+func curatorModelIDs(models []curatorModelInfo) []string {
+	ids := make([]string, 0, len(models))
+	for _, model := range models {
+		if id := strings.TrimSpace(model.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func chooseCuratorChatModel(provider, current string, ids []string) string {
+	current = strings.TrimSpace(current)
+	if current != "" && curatorModelExists(ids, current) {
+		return current
+	}
+	preferred := map[string][]string{
+		"openai":   {"gpt-4.1-mini", "gpt-4o-mini", "gpt-4o"},
+		"deepseek": {"deepseek-chat", "deepseek-reasoner"},
+	}
+	for _, id := range preferred[provider] {
+		if curatorModelExists(ids, id) {
+			return id
+		}
+	}
+	for _, id := range ids {
+		if !looksLikeEmbeddingModel(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+func chooseCuratorEmbeddingModel(provider, current string, ids []string) string {
+	current = strings.TrimSpace(current)
+	if current != "" && curatorModelExists(ids, current) {
+		return current
+	}
+	preferred := map[string][]string{
+		"openai": {"text-embedding-3-small", "text-embedding-3-large"},
+		"ollama": {"nomic-embed-text", "mxbai-embed-large", "bge-m3"},
+	}
+	for _, id := range preferred[provider] {
+		if curatorModelExists(ids, id) {
+			return id
+		}
+	}
+	for _, id := range ids {
+		if looksLikeEmbeddingModel(id) {
+			return id
+		}
+	}
+	return ""
+}
+
+func curatorModelExists(ids []string, expected string) bool {
+	for _, id := range ids {
+		if id == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeEmbeddingModel(id string) bool {
+	value := strings.ToLower(id)
+	return strings.Contains(value, "embed") ||
+		strings.Contains(value, "bge") ||
+		strings.Contains(value, "nomic") ||
+		strings.Contains(value, "e5-")
 }
 
 func (e *OpenAICompatibleCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDraftInput) (CuratorDraft, error) {
@@ -191,6 +397,9 @@ func (e *OpenAICompatibleCuratorEngine) SummarizeSource(ctx context.Context, sou
 }
 
 func (e *OpenAICompatibleCuratorEngine) BuildEmbedding(ctx context.Context, content string) ([]float32, error) {
+	if e.cfg.EmbeddingModel == "" {
+		return nil, ErrCuratorEngineUnavailable
+	}
 	var resp struct {
 		Data []struct {
 			Embedding []float32 `json:"embedding"`
@@ -216,7 +425,7 @@ func (e *OpenAICompatibleCuratorEngine) BuildEmbedding(ctx context.Context, cont
 }
 
 func (e *OpenAICompatibleCuratorEngine) Info() CuratorEngineInfo {
-	return CuratorEngineInfo{Provider: e.cfg.Provider, Model: e.cfg.Model, EmbeddingModel: e.cfg.EmbeddingModel, RuntimeMode: e.cfg.RuntimeMode}
+	return CuratorEngineInfo{Provider: e.cfg.Provider, Model: e.cfg.Model, EmbeddingModel: e.cfg.EmbeddingModel}
 }
 
 func (e *OpenAICompatibleCuratorEngine) chatJSON(ctx context.Context, prompt string, out any) error {
@@ -224,14 +433,70 @@ func (e *OpenAICompatibleCuratorEngine) chatJSON(ctx context.Context, prompt str
 	if err != nil {
 		return err
 	}
-	text = strings.TrimSpace(text)
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
-	if err := json.Unmarshal([]byte(strings.TrimSpace(text)), out); err != nil {
-		return fmt.Errorf("curator returned invalid JSON: %w", err)
+	text = stripCuratorJSONFence(text)
+	if err := json.Unmarshal([]byte(text), out); err == nil {
+		return nil
+	} else if object, ok := extractFirstJSONObject(text); ok {
+		if objectErr := json.Unmarshal([]byte(object), out); objectErr == nil {
+			return nil
+		} else {
+			return fmt.Errorf("%w: %v", ErrCuratorInvalidResponse, objectErr)
+		}
+	} else {
+		return fmt.Errorf("%w: %v", ErrCuratorInvalidResponse, err)
 	}
-	return nil
+}
+
+func stripCuratorJSONFence(text string) string {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "```") {
+		return text
+	}
+	if newline := strings.IndexByte(text, '\n'); newline >= 0 {
+		text = strings.TrimSpace(text[newline+1:])
+	}
+	if strings.HasSuffix(text, "```") {
+		text = strings.TrimSpace(strings.TrimSuffix(text, "```"))
+	}
+	return text
+}
+
+func extractFirstJSONObject(text string) (string, bool) {
+	start := strings.IndexByte(text, '{')
+	if start < 0 {
+		return "", false
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		ch := text[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			switch ch {
+			case '\\':
+				escaped = true
+			case '"':
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return text[start : i+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 func (e *OpenAICompatibleCuratorEngine) chatText(ctx context.Context, prompt string) (string, error) {
@@ -275,7 +540,9 @@ func (e *OpenAICompatibleCuratorEngine) postJSON(ctx context.Context, path strin
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	if e.cfg.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+e.cfg.APIKey)
+	}
 	resp, err := e.client.Do(req)
 	if err != nil {
 		return err
@@ -286,10 +553,10 @@ func (e *OpenAICompatibleCuratorEngine) postJSON(ctx context.Context, path strin
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("curator provider returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return fmt.Errorf("%w: returned %d: %s", ErrCuratorProvider, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("decode curator provider response: %w", err)
+		return fmt.Errorf("%w: decode response: %v", ErrCuratorProvider, err)
 	}
 	return nil
 }

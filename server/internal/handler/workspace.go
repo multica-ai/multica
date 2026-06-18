@@ -125,7 +125,7 @@ func validateKnowledgeCuratorSettings(settings any) error {
 			return fmt.Errorf("knowledge_curator.enabled must be a boolean")
 		}
 	}
-	stringFields := []string{"provider", "model", "embedding_model", "runtime_mode", "base_url"}
+	stringFields := []string{"provider", "model", "embedding_model", "base_url"}
 	for _, field := range stringFields {
 		if v, ok := curator[field]; ok && v != nil {
 			value, ok := v.(string)
@@ -135,13 +135,6 @@ func validateKnowledgeCuratorSettings(settings any) error {
 			if len(value) > 500 {
 				return fmt.Errorf("knowledge_curator.%s is too long", field)
 			}
-		}
-	}
-	if v, ok := curator["runtime_mode"].(string); ok && strings.TrimSpace(v) != "" {
-		switch v {
-		case "local", "cloud", "external":
-		default:
-			return fmt.Errorf("knowledge_curator.runtime_mode is invalid")
 		}
 	}
 	if v, ok := curator["provider"].(string); ok && strings.TrimSpace(v) == "" {
@@ -183,17 +176,6 @@ func validateKnowledgeRAGSettings(settings any) error {
 		case "low", "medium", "high":
 		default:
 			return fmt.Errorf("knowledge_rag.confidence_threshold is invalid")
-		}
-	}
-	if v, ok := policy["curator_runtime_policy"]; ok && v != nil {
-		runtimePolicy, ok := v.(string)
-		if !ok {
-			return fmt.Errorf("knowledge_rag.curator_runtime_policy must be a string")
-		}
-		switch runtimePolicy {
-		case "workspace_default", "cloud", "local":
-		default:
-			return fmt.Errorf("knowledge_rag.curator_runtime_policy is invalid")
 		}
 	}
 	if v, ok := policy["type_filters"]; ok && v != nil {

@@ -158,7 +158,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		KnowledgeCuratorAPIKey:         os.Getenv("KNOWLEDGE_CURATOR_API_KEY"),
 		KnowledgeCuratorModel:          os.Getenv("KNOWLEDGE_CURATOR_MODEL"),
 		KnowledgeCuratorEmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
-		KnowledgeCuratorRuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
 		KnowledgeCuratorTimeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}
 
@@ -871,6 +870,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/analytics", h.GetKnowledgeAnalytics)
 				r.Get("/effect", h.GetKnowledgeEffect)
 				r.Get("/effect/summary", h.GetKnowledgeEffectSummary)
+				r.Post("/curator/probe", h.ProbeKnowledgeCuratorEndpoint)
 				r.Post("/drafts/from-issue", h.CreateKnowledgeDraftFromIssue)
 				r.Get("/candidates", h.ListKnowledgeCandidates)
 				r.Post("/candidates/evaluate", h.EvaluateKnowledgeCandidate)

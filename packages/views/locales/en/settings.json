@@ -187,42 +187,44 @@
     "enabled_label": "Enable Knowledge Curator",
     "enabled_description": "When enabled and an engine is configured, accepted candidates can generate draft knowledge items. It remains a system service, not an assignable agent.",
     "provider_label": "Provider",
-    "provider_placeholder": "openai, anthropic, custom",
-    "runtime_mode_label": "Runtime mode",
-    "runtime_modes": {
-      "external": "External endpoint",
-      "cloud": "Cloud runtime",
-      "local": "Local runtime"
-    },
+    "provider_placeholder": "openai, deepseek, ollama, custom",
     "model_label": "Draft model",
     "model_placeholder": "Model used to write drafts",
     "embedding_model_label": "Embedding model",
     "embedding_model_placeholder": "Model used for knowledge embeddings",
     "base_url_label": "Base URL",
     "base_url_placeholder": "https://api.example.com/v1",
+    "probe_loading": "Checking endpoint...",
+    "probe_success": "Endpoint is compatible",
+    "probe_warning": "Endpoint is partially compatible",
+    "probe_failed": "Failed to probe endpoint",
+    "probe_recommendation": "Recommended: {{provider}} / {{model}} / {{embeddingModel}}",
+    "probe_use_recommendation": "Use recommended",
     "rag_auto_inject_label": "Auto-inject relevant knowledge",
     "rag_auto_inject_description": "Inject a small ranked knowledge context into agent task claims when the workspace policy allows it.",
     "rag_limit_label": "Injection limit",
     "rag_confidence_label": "Minimum confidence",
     "rag_confidence": {
-      "high": "High",
-      "medium": "Medium",
-      "low": "Low"
-    },
-    "rag_runtime_policy_label": "Curator runtime policy",
-    "rag_runtime_policy": {
-      "workspace_default": "Workspace default",
-      "cloud": "Prefer cloud",
-      "local": "Prefer local"
+      "high": "High: inject high only",
+      "medium": "Medium: inject medium/high",
+      "low": "Low: inject low/medium/high"
     },
     "rag_type_filters_label": "Knowledge types",
     "rag_types": {
-      "lesson": "Lessons",
-      "playbook": "Playbooks",
-      "reference": "References"
+      "lesson": "Lesson",
+      "playbook": "Playbook",
+      "reference": "Reference"
     },
-    "rag_token_budget_label": "Token budget",
-    "rag_token_budget_description": "Maximum tokens allocated per RAG injection. Higher values provide more context but increase agent task cost.",
+    "rag_type_help_open": "Explain knowledge types",
+    "rag_type_help_title": "Knowledge types",
+    "rag_type_help_description": "Choose which reviewed knowledge categories can be injected into agent context.",
+    "rag_type_help": {
+      "lesson": "Lessons capture mistakes, root causes, and how to avoid repeating them.",
+      "playbook": "Playbooks capture a repeatable investigation or repair procedure.",
+      "reference": "References capture stable facts, configuration, and architecture conventions."
+    },
+    "rag_token_budget_label": "Injection context budget",
+    "rag_token_budget_description": "Controls the maximum Knowledge context injected for each agent task. Higher values provide more background but may increase task cost.",
     "rag_model_changed_hint": "Model or embedding model has changed from the saved configuration. Existing embeddings were built with the previous model and may produce lower-quality retrieval results. Consider triggering a full re-embedding of published knowledge items after saving.",
     "save": "Save",
     "saving": "Saving...",

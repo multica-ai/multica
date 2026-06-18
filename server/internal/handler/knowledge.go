@@ -131,26 +131,26 @@ type KnowledgeAnalyticsRowResponse struct {
 }
 
 type KnowledgeEffectBucketResponse struct {
-	BucketHour         string  `json:"bucket_hour"`
-	WorkspaceID        string  `json:"workspace_id"`
-	AgentID            string  `json:"agent_id"`
-	ProjectID          *string `json:"project_id"`
-	Model              string  `json:"model"`
-	Provider           string  `json:"provider"`
-	TaskKind           string  `json:"task_kind"`
-	HasInjection       bool    `json:"has_injection"`
-	TaskCount          int64   `json:"task_count"`
-	SuccessfulCount    int64   `json:"successful_count"`
-	FailedCount        int64   `json:"failed_count"`
-	TotalDurationSecs  float64 `json:"total_duration_secs"`
-	DurationTaskCount  int64   `json:"duration_task_count"`
-	InputTokens        int64   `json:"input_tokens"`
-	OutputTokens       int64   `json:"output_tokens"`
-	CacheReadTokens    int64   `json:"cache_read_tokens"`
-	CacheWriteTokens   int64   `json:"cache_write_tokens"`
-	RerunCount         int64   `json:"rerun_count"`
-	FollowUpCount      int64   `json:"follow_up_count"`
-	MaxAttempt         int32   `json:"max_attempt"`
+	BucketHour        string  `json:"bucket_hour"`
+	WorkspaceID       string  `json:"workspace_id"`
+	AgentID           string  `json:"agent_id"`
+	ProjectID         *string `json:"project_id"`
+	Model             string  `json:"model"`
+	Provider          string  `json:"provider"`
+	TaskKind          string  `json:"task_kind"`
+	HasInjection      bool    `json:"has_injection"`
+	TaskCount         int64   `json:"task_count"`
+	SuccessfulCount   int64   `json:"successful_count"`
+	FailedCount       int64   `json:"failed_count"`
+	TotalDurationSecs float64 `json:"total_duration_secs"`
+	DurationTaskCount int64   `json:"duration_task_count"`
+	InputTokens       int64   `json:"input_tokens"`
+	OutputTokens      int64   `json:"output_tokens"`
+	CacheReadTokens   int64   `json:"cache_read_tokens"`
+	CacheWriteTokens  int64   `json:"cache_write_tokens"`
+	RerunCount        int64   `json:"rerun_count"`
+	FollowUpCount     int64   `json:"follow_up_count"`
+	MaxAttempt        int32   `json:"max_attempt"`
 }
 
 type KnowledgeEffectSummaryResponse struct {
@@ -227,21 +227,21 @@ type KnowledgeSearchResultResponse struct {
 }
 
 type KnowledgeInjectionDetailResponse struct {
-	InjectionEventID         string  `json:"injection_event_id"`
-	KnowledgeItemID          string  `json:"knowledge_item_id"`
-	AgentTaskID              *string `json:"agent_task_id"`
-	InjectionTarget          string  `json:"injection_target"`
-	RetrievalEventID         *string `json:"retrieval_event_id"`
-	Rank                     *int32  `json:"rank"`
+	InjectionEventID         string   `json:"injection_event_id"`
+	KnowledgeItemID          string   `json:"knowledge_item_id"`
+	AgentTaskID              *string  `json:"agent_task_id"`
+	InjectionTarget          string   `json:"injection_target"`
+	RetrievalEventID         *string  `json:"retrieval_event_id"`
+	Rank                     *int32   `json:"rank"`
 	Score                    *float64 `json:"score"`
-	InjectionReason          *string `json:"injection_reason"`
-	TokenBudget              *int32  `json:"token_budget"`
-	InjectedAt               string  `json:"injected_at"`
-	KnowledgeTitle           string  `json:"knowledge_title"`
-	KnowledgeType            string  `json:"knowledge_type"`
-	KnowledgeLifecycleStatus string  `json:"knowledge_lifecycle_status"`
-	WasUsed                  bool    `json:"was_used"`
-	SourceIssueID            *string `json:"source_issue_id"`
+	InjectionReason          *string  `json:"injection_reason"`
+	TokenBudget              *int32   `json:"token_budget"`
+	InjectedAt               string   `json:"injected_at"`
+	KnowledgeTitle           string   `json:"knowledge_title"`
+	KnowledgeType            string   `json:"knowledge_type"`
+	KnowledgeLifecycleStatus string   `json:"knowledge_lifecycle_status"`
+	WasUsed                  bool     `json:"was_used"`
+	SourceIssueID            *string  `json:"source_issue_id"`
 }
 
 type listKnowledgeInjectionsResponse struct {
@@ -349,6 +349,13 @@ type createKnowledgeDraftFromCandidateRequest struct {
 
 type createKnowledgeDraftFromGovernanceFindingRequest struct {
 	Regenerate bool `json:"regenerate"`
+}
+
+type probeKnowledgeCuratorRequest struct {
+	BaseURL        string  `json:"base_url"`
+	APIKey         *string `json:"api_key"`
+	Model          string  `json:"model"`
+	EmbeddingModel string  `json:"embedding_model"`
 }
 
 func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
@@ -1249,6 +1256,44 @@ func (h *Handler) CreateKnowledgeDraftFromGovernanceFinding(w http.ResponseWrite
 	writeJSON(w, http.StatusCreated, knowledgeDetailToResponse(detail))
 }
 
+func (h *Handler) ProbeKnowledgeCuratorEndpoint(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID := requestUserID(r)
+	actorType, _ := h.resolveActor(r, userID, workspaceID)
+	if actorType == "agent" {
+		writeError(w, http.StatusForbidden, "agents may not probe curator endpoints")
+		return
+	}
+	if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !ok {
+		return
+	}
+	var req probeKnowledgeCuratorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	apiKey := h.KnowledgeCuratorAPIKey
+	if req.APIKey != nil {
+		apiKey = *req.APIKey
+	}
+	result, err := service.ProbeCuratorEndpoint(r.Context(), service.CuratorEndpointProbeInput{
+		BaseURL:        req.BaseURL,
+		APIKey:         apiKey,
+		Model:          req.Model,
+		EmbeddingModel: req.EmbeddingModel,
+		Timeout:        h.KnowledgeCuratorTimeout,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrKnowledgeValidation) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (h *Handler) ResolveKnowledgeGovernanceFinding(w http.ResponseWriter, r *http.Request) {
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace id")
 	if !ok {
@@ -1400,6 +1445,10 @@ func (h *Handler) writeKnowledgeError(w http.ResponseWriter, err error, fallback
 	}
 	if errors.Is(err, service.ErrCuratorLocalRuntimeUnavailable) {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	if errors.Is(err, service.ErrCuratorProvider) || errors.Is(err, service.ErrCuratorInvalidResponse) {
+		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
 	writeError(w, http.StatusInternalServerError, fallback)

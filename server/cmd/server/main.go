@@ -400,7 +400,6 @@ func main() {
 		APIKey:         os.Getenv("KNOWLEDGE_CURATOR_API_KEY"),
 		Model:          os.Getenv("KNOWLEDGE_CURATOR_MODEL"),
 		EmbeddingModel: os.Getenv("KNOWLEDGE_CURATOR_EMBEDDING_MODEL"),
-		RuntimeMode:    os.Getenv("KNOWLEDGE_CURATOR_RUNTIME_MODE"),
 		Timeout:        envDuration("KNOWLEDGE_CURATOR_TIMEOUT", 60*time.Second),
 	}, nil)
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {

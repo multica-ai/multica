@@ -211,6 +211,8 @@ import type {
   ListKnowledgeParams,
   ListKnowledgeResponse,
   ListKnowledgeSourcesResponse,
+  ProbeKnowledgeCuratorRequest,
+  ProbeKnowledgeCuratorResponse,
   PublishKnowledgeToSkillRequest,
   PublishKnowledgeToWikiRequest,
   SearchKnowledgeRequest,
@@ -337,6 +339,7 @@ import {
   KnowledgeFeedbackSchema,
   KnowledgeGovernanceFindingSchema,
   KnowledgeItemSchema,
+  ProbeKnowledgeCuratorResponseSchema,
   ListKnowledgeAnalyticsResponseSchema,
   ListKnowledgeCandidatesResponseSchema,
   ListKnowledgeEffectResponseSchema,
@@ -346,6 +349,7 @@ import {
   ListKnowledgeResponseSchema,
   ListKnowledgeSourcesResponseSchema,
   SearchKnowledgeResponseSchema,
+  EMPTY_PROBE_KNOWLEDGE_CURATOR_RESPONSE,
 } from "../knowledge/schemas";
 
 /** Identifies the calling client to the server.
@@ -2165,6 +2169,19 @@ export class ApiClient {
   }
 
   // Knowledge
+  async probeKnowledgeCurator(data: ProbeKnowledgeCuratorRequest): Promise<ProbeKnowledgeCuratorResponse> {
+    const raw = await this.fetch<unknown>("/api/knowledge/curator/probe", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      ProbeKnowledgeCuratorResponseSchema,
+      EMPTY_PROBE_KNOWLEDGE_CURATOR_RESPONSE,
+      { endpoint: "POST /api/knowledge/curator/probe" },
+    );
+  }
+
   async listKnowledge(params?: ListKnowledgeParams): Promise<ListKnowledgeResponse> {
     const search = new URLSearchParams();
     if (params?.q) search.set("q", params.q);

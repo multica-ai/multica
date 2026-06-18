@@ -91,6 +91,5 @@ func (e *LocalCuratorEngine) Info() CuratorEngineInfo {
 		Provider:       e.base.cfg.Provider,
 		Model:          e.base.cfg.Model,
 		EmbeddingModel: e.base.cfg.EmbeddingModel,
-		RuntimeMode:    "local",
 	}
 }

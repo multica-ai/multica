@@ -120,7 +120,7 @@ export function KnowledgePublishWikiDialog({ detail }: { detail: KnowledgeDetail
           <DialogTitle>{t(($) => $.publish_wiki.title)}</DialogTitle>
           <DialogDescription>{t(($) => $.publish_wiki.description)}</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <div className="grid max-h-[70vh] gap-4 overflow-y-auto pr-1">
           <div className="grid gap-2">
             <Label>{t(($) => $.publish_wiki.target)}</Label>
             <Select
