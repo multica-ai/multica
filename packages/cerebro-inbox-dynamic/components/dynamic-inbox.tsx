@@ -996,12 +996,11 @@ export function DynamicInbox() {
           </div>
         </div>
 
-        {/* search (TECH-3413 #9) — TECH-3541 (Jesper): when the active tab has a
-            permanent inbox block the search lives inside it; this top bar is a
-            fallback for custom tabs without an "All messages" box. */}
-        {!inboxBlockId && (
-          <div className="border-b border-border px-3 py-2">{searchBar}</div>
-        )}
+        {/* search (TECH-3413 #9) — TECH-3541 (Jesper): the inbox search lives
+            inside the "All messages" block (rendered as its searchSlot). FIR-1502
+            (Jesper): tabs without an "All messages" box no longer get a standalone
+            search bar in the tab header — search lives in blocks (each block, e.g.
+            the Chat block, carries its own search). */}
 
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
