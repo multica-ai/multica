@@ -422,6 +422,89 @@ func TestRelinkIssueRelations_OrderIndependent(t *testing.T) {
 	}
 }
 
+// TECH-3766: a blocks/blocked_by/related dependency between two copied issues
+// must travel; a dependency pointing at an issue that was NOT copied is dropped
+// (never points back into the source). The relink pass is idempotent.
+func TestRelinkIssueRelations_Dependencies(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no test database")
+	}
+	ctx := context.Background()
+	s := New(testPool)
+	runID := newID()
+
+	srcA := newID()   // blocks srcB (both copied → must carry)
+	srcB := newID()   // blocked_by srcA
+	srcOut := newID()  // related to an issue we will NOT copy → must be dropped
+	for _, seed := range []struct {
+		id  pgtype.UUID
+		num int32
+	}{{srcA, 30}, {srcB, 31}, {srcOut, 32}} {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue (id, workspace_id, title, status, priority, kind, creator_type, creator_id, number, position)
+			VALUES ($1,$2,'DepIssue','todo','none','issue','member',$3,$4,1)`,
+			seed.id, srcWS, testUser, seed.num); err != nil {
+			t.Fatalf("seed issue: %v", err)
+		}
+	}
+	// srcA blocks srcB; srcOut related to srcA's UNcopied counterpart srcOnly.
+	srcOnly := newID()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (id, workspace_id, title, status, priority, kind, creator_type, creator_id, number, position)
+		VALUES ($1,$2,'Uncopied','todo','none','issue','member',$3,33,1)`,
+		srcOnly, srcWS, testUser); err != nil {
+		t.Fatalf("seed uncopied: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue_dependency (id, issue_id, depends_on_issue_id, type) VALUES
+		(gen_random_uuid(),$1,$2,'blocks'),
+		(gen_random_uuid(),$3,$4,'related')`,
+		srcA, srcB, srcOut, srcOnly); err != nil {
+		t.Fatalf("seed dependency: %v", err)
+	}
+
+	// copy A, B and Out — but NOT srcOnly
+	aRes, err := s.CopyIssue(ctx, runID, tgtWS, srcA)
+	if err != nil {
+		t.Fatalf("copy A: %v", err)
+	}
+	bRes, err := s.CopyIssue(ctx, runID, tgtWS, srcB)
+	if err != nil {
+		t.Fatalf("copy B: %v", err)
+	}
+	if _, err := s.CopyIssue(ctx, runID, tgtWS, srcOut); err != nil {
+		t.Fatalf("copy Out: %v", err)
+	}
+
+	rel, err := s.RelinkIssueRelations(ctx, tgtWS)
+	if err != nil {
+		t.Fatalf("RelinkIssueRelations: %v", err)
+	}
+	// only the A->B 'blocks' dependency has both ends copied; the related one to
+	// the uncopied issue must be skipped.
+	if rel.Dependencies != 1 {
+		t.Fatalf("dependencies relinked=%d, want 1 (the A->B blocks; the related-to-uncopied dropped)", rel.Dependencies)
+	}
+	var depType string
+	if err := testPool.QueryRow(ctx,
+		`SELECT type FROM issue_dependency WHERE issue_id=$1 AND depends_on_issue_id=$2`,
+		aRes.TargetID, bRes.TargetID).Scan(&depType); err != nil {
+		t.Fatalf("copied dependency missing: %v", err)
+	}
+	if depType != "blocks" {
+		t.Fatalf("copied dependency type=%q, want blocks", depType)
+	}
+
+	// idempotent: a second pass adds nothing
+	rel2, err := s.RelinkIssueRelations(ctx, tgtWS)
+	if err != nil {
+		t.Fatalf("second relink: %v", err)
+	}
+	if rel2.Dependencies != 0 {
+		t.Fatalf("second relink dependencies=%d, want 0 (idempotent)", rel2.Dependencies)
+	}
+}
+
 func TestCopyAgent_Parked_NameConflict(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no test database")

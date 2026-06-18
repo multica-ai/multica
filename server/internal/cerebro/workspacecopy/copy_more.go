@@ -37,8 +37,9 @@ func (s *Store) CopyAutopilot(ctx context.Context, runID, targetWorkspace, sourc
 
 // RelinkResult reports how many cross-issue links a relink pass healed.
 type RelinkResult struct {
-	Parents  int64 `json:"parents_relinked"`
-	Projects int64 `json:"projects_relinked"`
+	Parents      int64 `json:"parents_relinked"`
+	Projects     int64 `json:"projects_relinked"`
+	Dependencies int64 `json:"dependencies_relinked"` // CEREBRO-PATCH(workspace-copy): TECH-3766 blocks/blocked_by/related
 }
 
 // RelinkIssueRelations heals issue->issue (sub-issue) and issue->project links in
@@ -95,10 +96,40 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 		return RelinkResult{}, fmt.Errorf("relink projects: %w", err)
 	}
 
+	// CEREBRO-PATCH(workspace-copy): TECH-3766 — issue_dependency (blocks /
+	// blocked_by / related) links between two copied issues. Like parents, both
+	// endpoints must exist in the target, so this is healed in the post-pass: for
+	// every source dependency whose BOTH ends were copied into this target, insert
+	// the remapped dependency. Dependencies pointing at an issue that was not
+	// copied are skipped (the join drops them), never pointing into the source.
+	// Idempotent via the NOT EXISTS guard.
+	dTag, err := tx.Exec(ctx, `
+		INSERT INTO issue_dependency (id, issue_id, depends_on_issue_id, type)
+		SELECT gen_random_uuid(), im.target_id, dm.target_id, d.type
+		FROM issue_dependency d
+		JOIN cerebro_workspace_copy_map im
+		  ON im.target_workspace_id = $1
+		 AND im.entity_type = 'issue'
+		 AND im.source_id = d.issue_id
+		JOIN cerebro_workspace_copy_map dm
+		  ON dm.target_workspace_id = $1
+		 AND dm.entity_type = 'issue'
+		 AND dm.source_id = d.depends_on_issue_id
+		WHERE NOT EXISTS (
+			SELECT 1 FROM issue_dependency x
+			WHERE x.issue_id = im.target_id
+			  AND x.depends_on_issue_id = dm.target_id
+			  AND x.type = d.type
+		)`,
+		targetWorkspace)
+	if err != nil {
+		return RelinkResult{}, fmt.Errorf("relink dependencies: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return RelinkResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return RelinkResult{Parents: pTag.RowsAffected(), Projects: prTag.RowsAffected()}, nil
+	return RelinkResult{Parents: pTag.RowsAffected(), Projects: prTag.RowsAffected(), Dependencies: dTag.RowsAffected()}, nil
 }
 
 func copyProjectTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceProject pgtype.UUID) (CopyResult, error) {
