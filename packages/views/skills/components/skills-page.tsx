@@ -449,6 +449,8 @@ export default function SkillsPage() {
             ) : (
               <DataTable
                 table={table}
+                // CEREBRO-PATCH(skill-folders-dnd): FIR-1461 — drag a skill row onto a folder to file it.
+                rowProps={(row) => folderView.getDragProps(row.original.skill.id)}
                 onRowClick={(row) =>
                   navigation.push(paths.skillDetail(row.original.skill.id))
                 }

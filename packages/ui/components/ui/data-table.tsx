@@ -38,6 +38,10 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // a detail page on row click without nesting an <a> around <tr>,
   // which is invalid HTML.
   onRowClick?: (row: Row<TData>) => void;
+  // CEREBRO-PATCH(data-table-row-props): FIR-1461 — optional per-row attributes
+  // (e.g. draggable + onDragStart) so a list can make its rows drag sources
+  // without forking the table. Additive + backward-compatible.
+  rowProps?: (row: Row<TData>) => React.HTMLAttributes<HTMLTableRowElement>;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -62,6 +66,7 @@ export function DataTable<TData>({
   actionBar,
   emptyMessage = "No results.",
   onRowClick,
+  rowProps, // CEREBRO-PATCH(data-table-row-props): FIR-1461 — see interface.
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -251,6 +256,8 @@ export function DataTable<TData>({
                 <TableRow
                   key={row.id}
                   data-state={row.getIsSelected() && "selected"}
+                  // CEREBRO-PATCH(data-table-row-props): FIR-1461 — opt-in per-row attrs.
+                  {...rowProps?.(row)}
                   onClick={
                     onRowClick ? () => onRowClick(row) : undefined
                   }

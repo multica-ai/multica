@@ -9,6 +9,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { entityFolderItemsOptions, entityFoldersOptions } from "../queries";
+import {
+  setEntityFolderDragData,
+  type EntityFolderDragProps,
+} from "../dnd";
 import type { EntityFolderKind } from "../types";
 import {
   EntityFolderSidebar,
@@ -28,6 +32,12 @@ export interface EntityFolderView {
   includes: (itemId: string) => boolean;
   /** The folder sidebar, ready to render beside the list. */
   sidebar: ReactNode;
+  /**
+   * Props to spread on a list row so it can be dragged onto a folder in the
+   * sidebar to file it. Returns no-op (non-draggable) props when the feature
+   * is off, so the host page can spread unconditionally.
+   */
+  getDragProps: (itemId: string) => EntityFolderDragProps;
 }
 
 const FLAG_BY_KIND = {
@@ -91,5 +101,13 @@ export function useEntityFolderView(opts: {
     />
   ) : null;
 
-  return { enabled, includes, sidebar };
+  const getDragProps = (itemId: string): EntityFolderDragProps =>
+    enabled
+      ? {
+          draggable: true,
+          onDragStart: (e) => setEntityFolderDragData(e, kind, itemId),
+        }
+      : {};
+
+  return { enabled, includes, sidebar, getDragProps };
 }

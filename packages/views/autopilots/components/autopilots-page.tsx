@@ -18,7 +18,11 @@ import { cn } from "@multica/ui/lib/utils";
 // CEREBRO-PATCH(autopilot-private-badge-list-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(autopilot-folders): FIR-1412 — folder sidebar + grouping for autopilots.
-import { useEntityFolderView } from "@multica/cerebro-entity-folders";
+// CEREBRO-PATCH(autopilot-folders-dnd): FIR-1461 — drag a row onto a folder to file it.
+import {
+  useEntityFolderView,
+  type EntityFolderDragProps,
+} from "@multica/cerebro-entity-folders";
 import type { Autopilot, AutopilotStatus, AutopilotExecutionMode } from "@multica/core/types";
 import type { TriggerFrequency } from "./trigger-config";
 import { useT } from "../../i18n";
@@ -132,7 +136,14 @@ const STATUS_VISUAL: Record<AutopilotStatus, { color: string; icon: typeof Zap }
   archived: { color: "text-muted-foreground", icon: AlertCircle },
 };
 
-function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
+// CEREBRO-PATCH(autopilot-folders-dnd): FIR-1461 — dragProps make the row a drag source.
+function AutopilotRow({
+  autopilot,
+  dragProps,
+}: {
+  autopilot: Autopilot;
+  dragProps?: EntityFolderDragProps;
+}) {
   const { t } = useT("autopilots");
   const { getActorName } = useActorName();
   const wsPaths = useWorkspacePaths();
@@ -141,10 +152,16 @@ function AutopilotRow({ autopilot }: { autopilot: Autopilot }) {
   const StatusIcon = visual.icon;
 
   return (
-    <div className="group/row flex flex-col gap-2 border-b px-4 py-3 text-sm transition-colors hover:bg-accent/40 sm:h-11 sm:flex-row sm:items-center sm:gap-2 sm:border-b-0 sm:px-5 sm:py-0">
+    <div
+      className="group/row flex flex-col gap-2 border-b px-4 py-3 text-sm transition-colors hover:bg-accent/40 sm:h-11 sm:flex-row sm:items-center sm:gap-2 sm:border-b-0 sm:px-5 sm:py-0"
+      {...dragProps} /* CEREBRO-PATCH(autopilot-folders-dnd): FIR-1461 — drag onto a folder. */
+    >
       <AppLink
         href={wsPaths.autopilotDetail(autopilot.id)}
         className="flex min-w-0 items-center gap-2 sm:flex-1"
+        // CEREBRO-PATCH(autopilot-folders-dnd): FIR-1461 — let the row's drag win
+        // over the native <a> link-drag so the whole row is one drag source.
+        draggable={false}
       >
         <Zap className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate font-medium">{autopilot.title}</span>
@@ -294,7 +311,12 @@ export function AutopilotsPage() {
               <span className="w-20 text-right shrink-0">{t(($) => $.page.table.last_run)}</span>
             </div>
             {visibleAutopilots.map((autopilot) => (
-              <AutopilotRow key={autopilot.id} autopilot={autopilot} />
+              <AutopilotRow
+                key={autopilot.id}
+                autopilot={autopilot}
+                // CEREBRO-PATCH(autopilot-folders-dnd): FIR-1461 — drag onto a folder to file it.
+                dragProps={folderView.getDragProps(autopilot.id)}
+              />
             ))}
           </>
         )}

@@ -19,3 +19,5 @@ export {
 export { useEntityFolderView } from "./views/use-entity-folder-view";
 export { EntityFolderSidebar } from "./views/entity-folder-sidebar";
 export type { EntityFolderViewItem } from "./views/use-entity-folder-view";
+// FIR-1461: drag-and-drop a list row onto a folder to file it.
+export type { EntityFolderDragProps } from "./dnd";

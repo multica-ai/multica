@@ -6,7 +6,7 @@
 // The host list page only renders this beside its list and filters by the
 // selected folder.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -52,6 +52,10 @@ import {
   useSetEntityFolderItem,
   useUpdateEntityFolder,
 } from "../mutations";
+import {
+  hasEntityFolderDragData,
+  readEntityFolderDragData,
+} from "../dnd";
 import type { EntityFolder, EntityFolderKind } from "../types";
 import type { EntityFolderViewItem } from "./use-entity-folder-view";
 
@@ -122,6 +126,32 @@ export function EntityFolderSidebar({
   const createFolder = useCreateEntityFolder();
   const updateFolder = useUpdateEntityFolder(kind);
   const deleteFolder = useDeleteEntityFolder(kind);
+  const setItem = useSetEntityFolderItem();
+
+  // Drag-and-drop: which drop target (folder id or SELECT_UNFILED) the dragged
+  // row is currently hovering, for the highlight.
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+  const dropHandlers = (folderId: string | null, key: string) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!hasEntityFolderDragData(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      if (dropTarget !== key) setDropTarget(key);
+    },
+    onDragLeave: () =>
+      setDropTarget((cur) => (cur === key ? null : cur)),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      setDropTarget(null);
+      const itemId = readEntityFolderDragData(e, kind);
+      if (!itemId) return;
+      // No-op if it's already where it was dropped.
+      const current = membership.get(itemId) ?? null;
+      if (current === folderId) return;
+      setItem.mutate({ kind, item_id: itemId, folder_id: folderId });
+    },
+  });
 
   // Create / rename dialog state.
   const [nameDialog, setNameDialog] = useState<
@@ -177,8 +207,11 @@ export function EntityFolderSidebar({
             selected === node.id
               ? "bg-accent text-accent-foreground"
               : "hover:bg-accent/50",
+            dropTarget === node.id &&
+              "bg-primary/10 ring-1 ring-inset ring-primary/40",
           )}
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
+          {...dropHandlers(node.id, node.id)}
         >
           <button
             type="button"
@@ -211,7 +244,7 @@ export function EntityFolderSidebar({
               render={
                 <button
                   type="button"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-accent group-hover/folder:opacity-100"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                   aria-label="Folder actions"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
@@ -291,8 +324,11 @@ export function EntityFolderSidebar({
               selected === SELECT_UNFILED
                 ? "bg-accent text-accent-foreground"
                 : "hover:bg-accent/50",
+              dropTarget === SELECT_UNFILED &&
+                "bg-primary/10 ring-1 ring-inset ring-primary/40",
             )}
             onClick={() => onSelect(SELECT_UNFILED)}
+            {...dropHandlers(null, SELECT_UNFILED)}
           >
             <Inbox className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="flex-1 text-left">Unfiled</span>
