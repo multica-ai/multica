@@ -1,10 +1,6 @@
 import { useMemo } from "react";
-import {
-  ActionSheetIOS,
-  Alert,
-  FlatList,
-  View,
-} from "react-native";
+import { ActionSheetIOS, Alert, View } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import { useQuery } from "@tanstack/react-query";
 import { router, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -142,14 +138,14 @@ export default function Inbox() {
       ) : !data || data.length === 0 ? (
         <InboxEmpty iconColor={THEME[colorScheme].mutedForeground} />
       ) : (
-        <FlatList
+        <FlashList
           data={data}
           keyExtractor={(item) => item.id}
           contentInsetAdjustmentBehavior="automatic"
           ItemSeparatorComponent={() => (
             <View className="h-px bg-border ml-16" />
           )}
-          contentContainerClassName="pb-6"
+          contentContainerStyle={{ paddingBottom: 24 }}
           renderItem={({ item }) => (
             <SwipeableInboxRow
               item={item}
