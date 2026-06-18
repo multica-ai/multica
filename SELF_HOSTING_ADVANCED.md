@@ -382,12 +382,15 @@ NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
 
 ## LAN / Non-localhost Access
 
-By default, Multica works on `localhost`. If you access it from another machine on the LAN (e.g. `http://192.168.1.100:3000`), you need to tell the backend to accept that origin:
+By default, Multica binds Docker-published ports to `127.0.0.1`. For trusted private LAN testing, bind to one specific LAN IP and keep the browser origin, CLI app URL, daemon server URL, and backend origin allowlist in sync. Do not use `BIND_HOST=0.0.0.0` as a shortcut.
 
 ```bash
 # .env — replace with your server's LAN IP
+BIND_HOST=192.168.1.100
 FRONTEND_ORIGIN=http://192.168.1.100:3000
 CORS_ALLOWED_ORIGINS=http://192.168.1.100:3000
+MULTICA_APP_URL=http://192.168.1.100:3000
+MULTICA_SERVER_URL=ws://192.168.1.100:8080/ws
 ```
 
 Then restart the stack:

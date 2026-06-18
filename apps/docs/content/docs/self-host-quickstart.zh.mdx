@@ -33,9 +33,9 @@ make selfhost
 1. 如果没有 `.env` 文件，从 `.env.example` 自动生成一份，并**生成随机 JWT_SECRET 和 Postgres 密码**
 2. 拉取官方 Docker 镜像（PostgreSQL、Multica backend、Multica frontend）
 3. 用 `docker-compose.selfhost.yml` 启动全部服务
-4. 等后端 `/health` 端点准备就绪
+4. 等后端 `/readyz` 和前端页面都准备就绪
 
-如果是启动完成后的生产探针，想让数据库或 migration 异常也体现为失败，请改用 `/readyz`。
+`/health` 只代表 liveness。启动等待和生产探针如果要覆盖数据库与 migration 状态，请使用 `/readyz` 或 `/healthz`。
 
 后端容器启动时会**自动跑数据库 migration**（`docker/entrypoint.sh` 在启动 server 前执行 `./migrate up`）——你会在 backend 日志里看到 migration 输出。升级版本时同样自动处理。
 
@@ -49,7 +49,7 @@ make selfhost
 - **后端**：[http://localhost:8080](http://localhost:8080)
 
 <Callout type="info">
-**所有端口只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免服务密钥和 Postgres 凭据被直接暴露到公网。要做跨机访问，请用反向代理在前面终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
+**端口默认只监听 `127.0.0.1`。** `docker-compose.selfhost.yml` 默认把每个 publish 出来的端口都绑到 loopback —— `ss -tlnp` 不会看到 `0.0.0.0:8080`，外网/其它机器默认根本连不上。这是为了避免服务密钥和 Postgres 凭据被直接暴露到公网。可信内网测试可以把 `BIND_HOST` 设成一个具体 LAN IP，并同步更新 origin/URL 变量；跨机或公网访问优先用反向代理终结 TLS，详见下方 [Step 5b —— 跨机访问：用反向代理把服务挡在前面](#5b-跨机访问用反向代理把服务挡在前面)。
 </Callout>
 
 ## 2. 重要：保持生产安全配置
@@ -150,11 +150,11 @@ CLI 和 server 在同一台机器上时，默认参数就够用：
 multica setup self-host
 ```
 
-会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。
+会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。服务端启动和 CLI/daemon 配置是两个步骤：`make selfhost`、安装脚本或 `./start.sh` 启 Docker 服务，`multica setup self-host` 配置登录并启动 daemon。
 
 ### 5b. 跨机访问：用反向代理把服务挡在前面
 
-因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则服务密钥会直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
+因为 compose 默认监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——通常也不应该直接连，否则服务密钥会暴露到外部网络。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
 
 ```bash
 multica setup self-host \

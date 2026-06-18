@@ -83,6 +83,22 @@ function Get-SelfHostFrontendPort {
     return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
 }
 
+function Get-SelfHostUrlHost {
+    $value = Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "BIND_HOST" -Default "127.0.0.1"
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -eq "127.0.0.1" -or $value -eq "::1" -or $value -eq "0.0.0.0") {
+        return "localhost"
+    }
+    return $value
+}
+
+function Get-SelfHostBackendBaseUrl {
+    return "http://$(Get-SelfHostUrlHost):$(Get-SelfHostBackendPort)"
+}
+
+function Get-SelfHostFrontendBaseUrl {
+    return "http://$(Get-SelfHostUrlHost):$(Get-SelfHostFrontendPort)"
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -443,25 +459,30 @@ function Install-Server {
     Write-Info "Starting Multica services (this may take a few minutes on first run)..."
     docker compose -f docker-compose.selfhost.yml up -d
 
-    Write-Info "Waiting for backend to be ready..."
-    $backendPort = Get-SelfHostBackendPort
-    $ready = $false
-    for ($i = 1; $i -le 45; $i++) {
-        try {
-            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
-            $ready = $true
-            break
-        } catch {
-            Start-Sleep -Seconds 2
+    Write-Info "Waiting for backend readiness and frontend..."
+    $backendUrl = Get-SelfHostBackendBaseUrl
+    $frontendUrl = Get-SelfHostFrontendBaseUrl
+    foreach ($url in @("$backendUrl/readyz", "$frontendUrl/")) {
+        $ready = $false
+        for ($i = 1; $i -le 45; $i++) {
+            try {
+                $null = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 2
+                $ready = $true
+                break
+            } catch {
+                Start-Sleep -Seconds 2
+            }
+        }
+
+        if (-not $ready) {
+            Write-Fail @"
+Server did not become ready at $url.
+Check image pull, occupied host ports, Postgres/migration readiness, frontend boot, then inspect logs:
+  cd $InstallDir; docker compose -f docker-compose.selfhost.yml logs backend frontend postgres
+"@
         }
     }
-
-    if ($ready) {
-        Write-Ok "Multica server is running"
-    } else {
-        Write-Warn "Server is still starting. Check logs with:"
-        Write-Host "  cd $InstallDir; docker compose -f docker-compose.selfhost.yml logs"
-    }
+    Write-Ok "Multica server is running"
 
     Pop-Location
 }
@@ -510,15 +531,15 @@ function Start-LocalInstall {
     Write-Host "  [OK] Multica server is running and CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    $frontendPort = Get-SelfHostFrontendPort
-    $backendPort = Get-SelfHostBackendPort
-    Write-Host "  Frontend:  http://localhost:$frontendPort"
-    Write-Host "  Backend:   http://localhost:$backendPort"
+    $frontendUrl = Get-SelfHostFrontendBaseUrl
+    $backendUrl = Get-SelfHostBackendBaseUrl
+    Write-Host "  Frontend:  $frontendUrl"
+    Write-Host "  Backend:   $backendUrl"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""
     Write-Host "  Next: configure your CLI to connect"
     Write-Host ""
-    Write-Host "     multica setup self-host  " -NoNewline; Write-Host "# Configure + authenticate + start daemon" -ForegroundColor DarkGray
+    Write-Host "     multica setup self-host --server-url $backendUrl --app-url $frontendUrl" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "  Login: configure RESEND_API_KEY in .env for email codes,"
     Write-Host "  or read the generated code from backend logs when Resend is unset."

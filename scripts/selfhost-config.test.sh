@@ -28,13 +28,45 @@ require_env() {
   fi
 }
 
+require_file_contains() {
+  local file=$1
+  local expected=$2
+
+  if ! grep -Fq "$expected" "$file"; then
+    echo "Missing expected file content in $file:"
+    echo "  $expected"
+    exit 1
+  fi
+}
+
+require_success() {
+  local label=$1
+  shift
+
+  if ! "$@"; then
+    echo "Expected success: $label"
+    exit 1
+  fi
+}
+
+require_failure() {
+  local label=$1
+  shift
+
+  if "$@"; then
+    echo "Expected failure: $label"
+    exit 1
+  fi
+}
+
 tmp_env="$(mktemp)"
-trap 'rm -f "$tmp_env"' EXIT
+tmp_dir="$(mktemp -d)"
+trap 'rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\n' >>"$tmp_env"
 
 config="$(
-  docker compose \
+  env -i PATH="$PATH" HOME="$HOME" DOCKER_HOST="${DOCKER_HOST:-}" docker compose \
     --env-file "$tmp_env" \
     -f docker-compose.selfhost.yml \
     config
@@ -42,9 +74,14 @@ config="$(
 
 require_config "$config" 'published: "3100"'
 require_config "$config" 'published: "9100"'
+require_config "$config" 'host_ip: 127.0.0.1'
 require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
+if grep -Fq 'MULTICA_SERVER_URL:' <<<"$config"; then
+  echo "docker-compose.selfhost.yml must not pass daemon-only MULTICA_SERVER_URL into the backend container."
+  exit 1
+fi
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
@@ -83,5 +120,130 @@ require_env "$local_env" 'GOOGLE_REDIRECT_URI=http://localhost:3100/auth/callbac
 require_env "$local_env" 'MULTICA_SERVER_URL=ws://localhost:9100/ws'
 require_env "$local_env" 'LOCAL_UPLOAD_BASE_URL=http://localhost:9100'
 require_env "$local_env" 'PLAYWRIGHT_BASE_URL=http://localhost:3100'
+
+default_env="$(
+  env -i PATH="$PATH" bash -c '
+    set -euo pipefail
+    . scripts/selfhost-env.sh
+    printf "%s\n" \
+      "BACKEND_PORT=${BACKEND_PORT}" \
+      "SERVER_PORT=${SERVER_PORT}" \
+      "PORT=${PORT}" \
+      "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-}" \
+      "MULTICA_SERVER_URL=${MULTICA_SERVER_URL}" \
+      "BACKEND_BASE_URL=${BACKEND_BASE_URL}" \
+      "FRONTEND_BASE_URL=${FRONTEND_BASE_URL}"
+  '
+)"
+
+require_env "$default_env" 'BACKEND_PORT=8080'
+require_env "$default_env" 'SERVER_PORT=8080'
+require_env "$default_env" 'PORT=8080'
+require_env "$default_env" 'CORS_ALLOWED_ORIGINS='
+require_env "$default_env" 'MULTICA_SERVER_URL=ws://localhost:8080/ws'
+require_env "$default_env" 'BACKEND_BASE_URL=http://localhost:8080'
+require_env "$default_env" 'FRONTEND_BASE_URL=http://localhost:3000'
+
+for key in BACKEND_PORT API_PORT SERVER_PORT PORT; do
+  alias_env="$(
+    env -i PATH="$PATH" "$key=9187" bash -c '
+      set -euo pipefail
+      . scripts/selfhost-env.sh
+      printf "%s\n" \
+        "BACKEND_PORT=${BACKEND_PORT}" \
+        "MULTICA_SERVER_URL=${MULTICA_SERVER_URL}" \
+        "BACKEND_BASE_URL=${BACKEND_BASE_URL}"
+    '
+  )"
+  require_env "$alias_env" 'BACKEND_PORT=9187'
+  require_env "$alias_env" 'MULTICA_SERVER_URL=ws://localhost:9187/ws'
+  require_env "$alias_env" 'BACKEND_BASE_URL=http://localhost:9187'
+done
+
+lan_env="$(
+  env -i PATH="$PATH" \
+    BIND_HOST=192.168.1.100 \
+    FRONTEND_PORT=3100 \
+    bash -c '
+      set -euo pipefail
+      . scripts/selfhost-env.sh
+      printf "%s\n" \
+        "FRONTEND_ORIGIN=${FRONTEND_ORIGIN}" \
+        "CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}" \
+        "MULTICA_APP_URL=${MULTICA_APP_URL}" \
+        "MULTICA_SERVER_URL=${MULTICA_SERVER_URL}"
+    '
+)"
+
+require_env "$lan_env" 'FRONTEND_ORIGIN=http://192.168.1.100:3100'
+require_env "$lan_env" 'CORS_ALLOWED_ORIGINS=http://192.168.1.100:3100'
+require_env "$lan_env" 'MULTICA_APP_URL=http://192.168.1.100:3100'
+require_env "$lan_env" 'MULTICA_SERVER_URL=ws://192.168.1.100:8080/ws'
+
+require_file_contains start.sh 'SELFHOST_START_DAEMON="${SELFHOST_START_DAEMON:-false}"'
+require_file_contains start.sh 'wait_for_url "backend readiness" "${BACKEND_BASE_URL}/readyz"'
+require_file_contains start.sh 'wait_for_url "frontend" "${FRONTEND_BASE_URL}/"'
+
+fake_bin="$tmp_dir/bin"
+mkdir -p "$fake_bin" "$tmp_dir/server"
+
+cat >"$fake_bin/docker" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'docker %s\n' "$*" >>"${SELFHOST_TEST_LOG:?}"
+exit "${SELFHOST_FAKE_DOCKER_STATUS:-0}"
+SCRIPT
+chmod +x "$fake_bin/docker"
+
+cat >"$fake_bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >>"${SELFHOST_TEST_LOG:?}"
+url="${*: -1}"
+case "$url" in
+  */readyz) exit "${SELFHOST_FAKE_READYZ_STATUS:-0}" ;;
+  */health) exit "${SELFHOST_FAKE_HEALTH_STATUS:-0}" ;;
+  *) exit "${SELFHOST_FAKE_FRONTEND_STATUS:-0}" ;;
+esac
+SCRIPT
+chmod +x "$fake_bin/curl"
+
+cp start.sh "$tmp_dir/start.sh"
+chmod +x "$tmp_dir/start.sh"
+cp -R scripts "$tmp_dir/scripts"
+printf 'BACKEND_PORT=9188\nFRONTEND_PORT=3188\n' >"$tmp_dir/.env"
+
+smoke_start() {
+  (
+    cd "$tmp_dir"
+    PATH="$fake_bin:$PATH" SELFHOST_TEST_LOG="$tmp_dir/log" SELFHOST_MAX_ATTEMPTS=1 "$tmp_dir/start.sh"
+  )
+}
+
+smoke_start_backend_unready() {
+  SELFHOST_FAKE_READYZ_STATUS=22 smoke_start
+}
+
+smoke_start_pull_fails() {
+  SELFHOST_FAKE_DOCKER_STATUS=1 smoke_start
+}
+
+: >"$tmp_dir/log"
+require_success "start.sh succeeds when backend readiness and frontend checks pass" smoke_start
+require_file_contains "$tmp_dir/log" 'curl -fsS --max-time 2 http://localhost:9188/readyz'
+require_file_contains "$tmp_dir/log" 'curl -fsS --max-time 2 http://localhost:3188/'
+if grep -Fq 'daemon start' "$tmp_dir/log"; then
+  echo "start.sh must not start the daemon by default"
+  exit 1
+fi
+
+: >"$tmp_dir/log"
+require_failure "start.sh fails when backend readiness never succeeds" smoke_start_backend_unready
+if grep -Fq 'daemon start' "$tmp_dir/log"; then
+  echo "start.sh must not start the daemon after readiness failure"
+  exit 1
+fi
+
+: >"$tmp_dir/log"
+require_failure "start.sh fails fast when image pull fails" smoke_start_pull_fails
+require_file_contains "$tmp_dir/log" 'docker compose --env-file .env -f docker-compose.selfhost.yml pull'
 
 echo "self-host env derivation ok"

@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-wait selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -12,16 +12,21 @@ POSTGRES_DB ?= multica
 POSTGRES_USER ?= multica
 POSTGRES_PASSWORD ?= multica
 POSTGRES_PORT ?= 5432
-PORT := $(or $(BACKEND_PORT),$(API_PORT),$(SERVER_PORT),$(PORT),8080)
+BACKEND_PORT := $(or $(BACKEND_PORT),$(API_PORT),$(SERVER_PORT),$(PORT),8080)
+SERVER_PORT ?= $(BACKEND_PORT)
+PORT := $(BACKEND_PORT)
 FRONTEND_PORT ?= 3000
-FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
+BIND_HOST ?= 127.0.0.1
+SELFHOST_URL_HOST := $(if $(filter 127.0.0.1 ::1 0.0.0.0,$(BIND_HOST)),localhost,$(BIND_HOST))
+FRONTEND_ORIGIN ?= http://$(SELFHOST_URL_HOST):$(FRONTEND_PORT)
+CORS_ALLOWED_ORIGINS ?= $(FRONTEND_ORIGIN)
 MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
 DATABASE_URL ?= postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@localhost:$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=disable
-NEXT_PUBLIC_API_URL ?= http://localhost:$(PORT)
-NEXT_PUBLIC_WS_URL ?= ws://localhost:$(PORT)/ws
+NEXT_PUBLIC_API_URL ?= http://$(SELFHOST_URL_HOST):$(PORT)
+NEXT_PUBLIC_WS_URL ?= ws://$(SELFHOST_URL_HOST):$(PORT)/ws
 GOOGLE_REDIRECT_URI ?= $(FRONTEND_ORIGIN)/auth/callback
-MULTICA_SERVER_URL ?= ws://localhost:$(PORT)/ws
-LOCAL_UPLOAD_BASE_URL ?= http://localhost:$(PORT)
+MULTICA_SERVER_URL ?= ws://$(SELFHOST_URL_HOST):$(PORT)/ws
+LOCAL_UPLOAD_BASE_URL ?= http://$(SELFHOST_URL_HOST):$(PORT)
 
 export
 
@@ -71,7 +76,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Pulling official Multica images..."
-	@if ! docker compose -f docker-compose.selfhost.yml pull; then \
+	@if ! env -i PATH="$$PATH" HOME="$$HOME" DOCKER_HOST="$${DOCKER_HOST:-}" docker compose --env-file .env -f docker-compose.selfhost.yml pull; then \
 		echo ""; \
 		echo "Official images for tag '$${MULTICA_IMAGE_TAG:-latest}' are not published yet."; \
 		echo "If this is before the first GHCR release, build from the current checkout:"; \
@@ -79,34 +84,22 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		exit 1; \
 	fi
 	@echo "==> Starting Multica via Docker Compose..."
-	docker compose -f docker-compose.selfhost.yml up -d
-	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-			break; \
-		fi; \
-		sleep 2; \
-	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	env -i PATH="$$PATH" HOME="$$HOME" DOCKER_HOST="$${DOCKER_HOST:-}" docker compose --env-file .env -f docker-compose.selfhost.yml up -d
+	@$(MAKE) selfhost-wait
+	@bash -c 'set -euo pipefail; set -a; . .env; set +a; . scripts/selfhost-env.sh; \
 		echo ""; \
 		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
-		echo ""; \
-		echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"; \
-		echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"; \
-		echo ""; \
-		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or read the generated code from backend logs when Resend is unset."; \
+		echo "  Frontend: $$FRONTEND_BASE_URL"; \
+		echo "  Backend:  $$BACKEND_BASE_URL"; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
-	else \
-		echo ""; \
-		echo "Services are still starting. Check logs:"; \
-		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
-	fi
+		echo "  multica setup self-host --server-url $$BACKEND_BASE_URL --app-url $$FRONTEND_BASE_URL"'
+	@echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"
+	@echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"
+	@echo ""
+	@echo "Log in: configure RESEND_API_KEY in .env for email codes,"
+	@echo "        or read the generated code from backend logs when Resend is unset."
 
 selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
 	@if [ ! -f .env ]; then \
@@ -126,34 +119,43 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo "==> Generated random JWT_SECRET and POSTGRES_PASSWORD"; \
 	fi
 	@echo "==> Building Multica from the current checkout..."
-	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
-	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-			break; \
-		fi; \
-		sleep 2; \
-	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	env -i PATH="$$PATH" HOME="$$HOME" DOCKER_HOST="$${DOCKER_HOST:-}" docker compose --env-file .env -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
+	@$(MAKE) selfhost-wait
+	@bash -c 'set -euo pipefail; set -a; . .env; set +a; . scripts/selfhost-env.sh; \
 		echo ""; \
 		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
-		echo ""; \
-		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or read the generated code from backend logs when Resend is unset."; \
-		echo ""; \
-		echo "Built images locally via docker-compose.selfhost.build.yml."; \
-		echo "Local tags: multica-backend:dev and multica-web:dev."; \
+		echo "  Frontend: $$FRONTEND_BASE_URL"; \
+		echo "  Backend:  $$BACKEND_BASE_URL"; \
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
-	else \
-		echo ""; \
-		echo "Services are still starting. Check logs:"; \
-		echo "  docker compose -f docker-compose.selfhost.yml logs"; \
-	fi
+		echo "  multica setup self-host --server-url $$BACKEND_BASE_URL --app-url $$FRONTEND_BASE_URL"'
+	@echo "Log in: configure RESEND_API_KEY in .env for email codes,"
+	@echo "        or read the generated code from backend logs when Resend is unset."
+	@echo ""
+	@echo "Built images locally via docker-compose.selfhost.build.yml."
+	@echo "Local tags: multica-backend:dev and multica-web:dev."
+
+selfhost-wait:
+	@echo "==> Waiting for backend readiness and frontend..."
+	@bash -c 'set -euo pipefail; set -a; . .env; set +a; . scripts/selfhost-env.sh; \
+	for url in "$$BACKEND_BASE_URL/readyz" "$$FRONTEND_BASE_URL/"; do \
+		ok=false; \
+		for i in $$(seq 1 45); do \
+			if curl -fsS --max-time 2 "$$url" > /dev/null 2>&1; then \
+				ok=true; \
+				break; \
+			fi; \
+			sleep 2; \
+		done; \
+		if [ "$$ok" != "true" ]; then \
+			echo ""; \
+			echo "Self-host startup did not become ready at $$url"; \
+			echo "Check image pull, occupied host ports, Postgres/migration readiness, frontend boot, then inspect logs:"; \
+			echo "  docker compose -f docker-compose.selfhost.yml logs backend frontend postgres"; \
+			exit 1; \
+		fi; \
+	done'
 
 selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	@echo "==> Stopping Multica services..."

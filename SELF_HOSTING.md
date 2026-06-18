@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 multica setup self-host
 ```
 
-This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
+This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, starts the localhost server stack, and then lets `multica setup self-host` configure login and start the local daemon.
 
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or leave Resend unset and copy the generated code from the backend logs. See [Step 2 — Log In](#step-2--log-in) for details.
 
@@ -52,11 +52,13 @@ cd multica
 make selfhost
 ```
 
-`make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, and starts all services via Docker Compose.
+`make selfhost` automatically creates `.env` from the example, generates a random `JWT_SECRET`, starts all services via Docker Compose, and waits for backend `/readyz` plus the frontend page before reporting success.
 
 By default it pulls the latest stable release images from GHCR. To build the backend/web from your current checkout instead, run `make selfhost-build`.
 If the selected GHCR tag has not been published yet, `make selfhost` now tells you to fall back to `make selfhost-build`.
 `make selfhost-build` uses local `multica-backend:dev` / `multica-web:dev` tags, so it does not overwrite the pulled `:latest` images.
+
+`./start.sh` is a compatibility wrapper around the same server-stack startup path. It does not start the agent daemon by default; after the server is ready, run `multica setup self-host` to configure the CLI, authenticate, and start the daemon. For source-development debugging only, `SELFHOST_START_DAEMON=true ./start.sh` preserves the old source-run daemon behavior as an explicit opt-in.
 
 Once ready:
 
@@ -452,6 +454,13 @@ Then start everything:
 ```bash
 docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
+```
+
+Wait for backend readiness and the frontend before connecting the CLI:
+
+```bash
+curl -fsS http://localhost:8080/readyz
+curl -fsS http://localhost:3000/
 ```
 
 ## Manual CLI Configuration

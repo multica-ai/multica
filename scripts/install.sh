@@ -77,8 +77,27 @@ selfhost_backend_port() {
   printf "8080"
 }
 
+selfhost_bind_host() {
+  local value
+  value="$(env_file_value "${1:-.env}" "BIND_HOST" "127.0.0.1")"
+  case "$value" in
+    ""|"127.0.0.1"|"::1"|"0.0.0.0") printf "localhost" ;;
+    *) printf "%s" "$value" ;;
+  esac
+}
+
 selfhost_frontend_port() {
   env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
+}
+
+selfhost_backend_base_url() {
+  local file="${1:-.env}"
+  printf "http://%s:%s" "$(selfhost_bind_host "$file")" "$(selfhost_backend_port "$file")"
+}
+
+selfhost_frontend_base_url() {
+  local file="${1:-.env}"
+  printf "http://%s:%s" "$(selfhost_bind_host "$file")" "$(selfhost_frontend_port "$file")"
 }
 
 detect_os() {
@@ -382,26 +401,27 @@ setup_server() {
   info "Starting Multica services (this may take a few minutes on first run)..."
   docker compose -f docker-compose.selfhost.yml up -d
 
-  # Wait for health check
-  info "Waiting for backend to be ready..."
-  local backend_port
-  backend_port="$(selfhost_backend_port .env)"
-  local ready=false
-  for i in $(seq 1 45); do
-    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
-      ready=true
-      break
+  # Wait for readiness and frontend reachability. /readyz covers DB and migration state.
+  info "Waiting for backend readiness and frontend..."
+  local backend_url frontend_url url ready
+  backend_url="$(selfhost_backend_base_url .env)"
+  frontend_url="$(selfhost_frontend_base_url .env)"
+  for url in "${backend_url}/readyz" "${frontend_url}/"; do
+    ready=false
+    for i in $(seq 1 45); do
+      if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+        ready=true
+        break
+      fi
+      sleep 2
+    done
+    if [ "$ready" != true ]; then
+      fail "Server did not become ready at $url.
+Check image pull, occupied host ports, Postgres/migration readiness, frontend boot, then inspect logs:
+  cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml logs backend frontend postgres"
     fi
-    sleep 2
   done
-
-  if [ "$ready" = true ]; then
-    ok "Multica server is running"
-  else
-    warn "Server is still starting. You can check logs with:"
-    echo "  cd $INSTALL_DIR && docker compose -f docker-compose.selfhost.yml logs"
-    echo ""
-  fi
+  ok "Multica server is running"
 }
 
 
@@ -450,16 +470,16 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  local frontend_port backend_port
-  frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
-  backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
-  printf "  ${BOLD}Frontend:${RESET}  http://localhost:%s\n" "$frontend_port"
-  printf "  ${BOLD}Backend:${RESET}   http://localhost:%s\n" "$backend_port"
+  local frontend_url backend_url
+  frontend_url="$(selfhost_frontend_base_url "$INSTALL_DIR/.env")"
+  backend_url="$(selfhost_backend_base_url "$INSTALL_DIR/.env")"
+  printf "  ${BOLD}Frontend:${RESET}  %s\n" "$frontend_url"
+  printf "  ${BOLD}Backend:${RESET}   %s\n" "$backend_url"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica setup self-host${RESET}   # Configure + authenticate + start daemon\n"
+  printf "     ${CYAN}multica setup self-host --server-url %s --app-url %s${RESET}\n" "$backend_url" "$frontend_url"
   printf "\n"
   printf "  ${BOLD}Login:${RESET} configure ${CYAN}RESEND_API_KEY${RESET} in .env for email codes,\n"
   printf "  or read the generated code from backend logs when Resend is unset.\n"
