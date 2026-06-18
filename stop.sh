@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ENV_FILE="${ENV_FILE:-.env}"
+SELFHOST_STOP_DAEMON="${SELFHOST_STOP_DAEMON:-false}"
 
-if [ -d server ]; then
+if [ "$SELFHOST_STOP_DAEMON" = "true" ] && [ -d server ]; then
   (
     cd server
     go run ./cmd/multica daemon stop || true

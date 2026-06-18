@@ -188,9 +188,11 @@ Full reference (audit table semantics, advisory lock 4246, the standalone backfi
 # Stop Docker Compose services
 make selfhost-stop
 
-# Stop the local daemon
+# Stop the local daemon separately when you want to stop agent work on this host
 multica daemon stop
 ```
+
+`./stop.sh` also stops only the Compose stack by default. Source-development debugging can opt in to the old source-run daemon stop behavior with `SELFHOST_STOP_DAEMON=true ./stop.sh`, paired with `SELFHOST_START_DAEMON=true ./start.sh`.
 
 ## Switching to Multica Cloud
 

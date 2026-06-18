@@ -194,6 +194,13 @@ exit "${SELFHOST_FAKE_DOCKER_STATUS:-0}"
 SCRIPT
 chmod +x "$fake_bin/docker"
 
+cat >"$fake_bin/go" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'go %s\n' "$*" >>"${SELFHOST_TEST_LOG:?}"
+exit 0
+SCRIPT
+chmod +x "$fake_bin/go"
+
 cat >"$fake_bin/curl" <<'SCRIPT'
 #!/usr/bin/env bash
 printf 'curl %s\n' "$*" >>"${SELFHOST_TEST_LOG:?}"
@@ -208,6 +215,8 @@ chmod +x "$fake_bin/curl"
 
 cp start.sh "$tmp_dir/start.sh"
 chmod +x "$tmp_dir/start.sh"
+cp stop.sh "$tmp_dir/stop.sh"
+chmod +x "$tmp_dir/stop.sh"
 cp -R scripts "$tmp_dir/scripts"
 printf 'BACKEND_PORT=9188\nFRONTEND_PORT=3188\n' >"$tmp_dir/.env"
 
@@ -215,6 +224,20 @@ smoke_start() {
   (
     cd "$tmp_dir"
     PATH="$fake_bin:$PATH" SELFHOST_TEST_LOG="$tmp_dir/log" SELFHOST_MAX_ATTEMPTS=1 "$tmp_dir/start.sh"
+  )
+}
+
+smoke_stop() {
+  (
+    cd "$tmp_dir"
+    PATH="$fake_bin:$PATH" SELFHOST_TEST_LOG="$tmp_dir/log" "$tmp_dir/stop.sh"
+  )
+}
+
+smoke_stop_with_daemon() {
+  (
+    cd "$tmp_dir"
+    PATH="$fake_bin:$PATH" SELFHOST_TEST_LOG="$tmp_dir/log" SELFHOST_STOP_DAEMON=true "$tmp_dir/stop.sh"
   )
 }
 
@@ -245,5 +268,18 @@ fi
 : >"$tmp_dir/log"
 require_failure "start.sh fails fast when image pull fails" smoke_start_pull_fails
 require_file_contains "$tmp_dir/log" 'docker compose --env-file .env -f docker-compose.selfhost.yml pull'
+
+: >"$tmp_dir/log"
+require_success "stop.sh stops only the Docker Compose stack by default" smoke_stop
+require_file_contains "$tmp_dir/log" 'docker compose --env-file .env -f docker-compose.selfhost.yml down'
+if grep -Fq 'daemon stop' "$tmp_dir/log"; then
+  echo "stop.sh must not stop the daemon by default"
+  exit 1
+fi
+
+: >"$tmp_dir/log"
+require_success "stop.sh can stop the source daemon with explicit opt-in" smoke_stop_with_daemon
+require_file_contains "$tmp_dir/log" 'docker compose --env-file .env -f docker-compose.selfhost.yml down'
+require_file_contains "$tmp_dir/log" 'go run ./cmd/multica daemon stop'
 
 echo "self-host env derivation ok"

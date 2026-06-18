@@ -403,9 +403,11 @@ If you cloned the repo manually:
 # Stop the Docker Compose services (backend, frontend, database)
 make selfhost-stop
 
-# Stop the local daemon
+# Stop the local daemon separately when you want to stop agent work on this host
 multica daemon stop
 ```
+
+`./stop.sh` is also compose-only by default. For source-development debugging only, `SELFHOST_STOP_DAEMON=true ./stop.sh` preserves the old source-run daemon stop behavior as an explicit opt-in paired with `SELFHOST_START_DAEMON=true ./start.sh`.
 
 ## Switching to Multica Cloud
 
