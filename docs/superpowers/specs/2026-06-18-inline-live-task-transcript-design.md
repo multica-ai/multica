@@ -125,7 +125,7 @@ When `isLive && task.status === "running"`, the panel header shows a pulsing dot
 
 The first version keeps filters simple:
 
-- A single "Show thinking" toggle, defaulting to the user's last choice from `useTranscriptViewStore` if available.
+- A single "Show thinking" toggle, defaulting to `true` and stored as local component state.
 - Full tool-type filtering and sort direction remain in the modal dialog only.
 
 Future iterations can move the full filter bar into the inline panel.
