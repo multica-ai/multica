@@ -75,7 +75,47 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
 		return fmt.Errorf("write project resources: %w", err)
 	}
+	if err := writeAgentTaskMarker(workDir, ctx, manifest); err != nil {
+		return fmt.Errorf("write agent task marker: %w", err)
+	}
 
+	return nil
+}
+
+const agentTaskMarkerFile = ".multica/agent-task.json"
+
+type agentTaskMarker struct {
+	ManagedBy   string `json:"managed_by"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
+	AgentID     string `json:"agent_id,omitempty"`
+	IssueID     string `json:"issue_id,omitempty"`
+}
+
+func writeAgentTaskMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	dir := filepath.Join(workDir, ".multica")
+	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
+		return err
+	}
+	payload := agentTaskMarker{
+		ManagedBy:   "multica-daemon",
+		WorkspaceID: ctx.WorkspaceID,
+		TaskID:      ctx.TaskID,
+		AgentID:     ctx.AgentID,
+		IssueID:     ctx.IssueID,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := recordWriteFile(filepath.Join(workDir, agentTaskMarkerFile), data, 0o644, manifest); err != nil {
+		// .multica/agent-task.json is a Multica-owned guard marker. If a
+		// user-created file already occupies the path, never overwrite it;
+		// the env-based guard still protects the normal task path.
+		if !errors.Is(err, errPathPreExists) {
+			return err
+		}
+	}
 	return nil
 }
 

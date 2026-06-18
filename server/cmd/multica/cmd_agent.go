@@ -305,13 +305,57 @@ func normalizeAPIBaseURL(raw string) string {
 
 // inAgentExecutionContext reports whether the CLI is being invoked from
 // inside a daemon-managed agent task (daemon sets MULTICA_AGENT_ID and
-// MULTICA_TASK_ID in the agent env). In that context the workspace must be
+// MULTICA_TASK_ID in the agent env). As a fallback for provider/tool shells
+// that drop env on reused sessions, the daemon also writes a non-secret
+// marker under the task workdir. In that context the workspace must be
 // provided explicitly by the daemon — falling back to user-global
 // ~/.multica/config.json would let the agent act on whatever workspace the
 // user last configured, which is how cross-workspace contamination happens
 // when multiple workspaces share a host.
 func inAgentExecutionContext() bool {
-	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != "" || inDaemonManagedAgentWorkdir()
+}
+
+const agentTaskMarkerRelPath = ".multica/agent-task.json"
+
+func inDaemonManagedAgentWorkdir() bool {
+	_, ok := findAgentTaskMarkerFromCWD()
+	return ok
+}
+
+func findAgentTaskMarkerFromCWD() (string, bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	dir, err := filepath.Abs(cwd)
+	if err != nil {
+		dir = cwd
+	}
+	for {
+		path := filepath.Join(dir, filepath.FromSlash(agentTaskMarkerRelPath))
+		if data, err := os.ReadFile(path); err == nil && validAgentTaskMarker(data) {
+			return path, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
+}
+
+func validAgentTaskMarker(data []byte) bool {
+	var marker struct {
+		ManagedBy string `json:"managed_by"`
+		TaskID    string `json:"task_id"`
+		AgentID   string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return false
+	}
+	return strings.TrimSpace(marker.ManagedBy) == "multica-daemon" &&
+		(strings.TrimSpace(marker.TaskID) != "" || strings.TrimSpace(marker.AgentID) != "")
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {
