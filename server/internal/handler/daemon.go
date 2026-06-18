@@ -2524,9 +2524,10 @@ func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) 
 }
 
 // GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
-// run for the daemon GC loop. autopilot_run has no updated_at column; the
-// daemon uses completed_at as the TTL anchor for terminal runs, and treats
-// non-terminal status as a skip signal regardless of timestamp.
+// run for the daemon GC loop. The daemon decides purely on terminal status:
+// an autopilot run's workdir is never reused, so a terminal run is reclaimed on
+// sight while non-terminal status is a skip signal — completed_at is returned
+// for the API contract and diagnostics, not as a TTL anchor.
 //
 // Workspace ownership is resolved via the parent autopilot row.
 func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request) {

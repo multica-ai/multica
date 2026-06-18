@@ -391,9 +391,10 @@ func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*
 }
 
 // AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
-// is the run's terminal timestamp (zero for non-terminal runs); the GC loop
-// uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
-// have no updated_at column.
+// is the run's terminal timestamp (zero for non-terminal runs). The GC loop
+// reclaims a terminal run's never-reused workdir as soon as it sees the
+// terminal status, so it no longer gates on CompletedAt; the field is kept for
+// the API response contract and diagnostics.
 type AutopilotRunGCStatus struct {
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completed_at"`
