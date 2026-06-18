@@ -432,6 +432,62 @@ func TestClaimTaskByRuntime_DirectAgentTaskReturnsTaskToken(t *testing.T) {
 	}
 }
 
+func TestClaimTaskByRuntime_DirectAgentTaskReturnsCustomEnv(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID, agentID, _, taskID := createOwnedDirectTaskClaimFixture(t, ctx, "custom env")
+	customEnv := map[string]string{
+		"AIPC_AUTH_MOBILE":   "test-mobile",
+		"AIPC_AUTH_PASSWORD": "test-password",
+	}
+	customEnvJSON, err := json.Marshal(customEnv)
+	if err != nil {
+		t.Fatalf("marshal custom_env: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = $1 WHERE id = $2`, customEnvJSON, agentID); err != nil {
+		t.Fatalf("set custom_env: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "direct-task-custom-env-claim")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID    string `json:"id"`
+			Agent *struct {
+				CustomEnv map[string]string `json:"custom_env"`
+			} `json:"agent"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected claimed direct task %s, got nil: %s", taskID, w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.Agent == nil {
+		t.Fatalf("claim response missing agent data: %s", w.Body.String())
+	}
+	for key, want := range customEnv {
+		if got := resp.Task.Agent.CustomEnv[key]; got != want {
+			t.Fatalf("custom_env[%s] = %q, want %q", key, got, want)
+		}
+	}
+}
+
 // TestClaimTaskByRuntime_PopulatesWorkspaceContext verifies the claim
 // response carries workspace.context so the daemon can inject the
 // workspace-level system prompt into every agent brief. Regression coverage
