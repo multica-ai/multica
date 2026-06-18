@@ -79,7 +79,7 @@ Changes to `ALLOW_SIGNUP`, `DISABLE_WORKSPACE_CREATION`, and `GOOGLE_CLIENT_ID` 
 
 > **Warning:** do **not** set `MULTICA_DEV_VERIFICATION_CODE` on a publicly reachable instance — anyone who knows an email address can then log in with that fixed code.
 
-Before exposing the instance beyond localhost, rotate `JWT_SECRET` and `POSTGRES_PASSWORD`, keep `APP_ENV=production`, leave `MULTICA_DEV_VERIFICATION_CODE` empty, configure Resend or SMTP, set exact origins, and lock down signup/workspace creation after bootstrap. The self-host preflight runs automatically in `make selfhost`, `make selfhost-build`, `start.sh`, and the Unix installer.
+Before exposing the instance beyond localhost, rotate `JWT_SECRET` and `POSTGRES_PASSWORD`, keep `APP_ENV=production`, leave `MULTICA_DEV_VERIFICATION_CODE` empty, configure Resend or SMTP, set exact origins, and lock down signup/workspace creation after bootstrap. The self-host preflight runs automatically in `make selfhost`, `make selfhost-build`, and the Unix installer.
 
 ### Step 3 — Install CLI & Start Daemon
 

@@ -82,17 +82,21 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	@echo "==> Starting Multica via Docker Compose..."
 	docker compose -f docker-compose.selfhost.yml up -d
 	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@health_url=$$(bash scripts/selfhost-url.sh .env health); \
+	for i in $$(seq 1 30); do \
+		if curl -sf "$$health_url" > /dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 2; \
 	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@health_url=$$(bash scripts/selfhost-url.sh .env health); \
+	if curl -sf "$$health_url" > /dev/null 2>&1; then \
+		frontend_url=$$(bash scripts/selfhost-url.sh .env frontend); \
+		backend_url=$$(bash scripts/selfhost-url.sh .env backend); \
 		echo ""; \
 		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
+		echo "  Frontend: $$frontend_url"; \
+		echo "  Backend:  $$backend_url"; \
 		echo ""; \
 		echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"; \
 		echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"; \
@@ -130,17 +134,21 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	@echo "==> Building Multica from the current checkout..."
 	docker compose -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
 	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@health_url=$$(bash scripts/selfhost-url.sh .env health); \
+	for i in $$(seq 1 30); do \
+		if curl -sf "$$health_url" > /dev/null 2>&1; then \
 			break; \
 		fi; \
 		sleep 2; \
 	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
+	@health_url=$$(bash scripts/selfhost-url.sh .env health); \
+	if curl -sf "$$health_url" > /dev/null 2>&1; then \
+		frontend_url=$$(bash scripts/selfhost-url.sh .env frontend); \
+		backend_url=$$(bash scripts/selfhost-url.sh .env backend); \
 		echo ""; \
 		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
+		echo "  Frontend: $$frontend_url"; \
+		echo "  Backend:  $$backend_url"; \
 		echo ""; \
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
 		echo "        or read the generated code from backend logs when Resend is unset."; \

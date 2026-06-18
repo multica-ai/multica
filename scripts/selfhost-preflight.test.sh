@@ -110,6 +110,14 @@ make_env "$lan_mixed_origin_env" \
 lan_mixed_origin_output="$(run_preflight_expect_pass "$lan_mixed_origin_env")"
 require_contains "$lan_mixed_origin_output" "non-loopback bind requested"
 
+lan_missing_signup_env="$tmp_dir/lan-missing-signup.env"
+make_env "$lan_missing_signup_env" \
+  "BIND_HOST=192.168.1.50" \
+  "FRONTEND_ORIGIN=http://192.168.1.50:3000"
+sed -i '/^ALLOW_SIGNUP=/d' "$lan_missing_signup_env"
+lan_missing_signup_output="$(run_preflight_expect_fail "$lan_missing_signup_env")"
+require_contains "$lan_missing_signup_output" "ALLOW_SIGNUP defaults to true"
+
 all_interface_env="$tmp_dir/all-interface.env"
 make_env "$all_interface_env" "BIND_HOST=0.0.0.0"
 all_interface_output="$(run_preflight_expect_fail "$all_interface_env")"
@@ -142,7 +150,7 @@ require_contains "$lan_unsafe_output" "SMTP_TLS_INSECURE=true"
 require_contains "$lan_unsafe_output" "MULTICA_TRUSTED_PROXIES contains a broad CIDR"
 require_contains "$lan_unsafe_output" "RATE_LIMIT_TRUSTED_PROXIES contains a broad CIDR"
 require_contains "$lan_unsafe_output" "FRONTEND_ORIGIN or CORS_ALLOWED_ORIGINS must be set"
-require_contains "$lan_unsafe_output" "ALLOW_SIGNUP=true"
+require_contains "$lan_unsafe_output" "ALLOW_SIGNUP defaults to true"
 require_contains "$lan_unsafe_output" "DISABLE_WORKSPACE_CREATION is not true"
 require_not_contains "$lan_unsafe_output" "fixture-postgres-password"
 require_not_contains "$lan_unsafe_output" "fixture-jwt-secret"

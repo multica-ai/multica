@@ -191,8 +191,8 @@ if [ "$exposure_requested" = true ]; then
     fail_msg "FRONTEND_ORIGIN or CORS_ALLOWED_ORIGINS must be set to the exact LAN/public browser origin."
     errors=$((errors + 1))
   fi
-  if [ "$allow_signup" = "true" ]; then
-    fail_msg "ALLOW_SIGNUP=true leaves account creation open; set ALLOW_SIGNUP=false after bootstrapping users."
+  if [ "$allow_signup" != "false" ]; then
+    fail_msg "ALLOW_SIGNUP defaults to true unless explicitly set to false; set ALLOW_SIGNUP=false after bootstrapping users."
     errors=$((errors + 1))
   fi
   if [ "$disable_workspace_creation" != "true" ]; then

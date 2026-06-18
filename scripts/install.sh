@@ -41,50 +41,6 @@ fail()  { printf "${BOLD}${RED}✗ %s${RESET}\n" "$*" >&2; exit 1; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
 
-env_file_value() {
-  local file="$1"
-  local key="$2"
-  local default="$3"
-  local line value
-  line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 || true)"
-  if [ -z "$line" ]; then
-    printf "%s" "$default"
-    return
-  fi
-  value="${line#*=}"
-  value="${value%$'\r'}"
-  value="${value%\"}"
-  value="${value#\"}"
-  value="${value%\'}"
-  value="${value#\'}"
-  if [ -z "$value" ]; then
-    printf "%s" "$default"
-  else
-    printf "%s" "$value"
-  fi
-}
-
-selfhost_backend_port() {
-  local file="${1:-.env}"
-  local value
-  for key in BACKEND_PORT API_PORT SERVER_PORT PORT; do
-    value="$(env_file_value "$file" "$key" "")"
-    if [ -n "$value" ]; then
-      printf "%s" "$value"
-      return
-    fi
-  done
-  printf "8080"
-}
-
-selfhost_frontend_port() {
-  env_file_value "${1:-.env}" "FRONTEND_PORT" "3000"
-}
-
-selfhost_bind_host() {
-  env_file_value "${1:-.env}" "BIND_HOST" "localhost"
-}
-
 detect_os() {
   case "$(uname -s)" in
     Darwin) OS="darwin" ;;
@@ -390,11 +346,11 @@ setup_server() {
 
   # Wait for health check
   info "Waiting for backend to be ready..."
-  local backend_port
-  backend_port="$(selfhost_backend_port .env)"
+  local health_url
+  health_url="$(bash scripts/selfhost-url.sh .env health)"
   local ready=false
   for i in $(seq 1 45); do
-    if curl -sf "http://localhost:${backend_port}/health" >/dev/null 2>&1; then
+    if curl -sf "$health_url" >/dev/null 2>&1; then
       ready=true
       break
     fi
@@ -456,12 +412,11 @@ run_with_server() {
   printf "${BOLD}${GREEN}  ✓ Multica server is running and CLI is ready!${RESET}\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
   printf "\n"
-  local frontend_port backend_port bind_host
-  frontend_port="$(selfhost_frontend_port "$INSTALL_DIR/.env")"
-  backend_port="$(selfhost_backend_port "$INSTALL_DIR/.env")"
-  bind_host="$(selfhost_bind_host "$INSTALL_DIR/.env")"
-  printf "  ${BOLD}Frontend:${RESET}  http://%s:%s\n" "$bind_host" "$frontend_port"
-  printf "  ${BOLD}Backend:${RESET}   http://%s:%s\n" "$bind_host" "$backend_port"
+  local frontend_url backend_url
+  frontend_url="$(bash "$INSTALL_DIR/scripts/selfhost-url.sh" "$INSTALL_DIR/.env" frontend)"
+  backend_url="$(bash "$INSTALL_DIR/scripts/selfhost-url.sh" "$INSTALL_DIR/.env" backend)"
+  printf "  ${BOLD}Frontend:${RESET}  %s\n" "$frontend_url"
+  printf "  ${BOLD}Backend:${RESET}   %s\n" "$backend_url"
   printf "  ${BOLD}Server at:${RESET} %s\n" "$INSTALL_DIR"
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"

@@ -24,7 +24,7 @@ Docker Compose publishes backend and frontend ports on `127.0.0.1` by default. T
 | Trusted private LAN | `BIND_HOST=<specific LAN IP>` plus exact `FRONTEND_ORIGIN` / `CORS_ALLOWED_ORIGINS` | Private network only. Rotate secrets, configure email, keep `APP_ENV=production`, clear fixed dev codes, and lock down signup/workspace creation first. |
 | Public / cross-machine | Keep `BIND_HOST=127.0.0.1`; use Caddy, Nginx, or Cloudflare Tunnel | Recommended public path. Terminate TLS, forward `/ws` Upgrade, set exact origins, and use narrow trusted proxy CIDRs. |
 
-The self-host preflight runs before Docker starts in `make selfhost`, `make selfhost-build`, `start.sh`, and the Unix installer. You can also run it manually:
+The self-host preflight runs before Docker starts in `make selfhost`, `make selfhost-build`, and the Unix installer. You can also run it manually:
 
 ```bash
 bash scripts/selfhost-preflight.sh .env
