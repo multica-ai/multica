@@ -20,6 +20,9 @@ export interface ExtraSettingsTab {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   content: React.ReactNode;
+  // FIR-1404: wide data-table tabs (Permissions) opt out of the narrow
+  // max-w-3xl settings column so the per-tool catalog can use the full pane.
+  wide?: boolean;
 }
 
 // WorkspacePermissionsTab is the Settings-tab body: the per-tool catalog editing
@@ -60,6 +63,9 @@ export function useCerebroToolPolicySettingsTabs(): ExtraSettingsTab[] {
       label: "Permissions",
       icon: Wrench,
       content: <WorkspacePermissionsTab />,
+      // FIR-1404: the permission catalog is a wide multi-column table — give it
+      // the full settings pane instead of the narrow max-w-3xl column.
+      wide: true,
     },
   ];
 }
