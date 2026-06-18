@@ -725,6 +725,14 @@ export interface RuntimeLocalSkillSummary {
   description?: string;
   source_path: string;
   provider: string;
+  /**
+   * Which discovery root surfaced this skill: "provider" for the runtime's
+   * own skill directory (e.g. ~/.claude/skills) or "universal" for the
+   * cross-tool ~/.agents/skills fallback. Daemons that predate multi-root
+   * discovery omit the field; treat `undefined` as unknown rather than
+   * asserting either origin.
+   */
+  root?: "provider" | "universal";
   file_count: number;
 }
 
