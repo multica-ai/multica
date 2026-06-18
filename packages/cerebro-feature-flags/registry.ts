@@ -75,6 +75,10 @@ export type CerebroFlagKey =
   | "cerebro_skill_mention"
   | "cerebro_grants"
   | "cerebro_tool_policy"
+  // FIR-1496: surface the group/person → tool grant editor alongside the unified
+  // tool-policy table on the runtime page (the grant layer that silently denied
+  // Jakob had no UI once cerebro_tool_policy hid the legacy grants card).
+  | "cerebro_runtime_tool_grant_ui"
   | "cerebro_simple_tool_policy"
   | "cerebro_web_fetch_policy"
   | "cerebro_platform_capabilities"
@@ -256,6 +260,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_skill_mention: true,
   cerebro_grants: false,
   cerebro_tool_policy: true,
+  // FIR-1496: grant editor (group/person → tool) on the runtime page. Default OFF
+  // — nothing changes until an admin turns it on.
+  cerebro_runtime_tool_grant_ui: false,
   cerebro_simple_tool_policy: true,
   cerebro_web_fetch_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
@@ -766,6 +773,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
+  },
+  {
+    key: "cerebro_runtime_tool_grant_ui",
+    label: "Tool access grants (groups & people)",
+    group: "permissions",
+    description:
+      "Show the grant editor on the runtime page even when the unified tool-policy table is on: attach a group or a person to a specific tool so that runtime exposes it to them. This is the grant layer (an allow-list of who a tool is opened for) — the layer that silently gave a user zero tools when no UI could set it (FIR-426 / Saga). Reads GET and writes POST/DELETE /api/runtimes/{id}/tools/{tool}/groups|users. Default OFF.",
   },
   {
     key: "cerebro_simple_tool_policy",

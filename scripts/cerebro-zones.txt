@@ -40,5 +40,15 @@ server/**
 !**/testdata/**
 # Go module checksums cannot carry comments.
 !server/go.sum
+# Cerebro-only Go files in otherwise-upstream server dirs (e.g. server/cmd/multica,
+# server/internal/handler) are identified by a `cerebro_` prefix or `_cerebro`
+# suffix. Upstream multica never uses these names, so they are net-new fork files
+# that an upstream sync cannot overwrite — they belong to the cerebro zone exactly
+# like packages/cerebro-*/ and server/internal/cerebro/. Carving them out here
+# means editing a genuinely-cerebro CLI command or handler does not require a
+# per-line CEREBRO-PATCH marker (which only makes sense for true upstream edits).
+# This matches the "cerebro- filename prefix" convention in CLAUDE.md.
+!server/**/cerebro_*.go
+!server/**/*_cerebro.go
 !**/*.test.*
 !**/*.spec.*

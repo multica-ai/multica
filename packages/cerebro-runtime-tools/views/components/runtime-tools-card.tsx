@@ -82,6 +82,10 @@ export function RuntimeToolsCard({
   // layer) with a server-resolved Effective column, replacing the prior
   // enable-toggle + grants card. Flag defaults off.
   const unifiedToolPolicy = useFeatureFlag("cerebro_tool_policy");
+  // FIR-1496: the unified policy table edits Allow/Ask/Deny but hides the grant
+  // layer (who a tool is opened for). This flag brings the group/person → tool
+  // grant editor back alongside it — the layer that silently denied Jakob.
+  const grantEditing = useFeatureFlag("cerebro_runtime_tool_grant_ui");
 
   const toolsQuery = useQuery({
     queryKey: runtimeToolsKey(runtime.id),
@@ -320,8 +324,24 @@ export function RuntimeToolsCard({
       </div>
 
       {unifiedToolPolicy ? (
-        <div className="p-3">
+        <div className="space-y-4 p-3">
           <ToolPolicyTabs wsId={wsId} view="runtime" subjectId={runtime.id} />
+          {grantEditing && (
+            <RuntimeToolGrantsSection
+              toolsQuery={toolsQuery}
+              tools={tools}
+              grantsByTool={grantsByTool}
+              groups={groups}
+              members={members}
+              canEdit={canEdit}
+              onGroupGrant={(toolName, groupId, grant) =>
+                groupGrantMutation.mutate({ toolName, groupId, grant })
+              }
+              onUserGrant={(toolName, userId, grant) =>
+                userGrantMutation.mutate({ toolName, userId, grant })
+              }
+            />
+          )}
         </div>
       ) : (
         <>
@@ -361,6 +381,153 @@ export function RuntimeToolsCard({
         </>
       )}
       </div>
+    </div>
+  );
+}
+
+interface RuntimeToolGrantsSectionProps {
+  toolsQuery: ReturnType<typeof useQuery<RuntimeTool[], Error>>;
+  tools: RuntimeTool[];
+  grantsByTool: Map<
+    string,
+    {
+      groups: RuntimeToolGrants["group_grants"];
+      users: RuntimeToolGrants["user_grants"];
+    }
+  >;
+  groups: CerebroGroup[];
+  members: MemberWithUser[];
+  canEdit: boolean;
+  onGroupGrant: (toolName: string, groupId: string, grant: boolean) => void;
+  onUserGrant: (toolName: string, userId: string, grant: boolean) => void;
+}
+
+// FIR-1496: the grant editor that the unified tool-policy table hides. One row
+// per tool with the same group/person pickers as the legacy card, so an admin
+// can attach a group (e.g. Customer service) or a person to a specific tool on
+// this runtime. This is the layer that decides "who is this tool opened for" —
+// distinct from the Allow/Ask/Deny decision in the table above it.
+function RuntimeToolGrantsSection({
+  toolsQuery,
+  tools,
+  grantsByTool,
+  groups,
+  members,
+  canEdit,
+  onGroupGrant,
+  onUserGrant,
+}: RuntimeToolGrantsSectionProps) {
+  const [search, setSearch] = useState("");
+
+  const filteredTools = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return tools;
+    return tools.filter(
+      (tool) =>
+        tool.name.toLowerCase().includes(needle) ||
+        tool.description.toLowerCase().includes(needle),
+    );
+  }, [tools, search]);
+
+  return (
+    <div className="rounded-md border bg-card">
+      <div className="border-b p-4">
+        <h3 className="text-sm font-medium">Tool access grants</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Attach a group or a person to a tool so this runtime exposes it to
+          them. A grant is an allow-list — when any grants exist for a tool, only
+          the listed groups and people can use it (admins always can). This is a
+          separate layer from the Allow / Ask / Deny decision above.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-b p-3">
+        <div className="relative min-w-[200px] flex-1 max-w-xs">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search tools…"
+            className="h-8 w-full rounded-md border bg-background pl-7 pr-2 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+      </div>
+
+      {toolsQuery.isLoading ? (
+        <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading tools…
+        </div>
+      ) : filteredTools.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-1 p-10 text-center">
+          <Wrench className="h-7 w-7 text-muted-foreground/40" />
+          <p className="mt-2 text-sm text-muted-foreground">
+            {tools.length > 0
+              ? "No tools match your search."
+              : "No tools registered yet — daemon scans on next heartbeat."}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium">Tool</th>
+                <th className="px-4 py-2.5 text-left font-medium">Groups</th>
+                <th className="px-4 py-2.5 text-left font-medium">People</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTools.map((tool) => {
+                const grants = grantsByTool.get(tool.name) ?? {
+                  groups: [],
+                  users: [],
+                };
+                const selectedGroupIds = new Set(
+                  grants.groups.map((g) => g.group_id),
+                );
+                const selectedUserIds = new Set(
+                  grants.users.map((u) => u.user_id),
+                );
+                return (
+                  <tr key={tool.name} className="border-t">
+                    <td className="px-4 py-3 align-top">
+                      <div className="font-medium">{tool.name}</div>
+                      {tool.description && (
+                        <div className="mt-0.5 max-w-md text-xs text-muted-foreground">
+                          {tool.description}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <GroupPicker
+                        allGroups={groups}
+                        selectedGroupIds={selectedGroupIds}
+                        grants={grants.groups}
+                        canEdit={canEdit}
+                        onToggle={(groupId, grant) =>
+                          onGroupGrant(tool.name, groupId, grant)
+                        }
+                      />
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <UserPicker
+                        allMembers={members}
+                        selectedUserIds={selectedUserIds}
+                        grants={grants.users}
+                        canEdit={canEdit}
+                        onToggle={(userId, grant) =>
+                          onUserGrant(tool.name, userId, grant)
+                        }
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

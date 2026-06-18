@@ -227,6 +227,64 @@ describe("RuntimeToolsCard", () => {
     expect((await screen.findAllByText("BigQuery query")).length).toBeGreaterThan(0);
   });
 
+  it("does NOT show the grant editor when only the tool-policy flag is on", async () => {
+    // FIR-1496: the grant editor is gated behind its own flag, so the unified
+    // table alone must not surface it.
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    mockCerebroRequest.mockResolvedValue({ tools: [] });
+
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    await screen.findByTestId("tool-policy-table");
+    expect(screen.queryByText(/tool access grants/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the grant editor alongside the policy table when the grant flag is on", async () => {
+    // FIR-1496: with the unified table on, cerebro_runtime_tool_grant_ui brings
+    // back the group/person → tool grant editor (the layer that silently denied
+    // Jakob / Saga FIR-426).
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) =>
+        key === "cerebro_tool_policy" ||
+        key === "cerebro_runtime_tool_grant_ui",
+    );
+    mockCerebroRequest.mockResolvedValue({ tools: [] });
+    mockListRuntimeTools.mockResolvedValue([
+      {
+        id: "t1",
+        runtime_id: "rt-1",
+        name: "lookup_order",
+        source: "mcp",
+        mcp_server_name: "cs-mcp",
+        description: "Look up an order",
+        enabled: true,
+        last_scanned_at: null,
+      },
+    ]);
+    mockListCerebroGroups.mockResolvedValue([
+      { id: "g1", name: "Customer service", workspace_id: "ws-1" },
+    ]);
+
+    renderWithClient(
+      <RuntimeToolsCard runtime={runtime} workspaceId="ws-1" canEdit={true} />,
+    );
+
+    // The policy table and the grant editor both render.
+    await screen.findByTestId("tool-policy-table");
+    expect(
+      await screen.findByText(/tool access grants/i),
+    ).toBeInTheDocument();
+    // The tool shows up as a grant row with an "Add" affordance for pickers.
+    expect((await screen.findAllByText("lookup_order")).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: /add/i }).length,
+    ).toBeGreaterThan(0);
+  });
+
   it("Scan now triggers a live daemon scan via the scan-now endpoint", async () => {
     mockUseFeatureFlag.mockImplementation(
       (key: string) => key === "cerebro_tool_policy",
