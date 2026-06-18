@@ -61,6 +61,12 @@ export function createSkillSuggestion(
   // where you type: bottom-aligned when the popup sits above the input (the
   // mobile chat composer case), top-aligned when it drops below (FIR-2637).
   let side: "top" | "bottom" = "bottom";
+  // The last caret rect floating-ui positioned against, plus a bound reposition
+  // callback. The React list calls `requestReposition` after it expands/collapses
+  // a skill (mobile), so the popup re-anchors to the input instead of growing
+  // over it (FIR-1485). Assigned inside render(), where `popup`/updatePosition exist.
+  let lastClientRect: (() => DOMRect | null) | null | undefined = null;
+  let repositionPopup: () => void = () => {};
 
   function filterItems(
     skills: SkillSummary[] | undefined,
@@ -96,6 +102,7 @@ export function createSkillSuggestion(
         const item = currentItems[index];
         if (item) activeCommand?.(item);
       },
+      requestReposition: () => repositionPopup(),
     });
   }
 
@@ -152,6 +159,7 @@ export function createSkillSuggestion(
                 const item = currentItems[index];
                 if (item) activeCommand?.(item);
               },
+              requestReposition: () => repositionPopup(),
             },
             editor: props.editor,
           });
@@ -162,6 +170,10 @@ export function createSkillSuggestion(
           popup.appendChild(renderer.element);
           document.body.appendChild(popup);
 
+          lastClientRect = props.clientRect;
+          repositionPopup = () => {
+            if (popup) updatePosition(popup, lastClientRect);
+          };
           updatePosition(popup, props.clientRect);
         },
 
@@ -175,6 +187,7 @@ export function createSkillSuggestion(
           }
           activeCommand = props.command;
           rerender();
+          lastClientRect = props.clientRect;
           if (popup) updatePosition(popup, props.clientRect);
         },
 
@@ -245,6 +258,8 @@ export function createSkillSuggestion(
         currentItems = [];
         selectedIndex = 0;
         activeCommand = null;
+        lastClientRect = null;
+        repositionPopup = () => {};
       }
     },
   };

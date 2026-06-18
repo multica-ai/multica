@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { getCurrentWsId } from "@multica/core/platform";
 import { skillDetailOptions } from "@multica/core/workspace/queries";
 import { skillPreviewText } from "./skill-preview";
@@ -18,6 +19,13 @@ interface SkillMentionListProps {
   side: "top" | "bottom";
   onSelect: (index: number) => void;
   onHover: (index: number) => void;
+  /**
+   * Ask the extension to recompute the popup's floating position. Called after
+   * the user expands/collapses the highlighted skill on mobile, because the box
+   * resizes and would otherwise overlap the input it is anchored above
+   * (FIR-1485).
+   */
+  requestReposition?: () => void;
 }
 
 /**
@@ -32,12 +40,33 @@ export function SkillMentionList({
   side,
   onSelect,
   onHover,
+  requestReposition,
 }: SkillMentionListProps) {
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // Mobile-only "expand" state for the highlighted skill. Collapsed by default
+  // so the popup keeps a small, fixed height instead of ballooning to fit a
+  // long description; expanding reveals the full description + the inline
+  // SKILL.md preview (FIR-1485). Desktop ignores this — it has the side panel.
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
+
+  // A different skill (or a re-filtered list) collapses back to the compact
+  // height — expand is a per-skill, opt-in action.
+  useEffect(() => {
+    setExpanded(false);
+  }, [selectedIndex, items]);
+
+  // After expand/collapse resizes the box, re-anchor it to the input. Keep the
+  // callback in a ref so this fires only on `expanded` changes, not on every
+  // re-render (the extension hands us a fresh callback each time).
+  const repositionRef = useRef(requestReposition);
+  repositionRef.current = requestReposition;
+  useLayoutEffect(() => {
+    repositionRef.current?.();
+  }, [expanded]);
 
   if (items.length === 0) {
     return (
@@ -71,21 +100,54 @@ export function SkillMentionList({
           >
             <span className="font-medium">{item.name}</span>
             {item.description && (
-              // Highlighted skill shows its full description on mobile (the
-              // side panel that used to carry it is hidden there); other rows
-              // and all desktop rows stay clamped (FIR-2637).
+              // On mobile every row stays clamped to two lines so the popup
+              // keeps a fixed, compact height; the highlighted skill un-clamps
+              // only when the user taps "Show more" (FIR-1485). Desktop carries
+              // the full text in the side panel, so rows stay single-line there.
               <span
                 className={`text-[11px] text-muted-foreground sm:line-clamp-1 ${
-                  idx === selectedIndex ? "" : "line-clamp-2"
+                  idx === selectedIndex && expanded
+                    ? "line-clamp-none"
+                    : "line-clamp-2"
                 }`}
               >
                 {item.description}
               </span>
             )}
             {/* Inline preview for the highlighted skill on small screens,
-                where the side panel below doesn't fit (FIR-2637). */}
-            {idx === selectedIndex && (
+                where the side panel doesn't fit. Only when expanded so the
+                collapsed popup stays short (FIR-1485, FIR-2637). */}
+            {idx === selectedIndex && expanded && (
               <SkillInlinePreview item={item} className="sm:hidden" />
+            )}
+            {/* Expand / collapse toggle — mobile only. Lets the user fold out
+                the full description + preview on demand instead of having it
+                fill the screen by default (FIR-1485). A span (not a button)
+                because this row is itself a <button>; mousedown is suppressed
+                so the editor keeps focus and the popup stays open. */}
+            {idx === selectedIndex && (
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-expanded={expanded}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground sm:hidden"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setExpanded((v) => !v);
+                }}
+              >
+                {expanded ? (
+                  <>
+                    <ChevronUp className="h-3 w-3" /> Show less
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="h-3 w-3" /> Show more
+                  </>
+                )}
+              </span>
             )}
           </button>
         ))}
