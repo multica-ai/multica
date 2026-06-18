@@ -3,9 +3,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   Bot,
-  ChevronRight,
-  Brain,
-  AlertCircle,
   CheckCircle2,
   XCircle,
   X,
@@ -22,7 +19,6 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -35,8 +31,8 @@ import { ActorAvatar } from "../actor-avatar";
 import { api } from "@multica/core/api";
 import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
-import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
+import { TaskTranscriptTimeline, getEventSummary } from "./task-transcript-timeline";
 import { useT } from "../../i18n";
 
 interface AgentTranscriptDialogProps {
@@ -53,6 +49,25 @@ interface AgentTranscriptDialogProps {
    * The dialog stays generic — slot content is the caller's concern.
    */
   headerSlot?: React.ReactNode;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function formatDuration(start: string, end: string): string {
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}m ${secs}s`;
+}
+
+function formatElapsedMs(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${minutes}m ${secs}s`;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -84,8 +99,6 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
   error: { bg: "bg-red-400/60", bgActive: "bg-red-500", label: "bg-red-500/20 text-red-700 dark:text-red-300" },
 };
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 function getEventLabel(item: TimelineItem): string {
   switch (item.type) {
     case "text":
@@ -101,66 +114,6 @@ function getEventLabel(item: TimelineItem): string {
     default:
       return "Event";
   }
-}
-
-function getEventSummary(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
-    case "thinking":
-      return item.content?.slice(0, 200) ?? "";
-    case "tool_use": {
-      if (!item.input) return "";
-      const inp = item.input as Record<string, string>;
-      if (inp.query) return inp.query;
-      if (inp.file_path) return shortenPath(inp.file_path);
-      if (inp.path) return shortenPath(inp.path);
-      if (inp.pattern) return inp.pattern;
-      if (inp.description) return String(inp.description);
-      if (inp.command) {
-        const cmd = String(inp.command);
-        return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      }
-      if (inp.prompt) {
-        const p = String(inp.prompt);
-        return p.length > 120 ? p.slice(0, 120) + "..." : p;
-      }
-      if (inp.skill) return String(inp.skill);
-      for (const v of Object.values(inp)) {
-        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-      }
-      return "";
-    }
-    case "tool_result":
-      return item.output?.slice(0, 200) ?? "";
-    case "error":
-      return item.content ?? "";
-    default:
-      return "";
-  }
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
-}
-
-function formatDuration(start: string, end: string): string {
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
-}
-
-function formatElapsedMs(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
 }
 
 // ─── Main dialog ────────────────────────────────────────────────────────────
@@ -508,32 +461,13 @@ export function AgentTranscriptDialog({
           ref={scrollContainerRef}
           className="flex-1 overflow-y-auto min-h-0"
         >
-          {displayItems.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              {isLive ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t(($) => $.transcript.waiting_events)}
-                </div>
-              ) : (
-                t(($) => $.transcript.no_data)
-              )}
-            </div>
-          ) : (
-            <div className="divide-y">
-              {displayItems.map((item) => (
-                <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
-                  item={item}
-                  isSelected={selectedSeq === item.seq}
-                />
-              ))}
-            </div>
-          )}
+          <TaskTranscriptTimeline
+            items={displayItems}
+            isLive={isLive}
+            className="h-full"
+            emptyLabel={t(($) => $.transcript.no_data)}
+            liveEmptyLabel={t(($) => $.transcript.waiting_events)}
+          />
         </div>
       </DialogContent>
     </Dialog>
@@ -670,136 +604,4 @@ function TimelineBar({
       })}
     </div>
   );
-}
-
-// ─── Transcript event row ───────────────────────────────────────────────────
-
-interface TranscriptEventRowProps {
-  item: TimelineItem;
-  isSelected: boolean;
-}
-
-const TranscriptEventRow = ({
-  ref,
-  item,
-  isSelected,
-}: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
-  const [expanded, setExpanded] = useState(false);
-  const color = getEventColor(item);
-  const label = getEventLabel(item);
-  const summary = getEventSummary(item);
-
-  const hasDetail =
-    (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && item.output && item.output.length > 0) ||
-    (item.type === "thinking" && item.content && item.content.length > 0) ||
-    (item.type === "text" && item.content && item.content.length > 0) ||
-    (item.type === "error" && item.content && item.content.length > 0);
-
-  return (
-    <div
-      ref={ref}
-      className={cn(
-        "group transition-colors",
-        isSelected && "bg-accent/50",
-      )}
-    >
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
-        <div className="flex items-start gap-2 px-4 py-2">
-          {/* Type label badge */}
-          <span
-            className={cn(
-              "inline-flex items-center shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium mt-0.5 min-w-[60px] justify-center",
-              colorClasses[color].label,
-            )}
-          >
-            {item.type === "thinking" && <Brain className="h-3 w-3 mr-1 shrink-0" />}
-            {item.type === "error" && <AlertCircle className="h-3 w-3 mr-1 shrink-0" />}
-            {label}
-          </span>
-
-          {/* Summary */}
-          <CollapsibleTrigger
-            className={cn(
-              "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
-              hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-              item.type === "error" ? "text-destructive" : "text-muted-foreground",
-            )}
-            disabled={!hasDetail}
-          >
-            <div className="flex items-start gap-1.5">
-              {hasDetail && (
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
-                    expanded && "rotate-90",
-                  )}
-                />
-              )}
-              <span className="truncate">{summary || "(empty)"}</span>
-            </div>
-          </CollapsibleTrigger>
-
-          {/* Seq number / index */}
-          <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
-            #{item.seq}
-          </span>
-        </div>
-
-        {/* Expanded detail */}
-        {hasDetail && (
-          <CollapsibleContent>
-            <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded bg-muted/40 border">
-                <EventDetailContent item={item} />
-              </div>
-            </div>
-          </CollapsibleContent>
-        )}
-      </Collapsible>
-    </div>
-  );
-};
-
-// ─── Event detail content ───────────────────────────────────────────────────
-
-function EventDetailContent({ item }: { item: TimelineItem }) {
-  switch (item.type) {
-    case "tool_use":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.input ? redactSecrets(JSON.stringify(item.input, null, 2)) : ""}
-        </pre>
-      );
-    case "tool_result":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.output
-            ? item.output.length > 4000
-              ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
-              : redactSecrets(item.output)
-            : ""}
-        </pre>
-      );
-    case "thinking":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "text":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "error":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-destructive whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    default:
-      return null;
-  }
 }
