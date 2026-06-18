@@ -77,6 +77,11 @@ export function useRunNoteType() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: noteTypeKeys.all(wsId) });
       qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+      // A materialised note type registers as a Notes-feature note, so refresh
+      // the Notes list too — otherwise the freshly-started recurring note isn't
+      // in the cache and the Notes surface can't open it (FIR-1460). Raw key
+      // mirrors noteKeys.all() in @multica/cerebro-notes (avoids a package dep).
+      qc.invalidateQueries({ queryKey: ["notes", wsId] });
     },
   });
 }

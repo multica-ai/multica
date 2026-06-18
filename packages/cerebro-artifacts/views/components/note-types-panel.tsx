@@ -131,8 +131,16 @@ const NO_FOLDER = "__none__";
  * Admin panel for note types (TECH-3511). Lists the workspace's note types and
  * lets an admin create / edit / delete one and run it on demand ("Start ny nu").
  * Designed to render inside a Sheet from the Documents file manager.
+ *
+ * onOpenNote (FIR-1460): when the panel is hosted by the Notes surface itself,
+ * the parent passes a handler that selects the materialised note in place. The
+ * default (Documents file manager) navigates to the Notes route instead.
  */
-export function NoteTypesPanel() {
+export function NoteTypesPanel({
+  onOpenNote,
+}: {
+  onOpenNote?: (artifactId: string) => void;
+} = {}) {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -166,14 +174,21 @@ export function NoteTypesPanel() {
             ? "Ny note oprettet."
             : "Findes allerede for denne periode — åbner den.",
         );
-        router.push(
-          `${wsPaths.notes()}?note=${encodeURIComponent(result.artifact_id)}`,
-        );
+        // FIR-1460: when hosted on the Notes surface, select the note in place
+        // (a route push to the page we're already on doesn't re-open it).
+        // Otherwise navigate to the Notes route from the Documents file manager.
+        if (onOpenNote) {
+          onOpenNote(result.artifact_id);
+        } else {
+          router.push(
+            `${wsPaths.notes()}?note=${encodeURIComponent(result.artifact_id)}`,
+          );
+        }
       } catch {
         toast.error("Kunne ikke starte noten. Prøv igen.");
       }
     },
-    [run, router, wsPaths],
+    [run, router, wsPaths, onOpenNote],
   );
 
   const folderName = React.useCallback(

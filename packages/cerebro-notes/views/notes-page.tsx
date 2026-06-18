@@ -21,6 +21,8 @@ import {
   Link2,
   ListPlus,
   ExternalLink,
+  User,
+  Pencil,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -79,8 +81,9 @@ import type { Note, NoteVisibility } from "../core";
 import {
   artifactFoldersOptions,
   useCreateArtifactFolder,
+  useUpdateArtifactFolder,
 } from "@multica/cerebro-artifacts/core";
-import type { ArtifactFolder } from "@multica/core/types";
+import type { ArtifactFolder, MemberWithUser } from "@multica/core/types";
 import { NoteReferences, NoteAddReferenceDialog } from "./note-references";
 import { NoteCreateIssueDialog } from "./note-create-issue-dialog";
 import { NoteFolderCreateDialog } from "./note-folder-create-dialog";
@@ -101,6 +104,21 @@ const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
   shared: <Users className="size-3" />,
   workspace: <Globe className="size-3" />,
 };
+
+// A note carries an owner_id but no owner name (the wire shape is lightweight),
+// so resolve the display name from the workspace member list (FIR-1460). Used by
+// the list rows and the editor so you can always see who owns a note.
+type OwnerInfo = Pick<MemberWithUser, "user_id" | "name">;
+
+function ownerName(
+  ownerId: string,
+  myId: string | undefined,
+  members: OwnerInfo[],
+): string {
+  if (ownerId && ownerId === myId) return "You";
+  const m = members.find((x) => x.user_id === ownerId);
+  return m?.name?.trim() || "Unknown";
+}
 
 // NotesPage is the fast Notes surface: a search + capture header, a pinned-first
 // list on the left, and the selected note's editor on the right. Private by
@@ -129,10 +147,15 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
     artifactFoldersOptions(wsId, { kind: "note" }),
   );
   const setNoteFolder = useSetNoteFolder();
+  const createFolder = useCreateArtifactFolder();
 
   const { data: notes = [] } = useQuery(
     notesListOptions(wsId, { q: search.trim() || undefined }),
   );
+  // Owner display (FIR-1460): resolve owner_id → name for the list + editor.
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const user = useAuthStore((s: { user: { id: string; name: string } | null }) => s.user);
+  const myId = user?.id;
 
   const createNote = useCreateNote();
 
@@ -167,12 +190,40 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
     setNoteFolder.mutate({ id: noteId, folderId });
   }
 
+  // ensurePersonalFolder returns the id of the folder named after the current
+  // user, creating it once if it doesn't exist yet (FIR-1460, request 4). Used
+  // as the default home for new notes captured from the root.
+  async function ensurePersonalFolder(): Promise<string | null> {
+    const name = user?.name?.trim();
+    if (!name) return null;
+    const existing = folders.find(
+      (f) => f.name.trim().toLowerCase() === name.toLowerCase(),
+    );
+    if (existing) return existing.id;
+    const created = await createFolder.mutateAsync({
+      name,
+      kind: "note",
+      parent_id: null,
+    });
+    return created?.id ?? null;
+  }
+
   async function handleNew() {
+    // New notes are private ("Only you") by default, and — when captured from
+    // the root — land in a folder named after the user (FIR-1460, request 4).
+    // Inside a specific folder, the note stays there.
+    let targetFolder = folderId;
+    if (targetFolder === null) {
+      targetFolder = await ensurePersonalFolder();
+    }
     const note = await createNote.mutateAsync({
       visibility: "private",
-      folder_id: folderId,
+      folder_id: targetFolder,
     });
-    if (note) setSelectedId(note.id);
+    if (note) {
+      if (folderId === null && targetFolder) setFolderId(targetFolder);
+      setSelectedId(note.id);
+    }
   }
 
   return (
@@ -277,6 +328,8 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
                   notes={pinned}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
+                  myId={myId}
+                  members={members}
                 />
               )}
               <NoteListSection
@@ -284,6 +337,8 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
                 notes={rest}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                myId={myId}
+                members={members}
               />
             </>
           )}
@@ -330,7 +385,14 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
               </SheetDescription>
             </SheetHeader>
             <div className="px-4 pb-6">
-              <NoteTypesPanel />
+              <NoteTypesPanel
+                onOpenNote={(id) => {
+                  // FIR-1460: open the just-started recurring note right here on
+                  // the Notes surface and close the sheet so it isn't hidden.
+                  setShowRecurring(false);
+                  setSelectedId(id);
+                }}
+              />
             </div>
           </SheetContent>
         </Sheet>
@@ -365,9 +427,31 @@ function FolderRail({
   onDropNote: (noteId: string, folderId: string | null) => void;
 }) {
   const createFolder = useCreateArtifactFolder();
+  const renameFolder = useUpdateArtifactFolder();
   const [adding, setAdding] = React.useState(false);
   const [name, setName] = React.useState("");
   const [dragOver, setDragOver] = React.useState<string | null>(null);
+  // Inline folder rename (FIR-1460, request 3).
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameName, setRenameName] = React.useState("");
+
+  function startRename(f: ArtifactFolder) {
+    setRenamingId(f.id);
+    setRenameName(f.name);
+  }
+  function submitRename() {
+    const trimmed = renameName.trim();
+    if (!trimmed || !renamingId) return;
+    renameFolder.mutate(
+      { id: renamingId, data: { name: trimmed } },
+      {
+        onSuccess: () => {
+          setRenamingId(null);
+          setRenameName("");
+        },
+      },
+    );
+  }
 
   const byId = React.useMemo(() => {
     const m = new Map<string, ArtifactFolder>();
@@ -469,26 +553,68 @@ function FolderRail({
           Hidden while searching, since results are a flat cross-folder list. */}
       {!searching && (
         <div className="space-y-0.5">
-          {childFolders.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => onNavigate(f.id)}
-              {...dropHandlers(f.id, f.id)}
-              className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-muted/50",
-                dragOver === f.id && "ring-2 ring-primary ring-inset",
-              )}
-            >
-              <Folder className="size-3.5 shrink-0 text-muted-foreground" />
-              <span className="flex-1 truncate">{f.name}</span>
-              {countFor(f.id) > 0 && (
-                <span className="text-[11px] text-muted-foreground">
-                  {countFor(f.id)}
-                </span>
-              )}
-              <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-            </button>
-          ))}
+          {childFolders.map((f) =>
+            renamingId === f.id ? (
+              <div key={f.id} className="flex items-center gap-1 px-2 py-1">
+                <Input
+                  autoFocus
+                  value={renameName}
+                  onChange={(e) => setRenameName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") submitRename();
+                    if (e.key === "Escape") {
+                      setRenamingId(null);
+                      setRenameName("");
+                    }
+                  }}
+                  placeholder="Folder name"
+                  className="h-7 text-xs"
+                />
+                <Button
+                  size="sm"
+                  className="h-7 shrink-0"
+                  onClick={submitRename}
+                  disabled={renameFolder.isPending || !renameName.trim()}
+                >
+                  Save
+                </Button>
+              </div>
+            ) : (
+              // A row is a drop target + drill-in button, plus a rename action.
+              // The rename pencil is a sibling button (not nested) so the markup
+              // stays valid (FIR-1460, request 3).
+              <div
+                key={f.id}
+                {...dropHandlers(f.id, f.id)}
+                className={cn(
+                  "group flex items-center gap-1 rounded pr-1 hover:bg-muted/50",
+                  dragOver === f.id && "ring-2 ring-primary ring-inset",
+                )}
+              >
+                <button
+                  onClick={() => onNavigate(f.id)}
+                  className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-[13px]"
+                >
+                  <Folder className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">{f.name}</span>
+                  {countFor(f.id) > 0 && (
+                    <span className="text-[11px] text-muted-foreground">
+                      {countFor(f.id)}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => startRename(f)}
+                  aria-label={`Rename ${f.name}`}
+                  title="Rename folder"
+                  className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+              </div>
+            ),
+          )}
           {adding ? (
             <div className="flex items-center gap-1 px-2 py-1">
               <Input
@@ -531,11 +657,15 @@ function NoteListSection({
   notes,
   selectedId,
   onSelect,
+  myId,
+  members,
 }: {
   label: string;
   notes: Note[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  myId: string | undefined;
+  members: OwnerInfo[];
 }) {
   if (notes.length === 0) return null;
   return (
@@ -569,6 +699,17 @@ function NoteListSection({
           <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
             {VIS_ICON[n.visibility]}
             <span>{VISIBILITY_LABELS[n.visibility]}</span>
+            {/* Show the owner when it isn't you, so a shared/team note's author
+                is always visible (FIR-1460, request 1). */}
+            {n.owner_id && n.owner_id !== myId && (
+              <>
+                <span className="opacity-50">·</span>
+                <User className="size-3" />
+                <span className="truncate">
+                  {ownerName(n.owner_id, myId, members)}
+                </span>
+              </>
+            )}
           </div>
         </button>
       ))}
@@ -732,82 +873,105 @@ export function NoteEditor({
           </Button>
         )}
 
-        {/* Folder first (request 4 — "folders skal ligge i række 1"). */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            nativeButton={false}
-            render={
-              <Badge variant="outline" className="cursor-pointer gap-1.5">
-                <Folder className="size-3" />
-                {currentFolder ? currentFolder.name : "No folder"}
-              </Badge>
-            }
-          />
-          <DropdownMenuContent align="start" className="w-56">
-            <DropdownMenuRadioGroup
-              value={note.folder_id ?? ""}
-              onValueChange={(v) =>
-                setNoteFolder.mutate({ id: note.id, folderId: v || null })
+        {/* Folder first (request 4 — "folders skal ligge i række 1"). Only the
+            owner may move a note; everyone else sees a read-only folder badge
+            (FIR-1460, request 2). */}
+        {isOwner ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              nativeButton={false}
+              render={
+                <Badge variant="outline" className="cursor-pointer gap-1.5">
+                  <Folder className="size-3" />
+                  {currentFolder ? currentFolder.name : "No folder"}
+                </Badge>
               }
-            >
-              <DropdownMenuLabel>Folder</DropdownMenuLabel>
-              <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
-              {folders.map((f) => (
-                <DropdownMenuRadioItem key={f.id} value={f.id}>
-                  {f.name}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            />
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuRadioGroup
+                value={note.folder_id ?? ""}
+                onValueChange={(v) =>
+                  setNoteFolder.mutate({ id: note.id, folderId: v || null })
+                }
+              >
+                <DropdownMenuLabel>Folder</DropdownMenuLabel>
+                <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
+                {folders.map((f) => (
+                  <DropdownMenuRadioItem key={f.id} value={f.id}>
+                    {f.name}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Badge variant="outline" className="gap-1.5">
+            <Folder className="size-3" />
+            {currentFolder ? currentFolder.name : "No folder"}
+          </Badge>
+        )}
 
-        {/* Visibility is now a single "Share" button (request 4) — the icon
-            still reflects who can see it; the menu sets it. */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            nativeButton={false}
-            render={
-              <Button size="sm" variant="outline" className="gap-1.5">
-                {VIS_ICON[note.visibility]}
-                <span>Share</span>
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="start" className="w-60">
-            <DropdownMenuRadioGroup
-              value={note.visibility}
-              onValueChange={(v) => applyVisibility(v as NoteVisibility)}
-            >
-              <DropdownMenuLabel>Who can see it</DropdownMenuLabel>
-              <DropdownMenuRadioItem value="private">
-                Only you
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="shared">
-                Selected colleagues
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="workspace">
-                Whole team
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-            {note.visibility === "shared" && members.length > 0 && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Share with</DropdownMenuLabel>
-                  {members.map((m) => (
-                    <DropdownMenuCheckboxItem
-                      key={m.user_id}
-                      checked={sharedIds.includes(m.user_id)}
-                      onCheckedChange={() => toggleShare(m.user_id)}
-                    >
-                      {m.name}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuGroup>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Owner (FIR-1460, request 1): a note always shows who owns it. */}
+        <Badge variant="secondary" className="gap-1.5">
+          <User className="size-3" />
+          {ownerName(note.owner_id, myId, members)}
+        </Badge>
+
+        {/* Visibility is a single "Share" button (request 4) — the icon still
+            reflects who can see it; the menu sets it. Only the owner may change
+            sharing; others see a read-only visibility badge (request 2). */}
+        {isOwner ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              nativeButton={false}
+              render={
+                <Button size="sm" variant="outline" className="gap-1.5">
+                  {VIS_ICON[note.visibility]}
+                  <span>Share</span>
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-60">
+              <DropdownMenuRadioGroup
+                value={note.visibility}
+                onValueChange={(v) => applyVisibility(v as NoteVisibility)}
+              >
+                <DropdownMenuLabel>Who can see it</DropdownMenuLabel>
+                <DropdownMenuRadioItem value="private">
+                  Only you
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="shared">
+                  Selected colleagues
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="workspace">
+                  Whole team
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              {note.visibility === "shared" && members.length > 0 && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>Share with</DropdownMenuLabel>
+                    {members.map((m) => (
+                      <DropdownMenuCheckboxItem
+                        key={m.user_id}
+                        checked={sharedIds.includes(m.user_id)}
+                        onCheckedChange={() => toggleShare(m.user_id)}
+                      >
+                        {m.name}
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Badge variant="outline" className="gap-1.5">
+            {VIS_ICON[note.visibility]}
+            <span>{VISIBILITY_LABELS[note.visibility]}</span>
+          </Badge>
+        )}
 
         {/* Everything else lives behind one "⋯" menu (request 5 + 6). */}
         <DropdownMenu>
@@ -824,14 +988,17 @@ export function NoteEditor({
             }
           />
           <DropdownMenuContent align="end" className="w-52">
-            <DropdownMenuItem
-              onClick={() =>
-                setPin.mutate({ id: note.id, pinned: !note.pinned })
-              }
-            >
-              <Pin className="size-4" />
-              {note.pinned ? "Unpin" : "Pin"}
-            </DropdownMenuItem>
+            {/* Pin is an owner-only action on the backend (FIR-1460, request 2). */}
+            {isOwner && (
+              <DropdownMenuItem
+                onClick={() =>
+                  setPin.mutate({ id: note.id, pinned: !note.pinned })
+                }
+              >
+                <Pin className="size-4" />
+                {note.pinned ? "Unpin" : "Pin"}
+              </DropdownMenuItem>
+            )}
             {commentsEnabled && (
               <DropdownMenuItem
                 onClick={() =>
@@ -856,21 +1023,29 @@ export function NoteEditor({
               <ListPlus className="size-4" />
               Create issue
             </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() =>
-                // Navigate back to the overview once the note is gone. Without
-                // this we only invalidate the list cache and leave selectedId
-                // pointing at the deleted note — on mobile that hides both the
-                // list rail and the (now empty) editor, leaving a blank screen
-                // instead of the note list (TECH-3770).
-                deleteNote.mutate(note.id, { onSuccess: () => onBack() })
-              }
-            >
-              <Trash2 className="size-4" />
-              Delete
-            </DropdownMenuItem>
+            {/* Delete is owner-only (the backend rejects others with 403). Show
+                it solely to the owner so the action never silently fails
+                (FIR-1460, request 2). */}
+            {isOwner && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() =>
+                    // Navigate back to the overview once the note is gone.
+                    // Without this we only invalidate the list cache and leave
+                    // selectedId pointing at the deleted note — on mobile that
+                    // hides both the list rail and the (now empty) editor,
+                    // leaving a blank screen instead of the note list
+                    // (TECH-3770).
+                    deleteNote.mutate(note.id, { onSuccess: () => onBack() })
+                  }
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

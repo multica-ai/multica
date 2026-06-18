@@ -171,12 +171,19 @@ export function useUpdateArtifactFolder() {
       data: UpdateArtifactFolderRequest;
     }) => api.updateArtifactFolder(id, data),
     onSuccess: (folder) => {
-      qc.setQueryData<ArtifactFolder[]>(artifactKeys.folders(wsId), (old) =>
-        old ? old.map((f) => (f.id === folder.id ? folder : f)) : old,
+      // Cache is keyed by folder kind (TECH-3637): patch the rename into the
+      // folder's own kind list, not the shared "all" one — otherwise the notes
+      // folder tree (kind: "note") never reflects the new name (FIR-1460).
+      qc.setQueryData<ArtifactFolder[]>(
+        artifactKeys.folders(wsId, folder.kind),
+        (old) =>
+          old ? old.map((f) => (f.id === folder.id ? folder : f)) : old,
       );
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
+    onSettled: (folder) => {
+      qc.invalidateQueries({
+        queryKey: artifactKeys.folders(wsId, folder?.kind),
+      });
     },
   });
 }
