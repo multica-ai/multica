@@ -125,7 +125,7 @@ func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsage
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
     DATE(bucket_hour AT TIME ZONE $2::text) AS date,
-    provider,
+    LOWER(provider) AS provider,
     model,
     SUM(input_tokens)::bigint        AS input_tokens,
     SUM(output_tokens)::bigint       AS output_tokens,
@@ -134,8 +134,8 @@ SELECT
 FROM task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= $3::timestamptz
-GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), provider, model
-ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, provider, model
+GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), LOWER(provider), model
+ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, LOWER(provider), model
 `
 
 type ListRuntimeUsageParams struct {
@@ -162,6 +162,9 @@ type ListRuntimeUsageRow struct {
 // @tz is required, even if the caller intends "UTC", so the bucket
 // cast is unambiguous — `bucket_hour` is UTC and the caller picks the
 // calendar boundary per request.
+//
+// provider is LOWER()-normalized so mixed-case historical rows merge
+// (same reason as ListRuntimeUsageByAgent below).
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {

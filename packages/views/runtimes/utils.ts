@@ -374,6 +374,7 @@ function isSelfResolvingId(model: string): boolean {
 // result is memoized — the model-string set is small and bounded. Callers
 // only read the array (pricingCandidates maps/spreads into a fresh one), so
 // sharing the cached reference is safe.
+// Intentionally process-lifetime: never evicted (bounded key set, see above).
 const canonicalCandidatesCache = new Map<string, string[]>();
 function canonicalCandidates(model: string): string[] {
   const cached = canonicalCandidatesCache.get(model);

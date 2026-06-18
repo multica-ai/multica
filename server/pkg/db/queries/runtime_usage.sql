@@ -7,9 +7,12 @@
 -- @tz is required, even if the caller intends "UTC", so the bucket
 -- cast is unambiguous — `bucket_hour` is UTC and the caller picks the
 -- calendar boundary per request.
+--
+-- provider is LOWER()-normalized so mixed-case historical rows merge
+-- (same reason as ListRuntimeUsageByAgent below).
 SELECT
     DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) AS date,
-    provider,
+    LOWER(provider) AS provider,
     model,
     SUM(input_tokens)::bigint        AS input_tokens,
     SUM(output_tokens)::bigint       AS output_tokens,
@@ -18,8 +21,8 @@ SELECT
 FROM task_usage_hourly
 WHERE runtime_id = $1
   AND bucket_hour >= sqlc.arg('since')::timestamptz
-GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), provider, model
-ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, provider, model;
+GROUP BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text), LOWER(provider), model
+ORDER BY DATE(bucket_hour AT TIME ZONE sqlc.arg('tz')::text) DESC, LOWER(provider), model;
 
 -- name: GetRuntimeTaskHourlyActivity :many
 -- Hour-of-day distribution for queue starts. Bucketed in the viewer's
