@@ -90,15 +90,11 @@ func wikiSlugWithSuffix(base string, attempt int) string {
 	return base + "-" + strconv.Itoa(attempt)
 }
 
-func (h *Handler) requireWikiAdmin(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
-	if m, ok := ctxMember(r.Context()); ok {
-		if roleAllowed(m.Role, "owner", "admin") {
-			return m, true
-		}
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return db.Member{}, false
-	}
-	return h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+// requireWikiEditor ensures the caller is a workspace member with wiki edit
+// rights. Wiki editing is open to all workspace members (owner/admin/member);
+// deletion additionally requires ownership for non-admins (see DeleteWikiPage).
+func (h *Handler) requireWikiEditor(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
+	return h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin", "member")
 }
 
 func (h *Handler) ListWikiPages(w http.ResponseWriter, r *http.Request) {
@@ -152,7 +148,7 @@ func (h *Handler) CreateWikiPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWikiAdmin(w, r, workspaceID)
+	member, ok := h.requireWikiEditor(w, r, workspaceID)
 	if !ok {
 		return
 	}
@@ -268,7 +264,7 @@ func (h *Handler) UpdateWikiPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWikiAdmin(w, r, workspaceID)
+	member, ok := h.requireWikiEditor(w, r, workspaceID)
 	if !ok {
 		return
 	}
@@ -389,7 +385,7 @@ func (h *Handler) DeleteWikiPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWikiAdmin(w, r, workspaceID)
+	member, ok := h.requireWikiEditor(w, r, workspaceID)
 	if !ok {
 		return
 	}
@@ -400,6 +396,12 @@ func (h *Handler) DeleteWikiPage(w http.ResponseWriter, r *http.Request) {
 	page, err := h.Queries.GetWikiPage(r.Context(), db.GetWikiPageParams{ID: idUUID, WorkspaceID: wsUUID})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "wiki page not found")
+		return
+	}
+	// Members may only delete pages they created; owners/admins may delete any page.
+	if !roleAllowed(member.Role, "owner", "admin") &&
+		(!page.CreatedBy.Valid || page.CreatedBy.Bytes != member.UserID.Bytes) {
+		writeError(w, http.StatusForbidden, "you can only delete wiki pages you created")
 		return
 	}
 	childCount, err := h.Queries.CountWikiPageChildren(r.Context(), db.CountWikiPageChildrenParams{
@@ -440,7 +442,7 @@ func (h *Handler) ReorderWikiPages(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWikiAdmin(w, r, workspaceID)
+	member, ok := h.requireWikiEditor(w, r, workspaceID)
 	if !ok {
 		return
 	}

@@ -11,6 +11,7 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockApi = vi.hoisted(() => ({
   listTasksByIssue: vi.fn(),
+  listMyTasksByIssue: vi.fn(),
   listTaskInteractions: vi.fn(),
   listTaskTrace: vi.fn(),
 }));
@@ -77,6 +78,7 @@ function renderSidebar(onHighlightComment = vi.fn()) {
 
 beforeEach(() => {
   mockApi.listTasksByIssue.mockReset();
+  mockApi.listMyTasksByIssue.mockReset();
   mockApi.listTaskInteractions.mockReset();
   mockApi.listTaskTrace.mockReset();
   mockApi.listTaskInteractions.mockResolvedValue([]);
@@ -84,8 +86,17 @@ beforeEach(() => {
 });
 
 describe("AgentStreamSidebar", () => {
+  it("uses the current-user scoped runs endpoint instead of the execution-log endpoint", async () => {
+    mockApi.listMyTasksByIssue.mockResolvedValue([]);
+
+    renderSidebar();
+
+    await waitFor(() => expect(mockApi.listMyTasksByIssue).toHaveBeenCalledWith("issue-1"));
+    expect(mockApi.listTasksByIssue).not.toHaveBeenCalled();
+  });
+
   it("renders runs in created_at descending order (newest first)", async () => {
-    mockApi.listTasksByIssue.mockResolvedValue([
+    mockApi.listMyTasksByIssue.mockResolvedValue([
       makeTask({
         id: "task-old",
         created_at: "2026-01-01T00:01:00Z",
@@ -128,7 +139,7 @@ describe("AgentStreamSidebar", () => {
       completed_at: null,
       trigger_summary: "Active run",
     });
-    mockApi.listTasksByIssue
+    mockApi.listMyTasksByIssue
       .mockResolvedValueOnce([recentRun])
       .mockResolvedValueOnce([recentRun, activeRun]);
 
@@ -136,7 +147,7 @@ describe("AgentStreamSidebar", () => {
 
     await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
 
-    await queryClient.invalidateQueries({ queryKey: ["issues", "tasks", "issue-1"] });
+    await queryClient.invalidateQueries({ queryKey: ["issues", "my-task-runs", "issue-1"] });
 
     await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active"));
   });
@@ -163,7 +174,7 @@ describe("AgentStreamSidebar", () => {
       completed_at: null,
       trigger_summary: "Second active run",
     });
-    mockApi.listTasksByIssue
+    mockApi.listMyTasksByIssue
       .mockResolvedValueOnce([firstActive])
       .mockResolvedValueOnce([completedFirst, secondActive]);
 
@@ -171,13 +182,44 @@ describe("AgentStreamSidebar", () => {
 
     await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active-old"));
 
-    await queryClient.invalidateQueries({ queryKey: ["issues", "tasks", "issue-1"] });
+    await queryClient.invalidateQueries({ queryKey: ["issues", "my-task-runs", "issue-1"] });
 
     await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active-new"));
   });
 
+  it("keeps a manually selected recent run while another run is active", async () => {
+    const activeRun = makeTask({
+      id: "task-active",
+      status: "running",
+      created_at: "2026-01-01T00:03:00Z",
+      started_at: "2026-01-01T00:03:30Z",
+      completed_at: null,
+      trigger_summary: "Active run",
+    });
+    const recentRun = makeTask({
+      id: "task-recent",
+      status: "completed",
+      created_at: "2026-01-01T00:01:00Z",
+      completed_at: "2026-01-01T00:02:00Z",
+      trigger_summary: "Completed run",
+    });
+    mockApi.listMyTasksByIssue.mockResolvedValue([recentRun, activeRun]);
+
+    const { queryClient } = renderSidebar();
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-active"));
+    fireEvent.click(screen.getByRole("button", { name: /runs/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Completed run/i }));
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
+
+    await queryClient.invalidateQueries({ queryKey: ["issues", "my-task-runs", "issue-1"] });
+
+    await waitFor(() => expect(screen.getByTestId("task-trace-output")).toHaveTextContent("task-recent"));
+  });
+
   it("defaults to the newest recent run when there are no active runs", async () => {
-    mockApi.listTasksByIssue.mockResolvedValue([
+    mockApi.listMyTasksByIssue.mockResolvedValue([
       makeTask({
         id: "task-old",
         status: "completed",
@@ -200,7 +242,7 @@ describe("AgentStreamSidebar", () => {
   });
 
   it("jumps using the task trigger_comment_id", async () => {
-    mockApi.listTasksByIssue.mockResolvedValue([
+    mockApi.listMyTasksByIssue.mockResolvedValue([
       makeTask({
         id: "task-comment",
         trigger_summary: "Triggered from exact comment",

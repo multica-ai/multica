@@ -41,6 +41,12 @@ function workspaceScoped(slug: string) {
     wikiPage: (id: string) => `${ws}/wiki/${encode(id)}`,
     knowledge: () => `${ws}/knowledge`,
     knowledgeDetail: (id: string) => `${ws}/knowledge/${encode(id)}`,
+    channels: () => `${ws}/channels`,
+    channelDetail: (id: string, opts?: { messageId?: string }) => {
+      const path = `${ws}/channels/${encode(id)}`;
+      if (!opts?.messageId) return path;
+      return `${path}?message=${encode(opts.messageId)}`;
+    },
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     skills: () => `${ws}/skills`,

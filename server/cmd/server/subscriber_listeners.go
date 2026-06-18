@@ -7,6 +7,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/autosubscribe"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -43,6 +44,8 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 				maybeAddAutoSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned", autosubscribe.SourceIssueDescriptionMention)
 			}
 		}
+
+		inheritParentSubscribers(bus, queries, e.WorkspaceID, issue)
 	})
 
 	// issue:updated — subscribe new assignee or @mentioned users
@@ -148,10 +151,45 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 	issue.AssigneeType, _ = m["assignee_type"].(*string)
 	issue.AssigneeID, _ = m["assignee_id"].(*string)
 	issue.Description, _ = m["description"].(*string)
+	issue.ParentIssueID = stringPtrFromMap(m, "parent_issue_id")
 	if issue.ID == "" || issue.CreatorID == "" {
 		return handler.IssueResponse{}, false
 	}
 	return issue, true
+}
+
+func stringPtrFromMap(m map[string]any, key string) *string {
+	switch v := m[key].(type) {
+	case string:
+		if v == "" {
+			return nil
+		}
+		return &v
+	case *string:
+		return v
+	default:
+		return nil
+	}
+}
+
+func inheritParentSubscribers(bus *events.Bus, queries *db.Queries, workspaceID string, issue handler.IssueResponse) {
+	if issue.ParentIssueID == nil || *issue.ParentIssueID == "" {
+		return
+	}
+
+	parentSubs, err := queries.ListIssueSubscribers(context.Background(), parseUUID(*issue.ParentIssueID))
+	if err != nil {
+		slog.Error("failed to list parent issue subscribers",
+			"parent_issue_id", *issue.ParentIssueID,
+			"child_issue_id", issue.ID,
+			"error", err,
+		)
+		return
+	}
+
+	for _, sub := range parentSubs {
+		addSubscriber(bus, queries, workspaceID, issue.ID, sub.UserType, util.UUIDToString(sub.UserID), "parent")
+	}
 }
 
 func maybeAddAutoSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string, source autosubscribe.Source) {

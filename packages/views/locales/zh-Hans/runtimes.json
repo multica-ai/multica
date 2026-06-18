@@ -157,6 +157,8 @@
   "connect": {
     "title": "添加电脑",
     "description": "在要添加的电脑上运行这两条命令。守护进程一上线，这里就会自动识别。",
+    "platform_mac": "macOS / Linux",
+    "platform_windows": "Windows",
     "step1_label": "安装 Multica CLI",
     "step2_label": "启动守护进程",
     "step2_hint": "会打开浏览器登录，然后在后台保持守护进程运行。",

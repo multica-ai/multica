@@ -7,6 +7,7 @@ import {
   CircleHelp,
   Hash,
   MessageSquare,
+  MessagesSquare,
   Workflow,
   X,
 } from "lucide-react";
@@ -347,6 +348,8 @@ function TaskRow({
         ? t(($) => $.tab_body.activity.source_chat_session)
         : task.autopilot_run_id
           ? t(($) => $.tab_body.activity.source_autopilot_run)
+          : task.kind === "channel_mention"
+            ? t(($) => $.tab_body.activity.source_channel_message)
           : t(($) => $.tab_body.activity.source_untracked)
     : null;
 
@@ -356,6 +359,8 @@ function TaskRow({
       ? MessageSquare
       : task.autopilot_run_id
         ? Workflow
+        : task.kind === "channel_mention"
+          ? MessagesSquare
         : CircleHelp;
   const sourceLabel = hasIssue
     ? t(($) => $.tab_body.activity.source_issue)
@@ -363,6 +368,8 @@ function TaskRow({
       ? t(($) => $.tab_body.activity.source_chat)
       : task.autopilot_run_id
         ? t(($) => $.tab_body.activity.source_autopilot)
+        : task.kind === "channel_mention"
+          ? t(($) => $.tab_body.activity.source_channel)
         : t(($) => $.tab_body.activity.source_untracked);
 
   // For active tasks show "started/queued X ago"; for terminal show completed time.

@@ -51,6 +51,7 @@ func init() {
 	knowledgeCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 	wikiCmd.GroupID = groupCore
+	channelCmd.GroupID = groupCore
 	notifyCmd.GroupID = groupCore
 	codexPluginCmd.GroupID = groupCore
 	localRunCmd.GroupID = groupCore
@@ -82,6 +83,7 @@ func init() {
 	rootCmd.AddCommand(knowledgeCmd)
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(wikiCmd)
+	rootCmd.AddCommand(channelCmd)
 	rootCmd.AddCommand(notifyCmd)
 	rootCmd.AddCommand(codexPluginCmd)
 	rootCmd.AddCommand(localRunCmd)

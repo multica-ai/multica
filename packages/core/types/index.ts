@@ -214,6 +214,28 @@ export type {
 } from "./wiki";
 export type * from "../knowledge/types";
 export type {
+  ChannelSummary,
+  ChannelGroup,
+  ListChannelsResponse,
+  ChannelMember,
+  ListChannelMembersResponse,
+  ChannelThreadSummary,
+  ListChannelThreadsResponse,
+  ChannelMessage,
+  ListChannelMessagesResponse,
+  MessageThreadResponse,
+  ChannelContextMessage,
+  ChannelContextResponse,
+  ThreadLinkedIssue,
+  ListThreadMessagesResponse,
+  CreateChannelRequest,
+  UpdateChannelRequest,
+  CreateChannelThreadRequest,
+  CreateChannelMessageRequest,
+  ConvertMessageToIssueRequest,
+  ConvertMessageToIssueResponse,
+} from "./channel";
+export type {
   Squad,
   SquadMember,
   SquadMemberType,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@multica/ui/components/ui/button";
 import { Download, FileText, Loader2, X } from "lucide-react";
@@ -30,7 +30,6 @@ export function MarkdownPreviewDrawer({
 }: MarkdownPreviewDrawerProps) {
 	const [exportingPdf, setExportingPdf] = useState(false);
 	const [includeComments, setIncludeComments] = useState(false);
-	const contentRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		if (!open) return;
@@ -64,27 +63,12 @@ export function MarkdownPreviewDrawer({
 			return;
 		}
 
-		// Capture the rendered HTML from the preview content area
-		const htmlContent = contentRef.current?.innerHTML;
-		if (!htmlContent) {
-			toast.error("无法导出 PDF：预览内容为空");
-			return;
-		}
-
 		setExportingPdf(true);
 		try {
-			// If comments export is requested, fall back to the original endpoint
-			// which fetches comments server-side
-			let blob: Blob;
-			if (includeComments) {
-				blob = await api.exportIssue(issueId, {
-					format: "pdf",
-					include_comments: true,
-				});
-			} else {
-				// Use the new HTML-based export for exact preview fidelity
-				blob = await api.exportIssueHTML(issueId, htmlContent);
-			}
+			const blob = await api.exportIssue(issueId, {
+				format: "pdf",
+				include_comments: includeComments,
+			});
 
 			const url = URL.createObjectURL(blob);
 			const a = document.createElement("a");
@@ -183,7 +167,7 @@ export function MarkdownPreviewDrawer({
 
 				{/* Content Area */}
 				<div className="min-h-0 flex-1 overflow-auto bg-background">
-					<div ref={contentRef} className="px-6 py-4">
+					<div className="px-6 py-4">
 						<ReadonlyContent content={content || "*无内容*"} />
 					</div>
 				</div>

@@ -79,6 +79,9 @@ export const issueKeys = {
   attachments: (issueId: string) => ["issues", "attachments", issueId] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => ["issues", "tasks", issueId] as const,
+  /** Current-user-scoped issue runs for the right-side trace viewer. */
+  myTaskRuns: (issueId: string) => ["issues", "my-task-runs", issueId] as const,
+  myTaskRunsAll: () => ["issues", "my-task-runs"] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */

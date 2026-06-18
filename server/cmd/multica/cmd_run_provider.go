@@ -13,6 +13,7 @@ type localRunProvider interface {
 var localRunProviders = []localRunProvider{
 	codexLocalRunProvider{},
 	claudeLocalRunProvider{},
+	agyLocalRunProvider{},
 }
 
 func localRunProviderForCLI(cliName string) (localRunProvider, bool) {
