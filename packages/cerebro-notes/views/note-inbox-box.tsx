@@ -42,8 +42,8 @@ export type NoteFontSize = "xs" | "sm" | "base" | "lg";
 const FONT_SIZE_CLASS: Record<NoteFontSize, string> = {
   xs: "text-xs",
   sm: "text-sm",
-  base: "text-base",
-  lg: "text-lg",
+  base: "text-xl",
+  lg: "text-3xl",
 };
 
 const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
