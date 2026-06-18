@@ -101,20 +101,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 	return r
 }
 
-func daemonJSONCompressor() func(http.Handler) http.Handler {
-	compress := chimw.Compress(5, "application/json")
-	return func(next http.Handler) http.Handler {
-		compressed := compress(next)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
-				next.ServeHTTP(w, r)
-				return
-			}
-			compressed.ServeHTTP(w, r)
-		})
-	}
-}
-
 type RouterOptions struct {
 	HTTPMetrics     *obsmetrics.HTTPMetrics
 	BusinessMetrics *obsmetrics.BusinessMetrics
@@ -508,7 +494,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
-		r.Use(daemonJSONCompressor())
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)

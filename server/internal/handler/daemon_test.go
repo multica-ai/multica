@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,29 +21,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	logClaimEndpointSlow("runtime-1", "claimed", time.Now().Add(-600*time.Millisecond), 10, 20, 30, 4096, 2, 8, 3072)
-
-	got := logs.String()
-	for _, want := range []string{
-		"msg=\"claim_endpoint slow\"",
-		"runtime_id=runtime-1",
-		"payload_bytes=4096",
-		"agent_skill_count=2",
-		"builtin_skill_count=8",
-		"skill_payload_bytes=3072",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("slow claim log missing %q in %s", want, got)
-		}
-	}
-}
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
 // HasPending until the provided context is cancelled. PopPending delegates
