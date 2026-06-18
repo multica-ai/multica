@@ -150,6 +150,47 @@ func TestDaemonAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 }
 
+// TestDaemonAuth_StripsForgedAgentIdentityHeaders mirrors the Auth-path
+// invariant: client-supplied X-Agent-ID / X-Task-ID must be discarded so
+// they cannot be used to forge an agent actor identity on the daemon auth
+// path either. Only server-set values may survive.
+func TestDaemonAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewDaemonTokenCache(rdb)
+
+	const rawToken = "mdt_strip_agent_test"
+	hash := auth.HashToken(rawToken)
+	cache.Set(context.Background(), hash, auth.DaemonTokenIdentity{
+		WorkspaceID: "ws-1",
+		DaemonID:    "daemon-1",
+	}, auth.AuthCacheTTL)
+
+	var gotAgentID, gotTaskID string
+	mw := DaemonAuth(nil, nil, cache, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/api/daemon/heartbeat", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	req.Header.Set("X-Agent-ID", "11111111-1111-1111-1111-111111111111")
+	req.Header.Set("X-Task-ID", "22222222-2222-2222-2222-222222222222")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotAgentID != "" {
+		t.Fatalf("forged X-Agent-ID must be stripped on the daemon path, got %q", gotAgentID)
+	}
+	if gotTaskID != "" {
+		t.Fatalf("forged X-Task-ID must be stripped on the daemon path, got %q", gotTaskID)
+	}
+}
+
 func TestDaemonAuth_InvalidMDT_NilQueries(t *testing.T) {
 	mw := DaemonAuth(nil, nil, nil, nil) // no caches, no DB
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
