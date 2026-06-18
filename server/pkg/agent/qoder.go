@@ -59,10 +59,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	qoderArgs := append(
 		[]string{"--yolo", "--acp"},
@@ -182,8 +179,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		effectiveModel := strings.TrimSpace(opts.Model)
 
-		_, err := c.request(runCtx, "initialize", map[string]any{
+		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
 			"clientInfo": map[string]any{
 				"name":    "multica-agent-sdk",
@@ -197,6 +195,12 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
+
+		// Drop MCP entries whose remote transport the runtime didn't
+		// advertise. See the matching comment in hermes.go for why
+		// unconditionally sending http/sse to a stdio-only ACP runtime
+		// tanks the whole session/new.
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "qoder", b.cfg.Logger)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -224,6 +228,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 					"actual", sessionID,
 				)
 			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
@@ -242,6 +249,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
+			}
 		}
 
 		c.sessionID = sessionID
@@ -255,6 +265,17 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				b.cfg.Logger.Warn("qoder set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qoder could not switch to model %q: %v", opts.Model, err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// On a resumed session with a model override, the dead
+					// session surfaces here instead of at session/prompt.
+					// Clear the id so the daemon's resume-failure fallback
+					// retries fresh and stores the replacement session.
+					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
+						"backend", "qoder",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 				resCh <- Result{
 					Status:     finalStatus,
 					Error:      finalError,
@@ -290,6 +311,17 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qoder session/prompt failed: %v", err)
+				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
+					// The runtime may echo the requested id from
+					// session/resume and only reject it at prompt time.
+					// Empty SessionID lets the daemon retry with a fresh
+					// session instead of pinning future runs to the stale id.
+					b.cfg.Logger.Warn("resumed session not found at prompt time; clearing session id so the daemon retries fresh",
+						"backend", "qoder",
+						"session_id", sessionID,
+					)
+					sessionID = ""
+				}
 			}
 		} else {
 			select {
@@ -301,6 +333,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
+				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
 				c.usageMu.Unlock()
 			default:
 			}
@@ -351,7 +384,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 		var usageMap map[string]TokenUsage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
+			model := effectiveModel
 			if model == "" {
 				model = "unknown"
 			}

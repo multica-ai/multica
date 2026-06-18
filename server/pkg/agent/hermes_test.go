@@ -2052,7 +2052,7 @@ func TestHermesResumeIncludesMcpServers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Timeout:         5 * time.Second,
+		Timeout:         30 * time.Second,
 		ResumeSessionID: "ses_resume",
 		McpConfig:       json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx"}}}`),
 	})
@@ -2107,7 +2107,7 @@ func TestHermesDropsRemoteMcpWhenCapabilityNotAdvertised(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Timeout: 5 * time.Second,
+		Timeout: 30 * time.Second,
 		McpConfig: json.RawMessage(`{"mcpServers":{
 			"local":{"command":"uvx"},
 			"remote-http":{"type":"http","url":"https://x/mcp"},
@@ -2159,7 +2159,7 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Timeout: 5 * time.Second,
+		Timeout: 30 * time.Second,
 		McpConfig: json.RawMessage(`{"mcpServers":{
 			"local":{"command":"uvx"},
 			"remote-http":{"type":"http","url":"https://x/mcp"},

@@ -42,6 +42,48 @@ done
 `
 }
 
+func fakeQoderACPStaleResumeScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func fakeQoderACPStaleResumeSetModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      sid=$(printf '%s' "$line" | sed -n 's/.*"sessionId":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"%s"}}\n' "$id" "$sid"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session not found"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
 func fakeQoderACPScriptWithLeakedStdout() string {
 	return `#!/bin/sh
 # Fake qodercli that returns session/prompt but leaves stdout open via a child
@@ -76,7 +118,11 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      if [ "$QODER_INIT_MCP_SSE" = "1" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"sse":true}}}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      fi
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
@@ -110,6 +156,26 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"partial answer"}}}}\n'
       printf '%s\n' '[ERROR] API call failed after 3 retries: HTTP 429 RateLimitError' >&2
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+	`
+}
+
+func fakeQoderACPUsageWithDefaultModelScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_model","models":{"currentModelId":"qoder:auto","availableModels":[{"modelId":"qoder:auto","name":"Qoder Auto"}]}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -270,6 +336,39 @@ func TestQoderBackendHappyPath(t *testing.T) {
 	}
 }
 
+func TestQoderBackendNonPositiveTimeoutDoesNotImposeDeadline(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "hi", ExecOptions{Timeout: -1})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("non-positive timeout should not impose a deadline, got status=%q error=%q", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for qoder result")
+	}
+}
+
 func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 	oldGrace := qoderReaderDrainGrace
 	qoderReaderDrainGrace = 25 * time.Millisecond
@@ -324,7 +423,10 @@ func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	backend, err := New("qoder", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"QODER_RPC_FILE": rpcFile},
+		Env: map[string]string{
+			"QODER_RPC_FILE":     rpcFile,
+			"QODER_INIT_MCP_SSE": "1",
+		},
 	})
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
@@ -371,6 +473,62 @@ func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	}
 }
 
+func TestQoderFiltersRemoteMcpWhenInitializeDoesNotAdvertiseCapability(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	rpcFile := filepath.Join(tempDir, "rpc.txt")
+	fakePath := filepath.Join(tempDir, "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptCapturingRPC()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_RPC_FILE": rpcFile},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"local-stdio":{"command":"uvx","args":["mcp-local"]},"remote-sse":{"type":"sse","url":"https://example.com/sse","headers":{"Authorization":"Bearer tok"}}}}`)
+	session, err := backend.Execute(ctx, "hi", ExecOptions{
+		Timeout:   30 * time.Second,
+		McpConfig: mcpConfig,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(rpcFile)
+	if err != nil {
+		t.Fatalf("read rpc file: %v", err)
+	}
+	var sessionNew string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"method":"session/new"`) {
+			sessionNew = line
+			break
+		}
+	}
+	if sessionNew == "" {
+		t.Fatalf("no session/new request captured; rpc log:\n%s", raw)
+	}
+	if !strings.Contains(sessionNew, `"name":"local-stdio"`) || !strings.Contains(sessionNew, `"command":"uvx"`) {
+		t.Fatalf("stdio MCP server should remain in session/new payload:\n%s", sessionNew)
+	}
+	if strings.Contains(sessionNew, `"name":"remote-sse"`) || strings.Contains(sessionNew, "https://example.com/sse") || strings.Contains(sessionNew, "Bearer tok") {
+		t.Fatalf("remote SSE MCP server should be filtered when initialize omits mcpCapabilities.sse:\n%s", sessionNew)
+	}
+}
+
 // TestQoderPromotesTerminalProviderErrorWithOutput guards the second bug: a turn
 // that ends with stopReason=end_turn AND non-empty output must still be reported
 // as failed when stderr carried a terminal upstream-LLM error. Without the
@@ -411,6 +569,145 @@ func TestQoderPromotesTerminalProviderErrorWithOutput(t *testing.T) {
 			t.Errorf("expected error to surface the terminal stderr marker, got %q", result.Error)
 		}
 	case <-time.After(8 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestQoderBackendAttributesUsageToACPDefaultModel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPUsageWithDefaultModelScript()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+		if _, ok := result.Usage["unknown"]; ok {
+			t.Fatalf("usage should not be attributed to unknown: %+v", result.Usage)
+		}
+		usage, ok := result.Usage["qoder:auto"]
+		if !ok {
+			t.Fatalf("expected usage under Qoder current model, got %+v", result.Usage)
+		}
+		if usage.InputTokens != 17 || usage.OutputTokens != 5 || usage.CacheReadTokens != 3 {
+			t.Fatalf("usage = %+v, want input=17 output=5 cache_read=3", usage)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtPrompt(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPStaleResumeScript()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         30 * time.Second,
+		ResumeSessionID: "ses_stale",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Session not found") {
+			t.Errorf("expected error to surface the session-not-found message, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPStaleResumeSetModelScript()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         30 * time.Second,
+		ResumeSessionID: "ses_stale",
+		Model:           "some-model",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, `could not switch to model "some-model"`) {
+			t.Errorf("expected error to name the requested model, got %q", result.Error)
+		}
+		if result.SessionID != "" {
+			t.Errorf("expected empty session id so the daemon's fresh-session retry fires, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
 	}
 }
