@@ -61,6 +61,59 @@ Everything below in section 4 is **not** on this list — it is a separate model
 
 ---
 
+## 2a. The canonical inventory — the 55 platform capabilities
+
+There is already an authoritative, code-owned inventory of platform actions:
+`server/internal/cerebro/platformcatalog/catalog.go` (`var catalog`, exposed via `All()`).
+It was built from the hardcoded-policy audit (Jesper, 2026-05-31) **specifically so the
+buried code gates become settable instead of invisible**. Each entry carries: `Key` (the
+`tool_key` an `cerebro_tool_policy` row binds to), `Title`, `Category`, `Description`, `Ops`
+(the real HTTP routes it covers), and/or `Evidence` (file:line of the hardcoded check when
+it is not a single route). A capability MUST have at least one of `Ops` or `Evidence` — that
+is the traceability tripwire.
+
+**This catalog is the canonical scope of platform actions.** It is **55 capabilities** in 17
+categories. It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
+feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
+passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
+
+| Category | Capabilities (`tool_key`) |
+|---|---|
+| Issues | `create_issue`, `update_issue`, `delete_issue`, `rerun_issue`, `subscribe_issue`, `manage_labels`, `manage_share_tokens`, `manage_issue_recurrence` |
+| Comments | `add_comment`, `update_comment` |
+| Autopilots | `create_autopilot`, `trigger_autopilot`, `autopilot_scope`, `autopilot_webhook` ⚠ |
+| Artifacts | `manage_artifacts`, `manage_notes`, `manage_note_types` |
+| Agents | `create_agent`, `update_agent`, `trigger_other_agent`, `schedule_agent_wakeup`, `manage_agent_passes`, `manage_work_sessions` |
+| Runtimes | `manage_runtime`, `manage_runtime_tool_access`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
+| Groups | `manage_group`, `manage_group_members` |
+| Permissions | `manage_grants`, `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval` |
+| Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
+| Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations` |
+| Skills | `manage_skills` |
+| Squads | `manage_squad` |
+| Connections | `manage_connections` |
+| Credentials | `manage_credentials` |
+| Workflows | `manage_workflows` |
+| Channels | `manage_channels` |
+| Read access | `read_issues` ⚠, `read_projects` ⚠ |
+
+⚠ = `ManagedExternally: true` (5 total: `autopilot_webhook`, `daemon_runtime_callback`,
+`manage_project_access`, `read_issues`, `read_projects`). For these the tool-policy gate is
+**not** the enforcement point — they are listed for visibility only and a policy row on them
+does nothing. They are a permanent code-only set, not a backlog item.
+
+**Two dimensions, do not confuse them:**
+- **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
+  permissions, keyed on action.
+- **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like
+  `tools:<Name>` (built-ins), `mcp__<server>__<tool>` (MCP), `connection:<name>`
+  (connections). These come from `cerebro_capability` (runtime-reported, registered by
+  `runtime_capabilities_cerebro.go`) and the registry in `tools_registry.go`
+  (`ToolStatusExcluded` removes ~47). The 5 interfaces resolve both dimensions through the
+  same `cerebro_tool_policy` table; the catalog above is only the platform-action half.
+
+---
+
 ## 3. The four parallel models (the honest reality)
 
 | # | Model | Backing | Authored where | In the 5 interfaces? |
@@ -142,9 +195,9 @@ codexlimit, `permguard` (test-time inventory), Cloudflare Access (authentication
 
 **Decision (Jesper, 2026-06-18, FIR-1497):** Persona dies and is removed from all of
 Multica; the grant store is "dead for now"; everything converges on the tool-policy chain.
-This **supersedes** the prior "keep persona as a separate service" plans in
-`docs/persona-deferred-work.md`, `docs/persona-finish-plan.md`, `docs/persona-next-session.md`
-— mark those superseded, do not act on them.
+This **supersedes** the prior "keep persona as a separate service" plans, now archived under
+[`docs/archive/persona/`](../archive/persona/) (`persona-deferred-work.md`,
+`persona-finish-plan.md`, `persona-next-session.md`) — do not act on them.
 
 "Persona" is **four different things** with different fates. Do not delete them as one blob.
 
