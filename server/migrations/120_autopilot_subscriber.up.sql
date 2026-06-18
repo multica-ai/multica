@@ -1,9 +1,12 @@
 -- Template list of workspace members auto-subscribed to every issue spawned
 -- by the autopilot. Members-only for now (broaden the CHECK to expand).
--- No FK on user_id — workspace membership is enforced at the API boundary
--- (isWorkspaceEntity in the handler), matching issue_subscriber.
+-- No foreign keys or cascades — autopilot existence and workspace membership
+-- are both enforced in the application layer (the autopilot delete handler
+-- removes these rows in the same transaction; membership is checked at the API
+-- boundary via isWorkspaceEntity), per the repo rule. Mirrors issue_subscriber's
+-- app-level user_id handling.
 CREATE TABLE autopilot_subscriber (
-    autopilot_id UUID NOT NULL REFERENCES autopilot(id) ON DELETE CASCADE,
+    autopilot_id UUID NOT NULL,
     user_type    TEXT NOT NULL CHECK (user_type IN ('member')),
     user_id      UUID NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
