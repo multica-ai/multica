@@ -349,6 +349,7 @@
     "show_thinking": "显示思考过程",
     "transcript_error": "加载对话流失败",
     "retry": "重试",
+    "loading": "加载中...",
     "cancel_failed": "取消 task 失败",
     "trigger_retry": "重试",
     "trigger_retry_attempt": "重试 #{{attempt}}",

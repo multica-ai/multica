@@ -87,7 +87,7 @@ export function InlineTranscriptPanel({ task, isLive, defaultOpen = false }: Inl
           {isLoading ? (
             <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading...
+              {t(($) => $.execution_log.loading)}
             </div>
           ) : error ? (
             <div className="flex flex-col items-center justify-center gap-2 py-8 text-xs text-destructive">

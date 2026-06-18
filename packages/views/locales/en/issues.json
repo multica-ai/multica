@@ -356,6 +356,7 @@
     "show_thinking": "Show thinking",
     "transcript_error": "Failed to load transcript",
     "retry": "Retry",
+    "loading": "Loading...",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",
