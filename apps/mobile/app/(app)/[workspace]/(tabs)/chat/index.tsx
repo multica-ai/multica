@@ -37,8 +37,9 @@ import {
   Platform,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
@@ -71,7 +72,6 @@ import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtim
 import { canAssignAgent } from "@/lib/can-assign-agent";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
 import { useAgentPresence } from "@/lib/use-agent-presence";
-import { Header } from "@/components/ui/header";
 import { ChatTitleButton } from "@/components/chat/chat-title-button";
 import { ChatSessionActions } from "@/components/chat/chat-session-actions";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
@@ -83,6 +83,9 @@ import { useChatSelectStore } from "@/data/chat-select-store";
 
 export default function ChatTab() {
   const qc = useQueryClient();
+  // Native header height — used to offset the keyboard avoider, since the
+  // native nav bar lives outside this screen's view tree.
+  const headerHeight = useHeaderHeight();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
@@ -364,31 +367,34 @@ export default function ChatTab() {
 
   return (
     <View className="flex-1 bg-background">
-      <Header
-        center={
-          <ChatTitleButton
-            currentSession={activeSession}
-            currentAgent={currentAgent}
-            onPress={() => {
-              if (!wsSlug) return;
-              router.push({
-                pathname: "/[workspace]/chat-sessions",
-                params: { workspace: wsSlug },
-              });
-            }}
-          />
-        }
-        right={
-          <ChatSessionActions
-            showMore={!!activeSession}
-            onMorePress={handleDeleteActive}
-            onNewPress={handleNewChat}
-          />
-        }
+      <Stack.Screen
+        options={{
+          headerTitle: () => (
+            <ChatTitleButton
+              currentSession={activeSession}
+              currentAgent={currentAgent}
+              onPress={() => {
+                if (!wsSlug) return;
+                router.push({
+                  pathname: "/[workspace]/chat-sessions",
+                  params: { workspace: wsSlug },
+                });
+              }}
+            />
+          ),
+          headerRight: () => (
+            <ChatSessionActions
+              showMore={!!activeSession}
+              onMorePress={handleDeleteActive}
+              onNewPress={handleNewChat}
+            />
+          ),
+        }}
       />
       {availability === "none" ? <NoAgentBanner /> : null}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={headerHeight}
         className="flex-1"
       >
         <ChatMessageList
