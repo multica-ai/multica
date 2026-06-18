@@ -424,6 +424,86 @@ func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
 	}
 }
 
+// TestManageWorkspaceVisibleAgentByOwner (FIR-1416) verifies that a plain
+// workspace member who OWNS a workspace-visible (non-private) agent can manage
+// it — previously canManageAgent only allowed the owner when the agent was
+// private, so a member who made their agent workspace-visible (so the team can
+// use it) was locked out of editing it or assigning skills. A different
+// non-owner member must still get 403.
+func TestManageWorkspaceVisibleAgentByOwner(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	// Owner: a non-admin workspace member.
+	ownerEmail := "fir1416-owner-" + uuid.NewString() + "@multica.ai"
+	var ownerUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "FIR1416 Owner", ownerEmail).Scan(&ownerUserID); err != nil {
+		t.Fatalf("create owner user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, ownerUserID) })
+
+	// A second non-admin member who does NOT own the agent.
+	otherEmail := "fir1416-other-" + uuid.NewString() + "@multica.ai"
+	var otherUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+	`, "FIR1416 Other", otherEmail).Scan(&otherUserID); err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, otherUserID) })
+
+	for _, uid := range []string{ownerUserID, otherUserID} {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+		`, testWorkspaceID, uid); err != nil {
+			t.Fatalf("add member %s: %v", uid, err)
+		}
+	}
+
+	// A WORKSPACE-visible agent owned by the non-admin member.
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "fir1416-agent-"+uuid.NewString()[:8], handlerTestRuntimeID(t), ownerUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	// Owner of the workspace-visible agent CAN manage it now.
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"description": "owner edits workspace-visible agent",
+	})
+	req.Header.Set("X-User-ID", ownerUserID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner managing workspace-visible agent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// A non-owner member must still be rejected.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"description": "non-owner should not edit",
+	})
+	req.Header.Set("X-User-ID", otherUserID)
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("non-owner member managing agent: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestUpdateAgentPersonaSandbox_AuditLogged (W4.6) verifies that a
 // successful persona_sandbox change writes an activity_log row so the
 // workspace audit feed in Multica's UI shows who flipped the policy.
