@@ -60,7 +60,7 @@ function getEventLabel(item: TimelineItem): string {
   }
 }
 
-function getEventSummary(item: TimelineItem): string {
+export function getEventSummary(item: TimelineItem): string {
   switch (item.type) {
     case "text":
       return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
