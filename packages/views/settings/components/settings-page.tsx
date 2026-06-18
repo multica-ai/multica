@@ -368,8 +368,10 @@ export function SettingsPage({
         {activeTab === "documentation" && documentationContent ? (
           <div className="flex-1 min-h-0 relative">{documentationContent}</div>
         ) : (
-          // CEREBRO-PATCH(settings-page-wide-tab): FIR-1404 wide tabs use max-w-6xl so the permission table can breathe
-          <div className={`w-full ${activeTabIsWide ? "max-w-6xl" : "max-w-3xl"} mx-auto p-4 md:p-6`}>
+          // CEREBRO-PATCH(settings-page-wide-tab): FIR-1404 wide tabs drop the width cap entirely so the
+          // permission table fills the full settings pane on wide monitors (max-w-6xl still left a large
+          // empty gutter on ultrawide screens); narrow tabs keep the readable max-w-3xl centered column.
+          <div className={`w-full ${activeTabIsWide ? "max-w-none" : "max-w-3xl mx-auto"} p-4 md:p-6`}>
             <TabsContent value="profile"><AccountTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-agent-profile-content): agent profile tab content */}
             <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
