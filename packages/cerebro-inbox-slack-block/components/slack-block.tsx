@@ -584,8 +584,8 @@ export function SlackBlock({
               autoCorrect="off"
               spellCheck={false}
               role="searchbox"
-              placeholder="Search by name..."
-              aria-label="Search by name"
+              placeholder="Search in list..."
+              aria-label="Search in list"
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             {search && (

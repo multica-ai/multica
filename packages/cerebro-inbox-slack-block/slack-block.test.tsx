@@ -535,7 +535,7 @@ describe("SlackBlock", () => {
 
     await user.click(screen.getByTitle("Search"));
     await user.type(
-      screen.getByPlaceholderText("Search by name..."),
+      screen.getByPlaceholderText("Search in list..."),
       "bob",
     );
 
@@ -550,7 +550,7 @@ describe("SlackBlock", () => {
       renderBlock({ searchDefaultOpen: true });
     });
     expect(
-      screen.getByPlaceholderText("Search by name..."),
+      screen.getByPlaceholderText("Search in list..."),
     ).toBeInTheDocument();
   });
 
@@ -560,7 +560,7 @@ describe("SlackBlock", () => {
       renderBlock();
     });
     expect(
-      screen.queryByPlaceholderText("Search by name..."),
+      screen.queryByPlaceholderText("Search in list..."),
     ).not.toBeInTheDocument();
   });
 
