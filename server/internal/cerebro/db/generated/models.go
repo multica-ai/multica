@@ -290,6 +290,36 @@ type CerebroAccountTokenUsage struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroAgentCapabilityScan struct {
+	ID                      pgtype.UUID        `json:"id"`
+	WorkspaceID             pgtype.UUID        `json:"workspace_id"`
+	AgentID                 pgtype.UUID        `json:"agent_id"`
+	WindowStartAt           pgtype.Timestamptz `json:"window_start_at"`
+	WindowEndAt             pgtype.Timestamptz `json:"window_end_at"`
+	ObservedCapabilityCount int32              `json:"observed_capability_count"`
+	NewCapabilityCount      int32              `json:"new_capability_count"`
+	DriftCapabilityCount    int32              `json:"drift_capability_count"`
+	CreatedAt               pgtype.Timestamptz `json:"created_at"`
+	CompletedAt             pgtype.Timestamptz `json:"completed_at"`
+}
+
+type CerebroAgentCapabilityScanItem struct {
+	ID             pgtype.UUID        `json:"id"`
+	ScanID         pgtype.UUID        `json:"scan_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	CapabilityType string             `json:"capability_type"`
+	CapabilityKey  string             `json:"capability_key"`
+	DisplayName    string             `json:"display_name"`
+	Uses           int64              `json:"uses"`
+	FirstSeenAt    pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt     pgtype.Timestamptz `json:"last_seen_at"`
+	Permission     pgtype.Text        `json:"permission"`
+	Status         string             `json:"status"`
+	IsNew          bool               `json:"is_new"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroAgentInfisicalFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	AgentID     pgtype.UUID        `json:"agent_id"`

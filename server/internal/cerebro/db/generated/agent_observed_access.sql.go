@@ -93,3 +93,59 @@ func (q *Queries) ListAgentObservedToolUsage(ctx context.Context, arg ListAgentO
 	}
 	return items, nil
 }
+
+const listAgentObservedToolUsageBetween = `-- name: ListAgentObservedToolUsageBetween :many
+SELECT tm.tool::text                    AS tool,
+       COUNT(*)::bigint                 AS uses,
+       MIN(tm.created_at)::timestamptz  AS first_used,
+       MAX(tm.created_at)::timestamptz  AS last_used
+FROM task_message tm
+JOIN agent_task_queue atq ON atq.id = tm.task_id
+WHERE atq.agent_id = $1
+  AND tm.tool IS NOT NULL
+  AND tm.tool <> ''
+  AND tm.created_at > $2::timestamptz
+  AND tm.created_at <= $3::timestamptz
+GROUP BY tm.tool
+ORDER BY uses DESC, tool ASC
+`
+
+type ListAgentObservedToolUsageBetweenParams struct {
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	WindowStartAt pgtype.Timestamptz `json:"window_start_at"`
+	WindowEndAt   pgtype.Timestamptz `json:"window_end_at"`
+}
+
+type ListAgentObservedToolUsageBetweenRow struct {
+	Tool      string             `json:"tool"`
+	Uses      int64              `json:"uses"`
+	FirstUsed pgtype.Timestamptz `json:"first_used"`
+	LastUsed  pgtype.Timestamptz `json:"last_used"`
+}
+
+// Delta form for the capability scan history. Unlike ListAgentObservedToolUsage,
+// this reads only the interval since the previous persisted scan.
+func (q *Queries) ListAgentObservedToolUsageBetween(ctx context.Context, arg ListAgentObservedToolUsageBetweenParams) ([]ListAgentObservedToolUsageBetweenRow, error) {
+	rows, err := q.db.Query(ctx, listAgentObservedToolUsageBetween, arg.AgentID, arg.WindowStartAt, arg.WindowEndAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentObservedToolUsageBetweenRow{}
+	for rows.Next() {
+		var i ListAgentObservedToolUsageBetweenRow
+		if err := rows.Scan(
+			&i.Tool,
+			&i.Uses,
+			&i.FirstUsed,
+			&i.LastUsed,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

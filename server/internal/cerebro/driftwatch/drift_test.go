@@ -2,7 +2,9 @@ package driftwatch
 
 import (
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
@@ -99,4 +101,57 @@ func TestDriftSignature_StableAndOrderInsensitive(t *testing.T) {
 	if driftSignature(a) == driftSignature(c) {
 		t.Fatalf("different drift sets must have different signatures")
 	}
+}
+
+func TestComputeObservedCapabilities_MarksOnlyPreviouslyUnseenToolsNew(t *testing.T) {
+	usage := []cerebrodb.ListAgentObservedToolUsageBetweenRow{
+		{Tool: "Bash", Uses: 2, FirstUsed: testTS(2026, 6, 18, 1), LastUsed: testTS(2026, 6, 18, 2)},
+		{Tool: "DixaGetConversation", Uses: 1, FirstUsed: testTS(2026, 6, 18, 3), LastUsed: testTS(2026, 6, 18, 3)},
+		{Tool: "DropTable", Uses: 1, FirstUsed: testTS(2026, 6, 18, 4), LastUsed: testTS(2026, 6, 18, 4)},
+	}
+	known := map[string]bool{"bash": true}
+	perm := map[string]string{
+		"bash":                "allow",
+		"dixagetconversation": "ask",
+		"droptable":           "deny",
+	}
+
+	observed, newlyFound, drifting := computeObservedCapabilities(usage, perm, known)
+
+	if len(observed) != 3 {
+		t.Fatalf("observed len = %d, want 3", len(observed))
+	}
+	if len(newlyFound) != 2 {
+		t.Fatalf("newlyFound len = %d, want 2 (%+v)", len(newlyFound), newlyFound)
+	}
+	if newlyFound[0].Name != "DixaGetConversation" || newlyFound[0].Status != statusNeedsApproval {
+		t.Fatalf("first new capability = %+v", newlyFound[0])
+	}
+	if newlyFound[1].Name != "DropTable" || newlyFound[1].Status != statusBlocked {
+		t.Fatalf("second new capability = %+v", newlyFound[1])
+	}
+	if len(drifting) != 1 || drifting[0].Name != "DropTable" {
+		t.Fatalf("drifting = %+v, want only DropTable", drifting)
+	}
+}
+
+func TestNextNightlyRun(t *testing.T) {
+	loc := time.FixedZone("test", 60*60)
+	before := time.Date(2026, 6, 18, 1, 30, 0, 0, loc)
+	got := nextNightlyRun(before, 2, loc)
+	want := time.Date(2026, 6, 18, 2, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("before 02:00 next = %s, want %s", got, want)
+	}
+
+	after := time.Date(2026, 6, 18, 2, 1, 0, 0, loc)
+	got = nextNightlyRun(after, 2, loc)
+	want = time.Date(2026, 6, 19, 2, 0, 0, 0, loc)
+	if !got.Equal(want) {
+		t.Fatalf("after 02:00 next = %s, want %s", got, want)
+	}
+}
+
+func testTS(year int, month time.Month, day, hour int) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: time.Date(year, month, day, hour, 0, 0, 0, time.UTC), Valid: true}
 }

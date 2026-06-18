@@ -35,3 +35,20 @@ FROM agent_task_queue atq
 JOIN task_message tm ON tm.task_id = atq.id
 WHERE atq.agent_id = sqlc.arg(agent_id)
   AND tm.created_at >= now() - make_interval(days => sqlc.arg(window_days)::int);
+
+-- name: ListAgentObservedToolUsageBetween :many
+-- Delta form for the capability scan history. Unlike ListAgentObservedToolUsage,
+-- this reads only the interval since the previous persisted scan.
+SELECT tm.tool::text                    AS tool,
+       COUNT(*)::bigint                 AS uses,
+       MIN(tm.created_at)::timestamptz  AS first_used,
+       MAX(tm.created_at)::timestamptz  AS last_used
+FROM task_message tm
+JOIN agent_task_queue atq ON atq.id = tm.task_id
+WHERE atq.agent_id = sqlc.arg(agent_id)
+  AND tm.tool IS NOT NULL
+  AND tm.tool <> ''
+  AND tm.created_at > sqlc.arg(window_start_at)::timestamptz
+  AND tm.created_at <= sqlc.arg(window_end_at)::timestamptz
+GROUP BY tm.tool
+ORDER BY uses DESC, tool ASC;

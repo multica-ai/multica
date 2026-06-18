@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -19,10 +20,18 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// DefaultInterval is how often the watcher sweeps when main passes <= 0. Drift
-// is a slow-moving operational signal (it needs runs to accumulate), so a 6h
-// cadence is plenty and keeps the per-agent tool-policy resolution cheap.
-const DefaultInterval = 6 * time.Hour
+// DefaultInterval is the fallback cadence after the nightly run. The production
+// runner waits until the next 02:00 Europe/Copenhagen window before the first
+// scan so capability discovery does not run repeatedly during working hours.
+const DefaultInterval = 24 * time.Hour
+
+const (
+	defaultNightlyRunHour = 2
+	bootstrapWindow       = 24 * time.Hour
+	capabilityTypeTool    = "tool"
+	statusAllowed         = "allowed"
+	statusNeedsApproval   = "needs_approval"
+)
 
 // inboxTypeCapabilityDrift is the inbox_item.type for a drift alert. A string,
 // not a server enum; the frontend inbox renders unknown types from title/body
@@ -39,13 +48,27 @@ type Sweeper struct {
 	Upstream   *db.Queries
 	ToolPolicy *cerebrotoolpolicy.Store
 	Bus        *events.Bus
+}
 
-	// lastSignature dedups alerts in-memory: agent ID -> the drift signature we
-	// last alerted on. We re-alert only when the set of drifting tools CHANGES,
-	// not every tick. In-memory on purpose: a process restart may re-alert an
-	// existing drift once, which for an off-by-default security signal is
-	// acceptable (and arguably a useful reminder) and avoids a state table.
-	lastSignature map[[16]byte]string
+type observedCapability struct {
+	Key        string
+	Name       string
+	Uses       int64
+	FirstSeen  pgtype.Timestamptz
+	LastSeen   pgtype.Timestamptz
+	Permission string
+	Status     string
+	IsNew      bool
+}
+
+type agentScanResult struct {
+	Scan         cerebrodb.CerebroAgentCapabilityScan
+	Observed     []observedCapability
+	New          []observedCapability
+	Drift        []observedCapability
+	WindowStart  time.Time
+	WindowEnd    time.Time
+	HistoryFound bool
 }
 
 // NewSweeper builds a Sweeper. ToolPolicy resolves each agent's declared policy
@@ -53,29 +76,30 @@ type Sweeper struct {
 // written, just not broadcast live).
 func NewSweeper(cerebro *cerebrodb.Queries, upstream *db.Queries, toolPolicy *cerebrotoolpolicy.Store, bus *events.Bus) *Sweeper {
 	return &Sweeper{
-		Cerebro:       cerebro,
-		Upstream:      upstream,
-		ToolPolicy:    toolPolicy,
-		Bus:           bus,
-		lastSignature: map[[16]byte]string{},
+		Cerebro:    cerebro,
+		Upstream:   upstream,
+		ToolPolicy: toolPolicy,
+		Bus:        bus,
 	}
 }
 
-// Run blocks on ctx and ticks the sweep at the requested interval.
+// Run blocks on ctx and runs the sweep once nightly. Passing a custom non-default
+// interval keeps tests/manual invocations able to tick on a shorter cadence.
 func (s *Sweeper) Run(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultInterval
 	}
-	if err := s.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		slog.Warn("cerebro drift watcher: initial tick failed", "error", err)
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
+		wait := interval
+		if interval == DefaultInterval {
+			wait = time.Until(nextNightlyRun(time.Now(), defaultNightlyRunHour, nightlyLocation()))
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if err := s.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				slog.Warn("cerebro drift watcher: tick failed", "error", err)
 			}
@@ -100,87 +124,171 @@ func (s *Sweeper) Tick(ctx context.Context) error {
 	return nil
 }
 
-// scanWorkspace checks every agent in one workspace and alerts on drift.
+// scanWorkspace checks every agent in one workspace and alerts owners/admins
+// when the nightly delta found capabilities not already present in the agent's
+// persisted scan history.
 func (s *Sweeper) scanWorkspace(ctx context.Context, workspaceID pgtype.UUID) error {
 	recipients, err := s.Cerebro.ListCerebroWorkspaceOwnerAdmins(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list owner/admins: %w", err)
 	}
-	if len(recipients) == 0 {
-		// No one who can act on a drift alert — skip rather than write inbox
-		// rows nobody will see.
-		return nil
-	}
 	agents, err := s.Upstream.ListAgents(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list agents: %w", err)
 	}
+	now := time.Now()
 	for _, agent := range agents {
-		drift := s.agentDrift(ctx, workspaceID, agent.ID)
-		key := agent.ID.Bytes
-		if len(drift) == 0 {
-			// Drift cleared (or never had any) — forget the last signature so a
-			// future re-drift alerts again instead of being deduped away.
-			delete(s.lastSignature, key)
+		result, err := s.scanAgentCapabilities(ctx, workspaceID, agent.ID, now)
+		if err != nil {
+			slog.Warn("cerebro drift watcher: agent scan failed",
+				"agent_id", util.UUIDToString(agent.ID), "error", err)
 			continue
 		}
-		sig := driftSignature(drift)
-		if s.lastSignature[key] == sig {
-			continue // already alerted on this exact drift set
+		if len(result.New) == 0 {
+			continue
 		}
-		s.lastSignature[key] = sig
-		s.alert(ctx, workspaceID, agent, drift, recipients)
+		if len(recipients) == 0 {
+			slog.Info("cerebro drift watcher: new capabilities found but no owner/admin recipients",
+				"workspace_id", util.UUIDToString(workspaceID),
+				"agent_id", util.UUIDToString(agent.ID),
+				"new_capability_count", len(result.New),
+			)
+			continue
+		}
+		s.alert(ctx, workspaceID, agent, result, recipients)
 	}
 	return nil
 }
 
-// agentDrift resolves one agent's observed-vs-declared drift, reusing the same
-// inputs the capabilities card uses: observed tool usage (Bid B) compared to the
-// declared tool-policy table. Returns nil on any lookup error so one bad agent
-// never aborts the workspace sweep.
-func (s *Sweeper) agentDrift(ctx context.Context, workspaceID, agentID pgtype.UUID) []DriftTool {
-	usage, err := s.Cerebro.ListAgentObservedToolUsage(ctx, cerebrodb.ListAgentObservedToolUsageParams{
-		AgentID:    agentID,
-		WindowDays: observedWindowDays,
+func (s *Sweeper) scanAgentCapabilities(ctx context.Context, workspaceID, agentID pgtype.UUID, now time.Time) (agentScanResult, error) {
+	windowStart, historyFound, err := s.scanWindowStart(ctx, agentID, now)
+	if err != nil {
+		return agentScanResult{}, err
+	}
+	windowEnd := now.UTC()
+	usage, err := s.Cerebro.ListAgentObservedToolUsageBetween(ctx, cerebrodb.ListAgentObservedToolUsageBetweenParams{
+		AgentID:       agentID,
+		WindowStartAt: timestamptz(windowStart),
+		WindowEndAt:   timestamptz(windowEnd),
 	})
 	if err != nil {
-		slog.Warn("cerebro drift watcher: observed usage lookup failed",
-			"agent_id", util.UUIDToString(agentID), "error", err)
-		return nil
+		return agentScanResult{}, fmt.Errorf("list observed tool usage delta: %w", err)
 	}
-	if len(usage) == 0 {
-		return nil
+
+	known, err := s.knownCapabilities(ctx, agentID)
+	if err != nil {
+		return agentScanResult{}, err
 	}
-	rows, err := s.ToolPolicy.Table(ctx, cerebrotoolpolicy.TableQuery{
-		WorkspaceID:     workspaceID,
-		AgentID:         agentID,
-		Base:            cerebrotoolpolicy.SettingAllow,
-		IncludePlatform: true,
+
+	permByName := map[string]string{}
+	if len(usage) > 0 {
+		rows, err := s.ToolPolicy.Table(ctx, cerebrotoolpolicy.TableQuery{
+			WorkspaceID:     workspaceID,
+			AgentID:         agentID,
+			Base:            cerebrotoolpolicy.SettingAllow,
+			IncludePlatform: true,
+		})
+		if err != nil {
+			return agentScanResult{}, fmt.Errorf("load tool policy: %w", err)
+		}
+		permByName = permissionLookup(rows)
+	}
+
+	observed, newlyFound, drifting := computeObservedCapabilities(usage, permByName, known)
+	scan, err := s.Cerebro.CreateAgentCapabilityScan(ctx, cerebrodb.CreateAgentCapabilityScanParams{
+		WorkspaceID:   workspaceID,
+		AgentID:       agentID,
+		WindowStartAt: timestamptz(windowStart),
+		WindowEndAt:   timestamptz(windowEnd),
 	})
 	if err != nil {
-		slog.Warn("cerebro drift watcher: tool-policy lookup failed",
-			"agent_id", util.UUIDToString(agentID), "error", err)
-		return nil
+		return agentScanResult{}, fmt.Errorf("create capability scan: %w", err)
 	}
-	return computeDrift(usage, permissionLookup(rows))
+	for _, cap := range observed {
+		if _, err := s.Cerebro.InsertAgentCapabilityScanItem(ctx, cerebrodb.InsertAgentCapabilityScanItemParams{
+			ScanID:         scan.ID,
+			WorkspaceID:    workspaceID,
+			AgentID:        agentID,
+			CapabilityType: capabilityTypeTool,
+			CapabilityKey:  cap.Key,
+			DisplayName:    cap.Name,
+			Uses:           cap.Uses,
+			FirstSeenAt:    cap.FirstSeen,
+			LastSeenAt:     cap.LastSeen,
+			Permission:     nullableText(cap.Permission),
+			Status:         cap.Status,
+			IsNew:          cap.IsNew,
+		}); err != nil {
+			return agentScanResult{}, fmt.Errorf("insert capability scan item %q: %w", cap.Name, err)
+		}
+	}
+	scan, err = s.Cerebro.UpdateAgentCapabilityScanCounts(ctx, cerebrodb.UpdateAgentCapabilityScanCountsParams{
+		ObservedCapabilityCount: int32(len(observed)),
+		NewCapabilityCount:      int32(len(newlyFound)),
+		DriftCapabilityCount:    int32(len(drifting)),
+		CompletedAt:             timestamptz(time.Now().UTC()),
+		ID:                      scan.ID,
+	})
+	if err != nil {
+		return agentScanResult{}, fmt.Errorf("update capability scan counts: %w", err)
+	}
+	return agentScanResult{
+		Scan:         scan,
+		Observed:     observed,
+		New:          newlyFound,
+		Drift:        drifting,
+		WindowStart:  windowStart,
+		WindowEnd:    windowEnd,
+		HistoryFound: historyFound,
+	}, nil
+}
+
+func (s *Sweeper) scanWindowStart(ctx context.Context, agentID pgtype.UUID, now time.Time) (time.Time, bool, error) {
+	latest, err := s.Cerebro.GetAgentLatestCapabilityScan(ctx, agentID)
+	if err == nil && latest.WindowEndAt.Valid {
+		return latest.WindowEndAt.Time.UTC(), true, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return time.Time{}, false, fmt.Errorf("load latest capability scan: %w", err)
+	}
+	return now.Add(-bootstrapWindow).UTC(), false, nil
+}
+
+func (s *Sweeper) knownCapabilities(ctx context.Context, agentID pgtype.UUID) (map[string]bool, error) {
+	keys, err := s.Cerebro.ListAgentKnownCapabilityKeys(ctx, cerebrodb.ListAgentKnownCapabilityKeysParams{
+		AgentID:        agentID,
+		CapabilityType: capabilityTypeTool,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list known capability keys: %w", err)
+	}
+	known := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		known[key] = true
+	}
+	return known, nil
 }
 
 // alert writes one inbox card per owner/admin recipient and broadcasts each so
 // it lands live. Best-effort: a failed write for one recipient is logged and the
 // rest still proceed.
-func (s *Sweeper) alert(ctx context.Context, workspaceID pgtype.UUID, agent db.Agent, drift []DriftTool, recipients []pgtype.UUID) {
-	names := driftToolNames(drift)
-	title := fmt.Sprintf("Capability drift: %s", agentDisplayName(agent))
+func (s *Sweeper) alert(ctx context.Context, workspaceID pgtype.UUID, agent db.Agent, result agentScanResult, recipients []pgtype.UUID) {
+	names := observedCapabilityNames(result.New)
+	title := fmt.Sprintf("New capabilities: %s", agentDisplayName(agent))
 	body := fmt.Sprintf(
-		"%s used %d tool%s its policy does not allow (%s). Review on the agent's Capabilities tab.",
-		agentDisplayName(agent), len(drift), plural(len(drift)), strings.Join(names, ", "),
+		"%s used %d new tool%s since the previous capability scan (%s). Review the agent's Capabilities tab.",
+		agentDisplayName(agent), len(result.New), plural(len(result.New)), strings.Join(names, ", "),
 	)
 	details, _ := json.Marshal(map[string]any{
-		"agent_id":    util.UUIDToString(agent.ID),
-		"agent_name":  agent.Name,
-		"drift_tools": names,
-		"drift_count": len(drift),
-		"reason":      "capability_drift",
+		"agent_id":             util.UUIDToString(agent.ID),
+		"agent_name":           agent.Name,
+		"scan_id":              util.UUIDToString(result.Scan.ID),
+		"new_capabilities":     names,
+		"new_capability_count": len(result.New),
+		"drift_count":          len(result.Drift),
+		"window_start_at":      result.WindowStart.Format(time.RFC3339),
+		"window_end_at":        result.WindowEnd.Format(time.RFC3339),
+		"reason":               "agent_capability_new",
 	})
 
 	for _, userID := range recipients {
@@ -210,7 +318,8 @@ func (s *Sweeper) alert(ctx context.Context, workspaceID pgtype.UUID, agent db.A
 	slog.Info("cerebro drift watcher: alerted",
 		"workspace_id", util.UUIDToString(workspaceID),
 		"agent_id", util.UUIDToString(agent.ID),
-		"drift_count", len(drift),
+		"new_capability_count", len(result.New),
+		"drift_count", len(result.Drift),
 		"recipients", len(recipients),
 	)
 }
@@ -247,6 +356,94 @@ func (s *Sweeper) publishInboxNew(item db.InboxItem) {
 		Payload:         map[string]any{"item": resp},
 		AudienceUserIDs: []string{recipientID},
 	})
+}
+
+func computeObservedCapabilities(usage []cerebrodb.ListAgentObservedToolUsageBetweenRow, permByName map[string]string, known map[string]bool) ([]observedCapability, []observedCapability, []observedCapability) {
+	observed := make([]observedCapability, 0, len(usage))
+	newlyFound := []observedCapability{}
+	drifting := []observedCapability{}
+	for _, u := range usage {
+		key := capabilityKey(u.Tool)
+		perm, hasRow := permByName[key]
+		status, drift := capabilityStatus(perm, hasRow)
+		cap := observedCapability{
+			Key:        key,
+			Name:       u.Tool,
+			Uses:       u.Uses,
+			FirstSeen:  u.FirstUsed,
+			LastSeen:   u.LastUsed,
+			Permission: perm,
+			Status:     status,
+			IsNew:      !known[key],
+		}
+		observed = append(observed, cap)
+		if cap.IsNew {
+			newlyFound = append(newlyFound, cap)
+		}
+		if drift {
+			drifting = append(drifting, cap)
+		}
+	}
+	return observed, newlyFound, drifting
+}
+
+func capabilityStatus(permission string, hasRow bool) (status string, drift bool) {
+	if !hasRow {
+		return statusUnmapped, true
+	}
+	switch permission {
+	case "allow":
+		return statusAllowed, false
+	case "ask":
+		return statusNeedsApproval, false
+	case "deny":
+		return statusBlocked, true
+	default:
+		return statusUnmapped, true
+	}
+}
+
+func capabilityKey(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func observedCapabilityNames(caps []observedCapability) []string {
+	names := make([]string, 0, len(caps))
+	for _, cap := range caps {
+		names = append(names, cap.Name)
+	}
+	return names
+}
+
+func timestamptz(t time.Time) pgtype.Timestamptz {
+	return pgtype.Timestamptz{Time: t.UTC(), Valid: true}
+}
+
+func nullableText(s string) pgtype.Text {
+	if strings.TrimSpace(s) == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: s, Valid: true}
+}
+
+func nightlyLocation() *time.Location {
+	loc, err := time.LoadLocation("Europe/Copenhagen")
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+func nextNightlyRun(now time.Time, hour int, loc *time.Location) time.Time {
+	if loc == nil {
+		loc = time.Local
+	}
+	local := now.In(loc)
+	next := time.Date(local.Year(), local.Month(), local.Day(), hour, 0, 0, 0, loc)
+	if !next.After(local) {
+		next = next.AddDate(0, 0, 1)
+	}
+	return next
 }
 
 func agentDisplayName(agent db.Agent) string {
