@@ -130,9 +130,11 @@ type OpenclawConfigResult struct {
 // resolution to the openclaw CLI itself rather than re-implementing the
 // spec. We:
 //
-//  1. Run `openclaw config file` to find the user's active config path
-//     (handles OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, OPENCLAW_HOME, and
-//     the default location).
+//  1. Run `openclaw config file` to find the user's active config path.
+//     For OpenClaw releases whose `config` command rejects the `file`
+//     subcommand shape, fall back to resolving the documented path env vars:
+//     OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, OPENCLAW_HOME, and the
+//     default location.
 //  2. Run `openclaw config get agents.list --json` to enumerate every
 //     registered agent ID with its resolved fields. The CLI parses JSON5,
 //     follows $include, and substitutes ${VAR} for us.
@@ -435,7 +437,12 @@ func stripUserMcpServers(resolved map[string]any) {
 //
 // The CLI handles the full resolution chain — OPENCLAW_CONFIG_PATH, the
 // state directory (OPENCLAW_STATE_DIR / OPENCLAW_HOME / default), legacy
-// migration, and `~` expansion — so we don't re-implement it here.
+// migration, and `~` expansion — so we prefer it when the installed CLI
+// supports the command.
+//
+// OpenClaw 2026.2.x briefly rejected `openclaw config file` with the generic
+// "too many arguments for 'config'" error. For that command-shape failure only,
+// fall back to the documented path env vars so task prep can still continue.
 //
 // The reported path uses `~` shorthand for the user's home; we expand it
 // so the $include reference we write is unambiguous absolute.
@@ -444,8 +451,15 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	defer cancel()
 	out, err := openclawExec(ctx, bin, "config", "file")
 	if err != nil {
+		if isOpenclawConfigFileUnsupported(err) {
+			return openclawFallbackActiveConfigPath()
+		}
 		return "", false, err
 	}
+	return openclawParseActiveConfigPath(out)
+}
+
+func openclawParseActiveConfigPath(out string) (string, bool, error) {
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
 	// the actual path. The path is always the last non-empty line.
 	lines := strings.Split(strings.TrimSpace(out), "\n")
@@ -460,10 +474,49 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
+	var err error
+	path, err = expandOpenclawPath(path)
+	if err != nil {
+		return "", false, err
+	}
+	return openclawStatConfigPath(path)
+}
+
+func openclawFallbackActiveConfigPath() (string, bool, error) {
+	path := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH"))
+	if path == "" {
+		stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
+		if stateDir == "" {
+			home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+			var err error
+			if home == "" {
+				home, err = os.UserHomeDir()
+				if err != nil {
+					return "", false, fmt.Errorf("resolve openclaw home: %w", err)
+				}
+			} else {
+				home, err = expandOpenclawPath(home)
+				if err != nil {
+					return "", false, fmt.Errorf("resolve OPENCLAW_HOME: %w", err)
+				}
+			}
+			stateDir = filepath.Join(home, ".openclaw")
+		}
+		path = filepath.Join(stateDir, "openclaw.json")
+	}
+
+	path, err := expandOpenclawPath(path)
+	if err != nil {
+		return "", false, err
+	}
+	return openclawStatConfigPath(path)
+}
+
+func expandOpenclawPath(path string) (string, error) {
 	if path == "~" || strings.HasPrefix(path, "~/") {
 		home, herr := os.UserHomeDir()
 		if herr != nil {
-			return "", false, fmt.Errorf("expand `~` in openclaw config path: %w", herr)
+			return "", fmt.Errorf("expand `~` in openclaw config path: %w", herr)
 		}
 		if path == "~" {
 			path = home
@@ -471,6 +524,17 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
 		}
 	}
+	if !filepath.IsAbs(path) {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return "", fmt.Errorf("resolve openclaw config path %q: %w", path, err)
+		}
+		path = abs
+	}
+	return path, nil
+}
+
+func openclawStatConfigPath(path string) (string, bool, error) {
 	if !filepath.IsAbs(path) {
 		return "", false, fmt.Errorf("openclaw reported non-absolute config path %q", path)
 	}
@@ -485,6 +549,13 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		return "", false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
 	}
 	return path, true, nil
+}
+
+func isOpenclawConfigFileUnsupported(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too many arguments for 'config'") ||
+		strings.Contains(msg, "expected 0 arguments but got 1") ||
+		(strings.Contains(msg, "unknown") && strings.Contains(msg, "config") && strings.Contains(msg, "file"))
 }
 
 // openclawResolvedFullConfig fetches the user's fully resolved openclaw

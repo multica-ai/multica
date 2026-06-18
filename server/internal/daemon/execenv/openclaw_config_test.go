@@ -201,6 +201,59 @@ func TestPrepareOpenclawConfigFailsClosedOnCLIError(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported covers
+// OpenClaw 2026.2.x builds that rejected `openclaw config file` with
+// "too many arguments for 'config'". That command-shape mismatch should
+// not make every task fail during execenv prep; the daemon can derive the
+// active path from documented OPENCLAW_* path vars and then continue using
+// `config get ... --json` for resolved config data.
+func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	userConfigDir := t.TempDir()
+	userConfigPath := filepath.Join(userConfigDir, "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	t.Setenv("OPENCLAW_CONFIG_PATH", userConfigPath)
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {err: errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config'. Expected 0 arguments but got 1.)")},
+		"config get agents.list --json": {stdout: `[
+			{ "id": "coder", "model": "openai/gpt-5" }
+		]`},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok || len(include) != 1 || include[0] != userConfigPath {
+		t.Errorf("$include = %v, want fallback OPENCLAW_CONFIG_PATH %q", got["$include"], userConfigPath)
+	}
+	if result.IncludeRoot != userConfigDir {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, userConfigDir)
+	}
+	agents := got["agents"].(map[string]any)
+	list := agents["list"].([]any)
+	if len(list) != 1 || list[0].(map[string]any)["workspace"] != workDir {
+		t.Errorf("agents.list workspace rewrite after fallback = %v, want workDir %q", list, workDir)
+	}
+	if len(stub.calls) != 2 {
+		t.Fatalf("openclaw calls = %d, want 2: %+v", len(stub.calls), stub.calls)
+	}
+	if strings.Join(stub.calls[1].args, " ") != "config get agents.list --json" {
+		t.Errorf("second openclaw call = %q, want config get agents.list --json", strings.Join(stub.calls[1].args, " "))
+	}
+}
+
 // TestPrepareOpenclawConfigFailsClosedOnMalformedAgentsList — the second
 // fail-closed surface. When `openclaw config get agents.list --json`
 // returns junk we can't parse, we fail rather than guess.
