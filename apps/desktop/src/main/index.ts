@@ -219,6 +219,16 @@ function createWindow(): void {
     window.webContents.send("locale:system-changed", current);
   });
 
+  // Without this handler, Electron derives the save-dialog filename from the
+  // URL path (e.g. "/api/attachments/<id>/download" → "download.txt") and
+  // ignores the Content-Disposition header sent by the server. Forwarding
+  // getFilename() restores the correct name from Content-Disposition.
+  window.webContents.session.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({
+      defaultPath: join(app.getPath("downloads"), item.getFilename()),
+    });
+  });
+
   window.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
     return { action: "deny" };
