@@ -182,10 +182,12 @@ Set `DATABASE_URL` in `.env`. `docker-compose.selfhost.yml` passes that exact
 value to the backend when it is set; otherwise it builds the internal Compose
 URL from `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB`.
 
-The bundled `postgres` service may stay in the file for local testing, but it is
-not used by the backend when `DATABASE_URL` points at your external database. For
-production, remove or override the bundled service if you do not want the extra
-container or volume.
+Even when `DATABASE_URL` points at an external database, the stock Compose file
+still starts and waits for the bundled `postgres` service. That keeps the
+single-file quickstart predictable and local-testable. The bundled database is
+not used by the backend in that mode, but it is still part of the service graph;
+maintain a separate Compose override if you want to remove the extra container,
+dependency, and `pgdata` volume from a production external-Postgres deployment.
 
 ### Running Migrations Manually
 

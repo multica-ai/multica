@@ -39,6 +39,21 @@ require_file_contains() {
   fi
 }
 
+require_file_line_count() {
+  local file=$1
+  local expected=$2
+  local count=$3
+  local observed
+
+  observed="$(grep -Fxc "$expected" "$file" || true)"
+  if [ "$observed" != "$count" ]; then
+    echo "$file expected $count exact line(s):"
+    echo "  $expected"
+    echo "Observed: $observed"
+    exit 1
+  fi
+}
+
 tmp_env="$(mktemp)"
 trap 'rm -f "$tmp_env"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
@@ -70,6 +85,7 @@ require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callba
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 require_config "$config" 'DATABASE_URL: postgres://multica:multica@postgres:5432/multica?sslmode=disable'
 require_config "$external_config" 'DATABASE_URL: postgres://external-user:external-pass@external-postgres.example.com:5432/externaldb?sslmode=require'
+require_config "$external_config" 'condition: service_healthy'
 require_config "$config" 'test:'
 require_config "$config" 'CMD-SHELL'
 require_config "$config" 'wget -qO- http://127.0.0.1:8080/readyz >/dev/null'
@@ -86,6 +102,10 @@ require_file_contains deploy/helm/multica/values.yaml 'fsGroup: 10001'
 require_file_contains deploy/helm/multica/values.yaml 'runAsNonRoot: true'
 require_file_contains deploy/helm/multica/templates/backend.yaml '.Values.backend.podSecurityContext'
 require_file_contains deploy/helm/multica/templates/backend.yaml '.Values.backend.securityContext'
+require_file_line_count deploy/helm/multica/templates/backend.yaml '              path: /healthz' 2
+require_file_line_count deploy/helm/multica/templates/backend.yaml '              path: /health' 1
+require_file_contains SELF_HOSTING_ADVANCED.md 'Even when `DATABASE_URL` points at an external database, the stock Compose file'
+require_file_contains SELF_HOSTING_ADVANCED.md 'still starts and waits for the bundled `postgres` service.'
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then

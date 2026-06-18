@@ -84,8 +84,8 @@ spec:
           # cold cluster (Postgres still coming up) this can take minutes. The
           # startupProbe holds off liveness/readiness until /healthz is OK,
           # giving migrations a ~5 min budget (30 * 10s) so the pod is never
-          # killed mid-migration. Once it passes, the aggressive livenessProbe
-          # below takes over.
+          # killed mid-migration. Once it passes, liveness uses /health so
+          # dependency outages do not cause restart churn.
           startupProbe:
             httpGet:
               path: /healthz
@@ -100,7 +100,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /health
               port: 8080
             initialDelaySeconds: 30
             periodSeconds: 30
