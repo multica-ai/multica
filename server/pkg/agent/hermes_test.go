@@ -1998,6 +1998,9 @@ while IFS= read -r line; do
     *'"method":"session/new"'*|*'"method":"session/resume"'*|*'"method":"session/load"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"` + sessionID + `"}}\n' "$id"
       ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       exit 0
@@ -2031,6 +2034,53 @@ func findRecordedFrame(t *testing.T, recordPath, method string) map[string]any {
 	}
 	t.Fatalf("no recorded frame for method %q in %s", method, string(data))
 	return nil
+}
+
+func TestHermesSetModelPreservesCustomModelIDWithColon(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:lfm2.5:8b",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["sessionId"] != "ses_new" {
+		t.Errorf("session/set_model.sessionId = %v, want ses_new", params["sessionId"])
+	}
+	if params["modelId"] != "custom:lfm2.5:8b" {
+		t.Errorf("session/set_model.modelId must be passed verbatim, got %v", params["modelId"])
+	}
 }
 
 // TestHermesResumeIncludesMcpServers pins the contract that

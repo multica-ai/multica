@@ -880,6 +880,31 @@ func TestParseHermesSessionNewModels(t *testing.T) {
 	}
 }
 
+func TestParseHermesSessionNewModelsPreservesCustomModelIDsWithColons(t *testing.T) {
+	raw := []byte(`{
+      "sessionId": "ses_123",
+      "models": {
+        "availableModels": [
+          {"modelId": "custom:lfm2.5:8b", "name": "lfm2.5:8b", "description": "Provider: Custom"}
+        ],
+        "currentModelId": "custom:lfm2.5:8b"
+      }
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "custom:lfm2.5:8b" {
+		t.Errorf("model id must be preserved verbatim, got %+v", models[0])
+	}
+	if models[0].Provider != "custom" {
+		t.Errorf("provider should be derived from the first colon only, got %+v", models[0])
+	}
+	if !models[0].Default {
+		t.Errorf("current custom model should be marked default: %+v", models[0])
+	}
+}
+
 func TestParseHermesSessionNewModelsSnakeCaseAndUnknownNames(t *testing.T) {
 	raw := []byte(`{
       "session_id": "ses_123",
