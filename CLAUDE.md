@@ -25,6 +25,10 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 - Supports local (daemon) and cloud agent runtimes
 - Built for 2-10 person AI-native teams
 
+## Custom Implementation Ledger
+
+This checkout may carry workspace-specific behavior that is not part of an official upstream image or release line. Before changing self-hosting, Docker images, or locally customized product behavior, read `CUSTOMIZATIONS.md` and update it in the same PR when the customization changes.
+
 ## Architecture
 
 **Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared packages.**

@@ -145,6 +145,8 @@
     "issue_prefix_hint": "{{example}} 같은 이슈 번호에 사용됩니다.",
     "prefix_confirm_title": "이슈 접두사를 변경할까요?",
     "prefix_confirm_description": "모든 이슈 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
+    "auto_label_title": "새 이슈 자동 라벨링",
+    "auto_label_description": "멤버가 이슈를 만들면 Multica가 최대 2개의 라벨을 추천하고, 맞는 라벨이 없으면 새로 만듭니다.",
     "save": "저장",
     "saving": "저장하는 중...",
     "manage_hint": "관리자와 소유자만 워크스페이스 설정을 업데이트할 수 있습니다.",

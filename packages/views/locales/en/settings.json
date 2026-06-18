@@ -145,6 +145,8 @@
     "issue_prefix_hint": "Used in issue numbers like {{example}}.",
     "prefix_confirm_title": "Change issue prefix?",
     "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
+    "auto_label_title": "Auto-label new issues",
+    "auto_label_description": "When a member creates an issue, Multica suggests up to two labels and creates a matching label when none exists.",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update workspace settings.",

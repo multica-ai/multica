@@ -16,6 +16,7 @@ const workspaceRef = vi.hoisted(() => ({
     description: "",
     context: "",
     issue_prefix: "TES",
+    settings: {} as Record<string, unknown>,
     repos: [] as { url: string }[],
   },
 }));
@@ -110,13 +111,14 @@ describe("WorkspaceTab — issue prefix editing", () => {
       description: "",
       context: "",
       issue_prefix: "TES",
+      settings: { github_enabled: true },
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
     mockUpdateWorkspace.mockImplementation(
       async (
         _id: string,
-        payload: { issue_prefix?: string; name?: string },
+        payload: { issue_prefix?: string; name?: string; settings?: Record<string, unknown> },
       ) => ({
         ...workspaceRef.current,
         ...payload,
@@ -151,11 +153,15 @@ describe("WorkspaceTab — issue prefix editing", () => {
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
     });
-    // No issue_prefix in the payload when unchanged — avoids no-op churn
-    // and keeps the request shape identical to pre-feature behavior.
+    // No issue_prefix or settings in the payload when unchanged — avoids no-op
+    // churn and avoids overwriting concurrent settings from stale cache.
     expect(mockUpdateWorkspace).toHaveBeenCalledWith(
       "workspace-1",
       expect.not.objectContaining({ issue_prefix: expect.anything() }),
+    );
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.not.objectContaining({ settings: expect.anything() }),
     );
     expect(screen.queryByText(/Change issue prefix/i)).toBeNull();
     // Non-prefix saves must NOT invalidate the issue cache — would
@@ -233,5 +239,30 @@ describe("WorkspaceTab — issue prefix editing", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
     expect(screen.getByPlaceholderText("TES")).toBeDisabled();
+  });
+
+  it("saves the auto-label setting without dropping existing settings", async () => {
+    const user = userEvent.setup();
+    workspaceRef.current.settings = {
+      github_enabled: true,
+      auto_label_new_issues: false,
+    };
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("switch", { name: "Auto-label new issues" }));
+    await user.click(screen.getByRole("button", { name: /^Save$/ }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledTimes(1);
+    });
+    expect(mockUpdateWorkspace).toHaveBeenCalledWith(
+      "workspace-1",
+      expect.objectContaining({
+        settings: {
+          github_enabled: true,
+          auto_label_new_issues: true,
+        },
+      }),
+    );
   });
 });

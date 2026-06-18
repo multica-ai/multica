@@ -145,6 +145,8 @@
     "issue_prefix_hint": "用于 issue 编号，例如 {{example}}。",
     "prefix_confirm_title": "确认修改 issue 前缀？",
     "prefix_confirm_description": "所有 issue 将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
+    "auto_label_title": "自动标记新 issue",
+    "auto_label_description": "成员创建 issue 时，Multica 会推荐最多 2 个标签；没有合适标签时会自动创建。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以修改工作区设置。",

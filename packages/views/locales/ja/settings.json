@@ -141,6 +141,8 @@
     "issue_prefix_hint": "{{example}} のようなイシュー番号に使用されます。",
     "prefix_confirm_title": "イシュー接頭辞を変更しますか？",
     "prefix_confirm_description": "すべてのイシュー番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
+    "auto_label_title": "新しいイシューを自動ラベル付け",
+    "auto_label_description": "メンバーがイシューを作成すると、Multica が最大 2 件のラベルを提案し、適切なラベルがなければ作成します。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "ワークスペース設定を更新できるのは admin と owner のみです。",

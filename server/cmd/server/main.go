@@ -257,6 +257,7 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerIssueAutoLabelListeners(bus, service.NewIssueAutoLabelService(queries, bus, nil))
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server

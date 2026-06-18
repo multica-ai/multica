@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Camera, Loader2, Save, LogOut } from "lucide-react";
+import { Camera, Loader2, Save, LogOut, Tags } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Switch } from "@multica/ui/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -27,6 +28,10 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import {
+  isAutoLabelNewIssuesEnabled,
+  withAutoLabelNewIssuesSetting,
+} from "@multica/core/workspace/settings";
 import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -102,6 +107,9 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [autoLabelNewIssues, setAutoLabelNewIssues] = useState(
+    isAutoLabelNewIssuesEnabled(workspace?.settings),
+  );
   const [saving, setSaving] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -132,6 +140,7 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
+    setAutoLabelNewIssues(isAutoLabelNewIssuesEnabled(workspace?.settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
@@ -145,6 +154,8 @@ export function WorkspaceTab() {
   const prefixChanged =
     !!workspace && normalizedPrefix !== workspace.issue_prefix;
   const prefixInvalid = normalizedPrefix.length === 0;
+  const autoLabelChanged =
+    !!workspace && isAutoLabelNewIssuesEnabled(workspace.settings) !== autoLabelNewIssues;
 
   const performSave = async (includePrefix: boolean) => {
     if (!workspace) return;
@@ -154,6 +165,9 @@ export function WorkspaceTab() {
         name,
         description,
         context,
+        ...(autoLabelChanged
+          ? { settings: withAutoLabelNewIssuesSetting(workspace.settings, autoLabelNewIssues) }
+          : {}),
         ...(includePrefix ? { issue_prefix: normalizedPrefix } : {}),
       });
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
@@ -358,6 +372,29 @@ export function WorkspaceTab() {
                   example: `${normalizedPrefix || workspace.issue_prefix}-123`,
                 })}
               </p>
+            </div>
+            <div className="flex items-start justify-between gap-3 rounded-md border bg-muted/30 p-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-2">
+                  <Tags className="h-4 w-4 text-muted-foreground" />
+                  <Label
+                    htmlFor="auto-label-new-issues"
+                    className="text-sm font-medium"
+                  >
+                    {t(($) => $.workspace.auto_label_title)}
+                  </Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.workspace.auto_label_description)}
+                </p>
+              </div>
+              <Switch
+                id="auto-label-new-issues"
+                checked={autoLabelNewIssues}
+                onCheckedChange={setAutoLabelNewIssues}
+                disabled={!canManageWorkspace}
+                aria-label={t(($) => $.workspace.auto_label_title)}
+              />
             </div>
             <div className="flex items-center justify-end gap-2 pt-1">
               <Button
