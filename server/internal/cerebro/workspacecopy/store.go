@@ -439,10 +439,43 @@ func remapIfCopied(ctx context.Context, tx pgx.Tx, targetWorkspace pgtype.UUID, 
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
-	if ok {
-		return mapped, nil
+	if !ok {
+		return pgtype.UUID{}, nil
 	}
-	return pgtype.UUID{}, nil
+	// A copy_map row outlives deletion of its target (it cascades only on
+	// workspace delete), so the mapping can point at a since-deleted entity. Using
+	// that dangling id as project_id / parent_issue_id would violate an FK on
+	// insert. Treat a stale mapping as "not copied": leave the link null, exactly
+	// as if the counterpart had never been copied.
+	return liveTarget(ctx, tx, entity, mapped)
+}
+
+// liveTarget returns id when a row with that id still exists in the table backing
+// entity, or a null UUID when the target was deleted after the copy (a stale
+// copy_map entry). Only the FK-bearing link entities are verified — every other
+// entity is returned unchanged. The table name comes from a fixed switch, never
+// from caller input, so the interpolation is injection-safe.
+func liveTarget(ctx context.Context, tx pgx.Tx, entity string, id pgtype.UUID) (pgtype.UUID, error) {
+	if !id.Valid {
+		return pgtype.UUID{}, nil
+	}
+	var table string
+	switch entity {
+	case "issue":
+		table = "issue"
+	case "project":
+		table = "project"
+	default:
+		return id, nil
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` WHERE id = $1)`, id).Scan(&exists); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("verify %s target: %w", entity, err)
+	}
+	if !exists {
+		return pgtype.UUID{}, nil
+	}
+	return id, nil
 }
 
 // ensureLabelTx maps a source label to a label in the target workspace by name,

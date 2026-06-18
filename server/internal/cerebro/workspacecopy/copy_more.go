@@ -57,7 +57,9 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 	defer tx.Rollback(ctx)
 
 	// parent_issue_id: child and parent are both copied issues; set the child's
-	// target parent to the copied parent.
+	// target parent to the copied parent. The JOIN onto the live parent issue
+	// (pp) skips a stale mapping whose target was deleted after the copy — pointing
+	// parent_issue_id at a dangling id would violate the FK and abort the whole pass.
 	pTag, err := tx.Exec(ctx, `
 		UPDATE issue tgt SET parent_issue_id = pm.target_id, updated_at = now()
 		FROM cerebro_workspace_copy_map im
@@ -66,6 +68,7 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 		  ON pm.target_workspace_id = im.target_workspace_id
 		 AND pm.entity_type = 'issue'
 		 AND pm.source_id = src.parent_issue_id
+		JOIN issue pp ON pp.id = pm.target_id
 		WHERE im.target_workspace_id = $1
 		  AND im.entity_type = 'issue'
 		  AND tgt.id = im.target_id
@@ -77,7 +80,10 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 	}
 
 	// project_id: the issue's source project is a copied project; set the issue's
-	// target project to the copied project.
+	// target project to the copied project. The JOIN onto the live target project
+	// (tp) skips a stale mapping whose project was deleted from the target after an
+	// earlier copy — pointing project_id at that dangling id is exactly the
+	// issue_project_id_fkey (23503) violation that aborted the whole copy (TECH-3766).
 	prTag, err := tx.Exec(ctx, `
 		UPDATE issue tgt SET project_id = pm.target_id, updated_at = now()
 		FROM cerebro_workspace_copy_map im
@@ -86,6 +92,7 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 		  ON pm.target_workspace_id = im.target_workspace_id
 		 AND pm.entity_type = 'project'
 		 AND pm.source_id = src.project_id
+		JOIN project tp ON tp.id = pm.target_id
 		WHERE im.target_workspace_id = $1
 		  AND im.entity_type = 'issue'
 		  AND tgt.id = im.target_id
@@ -115,6 +122,8 @@ func (s *Store) RelinkIssueRelations(ctx context.Context, targetWorkspace pgtype
 		  ON dm.target_workspace_id = $1
 		 AND dm.entity_type = 'issue'
 		 AND dm.source_id = d.depends_on_issue_id
+		JOIN issue ti ON ti.id = im.target_id
+		JOIN issue td ON td.id = dm.target_id
 		WHERE NOT EXISTS (
 			SELECT 1 FROM issue_dependency x
 			WHERE x.issue_id = im.target_id

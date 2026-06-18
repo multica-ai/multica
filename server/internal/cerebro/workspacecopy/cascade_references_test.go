@@ -243,6 +243,78 @@ func TestCopyIssueCascade(t *testing.T) {
 	}
 }
 
+// TestStaleProjectMappingSkipped reproduces TECH-3766's production crash: a copy
+// into a target that already holds an EARLIER copy whose project was since deleted.
+// A copy_map row outlives its target (it cascades only on workspace delete), so the
+// mapping points at a dead project. Both the relink pass and a fresh issue insert
+// then tried to write that dangling project_id, hitting
+// issue_project_id_fkey (SQLSTATE 23503). The fix skips the stale mapping: the copy
+// succeeds and the issue lands unlinked instead of crashing the whole run.
+func TestStaleProjectMappingSkipped(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no test database")
+	}
+	ctx := context.Background()
+	s := New(testPool)
+	srcWS, tgtWS := freshWorkspaces(t, ctx)
+
+	// Source: project P with one open issue in it.
+	proj := newID()
+	if _, err := testPool.Exec(ctx, `INSERT INTO project (id, workspace_id, title, status) VALUES ($1,$2,'Stale Proj','in_progress')`,
+		proj, srcWS); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	issue1 := seedIssue(t, ctx, srcWS, 930, "todo", "", pgtype.UUID{}, proj)
+
+	// First copy: project P + its open issue land in the target (mapping recorded).
+	if _, err := s.CopyProjectCascade(ctx, newID(), tgtWS, proj); err != nil {
+		t.Fatalf("first CopyProjectCascade: %v", err)
+	}
+	var copiedProj pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		SELECT target_id FROM cerebro_workspace_copy_map WHERE target_workspace_id=$1 AND entity_type='project' AND source_id=$2`,
+		tgtWS, proj).Scan(&copiedProj); err != nil {
+		t.Fatalf("find copied project: %v", err)
+	}
+
+	// The admin deletes the copied project in the target (ON DELETE SET NULL nulls
+	// the copied issue's project_id). The copy_map mapping P -> copiedProj survives,
+	// now dangling.
+	if _, err := testPool.Exec(ctx, `DELETE FROM project WHERE id=$1`, copiedProj); err != nil {
+		t.Fatalf("delete copied project: %v", err)
+	}
+
+	// (a) Relink pass over the dirty target must not crash on the dead mapping.
+	if _, err := s.RelinkIssueRelations(ctx, tgtWS); err != nil {
+		t.Fatalf("relink with stale project mapping crashed: %v", err)
+	}
+	var issue1Proj pgtype.UUID
+	if err := testPool.QueryRow(ctx, `
+		SELECT tgt.project_id FROM cerebro_workspace_copy_map m
+		JOIN issue tgt ON tgt.id = m.target_id
+		WHERE m.target_workspace_id=$1 AND m.entity_type='issue' AND m.source_id=$2`, tgtWS, issue1).Scan(&issue1Proj); err != nil {
+		t.Fatalf("load copied issue1 project: %v", err)
+	}
+	if issue1Proj.Valid {
+		t.Fatalf("copied issue1 project = %v, want null (stale mapping must not relink to a deleted project)", issue1Proj)
+	}
+
+	// (b) Copying a NEW source issue in the same project must not crash on insert;
+	// it lands unlinked because the project's target no longer exists.
+	issue2 := seedIssue(t, ctx, srcWS, 931, "todo", "", pgtype.UUID{}, proj)
+	res2, err := s.CopyIssue(ctx, newID(), tgtWS, issue2)
+	if err != nil {
+		t.Fatalf("copy issue under deleted-target project crashed: %v", err)
+	}
+	var issue2Proj pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT project_id FROM issue WHERE id=$1`, res2.TargetID).Scan(&issue2Proj); err != nil {
+		t.Fatalf("load copied issue2 project: %v", err)
+	}
+	if issue2Proj.Valid {
+		t.Fatalf("copied issue2 project = %v, want null", issue2Proj)
+	}
+}
+
 func TestCopyProjectCascade(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no test database")
