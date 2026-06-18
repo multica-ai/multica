@@ -542,12 +542,14 @@ export interface RuntimeHourlyActivity {
   count: number;
 }
 
-// One (agent, model) row of the "Cost by agent" tab on the runtime detail
-// page. Model stays on the wire because cost is computed client-side from
-// a per-model pricing table — the client groups these rows by agent_id and
-// sums cost per agent across models.
+// One (agent, provider, model) row of the "Cost by agent" tab on the runtime
+// detail page. provider + model stay on the wire because cost is computed
+// client-side from a per-model pricing table (provider disambiguates bare
+// model ids that collide across providers) — the client groups these rows by
+// agent_id and sums cost per agent across models.
 export interface RuntimeUsageByAgent {
   agent_id: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -569,12 +571,15 @@ export interface RuntimeUsageByHour {
   task_count: number;
 }
 
-// One (date, model) bucket of token usage for the workspace dashboard.
-// Same shape as RuntimeUsage but workspace-scoped (no runtime_id, no
-// provider field on the wire) and optionally narrowed to a single project
-// on the server side. Cost stays client-side via the model pricing table.
+// One (date, provider, model) bucket of token usage for the workspace
+// dashboard. Workspace-scoped (no runtime_id) and optionally narrowed to a
+// single project on the server side. `provider` is kept on the wire so the
+// client can disambiguate bare model ids that collide across providers
+// (e.g. Cursor's `auto` vs another provider's `auto`) when pricing. Cost
+// stays client-side via the model pricing table.
 export interface DashboardUsageDaily {
   date: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -588,6 +593,7 @@ export interface DashboardUsageDaily {
 // sums cost.
 export interface DashboardUsageByAgent {
   agent_id: string;
+  provider: string;
   model: string;
   input_tokens: number;
   output_tokens: number;

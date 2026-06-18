@@ -279,6 +279,20 @@ describe("dashboard + runtime usage schema drift", () => {
     expect(RuntimeUsageByHourListSchema.parse([{ hour: 9 }])[0]?.model).toBe("");
   });
 
+  it("defaults a missing provider to \"\" so an older server's rows still price by bare model", () => {
+    // provider was added for cross-provider model disambiguation; a server
+    // predating it omits the field. The schema must fill "" (→ bare-model
+    // pricing lookup) rather than drop the row.
+    expect(
+      DashboardUsageDailyListSchema.parse([{ date: "2026-05-19", model: "claude-opus-4-7" }])[0]
+        ?.provider,
+    ).toBe("");
+    expect(
+      DashboardUsageByAgentListSchema.parse([{ model: "claude-opus-4-7" }])[0]?.provider,
+    ).toBe("");
+    expect(RuntimeUsageByAgentListSchema.parse([{ model: "x" }])[0]?.provider).toBe("");
+  });
+
   it("rejects a non-array body so parseWithFallback can return its fallback", () => {
     expect(DashboardUsageDailyListSchema.safeParse(null).success).toBe(false);
     expect(RuntimeUsageListSchema.safeParse({ rows: [] }).success).toBe(false);

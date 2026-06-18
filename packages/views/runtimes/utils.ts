@@ -147,6 +147,14 @@ export function formatTokens(n: number): string {
 // inheriting the price of a near-named relative; they surface in the
 // unmapped diagnostic instead. Mirror new entries in
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
+//
+// Provider-qualified keys: a model id that is NOT vendor-prefixed
+// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`) and is
+// not the provider name itself can collide across providers — more than one
+// provider may report the same generic id like `auto`. Such generic ids MUST be keyed as
+// `${provider}/${model}` (e.g. `cursor/auto`). `resolvePricing` tries the
+// `${provider}/…` form first, then the bare form, so vendor-prefixed SKUs
+// stay unqualified and still resolve.
 const MODEL_PRICING: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
@@ -232,20 +240,26 @@ const MODEL_PRICING: Record<
   // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
   //    cursor.com/docs/models/cursor-composer-2-5).
-  //    Cursor result events often omit `model`, so the daemon falls back to
-  //    the configured runtime model or the legacy key `cursor`.
-  //    Cursor does not publish a cache-write rate for these rows; keep it at
-  //    0 so reported cache_write_tokens don't invent spend from input pricing.
-  "auto":               { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
-  "composer-2.5-fast":  { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
-  "composer-2.5":       { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
-  "composer-2-fast":    { input: 1.5,  output: 7.5,  cacheRead: 0.35,   cacheWrite: 0 },
-  "composer-2":         { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
-  "composer-1.5":       { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
-  "composer-1":         { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
+  //    Cursor's model ids are all unprefixed generic names (`auto`,
+  //    `composer-*`) that collide with other providers (another provider
+  //    could also report `auto`), so they are provider-qualified under `cursor/`.
+  //    See the `provider-qualified keys` note above. Cursor result events
+  //    often omit `model`, so the daemon falls back to the configured
+  //    runtime model or the legacy key `cursor`. Cursor does not publish a
+  //    cache-write rate for these rows; keep it at 0 so reported
+  //    cache_write_tokens don't invent spend from input pricing.
+  "cursor/auto":              { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
+  "cursor/composer-2.5-fast": { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/composer-2.5":      { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
+  "cursor/composer-2-fast":   { input: 1.5,  output: 7.5,  cacheRead: 0.35,   cacheWrite: 0 },
+  "cursor/composer-2":        { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
+  "cursor/composer-1.5":      { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
+  "cursor/composer-1":        { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
   // Legacy fallback bucket when neither the result event nor the runtime
-  // model is known — price at the current Composer 2.5 Fast default.
-  "cursor":             { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
+  // model is known — the daemon emits the literal `cursor`. This key equals
+  // the provider name itself, so it can't collide across providers and stays
+  // unqualified. Price at the current Composer 2.5 Fast default.
+  "cursor":                   { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four
@@ -272,24 +286,99 @@ const MODEL_PRICING: Record<
 // Anything still unmapped falls back to the user-supplied custom pricing
 // store. No startsWith fallback: variants like `gpt-5.5-mini` must have
 // their own row to be priced (otherwise they'd inherit `gpt-5.5`).
-function resolvePricing(model: string) {
+//
+// `provider` disambiguates unprefixed generic ids (see the header note):
+// every candidate is tried `${provider}/…`-qualified first, then bare, so a
+// `cursor/auto` row wins for a Cursor row while an unqualified `auto` (no
+// provider) stays unmapped instead of silently borrowing Cursor's price.
+function resolvePricing(model: string, provider?: string) {
   if (!model) return undefined;
 
-  for (const candidate of canonicalCandidates(model)) {
+  const candidates = pricingCandidates(model, provider);
+  for (const candidate of candidates) {
     const hit = MODEL_PRICING[candidate];
     if (hit) return hit;
   }
-  for (const candidate of canonicalCandidates(model)) {
+  for (const candidate of candidates) {
     const hit = getCustomPricing(candidate);
     if (hit) return hit;
   }
   return undefined;
 }
 
+// Canonical provider token for keying: trimmed + lowercased so lookup keys,
+// storage keys, and grouping labels all tolerate case drift in the stored
+// value. Returns "" when no provider is known.
+function normalizeProvider(provider?: string): string {
+  return provider?.trim().toLowerCase() ?? "";
+}
+
+// Provider-qualify a key, skipping the prefix when the key already carries
+// this provider (an upstream-qualified `cursor/auto` must not become
+// `cursor/cursor/auto`). `provider` must already be normalized.
+function qualify(provider: string, key: string): string {
+  return key.startsWith(`${provider}/`) ? key : `${provider}/${key}`;
+}
+
+// Lookup keys for a (model, provider) pair: every canonical candidate
+// `${provider}/`-qualified first (when a provider is known), then the bare
+// candidates. Qualified-first means a provider-scoped row/override always
+// beats an unqualified one.
+function pricingCandidates(model: string, provider?: string): string[] {
+  const base = canonicalCandidates(model);
+  const p = normalizeProvider(provider);
+  if (!p) return base;
+  return [...base.map((c) => qualify(p, c)), ...base];
+}
+
+// The canonical storage/diagnostic key for a (model, provider) pair: the
+// provider-qualified form when a provider is known, else the bare model.
+// `collectUnmappedModels` returns these, and the custom-pricing dialog keys
+// overrides by them, so a user-entered rate for `cursor/auto` resolves only
+// for Cursor rows — not for another provider that also reports `auto`.
+// Provider is lowercased so lookups tolerate case drift in the stored value.
+export function pricingKey(model: string, provider?: string): string {
+  const p = normalizeProvider(provider);
+  return p ? qualify(p, model) : model;
+}
+
+// Display/grouping key for a usage row's model. Self-resolving ids
+// (vendor-prefixed SKUs like `claude-opus-4-7`, and the legacy `cursor`
+// fallback whose key equals the provider name) stay bare; a generic id that
+// only prices under a provider (`auto`, `composer-*`) is provider-qualified
+// so two providers reporting the same bare id don't merge into one mislabelled
+// row, and the label matches what `collectUnmappedModels` / the pricing dialog
+// surface.
+export function modelGroupingKey(model: string, provider?: string): string {
+  if (!model) return normalizeProvider(provider) || "unknown";
+  return isSelfResolvingId(model) ? model : pricingKey(model, provider);
+}
+
+// Whether a model id prices on its own without a provider qualifier (a
+// vendor-prefixed SKU, or the legacy `cursor` fallback). Such ids keep a bare
+// grouping key; generic ids (`auto`, `composer-*`) stay provider-qualified.
+//
+// Probes the BARE model on purpose: forwarding a provider would let a
+// qualified row report as self-resolving and collapse back to a bare key,
+// re-merging the cross-provider collision this scheme prevents. Keep the
+// argument list provider-free so that stays true.
+function isSelfResolvingId(model: string): boolean {
+  return isModelPriced(model);
+}
+
 // Generate the lookup candidates for a model string, in priority order:
 // the raw string first (preserves explicit user / catalog spellings),
 // then the canonicalized forms. Deduped so we don't repeat lookups.
+//
+// Pure in `model`, and the aggregation loops call it 3-4x per row, so the
+// result is memoized — the model-string set is small and bounded. Callers
+// only read the array (pricingCandidates maps/spreads into a fresh one), so
+// sharing the cached reference is safe.
+// Intentionally process-lifetime: never evicted (bounded key set, see above).
+const canonicalCandidatesCache = new Map<string, string[]>();
 function canonicalCandidates(model: string): string[] {
+  const cached = canonicalCandidatesCache.get(model);
+  if (cached) return cached;
   const seen = new Set<string>();
   const out: string[] = [];
   const push = (s: string) => {
@@ -325,23 +414,28 @@ function canonicalCandidates(model: string): string[] {
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+  canonicalCandidatesCache.set(model, out);
   return out;
 }
 
 // Cheap predicate for the empty-state diagnostic: which model strings in a
 // usage batch failed pricing resolution. Useful when the user is staring at
 // "$0.00 / 2M tokens" and wants to know why.
-export function isModelPriced(model: string): boolean {
-  return resolvePricing(model) !== undefined;
+export function isModelPriced(model: string, provider?: string): boolean {
+  return resolvePricing(model, provider) !== undefined;
 }
 
-// Returns the unique, sorted list of model strings present in `rows` that
-// don't resolve to a price. Empty when everything's priced or there are no
-// rows.
+// Returns the unique, sorted list of pricing keys present in `rows` that
+// don't resolve to a price. Keys are provider-qualified (`cursor/auto`) when
+// the row carries a provider, so the same bare model id reported by two
+// providers surfaces as two distinct entries the user can price separately.
+// Empty when everything's priced or there are no rows.
 export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
   const set = new Set<string>();
   for (const r of rows) {
-    if (r.model && !isModelPriced(r.model)) set.add(r.model);
+    if (r.model && !isModelPriced(r.model, r.provider)) {
+      set.add(pricingKey(r.model, r.provider));
+    }
   }
   return Array.from(set).toSorted();
 }
@@ -350,13 +444,17 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 // RuntimeUsageByAgent, RuntimeUsageByHour all share this shape on purpose
 // (the back-end keeps the model dimension specifically so the client can
 // run this calculation for any aggregation axis).
+// `provider` is optional so callers with provider-less rows (and existing
+// test fixtures) still type-check; when present it disambiguates generic
+// model ids during pricing. RuntimeUsage / RuntimeUsageByAgent /
+// DashboardUsageDaily / DashboardUsageByAgent all carry it on the wire.
 type Priceable = Pick<
   RuntimeUsage,
   "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
->;
+> & { provider?: string };
 
 export function estimateCost(usage: Priceable): number {
-  const pricing = resolvePricing(usage.model);
+  const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) return 0;
   return (
     (usage.input_tokens * pricing.input +
@@ -375,7 +473,7 @@ export interface CostBreakdown {
 }
 
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
-  const pricing = resolvePricing(usage.model);
+  const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) {
     return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   }
@@ -391,7 +489,7 @@ export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
 // minus what they actually cost at the discounted cache-hit rate. This is a
 // reconstruction of "money the cache saved you", not real-world spend.
 export function estimateCacheSavings(usage: Priceable): number {
-  const pricing = resolvePricing(usage.model);
+  const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) return 0;
   const wouldHaveCost = (usage.cache_read_tokens * pricing.input) / 1_000_000;
   const actualCost = (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000;
@@ -508,7 +606,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     stack.cacheWrite += breakdown.cacheWrite;
     stackMap.set(u.date, stack);
 
-    const modelName = u.model || u.provider;
+    const modelName = modelGroupingKey(u.model, u.provider);
     const m = modelMap.get(modelName) ?? { tokens: 0, cost: 0 };
     m.tokens +=
       u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
@@ -582,7 +680,7 @@ type WeeklyAggregable = Pick<
   | "output_tokens"
   | "cache_read_tokens"
   | "cache_write_tokens"
->;
+> & { provider?: string };
 
 export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
@@ -803,7 +901,7 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
 export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
   const map = new Map<string, CostByKey>();
   for (const r of rows) {
-    const key = r.model || r.provider || "unknown";
+    const key = modelGroupingKey(r.model, r.provider);
     const entry = map.get(key) ?? { key, tokens: 0, cost: 0, taskCount: 0 };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
