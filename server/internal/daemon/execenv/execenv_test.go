@@ -4130,8 +4130,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 // workflow, so any reordering or accidental absorption of the codex
 // section would surface here.
 func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) {
-	t.Parallel()
-
+	// Not parallel: mutates the package-level runtimeGOOS.
 	oldGOOS := runtimeGOOS
 	t.Cleanup(func() { runtimeGOOS = oldGOOS })
 
