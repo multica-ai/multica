@@ -87,6 +87,96 @@ func (q *Queries) DeleteCerebroRuntimeTool(ctx context.Context, arg DeleteCerebr
 	return err
 }
 
+const explainCerebroAgentToolAccess = `-- name: ExplainCerebroAgentToolAccess :many
+SELECT
+    rt.tool_name,
+    rt.source,
+    rt.mcp_server_name,
+    rt.enabled                                              AS runtime_enabled,
+    (ov.tool_name IS NOT NULL)::boolean                     AS has_override,
+    COALESCE(ov.enabled, false)::boolean                    AS override_enabled,
+    COALESCE(wm.role IN ('owner', 'admin'), false)::boolean AS user_is_admin,
+    EXISTS (
+        SELECT 1 FROM cerebro_runtime_tool_user_grant ug
+        WHERE ug.runtime_id = rt.runtime_id
+          AND ug.tool_name = rt.tool_name
+          AND ug.user_id = $2
+    )::boolean                                              AS user_grant,
+    COALESCE((
+        SELECT string_agg(g.name, ', ' ORDER BY g.name)
+        FROM cerebro_runtime_tool_group_grant gg
+        JOIN cerebro_group_member gm ON gm.group_id = gg.group_id
+        JOIN cerebro_group g ON g.id = gg.group_id
+        WHERE gg.runtime_id = rt.runtime_id
+          AND gg.tool_name = rt.tool_name
+          AND gm.user_id = $2
+    ), '')::text                                            AS group_grants
+FROM cerebro_runtime_tool rt
+JOIN agent a ON a.runtime_id = rt.runtime_id
+LEFT JOIN cerebro_agent_runtime_tool_override ov
+       ON ov.agent_id = a.id AND ov.tool_name = rt.tool_name
+LEFT JOIN member wm
+       ON wm.workspace_id = a.workspace_id AND wm.user_id = $2
+WHERE a.id = $1
+ORDER BY rt.tool_name ASC
+`
+
+type ExplainCerebroAgentToolAccessParams struct {
+	ID     pgtype.UUID `json:"id"`
+	UserID pgtype.UUID `json:"user_id"`
+}
+
+type ExplainCerebroAgentToolAccessRow struct {
+	ToolName        string      `json:"tool_name"`
+	Source          string      `json:"source"`
+	McpServerName   pgtype.Text `json:"mcp_server_name"`
+	RuntimeEnabled  bool        `json:"runtime_enabled"`
+	HasOverride     bool        `json:"has_override"`
+	OverrideEnabled bool        `json:"override_enabled"`
+	UserIsAdmin     bool        `json:"user_is_admin"`
+	UserGrant       bool        `json:"user_grant"`
+	GroupGrants     string      `json:"group_grants"`
+}
+
+// Diagnostic companion to ResolveCerebroAgentToolAccess: returns EVERY tool on
+// the agent's runtime together with the inputs to the default-deny decision, so
+// an operator can see WHY a given user can or cannot call each tool. The final
+// "callable" verdict is computed by the caller from these columns, matching the
+// rule in 9032_cerebro_runtime_tool_grants:
+//
+//	runtime_enabled
+//	AND (NOT has_override OR override_enabled)
+//	AND (user_is_admin OR user_grant OR group_grants IS NOT NULL)
+func (q *Queries) ExplainCerebroAgentToolAccess(ctx context.Context, arg ExplainCerebroAgentToolAccessParams) ([]ExplainCerebroAgentToolAccessRow, error) {
+	rows, err := q.db.Query(ctx, explainCerebroAgentToolAccess, arg.ID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExplainCerebroAgentToolAccessRow{}
+	for rows.Next() {
+		var i ExplainCerebroAgentToolAccessRow
+		if err := rows.Scan(
+			&i.ToolName,
+			&i.Source,
+			&i.McpServerName,
+			&i.RuntimeEnabled,
+			&i.HasOverride,
+			&i.OverrideEnabled,
+			&i.UserIsAdmin,
+			&i.UserGrant,
+			&i.GroupGrants,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCerebroRuntimeTool = `-- name: GetCerebroRuntimeTool :one
 SELECT id, runtime_id, tool_name, source, mcp_server_name, description,
        schema_json, enabled, last_scanned_at, created_at, updated_at

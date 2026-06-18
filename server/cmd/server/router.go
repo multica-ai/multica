@@ -893,6 +893,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess) // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling
