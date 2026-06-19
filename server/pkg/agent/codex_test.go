@@ -1597,7 +1597,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 90 * time.Millisecond,
+		SemanticInactivityTimeout: 300 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
@@ -1634,7 +1634,7 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousDeltaProgress(t *testing.
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
-		SemanticInactivityTimeout: 150 * time.Millisecond,
+		SemanticInactivityTimeout: 300 * time.Millisecond,
 	})
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
@@ -1719,6 +1719,21 @@ func TestWithAgentStderrAppendsHint(t *testing.T) {
 	want := "codex initialize failed: process exited; codex stderr: unexpected argument '-m' found"
 	if msg != want {
 		t.Errorf("got %q, want %q", msg, want)
+	}
+}
+
+func TestBuildCodexArgsLetsToolSubprocessesInheritDaemonEnv(t *testing.T) {
+	args := buildCodexArgs(ExecOptions{
+		CustomArgs: []string{"-c", `shell_environment_policy.include_only=["PATH"]`},
+	}, slog.Default())
+	if len(args) < 5 {
+		t.Fatalf("args too short: %v", args)
+	}
+	if args[0] != "app-server" || args[1] != "--listen" || args[2] != "stdio://" {
+		t.Fatalf("expected app-server stdio prefix, got %v", args)
+	}
+	if args[len(args)-2] != "-c" || args[len(args)-1] != "shell_environment_policy.inherit=all" {
+		t.Fatalf("expected daemon env inheritance override at the end, got %v", args)
 	}
 }
 

@@ -101,6 +101,7 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	args = append(args, extra...)
 	args = append(args, custom...)
+	args = append(args, "-c", "shell_environment_policy.inherit=all")
 	return args
 }
 
