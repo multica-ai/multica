@@ -32,6 +32,12 @@ var (
 	ErrCLIVersionTooOld  = errors.New("multica CLI version is below required minimum")
 )
 
+// devBuildVersion is the default version string set in cmd/multica/main.go for
+// unbuilt source runs (go run, go test, bare go build without ldflags). Like
+// git-describe builds, dev builders are working from the source tree and should
+// not be gated by minimum-version checks.
+const devBuildVersion = "dev"
+
 // devDescribeRe matches the `git describe --tags --always --dirty` output for
 // a build past the latest tag, e.g. `v0.2.15-235-gdaf0e935` (optionally with a
 // trailing `-dirty`). Daemons built from source (Makefile `make build` / `make
@@ -54,6 +60,9 @@ func CheckMinCLIVersion(detected string) error {
 		return ErrCLIVersionMissing
 	}
 	if devDescribeRe.MatchString(d) {
+		return nil
+	}
+	if d == devBuildVersion {
 		return nil
 	}
 	parsed, err := parseSemver(d)
