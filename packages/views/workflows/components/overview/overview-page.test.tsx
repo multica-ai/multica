@@ -212,7 +212,7 @@ describe("WorkflowOverviewPage", () => {
 
   describe("Stage selection", () => {
     it("selects a stage and shows its DAG", () => {
-      const { getByTestId, queryByTestId } = renderWithI18n(<WorkflowOverviewPage workflowId="wf-1" />);
+      const { getByTestId } = renderWithI18n(<WorkflowOverviewPage workflowId="wf-1" />);
 
       // Auto-select: the first stage (stage-1) is selected on load
       // DAG should show stage 1's nodes (n1, n2)

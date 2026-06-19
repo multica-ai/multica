@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -46,9 +47,10 @@ import type { WorkflowStatus } from "@multica/core/types";
 
 interface WorkflowDetailPageProps {
   workflowId: string;
+  viewToggle?: ReactNode;
 }
 
-export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) {
+export function WorkflowDetailPage({ workflowId: id, viewToggle }: WorkflowDetailPageProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -449,6 +451,7 @@ export function WorkflowDetailPage({ workflowId: id }: WorkflowDetailPageProps) 
               </Button>
             </>
           )}
+          {viewToggle}
           <Button
             size="sm"
             variant={workflow?.status === "active" ? "secondary" : "default"}

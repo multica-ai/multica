@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { WorkflowDetailPage } from "@multica/views/workflows/components";
+import { WorkflowDetailShell } from "@multica/views/workflows/components";
 
 export default function Page({
   params,
@@ -9,5 +9,5 @@ export default function Page({
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  return <WorkflowDetailPage workflowId={id} />;
+  return <WorkflowDetailShell workflowId={id} />;
 }

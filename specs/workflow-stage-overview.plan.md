@@ -1,13 +1,14 @@
 # Workflow Stage Overview — Self-Verifying & Self-Healing Test Plan
 
-**Feature:** Workflow 阶段可视化概览页 (`/workflows/[id]/overview`)
+**Feature:** Workflow 阶段可视化概览页（`/workflows/[id]` 默认视图）
 **Design doc:** `docs/superpowers/specs/2026-06-19-workflow-stage-overview-design.md`
 **Generated:** 2026-06-19
+**Updated:** 2026-06-19 (概览作为默认视图 + 视图切换)
 **Tool:** playwright-cli (spec-driven testing: plan → generate → heal)
 
 ## Application Overview
 
-The Workflow Stage Overview page introduces a three-layer drill-down view for understanding workflow structure: a horizontally scrollable stage card strip → a read-only ReactFlow DAG for the selected stage → a slide-out drawer showing node configuration details. It supports lightweight stage editing (create, rename, delete, reorder) while keeping node-level configuration read-only. The page complements the existing `WorkflowDetailPage` editor — changes made in either page sync via the shared TanStack Query cache key.
+The Workflow Stage Overview page is the **default view** for `/workflows/[id]`. It introduces a three-layer drill-down view: a horizontally scrollable stage card strip → a read-only ReactFlow DAG for the selected stage → a slide-out drawer showing node configuration details. A DropdownMenu view toggle in the header allows switching between overview and editor views. View preference is persisted per workspace via Zustand. Changes sync between views via the shared TanStack Query cache key.
 
 ## Self-Healing Strategy
 
@@ -53,16 +54,15 @@ For maximum test stability, the implementation should include these `data-testid
 1. From the workspace dashboard, navigate to the workflow list
    - expect: URL matches `/{slug}/workflows`
    - expect: at least one workflow card or list item is visible
-2. Click on a workflow to open its detail page
+2. Click on a workflow to open its default page
    - expect: URL matches `/{slug}/workflows/{id}`
-3. Click the "Overview" tab or navigation link
-   - expect: URL matches `/{slug}/workflows/{id}/overview`
-   - expect: the stage canvas area is visible
+   - expect: the stage canvas area is visible (overview is the default view)
    - expect: page heading contains the workflow name
+   - expect: a view toggle button is visible in the header (DropdownMenu)
 
 **Heal hints:**
-- If "Overview" tab is renamed, check for link with `/overview` href suffix
-- If workflow list is empty, seed a workflow via `TestApiClient`
+- Overview is now the default — no need to click an "Overview" tab
+- If view toggle button is renamed, check for button with `title="View"` or Layers/Pen icon
 
 #### 1.2. overview-page-shell-structure
 
@@ -519,12 +519,14 @@ For maximum test stability, the implementation should include these `data-testid
 **Steps:**
 1. Open the detail panel for a node
 2. Click the "Open in editor" button in the panel footer
-   - expect: navigation to `/workflows/{id}` (editor page)
-   - expect: the editor page loads successfully
-   - expect: the same workflow is displayed in the editor
+   - expect: view switches to editor view **in-place** (no URL change from `/workflows/{id}`)
+   - expect: the editor's ReactFlow DAG is displayed
+   - expect: the same workflow's nodes are visible in the editor
+   - expect: the view toggle button now shows the editor icon
 
 **Heal hints:**
 - Button text: `/Open in editor|在编辑器中打开/`
+- No navigation occurs — URL stays at `/workflows/{id}`
 - URL change: `page.waitForURL()` for the editor route
 
 #### 7.2. editor-changes-sync-to-overview

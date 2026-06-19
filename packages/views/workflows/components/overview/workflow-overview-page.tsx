@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -24,6 +24,7 @@ import { StageCreateDialog } from "./stage-create-dialog";
 
 export interface WorkflowOverviewPageProps {
   workflowId: string;
+  viewToggle?: ReactNode;
 }
 
 /** Loading skeleton for the stage card strip — 5 gray pulse placeholder cards. */
@@ -37,7 +38,7 @@ function StageCanvasSkeleton() {
   );
 }
 
-export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) {
+export function WorkflowOverviewPage({ workflowId, viewToggle }: WorkflowOverviewPageProps) {
   const { t } = useT("workflows");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -170,6 +171,7 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
         <div className="flex items-center gap-2 min-w-0">
           <h1 className="text-sm font-medium truncate">{workflow.title}</h1>
         </div>
+        {viewToggle && <div className="flex items-center gap-1">{viewToggle}</div>}
       </PageHeader>
 
       <div className="flex-1 overflow-auto p-6">
@@ -203,7 +205,6 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
       {selectedNodeId && (
         <NodeDetailPanel
           nodeId={selectedNodeId}
-          workflowId={workflowId}
           nodes={nodes}
           edges={edges}
           onClose={handleNodeDetailClose}

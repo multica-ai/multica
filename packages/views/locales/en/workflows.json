@@ -250,6 +250,11 @@
       "cancel": "Cancel"
     }
   },
+  "view": {
+    "section": "View",
+    "overview": "Overview",
+    "editor": "Editor"
+  },
   "my_tasks": {
     "title": "My Tasks",
     "empty": "No pending workflow tasks",

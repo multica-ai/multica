@@ -71,6 +71,7 @@
     "./autopilots/mutations": "./autopilots/mutations.ts",
     "./workflows/queries": "./workflows/queries.ts",
     "./workflows/store": "./workflows/store.ts",
+    "./workflows/stores/view-store": "./workflows/stores/view-store.ts",
     "./pins": "./pins/index.ts",
     "./pins/queries": "./pins/queries.ts",
     "./pins/mutations": "./pins/mutations.ts",

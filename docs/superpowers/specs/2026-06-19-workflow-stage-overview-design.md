@@ -17,7 +17,7 @@
 
 ## 2. Goal
 
-为 Workflow 新增一个 `/workflows/[id]/overview` 概览页，实现：
+为 Workflow 新增一个概览页作为 `/workflows/[id]` 的默认视图，实现：
 
 - **阶段画布**：阶段卡片横向排列，展示全局阶段划分和每个阶段的节点数
 - **阶段内节点 DAG**：点击阶段后展开该阶段内的只读 ReactFlow 画布，展示节点和边
@@ -36,12 +36,12 @@
 
 ## 4. Architecture Decisions
 
-### 4.1 页面关系：新增而非替换
+### 4.1 页面关系：概览作为默认视图
 
-保留 `WorkflowDetailPage`（编辑器），新建 `WorkflowOverviewPage`（查看/轻量编辑）。路由设计：
+`/workflows/[id]` 默认展示阶段概览页。通过 header 的视图切换 DropdownMenu 可在概览和编辑器之间切换。视图偏好通过 Zustand store 持久化（per workspace）。
 
-- `/workflows/[id]` — 现有编辑器（不变）
-- `/workflows/[id]/overview` — 新增概览页
+- `/workflows/[id]` — 概览页（默认）+ 视图切换至编辑器
+- `/workflows/[id]/overview` — 重定向至 `/workflows/[id]`
 - `/workflows/[id]/runs` — 运行历史（不变）
 - `/workflows/[id]/runs/[runId]` — 运行详情（不变）
 

@@ -249,6 +249,11 @@
       "cancel": "取消"
     }
   },
+  "view": {
+    "section": "视图",
+    "overview": "概览",
+    "editor": "编辑器"
+  },
   "my_tasks": {
     "title": "我的任务",
     "empty": "暂无待处理的工作流任务",
