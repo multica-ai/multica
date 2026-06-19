@@ -217,7 +217,10 @@ function renderProjects(adapter = makeAdapter()) {
 }
 
 function projectRow() {
-  const row = screen.getByText(PROJECT.title).closest('[role="row"]');
+  const row = screen
+    .getAllByText(PROJECT.title)
+    .map((el) => el.closest('[role="row"]'))
+    .find(Boolean);
   if (!row) throw new Error("project row not found");
   return row as HTMLElement;
 }
@@ -320,5 +323,28 @@ describe("ProjectsPage compact row navigation", () => {
     expect(push).toHaveBeenNthCalledWith(1, "/test-workspace/projects/project-1");
     expect(push).toHaveBeenNthCalledWith(2, "/test-workspace/projects/project-1");
     expect(push).toHaveBeenNthCalledWith(3, "/test-workspace/projects/project-1");
+  });
+});
+
+describe("ProjectsPage header issue creation", () => {
+  it("opens the create issue modal with the selected project", async () => {
+    const user = userEvent.setup();
+    renderProjects();
+
+    await user.click(screen.getByRole("button", { name: "New Issue" }));
+    await user.click(screen.getByRole("button", { name: "Launch Plan" }));
+
+    expect(mocks.openModal).toHaveBeenCalledWith("create-issue", {
+      project_id: "project-1",
+    });
+  });
+
+  it("disables the new issue entry when there are no projects", () => {
+    mocks.projects = [];
+
+    renderProjects();
+
+    expect(screen.getByRole("button", { name: "New Issue" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Launch Plan" })).not.toBeInTheDocument();
   });
 });

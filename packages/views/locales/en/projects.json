@@ -2,6 +2,9 @@
   "page": {
     "title": "Projects",
     "new_project": "New project",
+    "new_issue": "New Issue",
+    "new_issue_disabled": "Create a project before adding issues",
+    "select_issue_project": "Select project",
     "empty": "No projects yet",
     "create_first": "Create your first project",
     "view_compact": "Compact",

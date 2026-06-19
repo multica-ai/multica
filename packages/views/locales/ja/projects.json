@@ -2,6 +2,9 @@
   "page": {
     "title": "プロジェクト",
     "new_project": "新規プロジェクト",
+    "new_issue": "新規 Issue",
+    "new_issue_disabled": "Issue を追加する前にプロジェクトを作成してください",
+    "select_issue_project": "プロジェクトを選択",
     "empty": "プロジェクトはまだありません",
     "create_first": "最初のプロジェクトを作成",
     "view_compact": "コンパクト",

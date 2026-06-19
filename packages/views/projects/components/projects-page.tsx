@@ -14,6 +14,7 @@ import {
   Plus,
   Rows3,
   Search,
+  SquarePen,
   Trash2,
   X,
 } from "lucide-react";
@@ -764,6 +765,63 @@ function ProjectBatchToolbar({
   );
 }
 
+function NewIssueProjectPicker({ projects }: { projects: Project[] }) {
+  const { t } = useT("projects");
+  const [open, setOpen] = useState(false);
+  const hasProjects = projects.length > 0;
+
+  const openCreateIssue = (projectId: string) => {
+    useModalStore.getState().open("create-issue", { project_id: projectId });
+    setOpen(false);
+  };
+
+  const trigger = (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+      aria-label={t(($) => $.page.new_issue)}
+      disabled={!hasProjects}
+    >
+      <SquarePen className="h-3.5 w-3.5" />
+      <span className="hidden md:inline">{t(($) => $.page.new_issue)}</span>
+    </Button>
+  );
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <PopoverTrigger render={<TooltipTrigger render={trigger} />} />
+        <TooltipContent side="bottom">
+          {hasProjects
+            ? t(($) => $.page.new_issue)
+            : t(($) => $.page.new_issue_disabled)}
+        </TooltipContent>
+      </Tooltip>
+      {hasProjects && (
+        <PopoverContent align="end" className="w-64 p-1">
+          <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+            {t(($) => $.page.select_issue_project)}
+          </div>
+          <div className="max-h-72 overflow-y-auto">
+            {projects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => openCreateIssue(project.id)}
+              >
+                <ProjectIcon project={project} size="sm" />
+                <span className="truncate">{project.title}</span>
+              </button>
+            ))}
+          </div>
+        </PopoverContent>
+      )}
+    </Popover>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -923,16 +981,19 @@ export function ProjectsPage() {
             </span>
           )}
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_project)}
-          onClick={openCreateProject}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
-        </Button>
+        <div className="flex items-center gap-1">
+          <NewIssueProjectPicker projects={projects} />
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.page.new_project)}
+            onClick={openCreateProject}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">{t(($) => $.page.new_project)}</span>
+          </Button>
+        </div>
       </PageHeader>
 
       {showEmpty ? (

@@ -2,6 +2,9 @@
   "page": {
     "title": "项目",
     "new_project": "新建项目",
+    "new_issue": "新建 Issue",
+    "new_issue_disabled": "请先创建项目再添加 Issue",
+    "select_issue_project": "选择项目",
     "empty": "还没有项目",
     "create_first": "创建第一个项目",
     "view_compact": "紧凑视图",

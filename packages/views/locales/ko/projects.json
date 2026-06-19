@@ -2,6 +2,9 @@
   "page": {
     "title": "프로젝트",
     "new_project": "새 프로젝트",
+    "new_issue": "새 Issue",
+    "new_issue_disabled": "이슈를 추가하려면 먼저 프로젝트를 만드세요",
+    "select_issue_project": "프로젝트 선택",
     "empty": "아직 프로젝트가 없습니다",
     "create_first": "첫 프로젝트 만들기",
     "view_compact": "간결하게",
