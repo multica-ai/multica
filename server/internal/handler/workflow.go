@@ -111,6 +111,35 @@ type ToggleTemplateRequest struct {
 	IsTemplate bool `json:"is_template"`
 }
 
+// ── Stage request/response types ──
+
+type CreateStageRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SortOrder   int32  `json:"sort_order"`
+}
+
+type UpdateStageRequest struct {
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	SortOrder   *int32  `json:"sort_order"`
+}
+
+type AssignNodeToStageRequest struct {
+	StageID *string `json:"stage_id"` // null means unassign
+}
+
+type WorkflowStageResponse struct {
+	ID          string `json:"id"`
+	WorkflowID  string `json:"workflow_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	SortOrder   int32  `json:"sort_order"`
+	NodeCount   int64  `json:"node_count"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type UpdateWorkflowAdminsRequest struct {
 	UserIDs []string `json:"user_ids"`
 }
@@ -170,6 +199,19 @@ func workflowEdgeToResponse(edge db.MulticaWorkflowEdge) WorkflowEdgeResponse {
 		TargetNodeID: uuidToString(edge.TargetNodeID),
 		Condition:    edge.Condition,
 		CreatedAt:    timestampToString(edge.CreatedAt),
+	}
+}
+
+func workflowStageToResponse(s db.MulticaWorkflowStage, nodeCount int64) WorkflowStageResponse {
+	return WorkflowStageResponse{
+		ID:          uuidToString(s.ID),
+		WorkflowID:  uuidToString(s.WorkflowID),
+		Name:        s.Name,
+		Description: s.Description,
+		SortOrder:   s.SortOrder,
+		NodeCount:   nodeCount,
+		CreatedAt:   timestampToString(s.CreatedAt),
+		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}
 }
 
@@ -322,6 +364,11 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list edges")
 		return
 	}
+	stages, err := h.Queries.ListWorkflowStagesByWorkflow(r.Context(), wf.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list stages")
+		return
+	}
 
 	nodeResps := make([]WorkflowNodeResponse, 0, len(nodes))
 	for _, n := range nodes {
@@ -331,11 +378,17 @@ func (h *Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 	for _, e := range edges {
 		edgeResps = append(edgeResps, workflowEdgeToResponse(e))
 	}
+	stageResps := make([]WorkflowStageResponse, 0, len(stages))
+	for _, s := range stages {
+		count, _ := h.Queries.CountWorkflowStageNodes(r.Context(), s.ID)
+		stageResps = append(stageResps, workflowStageToResponse(s, count))
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workflow": workflowToResponse(wf, int64(len(nodes))),
 		"nodes":    nodeResps,
 		"edges":    edgeResps,
+		"stages":   stageResps,
 	})
 }
 
@@ -645,6 +698,24 @@ func (h *Handler) CreateWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate same stage: nodes must belong to the same stage (or both unassigned)
+	sourceNode, err := h.Queries.GetWorkflowNode(r.Context(), srcID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "source node not found")
+		return
+	}
+	targetNode, err := h.Queries.GetWorkflowNode(r.Context(), tgtID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "target node not found")
+		return
+	}
+	sourceStageID := uuidToString(sourceNode.StageID)
+	targetStageID := uuidToString(targetNode.StageID)
+	if sourceStageID != targetStageID {
+		writeError(w, http.StatusBadRequest, "nodes must belong to the same stage")
+		return
+	}
+
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, _ := requireUserID(w, r)
 
@@ -687,6 +758,217 @@ func (h *Handler) DeleteWorkflowEdge(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventWorkflowUpdated, workspaceID, "member", userID, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"deleted": edgeID})
 }
+
+// ── Stage Handlers ─────────────────────────────────────────────────────────────
+
+func (h *Handler) ListWorkflowStages(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, wfID)
+	if !ok {
+		return
+	}
+
+	stages, err := h.Queries.ListWorkflowStagesByWorkflow(r.Context(), wf.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list stages")
+		return
+	}
+
+	resps := make([]WorkflowStageResponse, 0, len(stages))
+	for _, s := range stages {
+		count, _ := h.Queries.CountWorkflowStageNodes(r.Context(), s.ID)
+		resps = append(resps, workflowStageToResponse(s, count))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stages": resps})
+}
+
+func (h *Handler) CreateWorkflowStage(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, wfID)
+	if !ok {
+		return
+	}
+
+	var req CreateStageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+
+	stage, err := h.Queries.CreateWorkflowStage(r.Context(), db.CreateWorkflowStageParams{
+		WorkflowID:  wf.ID,
+		Name:        req.Name,
+		Description: nonNullText(req.Description),
+		SortOrder:   req.SortOrder,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create stage")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, workflowStageToResponse(stage, 0))
+}
+
+func (h *Handler) UpdateWorkflowStage(w http.ResponseWriter, r *http.Request) {
+	stageID := chi.URLParam(r, "stageId")
+	stage, ok := h.loadWorkflowStage(w, r, stageID)
+	if !ok {
+		return
+	}
+
+	var req UpdateStageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	updated, err := h.Queries.UpdateWorkflowStage(r.Context(), db.UpdateWorkflowStageParams{
+		ID:          stage.ID,
+		Name:        ptrToText(req.Name),
+		Description: ptrToText(req.Description),
+		SortOrder:   int32ToInt4(req.SortOrder),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update stage")
+		return
+	}
+
+	count, _ := h.Queries.CountWorkflowStageNodes(r.Context(), updated.ID)
+	writeJSON(w, http.StatusOK, workflowStageToResponse(updated, count))
+}
+
+func (h *Handler) DeleteWorkflowStage(w http.ResponseWriter, r *http.Request) {
+	stageID := chi.URLParam(r, "stageId")
+	_, ok := h.loadWorkflowStage(w, r, stageID)
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.DeleteWorkflowStage(r.Context(), parseUUID(stageID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete stage")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+func (h *Handler) ReorderWorkflowStages(w http.ResponseWriter, r *http.Request) {
+	type reorderItem struct {
+		ID        string `json:"id"`
+		SortOrder int32  `json:"sort_order"`
+	}
+	var items []reorderItem
+	if err := json.NewDecoder(r.Body).Decode(&items); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	for _, item := range items {
+		_, err := h.Queries.UpdateWorkflowStage(r.Context(), db.UpdateWorkflowStageParams{
+			ID:        parseUUID(item.ID),
+			SortOrder: int32ToInt4(&item.SortOrder),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reorder stages")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reordered"})
+}
+
+func (h *Handler) AssignNodeToStage(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	nodeID := chi.URLParam(r, "nodeId")
+	node, ok := h.loadWorkflowNode(w, r, wfID, nodeID)
+	if !ok {
+		return
+	}
+
+	var req AssignNodeToStageRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.StageID == nil {
+		// Unassign
+		updated, err := h.Queries.UnassignNodeFromStage(r.Context(), node.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to unassign node")
+			return
+		}
+		writeJSON(w, http.StatusOK, workflowNodeToResponse(updated))
+		return
+	}
+
+	// Verify target stage belongs to same workflow
+	stageID := parseUUID(*req.StageID)
+	stage, err := h.Queries.GetWorkflowStage(r.Context(), stageID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "stage not found")
+		return
+	}
+	if uuidToString(stage.WorkflowID) != uuidToString(node.WorkflowID) {
+		writeError(w, http.StatusBadRequest, "stage does not belong to this workflow")
+		return
+	}
+
+	updated, err := h.Queries.AssignNodeToStage(r.Context(), db.AssignNodeToStageParams{
+		ID:      node.ID,
+		StageID: stageID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to assign node to stage")
+		return
+	}
+	writeJSON(w, http.StatusOK, workflowNodeToResponse(updated))
+}
+
+// ── Stage loader ──
+
+func (h *Handler) loadWorkflowStage(w http.ResponseWriter, r *http.Request, stageID string) (db.MulticaWorkflowStage, bool) {
+	id, ok := parseUUIDOrBadRequest(w, stageID, "stageId")
+	if !ok {
+		return db.MulticaWorkflowStage{}, false
+	}
+
+	stage, err := h.Queries.GetWorkflowStage(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "stage not found")
+		return db.MulticaWorkflowStage{}, false
+	}
+	return stage, true
+}
+
+func (h *Handler) loadWorkflowNode(w http.ResponseWriter, r *http.Request, wfID, nodeID string) (db.MulticaWorkflowNode, bool) {
+	nID, ok := parseUUIDOrBadRequest(w, nodeID, "node ID")
+	if !ok {
+		return db.MulticaWorkflowNode{}, false
+	}
+
+	wfUUID, ok := parseUUIDOrBadRequest(w, wfID, "workflow ID")
+	if !ok {
+		return db.MulticaWorkflowNode{}, false
+	}
+
+	node, err := h.Queries.GetWorkflowNode(r.Context(), nID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "node not found")
+		return db.MulticaWorkflowNode{}, false
+	}
+
+	if uuidToString(node.WorkflowID) != uuidToString(wfUUID) {
+		writeError(w, http.StatusNotFound, "node not found in this workflow")
+		return db.MulticaWorkflowNode{}, false
+	}
+
+	return node, true
+}
+
 
 // ── Template ───────────────────────────────────────────────────────────────────
 
