@@ -814,8 +814,14 @@ func (h *Handler) CreateWorkflowStage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateWorkflowStage(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, wfID)
+	if !ok {
+		return
+	}
+
 	stageID := chi.URLParam(r, "stageId")
-	stage, ok := h.loadWorkflowStage(w, r, stageID)
+	stage, ok := h.loadWorkflowStage(w, r, stageID, wf.ID)
 	if !ok {
 		return
 	}
@@ -842,13 +848,19 @@ func (h *Handler) UpdateWorkflowStage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteWorkflowStage(w http.ResponseWriter, r *http.Request) {
-	stageID := chi.URLParam(r, "stageId")
-	_, ok := h.loadWorkflowStage(w, r, stageID)
+	wfID := chi.URLParam(r, "id")
+	wf, ok := h.loadWorkflowInWorkspace(w, r, wfID)
 	if !ok {
 		return
 	}
 
-	if err := h.Queries.DeleteWorkflowStage(r.Context(), parseUUID(stageID)); err != nil {
+	stageID := chi.URLParam(r, "stageId")
+	stage, ok := h.loadWorkflowStage(w, r, stageID, wf.ID)
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.DeleteWorkflowStage(r.Context(), stage.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete stage")
 		return
 	}
@@ -866,9 +878,23 @@ func (h *Handler) ReorderWorkflowStages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Pre-validate all item IDs before applying any updates
+	type validatedItem struct {
+		ID        pgtype.UUID
+		SortOrder int32
+	}
+	validated := make([]validatedItem, 0, len(items))
 	for _, item := range items {
+		id, ok := parseUUIDOrBadRequest(w, item.ID, "stage ID")
+		if !ok {
+			return
+		}
+		validated = append(validated, validatedItem{ID: id, SortOrder: item.SortOrder})
+	}
+
+	for _, item := range validated {
 		_, err := h.Queries.UpdateWorkflowStage(r.Context(), db.UpdateWorkflowStageParams{
-			ID:        parseUUID(item.ID),
+			ID:        item.ID,
 			SortOrder: int32ToInt4(&item.SortOrder),
 		})
 		if err != nil {
@@ -906,7 +932,10 @@ func (h *Handler) AssignNodeToStage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify target stage belongs to same workflow
-	stageID := parseUUID(*req.StageID)
+	stageID, ok := parseUUIDOrBadRequest(w, *req.StageID, "stage_id")
+	if !ok {
+		return
+	}
 	stage, err := h.Queries.GetWorkflowStage(r.Context(), stageID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "stage not found")
@@ -930,7 +959,7 @@ func (h *Handler) AssignNodeToStage(w http.ResponseWriter, r *http.Request) {
 
 // ── Stage loader ──
 
-func (h *Handler) loadWorkflowStage(w http.ResponseWriter, r *http.Request, stageID string) (db.MulticaWorkflowStage, bool) {
+func (h *Handler) loadWorkflowStage(w http.ResponseWriter, r *http.Request, stageID string, wfID pgtype.UUID) (db.MulticaWorkflowStage, bool) {
 	id, ok := parseUUIDOrBadRequest(w, stageID, "stageId")
 	if !ok {
 		return db.MulticaWorkflowStage{}, false
@@ -941,6 +970,13 @@ func (h *Handler) loadWorkflowStage(w http.ResponseWriter, r *http.Request, stag
 		writeError(w, http.StatusNotFound, "stage not found")
 		return db.MulticaWorkflowStage{}, false
 	}
+
+	// Verify the stage belongs to the specified workflow
+	if wfID != (pgtype.UUID{}) && stage.WorkflowID != wfID {
+		writeError(w, http.StatusNotFound, "stage not found in this workflow")
+		return db.MulticaWorkflowStage{}, false
+	}
+
 	return stage, true
 }
 

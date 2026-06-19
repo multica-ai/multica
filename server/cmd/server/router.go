@@ -537,6 +537,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/edges/{edgeId}", h.DeleteWorkflowEdge)
 						// Stages
 						r.Post("/stages", h.CreateWorkflowStage)
+						r.Get("/stages", h.ListWorkflowStages)
 						r.Put("/stages/reorder", h.ReorderWorkflowStages)
 						r.Route("/stages/{stageId}", func(r chi.Router) {
 							r.Put("/", h.UpdateWorkflowStage)
