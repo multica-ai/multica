@@ -563,6 +563,76 @@ func (h *Handler) CreateIssueSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
+func (h *Handler) createSkillFromDoneIssue(ctx context.Context, issue db.Issue, creatorID pgtype.UUID) (bool, error) {
+	var existing pgtype.UUID
+	err := h.DB.QueryRow(ctx, `
+		SELECT skill_id
+		FROM issue_skill_source
+		WHERE issue_id = $1 AND workspace_id = $2
+	`, issue.ID, issue.WorkspaceID).Scan(&existing)
+	if err == nil {
+		return false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false, err
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	skill, err := createSkillWithFilesInTx(ctx, qtx, skillCreateInput{
+		WorkspaceID: issue.WorkspaceID,
+		CreatorID:   creatorID,
+		Name:        autoIssueSkillName(issue),
+		Description: "Captured from a resolved issue.",
+		Content:     autoIssueSkillContent(issue),
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	if _, err := qtx.CreateIssueSkillSource(ctx, db.CreateIssueSkillSourceParams{
+		SkillID:     parseUUID(skill.ID),
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		CreatedBy:   creatorID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func autoIssueSkillName(issue db.Issue) string {
+	return fmt.Sprintf("Issue %d: %s", issue.Number, issue.Title)
+}
+
+func autoIssueSkillContent(issue db.Issue) string {
+	var b strings.Builder
+	b.WriteString("# ")
+	b.WriteString(issue.Title)
+	b.WriteString("\n\n")
+	if issue.Description.Valid && strings.TrimSpace(issue.Description.String) != "" {
+		b.WriteString(strings.TrimSpace(issue.Description.String))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Source issue: ")
+	b.WriteString(uuidToString(issue.ID))
+	b.WriteString("\n")
+	return b.String()
+}
+
 func (h *Handler) SearchSkillEmbeddings(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")

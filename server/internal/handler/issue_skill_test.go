@@ -38,6 +38,98 @@ func createDoneIssueForSkillTest(t *testing.T, title string) string {
 	return resp.ID
 }
 
+func countIssueSkillSources(t *testing.T, issueID string) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM issue_skill_source WHERE issue_id = $1`,
+		issueID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count issue skill sources: %v", err)
+	}
+	return count
+}
+
+func countIssueSkillFiles(t *testing.T, issueID string) int {
+	t.Helper()
+	var count int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM skill_file sf
+		JOIN issue_skill_source iss ON iss.skill_id = sf.skill_id
+		WHERE iss.issue_id = $1
+	`, issueID).Scan(&count); err != nil {
+		t.Fatalf("count issue skill files: %v", err)
+	}
+	return count
+}
+
+func cleanupAutoIssueSkillByTitle(t *testing.T, title string) {
+	t.Helper()
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM skill WHERE workspace_id = $1 AND name LIKE $2`,
+			testWorkspaceID,
+			"%: "+title,
+		)
+	})
+}
+
+func TestUpdateIssueDoneCapturesSkillOnce(t *testing.T) {
+	title := "update done capture once"
+	issueID := createTestIssue(t, title, "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+	cleanupAutoIssueSkillByTitle(t, title)
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countIssueSkillSources(t, issueID); got != 1 {
+		t.Fatalf("skill sources after done = %d, want 1", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"title":  title + " edited",
+		"status": "done",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue repeat done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countIssueSkillSources(t, issueID); got != 1 {
+		t.Fatalf("skill sources after repeat done = %d, want 1", got)
+	}
+	if got := countIssueSkillFiles(t, issueID); got != 0 {
+		t.Fatalf("auto issue skill files = %d, want 0", got)
+	}
+}
+
+func TestIssueCommentDoesNotCaptureSkill(t *testing.T) {
+	title := "comment does not capture skill"
+	issueID := createTestIssue(t, title, "done", "none")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+	cleanupAutoIssueSkillByTitle(t, title)
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "a comment on a done issue is not a done transition",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.CreateComment(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countIssueSkillSources(t, issueID); got != 0 {
+		t.Fatalf("comment created %d issue skill sources, want 0", got)
+	}
+}
+
 func TestCreateIssueSkillRejectsInvalidIssueID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodPost, "/api/issues/not-a-uuid/skills", map[string]any{

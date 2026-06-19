@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -118,6 +119,72 @@ func TestBatchUpdateValidUpdatesPersistAndCount(t *testing.T) {
 		if got.Status != "in_progress" {
 			t.Errorf("issue %s: expected status=in_progress, got %q", id, got.Status)
 		}
+	}
+}
+
+func TestBatchUpdateDoneCapturesSkillOnceAndSkipsForeignWorkspace(t *testing.T) {
+	aTitle := "batch done capture once A"
+	bTitle := "batch done capture once B"
+	a := createTestIssue(t, aTitle, "todo", "none")
+	b := createTestIssue(t, bTitle, "done", "none")
+	t.Cleanup(func() { deleteTestIssue(t, a) })
+	t.Cleanup(func() { deleteTestIssue(t, b) })
+	cleanupAutoIssueSkillByTitle(t, aTitle)
+	cleanupAutoIssueSkillByTitle(t, bTitle)
+
+	ctx := context.Background()
+	var otherWorkspaceID, foreignIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, issue_prefix)
+		VALUES ('Batch Issue Skill Other', 'batch-issue-skill-other', 'BIS')
+		RETURNING id
+	`).Scan(&otherWorkspaceID); err != nil {
+		t.Fatalf("create other workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, status, number)
+		VALUES ($1, 'member', $2, 'foreign batch done', 'todo', 1)
+		RETURNING id
+	`, otherWorkspaceID, testUserID).Scan(&foreignIssueID); err != nil {
+		t.Fatalf("create foreign issue: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a, a, b, foreignIssueID},
+		"updates":   map[string]any{"status": "done"},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues done: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countIssueSkillSources(t, a); got != 1 {
+		t.Fatalf("todo->done issue skill sources = %d, want 1", got)
+	}
+	if got := countIssueSkillSources(t, b); got != 0 {
+		t.Fatalf("done->done issue skill sources = %d, want 0", got)
+	}
+	if got := countIssueSkillSources(t, foreignIssueID); got != 0 {
+		t.Fatalf("foreign issue skill sources = %d, want 0", got)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{a},
+		"updates":   map[string]any{"title": aTitle + " edited"},
+	})
+	testHandler.BatchUpdateIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues title: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countIssueSkillSources(t, a); got != 1 {
+		t.Fatalf("title update duplicated issue skill sources = %d, want 1", got)
+	}
+	if got := countIssueSkillFiles(t, a); got != 0 {
+		t.Fatalf("auto issue skill files = %d, want 0", got)
 	}
 }
 

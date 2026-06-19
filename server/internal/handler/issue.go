@@ -2577,6 +2577,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+		if prevIssue.Status != "done" && issue.Status == "done" {
+			creatorID, err := util.ParseUUID(userID)
+			if err == nil {
+				if _, err := h.createSkillFromDoneIssue(r.Context(), issue, creatorID); err != nil {
+					slog.Warn("create issue skill from done issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)...)
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -3063,6 +3071,14 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// (MUL-2538). Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue, actorType, actorID)
+			if prevIssue.Status != "done" && issue.Status == "done" {
+				creatorID, err := util.ParseUUID(userID)
+				if err == nil {
+					if _, err := h.createSkillFromDoneIssue(r.Context(), issue, creatorID); err != nil {
+						slog.Warn("batch create issue skill from done issue failed", "error", err, "issue_id", uuidToString(issue.ID), "workspace_id", workspaceID)
+					}
+				}
+			}
 		}
 
 		updated++
