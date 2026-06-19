@@ -11,8 +11,8 @@
 // Depends on: backend workflow + stage API, frontend overview page.
 // Expected to fail until the frontend implementation is built.
 
+import { test, expect } from "@playwright/test";
 import { loginAsDefault, createTestApi } from "../helpers";
-import { test, expect } from "../seed-workflow-overview";
 import type { TestApiClient } from "../fixtures";
 
 test.describe("Overview Page Shell Structure", () => {

@@ -6,8 +6,8 @@
 // Depends on: backend workflow API, frontend workflow pages.
 // Expected to fail until the frontend implementation is built.
 
+import { test, expect } from "@playwright/test";
 import { loginAsDefault, createTestApi } from "../helpers";
-import { test, expect } from "../seed-workflow-overview";
 import type { TestApiClient } from "../fixtures";
 
 test.describe("Workflow Overview Navigation", () => {
@@ -47,7 +47,8 @@ test.describe("Workflow Overview Navigation", () => {
 
     // Step 3: Click on the first workflow card to open its detail page
     await workflowCards.first().click();
-    await page.waitForURL(`/${slug}/workflows/`);
+    // Wait for a URL like /{slug}/workflows/{id}
+    await page.waitForURL(`/**/workflows/*`);
 
     // Expect a workflow detail URL: /{slug}/workflows/{id}
     const workflowDetailPattern = new RegExp(`/${slug}/workflows/[a-f0-9-]+$`);
@@ -63,7 +64,7 @@ test.describe("Workflow Overview Navigation", () => {
     await overviewTab.first().click();
 
     // Step 5: Expect the URL to match /{slug}/workflows/{id}/overview
-    await page.waitForURL(`/${slug}/workflows/`);
+    await page.waitForURL(`/**/workflows/*/overview`);
     const overviewPattern = new RegExp(`/${slug}/workflows/[a-f0-9-]+/overview`);
     await expect(page).toHaveURL(overviewPattern);
 
