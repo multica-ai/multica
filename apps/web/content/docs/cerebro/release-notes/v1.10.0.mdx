@@ -1,0 +1,40 @@
+---
+title: "Multica v1.10.0"
+description: "22 release bullets: 8 new, 10 fixed, 4 other changes."
+date: 2026-06-19
+---
+
+**Release summary:** 22 release bullets: 8 new, 10 fixed, 4 other changes.
+
+Changes since [v1.9.1](https://github.com/firtal-group/firtal-cerebro/compare/v1.9.1...v1.10.0) — bump: **minor**
+
+## New
+
+- Per-folder access control (FIR-1590) [#1533](https://github.com/firtal-group/firtal-cerebro/pull/1533)
+- Optional start/due time-of-day + scheduled agent start (FIR-1597) [#1532](https://github.com/firtal-group/firtal-cerebro/pull/1532)
+- Owner-controlled notifications + fork & agent-assign streams (FIR-1587) [#1530](https://github.com/firtal-group/firtal-cerebro/pull/1530)
+- Connections as a foldable per-connection tree (FIR-1512 Workstream B) [#1524](https://github.com/firtal-group/firtal-cerebro/pull/1524)
+- Relay local-runtime MCP connection calls through Multica (FIR-1563) [#1517](https://github.com/firtal-group/firtal-cerebro/pull/1517)
+- Multica permission explain — one read model first slice (FIR-1496) [#1514](https://github.com/firtal-group/firtal-cerebro/pull/1514)
+- Land stranded FIR-407 work — server-FTS in-conversation search + admin cross-conversation search [#1487](https://github.com/firtal-group/firtal-cerebro/pull/1487)
+- Tool list via per-tool policy chain (FIR-1512 Step 1) [#1513](https://github.com/firtal-group/firtal-cerebro/pull/1513)
+
+## Fixed
+
+- Inventory PUT /api/cerebro/issues/\{issueID}/date-times [#1534](https://github.com/firtal-group/firtal-cerebro/pull/1534)
+- Dedupe + reconcile wakeup runtime-brief rules (FIR-1585) [#1529](https://github.com/firtal-group/firtal-cerebro/pull/1529)
+- Apply Name template + cadence to manual New sprint [#1525](https://github.com/firtal-group/firtal-cerebro/pull/1525)
+- Render scheduled-run dot on inbox rows (FIR-1521) [#1527](https://github.com/firtal-group/firtal-cerebro/pull/1527)
+- Keep archived DMs recognised as channels across re-surface gap (FIR-1576) [#1521](https://github.com/firtal-group/firtal-cerebro/pull/1521)
+- Scheduled-run indicator is a dot, not a clock; English copy only [#1520](https://github.com/firtal-group/firtal-cerebro/pull/1520)
+- Resolve tool-grants catalog disjointness breaking main CI [#1519](https://github.com/firtal-group/firtal-cerebro/pull/1519)
+- Match Sprint property-row font size to other fields [#1516](https://github.com/firtal-group/firtal-cerebro/pull/1516)
+- Retry transient gateway transport drops + auto-pause on sustained outage (FIR-1561) [#1515](https://github.com/firtal-group/firtal-cerebro/pull/1515)
+- Readable type + seconds countdown on the bar, live orange clock in inbox (FIR-1521) [#1512](https://github.com/firtal-group/firtal-cerebro/pull/1512)
+
+## Other changes
+
+- Revert "feat(cerebro-tool-policy): connections as a foldable per-connection tree (FIR-1512 Workstream B) (#1524)" [#1526](https://github.com/firtal-group/firtal-cerebro/pull/1526)
+- Revert "feat(cerebro-permissions): multica permission explain — one read model first slice (FIR-1496) (#1514)" [#1523](https://github.com/firtal-group/firtal-cerebro/pull/1523)
+- Afvis self-tag som kommentarmodtager [#1489](https://github.com/firtal-group/firtal-cerebro/pull/1489)
+- Fix empty channel inbox timestamps [#1509](https://github.com/firtal-group/firtal-cerebro/pull/1509)
