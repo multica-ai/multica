@@ -539,12 +539,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 		b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 	}
-	if hasIssueContext { // CEREBRO-PATCH(runtime-config-no-busywait): FIR-2610 — standing rule: never busy-wait on CI/deploy
+	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
 		b.WriteString(cerebroNoBusyWaitRule())
-		b.WriteString(cerebroWakeupMandatoryRule()) // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3121 — set a wakeup and state the time whenever you comment about waiting or returning
-	}
-
-	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-mandatory): TECH-3038 Phase 1 — wakeup guidance (no recurring)
 		b.WriteString(cerebroWakeupMandatoryRule())
 	}
 

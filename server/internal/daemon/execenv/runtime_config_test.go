@@ -1597,3 +1597,42 @@ func TestNoBusyWaitRulePresentForIssueRunsOnly(t *testing.T) {
 		})
 	}
 }
+
+// FIR-1585 — the wakeup-mandatory section was emitted twice (TECH-3121 and
+// TECH-3038 each wrote it), which the cost-optimization inspector flagged as a
+// ~99% self-duplicate. It must now render exactly once. The no-busy-wait rule
+// must also no longer read as "exit and you'll be re-run for free" — it must
+// distinguish time-waits (need a wakeup) from event-waits, so it stops
+// contradicting the wakeup-mandatory section.
+func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
+	t.Parallel()
+	const wakeupHeading = "## Wakeup ved ventetid — obligatorisk (gælder ALLE agenter)"
+
+	for _, tc := range []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"assignment-triggered", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}},
+		{"comment-triggered", TaskContextForEnv{
+			IssueID:          "22222222-3333-4444-5555-666666666666",
+			TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+		}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if got := strings.Count(out, wakeupHeading); got != 1 {
+				t.Errorf("[%s] wakeup section must appear exactly once, got %d", tc.name, got)
+			}
+			for _, want := range []string{
+				"Waiting on the clock is not an event",
+				"you MUST schedule a wakeup first",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("[%s] no-busy-wait section missing reconciliation text %q", tc.name, want)
+				}
+			}
+		})
+	}
+}
