@@ -753,7 +753,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			switch {
 			case aborted:
 				finalStatus = "aborted"
-				finalError = "turn was aborted"
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalError = errMsg
+				} else {
+					finalError = "turn was aborted"
+				}
 			default:
 				if errMsg := c.getTurnError(); errMsg != "" {
 					finalStatus = "failed"
@@ -1462,11 +1466,37 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/fileChange/requestApproval", "applyPatchApproval":
 		c.respond(id, map[string]any{"decision": "accept"})
+	case "item/permissions/requestApproval":
+		c.respond(id, codexPermissionsApprovalResponse(raw["params"]))
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
+		msg := fmt.Sprintf("unsupported codex app-server request: %s", method)
 		c.cfg.Logger.Warn("codex: unhandled server request", "method", method, "id", id)
-		c.respondError(id, -32601, fmt.Sprintf("unhandled server request: %s", method))
+		c.setTurnError(msg)
+		c.respondError(id, -32601, msg)
+	}
+}
+
+func codexPermissionsApprovalResponse(params json.RawMessage) map[string]any {
+	var payload struct {
+		Permissions map[string]any `json:"permissions"`
+	}
+	_ = json.Unmarshal(params, &payload)
+
+	granted := map[string]any{}
+	if payload.Permissions != nil {
+		if network, ok := payload.Permissions["network"]; ok && network != nil {
+			granted["network"] = network
+		}
+		if fileSystem, ok := payload.Permissions["fileSystem"]; ok && fileSystem != nil {
+			granted["fileSystem"] = fileSystem
+		}
+	}
+
+	return map[string]any{
+		"permissions": granted,
+		"scope":       "turn",
 	}
 }
 
