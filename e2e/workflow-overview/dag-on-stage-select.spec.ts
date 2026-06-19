@@ -96,15 +96,15 @@ test.describe("DAG on Stage Selection", () => {
     await stage2Card.click();
 
     // ── Step 2: Verify stage 2 card gets selected state ──
-    // Use aria-selected as the primary selection attribute
-    await expect(stage2Card).toHaveAttribute("aria-selected", "true", {
+    // Use aria-pressed as the primary selection attribute
+    await expect(stage2Card).toHaveAttribute("aria-pressed", "true", {
       timeout: 3000,
     });
 
     // Extra verification for any additional selected visual state
     const stage2Selected = await stage2Card.evaluate((el) => {
       return (
-        el.getAttribute("aria-selected") === "true" ||
+        el.getAttribute("aria-pressed") === "true" ||
         el.getAttribute("data-selected") === "true" ||
         el.classList.contains("selected") ||
         el.classList.contains("active") ||
@@ -179,7 +179,7 @@ test.describe("DAG on Stage Selection", () => {
     // ── Step 5: Verify stage 1 card gains selected state ──
     const stage1Selected = await stage1Card.evaluate((el) => {
       return (
-        el.getAttribute("aria-selected") === "true" ||
+        el.getAttribute("aria-pressed") === "true" ||
         el.getAttribute("data-selected") === "true" ||
         el.classList.contains("selected") ||
         el.classList.contains("active") ||
@@ -191,7 +191,7 @@ test.describe("DAG on Stage Selection", () => {
     // Verify stage 2 card loses selected state
     const stage2StillSelected = await stage2Card.evaluate((el) => {
       return (
-        el.getAttribute("aria-selected") === "true" ||
+        el.getAttribute("aria-pressed") === "true" ||
         el.getAttribute("data-selected") === "true" ||
         el.classList.contains("selected") ||
         el.classList.contains("active")
