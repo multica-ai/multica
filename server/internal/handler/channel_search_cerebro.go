@@ -311,3 +311,116 @@ LIMIT $4`
 	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	writeJSON(w, http.StatusOK, AdminChannelMessageSearchResponse{Messages: messages, Total: total})
 }
+
+// ---------------------------------------------------------------------------
+// Per-user cross-conversation search (FIR-407, global-search follow-up)
+// ---------------------------------------------------------------------------
+
+// SearchMyChannelMessages handles GET /api/cerebro/my/channel-messages/search?q=
+//
+// Powers the global Cmd+K search: it searches messages across EVERY channel and
+// DM the caller participates in (is a subscriber of), so a user can find an old
+// link or note from any of their conversations in one place — without first
+// opening the conversation. It is the personal, access-scoped counterpart to the
+// admin-only SearchAllChannelMessages: the subscriber filter is the access
+// boundary, so a private DM only surfaces for its participants. Same FTS index
+// (comment.search_tsv) plus the substring fallback, newest match first.
+func (h *Handler) SearchMyChannelMessages(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	rawQ := strings.TrimSpace(r.URL.Query().Get("q"))
+	if rawQ == "" {
+		writeError(w, http.StatusBadRequest, "q parameter is required")
+		return
+	}
+
+	limit := channelSearchDefaultLimit
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, parseErr := strconv.Atoi(v); parseErr == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > channelSearchMaxLimit {
+		limit = channelSearchMaxLimit
+	}
+
+	likePattern := "%" + escapeLikePattern(strings.ToLower(rawQ)) + "%"
+
+	const sql = `
+SELECT c.id, c.issue_id, i.kind, i.title, c.parent_id, c.author_type, c.author_id, c.content, c.created_at,
+       count(*) OVER() AS total
+FROM comment c
+JOIN issue i ON i.id = c.issue_id
+WHERE c.workspace_id = $1
+  AND i.kind IN ('channel', 'dm')
+  AND c.type = 'comment'
+  AND EXISTS (
+    SELECT 1 FROM issue_subscriber s
+    WHERE s.issue_id = i.id AND s.user_type = 'member' AND s.user_id = $2
+  )
+  AND (
+    c.search_tsv @@ websearch_to_tsquery('simple', $3)
+    OR lower(c.content) LIKE $4 ESCAPE '\'
+  )
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $5`
+
+	rows, err := h.DB.Query(r.Context(), sql, wsUUID, parseUUID(userID), rawQ, likePattern, limit)
+	if err != nil {
+		slog.Warn("my channel message search failed", "error", err, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to search messages")
+		return
+	}
+	defer rows.Close()
+
+	messages := make([]AdminChannelMessageSearchResult, 0)
+	var total int64
+	for rows.Next() {
+		var (
+			cID       pgtype.UUID
+			issueID   pgtype.UUID
+			kind      string
+			title     string
+			parentID  pgtype.UUID
+			authType  string
+			authID    pgtype.UUID
+			content   string
+			createdAt pgtype.Timestamptz
+			rowTotal  int64
+		)
+		if scanErr := rows.Scan(&cID, &issueID, &kind, &title, &parentID, &authType, &authID, &content, &createdAt, &rowTotal); scanErr != nil {
+			slog.Warn("my channel message search scan failed", "error", scanErr, "workspace_id", workspaceID)
+			writeError(w, http.StatusInternalServerError, "failed to search messages")
+			return
+		}
+		total = rowTotal
+		messages = append(messages, AdminChannelMessageSearchResult{
+			ID:           uuidToString(cID),
+			ChannelID:    uuidToString(issueID),
+			ChannelKind:  kind,
+			ChannelTitle: title,
+			ParentID:     uuidToPtr(parentID),
+			AuthorType:   authType,
+			AuthorID:     uuidToString(authID),
+			Content:      content,
+			Snippet:      extractSnippet(content, rawQ),
+			CreatedAt:    timestampToString(createdAt),
+		})
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		slog.Warn("my channel message search rows error", "error", rowsErr, "workspace_id", workspaceID)
+		writeError(w, http.StatusInternalServerError, "failed to search messages")
+		return
+	}
+
+	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
+	writeJSON(w, http.StatusOK, AdminChannelMessageSearchResponse{Messages: messages, Total: total})
+}

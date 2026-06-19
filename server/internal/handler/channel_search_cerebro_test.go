@@ -240,3 +240,70 @@ func TestSearchAllChannelMessages_RequiresQuery(t *testing.T) {
 		t.Fatalf("expected 400 for empty query, got %d", w.Code)
 	}
 }
+
+// mySearch runs the per-user global message search as the given user (empty
+// userID = default test user).
+func mySearch(t *testing.T, userID, query string) (*httptest.ResponseRecorder, AdminChannelMessageSearchResponse) {
+	t.Helper()
+	w := httptest.NewRecorder()
+	var req *http.Request
+	if userID == "" {
+		req = newRequest("GET", "/api/cerebro/my/channel-messages/search?q="+query, nil)
+	} else {
+		req = newRequestAs(userID, "GET", "/api/cerebro/my/channel-messages/search?q="+query, nil)
+	}
+	testHandler.SearchMyChannelMessages(w, req)
+	var resp AdminChannelMessageSearchResponse
+	if w.Code == http.StatusOK {
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+	}
+	return w, resp
+}
+
+func TestSearchMyChannelMessages_FindsOwnConversations(t *testing.T) {
+	term := "Mineownsearchterm"
+	// seedChannelWithMessages creates the channel owned by testUserID, so the
+	// default test user is a subscriber and must find its messages.
+	channelID := seedChannelWithMessages(t, "mine-find", []string{"intro", "se " + term + " her"})
+
+	w, resp := mySearch(t, "", term)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if resp.Total != 1 {
+		t.Fatalf("expected 1 match in own channel, got %d", resp.Total)
+	}
+	if resp.Messages[0].ChannelID != channelID {
+		t.Fatalf("expected channel %s, got %s", channelID, resp.Messages[0].ChannelID)
+	}
+	if resp.Messages[0].ChannelTitle == "" || resp.Messages[0].Snippet == "" {
+		t.Fatalf("expected channel title + snippet, got title=%q snippet=%q", resp.Messages[0].ChannelTitle, resp.Messages[0].Snippet)
+	}
+}
+
+func TestSearchMyChannelMessages_ExcludesNonSubscribed(t *testing.T) {
+	term := "Notmineterm"
+	seedChannelWithMessages(t, "mine-acl", []string{"hemmelig " + term})
+
+	// A workspace member who is NOT subscribed to that channel must get zero
+	// results — the personal scope is the access boundary (not a 403).
+	outsiderID, cleanup := createSecondTestUser(t, "mine-outsider")
+	defer cleanup()
+
+	w, resp := mySearch(t, outsiderID, term)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if resp.Total != 0 {
+		t.Fatalf("expected 0 matches for non-subscriber, got %d", resp.Total)
+	}
+}
+
+func TestSearchMyChannelMessages_RequiresQuery(t *testing.T) {
+	w, _ := mySearch(t, "", "")
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty query, got %d", w.Code)
+	}
+}

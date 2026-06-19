@@ -25,6 +25,8 @@ export type CerebroFlagKey =
   | "cerebro_channel_row_actions"
   // FIR-407: in-conversation message search for channels + DMs.
   | "cerebro_channel_message_search"
+  // FIR-407: channel/DM messages surfaced in the global Cmd+K search.
+  | "cerebro_global_message_search"
   | "cerebro_typing_indicators"
   | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
@@ -239,6 +241,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
   cerebro_channel_message_search: true,
+  cerebro_global_message_search: true,
   cerebro_typing_indicators: true,
   cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
@@ -636,6 +639,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a search icon to every channel and DM header. Opens a search bar that highlights matching messages, dims the rest, and lets you step between results with the up/down arrows or Enter/Shift+Enter — Esc closes it. Searches the currently loaded message history of the open conversation.",
+  },
+  {
+    key: "cerebro_global_message_search",
+    label: "Messages in global search",
+    group: "inbox",
+    description:
+      "Include channel and DM messages in the global Cmd+K search. Matches from any conversation you take part in show up in a \"Messages\" group with a snippet, the conversation name, and the sender — so you can find an old link or note without opening each conversation. Access-scoped: you only see messages from your own conversations.",
   },
   {
     key: "cerebro_typing_indicators",

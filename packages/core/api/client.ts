@@ -2623,6 +2623,16 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(channel-message-search-mine-client): FIR-407 — per-user search across the caller's own channels/DMs (global Cmd+K). Same response shape as the admin search.
+  async searchMyChannelMessages(query: string, limit?: number): Promise<AdminChannelMessageSearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    const raw = await this.fetch<unknown>(`/api/cerebro/my/channel-messages/search?${params.toString()}`);
+    return parseWithFallback(raw, AdminChannelMessageSearchResponseSchema, EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH, {
+      endpoint: "GET /api/cerebro/my/channel-messages/search",
+    });
+  }
+
   async createChannel(data: CreateChannelRequest): Promise<Channel> {
     return this.fetch("/api/channels", {
       method: "POST",

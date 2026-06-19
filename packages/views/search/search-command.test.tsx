@@ -30,6 +30,7 @@ const {
   mockSearchProjects,
   mockSearchChatSessions,
   mockListNotes,
+  mockSearchMyChannelMessages,
   mockRecentItems,
   mockAllIssues,
   mockSetTheme,
@@ -46,6 +47,7 @@ const {
   mockSearchProjects: vi.fn(),
   mockSearchChatSessions: vi.fn(),
   mockListNotes: vi.fn(),
+  mockSearchMyChannelMessages: vi.fn(),
   mockRecentItems: { current: [] as Array<{ id: string; visitedAt: number }> },
   mockAllIssues: { current: [] as Array<Record<string, unknown>> },
   mockSetTheme: vi.fn(),
@@ -76,7 +78,13 @@ vi.mock("@multica/core/api", () => ({
     searchProjects: mockSearchProjects,
     searchChatSessions: mockSearchChatSessions,
     listNotes: mockListNotes,
+    searchMyChannelMessages: mockSearchMyChannelMessages,
   },
+}));
+
+// FIR-407 — Messages-in-global-search feature flag; default it ON in tests.
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => true,
 }));
 
 vi.mock("@multica/core/issues/stores", () => {
@@ -117,6 +125,8 @@ vi.mock("@multica/core/paths", () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     memberDetail: (id: string) => `/ws-test/members/${id}`,
     projectDetail: (id: string) => `/ws-test/projects/${id}`,
+    notes: () => "/ws-test/notes",
+    channelDetail: (id: string) => `/ws-test/channels/${id}`,
   }),
 }));
 
@@ -181,6 +191,7 @@ describe("SearchCommand", () => {
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockSearchChatSessions.mockReset().mockResolvedValue({ chat_sessions: [], total: 0 });
     mockListNotes.mockReset().mockResolvedValue([]);
+    mockSearchMyChannelMessages.mockReset().mockResolvedValue({ messages: [], total: 0 });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockSetTheme.mockReset();
@@ -533,6 +544,55 @@ describe("SearchCommand", () => {
     await user.click(item);
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/inbox?chat=session-1");
+    expect(useSearchStore.getState().open).toBe(false);
+  });
+
+  // FIR-407 — channel/DM messages in global Cmd+K search.
+  it("renders Messages group with snippet and opens the conversation on selection", async () => {
+    const user = userEvent.setup();
+    mockSearchMyChannelMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-1",
+          channel_id: "chan-1",
+          channel_kind: "channel",
+          channel_title: "Product team",
+          parent_id: null,
+          author_type: "member",
+          author_id: "user-1",
+          content: "full message body",
+          snippet: "Here is the Purchase product selector link",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "purchase");
+
+    await waitFor(() => {
+      expect(screen.getByText("Messages")).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Product team" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(
+        (_, el) =>
+          el?.textContent === "Here is the Purchase product selector link" &&
+          el?.tagName === "SPAN",
+      ),
+    ).toBeInTheDocument();
+    expect(mockSearchMyChannelMessages).toHaveBeenCalledWith("purchase", 10);
+
+    const item = await screen.findByText(
+      (_, el) => el?.textContent === "Product team" && el?.tagName === "SPAN",
+    );
+    await user.click(item);
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/channels/chan-1");
     expect(useSearchStore.getState().open).toBe(false);
   });
 

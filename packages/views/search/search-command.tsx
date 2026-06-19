@@ -36,6 +36,8 @@ import type {
   SearchChatSessionResult,
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
+// CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — gate + Messages group in Cmd+K.
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
@@ -145,6 +147,17 @@ function noteSearchSnippet(note: NoteHit): string {
   return lines.slice(skipTitle).join(" ");
 }
 
+// CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — one channel/DM message hit in Cmd+K.
+interface MessageHit {
+  id: string;
+  channel_id: string;
+  channel_kind: string;
+  channel_title: string;
+  author_id: string;
+  snippet: string;
+  content: string;
+}
+
 interface SearchResults {
   issues: SearchIssueResult[];
   // CEREBRO-PATCH(typeahead-comments): FIR-2605 — issues matched via comment body, shown in their own section.
@@ -152,9 +165,10 @@ interface SearchResults {
   projects: SearchProjectResult[];
   chatSessions: SearchChatSessionResult[];
   notes: NoteHit[]; // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — Notes group.
+  messages: MessageHit[]; // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — Messages group.
 }
 
-const EMPTY_RESULTS: SearchResults = { issues: [], comments: [], projects: [], chatSessions: [], notes: [] };
+const EMPTY_RESULTS: SearchResults = { issues: [], comments: [], projects: [], chatSessions: [], notes: [], messages: [] };
 
 export function SearchCommand() {
   const { t } = useT("search");
@@ -176,6 +190,8 @@ export function SearchCommand() {
   const p: WorkspacePaths = useWorkspacePaths();
   const { theme, setTheme } = useTheme();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — include channel/DM messages in Cmd+K when enabled.
+  const messageSearchEnabled = useFeatureFlag("cerebro_global_message_search");
 
   // Resolve each recent issue via its cached detail entry. Recent items are
   // typically already in the detail cache because the user has opened them;
@@ -352,6 +368,7 @@ export function SearchCommand() {
     results.projects.length > 0 ||
     results.chatSessions.length > 0 ||
     results.notes.length > 0 || // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421
+    results.messages.length > 0 || // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407
     filteredMembers.length > 0;
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -414,7 +431,8 @@ export function SearchCommand() {
       try {
         // CEREBRO-PATCH(chat-search-cerebro-ui): FIR-902 — third Promise.all leg for Cmd+K chat-session search.
         // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — fourth leg for Notes search.
-        const [issueRes, projectRes, chatRes, noteRes] = await Promise.all([
+        // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — fifth leg for channel/DM message search (flag-gated; never throws into the palette).
+        const [issueRes, projectRes, chatRes, noteRes, messageRes] = await Promise.all([
           api.searchIssues({
             q: q.trim(),
             limit: 20,
@@ -436,6 +454,9 @@ export function SearchCommand() {
           api
             .listNotes<NoteHit[]>({ q: q.trim(), limit: 10 })
             .catch(() => [] as NoteHit[]),
+          messageSearchEnabled
+            ? api.searchMyChannelMessages(q.trim(), 10).catch(() => ({ messages: [], total: 0 }))
+            : Promise.resolve({ messages: [], total: 0 }),
         ]);
         if (!controller.signal.aborted) {
           // CEREBRO-PATCH(typeahead-comments): FIR-2605 — split by match_source so comment hits get their own section.
@@ -447,6 +468,7 @@ export function SearchCommand() {
             projects: projectRes.projects,
             chatSessions: chatRes.chat_sessions,
             notes: Array.isArray(noteRes) ? noteRes : [], // CEREBRO-PATCH(cerebro-notes-search-ui): defensive — bad shape → empty.
+            messages: messageRes.messages, // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — schema-validated array.
           });
           setIsLoading(false);
         }
@@ -456,7 +478,7 @@ export function SearchCommand() {
         }
       }
     }, 300);
-  }, []);
+  }, [messageSearchEnabled]); // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — re-bind when the messages flag toggles.
 
   const handleValueChange = useCallback(
     (value: string) => {
@@ -478,6 +500,9 @@ export function SearchCommand() {
       } else if (value.startsWith("note:")) {
         // CEREBRO-PATCH(cerebro-notes-search-ui): TECH-3421 — open the note via /notes ?note= deeplink.
         push(`${p.notes()}?note=${encodeURIComponent(value.slice(5))}`);
+      } else if (value.startsWith("message:")) {
+        // CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — open the channel/DM the message lives in.
+        push(p.channelDetail(value.slice(8)));
       } else {
         push(p.issueDetail(value));
       }
@@ -831,6 +856,43 @@ export function SearchCommand() {
                         <span className="truncate text-xs text-muted-foreground">
                           <HighlightText
                             text={noteSearchSnippet(note)}
+                            query={query}
+                          />
+                        </span>
+                      </div>
+                    )}
+                  </CommandPrimitive.Item>
+                ))}
+              </CommandPrimitive.Group>
+            )}
+
+            {/* CEREBRO-PATCH(cerebro-global-message-search-ui): FIR-407 — Messages group in Cmd+K. */}
+            {!isLoading && results.messages.length > 0 && (
+              <CommandPrimitive.Group
+                heading="Messages"
+                className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {results.messages.map((message) => (
+                  <CommandPrimitive.Item
+                    key={`message:${message.id}`}
+                    value={`message:${message.channel_id}`}
+                    onSelect={handleSelect}
+                    className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">
+                        <HighlightText
+                          text={message.channel_title || "Conversation"}
+                          query={query}
+                        />
+                      </span>
+                    </div>
+                    {(message.snippet || message.content) && (
+                      <div className="flex items-start gap-2 pl-[26px]">
+                        <span className="truncate text-xs text-muted-foreground">
+                          <HighlightText
+                            text={message.snippet || message.content}
                             query={query}
                           />
                         </span>
