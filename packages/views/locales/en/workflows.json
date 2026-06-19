@@ -208,6 +208,7 @@
   },
   "overview": {
     "title": "Workflow Overview",
+    "error_retry": "Retry",
     "stage_canvas": {
       "empty_title": "No stages defined yet",
       "empty_description": "Stages help you organize workflow nodes into logical phases. Create your first stage to get started.",

@@ -20,6 +20,7 @@ import { useT } from "../../../i18n";
 import { StageCanvas } from "./stage-canvas";
 import { StageNodeDag } from "./stage-node-dag";
 import { NodeDetailPanel } from "./node-detail-panel";
+import { StageCreateDialog } from "./stage-create-dialog";
 
 export interface WorkflowOverviewPageProps {
   workflowId: string;
@@ -45,12 +46,14 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
   // Page-level selection state (pure browse state — useState is sufficient)
   const [selectedStageId, setSelectedStageId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
 
   // Queries — these share cache keys with WorkflowDetailPage so edits sync
   const {
     data: workflow,
     isLoading: workflowLoading,
     isError: workflowError,
+    refetch: workflowRefetch,
   } = useQuery(workflowOverviewOptions(wsId, workflowId));
 
   const { data: stages = [], isLoading: stagesLoading } = useQuery(
@@ -68,6 +71,14 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
   const isLoading = workflowLoading || stagesLoading || nodesLoading;
 
   // ── Handlers ──
+
+  const handleAddStage = () => {
+    setShowCreateDialog(true);
+  };
+
+  const handleCloseCreateDialog = () => {
+    setShowCreateDialog(false);
+  };
 
   const handleStageSelect = (stageId: string) => {
     setSelectedStageId(stageId);
@@ -114,14 +125,23 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
               <p className="text-sm text-muted-foreground">
                 {t(($) => $.detail.not_found)}
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigation.push(wsPaths.workflows())}
-              >
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                {t(($) => $.detail.back_to_workflows)}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigation.push(wsPaths.workflows())}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  {t(($) => $.detail.back_to_workflows)}
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => workflowRefetch()}
+                >
+                  {t(($) => $.overview.error_retry)}
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         </div>
@@ -146,6 +166,7 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
             stages={stages}
             selectedStageId={selectedStageId}
             onStageSelect={handleStageSelect}
+            onAddStage={handleAddStage}
           />
         </div>
 
@@ -172,6 +193,15 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
           nodes={nodes}
           edges={edges}
           onClose={handleNodeDetailClose}
+        />
+      )}
+
+      {/* Stage creation dialog */}
+      {showCreateDialog && (
+        <StageCreateDialog
+          workflowId={workflowId}
+          wsId={wsId}
+          onClose={handleCloseCreateDialog}
         />
       )}
     </div>

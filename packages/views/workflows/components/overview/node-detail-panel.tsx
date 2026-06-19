@@ -48,11 +48,11 @@ export function NodeDetailPanel({
   const formatSchema = useMemo(() => {
     if (!node?.format_schema) return null;
     try {
-      return JSON.stringify(
-        JSON.parse(node.format_schema as unknown as string),
-        null,
-        2,
-      );
+      if (typeof node.format_schema === "string") {
+        return JSON.stringify(JSON.parse(node.format_schema), null, 2);
+      }
+      // Already an object — pretty-print directly
+      return JSON.stringify(node.format_schema, null, 2);
     } catch {
       return String(node.format_schema);
     }

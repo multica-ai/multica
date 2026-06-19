@@ -3,6 +3,7 @@
 import type { WorkflowStage } from "@multica/core/types";
 import { useT } from "../../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
+import { cn } from "@multica/ui/lib/utils";
 import { Plus } from "lucide-react";
 import { StageCard } from "./stage-card";
 
@@ -10,9 +11,11 @@ export interface StageCanvasProps {
   stages: WorkflowStage[];
   selectedStageId: string | null;
   onStageSelect: (stageId: string) => void;
+  onAddStage?: () => void;
+  unassignedNodeCount?: number;
 }
 
-export function StageCanvas({ stages, selectedStageId, onStageSelect }: StageCanvasProps) {
+export function StageCanvas({ stages, selectedStageId, onStageSelect, onAddStage, unassignedNodeCount = 0 }: StageCanvasProps) {
   const { t } = useT("workflows");
 
   // ── Empty state ──
@@ -28,10 +31,18 @@ export function StageCanvas({ stages, selectedStageId, onStageSelect }: StageCan
         <p className="text-xs text-muted-foreground max-w-md">
           {t(($) => $.overview.stage_canvas.empty_description)}
         </p>
-        <Button data-testid="add-stage-button" size="sm">
+        <Button data-testid="add-stage-button" size="sm" onClick={onAddStage}>
           <Plus className="mr-1.5 h-4 w-4" />
           {t(($) => $.overview.stage_canvas.create_first)}
         </Button>
+
+        {unassignedNodeCount > 0 && (
+          <UnassignedCard
+            count={unassignedNodeCount}
+            isSelected={selectedStageId === "unassigned"}
+            onSelect={() => onStageSelect("unassigned")}
+          />
+        )}
       </div>
     );
   }
@@ -57,10 +68,53 @@ export function StageCanvas({ stages, selectedStageId, onStageSelect }: StageCan
         variant="outline"
         size="sm"
         className="shrink-0 h-auto min-h-[104px] px-4"
+        onClick={onAddStage}
       >
         <Plus className="h-4 w-4 mr-1" />
         {t(($) => $.overview.stage_canvas.add_stage)}
       </Button>
+
+      {unassignedNodeCount > 0 && (
+        <UnassignedCard
+          count={unassignedNodeCount}
+          isSelected={selectedStageId === "unassigned"}
+          onSelect={() => onStageSelect("unassigned")}
+        />
+      )}
     </div>
+  );
+}
+
+/** Virtual card for nodes with no stage assignment (stage_id = null). */
+function UnassignedCard({
+  count,
+  isSelected,
+  onSelect,
+}: {
+  count: number;
+  isSelected: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useT("workflows");
+  return (
+    <button
+      data-testid="stage-card-unassigned"
+      data-selected={isSelected ? "true" : "false"}
+      onClick={onSelect}
+      className={cn(
+        "flex shrink-0 flex-col gap-1.5 rounded-lg border-2 border-dashed p-4 text-left transition-colors min-w-[160px]",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+        isSelected
+          ? "border-primary bg-accent text-accent-foreground"
+          : "border-muted-foreground/30 bg-card text-muted-foreground hover:bg-accent/50",
+      )}
+      aria-pressed={isSelected}
+    >
+      <span className="text-xs text-muted-foreground">{t(($) => $.overview.stage_canvas.unassigned)}</span>
+      <span className="text-sm font-medium truncate">{t(($) => $.overview.stage_canvas.unassigned)}</span>
+      <span className="text-xs text-muted-foreground">
+        {t(($) => $.overview.stage_canvas.nodes_count, { count })}
+      </span>
+    </button>
   );
 }
