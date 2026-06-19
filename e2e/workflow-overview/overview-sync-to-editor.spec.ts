@@ -1,5 +1,9 @@
 // E2E test: Overview stage changes sync to editor.
 //
+// Note: These tests will be refined when the workflow editor's add-node flow is
+// stable. The sync verification logic is the goal — editor interactions are
+// placeholder selectors.
+//
 // Verifies that creating a stage in the overview page is reflected in the
 // workflow editor. The test:
 //   1. Opens the overview page and creates a new stage

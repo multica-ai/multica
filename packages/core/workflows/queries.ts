@@ -105,12 +105,10 @@ export function myWorkflowTasksOptions(wsId: string) {
 
 // ── Mutations ──
 
-export function workflowOverviewOptions(wsId: string, workflowId: string) {
-  return queryOptions({
-    queryKey: workflowKeys.detail(wsId, workflowId),
-    queryFn: () => api.getWorkflow(workflowId),
-  });
-}
+// Intentionally aliased — overview fetches the same workflow detail data.
+// Kept as a separate name for semantic clarity at call sites; the query key
+// and API call are identical to workflowDetailOptions.
+export const workflowOverviewOptions = workflowDetailOptions;
 
 export function workflowStagesOptions(wsId: string, workflowId: string) {
   return queryOptions({

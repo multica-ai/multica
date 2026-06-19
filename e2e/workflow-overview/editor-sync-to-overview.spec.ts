@@ -1,5 +1,9 @@
 // E2E test: Editor changes sync to overview page.
 //
+// Note: These tests will be refined when the workflow editor's add-node flow is
+// stable. The sync verification logic is the goal — editor interactions are
+// placeholder selectors.
+//
 // Verifies that adding a node in the workflow editor is reflected in the
 // overview page's stage DAG. The test:
 //   1. Opens the overview page and notes the stage/node count
