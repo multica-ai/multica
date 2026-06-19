@@ -205,6 +205,48 @@
     "toast_skip_failed": "跳过节点失败",
     "review_comment_placeholder": "添加评审意见..."
   },
+  "overview": {
+    "title": "Workflow 概览",
+    "stage_canvas": {
+      "empty_title": "尚未定义阶段",
+      "empty_description": "阶段可帮助你按业务逻辑组织 Workflow 节点。创建你的第一个阶段开始吧。",
+      "create_first": "创建第一个阶段",
+      "add_stage": "添加阶段",
+      "unassigned": "未分组",
+      "stage_n_of_m": "阶段 {{n}}/{{m}}",
+      "nodes_count_one": "{{count}} 个节点",
+      "nodes_count_other": "{{count}} 个节点"
+    },
+    "node_dag": {
+      "empty_title": "此阶段暂无节点",
+      "empty_description": "可在 Workflow 编辑器中为此阶段添加节点。",
+      "node_n_of_m": "节点 {{n}}/{{m}}"
+    },
+    "detail_panel": {
+      "title": "节点详情",
+      "worker": "Worker",
+      "critic": "Critic",
+      "format_schema": "Format Schema",
+      "relations": "关系",
+      "upstream": "上游节点",
+      "downstream": "下游节点",
+      "plugins": "Plugin",
+      "skills": "Skill",
+      "not_configured": "未配置",
+      "no_schema": "无格式约束",
+      "open_in_editor": "在编辑器中打开"
+    },
+    "stage_dialog": {
+      "create_title": "创建阶段",
+      "edit_title": "编辑阶段",
+      "name_label": "阶段名称",
+      "name_placeholder": "例如：需求、设计、编码",
+      "description_label": "描述（可选）",
+      "description_placeholder": "这个阶段做什么？",
+      "delete_confirm_title": "删除阶段？",
+      "delete_confirm_description": "此阶段包含 {{count}} 个节点。删除阶段后节点将移至「未分组」。"
+    }
+  },
   "my_tasks": {
     "title": "我的任务",
     "empty": "暂无待处理的工作流任务",

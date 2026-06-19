@@ -206,6 +206,48 @@
     "toast_skip_failed": "Failed to skip node",
     "review_comment_placeholder": "Add a comment with your review..."
   },
+  "overview": {
+    "title": "Workflow Overview",
+    "stage_canvas": {
+      "empty_title": "No stages defined yet",
+      "empty_description": "Stages help you organize workflow nodes into logical phases. Create your first stage to get started.",
+      "create_first": "Create first stage",
+      "add_stage": "Add stage",
+      "unassigned": "Unassigned",
+      "stage_n_of_m": "Stage {{n}}/{{m}}",
+      "nodes_count_one": "{{count}} node",
+      "nodes_count_other": "{{count}} nodes"
+    },
+    "node_dag": {
+      "empty_title": "No nodes in this stage",
+      "empty_description": "Add nodes to this stage in the workflow editor.",
+      "node_n_of_m": "Node {{n}}/{{m}}"
+    },
+    "detail_panel": {
+      "title": "Node Details",
+      "worker": "Worker",
+      "critic": "Critic",
+      "format_schema": "Format Schema",
+      "relations": "Relations",
+      "upstream": "Upstream",
+      "downstream": "Downstream",
+      "plugins": "Plugins",
+      "skills": "Skills",
+      "not_configured": "Not configured",
+      "no_schema": "No format constraints",
+      "open_in_editor": "Open in editor"
+    },
+    "stage_dialog": {
+      "create_title": "Create Stage",
+      "edit_title": "Edit Stage",
+      "name_label": "Stage name",
+      "name_placeholder": "e.g. Requirements, Design, Build",
+      "description_label": "Description (optional)",
+      "description_placeholder": "What happens in this stage?",
+      "delete_confirm_title": "Delete stage?",
+      "delete_confirm_description": "This stage contains {{count}} node(s). Deleting it will move them to \"Unassigned\"."
+    }
+  },
   "my_tasks": {
     "title": "My Tasks",
     "empty": "No pending workflow tasks",
