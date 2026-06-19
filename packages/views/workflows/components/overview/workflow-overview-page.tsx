@@ -8,11 +8,6 @@ import {
   workflowStagesOptions,
   workflowNodesOptions,
   workflowEdgesOptions,
-  useCreateStage,
-  useUpdateStage,
-  useDeleteStage,
-  useReorderStages,
-  useAssignNodeToStage,
 } from "@multica/core/workflows/queries";
 import { useNavigation } from "../../../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -25,7 +20,6 @@ import { useT } from "../../../i18n";
 import { StageCanvas } from "./stage-canvas";
 import { StageNodeDag } from "./stage-node-dag";
 import { NodeDetailPanel } from "./node-detail-panel";
-import type { WorkflowStage, WorkflowNode, WorkflowEdge } from "@multica/core/types";
 
 export interface WorkflowOverviewPageProps {
   workflowId: string;
