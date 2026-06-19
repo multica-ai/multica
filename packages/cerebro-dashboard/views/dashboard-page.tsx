@@ -17,6 +17,7 @@ import { MessageTracker } from "./components/message-tracker";
 import { MessageFlow } from "./components/message-flow";
 import { ActorMessagePanel } from "./components/actor-message-panel";
 import { AllMessagesTable } from "./components/all-messages-table";
+import { MessageSearchPanel } from "./components/message-search-panel";
 import { MessageActivityChart } from "./components/message-activity-chart";
 import { MessageSpendTable } from "./components/message-spend-table";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
@@ -138,6 +139,10 @@ export function DashboardPage() {
 
           {tab === "messages" && (
             <>
+              <section aria-label="Search all conversations">
+                <MessageSearchPanel workspaceSlug={workspace.slug} />
+              </section>
+
               <section aria-label="Message KPIs">
                 <KpiCards
                   data={data}

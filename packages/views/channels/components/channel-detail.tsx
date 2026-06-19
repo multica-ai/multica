@@ -193,8 +193,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
   // scroll to bottom on open; surface "Ny besked"-pille when scrolled up.
   const scrollRef = useRef<HTMLDivElement>(null);
   const { hasNewBelow, scrollToBottom } = useStickyBottom(scrollRef);
-  // CEREBRO-PATCH(channel-message-search): FIR-407 — search over the loaded message stream (icon toggles the bar below the header).
-  const messageSearch = useChannelMessageSearch(topLevel, scrollRef);
+  // CEREBRO-PATCH(channel-message-search): FIR-407 — server-backed message search (icon toggles the bar below the header).
+  const messageSearch = useChannelMessageSearch(channelId, topLevel, scrollRef);
   // CEREBRO-PATCH(dm-channel-message-fixes): TECH-3316 — keep latest channel messages visible on open and after sending.
   const openedChannelRef = useRef<string | null>(null);
   const lastOwnMessageRef = useRef<string | null>(null);

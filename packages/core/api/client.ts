@@ -254,6 +254,16 @@ import {
 import { z } from "zod";
 const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
 
+// CEREBRO-PATCH(channel-message-search-client): FIR-407 — per-channel/DM message search response schema + type.
+const ChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.object({ id: z.string(), parent_id: z.string().nullable().optional(), author_type: z.string(), author_id: z.string(), content: z.string(), snippet: z.string(), created_at: z.string() }).loose()).default([]), total: z.number().default(0) }).loose();
+export type ChannelMessageSearchResponse = z.infer<typeof ChannelMessageSearchResponseSchema>;
+const EMPTY_CHANNEL_MESSAGE_SEARCH: ChannelMessageSearchResponse = { messages: [], total: 0 };
+
+// CEREBRO-PATCH(channel-message-search-admin-client): FIR-407 — workspace-admin cross-conversation search schema + type.
+const AdminChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.object({ id: z.string(), channel_id: z.string(), channel_kind: z.string(), channel_title: z.string().default(""), parent_id: z.string().nullable().optional(), author_type: z.string(), author_id: z.string(), content: z.string(), snippet: z.string(), created_at: z.string() }).loose()).default([]), total: z.number().default(0) }).loose();
+export type AdminChannelMessageSearchResponse = z.infer<typeof AdminChannelMessageSearchResponseSchema>;
+const EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH: AdminChannelMessageSearchResponse = { messages: [], total: 0 };
+
 // CEREBRO-PATCH(channel-perms-client): TECH-3698 — per-channel permission
 // settings schema + safe defaults (enum drift downgrades to the default).
 const DEFAULT_CHANNEL_PERMISSIONS: ChannelPermissions = {
@@ -2591,6 +2601,26 @@ export class ApiClient {
 
   async getChannel(id: string): Promise<Channel> {
     return this.fetch(`/api/channels/${id}`);
+  }
+
+  // CEREBRO-PATCH(channel-message-search-client): FIR-407 — full-text search of one channel/DM's messages.
+  async searchChannelMessages(channelId: string, query: string, limit?: number): Promise<ChannelMessageSearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    const raw = await this.fetch<unknown>(`/api/channels/${channelId}/messages/search?${params.toString()}`);
+    return parseWithFallback(raw, ChannelMessageSearchResponseSchema, EMPTY_CHANNEL_MESSAGE_SEARCH, {
+      endpoint: "GET /api/channels/:id/messages/search",
+    });
+  }
+
+  // CEREBRO-PATCH(channel-message-search-admin-client): FIR-407 — workspace-admin search across all channels/DMs.
+  async searchAllChannelMessages(query: string, limit?: number): Promise<AdminChannelMessageSearchResponse> {
+    const params = new URLSearchParams({ q: query });
+    if (limit) params.set("limit", String(limit));
+    const raw = await this.fetch<unknown>(`/api/cerebro/channel-messages/search?${params.toString()}`);
+    return parseWithFallback(raw, AdminChannelMessageSearchResponseSchema, EMPTY_ADMIN_CHANNEL_MESSAGE_SEARCH, {
+      endpoint: "GET /api/cerebro/channel-messages/search",
+    });
   }
 
   async createChannel(data: CreateChannelRequest): Promise<Channel> {

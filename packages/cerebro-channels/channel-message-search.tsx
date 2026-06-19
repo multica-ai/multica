@@ -19,7 +19,9 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
+import { api } from "@multica/core/api";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -35,29 +37,6 @@ const HIGHLIGHT_CURRENT_NAME = "cerebro-msg-search-current";
 const STYLE_ELEMENT_ID = "cerebro-channel-search-style";
 
 // ---------------------------------------------------------------------------
-// Pure matching logic — exported for tests.
-// ---------------------------------------------------------------------------
-
-/**
- * Return the IDs of the messages whose content contains `query`
- * (case-insensitive substring), in the order they appear in `topLevel`
- * (chronological). Whitespace-only queries match nothing.
- */
-export function findMessageMatches(
-  topLevel: TimelineEntry[],
-  query: string,
-): string[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [];
-  const out: string[] = [];
-  for (const entry of topLevel) {
-    const content = entry.content ?? "";
-    if (content.toLowerCase().includes(q)) out.push(entry.id);
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
 // Search controller hook.
 // ---------------------------------------------------------------------------
 
@@ -67,7 +46,9 @@ export interface ChannelMessageSearch {
   setQuery: (q: string) => void;
   toggle: () => void;
   close: () => void;
-  /** Total number of matching messages. */
+  /** True while a server search is in flight. */
+  loading: boolean;
+  /** Total number of matching messages reported by the server. */
   matchCount: number;
   /** 1-based position of the current match, 0 when there is none. */
   position: number;
@@ -77,34 +58,49 @@ export interface ChannelMessageSearch {
   prev: () => void;
 }
 
+const SEARCH_DEBOUNCE_MS = 200;
+
+/**
+ * Drives in-conversation message search. Matching is done server-side against
+ * the full-text index (the whole conversation history, access-controlled — so
+ * private DMs are searchable only by their participants), and the resulting
+ * message IDs drive the in-place highlight / dim / scroll over the loaded
+ * message rows.
+ */
 export function useChannelMessageSearch(
+  channelId: string,
   topLevel: TimelineEntry[],
   scrollRef: RefObject<HTMLElement | null>,
 ): ChannelMessageSearch {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [currentId, setCurrentId] = useState<string | null>(null);
 
-  const matchedIds = useMemo(
-    () => findMessageMatches(topLevel, query),
-    [topLevel, query],
-  );
-
-  // When the query changes, jump to the most recent match (Slack-like). Done in
-  // an effect so it follows the recomputed `matchedIds`.
+  // Debounce so each keystroke doesn't fire its own request.
   useEffect(() => {
-    setCurrentId(matchedIds[matchedIds.length - 1] ?? null);
-    // Intentionally keyed on the query only: a new message arriving should not
-    // yank the user away from the match they navigated to.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const handle = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
   }, [query]);
 
-  // Keep the current match valid if the underlying list shifts (deletes etc.).
+  const enabled = open && debounced.length > 0;
+  const { data, isFetching } = useQuery({
+    queryKey: ["cerebro", "channel-message-search", channelId, debounced],
+    queryFn: () => api.searchChannelMessages(channelId, debounced),
+    enabled,
+    staleTime: 30_000,
+  });
+
+  const matchedIds = useMemo(
+    () => (enabled && data ? data.messages.map((m) => m.id) : []),
+    [enabled, data],
+  );
+  const matchCount = enabled && data ? data.total : 0;
+
+  // When the resolved result set changes, jump to the most recent match.
   useEffect(() => {
-    if (currentId && !matchedIds.includes(currentId)) {
-      setCurrentId(matchedIds[matchedIds.length - 1] ?? null);
-    }
-  }, [matchedIds, currentId]);
+    setCurrentId(matchedIds[matchedIds.length - 1] ?? null);
+  }, [matchedIds]);
 
   const currentIndex = currentId ? matchedIds.indexOf(currentId) : -1;
 
@@ -125,6 +121,7 @@ export function useChannelMessageSearch(
   const close = useCallback(() => {
     setOpen(false);
     setQuery("");
+    setDebounced("");
     setCurrentId(null);
   }, []);
 
@@ -132,6 +129,7 @@ export function useChannelMessageSearch(
     setOpen((o) => {
       if (o) {
         setQuery("");
+        setDebounced("");
         setCurrentId(null);
       }
       return !o;
@@ -141,14 +139,15 @@ export function useChannelMessageSearch(
   // Apply visual state (dim / highlight / scroll) imperatively. The row
   // elements are owned by the upstream renderer, so we drive presentation via a
   // `data-msg-search` attribute (which React never reconciles away) plus the
-  // CSS Custom Highlight API for the in-text marks.
+  // CSS Custom Highlight API for the in-text marks. `topLevel.length` is a
+  // dependency so the highlight re-applies when new rows render into the stream.
   useEffect(() => {
     ensureStyleInjected();
     const container = scrollRef.current;
     if (!container) return;
 
     const rows = container.querySelectorAll<HTMLElement>("[data-message-id]");
-    const active = open && query.trim().length > 0 && matchedIds.length > 0;
+    const active = open && debounced.length > 0 && matchedIds.length > 0;
 
     if (!active) {
       clearRowState(rows);
@@ -166,7 +165,7 @@ export function useChannelMessageSearch(
       }
     });
 
-    applyTextHighlights(rows, matchSet, currentId, query.trim());
+    applyTextHighlights(rows, matchSet, currentId, debounced);
 
     if (currentId) {
       const currentRow = container.querySelector<HTMLElement>(
@@ -174,7 +173,7 @@ export function useChannelMessageSearch(
       );
       currentRow?.scrollIntoView({ block: "center", behavior: "smooth" });
     }
-  }, [open, query, matchedIds, currentId, scrollRef]);
+  }, [open, debounced, matchedIds, currentId, scrollRef, topLevel.length]);
 
   // Clear everything when the controller unmounts (e.g. switching channels).
   useEffect(() => {
@@ -193,7 +192,8 @@ export function useChannelMessageSearch(
     setQuery,
     toggle,
     close,
-    matchCount: matchedIds.length,
+    loading: enabled && isFetching,
+    matchCount,
     position: currentIndex === -1 ? 0 : currentIndex + 1,
     next,
     prev,
@@ -258,14 +258,16 @@ export function ChannelMessageSearchBar({
     inputRef.current?.focus();
   }, []);
 
-  const { query, setQuery, matchCount, position, next, prev, close } = search;
+  const { query, setQuery, matchCount, position, next, prev, close, loading } = search;
   const trimmed = query.trim();
 
   const countLabel = !trimmed
     ? ""
-    : matchCount === 0
-      ? "Ingen resultater"
-      : `${position} af ${matchCount}`;
+    : loading && matchCount === 0
+      ? "Søger…"
+      : matchCount === 0
+        ? "Ingen resultater"
+        : `${position} af ${matchCount}`;
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-4 py-2">

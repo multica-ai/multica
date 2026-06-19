@@ -1684,6 +1684,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChannels)
 				r.Post("/", h.CreateChannel)
 				r.Get("/{id}", h.GetChannel)
+				// CEREBRO-PATCH(channel-message-search): FIR-407 — full-text search of one channel/DM's messages.
+				r.Get("/{id}/messages/search", h.SearchChannelMessages)
 				r.Post("/{id}/read", h.MarkChannelRead)
 				// CEREBRO-PATCH(channel-listen-routes): per-(channel, agent)
 				// listen-mode toggle.
@@ -1826,6 +1828,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/cerebro/dashboard/all-messages", cerebroDashboardHandler.AllMessages)
 			// CEREBRO-PATCH(cerebro-dashboard-session-messages-route): TECH-3139 message detail sheet full session + cost
 			r.Get("/api/cerebro/dashboard/session-messages", cerebroDashboardHandler.SessionMessages)
+				// CEREBRO-PATCH(channel-message-search-admin): FIR-407 — workspace-admin search across all channels/DMs (agent coaching).
+				r.Get("/api/cerebro/channel-messages/search", h.SearchAllChannelMessages)
 			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
 			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)

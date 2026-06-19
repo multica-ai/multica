@@ -595,3 +595,51 @@ describe("ApiClient", () => {
   });
 });
 // Cerebro feature-flag tests live in packages/cerebro-test/api-client.test.ts
+
+// CEREBRO-PATCH(channel-message-search-client): FIR-407 — response-schema fallback tests.
+describe("channel message search", () => {
+  function jsonResponse(body: unknown) {
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  it("returns the empty fallback on a malformed per-channel search response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ messages: "nope", total: "x" })));
+    const client = new ApiClient("https://api.example.test");
+    const res = await client.searchChannelMessages("chan-1", "hi");
+    expect(res).toEqual({ messages: [], total: 0 });
+  });
+
+  it("returns the empty fallback on a malformed admin search response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ messages: 123, total: "x" })));
+    const client = new ApiClient("https://api.example.test");
+    const res = await client.searchAllChannelMessages("hi");
+    expect(res).toEqual({ messages: [], total: 0 });
+  });
+
+  it("parses a valid admin search response", async () => {
+    const body = {
+      messages: [
+        {
+          id: "m1",
+          channel_id: "c1",
+          channel_kind: "dm",
+          channel_title: "",
+          author_type: "member",
+          author_id: "u1",
+          content: "hello world",
+          snippet: "hello",
+          created_at: "2026-06-18T10:00:00Z",
+        },
+      ],
+      total: 1,
+    };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(body)));
+    const client = new ApiClient("https://api.example.test");
+    const res = await client.searchAllChannelMessages("hello");
+    expect(res.total).toBe(1);
+    expect(res.messages[0]?.channel_kind).toBe("dm");
+  });
+});

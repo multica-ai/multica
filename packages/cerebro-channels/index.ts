@@ -30,7 +30,6 @@ export {
   useChannelMessageSearch,
   ChannelMessageSearchButton,
   ChannelMessageSearchBar,
-  findMessageMatches,
 } from "./channel-message-search";
 export type {
   ChannelMessageSearch,
