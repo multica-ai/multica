@@ -90,6 +90,30 @@ describe("AppLink", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("activateTabOnClick delegates normal clicks to openInNewTab in the foreground", () => {
+    const push = vi.fn();
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ push, openInNewTab });
+
+    renderLink(adapter, { href: "/issues", activateTabOnClick: true });
+    fireEvent.click(screen.getByText("go"));
+
+    expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined, {
+      activate: true,
+    });
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("activateTabOnClick falls back to push when the adapter has no tab API", () => {
+    const push = vi.fn();
+    const adapter = makeAdapter({ push });
+
+    renderLink(adapter, { href: "/issues", activateTabOnClick: true });
+    fireEvent.click(screen.getByText("go"));
+
+    expect(push).toHaveBeenCalledWith("/issues");
+  });
+
   it("a caller-supplied onClick passed via spread cannot silently override the navigation handler", () => {
     const push = vi.fn();
     const adapter = makeAdapter({ push });
