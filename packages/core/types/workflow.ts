@@ -54,6 +54,7 @@ export interface WorkflowNode {
   critic_id: string | null;
   critic_api_url: string | null;
   sort_order: number;
+  stage_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -173,6 +174,38 @@ export interface ListWorkflowRunsResponse {
 export interface MyWorkflowTaskResponse {
   node_runs: WorkflowNodeRun[];
   total: number;
+}
+
+export interface WorkflowStage {
+  id: string;
+  workflow_id: string;
+  name: string;
+  description: string;
+  sort_order: number;
+  node_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateStageRequest {
+  name: string;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface UpdateStageRequest {
+  name?: string;
+  description?: string;
+  sort_order?: number;
+}
+
+export interface ReorderStagesItem {
+  id: string;
+  sort_order: number;
+}
+
+export interface AssignNodeToStageRequest {
+  stage_id: string | null;
 }
 
 export interface WorkflowAdmin {

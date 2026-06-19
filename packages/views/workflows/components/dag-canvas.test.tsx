@@ -97,6 +97,7 @@ function makeNode(overrides: Partial<WorkflowNode> = {}): WorkflowNode {
     critic_id: null,
     critic_api_url: null,
     sort_order: 1,
+    stage_id: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

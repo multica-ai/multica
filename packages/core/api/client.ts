@@ -106,11 +106,16 @@ import type {
   WorkflowEdge,
   WorkflowRun,
   WorkflowNodeRun,
+  WorkflowStage,
   CreateWorkflowRequest,
   UpdateWorkflowRequest,
   CreateNodeRequest,
   UpdateNodeRequest,
   CreateEdgeRequest,
+  CreateStageRequest,
+  UpdateStageRequest,
+  ReorderStagesItem,
+  AssignNodeToStageRequest,
   ListWorkflowsResponse,
   ListWorkflowRunsResponse,
   MyWorkflowTaskResponse,
@@ -152,6 +157,7 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  EMPTY_WORKFLOW_STAGES_RESPONSE,
   GroupedIssuesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -172,6 +178,7 @@ import {
   EMPTY_WORKFLOW_NODES_RESPONSE,
   WorkflowEdgesResponseSchema,
   EMPTY_WORKFLOW_EDGES_RESPONSE,
+  WorkflowStagesResponseSchema,
   ListWorkflowRunsResponseSchema,
   EMPTY_LIST_WORKFLOW_RUNS_RESPONSE,
   WorkflowRunSchema,
@@ -2063,6 +2070,50 @@ export class ApiClient {
     return this.fetch("/api/workflow-admins/invite", {
       method: "POST",
       body: JSON.stringify({ email }),
+    });
+  }
+
+  // ── Workflow Stages ──
+
+  async listWorkflowStages(workflowId: string): Promise<WorkflowStage[]> {
+    const raw = await this.fetch<unknown>(`/api/workflows/${workflowId}/stages`);
+    const parsed = parseWithFallback(raw, WorkflowStagesResponseSchema, EMPTY_WORKFLOW_STAGES_RESPONSE, {
+      endpoint: "GET /api/workflows/:id/stages",
+    });
+    return parsed.stages;
+  }
+
+  async createWorkflowStage(workflowId: string, req: CreateStageRequest): Promise<WorkflowStage> {
+    return this.fetch(`/api/workflows/${workflowId}/stages`, {
+      method: "POST",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async updateWorkflowStage(workflowId: string, stageId: string, req: UpdateStageRequest): Promise<WorkflowStage> {
+    return this.fetch(`/api/workflows/${workflowId}/stages/${stageId}`, {
+      method: "PUT",
+      body: JSON.stringify(req),
+    });
+  }
+
+  async deleteWorkflowStage(workflowId: string, stageId: string): Promise<void> {
+    await this.fetch(`/api/workflows/${workflowId}/stages/${stageId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async reorderWorkflowStages(workflowId: string, items: ReorderStagesItem[]): Promise<void> {
+    await this.fetch(`/api/workflows/${workflowId}/stages/reorder`, {
+      method: "PUT",
+      body: JSON.stringify(items),
+    });
+  }
+
+  async assignNodeToStage(workflowId: string, nodeId: string, req: AssignNodeToStageRequest): Promise<WorkflowNode> {
+    return this.fetch(`/api/workflows/${workflowId}/nodes/${nodeId}/stage`, {
+      method: "PUT",
+      body: JSON.stringify(req),
     });
   }
 }
