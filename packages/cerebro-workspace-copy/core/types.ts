@@ -127,6 +127,7 @@ export type RelinkResult = z.infer<typeof RelinkResultSchema>;
 export const InboxCopyResultSchema = z.object({
   inbox_issues: z.number().optional(),
   issues_copied: z.number().optional(),
+  inbox_items_created: z.number().optional(),
 });
 export type InboxCopyResult = z.infer<typeof InboxCopyResultSchema>;
 

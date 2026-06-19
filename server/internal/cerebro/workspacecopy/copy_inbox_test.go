@@ -34,6 +34,20 @@ func issuesInWorkspace(t *testing.T, ctx context.Context, ws pgtype.UUID) int {
 	return n
 }
 
+// activeInboxItems counts the recipient's active inbox rows in a workspace — the
+// set the inbox page would show (route='inbox', not archived).
+func activeInboxItems(t *testing.T, ctx context.Context, ws, recipient pgtype.UUID) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM inbox_item
+		WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
+		  AND route = 'inbox' AND archived = false`, ws, recipient).Scan(&n); err != nil {
+		t.Fatalf("count inbox items: %v", err)
+	}
+	return n
+}
+
 func TestCopyInbox_CopiesExactlyTheInboxIssues(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no test database")
@@ -63,23 +77,34 @@ func TestCopyInbox_CopiesExactlyTheInboxIssues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CopyInbox: %v", err)
 	}
-	if res.InboxIssues != 2 || res.IssuesCopied != 2 {
-		t.Fatalf("got InboxIssues=%d IssuesCopied=%d, want 2/2", res.InboxIssues, res.IssuesCopied)
+	if res.InboxIssues != 2 || res.IssuesCopied != 2 || res.InboxItemsCreated != 2 {
+		t.Fatalf("got InboxIssues=%d IssuesCopied=%d InboxItemsCreated=%d, want 2/2/2",
+			res.InboxIssues, res.IssuesCopied, res.InboxItemsCreated)
 	}
 	if n := issuesInWorkspace(t, ctx, tgtWS); n != 2 {
 		t.Fatalf("target has %d issues, want exactly 2 (inbox A+B only)", n)
 	}
+	// The copied issues must actually land in the recipient's inbox in the target —
+	// the whole point of the feature (TECH-3785).
+	if n := activeInboxItems(t, ctx, tgtWS, testUser); n != 2 {
+		t.Fatalf("target inbox has %d items, want 2 (the copied issues)", n)
+	}
 
-	// Idempotent: a re-run copies nothing new but still reports the same 2 found.
+	// Idempotent: a re-run copies nothing new and seeds no duplicate inbox rows,
+	// but still reports the same 2 found.
 	res2, err := s.CopyInbox(ctx, newID(), srcWS, tgtWS, testUser)
 	if err != nil {
 		t.Fatalf("CopyInbox re-run: %v", err)
 	}
-	if res2.InboxIssues != 2 || res2.IssuesCopied != 0 {
-		t.Fatalf("re-run got InboxIssues=%d IssuesCopied=%d, want 2/0", res2.InboxIssues, res2.IssuesCopied)
+	if res2.InboxIssues != 2 || res2.IssuesCopied != 0 || res2.InboxItemsCreated != 0 {
+		t.Fatalf("re-run got InboxIssues=%d IssuesCopied=%d InboxItemsCreated=%d, want 2/0/0",
+			res2.InboxIssues, res2.IssuesCopied, res2.InboxItemsCreated)
 	}
 	if n := issuesInWorkspace(t, ctx, tgtWS); n != 2 {
 		t.Fatalf("after re-run target has %d issues, want 2", n)
+	}
+	if n := activeInboxItems(t, ctx, tgtWS, testUser); n != 2 {
+		t.Fatalf("after re-run target inbox has %d items, want 2 (no duplicates)", n)
 	}
 
 	// Source is untouched.

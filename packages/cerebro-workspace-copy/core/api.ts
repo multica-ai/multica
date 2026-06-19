@@ -82,8 +82,9 @@ export async function copyWorkspaceArtifacts(
 }
 
 // copyInbox copies every issue the current user has open in their inbox
-// (route='inbox', not archived) into the target, then heals links/references —
-// the curated set the user works with, without copying the whole issue archive.
+// (route='inbox', not archived) into the target, heals links/references, and
+// places the copied issues into the user's inbox in the target workspace — the
+// curated set the user works with, without copying the whole issue archive.
 export async function copyInbox(
   wsId: string,
   targetWorkspaceId: string,

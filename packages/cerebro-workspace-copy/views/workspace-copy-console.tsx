@@ -371,12 +371,14 @@ export function WorkspaceCopyConsole() {
       const r = await copyInbox(wsId, targetId);
       const found = r.inbox_issues ?? 0;
       const copied = r.issues_copied ?? 0;
+      const inboxed = r.inbox_items_created ?? 0;
       const already = found - copied;
       toast.success(
         found === 0
           ? "Your inbox is empty — nothing to copy."
           : `Copied your inbox: ${copied} of ${found} issue${found === 1 ? "" : "s"}` +
-              `${already > 0 ? ` (${already} already in the target)` : ""}.`,
+              `${already > 0 ? ` (${already} already in the target)` : ""}` +
+              `${inboxed > 0 ? `, added ${inboxed} to your inbox there` : ""}.`,
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Inbox copy failed.");
