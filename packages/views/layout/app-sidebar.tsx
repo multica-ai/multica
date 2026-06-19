@@ -92,6 +92,8 @@ import { ApprovalsNavItem } from "@multica/cerebro-approvals/views/approvals-nav
 import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-passes-nav-item";
 // CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 sidebar entry for the Notes page
 import { NotesNavItem } from "@multica/cerebro-notes/views/notes-nav-item";
+// CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 sidebar entry for the Reminders overview
+import { RemindersNavItem } from "@multica/cerebro-reminders/views/reminders-nav-item";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -872,6 +874,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 Notes entry in workspace group */}
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                {/* CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 Reminders entry in workspace group */}
+                <RemindersNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
                 {projectsEnabled && (
                 // CEREBRO-PATCH(projects-sidebar-default-collapsed): TECH-3687 start Projects collapsed on load.

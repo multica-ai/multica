@@ -27,7 +27,13 @@ import { Label } from "@multica/ui/components/ui/label";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { CustomReminderPicker } from "./cerebro-inbox-row-actions";
-import { useCreateInboxReminder } from "../mutations";
+// FIR-394 — a comment reminder now creates a cerebro_reminder ENTITY linked
+// back to the comment, instead of an inbox_item on the conversation. That is
+// what removes the DM-lockout (FIR-249) for newly-set reminders: reminder state
+// no longer lives on the thread it points at. The mutation lives locally (not
+// imported from @multica/cerebro-reminders) so the inbox package does not take
+// a dependency on the reminders package — that would close a views↔inbox cycle.
+import { useCreateCommentReminder } from "../mutations";
 import {
   addHours,
   fromDateTimeLocalValue,
@@ -59,20 +65,21 @@ export function suggestReminderText(content: string): string {
 export function CerebroCommentReminderSheet({
   open,
   onOpenChange,
-  issueId,
   commentId,
   commentContent,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  issueId: string;
+  // Accepted for backward compatibility but no longer needed: the backend
+  // resolves the conversation from the comment itself (FIR-394).
+  issueId?: string;
   commentId: string;
   commentContent: string;
 }) {
   const isMobile = useIsMobile();
   const strings = useCerebroInboxStrings();
   const { i18n } = useTranslation();
-  const createReminder = useCreateInboxReminder();
+  const createReminder = useCreateCommentReminder();
 
   const [text, setText] = useState("");
   const [customReminder, setCustomReminder] = useState(() =>
@@ -103,7 +110,7 @@ export function CerebroCommentReminderSheet({
 
   const schedule = (plannedAt: Date) => {
     createReminder.mutate(
-      { text: text.trim(), plannedAt, issueId, commentId },
+      { message_id: commentId, remind_at: plannedAt.toISOString(), text: text.trim() },
       {
         onSuccess: () => {
           onOpenChange(false);

@@ -833,6 +833,21 @@ type CerebroProjectStatusModel struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroReminder struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	RemindAt         pgtype.Timestamptz `json:"remind_at"`
+	Status           string             `json:"status"`
+	Text             string             `json:"text"`
+	MessageID        pgtype.UUID        `json:"message_id"`
+	ConversationID   pgtype.UUID        `json:"conversation_id"`
+	FiredInboxItemID pgtype.UUID        `json:"fired_inbox_item_id"`
+	FiredAt          pgtype.Timestamptz `json:"fired_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroRole struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

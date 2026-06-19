@@ -69,6 +69,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/reminders/{id}",
+      "gate": "self_only"
+    },
+    {
       "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
       "gate": "workspace_member"
     },
@@ -575,6 +579,18 @@
     {
       "id": "POST /api/cerebro/projects/{projectID}/sprints/",
       "gate": "via:POST /api/cerebro/projects/{projectID}/sprints/"
+    },
+    {
+      "id": "POST /api/cerebro/reminders/",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/reminders/{id}/done",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/reminders/{id}/snooze",
+      "gate": "self_only"
     },
     {
       "id": "POST /api/cerebro/status-models/",

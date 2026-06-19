@@ -230,3 +230,32 @@ export function useCreateInboxReminder() {
     },
   });
 }
+
+// FIR-394 — create a reminder as its OWN entity linked back to the comment,
+// instead of an inbox_item on the conversation (which is what locked DM threads,
+// FIR-249). Posts straight to /api/cerebro/reminders; kept here (rather than
+// importing @multica/cerebro-reminders) so the inbox package takes no dependency
+// on the reminders package — that would close a views↔inbox dependency cycle.
+// The query key mirrors reminderKeys.all so the reminder overview refreshes too.
+export function useCreateCommentReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      message_id,
+      remind_at,
+      text,
+    }: {
+      message_id: string;
+      remind_at: string;
+      text: string;
+    }) =>
+      api.cerebroRequest("/api/cerebro/reminders", {
+        method: "POST",
+        body: JSON.stringify({ message_id, remind_at, text }),
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}

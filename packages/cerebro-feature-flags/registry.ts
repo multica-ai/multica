@@ -122,6 +122,10 @@ export type CerebroFlagKey =
   | "cerebro_pdf_inline_render"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
   | "cerebro_comment_reminders"
+  // FIR-394: reminder overview page — reminders as their own entity (linked back
+  // to the source message), with the opened reminder card. Gates the nav entry +
+  // /reminders route. OFF until QA'd on staging.
+  | "cerebro_reminders"
   // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
   | "cerebro_comment_target_guard"
   // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
@@ -360,6 +364,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // by default; per-channel push stays opt-in). Off hides the menu action and
   // the server rejects comment-referencing reminders.
   cerebro_comment_reminders: true,
+  // FIR-394: OFF until the reminder overview is QA'd on staging. Gates only the
+  // nav entry + /reminders route; the backend entity + sweeper are always live.
+  cerebro_reminders: false,
   // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
   // no target at all (no person, agent, or issue) is rejected by the server
   // with a 422 telling the agent to add one. Members are never affected. Off

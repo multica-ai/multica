@@ -47,6 +47,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { NotesPage } from "@multica/cerebro-notes/views";
+import { ReminderOverview } from "@multica/cerebro-reminders/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
 import { Download, Server } from "lucide-react";
@@ -309,6 +310,11 @@ export const appRoutes: RouteObject[] = [
             path: "notes",
             element: <NotesRoute />,
             handle: { title: "Noter" },
+          },
+          {
+            path: "reminders",
+            element: <ReminderOverview />,
+            handle: { title: "Reminders" },
           },
           {
             path: "notifications",

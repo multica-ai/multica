@@ -106,6 +106,8 @@ import (
 	cerebroentityfolder "github.com/multica-ai/multica/server/internal/cerebro/entityfolder"
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox
 	cerebrofocuslist "github.com/multica-ai/multica/server/internal/cerebro/focus_list"
+	// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder as its own entity
+	cerebroreminder "github.com/multica-ai/multica/server/internal/cerebro/reminder"
 	// CEREBRO-PATCH(agent-avatar-generate): JEH-1563 AI avatar generation handler import
 	cerebroagentavatar "github.com/multica-ai/multica/server/internal/cerebro/agent_avatar"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
@@ -714,6 +716,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroEntityFolderHandler := cerebroentityfolder.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list handler instance
 	cerebroFocusListHandler := cerebrofocuslist.New(cerebroQueries)
+	// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder entity handler.
+	cerebroReminderHandler := cerebroreminder.New(queries, cerebroQueries)
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API handler.
 	cerebroWakeupHandler := cerebrowakeup.NewHandler(cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus))
 
@@ -1885,6 +1889,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{id}", cerebroFocusListHandler.Delete)
 				r.Post("/{id}/done", cerebroFocusListHandler.MarkDone)
 				r.Post("/{id}/snooze", cerebroFocusListHandler.Snooze)
+			})
+			// CEREBRO-PATCH(cerebro-reminder): FIR-394 reminder as its own entity.
+			r.Route("/api/cerebro/reminders", func(r chi.Router) {
+				r.Get("/", cerebroReminderHandler.List)
+				r.Post("/", cerebroReminderHandler.Create)
+				r.Get("/{id}", cerebroReminderHandler.Get)
+				r.Post("/{id}/snooze", cerebroReminderHandler.Snooze)
+				r.Post("/{id}/done", cerebroReminderHandler.MarkDone)
+				r.Delete("/{id}", cerebroReminderHandler.Delete)
 			})
 			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
 			// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal endpoints.

@@ -399,6 +399,8 @@ func main() {
 	go cerebrowakeup.RunSweeper(sweepCtx, wakeupSvc, 30*time.Second)
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
+	// CEREBRO-PATCH(cerebro-reminder): FIR-394 — fire standalone reminders and re-surface the source conversation in the inbox.
+	go runCerebroReminderSweeper(sweepCtx, cerebrodb.New(pool), bus)
 	// CEREBRO-PATCH(issue-date-reminders): fire a notification when an issue's start/due date arrives, and auto-start an agent-assigned issue at its scheduled start time (issue-date-times).
 	go runIssueDateReminderSweeper(sweepCtx, queries, bus, taskSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
