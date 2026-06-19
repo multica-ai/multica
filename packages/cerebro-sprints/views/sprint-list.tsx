@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CalendarRange } from "lucide-react";
@@ -25,8 +25,20 @@ import { useWorkspacePaths } from "@multica/core/paths";
 // `@multica/views` to dependencies here.
 import { AppLink } from "@multica/views/navigation";
 
-import { projectSprintsOptions, useCreateSprint, useDeleteSprint } from "../core/queries";
-import type { SprintStatus } from "../core/types";
+import {
+  projectSprintsOptions,
+  sprintSettingsOptions,
+  useCreateSprint,
+  useDeleteSprint,
+} from "../core/queries";
+import type { Sprint, SprintStatus } from "../core/types";
+import {
+  applyNameTemplate,
+  computeEnd,
+  computeNextStart,
+  formatDateOnly,
+  parseDateOnly,
+} from "../core/template";
 
 interface Props {
   workspaceId: string;
@@ -50,8 +62,79 @@ function openDatePicker(e: { currentTarget: HTMLInputElement }) {
   }
 }
 
+interface SprintFormDefaults {
+  name: string;
+  start_date: string;
+  end_date: string;
+  sequence_no: number;
+}
+
+// Cadence-aware defaults for the "New sprint" dialog so a hand-created sprint
+// follows the same Name template + duration as an auto-created one (FIR-1581).
+// Mirrors the server's nextSequenceFor + ComputeNextStart/ComputeEnd: sequence
+// continues from the latest sprint, dates roll forward by the configured
+// cadence (falling back to today when there is no prior sprint), and the name
+// is rendered from the template. `settings` may be undefined while the query
+// loads — defaults degrade to a plain sequence with empty dates.
+function buildSprintDefaults(
+  sprints: Sprint[],
+  settings:
+    | {
+        name_template: string;
+        duration_unit: "day" | "week" | "month";
+        duration_count: number;
+        start_weekday: number;
+      }
+    | undefined,
+  today: Date,
+): SprintFormDefaults {
+  const maxSeq = sprints.reduce((max, s) => (s.sequence_no > max ? s.sequence_no : max), 0);
+  const sequenceNo = maxSeq + 1;
+
+  const template = settings?.name_template ?? "";
+  const unit = settings?.duration_unit ?? "week";
+  const count = settings?.duration_count ?? 1;
+  const weekday = settings?.start_weekday ?? 1;
+
+  // Roll forward from the latest sprint that has an end date; otherwise seed
+  // from today so the picker is pre-filled rather than blank.
+  const latest = sprints.reduce<Sprint | null>(
+    (acc, s) => (acc === null || s.sequence_no > acc.sequence_no ? s : acc),
+    null,
+  );
+  const previousEnd = latest ? parseDateOnly(latest.end_date) : null;
+
+  let start: Date;
+  let end: Date;
+  if (previousEnd) {
+    start = computeNextStart(previousEnd, unit, weekday);
+    end = computeEnd(start, unit, count);
+  } else if (settings) {
+    start = today;
+    end = computeEnd(start, unit, count);
+  } else {
+    // No settings yet — leave dates blank so the user picks them manually.
+    return {
+      name: applyNameTemplate(template, sequenceNo),
+      start_date: "",
+      end_date: "",
+      sequence_no: sequenceNo,
+    };
+  }
+
+  const start_date = formatDateOnly(start);
+  const end_date = formatDateOnly(end);
+  return {
+    name: applyNameTemplate(template, sequenceNo, start_date, end_date),
+    start_date,
+    end_date,
+    sequence_no: sequenceNo,
+  };
+}
+
 export function SprintList({ workspaceId, projectId }: Props) {
   const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId));
+  const settingsQuery = useQuery(sprintSettingsOptions(workspaceId, projectId));
   const createSprint = useCreateSprint(workspaceId, projectId);
   const deleteSprint = useDeleteSprint(workspaceId, projectId);
   const paths = useWorkspacePaths();
@@ -63,8 +146,49 @@ export function SprintList({ workspaceId, projectId }: Props) {
     end_date: "",
     goal: "",
   });
+  // Once the user types in the Name field we stop re-deriving it from the
+  // template on date changes, so a manual override is never clobbered.
+  const [nameEdited, setNameEdited] = useState(false);
+  // Sequence the prefill computed, reused to keep {n} stable while the user
+  // tweaks the dates.
+  const [prefillSeq, setPrefillSeq] = useState(1);
 
   const sprints = sprintsQuery.data?.sprints ?? [];
+  const settings = settingsQuery.data ?? undefined;
+
+  // When the dialog opens, prefill name + dates from the Name template and
+  // cadence so a hand-created sprint matches an auto-created one (FIR-1581).
+  useEffect(() => {
+    if (!open) return;
+    const defaults = buildSprintDefaults(sprints, settings, new Date());
+    setForm({
+      name: defaults.name,
+      start_date: defaults.start_date,
+      end_date: defaults.end_date,
+      goal: "",
+    });
+    setPrefillSeq(defaults.sequence_no);
+    setNameEdited(false);
+    // Only re-run when the dialog is (re)opened — not on every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Re-render the name from the template when dates change, unless the user has
+  // taken over the Name field. Keeps {start}/{end} in sync with the pickers.
+  function setDate(field: "start_date" | "end_date", value: string) {
+    setForm((prev) => {
+      const next = { ...prev, [field]: value };
+      if (!nameEdited && settings) {
+        next.name = applyNameTemplate(
+          settings.name_template,
+          prefillSeq,
+          next.start_date,
+          next.end_date,
+        );
+      }
+      return next;
+    });
+  }
 
   function submit() {
     if (!form.name.trim()) {
@@ -118,7 +242,10 @@ export function SprintList({ workspaceId, projectId }: Props) {
                 <Input
                   id="sprint-name"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  onChange={(e) => {
+                    setNameEdited(true);
+                    setForm({ ...form, name: e.target.value });
+                  }}
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -128,7 +255,7 @@ export function SprintList({ workspaceId, projectId }: Props) {
                     id="sprint-start"
                     type="date"
                     value={form.start_date}
-                    onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+                    onChange={(e) => setDate("start_date", e.target.value)}
                     onClick={openDatePicker}
                     onFocus={openDatePicker}
                   />
@@ -139,7 +266,7 @@ export function SprintList({ workspaceId, projectId }: Props) {
                     id="sprint-end"
                     type="date"
                     value={form.end_date}
-                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                    onChange={(e) => setDate("end_date", e.target.value)}
                     onClick={openDatePicker}
                     onFocus={openDatePicker}
                   />
