@@ -1349,6 +1349,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/issues/{issueID}/date-times/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/issues/{issueID}/recurrence/",
       "gate": "workspace_member"
     },
