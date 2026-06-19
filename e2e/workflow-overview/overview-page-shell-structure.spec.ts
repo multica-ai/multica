@@ -11,38 +11,22 @@
 // Depends on: backend workflow + stage API, frontend overview page.
 // Expected to fail until the frontend implementation is built.
 
-import { test, expect } from "@playwright/test";
-import { loginAsDefault, createTestApi } from "../helpers";
-import type { TestApiClient } from "../fixtures";
+import { test, expect } from "../seed-workflow-overview";
 
 test.describe("Overview Page Shell Structure", () => {
-  let api: TestApiClient;
-  let slug: string;
-
-  test.beforeEach(async ({ page }) => {
-    slug = await loginAsDefault(page);
-    api = await createTestApi();
-  });
-
-  test.afterEach(async () => {
-    if (api) {
-      await api.cleanup();
-    }
-  });
-
-  test("overview page shows three-zone layout with stage cards, DAG, and no detail panel", async ({ page }) => {
+  test("overview page shows three-zone layout with stage cards, DAG, and no detail panel", async ({ page, slug, seededApi }) => {
     // ── Setup: create a workflow with stages ──
-    const workflow = await api.createWorkflow("E2E Shell Test " + Date.now());
+    const workflow = await seededApi.createWorkflow("E2E Shell Test " + Date.now());
 
     // Create several stages to populate the stage card strip
-    await api.createWorkflowStage(workflow.id, "Research", 1);
-    await api.createWorkflowStage(workflow.id, "Draft", 2);
-    await api.createWorkflowStage(workflow.id, "Review", 3);
-    await api.createWorkflowStage(workflow.id, "Finalize", 4);
+    await seededApi.createWorkflowStage(workflow.id, "Research", 1);
+    await seededApi.createWorkflowStage(workflow.id, "Draft", 2);
+    await seededApi.createWorkflowStage(workflow.id, "Review", 3);
+    await seededApi.createWorkflowStage(workflow.id, "Finalize", 4);
 
     // ── Navigate directly to the overview page ──
     await page.goto(`/${slug}/workflows/${workflow.id}/overview`);
-    await page.waitForURL(`/${slug}/workflows/${workflow.id}/overview`);
+    await expect(page).toHaveURL(`/${slug}/workflows/${workflow.id}/overview`);
 
     // ── Step 1: Verify three main zones ──
     // The overview page should have three zones:
