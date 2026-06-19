@@ -293,39 +293,6 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
-func TestIssueAutoLabelBriefSuppressesIssueWorkflow(t *testing.T) {
-	t.Parallel()
-	const issueID = "88888888-9999-aaaa-bbbb-cccccccccccc"
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
-		IssueID:        issueID,
-		IssueAutoLabel: true,
-	})
-
-	for _, want := range []string{
-		"internal issue auto-label task",
-		"Use LLM judgment to choose at most two useful labels.",
-		"Do NOT post issue comments, change status, edit metadata, create PRs",
-		"Final results are captured from stdout; do NOT post a Multica issue comment.",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("auto-label brief missing %q\n---\n%s", want, out)
-		}
-	}
-	for _, banned := range []string{
-		"## Instruction Precedence",
-		"## Issue Metadata",
-		"## Sub-issue Creation",
-		"Run `multica issue status " + issueID + " in_progress`",
-		"Post your final results as a comment",
-		"Final results MUST be delivered via `multica issue comment add`",
-		"Run `multica issue comment list " + issueID,
-	} {
-		if strings.Contains(out, banned) {
-			t.Errorf("auto-label brief must not contain %q\n---\n%s", banned, out)
-		}
-	}
-}
-
 func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -350,13 +317,6 @@ func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 		{
 			name: "autopilot run-only",
 			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},
-		},
-		{
-			name: "issue auto-label",
-			ctx: TaskContextForEnv{
-				IssueID:        "55555555-6666-7777-8888-999999999999",
-				IssueAutoLabel: true,
-			},
 		},
 	}
 	for _, tc := range cases {

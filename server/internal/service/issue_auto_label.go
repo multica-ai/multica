@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	WorkspaceSettingAutoLabelNewIssues = "auto_label_new_issues"
-	WorkspaceSettingAutoLabelAgentID   = "auto_label_agent_id"
-	maxAutoLabelsPerIssue              = 2
-	minAutoLabelConfidence             = 0.65
+	WorkspaceSettingAutoLabelNewIssues   = "auto_label_new_issues"
+	WorkspaceSettingAutoLabelAgentID     = "auto_label_agent_id"
+	WorkspaceSettingAutoLabelAutopilotID = "auto_label_autopilot_id"
+	maxAutoLabelsPerIssue                = 2
+	minAutoLabelConfidence               = 0.65
+	issueAutoLabelAutopilotTitle         = "Issue Auto Labeler"
 )
 
 // IssueLabelRecommendation is a recommender output that the service can
@@ -38,15 +40,35 @@ type IssueLabelRecommender interface {
 	RecommendIssueLabels(ctx context.Context, issue db.Issue, existing []db.IssueLabel) ([]IssueLabelRecommendation, error)
 }
 
-// IssueAutoLabelService handles labels for newly created member- or
-// agent-authored issues. In production it enqueues an internal Multica agent
-// task so the agent can classify via LLM judgment; the recommender path remains
-// as a deterministic fallback for tests and deployments without TaskService.
+const issueAutoLabelAutopilotDescription = `You are the Multica issue auto-labeling autopilot.
+
+Trigger payload includes type=issue_auto_label, issue_id, and workspace_id. Use trigger_payload.issue_id as the only issue you may modify.
+
+Workflow:
+1. Run multica issue get <issue_id> --output json to read the issue.
+2. Run multica issue label list <issue_id> --output json. If it already has labels, make no changes and exit.
+3. Run multica label list --output json to see the workspace label vocabulary.
+4. Choose at most two labels using semantic judgment. Prefer existing broad, reusable labels when they fit.
+5. If no existing label fits but a concise reusable label is clearly useful, create it with multica label create --name <name> --color <hex> --output json.
+6. Attach selected labels with multica issue label add <issue_id> <label-id> --output json.
+
+Rules:
+- Use LLM judgment, not keyword counting.
+- Do not create duplicate labels that differ only by case, spacing, or translation.
+- Keep new label names 32 characters or fewer.
+- If the issue is too ambiguous for a useful label, attach nothing.
+- Do not comment, change status, change assignee, edit issue fields, edit metadata, mention anyone, create PRs, or touch code.
+- Finish with one short terminal line summarizing the labels applied or why none were applied.`
+
+// IssueAutoLabelService labels newly created member- or agent-authored issues.
+// In production it dispatches a run_only Multica Autopilot so an agent can use
+// LLM judgment. The recommender path remains as a deterministic fallback for
+// tests and deployments without AutopilotService.
 type IssueAutoLabelService struct {
-	Queries     *db.Queries
-	Bus         *events.Bus
-	TaskService *TaskService
-	Recommender IssueLabelRecommender
+	Queries          *db.Queries
+	Bus              *events.Bus
+	AutopilotService *AutopilotService
+	Recommender      IssueLabelRecommender
 }
 
 func NewIssueAutoLabelService(q *db.Queries, bus *events.Bus, recommender IssueLabelRecommender) *IssueAutoLabelService {
@@ -61,13 +83,7 @@ func NewIssueAutoLabelService(q *db.Queries, bus *events.Bus, recommender IssueL
 }
 
 func AutoLabelNewIssuesEnabled(settings []byte) bool {
-	if len(settings) == 0 {
-		return false
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(settings, &parsed); err != nil {
-		return false
-	}
+	parsed := parseAutoLabelSettings(settings)
 	return parsed[WorkspaceSettingAutoLabelNewIssues] == true
 }
 
@@ -76,21 +92,37 @@ func AutoLabelEligibleCreatorType(creatorType string) bool {
 }
 
 func AutoLabelAgentID(settings []byte) string {
-	if len(settings) == 0 {
-		return ""
-	}
-	var parsed map[string]any
-	if err := json.Unmarshal(settings, &parsed); err != nil {
-		return ""
-	}
+	parsed := parseAutoLabelSettings(settings)
 	if id, ok := parsed[WorkspaceSettingAutoLabelAgentID].(string); ok {
 		return strings.TrimSpace(id)
 	}
 	return ""
 }
 
+func AutoLabelAutopilotID(settings []byte) string {
+	parsed := parseAutoLabelSettings(settings)
+	if id, ok := parsed[WorkspaceSettingAutoLabelAutopilotID].(string); ok {
+		return strings.TrimSpace(id)
+	}
+	return ""
+}
+
+func parseAutoLabelSettings(settings []byte) map[string]any {
+	if len(settings) == 0 {
+		return map[string]any{}
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(settings, &parsed); err != nil {
+		return map[string]any{}
+	}
+	if parsed == nil {
+		return map[string]any{}
+	}
+	return parsed
+}
+
 func (s *IssueAutoLabelService) AutoLabelCreatedIssue(ctx context.Context, issueID string) error {
-	if s == nil || s.Queries == nil || s.Recommender == nil {
+	if s == nil || s.Queries == nil {
 		return nil
 	}
 	issueUUID, err := util.ParseUUID(issueID)
@@ -121,14 +153,16 @@ func (s *IssueAutoLabelService) AutoLabelCreatedIssue(ctx context.Context, issue
 	if len(current) > 0 {
 		return nil
 	}
-	if s.TaskService != nil {
-		return s.enqueueAgentAutoLabelTask(ctx, issue, workspace.Settings)
+	if s.AutopilotService != nil {
+		return s.dispatchAutoLabelAutopilot(ctx, issue, workspace.Settings)
 	}
-
+	if s.Recommender == nil {
+		return nil
+	}
 	return s.applyRecommendedLabels(ctx, issue)
 }
 
-func (s *IssueAutoLabelService) enqueueAgentAutoLabelTask(ctx context.Context, issue db.Issue, settings []byte) error {
+func (s *IssueAutoLabelService) dispatchAutoLabelAutopilot(ctx context.Context, issue db.Issue, settings []byte) error {
 	agentID, ok, err := s.selectAutoLabelAgent(ctx, issue, settings)
 	if err != nil {
 		return err
@@ -140,7 +174,24 @@ func (s *IssueAutoLabelService) enqueueAgentAutoLabelTask(ctx context.Context, i
 		)
 		return nil
 	}
-	_, err = s.TaskService.EnqueueIssueAutoLabelTask(ctx, issue, agentID)
+	ap, err := s.ensureAutoLabelAutopilot(ctx, issue.WorkspaceID, agentID, settings)
+	if err != nil {
+		return err
+	}
+	if active, err := s.hasActiveAutoLabelAutopilotRun(ctx, ap.ID, issue.ID); err != nil {
+		return err
+	} else if active {
+		return nil
+	}
+	payload, err := json.Marshal(map[string]string{
+		"type":         "issue_auto_label",
+		"issue_id":     util.UUIDToString(issue.ID),
+		"workspace_id": util.UUIDToString(issue.WorkspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "api", payload)
 	return err
 }
 
@@ -153,17 +204,17 @@ func (s *IssueAutoLabelService) selectAutoLabelAgent(ctx context.Context, issue 
 				"agent_id", configuredID,
 				"error", err,
 			)
-		} else if s.isReadyWorkspaceAgent(ctx, agentID, issue.WorkspaceID) {
+		} else if s.isUsableWorkspaceAgent(ctx, agentID, issue.WorkspaceID) {
 			return agentID, true, nil
 		}
 	}
 	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
-		if s.isReadyWorkspaceAgent(ctx, issue.AssigneeID, issue.WorkspaceID) {
+		if s.isUsableWorkspaceAgent(ctx, issue.AssigneeID, issue.WorkspaceID) {
 			return issue.AssigneeID, true, nil
 		}
 	}
 	if issue.CreatorType == "agent" && issue.CreatorID.Valid {
-		if s.isReadyWorkspaceAgent(ctx, issue.CreatorID, issue.WorkspaceID) {
+		if s.isUsableWorkspaceAgent(ctx, issue.CreatorID, issue.WorkspaceID) {
 			return issue.CreatorID, true, nil
 		}
 	}
@@ -171,20 +222,155 @@ func (s *IssueAutoLabelService) selectAutoLabelAgent(ctx context.Context, issue 
 	if err != nil {
 		return pgtype.UUID{}, false, err
 	}
+	var fallback pgtype.UUID
 	for _, agent := range agents {
-		if agent.RuntimeID.Valid && !agent.ArchivedAt.Valid {
+		if agent.ArchivedAt.Valid {
+			continue
+		}
+		if !fallback.Valid {
+			fallback = agent.ID
+		}
+		ready, _, err := AgentReadiness(ctx, s.Queries, agent)
+		if err == nil && ready {
 			return agent.ID, true, nil
 		}
+	}
+	if fallback.Valid {
+		return fallback, true, nil
 	}
 	return pgtype.UUID{}, false, nil
 }
 
-func (s *IssueAutoLabelService) isReadyWorkspaceAgent(ctx context.Context, agentID, workspaceID pgtype.UUID) bool {
+func (s *IssueAutoLabelService) isUsableWorkspaceAgent(ctx context.Context, agentID, workspaceID pgtype.UUID) bool {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
-	if err != nil {
+	if err != nil || agent.WorkspaceID != workspaceID {
 		return false
 	}
-	return agent.WorkspaceID == workspaceID && agent.RuntimeID.Valid && !agent.ArchivedAt.Valid
+	return !agent.ArchivedAt.Valid
+}
+
+func (s *IssueAutoLabelService) ensureAutoLabelAutopilot(ctx context.Context, workspaceID, agentID pgtype.UUID, settings []byte) (db.Autopilot, error) {
+	if configuredID := AutoLabelAutopilotID(settings); configuredID != "" {
+		apID, err := util.ParseUUID(configuredID)
+		if err != nil {
+			slog.Warn("issue auto-label: configured autopilot id is invalid", "autopilot_id", configuredID, "error", err)
+		} else if ap, err := s.Queries.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{
+			ID:          apID,
+			WorkspaceID: workspaceID,
+		}); err == nil {
+			return s.normalizeAutoLabelAutopilot(ctx, ap, agentID)
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return db.Autopilot{}, err
+		}
+	}
+
+	autopilots, err := s.Queries.ListAutopilots(ctx, db.ListAutopilotsParams{
+		WorkspaceID: workspaceID,
+		Status:      pgtype.Text{},
+	})
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	for _, row := range autopilots {
+		ap := row.Autopilot
+		if ap.Title == issueAutoLabelAutopilotTitle && ap.ExecutionMode == "run_only" {
+			ap, err = s.normalizeAutoLabelAutopilot(ctx, ap, agentID)
+			if err != nil {
+				return db.Autopilot{}, err
+			}
+			s.persistAutoLabelAutopilotID(ctx, workspaceID, settings, ap.ID)
+			return ap, nil
+		}
+	}
+
+	ap, err := s.Queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:   workspaceID,
+		Title:         issueAutoLabelAutopilotTitle,
+		Description:   pgtype.Text{String: issueAutoLabelAutopilotDescription, Valid: true},
+		AssigneeType:  "agent",
+		AssigneeID:    agentID,
+		Status:        "active",
+		ExecutionMode: "run_only",
+		CreatedByType: "agent",
+		CreatedByID:   agentID,
+	})
+	if err != nil {
+		return db.Autopilot{}, err
+	}
+	s.persistAutoLabelAutopilotID(ctx, workspaceID, settings, ap.ID)
+	return ap, nil
+}
+
+func (s *IssueAutoLabelService) normalizeAutoLabelAutopilot(ctx context.Context, ap db.Autopilot, agentID pgtype.UUID) (db.Autopilot, error) {
+	if ap.Title == issueAutoLabelAutopilotTitle &&
+		ap.Description.Valid &&
+		ap.Description.String == issueAutoLabelAutopilotDescription &&
+		ap.AssigneeType == "agent" &&
+		ap.AssigneeID == agentID &&
+		ap.Status == "active" &&
+		ap.ExecutionMode == "run_only" {
+		return ap, nil
+	}
+	return s.Queries.UpdateAutopilot(ctx, db.UpdateAutopilotParams{
+		ID:            ap.ID,
+		Title:         pgtype.Text{String: issueAutoLabelAutopilotTitle, Valid: true},
+		Description:   pgtype.Text{String: issueAutoLabelAutopilotDescription, Valid: true},
+		AssigneeType:  pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:    agentID,
+		Status:        pgtype.Text{String: "active", Valid: true},
+		ExecutionMode: pgtype.Text{String: "run_only", Valid: true},
+	})
+}
+
+func (s *IssueAutoLabelService) persistAutoLabelAutopilotID(ctx context.Context, workspaceID pgtype.UUID, settings []byte, autopilotID pgtype.UUID) {
+	updated, err := settingsWithAutoLabelAutopilotID(settings, util.UUIDToString(autopilotID))
+	if err != nil {
+		slog.Warn("issue auto-label: failed to encode autopilot setting", "error", err)
+		return
+	}
+	if _, err := s.Queries.UpdateWorkspace(ctx, db.UpdateWorkspaceParams{
+		ID:       workspaceID,
+		Settings: updated,
+	}); err != nil {
+		slog.Warn("issue auto-label: failed to persist autopilot id",
+			"workspace_id", util.UUIDToString(workspaceID),
+			"autopilot_id", util.UUIDToString(autopilotID),
+			"error", err,
+		)
+	}
+}
+
+func settingsWithAutoLabelAutopilotID(settings []byte, autopilotID string) ([]byte, error) {
+	parsed := parseAutoLabelSettings(settings)
+	parsed[WorkspaceSettingAutoLabelAutopilotID] = autopilotID
+	return json.Marshal(parsed)
+}
+
+func (s *IssueAutoLabelService) hasActiveAutoLabelAutopilotRun(ctx context.Context, autopilotID, issueID pgtype.UUID) (bool, error) {
+	runs, err := s.Queries.ListAutopilotRuns(ctx, db.ListAutopilotRunsParams{
+		AutopilotID: autopilotID,
+		Limit:       100,
+		Offset:      0,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, run := range runs {
+		if run.Status != "running" && run.Status != "issue_created" {
+			continue
+		}
+		var payload struct {
+			Type    string `json:"type"`
+			IssueID string `json:"issue_id"`
+		}
+		if err := json.Unmarshal(run.TriggerPayload, &payload); err != nil {
+			continue
+		}
+		if payload.Type == "issue_auto_label" && payload.IssueID == util.UUIDToString(issueID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *IssueAutoLabelService) applyRecommendedLabels(ctx context.Context, issue db.Issue) error {

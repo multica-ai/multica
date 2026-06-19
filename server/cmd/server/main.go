@@ -332,11 +332,11 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
-	autoLabelSvc := service.NewIssueAutoLabelService(queries, bus, nil)
-	autoLabelSvc.TaskService = taskSvc
-	registerIssueAutoLabelListeners(bus, autoLabelSvc)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
+	autoLabelSvc := service.NewIssueAutoLabelService(queries, bus, nil)
+	autoLabelSvc.AutopilotService = autopilotSvc
+	registerIssueAutoLabelListeners(bus, autoLabelSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
