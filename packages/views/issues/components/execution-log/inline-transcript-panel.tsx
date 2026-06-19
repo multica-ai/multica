@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Loader2, AlertCircle, RotateCcw } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
-import { api } from "@multica/core/api";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types/agent";
 import { TaskTranscriptTimeline, buildTimeline } from "../../../common/task-transcript";

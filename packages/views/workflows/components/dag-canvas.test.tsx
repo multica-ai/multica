@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { fireEvent, cleanup } from "@testing-library/react";
 import { renderWithI18n } from "../../test/i18n";
 
 // ── ReactFlow mock ──────────────────────────────────────────────
@@ -10,9 +10,9 @@ const rfPropsRef = vi.hoisted(() => [] as Record<string, unknown>[]);
 vi.mock("@xyflow/react", () => ({
   ReactFlow: (props: Record<string, unknown>) => {
     rfPropsRef.push(props);
-    const { nodes, edges, nodeTypes, edgeTypes, onNodeClick, onNodeDragStop,
+    const { nodes, edges, onNodeClick, onNodeDragStop,
       onConnect, onEdgeClick, onPaneClick, nodesDraggable, nodesConnectable,
-      elementsSelectable, fitView, children } = props;
+      children } = props;
     return (
       <div data-testid="reactflow" data-draggable={String(nodesDraggable)}
         data-connectable={String(nodesConnectable)}>
@@ -117,7 +117,7 @@ function makeEdge(overrides: Partial<WorkflowEdge> = {}): WorkflowEdge {
 }
 
 function lastProps(): Record<string, unknown> {
-  return rfPropsRef[rfPropsRef.length - 1];
+  return rfPropsRef[rfPropsRef.length - 1]!;
 }
 
 // ── Tests ───────────────────────────────────────────────────────
@@ -158,16 +158,16 @@ describe("WorkflowCanvas", () => {
     const nodes = [makeNode({ id: "n1", position_x: 42, position_y: 99 })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     const rfNodes = lastProps().nodes as { position: { x: number; y: number } }[];
-    expect(rfNodes[0].position).toEqual({ x: 42, y: 99 });
+    expect(rfNodes[0]!.position).toEqual({ x: 42, y: 99 });
   });
 
   it("maps node data with title and default status fields", () => {
     const nodes = [makeNode({ id: "n1", title: "Hello" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     const rfNodes = lastProps().nodes as { data: Record<string, unknown> }[];
-    expect(rfNodes[0].data.title).toBe("Hello");
-    expect(rfNodes[0].data.statusColor).toBeUndefined();
-    expect(rfNodes[0].data.isRunning).toBe(false);
+    expect(rfNodes[0]!.data.title).toBe("Hello");
+    expect(rfNodes[0]!.data.statusColor).toBeUndefined();
+    expect(rfNodes[0]!.data.isRunning).toBe(false);
   });
 
   it("maps node data with status colors and running flags", () => {
@@ -181,9 +181,9 @@ describe("WorkflowCanvas", () => {
       />,
     );
     const rfNodes = lastProps().nodes as { data: Record<string, unknown> }[];
-    expect(rfNodes[0].data.statusColor).toBe("#ff0000");
-    expect(rfNodes[0].data.statusLabel).toBe("working");
-    expect(rfNodes[0].data.isRunning).toBe(true);
+    expect(rfNodes[0]!.data.statusColor).toBe("#ff0000");
+    expect(rfNodes[0]!.data.statusLabel).toBe("working");
+    expect(rfNodes[0]!.data.isRunning).toBe(true);
   });
 
   // ── Interactions ───────────────────────────────────────────────
@@ -248,7 +248,7 @@ describe("WorkflowCanvas", () => {
     const nodes = [makeNode({ id: "n1" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     expect(() =>
-      fireEvent.click(document.querySelector("[data-testid='rf-nodeclick']"!)),
+      fireEvent.click(document.querySelector("[data-testid='rf-nodeclick']")!),
     ).not.toThrow();
   });
 
@@ -256,7 +256,7 @@ describe("WorkflowCanvas", () => {
     const nodes = [makeNode({ id: "n1" }), makeNode({ id: "n2" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     expect(() =>
-      fireEvent.click(document.querySelector("[data-testid='rf-connect']"!)),
+      fireEvent.click(document.querySelector("[data-testid='rf-connect']")!),
     ).not.toThrow();
   });
 
@@ -301,9 +301,9 @@ describe("WorkflowCanvas", () => {
     const nodes = [makeNode({ id: "n1" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     const rfNodes = lastProps().nodes as { data: Record<string, unknown> }[];
-    expect(rfNodes[0].data.statusColor).toBeUndefined();
-    expect(rfNodes[0].data.statusLabel).toBeUndefined();
-    expect(rfNodes[0].data.isRunning).toBe(false);
+    expect(rfNodes[0]!.data.statusColor).toBeUndefined();
+    expect(rfNodes[0]!.data.statusLabel).toBeUndefined();
+    expect(rfNodes[0]!.data.isRunning).toBe(false);
   });
 
   it("passes onEdgeDelete to edge data", () => {
@@ -312,7 +312,7 @@ describe("WorkflowCanvas", () => {
     const edges = [makeEdge({ id: "e1", source_node_id: "n1", target_node_id: "n2" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={edges} onEdgeDelete={onEdgeDelete} />);
     const rfEdges = lastProps().edges as { data: Record<string, unknown> }[];
-    expect(rfEdges[0].data.onEdgeDelete).toBe(onEdgeDelete);
+    expect(rfEdges[0]!.data.onEdgeDelete).toBe(onEdgeDelete);
   });
 
   it("selects bottom→top handles when nodes are vertically aligned", () => {
@@ -323,8 +323,8 @@ describe("WorkflowCanvas", () => {
     const edges = [makeEdge({ id: "e1", source_node_id: "src", target_node_id: "tgt" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={edges} />);
     const rfEdges = lastProps().edges as { sourceHandle: string; targetHandle: string }[];
-    expect(rfEdges[0].sourceHandle).toBe("bottom");
-    expect(rfEdges[0].targetHandle).toBe("top");
+    expect(rfEdges[0]!.sourceHandle).toBe("bottom");
+    expect(rfEdges[0]!.targetHandle).toBe("top");
   });
 
   it("selects right→left handles when nodes are horizontally aligned", () => {
@@ -335,8 +335,8 @@ describe("WorkflowCanvas", () => {
     const edges = [makeEdge({ id: "e1", source_node_id: "src", target_node_id: "tgt" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={edges} />);
     const rfEdges = lastProps().edges as { sourceHandle: string; targetHandle: string }[];
-    expect(rfEdges[0].sourceHandle).toBe("right");
-    expect(rfEdges[0].targetHandle).toBe("left");
+    expect(rfEdges[0]!.sourceHandle).toBe("right");
+    expect(rfEdges[0]!.targetHandle).toBe("left");
   });
 
   it("includes Background and Controls as children", () => {
@@ -350,7 +350,7 @@ describe("WorkflowCanvas", () => {
     const nodes = [makeNode({ id: "n1" })];
     renderWithI18n(<WorkflowCanvas nodes={nodes} edges={[]} />);
     const rfNodes = lastProps().nodes as { type: string }[];
-    expect(rfNodes[0].type).toBe("workflow");
+    expect(rfNodes[0]!.type).toBe("workflow");
   });
 
   it("DAGCanvas alias equals WorkflowCanvas", () => {

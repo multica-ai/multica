@@ -35,8 +35,8 @@ const MOCK_EDGES = [
 const mocks = vi.hoisted(() => ({
   workflowData: undefined as unknown,
   stagesData: undefined as unknown,
-  nodesData: undefined as unknown[],
-  edgesData: undefined as unknown[],
+  nodesData: undefined as unknown as unknown[],
+  edgesData: undefined as unknown as unknown[],
   isLoading: false,
   isError: false,
   navigationPush: vi.fn(),
