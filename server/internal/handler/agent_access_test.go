@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -59,16 +61,17 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	t.Helper()
 
 	ctx := context.Background()
+	ownerEmail := fmt.Sprintf("private-agent-owner-%s@multica.test", uuid.NewString())
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Private Agent Owner', 'private-agent-owner@multica.test')
+		VALUES ('Private Agent Owner', $1)
 		RETURNING id
-	`).Scan(&ownerID); err != nil {
+	`, ownerEmail).Scan(&ownerID); err != nil {
 		t.Fatalf("create owner user: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'private-agent-owner@multica.test'`)
+			`DELETE FROM "user" WHERE id = $1`, ownerID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
@@ -78,16 +81,17 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		t.Fatalf("add owner as member: %v", err)
 	}
 
+	memberEmail := fmt.Sprintf("plain-member-%s@multica.test", uuid.NewString())
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Plain Member', 'plain-member@multica.test')
+		VALUES ('Plain Member', $1)
 		RETURNING id
-	`).Scan(&memberID); err != nil {
+	`, memberEmail).Scan(&memberID); err != nil {
 		t.Fatalf("create plain member user: %v", err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`DELETE FROM "user" WHERE email = 'plain-member@multica.test'`)
+			`DELETE FROM "user" WHERE id = $1`, memberID)
 	})
 
 	if _, err := testPool.Exec(ctx, `
