@@ -70,6 +70,30 @@ async function loadModelsDev() {
   let pricedCount = 0;
   let skippedNoCost = 0;
 
+  // Models not in models.dev but used by Multica runtimes — maintained manually.
+  // Source: cursor.com/docs/models-and-pricing (Cursor does not publish a
+  // cache-write rate, so cacheWrite stays 0 to avoid inventing spend).
+  // Cursor model ids are unprefixed generic names (`auto`, `composer-*`) that
+  // collide with other providers. They are keyed as `cursor/<model>` so that
+  // provider-qualified lookup resolves them only for Cursor runtimes. The
+  // bare `cursor` key equals the provider name itself, so it stays unqualified.
+  const extraEntries = [
+    { key: "cursor/auto",            input: 1.25, output: 6,    cache_read: 0.25,  cache_write: 0 },
+    { key: "cursor/composer-2.5-fast", input: 3,  output: 15,   cache_read: 0.5,   cache_write: 0 },
+    { key: "cursor/composer-2.5",   input: 0.5,  output: 2.5,  cache_read: 0.2,   cache_write: 0 },
+    { key: "cursor/composer-2-fast", input: 1.5, output: 7.5,  cache_read: 0.35,  cache_write: 0 },
+    { key: "cursor/composer-2",     input: 0.5,  output: 2.5,  cache_read: 0.2,   cache_write: 0 },
+    { key: "cursor/composer-1.5",   input: 3.5,  output: 17.5, cache_read: 0.35,  cache_write: 0 },
+    { key: "cursor/composer-1",     input: 1.25, output: 10,   cache_read: 0.125, cache_write: 0 },
+    { key: "cursor",                input: 3,    output: 15,   cache_read: 0.5,   cache_write: 0 },
+  ];
+  for (const e of extraEntries) {
+    if (!rows.has(e.key)) {
+      rows.set(e.key, e);
+      pricedCount++;
+    }
+  }
+
   for (const provider of ALLOWED_PROVIDERS) {
     const prov = db[provider];
     if (!prov) continue;
@@ -139,7 +163,8 @@ async function loadModelsDev() {
     // with cacheWrite < input (e.g. claude-3-sonnet-20240229 listing
     // cache_write: 0.3 vs input: 3) is almost certainly a data error and
     // would systematically under-bill cache-creation tokens.
-    const cacheWrite = Math.max(c.cache_write ?? c.input, c.input);
+    // Exception: explicit 0 is intentional (Cursor does not bill cache writes).
+    const cacheWrite = (c.cache_write === 0) ? 0 : Math.max(c.cache_write ?? c.input, c.input);
     effective.set(key, { input: c.input, output: c.output, cacheRead, cacheWrite });
   }
 
