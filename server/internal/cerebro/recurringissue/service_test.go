@@ -36,6 +36,15 @@ func TestNextDueDate(t *testing.T) {
 		// custom = weekly; snap to Friday(5) from 2026-06-24(Wed) → 2026-06-26.
 		{"custom every 1 week friday", "2026-06-17", FreqCustom, 1, []int{5}, 0, "2026-06-26"},
 		{"interval zero clamps to 1", "2026-06-17", FreqDaily, 0, nil, 0, "2026-06-18"},
+		// every_weekday: next working day, weekends skipped, interval/weekdays ignored.
+		// 2026-06-17 is Wednesday → next weekday is Thursday 2026-06-18.
+		{"every_weekday from wednesday", "2026-06-17", FreqEveryWeekday, 1, nil, 0, "2026-06-18"},
+		// 2026-06-19 is Friday → skip Sat/Sun → Monday 2026-06-22.
+		{"every_weekday friday skips weekend", "2026-06-19", FreqEveryWeekday, 1, nil, 0, "2026-06-22"},
+		// 2026-06-20 is Saturday → next weekday is Monday 2026-06-22.
+		{"every_weekday from saturday", "2026-06-20", FreqEveryWeekday, 1, nil, 0, "2026-06-22"},
+		// interval is ignored for every_weekday → still just the next weekday.
+		{"every_weekday ignores interval", "2026-06-17", FreqEveryWeekday, 3, []int{1, 5}, 0, "2026-06-18"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
