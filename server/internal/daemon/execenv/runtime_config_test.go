@@ -1598,6 +1598,7 @@ func TestNoBusyWaitRulePresentForIssueRunsOnly(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — regression test guarding the dedup + no-busy-wait reconciliation in the cerebro runtime brief.
 // FIR-1585 — the wakeup-mandatory section was emitted twice (TECH-3121 and
 // TECH-3038 each wrote it), which the cost-optimization inspector flagged as a
 // ~99% self-duplicate. It must now render exactly once. The no-busy-wait rule
