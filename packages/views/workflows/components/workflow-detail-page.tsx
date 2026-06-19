@@ -10,6 +10,7 @@ import {
   workflowDetailOptions,
   workflowNodesOptions,
   workflowEdgesOptions,
+  workflowStagesOptions,
   useCreateNode,
   useUpdateNode,
   useCreateEdge,
@@ -108,6 +109,7 @@ export function WorkflowDetailPage({ workflowId: id, viewToggle }: WorkflowDetai
   const { data: workflow, isLoading } = useQuery(workflowDetailOptions(wsId, id!));
   const { data: nodes = [] } = useQuery(workflowNodesOptions(wsId, id!));
   const { data: edges = [] } = useQuery(workflowEdgesOptions(wsId, id!));
+  const { data: stages = [] } = useQuery(workflowStagesOptions(wsId, id!));
 
   const createNodeMutation = useCreateNode(wsId, id!);
   const updateNodeMutation = useUpdateNode(wsId, id!);
@@ -519,6 +521,7 @@ export function WorkflowDetailPage({ workflowId: id, viewToggle }: WorkflowDetai
               node={selectedNode}
               workflowId={id!}
               nodes={displayNodes}
+              stages={stages}
               disabled={mode !== "edit"}
               onClose={() => useWorkflowEditorStore.getState().selectNode(null)}
             />

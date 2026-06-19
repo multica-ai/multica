@@ -109,6 +109,7 @@
     "description": "描述",
     "title_placeholder": "节点名称",
     "description_placeholder": "此节点做什么？",
+    "stage_label": "阶段",
     "section_format": "格式校验",
     "format_schema_label": "JSON Schema",
     "format_schema_hint": "留空跳过格式校验。用于验证输入的 JSON Schema。",

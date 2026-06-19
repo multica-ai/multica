@@ -109,6 +109,7 @@
     "description": "Description",
     "title_placeholder": "Node name",
     "description_placeholder": "What does this node do?",
+    "stage_label": "Stage",
     "section_format": "Format Checker",
     "format_schema_label": "JSON Schema",
     "format_schema_hint": "Leave empty to skip format validation. JSON Schema to validate input against.",
