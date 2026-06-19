@@ -439,3 +439,107 @@ describe("ToolPolicyTable (repo groups)", () => {
     });
   });
 });
+
+// FIR-1512 Workstream B — connections render as a foldable per-connection tree
+// (not flat mcp__name__tool rows), so a connection's tools are governed under
+// the connection itself.
+describe("ToolPolicyTable (connection groups)", () => {
+  const CONN_KEY = "connection:customer-service";
+  const connWide = {
+    tool_key: CONN_KEY,
+    resource_pattern: "",
+    title: "Customer Service",
+    category: "Customer Service MCP",
+    source: "connection",
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  };
+  const connTool = (pattern: string) => ({
+    tool_key: CONN_KEY,
+    resource_pattern: pattern,
+    title: pattern,
+    category: "Customer Service MCP",
+    source: "connection-tool",
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  });
+  const CONN_TABLE = {
+    tools: [connWide, connTool("lookup_order"), connTool("get_order_confirmation")],
+  };
+
+  beforeEach(() => {
+    mockCerebroRequest.mockReset();
+    mockCerebroRequest.mockResolvedValue(CONN_TABLE);
+  });
+
+  function renderConnections() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable
+          wsId="ws-1"
+          view="workspace"
+          subjectId="ws-1"
+          runtimeId="rt-1"
+          userId="user-1"
+          tabFilter="connections"
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("renders each connection as a collapsible group, not as flat tool rows", async () => {
+    renderConnections();
+    expect(await screen.findByTestId("connection-policy-section")).toBeInTheDocument();
+    expect(screen.getByTestId(`connection-group-${CONN_KEY}`)).toBeInTheDocument();
+    // The connection's tools are not flat catalog rows.
+    expect(screen.queryByTestId(`tool-row-${CONN_KEY}`)).not.toBeInTheDocument();
+    // Collapsed by default — the per-tool sub-rows are hidden.
+    expect(
+      screen.queryByTestId(`connection-tool-${CONN_KEY}-lookup_order`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("expanding a connection reveals its tools", async () => {
+    const user = userEvent.setup();
+    renderConnections();
+    const group = await screen.findByTestId(`connection-group-${CONN_KEY}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId(`connection-tool-${CONN_KEY}-lookup_order`)).toBeInTheDocument();
+    expect(
+      screen.getByTestId(`connection-tool-${CONN_KEY}-get_order_confirmation`),
+    ).toBeInTheDocument();
+  });
+
+  it("a single connection tool writes with its tool name as the resource_pattern", async () => {
+    const user = userEvent.setup();
+    renderConnections();
+    const group = await screen.findByTestId(`connection-group-${CONN_KEY}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const tool = screen.getByTestId(`connection-tool-${CONN_KEY}-lookup_order`);
+    await user.click(within(tool).getByLabelText(/^Decision:/));
+    await user.click(within(tool).getByRole("menuitem", { name: "Deny" }));
+    await waitFor(() => {
+      const put = JSON.parse((findPutCalls().at(-1)![1] as RequestInit).body as string);
+      expect(put).toMatchObject({
+        tool_key: CONN_KEY,
+        setting: "deny",
+        resource_pattern: "lookup_order",
+      });
+    });
+  });
+
+  it("setting the connection header writes the connection-wide row (no resource_pattern)", async () => {
+    const user = userEvent.setup();
+    renderConnections();
+    const group = await screen.findByTestId(`connection-group-${CONN_KEY}`);
+    await user.click(within(group).getByLabelText(/^Decision:/));
+    await user.click(within(group).getByRole("menuitem", { name: /Ask/ }));
+    await waitFor(() => {
+      const put = JSON.parse((findPutCalls().at(-1)![1] as RequestInit).body as string);
+      expect(put.tool_key).toBe(CONN_KEY);
+      expect(put.setting).toBe("ask");
+      expect(put.resource_pattern ?? "").toBe("");
+    });
+  });
+});
