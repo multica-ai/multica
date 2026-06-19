@@ -4,9 +4,9 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { InboxActionContext } from "@multica/cerebro-inbox";
 import type { Project } from "@multica/core/types";
-import type { SectionFilterContext } from "../section-filter";
+import type { SectionFilterContext, DynInboxEntry } from "../section-filter";
 import type { InboxSectionConfig } from "../layout";
-import { DynamicInboxSection } from "./dynamic-inbox-section";
+import { DynamicInboxSection, runStateFor } from "./dynamic-inbox-section";
 
 afterEach(() => cleanup());
 
@@ -98,5 +98,43 @@ describe("DynamicInboxSection badge color", () => {
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ id: "s1", countStyle: "circle", badgeColor: "warning" }),
     );
+  });
+});
+
+describe("runStateFor — scheduled wakeup dot (FIR-1521)", () => {
+  function ctxWith(over: Partial<InboxActionContext>): SectionFilterContext {
+    return {
+      action: {
+        userId: "me",
+        issueRunStates: new Map(),
+        subIssueRunStates: new Map(),
+        chatRunStates: new Map(),
+        mentionedChannels: new Set(),
+        wakeupIssueIds: new Set(),
+        ...over,
+      } as InboxActionContext,
+      matchesPins: () => false,
+    } as SectionFilterContext;
+  }
+  const notifEntry = (issueId: string) =>
+    ({ kind: "notif", id: "n1", time: 0, item: { id: "n1", issue_id: issueId } } as DynInboxEntry);
+
+  it("returns 'scheduled' for an idle issue with a pending wakeup", () => {
+    expect(runStateFor(notifEntry("iss1"), ctxWith({ wakeupIssueIds: new Set(["iss1"]) }))).toBe(
+      "scheduled",
+    );
+  });
+
+  it("prefers a live run over the scheduled dot when both apply", () => {
+    expect(
+      runStateFor(
+        notifEntry("iss1"),
+        ctxWith({ issueRunStates: new Map([["iss1", "active"]]), wakeupIssueIds: new Set(["iss1"]) }),
+      ),
+    ).toBe("active");
+  });
+
+  it("returns undefined when the issue has neither a run nor a wakeup", () => {
+    expect(runStateFor(notifEntry("iss1"), ctxWith({}))).toBeUndefined();
   });
 });

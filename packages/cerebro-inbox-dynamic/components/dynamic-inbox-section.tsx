@@ -159,12 +159,19 @@ function badgeColorClassName(color: SectionBadgeColor | undefined): string {
 
 // Resolve the running/queued pip for a row from the same task state the
 // classic inbox uses: issue rows key on issue_id, chat rows on session id.
-function runStateFor(
+// Exported for unit testing the scheduled-wakeup fallback (FIR-1521).
+export function runStateFor(
   entry: DynInboxEntry,
   ctx: SectionFilterContext,
 ): AgentRunState | undefined {
   if (entry.kind === "notif" && entry.item.issue_id) {
-    return ctx.action.issueRunStates.get(entry.item.issue_id) as AgentRunState | undefined;
+    const live = ctx.action.issueRunStates.get(entry.item.issue_id) as AgentRunState | undefined;
+    if (live) return live;
+    // FIR-1521 — no live run, but a pending wakeup means the agent is scheduled
+    // to come back. Render the orange "scheduled" dot (the bucketizer already
+    // groups these under Running; without this the row showed no indicator).
+    if (ctx.action.wakeupIssueIds.has(entry.item.issue_id)) return "scheduled";
+    return undefined;
   }
   if (entry.kind === "chat") {
     return ctx.action.chatRunStates.get(entry.session.id) as AgentRunState | undefined;
