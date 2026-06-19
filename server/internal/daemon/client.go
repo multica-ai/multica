@@ -91,6 +91,10 @@ type Client struct {
 	baseURL string
 	token   string
 	client  *http.Client
+	// Claim responses can include large issue/skill payloads. Keep ordinary
+	// daemon API calls on the short client timeout, but give claim body reads
+	// a wider window so slow links do not leave tasks stuck in dispatched.
+	claimClient *http.Client
 
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
@@ -102,10 +106,11 @@ type Client struct {
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		platform: "daemon",
-		os:       normalizeGOOS(runtime.GOOS),
+		baseURL:     baseURL,
+		client:      &http.Client{Timeout: 30 * time.Second},
+		claimClient: &http.Client{Timeout: 2 * time.Minute},
+		platform:    "daemon",
+		os:          normalizeGOOS(runtime.GOOS),
 	}
 }
 
@@ -157,7 +162,7 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 	var resp struct {
 		Task *Task `json:"task"`
 	}
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/claim", runtimeID), map[string]any{}, &resp); err != nil {
+	if err := c.postJSONWithClient(ctx, c.claimClient, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/claim", runtimeID), map[string]any{}, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Task, nil
@@ -293,8 +298,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -599,6 +604,13 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONWithClient(ctx, c.client, path, reqBody, respBody)
+}
+
+func (c *Client) postJSONWithClient(ctx context.Context, client *http.Client, path string, reqBody any, respBody any) error {
+	if client == nil {
+		client = c.client
+	}
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -618,7 +630,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}

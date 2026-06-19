@@ -2461,10 +2461,10 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 // recreating it under load.
 //
 // Slot-before-claim does mean a slow claim holds a slot during its HTTP
-// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
-// below the 300s dispatch timeout, so other runtimes' tasks stay in
-// server-side `queued` state (which has no timeout) rather than entering
-// `dispatched` and racing the sweeper.
+// roundtrip; ClaimTask has a dedicated timeout that remains below the 300s
+// dispatch timeout, so other runtimes' tasks stay in server-side `queued`
+// state (which has no timeout) rather than entering `dispatched` and racing
+// the sweeper.
 //
 // pollerCtx is cancelled when this runtime is removed from the watched set
 // (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is

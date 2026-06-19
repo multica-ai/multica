@@ -85,6 +85,25 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	}
 }
 
+func TestClient_ClaimTaskUsesDedicatedTimeout(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/runtimes/runtime-1/tasks/claim" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"task":null}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.client.Timeout = 10 * time.Millisecond
+
+	if _, err := c.ClaimTask(context.Background(), "runtime-1"); err != nil {
+		t.Fatalf("ClaimTask() error = %v, want success despite default client timeout", err)
+	}
+}
+
 // noSleepRetry replaces retrySleep with an immediate no-op so tests don't
 // actually wait the 4s/8s/16s/... backoffs. Returns a restore func.
 func noSleepRetry(t *testing.T) func() {
