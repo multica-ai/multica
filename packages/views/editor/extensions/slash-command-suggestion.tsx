@@ -19,7 +19,11 @@ import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+  isPickerAcceptKey,
+  preventSuggestionBlur,
+} from "./suggestion-popup";
 
 const MAX_ITEMS = 20;
 
@@ -139,6 +143,7 @@ export const SlashCommandList = forwardRef<
             className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
               selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
             }`}
+            onMouseDown={preventSuggestionBlur}
             onClick={() => selectItem(index)}
           >
             <span className="font-medium">/{item.label}</span>
