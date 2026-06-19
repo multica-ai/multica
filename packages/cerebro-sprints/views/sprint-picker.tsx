@@ -53,7 +53,7 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
   if (sprintsQuery.isLoading) {
     return (
       <div className={className}>
-        <span className="flex items-center gap-1.5 -mx-1 px-1 text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5 -mx-1 px-1 text-xs text-muted-foreground">
           <CalendarRange className="h-3.5 w-3.5 shrink-0" />
           Loading sprint…
         </span>
@@ -66,7 +66,7 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
   if (sprints.length === 0) {
     return (
       <div className={className}>
-        <span className="flex items-center gap-1.5 -mx-1 px-1 text-sm text-muted-foreground">
+        <span className="flex items-center gap-1.5 -mx-1 px-1 text-xs text-muted-foreground">
           <CalendarRange className="h-3.5 w-3.5 shrink-0" />
           No sprints yet
         </span>
