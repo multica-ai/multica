@@ -195,6 +195,20 @@ func classifyAutoPause(task db.AgentTaskQueue, now time.Time) autoPauseDecision 
 			detail:        "Runtimen kan ikke starte nye kørsler, før konto eller API-nøgle er fornyet.",
 		}
 	}
+	// A gateway transport drop (EOF, connection reset/refused) that survived the
+	// in-process retries in doWithRetry signals a sustained gateway outage
+	// (FIR-1561). Pause + auto-resume on a growing backoff instead of failing
+	// the run with the raw transport error. runtime_recovery is in the unpause
+	// resume set, so the suspended task is reclaimed when the gateway returns.
+	if isTransientGatewayError(task.Error.String) {
+		return autoPauseDecision{
+			pauseWorthy:   true,
+			pauseReason:   "runtime_recovery",
+			failureReason: "runtime_recovery",
+			title:         "AI gateway temporarily unreachable",
+			detail:        "Runtimen er midlertidigt sat på pause, fordi forbindelsen til AI-gateway'en blev afbrudt. Den prøver automatisk igen.",
+		}
+	}
 	resetAt, hasReset, pauseWorthy := account.ClassifyRateLimitReset(task.Error.String, now)
 	if !pauseWorthy {
 		return autoPauseDecision{}

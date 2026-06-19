@@ -312,7 +312,7 @@ func (c *GatewayClient) completeChat(ctx context.Context, model string, messages
 	req.Header.Set("X-Tags", "multica,cerebro,server-runtime")
 	meta.applyContextHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(req, raw)
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("call gateway: %w", err)
 	}

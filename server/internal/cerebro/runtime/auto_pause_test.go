@@ -78,6 +78,30 @@ func TestClassifyAutoPause(t *testing.T) {
 			wantResetAt: now.Add(90 * time.Second),
 			wantReason:  "rate_limit",
 		},
+		{
+			name:       "gateway EOF — pause-worthy as runtime_recovery",
+			task:       mkTask(validRuntime, `call gateway: Post "http://firtal-data-registry.internal:3000/api/ai/proxy/v1/chat/completions": EOF`),
+			wantWorthy: true,
+			wantReset:  false,
+			wantReason: "runtime_recovery",
+		},
+		{
+			name:       "gateway connection reset — pause-worthy as runtime_recovery",
+			task:       mkTask(validRuntime, "call anthropic gateway: Post \"http://firtal-data-registry.internal:3000/api/ai/proxy/v1/messages\": read tcp: connection reset by peer"),
+			wantWorthy: true,
+			wantReset:  false,
+			wantReason: "runtime_recovery",
+		},
+		{
+			name:       "non-gateway EOF — not pause-worthy (gating)",
+			task:       mkTask(validRuntime, `read tcp 10.0.0.1:443: EOF`),
+			wantWorthy: false,
+		},
+		{
+			name:       "gateway HTTP 503 (no transport drop) — not gateway-transient",
+			task:       mkTask(validRuntime, "gateway returned HTTP 503: service unavailable"),
+			wantWorthy: false,
+		},
 	}
 
 	for _, tc := range cases {

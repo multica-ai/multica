@@ -202,7 +202,7 @@ func (c *GatewayClient) completeAnthropic(
 	req.Header.Set("X-Tags", "multica,cerebro,server-runtime,anthropic")
 	meta.applyContextHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(req, raw)
 	if err != nil {
 		return GatewayCompletion{}, fmt.Errorf("call anthropic gateway: %w", err)
 	}
