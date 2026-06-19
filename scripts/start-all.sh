@@ -29,6 +29,24 @@ err()   { echo -e "${RED}[ERR]${NC}   $*"; }
 
 # ── 辅助函数 ──────────────────────────────────────────
 
+# resolve_multica  — 查找 multica CLI：优先用已安装的二进制，否则用 go run
+# 输出为 MULTICA_CMD 变量（数组），调用时用 "${MULTICA_CMD[@]}" args...
+resolve_multica() {
+  if command -v multica >/dev/null 2>&1; then
+    MULTICA_CMD=(multica)
+    return 0
+  fi
+
+  # Fallback: use go run from the source tree (mirrors `make multica`)
+  if [ -f "$ROOT_DIR/server/cmd/multica/main.go" ]; then
+    MULTICA_CMD=(go run "$ROOT_DIR/server/cmd/multica")
+    return 0
+  fi
+
+  warn "multica CLI 和 server/cmd/multica 均不可用；跳过守护进程操作"
+  return 1
+}
+
 # kill_port <port>  — 强制杀掉占用指定端口的进程
 kill_port() {
   local port="$1"
@@ -81,9 +99,9 @@ info "清理旧进程..."
 
 kill_port "$PORT"
 
-if multica daemon status >/dev/null 2>&1; then
+if resolve_multica && "${MULTICA_CMD[@]}" daemon status >/dev/null 2>&1; then
   warn "检测到运行中的守护进程，正在停止..."
-  multica daemon stop >/dev/null 2>&1 || true
+  "${MULTICA_CMD[@]}" daemon stop >/dev/null 2>&1 || true
   sleep 2
 fi
 
@@ -111,7 +129,9 @@ echo ""
 
 # 3. 启动守护进程
 info "启动 Multica 守护进程..."
-DAEMON_OUTPUT=$(multica daemon start 2>&1) && ok "守护进程已启动" || warn "守护进程启动失败（$DAEMON_OUTPUT）"
+if resolve_multica; then
+  DAEMON_OUTPUT=$("${MULTICA_CMD[@]}" daemon start 2>&1) && ok "守护进程已启动" || warn "守护进程启动失败（$DAEMON_OUTPUT）"
+fi
 echo ""
 
 # 4. 启动前端（后台运行，输出重定向到日志）
@@ -139,13 +159,19 @@ else
   warn "前端尚未就绪，可能仍在编译（后台继续运行中，查看日志: $FRONTEND_LOG）"
 fi
 
+# 收集守护进程状态（如果可用）
+DAEMON_STATUS="（守护进程未启动）"
+if resolve_multica; then
+  DAEMON_STATUS=$("${MULTICA_CMD[@]}" daemon status 2>/dev/null | head -1)
+fi
+
 echo ""
 info "========================================"
 ok "  全套服务已启动（后台运行）！"
 info ""
 info "  后端 API:    http://localhost:$PORT"
 info "  前端界面:    http://localhost:$FRONTEND_PORT"
-info "  守护进程:    $(multica daemon status 2>/dev/null | head -1)"
+info "  守护进程:    $DAEMON_STATUS"
 info ""
 info "  后端日志:    $BACKEND_LOG"
 info "  前端日志:    $FRONTEND_LOG"

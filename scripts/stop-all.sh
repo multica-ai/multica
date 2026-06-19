@@ -24,6 +24,22 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()   { echo -e "${RED}[ERR]${NC}   $*"; }
 
+# resolve_multica  — 查找 multica CLI：优先用已安装的二进制，否则用 go run
+resolve_multica() {
+  if command -v multica >/dev/null 2>&1; then
+    MULTICA_CMD=(multica)
+    return 0
+  fi
+
+  if [ -f "$ROOT_DIR/server/cmd/multica/main.go" ]; then
+    MULTICA_CMD=(go run "$ROOT_DIR/server/cmd/multica")
+    return 0
+  fi
+
+  warn "multica CLI 和 server/cmd/multica 均不可用；跳过守护进程操作"
+  return 1
+}
+
 # kill_pid <pid> <label>  — 优雅终止进程，失败则强制 kill
 kill_pid() {
   local pid="$1"
@@ -88,9 +104,9 @@ fi
 info "检查端口占用..."
 
 # 停止守护进程
-if multica daemon status >/dev/null 2>&1; then
+if resolve_multica && "${MULTICA_CMD[@]}" daemon status >/dev/null 2>&1; then
   info "停止守护进程..."
-  multica daemon stop >/dev/null 2>&1 || true
+  "${MULTICA_CMD[@]}" daemon stop >/dev/null 2>&1 || true
   ok "守护进程已停止"
 else
   info "守护进程未运行"

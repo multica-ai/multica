@@ -232,9 +232,7 @@
       "relations": "Relations",
       "upstream": "Upstream",
       "downstream": "Downstream",
-      // FUTURE: plugin/skill display in detail panel relations section
       "plugins": "Plugins",
-      // FUTURE: plugin/skill display in detail panel relations section
       "skills": "Skills",
       "not_configured": "Not configured",
       "no_schema": "No format constraints",
