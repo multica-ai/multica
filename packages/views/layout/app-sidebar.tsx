@@ -286,7 +286,7 @@ function PinRow({
     if (issueQuery.isPending) return <PinSkeleton />;
     if (issueQuery.isError || !issueQuery.data) return null;
     const issue = issueQuery.data;
-    const label = issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
+    const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
       <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />

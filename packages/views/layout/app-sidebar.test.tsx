@@ -172,7 +172,8 @@ describe("PinRow", () => {
   it("renders loaded details", async () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
-    expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+    expect(await screen.findByText("Keep this pin")).toBeInTheDocument();
+    expect(screen.queryByText("MUL-123 Keep this pin")).not.toBeInTheDocument();
   });
 
   it("does not also highlight the parent workspace nav for an active pin", async () => {
@@ -186,7 +187,7 @@ describe("PinRow", () => {
 
     const { container } = render(<AppSidebar />);
 
-    expect((await screen.findByText("MUL-123 Keep this pin")).closest("button")).toHaveAttribute(
+    expect((await screen.findByText("Keep this pin")).closest("button")).toHaveAttribute(
       "data-active",
       "true",
     );
