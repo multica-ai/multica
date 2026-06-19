@@ -7,7 +7,7 @@
 #
 # Reads from secret bag (env):   MULTICA_PAT, AGENTFARM_WORKSPACE_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY
 # Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
-# Optional from secret bag:      GIT_USER_EMAIL, JIRA_PAT
+# Optional from secret bag:      JIRA_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
 #                                DEFAULT_GIT_REPO (comma-separated URLs; seeds workspace repos)
 # Defaulted constant:            ATLASSIAN_SITE (https://g2crowd.atlassian.net)
@@ -34,35 +34,23 @@ readonly LITELLM_BASE_URL="https://llmproxy.g2.com"
 SLUG="${WORKSPACE_SLUG#agentrunner-}"
 DEVICE_NAME="agentrunner-${SLUG}"
 
-# ── 1. Point CLI at the agentfarm server and log in as the bot. ───────────────
-#    Write config directly (mirrors entrypoint.sh pattern) to avoid interactive
-#    prompts from 'multica setup self-host' when pointing at a remote server.
-config_dir="${HOME}/.multica"
-mkdir -p "${config_dir}"
-umask 077
-cat > "${config_dir}/config.json" <<JSON
-{
-  "server_url": "${MULTICA_SERVER_URL}",
-  "app_url": "${MULTICA_SERVER_URL}",
-  "token": "${MULTICA_PAT}",
-  "workspace_id": "${AGENTFARM_WORKSPACE_ID}"
-}
-JSON
-
-# ── 1a. Optional: acli Atlassian auth (jira). ────────────────────────────────
+# ── 1. Optional: acli Atlassian auth (jira). ─────────────────────────────────
 #    --token reads from stdin — keeps JIRA_PAT off argv and /proc/<pid>/cmdline.
 #    acli --site wants the bare hostname; strip the scheme from ATLASSIAN_SITE.
 : "${ATLASSIAN_SITE:=https://g2crowd.atlassian.net}"
 ATLASSIAN_SITE_HOST="${ATLASSIAN_SITE#*//}"
 
-if [[ -n "${GIT_USER_EMAIL:-}" && -n "${JIRA_PAT:-}" ]]; then
-  printf '%s' "${JIRA_PAT}" | acli jira auth login \
-    --site  "${ATLASSIAN_SITE_HOST}" \
-    --email "${GIT_USER_EMAIL}" \
-    --token
-  echo "agentfarm-bootstrap: acli authenticated against ${ATLASSIAN_SITE_HOST} as ${GIT_USER_EMAIL}"
+if [[ -n "${JIRA_EMAIL:-}" && -n "${JIRA_PAT:-}" ]]; then
+  if printf '%s' "${JIRA_PAT}" | acli jira auth login \
+      --site  "${ATLASSIAN_SITE_HOST}" \
+      --email "${JIRA_EMAIL}" \
+      --token; then
+    echo "agentfarm-bootstrap: acli authenticated against ${ATLASSIAN_SITE_HOST} as ${JIRA_EMAIL}"
+  else
+    echo "agentfarm-bootstrap: acli auth failed — continuing without Jira auth (acli still on PATH, just unauthenticated)" >&2
+  fi
 else
-  echo "agentfarm-bootstrap: GIT_USER_EMAIL or JIRA_PAT unset — skipping acli auth (acli still on PATH, just unauthenticated)"
+  echo "agentfarm-bootstrap: JIRA_EMAIL or JIRA_PAT unset — skipping acli auth (acli still on PATH, just unauthenticated)"
 fi
 
 # ── 2. Wait for the claude runtime to register (≤60s). ──────────────────────
