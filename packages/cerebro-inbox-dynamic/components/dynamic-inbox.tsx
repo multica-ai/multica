@@ -166,7 +166,7 @@ export function DynamicInbox() {
   // TECH-3690 — open notes in the inbox detail pane instead of navigating away.
   const noteInboxPaneEnabled = useFeatureFlag("cerebro_note_inbox_pane");
   const { layout, setLayout, userPresets, saveUserPreset, deleteUserPreset } = useInboxLayout();
-  const { entries, items, filterContext, projects, projectMap, agentMap, toggleFavorite, loading } =
+  const { entries, items, filterContext, projects, projectMap, agentMap, toggleFavorite, knownChannelIds, loading } =
     useDynamicInboxData(wsId);
   const actionLabels = useInboxActionGroupLabels();
   const typeLabels = useTypeLabels();
@@ -682,6 +682,23 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
+    // FIR-1576 — a notification whose issue is a known channel/DM (its channel
+    // briefly left channelMap during the archive re-surface gap) opens in the
+    // ChannelDetail pane, never IssueDetail — which would redirect out to
+    // /channels/<id> and kick the user out of the inbox.
+    if (selected.kind === "notif" && selected.item.issue_id && knownChannelIds.has(selected.item.issue_id)) {
+      const channelId = selected.item.issue_id;
+      return (
+        <ErrorBoundary resetKeys={[channelId]}>
+          <ChannelDetail
+            key={channelId}
+            channelId={channelId}
+            initialCommentId={selectedChannelCommentId}
+            onArchive={clearSelection}
+          />
+        </ErrorBoundary>
+      );
+    }
     if (selected.kind === "notif" && selected.item.issue_id) {
       return (
         <ErrorBoundary resetKeys={[selected.item.issue_id]}>
@@ -778,7 +795,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, typeLabels]);
+  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, knownChannelIds, typeLabels]); // FIR-1576 — re-render the channel-vs-issue branch when a channel id becomes known
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),

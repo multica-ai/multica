@@ -40,6 +40,10 @@ export { CerebroInboxRunRequestRow } from "./components/cerebro-inbox-run-reques
 // FIR-2643 — "Remind me" on a specific comment, hooked into the shared comment menu.
 export { useCommentReminder } from "./use-comment-reminder";
 export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
+// FIR-1576 — session-persistent channel-id set so an archived DM stays
+// recognised as a channel across the re-surface refetch gap (no bare-notif
+// reappearance, no click-bounce out of the inbox).
+export { useKnownChannelIds, accumulateChannelIds } from "./known-channel-ids";
 // FIR-2684 — always refetch the opened message (timeline + detail) on select.
 export { useInboxMessageRefresh, refreshInboxMessageQueries } from "./use-inbox-message-refresh";
 export {

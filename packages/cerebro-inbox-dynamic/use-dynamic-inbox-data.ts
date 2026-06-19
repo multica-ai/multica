@@ -18,7 +18,7 @@ import { projectListOptions, projectTreeOptions } from "@multica/core/projects";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { useInboxWakeupStates, useInboxPinnedMatcher } from "@multica/cerebro-inbox";
+import { useInboxWakeupStates, useInboxPinnedMatcher, useKnownChannelIds } from "@multica/cerebro-inbox";
 import type { InboxActionContext } from "@multica/cerebro-inbox";
 import type { Channel, InboxItem, Project, ProjectTreeItem } from "@multica/core/types";
 import type { DynInboxEntry, SectionFilterContext } from "./section-filter";
@@ -44,6 +44,9 @@ export interface DynamicInboxData {
   agentMap: Map<string, { name?: string }>;
   /** TECH-3579 — star / unstar a conversation (optimistic, server-synced). */
   toggleFavorite: (entry: DynInboxEntry) => void;
+  /** FIR-1576 — every channel/DM id seen this session; lets the detail pane
+   * open a channel notif in-place even when its channel briefly left the list. */
+  knownChannelIds: ReadonlySet<string>;
   loading: boolean;
 }
 
@@ -69,6 +72,9 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
   });
   const channels = useMemo<Channel[]>(() => channelQuery.data ?? [], [channelQuery.data]);
   const channelMap = useMemo(() => new Map(channels.map((c) => [c.id, c])), [channels]);
+  // FIR-1576 — channel ids persist across the archive/re-surface gap so a DM
+  // stays recognised as a channel (no bare-notif reappearance, no click-bounce).
+  const knownChannelIds = useKnownChannelIds(channels);
 
   const { data: activeIssueTasksData } = useQuery(activeIssueTasksOptions(wsId));
   const issueRunStates = useMemo(
@@ -158,11 +164,14 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
       out.push({ kind: "chat", id: session.id, time: new Date(session.updated_at).getTime(), session });
     }
     for (const item of items) {
-      if (item.issue_id && channelMap.has(item.issue_id)) continue;
+      // FIR-1576 — also fold when the issue is a known channel that briefly left
+      // channelMap (archive re-surface gap), so an archived DM never reappears
+      // as a bare notification row.
+      if (item.issue_id && (channelMap.has(item.issue_id) || knownChannelIds.has(item.issue_id))) continue;
       out.push({ kind: "notif", id: item.id, time: inboxItemSortTime(item), item });
     }
     return out;
-  }, [channels, chatSessions, items, channelMap]);
+  }, [channels, chatSessions, items, channelMap, knownChannelIds]);
 
   const filterContext = useMemo<SectionFilterContext>(() => {
     const action: InboxActionContext = {
@@ -189,6 +198,7 @@ export function useDynamicInboxData(wsId: string): DynamicInboxData {
     projects,
     agentMap,
     toggleFavorite,
+    knownChannelIds,
     loading: inboxQuery.isLoading || (channelsEnabled && channelQuery.isLoading),
   };
 }

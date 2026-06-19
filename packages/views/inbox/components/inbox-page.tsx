@@ -54,6 +54,7 @@ import {
   // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
   useFocusListVisibility,
   CerebroInboxModeMenuItem, // CEREBRO-PATCH(inbox-dynamic-mode-button): TECH-3413 — ⋯-menu entry to switch to the dynamic inbox
+  useKnownChannelIds, // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — keep archived DMs recognised as channels across re-surface gap
   GlobalInboxReminderDialog, // CEREBRO-PATCH(dynamic-inbox-create-menu): TECH-3494 — shared reminder dialog reused by dynamic inbox.
   type GlobalInboxReminderDialogLabels,
 } from "@multica/cerebro-inbox";
@@ -321,6 +322,8 @@ export function InboxPage() {
     () => new Map(channels.map((c) => [c.id, c])),
     [channels],
   );
+  // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — channel ids survive the archive/re-surface gap so a DM stays recognised as a channel.
+  const knownChannelIds = useKnownChannelIds(channels);
 
   // Per-channel "@you was mentioned" flag — true when at least one unread
   // inbox item attached to the channel has type = 'mentioned'. The channel
@@ -433,6 +436,7 @@ export function InboxPage() {
     if (!selectedKey) return;
     if (selected) return;
     if (channelMap.has(selectedKey)) return; // CEREBRO-PATCH(inbox-page-channel-fallback): channel/DM URLs render via ChannelDetail in-place
+    if (knownChannelIds.has(selectedKey)) return; // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — a known channel mid-re-surface opens in-pane, never redirect out to /channels
     // CEREBRO-PATCH(inbox-page-chat-fallback): don't redirect chat URLs to issue page
     if (selectedChatSession || selectedKey === "new-chat") return;
     if (pendingChatIdRef.current === selectedKey) return;
@@ -442,7 +446,7 @@ export function InboxPage() {
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
-  }, [loading, channelsLoading, selectedKey, selected, channelMap, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]);
+  }, [loading, channelsLoading, selectedKey, selected, channelMap, knownChannelIds, selectedChatSession, replace, wsPaths, setSelectedKey, urlChat, urlIssue]); // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — re-evaluate redirect when a channel id becomes known
 
   // CEREBRO-PATCH(inbox-mute-auto-advance): JEH-1457 — when the selected item is
   // muted while the view hides muted entries, advance to the next visible item
@@ -860,7 +864,8 @@ export function InboxPage() {
     for (const item of items) {
       // Don't double-count: inbox notifications about a channel-issue's
       // comments are surfaced via the channel row + unread_count badge.
-      if (item.issue_id && channelMap.has(item.issue_id)) continue;
+      // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — also fold when the issue is a known channel that briefly left channelMap (archive re-surface gap), so an archived DM never reappears as a bare notification row.
+      if (item.issue_id && (channelMap.has(item.issue_id) || knownChannelIds.has(item.issue_id))) continue;
       entries.push({
         kind: "notif",
         id: item.id,
@@ -878,7 +883,7 @@ export function InboxPage() {
     return sortByInboxPreference(entries, sortPref, (entry) =>
       inboxSortSignals(entry, userId),
     );
-  }, [chatSessions, items, channels, channelMap, selectedKey, sortPref, userId]); // CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change; CEREBRO-PATCH(inbox-sort-method): re-sort on pref change
+  }, [chatSessions, items, channels, channelMap, knownChannelIds, selectedKey, sortPref, userId]); // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — refold when a new channel id is learned; CEREBRO-PATCH(inbox-pin-selected): re-pin on selection change; CEREBRO-PATCH(inbox-sort-method): re-sort on pref change
 
   const filteredEntries = useMemo<MergedEntry[]>(
     () =>
@@ -1275,6 +1280,8 @@ export function InboxPage() {
   );
 
   const selectedChannel = selectedKey ? channelMap.get(selectedKey) ?? null : null;
+  // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — open a known channel/DM in the inbox pane even when it briefly left channelMap (re-surface gap), so a click never falls through to IssueDetail (which redirects out to /channels).
+  const channelDetailId = selectedChannel?.id ?? (selectedKey && knownChannelIds.has(selectedKey) ? selectedKey : null);
   // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004 — snapshot the most
   // recent unread inbox notification's comment_id for the selected channel, keyed
   // on selectedKey (stable string), so ChannelDetail can auto-open the thread.
@@ -1315,11 +1322,11 @@ export function InboxPage() {
   // in an error boundary (mirrors the IssueDetail boundary below) so a render
   // crash in the channel pane shows a recoverable fallback instead of
   // propagating to the whole InboxPage.
-  const detailContent = selectedChannel ? (
-    <ErrorBoundary resetKeys={[selectedChannel.id]}>
+  const detailContent = channelDetailId ? ( // CEREBRO-PATCH(inbox-channel-fold-known): FIR-1576 — render by known channel id, not only channelMap presence
+    <ErrorBoundary resetKeys={[channelDetailId]}>
       <ChannelDetail
-        key={selectedChannel.id}
-        channelId={selectedChannel.id}
+        key={channelDetailId}
+        channelId={channelDetailId}
         initialChannel={selectedChannel}
         // CEREBRO-PATCH(channel-thread-inbox-autoopen): TECH-3004
         initialCommentId={selectedChannelCommentId}
