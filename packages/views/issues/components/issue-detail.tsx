@@ -1791,8 +1791,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         </div>
       )}
 
-      {/* CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — pending wakeups with cancel */}
-      {!isChat && <CerebroWakeupSection issueId={id} />}
+      {/* CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3144 — pending wakeups with cancel.
+          FIR-1521: pass the issue UUID (issue.id), not the route identifier (id) —
+          the /api/cerebro/wakeups list endpoint requires a UUID and 400s on an identifier. */}
+      {!isChat && issue?.id && <CerebroWakeupSection issueId={issue.id} />}
     </div>
   );
 
@@ -2448,8 +2450,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 Chat threads run conversationally — there is no agent-run history to surface here. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} />}
 
-            {/* CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — orange scheduled-wakeup banner under the running card. */}
-            {!isChat && wakeupBarEnabled && <CerebroWakeupBar issueId={id} />}
+            {/* CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — orange scheduled-wakeup banner under the running card.
+                Pass the issue UUID (issue.id), not the route identifier (id): the wakeups
+                list endpoint requires a UUID and 400s on an identifier, leaving the bar empty. */}
+            {!isChat && wakeupBarEnabled && issue?.id && <CerebroWakeupBar issueId={issue.id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />
