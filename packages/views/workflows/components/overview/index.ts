@@ -5,9 +5,9 @@ export { StageCanvas } from "./stage-canvas";
 export type { StageCanvasProps } from "./stage-canvas";
 export { StageCard } from "./stage-card";
 export type { StageCardProps } from "./stage-card";
-// Sub-components (implemented in Tasks 8-10):
-// export { StageNodeDag } from "./stage-node-dag";
-// export { NodeDetailPanel } from "./node-detail-panel";
+export { StageNodeDag } from "./stage-node-dag";
+export type { StageNodeDagProps } from "./stage-node-dag";
+export { NodeDetailPanel } from "./node-detail-panel";
 // export { NodeDetailWorker } from "./node-detail-worker";
 // export { NodeDetailCritic } from "./node-detail-critic";
 // export { NodeDetailSchema } from "./node-detail-schema";
