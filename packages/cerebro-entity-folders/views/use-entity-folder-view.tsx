@@ -30,6 +30,12 @@ export interface EntityFolderView {
   enabled: boolean;
   /** True if the item should be visible under the current folder selection. */
   includes: (itemId: string) => boolean;
+  /**
+   * FIR-1530: name of the folder an item is filed under, or null when it is
+   * unfiled or the feature is off. Lets the list view show a "Folder" column
+   * without each cell re-querying the folder tree.
+   */
+  folderName: (itemId: string) => string | null;
   /** The folder sidebar, ready to render beside the list. */
   sidebar: ReactNode;
   /**
@@ -89,6 +95,17 @@ export function useEntityFolderView(opts: {
     };
   }, [enabled, effectiveSelected, membership]);
 
+  // FIR-1530: resolve an item's folder name for the list "Folder" column.
+  const folderName = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const f of folders) names.set(f.id, f.name);
+    return (itemId: string): string | null => {
+      if (!enabled) return null;
+      const folderId = membership.get(itemId);
+      return folderId ? names.get(folderId) ?? null : null;
+    };
+  }, [enabled, folders, membership]);
+
   const sidebar = useMemo(
     () =>
       enabled ? (
@@ -117,7 +134,7 @@ export function useEntityFolderView(opts: {
   );
 
   return useMemo(
-    () => ({ enabled, includes, sidebar, getDragProps }),
-    [enabled, getDragProps, includes, sidebar],
+    () => ({ enabled, includes, folderName, sidebar, getDragProps }),
+    [enabled, folderName, getDragProps, includes, sidebar],
   );
 }

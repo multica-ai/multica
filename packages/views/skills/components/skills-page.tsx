@@ -50,6 +50,12 @@ import {
 } from "@multica/cerebro-skill-metadata";
 // CEREBRO-PATCH(skill-folders): FIR-1412 — folder sidebar + grouping for skills.
 import { useEntityFolderView } from "@multica/cerebro-entity-folders";
+// CEREBRO-PATCH(skill-list-columns): FIR-1530 — folder + pending-change columns + filter.
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import {
+  usePendingChangeRequestSkillIds,
+  withCerebroSkillColumns,
+} from "@multica/cerebro-skill-ownership/views";
 
 type FilterKey = "all" | "used" | "unused" | "mine";
 
@@ -220,6 +226,10 @@ export default function SkillsPage() {
     itemNoun: "skills",
   });
   const folderIncludes = folderView.includes; // CEREBRO-PATCH(skill-folder-loop): FIR-1486 — keep the filter dependency stable.
+  // CEREBRO-PATCH(skill-list-columns): FIR-1530 — pending change-request data + filter state.
+  const pendingChangeIds = usePendingChangeRequestSkillIds();
+  const ownershipEnabled = useFeatureFlag("cerebro_skill_ownership");
+  const [pendingOnly, setPendingOnly] = useState(false);
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -261,6 +271,8 @@ export default function SkillsPage() {
       if (categoryFilter && skillCategoryKey(s) !== categoryFilter) return false;
       // CEREBRO-PATCH(skill-folders): FIR-1412 — filter by selected folder.
       if (!folderIncludes(s.id)) return false;
+      // CEREBRO-PATCH(skill-list-columns): FIR-1530 — filter to skills with pending changes.
+      if (pendingOnly && !pendingChangeIds.has(s.id)) return false;
       return true;
     });
   }, [
@@ -271,6 +283,8 @@ export default function SkillsPage() {
     currentUserId,
     categoryFilter,
     folderIncludes,
+    pendingOnly, // CEREBRO-PATCH(skill-list-columns): FIR-1530 — re-filter on pending toggle.
+    pendingChangeIds, // CEREBRO-PATCH(skill-list-columns): FIR-1530 — re-filter when pending set changes.
   ]);
 
   const handleCreated = (skill: Skill) => {
@@ -306,7 +320,13 @@ export default function SkillsPage() {
     myRole,
   ]);
 
-  const columns = useSkillColumns();
+  // CEREBRO-PATCH(skill-list-columns): FIR-1530 — splice in folder + pending-change columns.
+  const columns = withCerebroSkillColumns(useSkillColumns(), {
+    folderName: folderView.folderName,
+    pendingIds: pendingChangeIds,
+    foldersEnabled: folderView.enabled,
+    ownershipEnabled,
+  });
 
   const table = useReactTable({
     data: skillRows,
@@ -423,12 +443,28 @@ export default function SkillsPage() {
               setFilter={setFilter}
             />
             {/* CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter row. */}
-            <div className="shrink-0 border-b px-3 py-2 sm:px-4">
+            <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
               <SkillCategoryFilter
                 skills={skills}
                 category={categoryFilter}
                 onCategoryChange={setCategoryFilter}
               />
+              {/* CEREBRO-PATCH(skill-list-columns): FIR-1530 — filter to skills awaiting review. */}
+              {ownershipEnabled && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className={
+                    pendingOnly
+                      ? "shrink-0 bg-accent text-accent-foreground hover:bg-accent/80"
+                      : "shrink-0 text-muted-foreground"
+                  }
+                  onClick={() => setPendingOnly((v) => !v)}
+                >
+                  Pending changes
+                </Button>
+              )}
             </div>
             {filtered.length === 0 ? (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 px-4 py-16 text-center text-muted-foreground">
