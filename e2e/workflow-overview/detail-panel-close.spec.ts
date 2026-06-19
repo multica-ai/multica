@@ -100,10 +100,9 @@ test.describe("Node Detail Panel - Close Methods", () => {
 
       // Find and click the close button
       const closeButton = detailPanel()
-        .getByTestId("node-detail-close")
-        .or(page.locator('[data-testid="node-detail-close"]'))
-        .or(detailPanel().locator('[aria-label="Close"]'))
-        .or(page.locator('[aria-label="Close"]'));
+        .getByTestId("close-detail-panel")
+        .or(page.locator('[data-testid="close-detail-panel"]'))
+        .or(detailPanel().locator('[aria-label="Close"]'));
 
       await closeButton.first().click();
       await page.waitForTimeout(500);
