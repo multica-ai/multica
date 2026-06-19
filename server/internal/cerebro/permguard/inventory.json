@@ -2381,10 +2381,6 @@
       "exempt": "local-only \u2014 reads a plan file and prints the computed execution waves"
     },
     {
-      "id": "permission explain",
-      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/permissions/explain"
-    },
-    {
       "id": "project create",
       "gate": "via:POST /api/projects/"
     },
