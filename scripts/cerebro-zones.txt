@@ -50,5 +50,12 @@ server/**
 # This matches the "cerebro- filename prefix" convention in CLAUDE.md.
 !server/**/cerebro_*.go
 !server/**/*_cerebro.go
+# Cerebro-only Go TEST files. Go test files use the `_test.go` suffix (underscore
+# + .go), so the JS/TS-oriented `**/*.test.*` glob below never matches them. A
+# `*_cerebro_test.go` (or `cerebro_*_test.go`) file is a net-new cerebro test for
+# a cerebro fork file — it can never be a true upstream edit, so carve it out the
+# same way as the `_cerebro.go` source files above.
+!server/**/*_cerebro_test.go
+!server/**/cerebro_*_test.go
 !**/*.test.*
 !**/*.spec.*
