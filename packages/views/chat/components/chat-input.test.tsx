@@ -245,14 +245,15 @@ describe("ChatInput — TECH-3536 unified expand toggle", () => {
   // The scroll container carries the shared height style (same as the
   // comment/channel/DM composer). Grab it by its overflow class so we don't
   // depend on test-id additions to the upstream-zone JSX. Defaults in jsdom
-  // are desktop width (1024) + 768px height → 240px collapsed cap.
+  // are desktop width (1024) + 768px height → 92px collapsed cap
+  // (4 lines × 23px desktop line-height, FIR-1625).
   const findScroll = (container: HTMLElement) =>
     container.querySelector(".overflow-y-auto") as HTMLElement;
 
   it("starts collapsed with a height cap, no fixed height", () => {
     const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
     const scroll = findScroll(container);
-    expect(scroll.style.maxHeight).toBe("240px");
+    expect(scroll.style.maxHeight).toBe("92px");
     expect(scroll.style.height).toBe("");
   });
 
@@ -269,7 +270,7 @@ describe("ChatInput — TECH-3536 unified expand toggle", () => {
 
     await user.click(expandBtn);
     scroll = findScroll(container);
-    expect(scroll.style.maxHeight).toBe("240px");
+    expect(scroll.style.maxHeight).toBe("92px");
     expect(scroll.style.height).toBe("");
   });
 });
