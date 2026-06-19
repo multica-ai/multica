@@ -28,7 +28,6 @@ import {
   ChevronRight,
   FolderGit2,
   Lock,
-  Plug,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -248,11 +247,8 @@ export function ToolPolicyTable({
   // (e.g. tabbed workspace permissions) share a single network request.
   const capRows = useMemo(() => {
     if (tabFilter === "repos") return [];
-    // FIR-1512 Workstream B: the connections tab renders a foldable per-connection
-    // tree (ConnectionSection) instead of the flat catalog, so the flat table is
-    // empty here and the connection-wide rows feed connectionGroups below.
-    if (tabFilter === "connections") return [];
     if (!tabFilter) return allCapRows;
+    if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
     if (tabFilter === "runtime") return allCapRows.filter((r) => r.category === "Runtimes");
     // "multica" = everything that isn't a connection or runtime tool
     return allCapRows.filter((r) => r.source !== "connection" && r.category !== "Runtimes");
@@ -271,16 +267,6 @@ export function ToolPolicyTable({
   // Repo groups are keyed by URL and narrowed only by the free-text search — the
   // class/side-effect/decision facets describe capabilities, not repos.
   const repoGroups = useMemo(() => groupRepoRows(repoRows, search), [repoRows, search]);
-  // FIR-1512 Workstream B: connection groups nest each connection's tools under
-  // the connection itself, narrowed by the free-text search only.
-  const connectionGroups = useMemo(() => {
-    if (tabFilter !== "connections") return [];
-    return groupConnectionRows(
-      allCapRows.filter((r) => r.source === "connection"),
-      connectionToolsByKey,
-      search,
-    );
-  }, [tabFilter, allCapRows, connectionToolsByKey, search]);
 
   const busy = setPolicy.isPending || clearPolicy.isPending;
 
@@ -314,11 +300,7 @@ export function ToolPolicyTable({
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
       <CatalogHeader
         shown={filtered.length}
-        total={
-          capRows.length +
-          repoRows.length +
-          connectionGroups.reduce((n, g) => n + g.tools.length, 0)
-        }
+        total={capRows.length + repoRows.length}
         busy={busy}
         onBulk={bulkSet}
       />
@@ -340,7 +322,7 @@ export function ToolPolicyTable({
 
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading tools…</p>
-      ) : repoGroups.length === 0 && connectionGroups.length === 0 && filtered.length === 0 ? (
+      ) : repoGroups.length === 0 && filtered.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {allCapRows.length === 0 && allRepoRows.length === 0
             ? "No tools reported yet."
@@ -355,16 +337,6 @@ export function ToolPolicyTable({
               busy={busy}
               onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
               onSetGroup={applyRepoGroup}
-            />
-          )}
-
-          {connectionGroups.length > 0 && (
-            <ConnectionSection
-              groups={connectionGroups}
-              editLayer={editLayer}
-              busy={busy}
-              onSetConnection={(connKey, s) => applySetting(connKey, s)}
-              onSetTool={(connKey, pattern, s) => applySetting(connKey, s, pattern)}
             />
           )}
 
@@ -1176,165 +1148,5 @@ function RepoGroupControl({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-// --- connection groups (FIR-1512 Workstream B) ------------------------------
-
-// ConnectionGroupData is one connection's collapsible group: the connection-wide
-// row ("connection:<name>") plus its per-tool / per-endpoint sub-rows. The
-// connection-wide row is the default the chain applies to every tool; a tool's
-// own row tightens it.
-interface ConnectionGroupData {
-  conn: ToolPolicyRow;
-  tools: ToolPolicyRow[];
-}
-
-// groupConnectionRows pairs each connection-wide row with its sub-rows (from
-// connectionToolsByKey), orders the tools by name, and narrows by the free-text
-// search — matching on either the connection name or any of its tools. Groups
-// are sorted by connection label so the list is stable.
-export function groupConnectionRows(
-  connRows: ToolPolicyRow[],
-  toolsByKey: Map<string, ToolPolicyRow[]>,
-  search: string,
-): ConnectionGroupData[] {
-  const q = search.trim().toLowerCase();
-  const label = (r: ToolPolicyRow) => (r.title || r.tool_key).toLowerCase();
-  const toolLabel = (r: ToolPolicyRow) => (r.title || r.resource_pattern).toLowerCase();
-  return connRows
-    .map((conn) => ({
-      conn,
-      tools: [...(toolsByKey.get(conn.tool_key) ?? [])].sort((a, b) =>
-        a.resource_pattern.localeCompare(b.resource_pattern),
-      ),
-    }))
-    .filter(({ conn, tools }) => {
-      if (!q) return true;
-      return label(conn).includes(q) || tools.some((t) => toolLabel(t).includes(q));
-    })
-    .sort((a, b) => label(a.conn).localeCompare(label(b.conn)));
-}
-
-function ConnectionSection({
-  groups,
-  editLayer,
-  busy,
-  onSetConnection,
-  onSetTool,
-}: {
-  groups: ConnectionGroupData[];
-  editLayer: ToolLayer;
-  busy: boolean;
-  onSetConnection: (connKey: string, setting: ToolSetting) => void;
-  onSetTool: (connKey: string, toolPattern: string, setting: ToolSetting) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2" data-testid="connection-policy-section">
-      <div className="flex items-center gap-2">
-        <Plug className="size-4 text-muted-foreground" />
-        <h3 className="text-base font-semibold">Connections</h3>
-        <span className="font-mono text-xs text-muted-foreground">
-          {groups.length === 1 ? "1 connection" : `${groups.length} connections`}
-        </span>
-      </div>
-      <p className="max-w-xl text-sm text-muted-foreground">
-        Set a whole connection, or expand it to allow, ask or deny each of its
-        tools individually. A tool&apos;s own setting tightens the connection
-        default.
-      </p>
-      <div className="flex flex-col gap-2">
-        {groups.map((group) => (
-          <ConnectionGroup
-            key={group.conn.tool_key}
-            group={group}
-            editLayer={editLayer}
-            busy={busy}
-            onSetConnection={onSetConnection}
-            onSetTool={onSetTool}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ConnectionGroup({
-  group,
-  editLayer,
-  busy,
-  onSetConnection,
-  onSetTool,
-}: {
-  group: ConnectionGroupData;
-  editLayer: ToolLayer;
-  busy: boolean;
-  onSetConnection: (connKey: string, setting: ToolSetting) => void;
-  onSetTool: (connKey: string, toolPattern: string, setting: ToolSetting) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const { conn, tools } = group;
-  const Chevron = open ? ChevronDown : ChevronRight;
-  return (
-    <div className="rounded-lg border" data-testid={`connection-group-${conn.tool_key}`}>
-      <div className="flex items-center justify-between gap-3 p-3">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          className="flex min-w-0 items-center gap-2 text-left"
-        >
-          <Chevron className="size-4 shrink-0 text-muted-foreground" />
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate text-sm font-medium">{conn.title || conn.tool_key}</span>
-            <span className="font-mono text-xs text-muted-foreground">
-              {tools.length === 1 ? "1 tool" : `${tools.length} tools`}
-            </span>
-          </div>
-        </button>
-        <div className="flex items-center gap-2">
-          <OriginTag row={conn} editLayer={editLayer} />
-          <DecisionControl
-            row={conn}
-            editLayer={editLayer}
-            disabled={busy}
-            onChange={(s) => onSetConnection(conn.tool_key, s)}
-          />
-        </div>
-      </div>
-      {open && tools.length > 0 && (
-        <div className="border-t">
-          {tools.map((row) => (
-            <div
-              key={`${row.tool_key}:${row.resource_pattern}`}
-              data-testid={`connection-tool-${row.tool_key}-${row.resource_pattern}`}
-              className="flex items-center justify-between gap-3 py-2 pl-9 pr-3"
-            >
-              <div className="flex min-w-0 flex-col">
-                <span className="text-sm">{row.title || row.resource_pattern}</span>
-                <span className="font-mono text-xs text-muted-foreground">
-                  {row.resource_pattern}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <OriginTag row={row} editLayer={editLayer} />
-                <DecisionControl
-                  row={row}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  onChange={(s) => onSetTool(conn.tool_key, row.resource_pattern, s)}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {open && tools.length === 0 && (
-        <div className="border-t py-2 pl-9 pr-3 text-xs text-muted-foreground">
-          This connection exposes no individually-scoped tools yet — the
-          connection-wide decision above applies to everything it provides.
-        </div>
-      )}
-    </div>
   );
 }
