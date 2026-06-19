@@ -146,6 +146,7 @@ var catalog = []Capability{
 			"DELETE /api/cerebro/references/{refId}",
 			"PUT /api/cerebro/issues/{issueId}/custom-status/",
 			"DELETE /api/cerebro/issues/{issueId}/custom-status/",
+			"PUT /api/cerebro/issues/{issueID}/date-times/",
 		},
 	},
 	{
@@ -295,7 +296,7 @@ var catalog = []Capability{
 		Key:         "manage_artifacts",
 		Title:       "Create / edit / delete artifacts",
 		Category:    CategoryArtifacts,
-		Description: "Create, upload, edit, move, re-scope, or delete artifacts, artifact folders, and attachments.",
+		Description: "Create, upload, edit, move, re-scope, change folder access of, or delete artifacts, artifact folders, and attachments.",
 		Ops: []string{
 			"POST /api/artifacts/",
 			"PUT /api/artifacts/{id}",
@@ -304,6 +305,7 @@ var catalog = []Capability{
 			"DELETE /api/artifacts/{id}",
 			"POST /api/artifact-folders/",
 			"PUT /api/artifact-folders/{id}",
+			"PUT /api/artifact-folders/{id}/visibility",
 			"DELETE /api/artifact-folders/{id}",
 			"POST /api/artifact-uploads",
 			"POST /api/upload-file",
