@@ -196,9 +196,9 @@ func customerServiceMCPTools() []Tool {
 		},
 		{
 			name:        "refine_reply",
-			description: "Rediger et eksisterende kundeservice-svarudkast via sessionId fra draft_reply.",
+			description: "Rediger et eksisterende kundeservice-svarudkast via sessionId fra draft_reply eller draft_reply_from_conversation.",
 			schema: objectSchema([]string{"sessionId", "instruction"}, map[string]any{
-				"sessionId":   stringProp("sessionId fra draft_reply."),
+				"sessionId":   stringProp("sessionId fra draft_reply eller draft_reply_from_conversation."),
 				"instruction": stringProp("Hvad der skal aendres i udkastet."),
 			}),
 		},
@@ -206,7 +206,18 @@ func customerServiceMCPTools() []Tool {
 			name:        "get_draft",
 			description: "Hent det nuvaerende kundeservice-udkast, kilder og antal turns for en draft-session.",
 			schema: objectSchema([]string{"sessionId"}, map[string]any{
-				"sessionId": stringProp("sessionId fra draft_reply."),
+				"sessionId": stringProp("sessionId fra draft_reply eller draft_reply_from_conversation."),
+			}),
+		},
+		{
+			name:        "draft_reply_from_conversation",
+			description: "Hent alle beskeder fra en Dixa-samtale og generer et grounded udkast i et kald.",
+			schema: objectSchema([]string{"conversationId"}, map[string]any{
+				"conversationId": stringProp("Dixa conversation ID (csid)."),
+				"brand":          stringProp("helsebixen | jala | well | made4men | firtal."),
+				"orderNumber":    stringProp("Ordrenummer hvis det allerede kendes."),
+				"channel":        stringProp("email | chat | phone."),
+				"messageLimit":   numberProp("Maks antal seneste tekstbeskeder (standard 20, maks 50)."),
 			}),
 		},
 		{
@@ -244,6 +255,13 @@ func customerServiceMCPTools() []Tool {
 			}),
 		},
 		{
+			name:        "check_delivery_estimate",
+			description: "Svar paa hvornaar en forsinket, ikke-afsendt ordrelinje forventes at komme paa lager.",
+			schema: objectSchema([]string{"productSsin"}, map[string]any{
+				"productSsin": stringProp("SSIN fra lookup_order (item.ssin)."),
+			}),
+		},
+		{
 			name:        "list_templates",
 			description: "Vis kendte Dixa-templates med id, navn, type, brand og tekstuddrag.",
 			schema: objectSchema([]string{}, map[string]any{
@@ -261,9 +279,27 @@ func customerServiceMCPTools() []Tool {
 			}),
 		},
 		{
+			name:        "mcp_data_status",
+			description: "Diagnostisk tool der viser om kundeservice-MCP-databasen har templates, vidensbase, historiske svar og draft-sessions.",
+			schema:      objectSchema([]string{}, map[string]any{}),
+		},
+		{
 			name:        "list_categories",
 			description: "Vis Firtals intent-kategorier grupperet i familier.",
 			schema:      objectSchema([]string{}, map[string]any{}),
+		},
+		{
+			name:        "list_db_tools",
+			description: "Vis webhook-tools der er registreret i kundeservice-systemet og tilladt til automatisk brug.",
+			schema:      objectSchema([]string{}, map[string]any{}),
+		},
+		{
+			name:        "execute_db_tool",
+			description: "Kald et registreret kundeservice webhook-tool via slug. Brug list_db_tools foerst for at se slugs og input.",
+			schema: objectSchema([]string{"slug"}, map[string]any{
+				"slug":  stringProp("Tool-slug fra list_db_tools."),
+				"input": objectProp("Input-parametre som JSON-objekt, matchende tool-schema fra list_db_tools."),
+			}),
 		},
 		// Dixa realtime tools (added TECH-3020)
 		{
@@ -398,4 +434,8 @@ func stringProp(description string) map[string]any {
 
 func numberProp(description string) map[string]any {
 	return map[string]any{"type": "number", "description": description}
+}
+
+func objectProp(description string) map[string]any {
+	return map[string]any{"type": "object", "description": description, "additionalProperties": true}
 }

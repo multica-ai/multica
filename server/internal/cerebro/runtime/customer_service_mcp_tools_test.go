@@ -73,21 +73,35 @@ data: {"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"Hej fr
 
 func TestCustomerServiceMCPToolsAreRegisteredAndInMetadata(t *testing.T) {
 	reg := NewDefaultRegistry(nil, nil, ToolContext{})
-	if !reg.hasTool("draft_reply") {
-		t.Fatal("draft_reply was not registered")
+
+	required := []string{
+		"draft_reply",
+		"lookup_order",
+		"check_delivery_estimate",
+		"draft_reply_from_conversation",
+		"execute_db_tool",
+		"list_db_tools",
+		"mcp_data_status",
 	}
-	if !reg.hasTool("lookup_order") {
-		t.Fatal("lookup_order was not registered")
+	for _, name := range required {
+		if !reg.hasTool(name) {
+			t.Fatalf("%s was not registered", name)
+		}
 	}
 
 	found := map[string]bool{}
 	for _, meta := range AllBuiltinToolMeta() {
-		if meta.Name == "draft_reply" || meta.Name == "lookup_order" {
+		for _, name := range required {
+			if meta.Name != name {
+				continue
+			}
 			found[meta.Name] = meta.Status == ToolStatusNewlyImplemented
 		}
 	}
-	if !found["draft_reply"] || !found["lookup_order"] {
-		t.Fatalf("customer service tools missing from metadata or wrong status: %#v", found)
+	for _, name := range required {
+		if !found[name] {
+			t.Fatalf("%s missing from metadata or wrong status: %#v", name, found)
+		}
 	}
 }
 
