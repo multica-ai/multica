@@ -868,6 +868,12 @@ func (h *Handler) DeleteWorkflowStage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ReorderWorkflowStages(w http.ResponseWriter, r *http.Request) {
+	wfID := chi.URLParam(r, "id")
+	_, ok := h.loadWorkflowInWorkspace(w, r, wfID)
+	if !ok {
+		return
+	}
+
 	type reorderItem struct {
 		ID        string `json:"id"`
 		SortOrder int32  `json:"sort_order"`

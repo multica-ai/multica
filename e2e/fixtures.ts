@@ -24,6 +24,8 @@ export class TestApiClient {
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdWorkflowIds: string[] = [];
+  private createdWorkflowStageIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -133,12 +135,47 @@ export class TestApiClient {
     return issue;
   }
 
+  async createWorkflow(title: string) {
+    const res = await this.authedFetch("/api/workflows", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    });
+    const workflow = await res.json();
+    this.createdWorkflowIds.push(workflow.id);
+    return workflow;
+  }
+
+  async createWorkflowStage(workflowId: string, name: string, sortOrder: number) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/stages`, {
+      method: "POST",
+      body: JSON.stringify({ name, sort_order: sortOrder }),
+    });
+    const stage = await res.json();
+    this.createdWorkflowStageIds.push(stage.id);
+    return stage;
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  /** Clean up all issues created during this test. */
+  async deleteWorkflow(id: string) {
+    await this.authedFetch(`/api/workflows/${id}`, { method: "DELETE" });
+  }
+
+  /** Clean up all issues, workflows created during this test.
+   *  Workflow cascade deletion handles associated stages and nodes. */
   async cleanup() {
+    for (const id of this.createdWorkflowIds) {
+      try {
+        await this.deleteWorkflow(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdWorkflowIds = [];
+    this.createdWorkflowStageIds = [];
+
     for (const id of this.createdIssueIds) {
       try {
         await this.deleteIssue(id);
