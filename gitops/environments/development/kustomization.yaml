@@ -40,4 +40,4 @@ images:
     newTag: "3d61249d"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "b4db44ef"
+    newTag: "3d61249d"
