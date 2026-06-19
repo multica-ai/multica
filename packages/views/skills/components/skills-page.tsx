@@ -219,6 +219,7 @@ export default function SkillsPage() {
     items: folderItems,
     itemNoun: "skills",
   });
+  const folderIncludes = folderView.includes; // CEREBRO-PATCH(skill-folder-loop): FIR-1486 — keep the filter dependency stable.
 
   const assignments = useMemo(
     () => selectSkillAssignments(agents),
@@ -259,7 +260,7 @@ export default function SkillsPage() {
       // CEREBRO-PATCH(skill-category-filter): TECH-3077 — filter by category.
       if (categoryFilter && skillCategoryKey(s) !== categoryFilter) return false;
       // CEREBRO-PATCH(skill-folders): FIR-1412 — filter by selected folder.
-      if (!folderView.includes(s.id)) return false;
+      if (!folderIncludes(s.id)) return false;
       return true;
     });
   }, [
@@ -269,7 +270,7 @@ export default function SkillsPage() {
     filter,
     currentUserId,
     categoryFilter,
-    folderView,
+    folderIncludes,
   ]);
 
   const handleCreated = (skill: Skill) => {

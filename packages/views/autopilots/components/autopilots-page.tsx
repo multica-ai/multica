@@ -221,9 +221,10 @@ export function AutopilotsPage() {
     items: folderItems,
     itemNoun: "autopilots",
   });
+  const folderIncludes = folderView.includes; // CEREBRO-PATCH(autopilot-folder-loop): FIR-1486 — keep the filter dependency stable.
   const visibleAutopilots = useMemo(
-    () => autopilots.filter((a) => folderView.includes(a.id)),
-    [autopilots, folderView],
+    () => autopilots.filter((a) => folderIncludes(a.id)),
+    [autopilots, folderIncludes],
   );
 
   return (

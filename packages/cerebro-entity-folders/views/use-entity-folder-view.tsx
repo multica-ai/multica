@@ -4,7 +4,7 @@
 // with a minimal footprint. Returns whether the feature is on, a predicate to
 // filter the list by the selected folder, and the ready-to-render sidebar node.
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -89,25 +89,35 @@ export function useEntityFolderView(opts: {
     };
   }, [enabled, effectiveSelected, membership]);
 
-  const sidebar = enabled ? (
-    <EntityFolderSidebar
-      kind={kind}
-      folders={folders}
-      items={items}
-      membership={membership}
-      selected={effectiveSelected}
-      onSelect={setSelected}
-      itemNoun={itemNoun}
-    />
-  ) : null;
+  const sidebar = useMemo(
+    () =>
+      enabled ? (
+        <EntityFolderSidebar
+          kind={kind}
+          folders={folders}
+          items={items}
+          membership={membership}
+          selected={effectiveSelected}
+          onSelect={setSelected}
+          itemNoun={itemNoun}
+        />
+      ) : null,
+    [enabled, effectiveSelected, folders, itemNoun, items, kind, membership],
+  );
 
-  const getDragProps = (itemId: string): EntityFolderDragProps =>
-    enabled
-      ? {
-          draggable: true,
-          onDragStart: (e) => setEntityFolderDragData(e, kind, itemId),
-        }
-      : {};
+  const getDragProps = useCallback(
+    (itemId: string): EntityFolderDragProps =>
+      enabled
+        ? {
+            draggable: true,
+            onDragStart: (e) => setEntityFolderDragData(e, kind, itemId),
+          }
+        : {},
+    [enabled, kind],
+  );
 
-  return { enabled, includes, sidebar, getDragProps };
+  return useMemo(
+    () => ({ enabled, includes, sidebar, getDragProps }),
+    [enabled, getDragProps, includes, sidebar],
+  );
 }
