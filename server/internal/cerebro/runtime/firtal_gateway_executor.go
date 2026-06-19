@@ -734,9 +734,100 @@ func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, 
 	return c, err
 }
 
+// toolPolicyScoped reports whether this agent's tool access is governed by the
+// unified per-tool permission chain (FIR-2230) on this executor — i.e. the gate
+// runs in tool-policy mode (e.toolPolicy set) and the agent is in the gate's
+// scope (gateAgents empty = all agents, else membership required). It is the
+// SAME predicate the per-call gate uses, so the tool LIST build and the per-call
+// GATE are switched on for exactly the same agents and never drift (FIR-1512).
+func (e *FirtalGatewayExecutor) toolPolicyScoped(agentID pgtype.UUID) bool {
+	if e == nil || e.toolPolicy == nil || !agentID.Valid {
+		return false
+	}
+	if len(e.gateAgents) > 0 {
+		if _, ok := e.gateAgents[agentID.Bytes]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// policyEnabledTools resolves an agent's tool list through the unified per-tool
+// chain when this agent is tool-policy scoped (FIR-1512 Step 1). The bool return
+// reports whether the policy engine handled the decision: when true the returned
+// slice is authoritative (an empty slice means "chat-only by policy" — the caller
+// must NOT fall back to the legacy grant cascade or the POC tool set); when false
+// the agent is out of scope and the caller keeps the legacy cascade path.
+//
+// Runtime and owner (the chain's user ceiling) come from the agent row, mirroring
+// guardToolCallViaPolicy. An agent-row lookup failure fails closed (empty list,
+// handled=true) to match the gate, which denies on the same error — so a broken
+// lookup never silently widens access.
+func (e *FirtalGatewayExecutor) policyEnabledTools(ctx context.Context, reg *Registry, agentID, workspaceID pgtype.UUID) ([]Tool, bool) {
+	if !e.toolPolicyScoped(agentID) {
+		return nil, false
+	}
+	// Mirror the per-call gate's preconditions: guardToolCall no-ops (allows
+	// everything) when the cerebro_approval_gate workspace flag is off, BEFORE it
+	// ever resolves the policy chain. If the list were still built from policy
+	// while the gate is a no-op, a workspace that switches that flag off (a
+	// supported restart-free admin action) would strand agents with a
+	// policy-restricted list and no enforcement behind it. So when the flag is
+	// off we defer to the legacy cascade, exactly matching the gate.
+	if !e.workspaceApprovalGateEnabled(ctx, workspaceID) {
+		return nil, false
+	}
+	agent, err := e.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		e.logger.Warn("tool-policy list: agent lookup failed — surfacing no tools (fail closed)",
+			"agent_id", util.UUIDToString(agentID), "error", err)
+		return nil, true
+	}
+	runtimeID, ownerID := agent.RuntimeID, agent.OwnerID
+
+	tools := reg.GetToolPolicyEnabledToolsForAgent(ctx, e.toolPolicy, workspaceID, agentID, runtimeID, ownerID)
+	// Connection tools (customer-service MCP et al.) carry an always-on per-tool
+	// Deny that runs independent of the approval gate (TECH-3174) and is keyed
+	// under connection:<name> rows the generic Resolve above never sees. Drop any
+	// tool the connection check would Deny, so the list matches what the gate
+	// actually allows at call time. Ask is kept — like the gate, it only pauses
+	// when the inbox is active.
+	return e.filterConnectionDenied(ctx, tools, workspaceID, runtimeID, agentID, ownerID), true
+}
+
+// filterConnectionDenied drops tools whose workspace-connection verdict is Deny,
+// resolved through the same chain (and the same store) the always-on call-time
+// connection gate uses (connectionToolSetting → ConnectionToolEffective). It
+// reuses the runtime/owner already loaded for the agent to avoid an extra lookup
+// per tool. Fail-open on a resolve error — keep the tool — to match the gate,
+// whose connection check also allows on error so a transient blip cannot strip
+// the whole fleet's tools.
+func (e *FirtalGatewayExecutor) filterConnectionDenied(ctx context.Context, tools []Tool, workspaceID, runtimeID, agentID, ownerID pgtype.UUID) []Tool {
+	if e.connDeny == nil || len(tools) == 0 {
+		return tools
+	}
+	out := make([]Tool, 0, len(tools))
+	for _, t := range tools {
+		eff, _, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, runtimeID, agentID, ownerID, t.Name())
+		if err != nil {
+			e.logger.Warn("tool-policy list: connection verdict failed — keeping tool",
+				"agent_id", util.UUIDToString(agentID), "tool", t.Name(), "error", err)
+			out = append(out, t)
+			continue
+		}
+		if eff == toolpolicy.SettingDeny {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
 // agentHasCallableTools reports whether this task should enter the tool loop.
-// Resolution follows the runtime tools list (cerebro_runtime_tool cascade with
-// legacy agent_tool_grant fallback), not MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS.
+// Resolution follows the runtime tools list — the unified per-tool chain when
+// the agent is tool-policy scoped (FIR-1512), otherwise the cerebro_runtime_tool
+// cascade with legacy agent_tool_grant fallback — not
+// MULTICA_SERVER_FIRTAL_GATEWAY_TOOLS_AGENTS.
 func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agentID, workspaceID, originalUserID pgtype.UUID) bool {
 	if e.registry == nil {
 		return false
@@ -744,6 +835,9 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage}
 	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 	taskRegistry.db = e.registry.db
+	if tools, handled := e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID); handled {
+		return len(tools) > 0
+	}
 	return len(taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)) > 0
 }
 
@@ -788,16 +882,22 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 		activeRegistry *Registry
 		useRegistry    bool
 	)
+	var policyHandled bool
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
-		// JEH-1710 bid 5: enforce the cerebro_runtime_tool cascade (runtime
-		// enable + user/group grants + agent override) when the new grant
-		// system is configured for this runtime; otherwise fall back to the
-		// legacy agent_tool_grant path. originalUserID carries the user who
-		// triggered the task (chat message, comment, or autopilot manual run)
-		// so the cascade can apply user/group access rules.
-		enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)
+		// FIR-1512 Step 1 (engine-flip): when this agent is tool-policy scoped,
+		// the tool list is built from the unified Allow/Ask/Deny chain — the same
+		// engine that guards each call — so the grant cascade is retired for
+		// scoped agents. Out of scope, the legacy path stands: JEH-1710 bid 5
+		// cerebro_runtime_tool cascade (runtime enable + user/group grants + agent
+		// override) when configured, else the legacy agent_tool_grant fallback.
+		// originalUserID carries the triggering user so the cascade can apply its
+		// user/group access rules.
+		enabledTools, policyHandled = e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID)
+		if !policyHandled {
+			enabledTools = taskRegistry.GetCascadeEnabledToolsForAgent(ctx, e.cerebro, agentID, originalUserID)
+		}
 		if len(enabledTools) > 0 {
 			// Also register the MCP-backed tools (get_issue, list_comments,
 			// add_comment) that the Registry wraps via its Call method.
@@ -808,7 +908,10 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 			useRegistry = true
 		}
 	}
-	if !useRegistry {
+	// When the policy engine handled the decision, an empty list is a deliberate
+	// "chat-only by policy" — skip the legacy POC fallback so it never re-injects
+	// the hardcoded tool set behind the policy's back.
+	if !useRegistry && !policyHandled {
 		// Legacy POC fallback only when the runtime has no cerebro_runtime_tool
 		// rows yet. Once tools are managed on the runtime, an empty grant list
 		// means chat-only — do not inject the hardcoded three-tool MCP set.

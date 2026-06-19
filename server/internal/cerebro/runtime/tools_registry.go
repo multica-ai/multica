@@ -11,8 +11,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
+
+// toolPolicyResolver is the slice of *toolpolicy.Store the registry needs to
+// build a tool list from the unified per-tool permission chain (FIR-2230 /
+// FIR-1512). Kept as an interface so the resolution loop is unit-testable with
+// a fake and without a database. Satisfied by *toolpolicy.Store.
+type toolPolicyResolver interface {
+	Resolve(ctx context.Context, q toolpolicy.Query) (toolpolicy.Effective, error)
+}
 
 // Tool is the interface every in-process tool must implement.
 type Tool interface {
@@ -167,6 +176,70 @@ func (r *Registry) GetCascadeEnabledToolsForAgent(ctx context.Context, cerebro *
 		}
 		seen[row.ToolName] = struct{}{}
 		if t, ok := r.tools[row.ToolName]; ok {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// GetToolPolicyEnabledToolsForAgent builds an agent's tool list from the
+// unified per-tool permission chain (FIR-2230) instead of the legacy grant
+// cascade — this is the engine-flip (FIR-1512 Step 1). Every registered tool
+// whose Effective verdict is not Deny is offered; Allow and Ask both surface
+// the tool, because Ask only pauses at call time (the approval gate), it does
+// not hide the tool from the model.
+//
+// It resolves the identical chain query as guardToolCallViaPolicy — same tool
+// key, same (workspace, runtime, agent, owner) context, same default-Allow base
+// — so the tool LIST an agent is given and the per-call GATE that guards each
+// invocation are decided by one engine and cannot disagree. The default-deny
+// posture (an agent only gets explicitly-allowed tools) is authored as policy
+// rows (a workspace/runtime Deny base + per-tool Allow), exactly as the gate
+// expects; the engine itself stays faithful to the stored chain.
+//
+// runtimeID is the agent's runtime; ownerID is the agent's owner — the chain's
+// user ceiling. The caller resolves both from the agent row. Resolution is
+// fail-closed per tool: a resolve error excludes that one tool rather than
+// leaking it into the toolset.
+func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolver toolPolicyResolver, workspaceID, agentID, runtimeID, ownerID pgtype.UUID) []Tool {
+	if resolver == nil {
+		return nil
+	}
+
+	// Snapshot the registered names under the lock, then resolve outside it:
+	// Resolve hits the DB, and holding the registry's RW lock across that IO
+	// would serialize every task's tool-list build behind one another.
+	r.mu.RLock()
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	r.mu.RUnlock()
+
+	out := make([]Tool, 0, len(names))
+	for _, name := range names {
+		eff, err := resolver.Resolve(ctx, toolpolicy.Query{
+			WorkspaceID: workspaceID,
+			ToolKey:     name,
+			RuntimeID:   runtimeID,
+			AgentID:     agentID,
+			UserID:      ownerID,
+		})
+		if err != nil {
+			slog.Warn("tool registry: tool-policy resolve failed — excluding tool",
+				"agent_id", util.UUIDToString(agentID),
+				"tool", name,
+				"error", err,
+			)
+			continue
+		}
+		if eff.Setting == toolpolicy.SettingDeny {
+			continue
+		}
+		r.mu.RLock()
+		t, ok := r.tools[name]
+		r.mu.RUnlock()
+		if ok {
 			out = append(out, t)
 		}
 	}
