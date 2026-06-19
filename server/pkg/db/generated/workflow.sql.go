@@ -11,6 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const assignNodeToStage = `-- name: AssignNodeToStage :one
+UPDATE multica_workflow_node SET
+    stage_id = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id
+`
+
+type AssignNodeToStageParams struct {
+	ID      pgtype.UUID `json:"id"`
+	StageID pgtype.UUID `json:"stage_id"`
+}
+
+func (q *Queries) AssignNodeToStage(ctx context.Context, arg AssignNodeToStageParams) (MulticaWorkflowNode, error) {
+	row := q.db.QueryRow(ctx, assignNodeToStage, arg.ID, arg.StageID)
+	var i MulticaWorkflowNode
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.Title,
+		&i.Description,
+		&i.PositionX,
+		&i.PositionY,
+		&i.FormatSchema,
+		&i.WorkerType,
+		&i.WorkerID,
+		&i.CriticType,
+		&i.CriticID,
+		&i.CriticApiUrl,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StageID,
+	)
+	return i, err
+}
+
 const cancelWorkflowRun = `-- name: CancelWorkflowRun :one
 UPDATE multica_workflow_run SET
     status = 'cancelled',
@@ -82,6 +119,18 @@ WHERE workflow_id = $1
 
 func (q *Queries) CountWorkflowNodes(ctx context.Context, workflowID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countWorkflowNodes, workflowID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countWorkflowStageNodes = `-- name: CountWorkflowStageNodes :one
+SELECT count(*)::bigint FROM multica_workflow_node
+WHERE stage_id = $1
+`
+
+func (q *Queries) CountWorkflowStageNodes(ctx context.Context, stageID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkflowStageNodes, stageID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -240,7 +289,7 @@ INSERT INTO multica_workflow_node (
     $9, $5, $10,
     $6, $11, $12,
     $7
-) RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at
+) RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id
 `
 
 type CreateWorkflowNodeParams struct {
@@ -290,6 +339,7 @@ func (q *Queries) CreateWorkflowNode(ctx context.Context, arg CreateWorkflowNode
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.StageID,
 	)
 	return i, err
 }
@@ -344,6 +394,45 @@ func (q *Queries) CreateWorkflowRun(ctx context.Context, arg CreateWorkflowRunPa
 	return i, err
 }
 
+const createWorkflowStage = `-- name: CreateWorkflowStage :one
+
+INSERT INTO multica_workflow_stage (
+    workflow_id, name, description, sort_order
+) VALUES (
+    $1, $2, $4, $3
+) RETURNING id, workflow_id, name, description, sort_order, created_at, updated_at
+`
+
+type CreateWorkflowStageParams struct {
+	WorkflowID  pgtype.UUID `json:"workflow_id"`
+	Name        string      `json:"name"`
+	SortOrder   int32       `json:"sort_order"`
+	Description pgtype.Text `json:"description"`
+}
+
+// =====================
+// Workflow Stage CRUD
+// =====================
+func (q *Queries) CreateWorkflowStage(ctx context.Context, arg CreateWorkflowStageParams) (MulticaWorkflowStage, error) {
+	row := q.db.QueryRow(ctx, createWorkflowStage,
+		arg.WorkflowID,
+		arg.Name,
+		arg.SortOrder,
+		arg.Description,
+	)
+	var i MulticaWorkflowStage
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.Name,
+		&i.Description,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const deleteWorkflow = `-- name: DeleteWorkflow :exec
 DELETE FROM multica_workflow WHERE id = $1
 `
@@ -386,6 +475,15 @@ DELETE FROM multica_workflow_node WHERE workflow_id = $1
 
 func (q *Queries) DeleteWorkflowNodesByWorkflow(ctx context.Context, workflowID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkflowNodesByWorkflow, workflowID)
+	return err
+}
+
+const deleteWorkflowStage = `-- name: DeleteWorkflowStage :exec
+DELETE FROM multica_workflow_stage WHERE id = $1
+`
+
+func (q *Queries) DeleteWorkflowStage(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkflowStage, id)
 	return err
 }
 
@@ -493,7 +591,7 @@ func (q *Queries) GetWorkflowInWorkspace(ctx context.Context, arg GetWorkflowInW
 }
 
 const getWorkflowNode = `-- name: GetWorkflowNode :one
-SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
+SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id FROM multica_workflow_node
 WHERE id = $1
 `
 
@@ -516,6 +614,7 @@ func (q *Queries) GetWorkflowNode(ctx context.Context, id pgtype.UUID) (MulticaW
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.StageID,
 	)
 	return i, err
 }
@@ -542,6 +641,25 @@ func (q *Queries) GetWorkflowRun(ctx context.Context, id pgtype.UUID) (MulticaWo
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.RuntimeID,
+	)
+	return i, err
+}
+
+const getWorkflowStage = `-- name: GetWorkflowStage :one
+SELECT id, workflow_id, name, description, sort_order, created_at, updated_at FROM multica_workflow_stage WHERE id = $1
+`
+
+func (q *Queries) GetWorkflowStage(ctx context.Context, id pgtype.UUID) (MulticaWorkflowStage, error) {
+	row := q.db.QueryRow(ctx, getWorkflowStage, id)
+	var i MulticaWorkflowStage
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.Name,
+		&i.Description,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -741,7 +859,7 @@ func (q *Queries) ListWorkflowEdgesByTarget(ctx context.Context, targetNodeID pg
 
 const listWorkflowNodes = `-- name: ListWorkflowNodes :many
 
-SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at FROM multica_workflow_node
+SELECT id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id FROM multica_workflow_node
 WHERE workflow_id = $1
 ORDER BY sort_order ASC, created_at ASC
 `
@@ -774,6 +892,7 @@ func (q *Queries) ListWorkflowNodes(ctx context.Context, workflowID pgtype.UUID)
 			&i.SortOrder,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.StageID,
 		); err != nil {
 			return nil, err
 		}
@@ -872,6 +991,40 @@ func (q *Queries) ListWorkflowRunsByWorkspace(ctx context.Context, arg ListWorkf
 			&i.CompletedAt,
 			&i.CreatedAt,
 			&i.RuntimeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowStagesByWorkflow = `-- name: ListWorkflowStagesByWorkflow :many
+SELECT id, workflow_id, name, description, sort_order, created_at, updated_at FROM multica_workflow_stage
+WHERE workflow_id = $1
+ORDER BY sort_order ASC, created_at ASC
+`
+
+func (q *Queries) ListWorkflowStagesByWorkflow(ctx context.Context, workflowID pgtype.UUID) ([]MulticaWorkflowStage, error) {
+	rows, err := q.db.Query(ctx, listWorkflowStagesByWorkflow, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MulticaWorkflowStage{}
+	for rows.Next() {
+		var i MulticaWorkflowStage
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkflowID,
+			&i.Name,
+			&i.Description,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1062,6 +1215,38 @@ func (q *Queries) SetWorkflowTemplate(ctx context.Context, arg SetWorkflowTempla
 	return i, err
 }
 
+const unassignNodeFromStage = `-- name: UnassignNodeFromStage :one
+UPDATE multica_workflow_node SET
+    stage_id = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id
+`
+
+func (q *Queries) UnassignNodeFromStage(ctx context.Context, id pgtype.UUID) (MulticaWorkflowNode, error) {
+	row := q.db.QueryRow(ctx, unassignNodeFromStage, id)
+	var i MulticaWorkflowNode
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.Title,
+		&i.Description,
+		&i.PositionX,
+		&i.PositionY,
+		&i.FormatSchema,
+		&i.WorkerType,
+		&i.WorkerID,
+		&i.CriticType,
+		&i.CriticID,
+		&i.CriticApiUrl,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.StageID,
+	)
+	return i, err
+}
+
 const updateWorkflow = `-- name: UpdateWorkflow :one
 UPDATE multica_workflow SET
     title = COALESCE($2, title),
@@ -1122,7 +1307,7 @@ UPDATE multica_workflow_node SET
     sort_order = COALESCE($12::int, sort_order),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at
+RETURNING id, workflow_id, title, description, position_x, position_y, format_schema, worker_type, worker_id, critic_type, critic_id, critic_api_url, sort_order, created_at, updated_at, stage_id
 `
 
 type UpdateWorkflowNodeParams struct {
@@ -1172,6 +1357,7 @@ func (q *Queries) UpdateWorkflowNode(ctx context.Context, arg UpdateWorkflowNode
 		&i.SortOrder,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.StageID,
 	)
 	return i, err
 }
@@ -1206,6 +1392,43 @@ func (q *Queries) UpdateWorkflowRunStatus(ctx context.Context, arg UpdateWorkflo
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.RuntimeID,
+	)
+	return i, err
+}
+
+const updateWorkflowStage = `-- name: UpdateWorkflowStage :one
+UPDATE multica_workflow_stage SET
+    name = COALESCE($2, name),
+    description = COALESCE($3, description),
+    sort_order = COALESCE($4::int, sort_order),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workflow_id, name, description, sort_order, created_at, updated_at
+`
+
+type UpdateWorkflowStageParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Name        pgtype.Text `json:"name"`
+	Description pgtype.Text `json:"description"`
+	SortOrder   pgtype.Int4 `json:"sort_order"`
+}
+
+func (q *Queries) UpdateWorkflowStage(ctx context.Context, arg UpdateWorkflowStageParams) (MulticaWorkflowStage, error) {
+	row := q.db.QueryRow(ctx, updateWorkflowStage,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+		arg.SortOrder,
+	)
+	var i MulticaWorkflowStage
+	err := row.Scan(
+		&i.ID,
+		&i.WorkflowID,
+		&i.Name,
+		&i.Description,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

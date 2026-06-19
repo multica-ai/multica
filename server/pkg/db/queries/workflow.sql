@@ -233,3 +233,52 @@ UPDATE multica_user SET
     can_manage_workflows = $2
 WHERE id = $1
 RETURNING *;
+
+-- =====================
+-- Workflow Stage CRUD
+-- =====================
+
+-- name: CreateWorkflowStage :one
+INSERT INTO multica_workflow_stage (
+    workflow_id, name, description, sort_order
+) VALUES (
+    $1, $2, sqlc.narg('description'), $3
+) RETURNING *;
+
+-- name: GetWorkflowStage :one
+SELECT * FROM multica_workflow_stage WHERE id = $1;
+
+-- name: ListWorkflowStagesByWorkflow :many
+SELECT * FROM multica_workflow_stage
+WHERE workflow_id = $1
+ORDER BY sort_order ASC, created_at ASC;
+
+-- name: UpdateWorkflowStage :one
+UPDATE multica_workflow_stage SET
+    name = COALESCE(sqlc.narg('name'), name),
+    description = COALESCE(sqlc.narg('description'), description),
+    sort_order = COALESCE(sqlc.narg('sort_order')::int, sort_order),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteWorkflowStage :exec
+DELETE FROM multica_workflow_stage WHERE id = $1;
+
+-- name: CountWorkflowStageNodes :one
+SELECT count(*)::bigint FROM multica_workflow_node
+WHERE stage_id = $1;
+
+-- name: AssignNodeToStage :one
+UPDATE multica_workflow_node SET
+    stage_id = sqlc.narg('stage_id'),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UnassignNodeFromStage :one
+UPDATE multica_workflow_node SET
+    stage_id = NULL,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
