@@ -1,8 +1,9 @@
 name: Mobile Verify
 
-# Runs lint + typecheck for apps/mobile only, parallel to the main CI
-# workflow. Path-filtered so PRs that don't touch mobile (or anything
-# mobile transitively depends on) pay zero cost.
+# Runs mobile-only verification in parallel to the main CI workflow:
+# typecheck + lint + test + Android assembleDebug. Path-filtered so PRs
+# that don't touch mobile (or anything mobile transitively depends on)
+# pay zero cost.
 #
 # Path scope rationale — mobile transitively depends on:
 # - apps/mobile/**                — the app itself
@@ -15,7 +16,8 @@ name: Mobile Verify
 #
 # Mobile's vitest suite is intentionally narrow (Node env, pure-function
 # tests under apps/mobile/lib/*.test.ts — see apps/mobile/vitest.config.ts).
-# RN component-level rendering is not exercised here.
+# RN component-level rendering is not exercised here; Android native
+# viability is covered separately via assembleDebug below.
 
 on:
   push:
@@ -59,8 +61,24 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: pnpm install
 
       - name: Type check, lint, and test
         run: pnpm exec turbo typecheck lint test --filter=@multica/mobile
+
+      - name: Prebuild Android project
+        run: pnpm --filter @multica/mobile exec expo prebuild --platform android --non-interactive
+
+      - name: Assemble Android debug build
+        run: ./gradlew assembleDebug
+        working-directory: apps/mobile/android

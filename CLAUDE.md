@@ -32,7 +32,7 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
 - `apps/web/` — Next.js frontend (App Router)
 - `apps/desktop/` — Electron desktop app (electron-vite)
-- `apps/mobile/` — Expo / React Native iOS app. See `apps/mobile/CLAUDE.md`.
+- `apps/mobile/` — Expo / React Native mobile app for iOS + Android. See `apps/mobile/CLAUDE.md`.
 - `packages/core/` — Headless business logic (zero react-dom)
 - `packages/ui/` — Atomic UI components (zero business logic)
 - `packages/views/` — Shared business pages/components (zero next/* imports, zero react-router imports)
@@ -132,8 +132,13 @@ pnpm ios:mobile                  # Native build + install dev-client to iOS Simu
 pnpm ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
 pnpm ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
 pnpm ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
-# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
-# native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
+pnpm -C apps/mobile android                 # Native build + install debug app to Android emulator/device, dev env
+pnpm -C apps/mobile android:staging         # Native build + install debug app to Android emulator/device, staging env
+pnpm -C apps/mobile android:device          # Native build + install debug app to a specific Android device, dev env
+pnpm -C apps/mobile android:device:staging  # Native build + install debug app to a specific Android device, staging env
+pnpm -C apps/mobile android:staging:release # Native release APK build / install for Android, staging env
+# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Re-run `ios:mobile*` / `pnpm -C apps/mobile android*`
+# when native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
 
 # Desktop build & package
 pnpm --filter @multica/desktop build      # Compile TS → JS (reads .env.production)

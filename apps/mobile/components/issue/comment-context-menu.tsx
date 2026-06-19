@@ -1,10 +1,10 @@
 /**
- * Long-press handler for a comment bubble. Exposes `onLongPress` (drives a
- * native iOS ActionSheetIOS) and `isPressed` (drives the caller's highlight
+ * Long-press handler for a comment bubble. Exposes `onLongPress` (drives the
+ * shared action-sheet wrapper) and `isPressed` (drives the caller's highlight
  * ring while the sheet is on screen).
  *
  * iOS-native first per apps/mobile/CLAUDE.md §UI components → waterfall step
- * 1: `ActionSheetIOS.showActionSheetWithOptions`. Zero custom layout, zero
+ * 1: the native action-sheet API. Zero custom layout, zero
  * animation, zero overflow math, zero new deps.
  *
  * Item set (conditional, mirrors web's comment context menu):
@@ -18,7 +18,7 @@
  * first is still dismissing — the callback runs after dismissal completes.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -33,6 +33,7 @@ import {
   useResolveComment,
   useToggleCommentReaction,
 } from "@/data/mutations/issues";
+import { showActionSheetWithOptions } from "@/lib/action-sheet";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
 
 const QUICK_ROW_SIZE = 5;
@@ -99,7 +100,7 @@ export function useCommentLongPress(
       ? actions.findIndex((a) => a.kind === "delete")
       : undefined;
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex,
@@ -216,7 +217,7 @@ function presentReactSheet(args: {
   const options = [...emojis, "More reactions…", "Cancel"];
   const cancelButtonIndex = options.length - 1;
 
-  ActionSheetIOS.showActionSheetWithOptions(
+  showActionSheetWithOptions(
     { options, cancelButtonIndex },
     (i) => {
       if (i === cancelButtonIndex) return;

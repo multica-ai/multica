@@ -2,6 +2,9 @@ packages:
   - "apps/*"
   - "packages/*"
 
+patchedDependencies:
+  react-native-shiki-engine@0.3.10: patches/react-native-shiki-engine@0.3.10.patch
+
 catalog:
   # Core React
   react: "19.2.3"

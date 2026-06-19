@@ -1,6 +1,6 @@
 # Mobile App Rules (apps/mobile/)
 
-For cross-app sharing rules, see the root `CLAUDE.md` *Sharing Principles* section. This file documents the locked tech-stack baseline and the few mobile-specific rules — so AI doesn't suggest outdated alternatives.
+For cross-app sharing rules, see the root `CLAUDE.md` *Sharing Principles* section. This file documents the locked dual-target tech-stack baseline and the mobile-specific rules — so AI doesn't suggest outdated alternatives.
 
 ## What mobile may import from `packages/`
 
@@ -79,9 +79,10 @@ This pattern repeats: timeline coalescing (`buildTimelineGroups`), inbox dedup, 
 
 Start minimal. Add to this list when actually adopted — do NOT pre-list libraries.
 
+- **Dual target: iOS + Android** on one Expo / React Native codebase. iOS remains the visual reference client; Android should preserve the same product semantics with the minimum platform-specific adaptation required for correctness.
 - **Expo SDK 55**
-- **React Native 0.82**
-- **React 19.1** — whatever Expo SDK 55 ships. Pinned in `apps/mobile/package.json` directly, NOT via root `catalog:`.
+- **React Native 0.83.6**
+- **React 19.2** — whatever Expo SDK 55 ships in this app today. Pinned in `apps/mobile/package.json` directly, NOT via root `catalog:`.
 - **TypeScript** strict
 - **Expo Router 55** (file-based routing — version aligns with Expo SDK)
 - **NativeWind 4** + **Tailwind 3.4** — NativeWind 5 is unstable; stay on v4. (Note: web/desktop use Tailwind v4 — versions intentionally differ.)
@@ -118,7 +119,7 @@ Why: every "I'll just write a fresh one" produced one of the 21 legacy component
 1. **iOS / RN ships a native API?** Use it directly. Don't wrap a `Modal` to mimic it.
    - Text input prompt → `Alert.prompt`
    - Confirm / destructive prompt → `Alert.alert`
-   - Action sheet (one-of-N) → `ActionSheetIOS.showActionSheetWithOptions`
+   - Action sheet (one-of-N) → the shared action-sheet wrapper (native `ActionSheetIOS` on iOS, Android fallback in the same helper)
    - Date / time → `@react-native-community/datetimepicker` (already installed)
    - Image / camera → `expo-image-picker` (already installed)
    - Documents → `expo-document-picker` (already installed)
@@ -154,11 +155,23 @@ Never copy the visual shape of an existing hand-written `components/ui/` compone
 ## Build & release
 
 - **Main CI** (`.github/workflows/ci.yml`) excludes mobile via `--filter='!@multica/mobile'`. Mobile failures do NOT block web/desktop PRs.
-- **Mobile verify** (`.github/workflows/mobile-verify.yml`): triggered on `apps/mobile/**` or `packages/core/types/**` changes — runs typecheck/lint/test only, no IPA build.
-- **Mobile release** (`.github/workflows/mobile-release.yml`): triggered by `mobile-v*.*.*` tag → `eas build` + `eas submit`.
-- **OTA** — EAS Update for JS-only fixes that don't change the runtime version. Manual / on-demand push to preview/production channels.
+- **Mobile verify** (`.github/workflows/mobile-verify.yml`): path-filtered to mobile-relevant changes, runs typecheck/lint/test plus an Android `assembleDebug` build check. Keep it separate from main CI; do not add mobile work back into `.github/workflows/ci.yml`.
+- **Local iOS builds** use the checked-in `expo run:ios` pnpm scripts.
+- **Local Android builds** use `expo run:android`. CI prebuilds the Android project on demand, then runs `./gradlew assembleDebug`; local release APKs come from `expo run:android --variant release` or `./gradlew assembleRelease` inside `apps/mobile/android/` after prebuild.
+- **Android distribution in this repo is local / internal APK install**, not Play Store / AAB automation.
+- **Do not assume EAS Build, EAS Submit, or OTA Update are wired up here.** There is no checked-in mobile release workflow under `.github/workflows/` today; if the user asks for cloud release automation, treat that as new work.
 
 Mobile release cadence is decoupled from main `v*.*.*` tags (server / CLI / desktop).
+
+## Android platform differences
+
+Android is a first-class target, but iOS remains the visual reference client. Keep product semantics identical and adapt only where the platform requires it.
+
+- **`formSheet` routes** — Expo Router `presentation: "formSheet"` gives native iOS sheet behavior. On Android it falls back to a regular modal presentation. Keep route bodies self-contained, verify keyboard/search layouts, and do not promise iOS grabber/detent behavior on Android.
+- **Action sheets** — never import `ActionSheetIOS` at a feature call site. Use the shared wrapper so iOS keeps the native action sheet and Android gets the repo's fallback implementation.
+- **SF Symbols** — `sf:` icons are iOS-only. Every SF Symbol usage needs an Android fallback (currently Ionicons where applicable).
+- **Hardware back** — route stacks usually work automatically, but every non-route overlay still needs explicit verification that Back closes the topmost layer instead of exiting the app.
+- **Edge-to-edge** — Android runs edge-to-edge, so verify SafeArea / header / tab bar spacing under both gesture navigation and 3-button navigation. Status bar and navigation bar colors must stay aligned with the active theme.
 
 ## Realtime / WebSocket strategy
 
@@ -287,7 +300,7 @@ fallback, sync-before-await ordering, type-safe payloads).
 2. **Use the existing components — no new primitives.** Walk the
    `iOS native > RNR > discuss` waterfall in §UI components. If RNR ships
    it, `npx @react-native-reusables/cli@latest add <name>`. If iOS ships
-   it (Alert / ActionSheetIOS / Haptics / share / picker), use it directly.
+   it (Alert / shared action-sheet wrapper / Haptics / share / picker), use it directly.
    If neither has it AND it's a single-screen need, inline compose with
    `<Pressable>` + `<Text>` + tokens. **Do NOT create a new generic
    primitive in `components/ui/` for one or two callers** — the migration
@@ -477,7 +490,7 @@ The mobile codebase started with ~15 Modal sheets. They almost all copied the sa
 |---|---|---|
 | < 5 fixed actions, 1-2s stay, no keyboard | `Modal transparent` + bottom action card | Short, light, dim-backdrop tap-to-dismiss is correct here |
 | Yes/No or one-tap confirm | `Alert.alert` | Native, accessible, no custom UI |
-| One-of-N from a server-driven short list | `ActionSheetIOS.showActionSheetWithOptions` | Native iOS action sheet, no custom UI |
+| One-of-N from a server-driven short list | Shared action-sheet wrapper | Native iOS action sheet on iOS, repo fallback on Android |
 | < 7 fixed picker options, no search | `Modal transparent` + small centered card | Same as action card, just centered |
 | Long list / search box / content view / form / anything with a keyboard | **Expo Router `presentation: "formSheet"` route** | Instantiates iOS `UISheetPresentationController`: native grabber, drag-dismiss with spring physics, stacked-card backdrop, detents — all UIKit-managed |
 | Multi-screen flow / route-level full modal | Expo Router `presentation: "modal"` | Full-page slide-up, has back-stack, swipe-dismiss, deep-linkable |
