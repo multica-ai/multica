@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -793,8 +795,61 @@ func TestFetchFromGitHub_RepoRootMissingSKILLmdReturnsActionableError(t *testing
 	if err == nil {
 		t.Fatal("expected error for missing root SKILL.md")
 	}
-	if !strings.Contains(err.Error(), "tree/main/<skill-dir>") && !strings.Contains(err.Error(), "tree/main") {
-		t.Fatalf("error should hint at /tree/{ref}/<skill-dir>, got %q", err.Error())
+	if !errors.Is(err, errImportClient) {
+		t.Fatalf("expected errImportClient, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "multiple skills") && !strings.Contains(err.Error(), "tree/main") {
+		t.Fatalf("error should hint at multi-skill import URLs, got %q", err.Error())
+	}
+}
+
+func TestFetchFromGitHub_RepoRootMissingSKILLmdListsIndexCatalog(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			if r.URL.Path == "/repos/pokanop/ai" {
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+				return
+			}
+			http.NotFound(w, r)
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/pokanop/ai/main/SKILL.md":
+				http.NotFound(w, r)
+			case "/pokanop/ai/main/skills/index.json":
+				writeJSON(w, http.StatusOK, map[string]any{
+					"schemaVersion": 1,
+					"skills": []map[string]any{
+						{"name": "code-review", "path": "skills/code-review"},
+						{"name": "debug-and-fix", "path": "skills/debug-and-fix"},
+					},
+				})
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromGitHub(client, "https://github.com/pokanop/ai")
+	if err == nil {
+		t.Fatal("expected error for missing root SKILL.md")
+	}
+	if !strings.Contains(err.Error(), "code-review") || !strings.Contains(err.Error(), "skills/code-review") {
+		t.Fatalf("expected catalog entries in error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "skills.sh/pokanop/ai") {
+		t.Fatalf("expected skills.sh hint, got %q", err.Error())
+	}
+}
+
+func TestImportFetchHTTPStatus(t *testing.T) {
+	if importFetchHTTPStatus(newImportClientError("bad url")) != http.StatusBadRequest {
+		t.Fatal("expected 400 for import client error")
+	}
+	if importFetchHTTPStatus(fmt.Errorf("upstream down")) != http.StatusBadGateway {
+		t.Fatal("expected 502 for upstream error")
 	}
 }
 

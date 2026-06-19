@@ -602,6 +602,31 @@ type importedFile struct {
 // produce an incomplete skill that looks valid to the user.
 var errImportCapExceeded = errors.New("import cap exceeded")
 
+// errImportClient marks an import failure caused by the URL or repository
+// layout (missing SKILL.md, malformed URL, unknown skill name) rather than an
+// upstream outage. ImportSkill maps these to 400 so clients don't surface a
+// misleading "server temporarily unavailable" for user-fixable input.
+var errImportClient = errors.New("import client error")
+
+type importClientError struct {
+	msg string
+}
+
+func (e *importClientError) Error() string { return e.msg }
+
+func (e *importClientError) Is(target error) bool { return target == errImportClient }
+
+func newImportClientError(msg string) error {
+	return &importClientError{msg: msg}
+}
+
+func importFetchHTTPStatus(err error) int {
+	if errors.Is(err, errImportClient) || errors.Is(err, errImportCapExceeded) {
+		return http.StatusBadRequest
+	}
+	return http.StatusBadGateway
+}
+
 // isCapError reports whether err is (or wraps) errImportCapExceeded.
 func isCapError(err error) bool {
 	return errors.Is(err, errImportCapExceeded)
@@ -899,7 +924,7 @@ func fetchClawHubInstallCount(httpClient *http.Client, slug string) (int64, bool
 func fetchFromClawHub(httpClient *http.Client, rawURL string) (*importedSkill, error) {
 	slug, err := parseClawHubSlug(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, newImportClientError(err.Error())
 	}
 
 	apiBase := clawHubAPIBase
@@ -1014,7 +1039,7 @@ func parseSkillsShParts(raw string) (owner, repo, skillName string, err error) {
 func fetchFromSkillsSh(httpClient *http.Client, rawURL string) (*importedSkill, error) {
 	owner, repo, skillName, err := parseSkillsShParts(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, newImportClientError(err.Error())
 	}
 
 	// Skills can be at different paths depending on the repo structure:
@@ -1387,6 +1412,63 @@ func skillNameHints(skillName string) []string {
 
 // --- GitHub import ---
 
+// skillsIndexEntry is one row from a repo's skills/index.json catalog (see
+// pokanop/ai and other multi-skill repositories).
+type skillsIndexEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+type skillsIndexCatalog struct {
+	Skills []skillsIndexEntry `json:"skills"`
+}
+
+func fetchSkillsIndexCatalog(httpClient *http.Client, rawPrefix string) (*skillsIndexCatalog, error) {
+	body, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, "skills/index.json"))
+	if err != nil {
+		return nil, err
+	}
+	var catalog skillsIndexCatalog
+	if err := json.Unmarshal(body, &catalog); err != nil {
+		return nil, err
+	}
+	if len(catalog.Skills) == 0 {
+		return nil, fmt.Errorf("skills/index.json has no skills")
+	}
+	return &catalog, nil
+}
+
+func formatMultiSkillImportHint(spec githubSpec, catalog *skillsIndexCatalog) string {
+	var b strings.Builder
+	b.WriteString("Available skills in this repository:\n")
+	for _, s := range catalog.Skills {
+		path := strings.Trim(s.Path, "/")
+		if path == "" {
+			path = "skills/" + s.Name
+		}
+		fmt.Fprintf(&b, "  - %s: https://github.com/%s/%s/tree/%s/%s\n",
+			s.Name, spec.owner, spec.repo, spec.ref, path)
+	}
+	fmt.Fprintf(&b, "Or install via skills.sh: https://skills.sh/%s/%s/{skill-name}", spec.owner, spec.repo)
+	return b.String()
+}
+
+func multiSkillRootMissingError(httpClient *http.Client, spec githubSpec, rawPrefix string) error {
+	msg := fmt.Sprintf(
+		"SKILL.md not found at the root of %s/%s@%s. This repository contains multiple skills — import a specific skill directory instead.",
+		spec.owner, spec.repo, spec.ref,
+	)
+	if catalog, err := fetchSkillsIndexCatalog(httpClient, rawPrefix); err == nil {
+		msg += "\n\n" + formatMultiSkillImportHint(spec, catalog)
+	} else {
+		msg += fmt.Sprintf(
+			"\n\nExample: https://github.com/%s/%s/tree/%s/skills/<skill-name>",
+			spec.owner, spec.repo, spec.ref,
+		)
+	}
+	return newImportClientError(msg)
+}
+
 // errGitHubAPIBlocked signals that an api.github.com probe was rejected for
 // auth/rate-limit reasons (401/403/429) rather than because the resource
 // genuinely does not exist. Resolvers treat this as "indeterminate" and may
@@ -1597,7 +1679,7 @@ func githubRefExists(httpClient *http.Client, owner, repo, ref string) (bool, er
 func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, error) {
 	spec, err := parseGitHubURL(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, newImportClientError(err.Error())
 	}
 	if len(spec.refSegments) > 0 {
 		// Disambiguate slash-bearing refs (release/v2 etc.) against the API
@@ -1619,11 +1701,10 @@ func fetchFromGitHub(httpClient *http.Client, rawURL string) (*importedSkill, er
 	skillMdBody, err := fetchRawFile(httpClient, buildRawGitHubURL(rawPrefix, skillMdPath))
 	if err != nil {
 		if spec.skillDir == "" {
-			return nil, fmt.Errorf("SKILL.md not found at the root of %s/%s@%s. For multi-skill repositories, point to a specific directory using github.com/%s/%s/tree/%s/<skill-dir>",
-				spec.owner, spec.repo, spec.ref, spec.owner, spec.repo, spec.ref)
+			return nil, multiSkillRootMissingError(httpClient, spec, rawPrefix)
 		}
-		return nil, fmt.Errorf("SKILL.md not found at %s in %s/%s@%s: %w",
-			skillMdPath, spec.owner, spec.repo, spec.ref, err)
+		return nil, newImportClientError(fmt.Sprintf("SKILL.md not found at %s in %s/%s@%s",
+			skillMdPath, spec.owner, spec.repo, spec.ref))
 	}
 
 	name, description := skillpkg.ParseSkillFrontmatter(string(skillMdBody))
@@ -1764,7 +1845,7 @@ func skillDirFromSkillFilePath(path string) string {
 }
 
 func skillMdNotFoundError(owner, repo, skillName string) error {
-	return fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
+	return newImportClientError(fmt.Sprintf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName))
 }
 
 func skillImportConflictReason() string {
@@ -1925,7 +2006,7 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		imported, err = fetchFromGitHub(httpClient, normalized)
 	}
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, importFetchHTTPStatus(err), err.Error())
 		return
 	}
 
