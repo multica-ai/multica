@@ -109,6 +109,8 @@ export type CerebroFlagKey =
   | "cerebro_sprints"
   // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
   | "cerebro_recurring_issues"
+  // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
+  | "cerebro_issue_date_times"
   // TECH-3738 Bid C: capability drift watcher — periodically alert owners when an agent uses a tool its policy denies.
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
@@ -330,6 +332,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
   // the recurring-issue sweeper.
   cerebro_recurring_issues: false,
+  // FIR-1597: OFF by default. Hides the time-of-day control next to the
+  // start/due date pickers. The sweeper still treats a no-time date as before.
+  cerebro_issue_date_times: false,
   // TECH-3738 Bid C: OFF by default. The capability drift watcher does nothing
   // until an admin turns it on; then it periodically alerts owners/admins when
   // an agent uses a tool its declared policy denies.
@@ -954,6 +959,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Let users mark an individual issue as recurring (frequency, on-status-change trigger, create-new-task, recur-forever, update-status-to, sync-to-due-date). When the issue reaches its trigger status, a sweeper spawns the next occurrence with a fresh due date and the same data (assignee, text, labels, attachments) and chains the rule onto the new issue. TECH-3064.",
+  },
+  {
+    key: "cerebro_issue_date_times",
+    label: "Start/due time of day",
+    group: "workspace",
+    description:
+      "Add an optional time-of-day next to an issue's Start date and Due date. A start time auto-starts an agent-assigned issue at that exact moment (same as a fresh assignment); a due time makes the due reminder fire at that moment instead of at the start of the day. Leaving a time empty keeps the date behaving exactly as before. Off hides the time control. FIR-1597.",
   },
   {
     key: "cerebro_capability_drift_watcher",

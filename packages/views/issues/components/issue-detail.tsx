@@ -114,6 +114,8 @@ import { useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 assign issue to a sprint sub-project from the sidebar, gated on cerebro_sprints.
 import { SprintPicker } from "@multica/cerebro-sprints/views";
+// CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 optional time-of-day next to the start/due date pickers, gated on cerebro_issue_date_times.
+import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
@@ -1159,6 +1161,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const moveCommentToThreadEnabled = useFeatureFlag("cerebro_move_comment_to_thread");
   // CEREBRO-PATCH(issue-detail-sprint-picker): FIR-2666 gate the sidebar sprint picker.
   const sprintsEnabled = useFeatureFlag("cerebro_sprints");
+  // CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 gate the start/due time-of-day control.
+  const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
   // CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 gate the top-of-issue wakeup banner.
@@ -1515,6 +1519,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 onUpdate={handleUpdateField}
                 defaultOpen={autoOpenProp === "start_date"}
               />
+              {/* CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 optional start time-of-day. */}
+              {issueDateTimesEnabled && issue.start_date && (
+                <IssueTimePicker workspaceId={wsId} issueId={issue.id} kind="start" />
+              )}
             </PropRow>
           )}
           {visibleOptionalProps.has("due_date") && (
@@ -1524,6 +1532,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 onUpdate={handleUpdateField}
                 defaultOpen={autoOpenProp === "due_date"}
               />
+              {/* CEREBRO-PATCH(issue-detail-time-picker): FIR-1597 optional due time-of-day. */}
+              {issueDateTimesEnabled && issue.due_date && (
+                <IssueTimePicker workspaceId={wsId} issueId={issue.id} kind="due" />
+              )}
             </PropRow>
           )}
           {visibleOptionalProps.has("labels") && (

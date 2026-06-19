@@ -96,6 +96,8 @@ import (
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
+	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 issue start/due time-of-day handler import
+	cerebroissuedatetime "github.com/multica-ai/multica/server/internal/cerebro/issuedatetime"
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler import
 	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
@@ -702,6 +704,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 issue start/due time-of-day handler instance
+	cerebroIssueDateTimeHandler := cerebroissuedatetime.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
@@ -1956,6 +1960,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/issues/{issueID}/sprint", func(r chi.Router) {
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)
 				r.Put("/", cerebroSprintsHandler.AssignIssue)
+			})
+			// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 optional start/due time-of-day per issue.
+			r.Route("/api/cerebro/issues/{issueID}/date-times", func(r chi.Router) {
+				r.Get("/", cerebroIssueDateTimeHandler.Get)
+				r.Put("/", cerebroIssueDateTimeHandler.Put)
 			})
 			// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue REST surface.
 			r.Route("/api/cerebro/issues/{issueID}/recurrence", func(r chi.Router) {

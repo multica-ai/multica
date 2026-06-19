@@ -15,37 +15,54 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const (
-	issueDateReminderSweepInterval = 5 * time.Minute
+	// CEREBRO-PATCH(issue-date-times): 1-minute tick so an issue's optional
+	// start/due time-of-day fires close to the wall-clock minute the user set.
+	issueDateReminderSweepInterval = 1 * time.Minute
 	issueDateReminderSweepLimit    = 200
 )
 
-func runIssueDateReminderSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func runIssueDateReminderSweeper(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks *service.TaskService) {
 	ticker := time.NewTicker(issueDateReminderSweepInterval)
 	defer ticker.Stop()
 
-	tickIssueDateReminders(ctx, queries, bus)
+	tickIssueDateReminders(ctx, queries, bus, tasks)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tickIssueDateReminders(ctx, queries, bus)
+			tickIssueDateReminders(ctx, queries, bus, tasks)
 		}
 	}
 }
 
-func tickIssueDateReminders(ctx context.Context, queries *db.Queries, bus *events.Bus) {
+func tickIssueDateReminders(ctx context.Context, queries *db.Queries, bus *events.Bus, tasks *service.TaskService) {
 	rows, err := queries.ClaimArrivingDateReminders(ctx, issueDateReminderSweepLimit)
 	if err != nil {
 		slog.Warn("issue date reminder sweeper: failed to claim due reminders", "error", err)
 		return
 	}
 	for _, row := range rows {
+		// CEREBRO-PATCH(issue-date-times): an agent-assigned issue whose scheduled
+		// start time has arrived auto-starts its agent — same path as a fresh
+		// assignment — instead of ringing a human reminder.
+		if row.AssigneeType.String == "agent" && row.Kind == "start" {
+			issue, err := queries.GetIssue(ctx, row.IssueID)
+			if err != nil {
+				slog.Warn("issue date reminder sweeper: load issue for agent start failed", "error", err, "issue_id", util.UUIDToString(row.IssueID))
+				continue
+			}
+			if _, err := tasks.EnqueueTaskForIssue(ctx, issue); err != nil {
+				slog.Warn("issue date reminder sweeper: auto-start agent failed", "error", err, "issue_id", util.UUIDToString(row.IssueID))
+			}
+			continue
+		}
 		if !row.AssigneeID.Valid {
 			continue
 		}

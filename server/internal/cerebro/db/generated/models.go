@@ -654,6 +654,13 @@ type CerebroIssueDateReminder struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroIssueDateTime struct {
+	IssueID   pgtype.UUID        `json:"issue_id"`
+	StartTime pgtype.Time        `json:"start_time"`
+	DueTime   pgtype.Time        `json:"due_time"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroIssueDueTime struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	DueAt     pgtype.Timestamptz `json:"due_at"`
