@@ -8,20 +8,27 @@ set -euo pipefail
 : "${OPENAI_API_KEY:?OPENAI_API_KEY required}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required (Downward API: metadata.namespace)}"
 
-# ── GitHub credential helper ──────────────────────────────────────────────────
-# gandalf writes the PAT as GITHUB_PAT; gh reads GH_TOKEN, so bridge the two.
-export GH_TOKEN="${GH_TOKEN:-${GITHUB_PAT:-}}"
-if [ -n "${GH_TOKEN:-}" ]; then
-  if gh auth setup-git --hostname github.com; then
-    git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true
-    git config --global --add url."https://github.com/".insteadOf "git@github.com:"
-    git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
-  fi
+# ── GitHub credential helper (Platform Bot GitHub App) ───────────────────────
+# The runner mints short-lived installation tokens from the Platform Bot app at
+# git-time via git-credential-platform-bot, so no static PAT is stored. App
+# creds (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY)
+# arrive via the deployment env + agentrunner-secrets.
+if [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_INSTALLATION_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
+  git config --global --replace-all credential."https://github.com".helper "/usr/local/bin/git-credential-platform-bot"
+  # Rewrite ssh-style remotes to https so the credential helper applies.
+  git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true
+  git config --global --add url."https://github.com/".insteadOf "git@github.com:"
+  git config --global --add url."https://github.com/".insteadOf "ssh://git@github.com/"
+  # gh doesn't use git's credential helper; the /usr/local/bin/gh wrapper injects
+  # a fresh token per invocation (same on-demand minting as git), so there's no
+  # long-lived gh token to keep alive over the pod's multi-month life.
 fi
 
 # ── Git identity ──────────────────────────────────────────────────────────────
-if [ -n "${GIT_USER_NAME:-}" ];  then git config --global user.name  "$GIT_USER_NAME";  fi
-if [ -n "${GIT_USER_EMAIL:-}" ]; then git config --global user.email "$GIT_USER_EMAIL"; fi
+# Commits from runner agents are bot-authored. Defaults target the Platform Bot
+# and are overridable via the deployment env for precise attribution.
+git config --global user.name  "${GIT_USER_NAME:-g2-platform-bot[bot]}"
+git config --global user.email "${GIT_USER_EMAIL:-g2-platform-bot[bot]@users.noreply.github.com}"
 
 # ── SSH key ───────────────────────────────────────────────────────────────────
 SSH_DIR="${HOME}/.ssh"

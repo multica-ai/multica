@@ -16,15 +16,20 @@ USER root
 # ── System packages the agentfarm bootstrap needs ───────────────────────────
 #   yq            — agentfarm-bootstrap.sh parses agent-templates/*.yaml
 #   openssh-client — entrypoint.sh generates an ed25519 keypair via ssh-keygen
+#   openssl       — git-credential-platform-bot signs the GitHub App JWT
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       yq \
       openssh-client \
+      openssl \
  && rm -rf /var/lib/apt/lists/*
 
 # ── Bundled scripts and templates ────────────────────────────────────────────
-COPY --chmod=755 entrypoint.sh            /usr/local/bin/entrypoint.sh
-COPY --chmod=755 agentfarm-bootstrap.sh   /usr/local/bin/agentfarm-bootstrap.sh
+COPY --chmod=755 entrypoint.sh                   /usr/local/bin/entrypoint.sh
+COPY --chmod=755 agentfarm-bootstrap.sh          /usr/local/bin/agentfarm-bootstrap.sh
+COPY --chmod=755 git-credential-platform-bot.sh  /usr/local/bin/git-credential-platform-bot
+# Shadows the real gh (/usr/bin/gh) on PATH to inject a fresh token per call.
+COPY --chmod=755 gh-platform-bot-wrapper.sh      /usr/local/bin/gh
 
 COPY agent-templates/                     /etc/multica/agent-templates/
 RUN chmod -R a+r /etc/multica/agent-templates/

@@ -30,6 +30,21 @@ spec:
               value: https://g2crowd.atlassian.net
             - name: DEFAULT_GIT_REPO
               value: "https://github.com/g2crowd/ai-enhancement-hub,https://github.com/g2crowd/ue,https://github.com/g2crowd/companies_service"
+            # Platform Bot GitHub App — non-secret identifiers used by
+            # git-credential-platform-bot to mint installation tokens. The
+            # private key (GITHUB_APP_PRIVATE_KEY) arrives via the
+            # agentrunner-secrets envFrom below.
+            - name: GITHUB_APP_ID
+              value: "859473"
+            - name: GITHUB_APP_INSTALLATION_ID
+              value: "48670491"
+            # Bot git identity. Declared here (not via the secret) so it takes
+            # precedence over any GIT_USER_* swept in through envFrom — commits
+            # from runner agents are attributed to the bot, not the requester.
+            - name: GIT_USER_NAME
+              value: "g2-platform-bot[bot]"
+            - name: GIT_USER_EMAIL
+              value: "g2-platform-bot[bot]@users.noreply.github.com"
           envFrom:
             - secretRef:
                 name: agentrunner-secrets
