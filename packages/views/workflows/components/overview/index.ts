@@ -1,9 +1,11 @@
 export { WorkflowOverviewPage } from "./workflow-overview-page";
 export type { WorkflowOverviewPageProps } from "./workflow-overview-page";
 
-// Sub-components (implemented in Tasks 7-10):
-// export { StageCanvas } from "./stage-canvas";
-// export { StageCard } from "./stage-card";
+export { StageCanvas } from "./stage-canvas";
+export type { StageCanvasProps } from "./stage-canvas";
+export { StageCard } from "./stage-card";
+export type { StageCardProps } from "./stage-card";
+// Sub-components (implemented in Tasks 8-10):
 // export { StageNodeDag } from "./stage-node-dag";
 // export { NodeDetailPanel } from "./node-detail-panel";
 // export { NodeDetailWorker } from "./node-detail-worker";
