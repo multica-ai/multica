@@ -10,6 +10,9 @@ export { CerebroWakeupBar } from "./components/wakeup-bar";
 // running-agent indicator on issue lists + board cards. Feature flag
 // cerebro_activity_wakeup_dot.
 export { CerebroIssueWakeupPip } from "./components/wakeup-pip";
+// CEREBRO: FIR-1521 (part 2 polish) — orange ticking clock for an inbox row whose
+// issue has a pending wakeup (replaces the static grey clock).
+export { CerebroInboxWakeupPip } from "./components/inbox-wakeup-pip";
 // CEREBRO: TECH-3298 — wakeup action-note rendering in the issue timeline +
 // the self-wakeup limit settings shown inline in the Cerebro features tab.
 export { WakeupNote, isWakeupEntry } from "./components/wakeup-note";

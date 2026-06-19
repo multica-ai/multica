@@ -1006,6 +1006,7 @@ export function InboxPage() {
         agentRunState={agentRunState}
         agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : undefined}
         scheduledStackTitle={scheduledStackTitle} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
+        scheduledFireAt={wakeupHint?.fireAt} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — drives the live countdown on the inbox clock
         onClick={() => handleSelect(item)}
         onArchive={() => handleArchive(item.id)}
         // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view wires

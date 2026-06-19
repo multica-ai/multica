@@ -16,6 +16,7 @@ import { InboxDetailLabel } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
 import { AgentRunPip, type AgentRunState } from "../../common/agent-run-pip"; // CEREBRO-PATCH(inbox-run-state-pip): active vs queued indicator (JEH-1332)
+import { CerebroInboxWakeupPip } from "@multica/cerebro-wakeup"; // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — orange ticking clock for scheduled wakeups
 // CEREBRO-PATCH(inbox-dynamic-chat-reexport): TECH-3413 — expose the chat panel + run pip to the dynamic inbox without widening the views exports map.
 export { InboxChatPanel } from "./inbox-chat-panel";
 export { AgentRunPip, type AgentRunState } from "../../common/agent-run-pip";
@@ -115,6 +116,7 @@ export function InboxListItem({
   agentRunState,
   agentRunTitle, // CEREBRO-PATCH(inbox-wakeup-pip): TECH-3322 — approximate wakeup time for the clock pip.
   scheduledStackTitle, // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — extra clock pip stacked next to a live run pip.
+  scheduledFireAt, // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — fire time driving the live countdown.
   onClick,
   onArchive,
   onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -124,6 +126,7 @@ export function InboxListItem({
   agentRunState?: AgentRunState;
   agentRunTitle?: string; // CEREBRO-PATCH(inbox-wakeup-pip): TECH-3322
   scheduledStackTitle?: string; // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
+  scheduledFireAt?: string; // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
   onClick: () => void;
   onArchive: () => void;
   onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -174,9 +177,17 @@ export function InboxListItem({
         <p
           className={`mt-0.5 flex items-start gap-1.5 text-xs leading-snug line-clamp-2 ${unread ? "text-foreground" : "text-muted-foreground/70"}`}
         >
-          {agentRunState && <AgentRunPip state={agentRunState} title={agentRunTitle} className="mt-1" />}
-          {/* CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — clock pip overlapping the run pip when an issue is both running and scheduled. */}
-          {scheduledStackTitle && <AgentRunPip state="scheduled" title={scheduledStackTitle} className="mt-1 -ml-1" />}
+          {/* CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — a scheduled wakeup uses the
+              orange ticking clock; live runs keep the pulsing run pip. */}
+          {agentRunState === "scheduled" ? (
+            <CerebroInboxWakeupPip fireAt={scheduledFireAt} title={agentRunTitle} className="mt-1" />
+          ) : (
+            agentRunState && <AgentRunPip state={agentRunState} title={agentRunTitle} className="mt-1" />
+          )}
+          {/* CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — clock pip stacked next to the run pip when an issue is both running and scheduled. */}
+          {scheduledStackTitle && (
+            <CerebroInboxWakeupPip fireAt={scheduledFireAt} title={scheduledStackTitle} className="mt-1 -ml-0.5" />
+          )}
           <span className="line-clamp-2">
             <InboxDetailLabel item={item} />
           </span>

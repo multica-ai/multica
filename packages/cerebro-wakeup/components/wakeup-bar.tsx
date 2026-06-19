@@ -31,10 +31,12 @@ function WakeupBarRow({
     <div className="flex items-center gap-2 px-3 py-2 text-muted-foreground">
       <AlarmClock className="h-3.5 w-3.5 shrink-0 text-warning" />
       <div className="flex items-center gap-1.5 text-xs min-w-0">
-        <span className="font-medium text-foreground truncate">{wakeupLabel(wakeup)}</span>
+        {/* Type + countdown never shrink — the prompt is the only thing that
+            truncates, so the wakeup type label is always readable (Jesper FIR-1521). */}
+        <span className="font-medium text-foreground shrink-0">{wakeupLabel(wakeup)}</span>
         <span className="text-warning tabular-nums shrink-0">{wakeupCounter(wakeup, now)}</span>
         {wakeup.prompt && (
-          <span className="text-muted-foreground truncate" title={wakeup.prompt}>
+          <span className="text-muted-foreground truncate min-w-0" title={wakeup.prompt}>
             {wakeup.prompt}
           </span>
         )}

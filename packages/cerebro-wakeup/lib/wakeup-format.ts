@@ -12,7 +12,9 @@ export interface Wakeup {
   created_at: string;
 }
 
-// "om 2d 4t" / "om 14m" / "om 45s" / "når som helst" — counts down to fire time.
+// "om 2d 4t" / "om 1t 14m" / "om 36m 12s" / "om 45s" / "når som helst" — counts
+// down to fire time. Under an hour it ticks every second so the user can see the
+// wakeup is live (Jesper feedback FIR-1521); further out, the two top units suffice.
 export function formatCountdown(fireAt: string, now: number): string {
   const diff = new Date(fireAt).getTime() - now;
   if (diff <= 0 || Number.isNaN(diff)) return "når som helst";
@@ -23,7 +25,7 @@ export function formatCountdown(fireAt: string, now: number): string {
   const sec = s % 60;
   if (d > 0) return `om ${d}d ${h}t`;
   if (h > 0) return `om ${h}t ${m}m`;
-  if (m > 0) return `om ${m}m`;
+  if (m > 0) return `om ${m}m ${sec}s`;
   return `om ${sec}s`;
 }
 
