@@ -39,9 +39,12 @@ const SAVE_DEBOUNCE_MS = 600;
 /** FIR-1487 — available font sizes for the Quick note editor. */
 export type NoteFontSize = "xs" | "sm" | "base" | "lg";
 
-// Inline style bypasses the Textarea component's `text-base md:text-sm`
-// defaults entirely — no breakpoint dependency, works on all viewport sizes.
-// Sizes: XS=8px, +2px per step (FIR-1487).
+// Applied as an inline `!important` font-size in NoteEditor. base.css forces
+// `font-size: 16px !important` on every <textarea> below 768px / on coarse
+// pointers (to dodge iOS focus-zoom); a plain inline style loses to it, so on
+// mobile the size selector did nothing. Inline `!important` is the only
+// declaration that outranks the global rule on every engine (FIR-1487).
+// Sizes: XS=8px, +2px per step.
 const FONT_SIZE_PX: Record<NoteFontSize, string> = {
   xs: "8px",
   sm: "10px",
@@ -228,6 +231,18 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
     save(bodyRef.current);
   };
 
+  // FIR-1487 — re-apply the chosen size as an inline `!important` font-size on
+  // the textarea so it beats base.css's global `textarea { font-size:16px
+  // !important }` mobile rule. React's `style` prop can't express `!important`,
+  // and the Textarea component doesn't forward refs, so reach the node through
+  // the wrapper. Verified on WebKit/iOS: without this the size stays 16px.
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    wrapRef.current
+      ?.querySelector("textarea")
+      ?.style.setProperty("font-size", FONT_SIZE_PX[fontSize ?? "sm"], "important");
+  }, [fontSize]);
+
   // Flush any pending edit on unmount so nothing is lost on navigate-away.
   React.useEffect(() => {
     return () => {
@@ -240,13 +255,12 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
   }, [note.id]);
 
   return (
-    <div className="p-2">
+    <div ref={wrapRef} className="p-2">
       <Textarea
         value={body}
         onChange={(e) => onChange(e.target.value)}
         onBlur={flush}
         placeholder="Write a note… (the first line becomes the title)"
-        style={{ fontSize: FONT_SIZE_PX[fontSize ?? "sm"] }}
         className="min-h-28 resize-y border-0 bg-transparent shadow-none focus-visible:ring-0"
       />
     </div>
