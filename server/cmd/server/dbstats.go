@@ -191,3 +191,33 @@ func runDBStatsLogger(ctx context.Context, pool *pgxpool.Pool) {
 		lastCanceled = s.CanceledAcquireCount()
 	}
 }
+
+// samplerMaxConns is the cap for the dedicated /metrics sampler pool. The
+// sampler issues at most one acquire per scrape and Prometheus typically
+// scrapes once per 15s — two connections is plenty for two replicas
+// scraping in parallel without ever competing with the main pool.
+const samplerMaxConns int32 = 2
+
+// newSamplerDBPool builds a tiny pgxpool aimed exclusively at the
+// BusinessSamplerCollector. Keeping it isolated from the main pool means a
+// stalled sampler scrape can never starve business traffic — the worst
+// case is the next /metrics returning stale numbers, which is exactly the
+// safety contract documented on BusinessSamplerOptions.
+//
+// The pool is built from the same DATABASE_URL as the main pool so it
+// hits the same database; the sizing knobs (DATABASE_MAX_CONNS et al.) on
+// the main pool are intentionally NOT honored here. A sampler that grew
+// to 25 connections per replica during an incident would defeat the
+// purpose of running it on a separate pool in the first place.
+func newSamplerDBPool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse database url for sampler: %w", err)
+	}
+	cfg.MaxConns = samplerMaxConns
+	cfg.MinConns = 0
+	// A dedicated short-lived idle window — the sampler runs every
+	// scrape (~15s) so connections shouldn't sit warm forever.
+	cfg.MaxConnIdleTime = 5 * time.Minute
+	return pgxpool.NewWithConfig(ctx, cfg)
+}

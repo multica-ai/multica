@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -18,7 +18,8 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType } from "@multica/core/types";
+import type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, Attachment } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import {
   DialogContent,
   DialogTitle,
@@ -56,6 +57,17 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { PillButton } from "../common/pill-button";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
+
+function toDraftAttachment(attachment: Attachment): Attachment {
+  return {
+    ...attachment,
+    // `download_url` is minted for the current API response and may be a
+    // short-lived signed URL. Drafts survive across dialog closes and app
+    // restarts, so persist only durable fields and let render/download paths
+    // re-resolve through id/markdown_url when needed.
+    download_url: "",
+  };
+}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -146,13 +158,34 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // File upload — collect attachment IDs so we can link them after issue creation.
-  const [attachmentIds, setAttachmentIds] = useState<string[]>([]);
+  const draftAttachments = draft.attachments ?? [];
+
+  // Prune draft attachments whose markdown reference was deleted in an
+  // earlier editing session. Runs once on mount: at that point the persisted
+  // description IS the draft body (no editor edits have happened yet), so
+  // dropping unreferenced records is safe. Don't prune on description updates
+  // — an onUpdate flush can race a just-finished upload whose markdown link
+  // hasn't been inserted yet, and pruning there would drop a live attachment.
+  useEffect(() => {
+    const { draft: current } = useIssueDraftStore.getState();
+    const attachments = current.attachments ?? [];
+    const kept = attachments.filter((a) =>
+      contentReferencesAttachment(current.description, a),
+    );
+    if (kept.length !== attachments.length) setDraft({ attachments: kept });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { uploadWithToast } = useFileUpload(api);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
-      setAttachmentIds((prev) => [...prev, result.id]);
+      const currentAttachments =
+        useIssueDraftStore.getState().draft.attachments ?? [];
+      const attachments = currentAttachments.some((a) => a.id === result.id)
+        ? currentAttachments
+        : [...currentAttachments, toDraftAttachment(result)];
+      setDraft({ attachments });
     }
     return result;
   };
@@ -179,7 +212,6 @@ export function ManualCreatePanel({
     setProjectId(undefined);
     setParentIssueId(undefined);
     setChildIssues([]);
-    setAttachmentIds([]);
     setDraft({
       title: "",
       description: "",
@@ -189,6 +221,7 @@ export function ManualCreatePanel({
       assigneeId,
       startDate: null,
       dueDate: null,
+      attachments: [],
     });
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
@@ -198,16 +231,20 @@ export function ManualCreatePanel({
     if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
+      const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
+      const activeAttachmentIds = draftAttachments
+        .filter((a) => contentReferencesAttachment(description ?? "", a))
+        .map((a) => a.id);
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
-        description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
+        description,
         status,
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
@@ -482,6 +519,7 @@ export function ManualCreatePanel({
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
                 debounceMs={500}
+                attachments={draftAttachments}
               />
               {descDragOver && <FileDropOverlay />}
             </div>

@@ -73,8 +73,6 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 	return allowed, true
 }
-
-
 // canEnqueueSquadLeader returns true when the given actor is allowed to
 // trigger the squad's private leader. It loads the leader agent and delegates
 // to canAccessPrivateAgent. Non-private leaders always pass. System-initiated

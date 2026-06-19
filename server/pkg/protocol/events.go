@@ -124,4 +124,13 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+
+	// Lark integration events. `created` covers both first-install
+	// (UNIQUE on (workspace_id, agent_id) means at most one row per
+	// agent) and re-install via UpsertLarkInstallation — front-ends
+	// treat both as a single "installation appeared / refreshed"
+	// notification. `revoked` flips status to 'revoked' without
+	// deleting the row; the audit trail is preserved.
+	EventLarkInstallationCreated = "lark_installation:created"
+	EventLarkInstallationRevoked = "lark_installation:revoked"
 )

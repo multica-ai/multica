@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -40,9 +42,11 @@ type ScopeAuthorizer interface {
 }
 
 var allowedWSOrigins atomic.Value // holds []string
+var trustedProxies atomic.Value   // holds []netip.Prefix
 
 func init() {
 	allowedWSOrigins.Store(loadAllowedOrigins())
+	trustedProxies.Store(loadTrustedProxies())
 }
 
 func loadAllowedOrigins() []string {
@@ -72,9 +76,83 @@ func loadAllowedOrigins() []string {
 	return origins
 }
 
+// loadTrustedProxies reads the same MULTICA_TRUSTED_PROXIES env var the rest of
+// the server uses (see cmd/server/router.go and handler.Config.TrustedProxies),
+// parsing it as a comma-separated list of CIDR prefixes. Invalid entries are
+// dropped with a warn-line rather than crashing. Empty input returns nil, which
+// means "trust no proxy" — X-Forwarded-Host is then never honored. The router
+// overrides this at startup via SetTrustedProxies so both share one config.
+func loadTrustedProxies() []netip.Prefix {
+	raw := strings.TrimSpace(os.Getenv("MULTICA_TRUSTED_PROXIES"))
+	if raw == "" {
+		return nil
+	}
+	var prefixes []netip.Prefix
+	for _, part := range strings.Split(raw, ",") {
+		s := strings.TrimSpace(part)
+		if s == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			slog.Warn("ws: ignoring invalid trusted proxy CIDR", "value", s, "error", err)
+			continue
+		}
+		prefixes = append(prefixes, p)
+	}
+	return prefixes
+}
+
 // SetAllowedOrigins overrides the WebSocket origin whitelist.
 func SetAllowedOrigins(origins []string) {
 	allowedWSOrigins.Store(origins)
+}
+
+// SetTrustedProxies overrides the trusted proxy CIDR list. The server wires the
+// shared MULTICA_TRUSTED_PROXIES value in here at startup.
+func SetTrustedProxies(proxies []netip.Prefix) {
+	trustedProxies.Store(proxies)
+}
+
+// isTrustedProxy reports whether the request's remote address falls within one
+// of the configured trusted proxy CIDRs.
+func isTrustedProxy(remoteAddr string) bool {
+	proxies := trustedProxies.Load().([]netip.Prefix)
+	if len(proxies) == 0 {
+		return false
+	}
+	addr, err := netip.ParseAddr(remoteHost(remoteAddr))
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	for _, p := range proxies {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// remoteHost extracts the host/IP from an http.Request.RemoteAddr, which is
+// normally "host:port". It handles bracketed IPv6 ("[::1]:443") via
+// net.SplitHostPort and falls back to the raw value (sans brackets) when no
+// port is present.
+func remoteHost(remoteAddr string) string {
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil {
+		return host
+	}
+	return strings.Trim(remoteAddr, "[]")
+}
+
+// firstForwardedHost returns the first host from a (possibly comma-separated)
+// X-Forwarded-Host header. Proxy chains append values left-to-right, so the
+// first entry is the original client-facing host we compare against Origin.
+func firstForwardedHost(h string) string {
+	if i := strings.IndexByte(h, ','); i >= 0 {
+		h = h[:i]
+	}
+	return strings.TrimSpace(h)
 }
 
 func checkOrigin(r *http.Request) bool {
@@ -92,13 +170,23 @@ func checkOrigin(r *http.Request) bool {
 	if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, r.Host) {
 		return true
 	}
+	// Reverse-proxy support: when sitting behind a proxy the Host header
+	// contains the internal address. X-Forwarded-Host carries the original
+	// public host seen by the client, so we treat a matching origin as
+	// same-origin in that case too. SECURITY: Only trust X-Forwarded-Host
+	// if the request comes from a trusted proxy to prevent header spoofing.
+	if fwdHost := firstForwardedHost(r.Header.Get("X-Forwarded-Host")); fwdHost != "" && isTrustedProxy(r.RemoteAddr) {
+		if u, err := url.Parse(origin); err == nil && strings.EqualFold(u.Host, fwdHost) {
+			return true
+		}
+	}
 	origins := allowedWSOrigins.Load().([]string)
 	for _, allowed := range origins {
 		if origin == allowed {
 			return true
 		}
 	}
-	slog.Warn("ws: rejected origin", "origin", origin)
+	slog.Warn("ws: rejected origin", "origin", origin, "remote_addr", r.RemoteAddr)
 	return false
 }
 

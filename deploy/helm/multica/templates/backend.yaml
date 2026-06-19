@@ -26,8 +26,10 @@ metadata:
     {{- include "multica.labels" . | nindent 4 }}
     app.kubernetes.io/component: backend
 spec:
-  # The backend entrypoint runs migrations before starting. Keep replicas at 1
-  # so two pods don't race on startup migrations.
+  # The backend entrypoint runs migrations before starting. Concurrent
+  # runs are protected by a Postgres advisory lock in cmd/migrate (see
+  # GitHub multica-ai/multica#3647), so multiple replicas no longer race;
+  # 1 is still the chart default (strategy: Recreate, no leader split).
   replicas: {{ .Values.backend.replicas }}
   strategy:
     type: Recreate

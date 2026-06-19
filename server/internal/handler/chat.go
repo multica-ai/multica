@@ -5,12 +5,17 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -460,11 +465,26 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Enqueue a chat task after the message exists.
-	task, err := h.TaskService.EnqueueChatTask(r.Context(), session)
+	// Enqueue a chat task after the message exists. For web chat the sender is
+	// the authenticated request user (sessions are creator-only), so they are
+	// the task initiator — surfaced to the agent under `## Task Initiator`.
+	task, err := h.TaskService.EnqueueChatTask(r.Context(), session, parseUUID(userID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enqueue chat task: "+err.Error())
 		return
+	}
+	if err := h.Queries.LinkChatMessageToTask(r.Context(), db.LinkChatMessageToTaskParams{
+		ID:     msg.ID,
+		TaskID: task.ID,
+	}); err != nil {
+		// Don't fail the send: the task already exists and the user message
+		// is persisted. The link is only needed for precise empty-cancel
+		// cleanup; older/unlinked rows simply keep the historical behavior.
+		slog.Warn("link user chat message to task failed",
+			"message_id", uuidToString(msg.ID),
+			"task_id", uuidToString(task.ID),
+			"error", err,
+		)
 	}
 
 	// Touch session updated_at.
@@ -472,7 +492,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("failed to touch chat session", "session_id", sessionID, "error", err)
 	}
 	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), task)
-	h.Analytics.Capture(analytics.ChatMessageSent(
+	platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.ChatMessageSent(
 		userID,
 		workspaceID,
 		uuidToString(session.ID),
@@ -480,6 +501,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		uuidToString(session.AgentID),
 		taskContext.RuntimeMode,
 		taskContext.Provider,
+		platform,
 	))
 
 	// Broadcast the user message.
@@ -498,6 +520,47 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		TaskID:    uuidToString(task.ID),
 		CreatedAt: timestampToString(task.CreatedAt),
 	})
+}
+
+type ChatMessagesCursorResponse struct {
+	CreatedAt string `json:"created_at"`
+	ID        string `json:"id"`
+}
+
+type ChatMessagesPageResponse struct {
+	Messages   []ChatMessageResponse       `json:"messages"`
+	Limit      int                         `json:"limit"`
+	HasMore    bool                        `json:"has_more"`
+	NextCursor *ChatMessagesCursorResponse `json:"next_cursor,omitempty"`
+}
+
+func parseChatMessagesPageParams(r *http.Request) (int, pgtype.Timestamptz, pgtype.UUID, error) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid limit")
+		}
+		limit = parsed
+	}
+
+	rawBeforeCreatedAt := r.URL.Query().Get("before_created_at")
+	rawBeforeID := r.URL.Query().Get("before_id")
+	if rawBeforeCreatedAt == "" && rawBeforeID == "" {
+		return limit, pgtype.Timestamptz{}, pgtype.UUID{}, nil
+	}
+	if rawBeforeCreatedAt == "" || rawBeforeID == "" {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	beforeTime, err := time.Parse(time.RFC3339Nano, rawBeforeCreatedAt)
+	if err != nil {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	beforeID, err := util.ParseUUID(rawBeforeID)
+	if err != nil {
+		return 0, pgtype.Timestamptz{}, pgtype.UUID{}, errors.New("invalid cursor")
+	}
+	return limit, pgtype.Timestamptz{Time: beforeTime, Valid: true}, beforeID, nil
 }
 
 func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -530,6 +593,72 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	limit, beforeCreatedAt, beforeID, err := parseChatMessagesPageParams(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	messages, err := h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
+		ChatSessionID:   session.ID,
+		Limit:           int32(limit + 1),
+		BeforeCreatedAt: beforeCreatedAt,
+		BeforeID:        beforeID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list chat messages")
+		return
+	}
+	hasMore := len(messages) > limit
+	if hasMore {
+		messages = messages[:limit]
+	}
+	var nextCursor *ChatMessagesCursorResponse
+	if hasMore && len(messages) > 0 {
+		oldest := messages[len(messages)-1]
+		nextCursor = &ChatMessagesCursorResponse{
+			CreatedAt: oldest.CreatedAt.Time.Format(time.RFC3339Nano),
+			ID:        uuidToString(oldest.ID),
+		}
+	}
+	// SQL fetches newest windows first so the empty cursor opens at the recent
+	// tail. Reverse each cursor page before serializing to keep message order
+	// chronological within the viewport.
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	messageIDs := make([]pgtype.UUID, len(messages))
+	for i, m := range messages {
+		messageIDs[i] = m.ID
+	}
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+
+	resp := make([]ChatMessageResponse, len(messages))
+	for i, m := range messages {
+		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+	}
+	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
+		Messages:   resp,
+		Limit:      limit,
+		HasMore:    hasMore,
+		NextCursor: nextCursor,
+	})
 }
 
 // PendingChatTaskResponse is returned by GetPendingChatTask — either the
@@ -582,6 +711,18 @@ type PendingChatTaskItem struct {
 	TaskID        string `json:"task_id"`
 	Status        string `json:"status"`
 	ChatSessionID string `json:"chat_session_id"`
+}
+
+type CancelledChatMessageResponse struct {
+	ChatSessionID  string `json:"chat_session_id"`
+	MessageID      string `json:"message_id"`
+	Content        string `json:"content"`
+	RestoreToInput bool   `json:"restore_to_input"`
+}
+
+type CancelTaskByUserResponse struct {
+	AgentTaskResponse
+	CancelledChatMessage *CancelledChatMessageResponse `json:"cancelled_chat_message,omitempty"`
 }
 
 // ListPendingChatTasks returns every in-flight chat task owned by the current
@@ -763,13 +904,25 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cancelled, err := h.TaskService.CancelTask(r.Context(), taskUUID)
+	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, taskToResponse(*cancelled, workspaceID))
+	resp := CancelTaskByUserResponse{
+		AgentTaskResponse: taskToResponse(cancelled.Task, workspaceID),
+	}
+	if cancelled.CancelledChatMessage != nil {
+		resp.CancelledChatMessage = &CancelledChatMessageResponse{
+			ChatSessionID:  cancelled.CancelledChatMessage.ChatSessionID,
+			MessageID:      cancelled.CancelledChatMessage.MessageID,
+			Content:        cancelled.CancelledChatMessage.Content,
+			RestoreToInput: cancelled.CancelledChatMessage.RestoreToInput,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ---------------------------------------------------------------------------

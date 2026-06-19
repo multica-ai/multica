@@ -114,12 +114,19 @@ On the API server:
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+
+# Optional but recommended — populates the connected account name on
+# install instead of waiting for the first webhook to refresh it:
+GITHUB_APP_ID=<numeric App ID from the App's settings page>
+GITHUB_APP_PRIVATE_KEY=<full PEM block, including BEGIN/END lines>
 ```
 
-Both variables are required. If either is missing:
+`GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` are required. If either is missing:
 
 - `Connect GitHub` in Settings is **disabled** and shows a "not configured" hint.
 - The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret, rather than silently treating every signature as valid.
+
+`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are **optional**. They let the setup callback call GitHub's App-authenticated `/app/installations/{id}` endpoint to fetch the real organization or user name during install. Without them, the connection card briefly shows `Connected to unknown` until GitHub delivers the `installation.created` webhook (typically within a few seconds), at which point Multica refreshes the row and broadcasts a realtime update so any open Settings tab updates without a manual refresh. Generate the private key under **Private keys → Generate a private key** on the App's settings page; paste the full PEM block (including the `-----BEGIN/END RSA PRIVATE KEY-----` lines) into the env var, preserving newlines.
 
 `FRONTEND_ORIGIN` must also be set (it already is for any production self-host); the setup callback bounces the user back to `<FRONTEND_ORIGIN>/settings?tab=github` after install.
 

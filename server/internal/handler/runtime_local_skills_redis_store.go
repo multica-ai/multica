@@ -262,18 +262,21 @@ func NewRedisLocalSkillImportStore(rdb *redis.Client) *RedisLocalSkillImportStor
 	return &RedisLocalSkillImportStore{rdb: rdb}
 }
 
-func (s *RedisLocalSkillImportStore) Create(ctx context.Context, runtimeID, creatorID, skillKey string, name, description *string) (*RuntimeLocalSkillImportRequest, error) {
+func (s *RedisLocalSkillImportStore) Create(ctx context.Context, input LocalSkillImportRequestInput) (*RuntimeLocalSkillImportRequest, error) {
 	now := time.Now()
 	req := &RuntimeLocalSkillImportRequest{
-		ID:          randomID(),
-		RuntimeID:   runtimeID,
-		SkillKey:    skillKey,
-		Name:        name,
-		Description: description,
-		Status:      RuntimeLocalSkillPending,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-		CreatorID:   creatorID,
+		ID:               randomID(),
+		RuntimeID:        input.RuntimeID,
+		SkillKey:         input.SkillKey,
+		Name:             input.Name,
+		Description:      input.Description,
+		Action:           input.Action,
+		TargetSkillID:    input.TargetSkillID,
+		SupportsConflict: input.SupportsConflict,
+		Status:           RuntimeLocalSkillPending,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+		CreatorID:        input.CreatorID,
 	}
 	data, err := s.marshalImport(req)
 	if err != nil {
@@ -282,11 +285,11 @@ func (s *RedisLocalSkillImportStore) Create(ctx context.Context, runtimeID, crea
 
 	pipe := s.rdb.TxPipeline()
 	pipe.Set(ctx, localSkillImportKey(req.ID), data, runtimeLocalSkillStoreRetention)
-	pipe.ZAdd(ctx, localSkillImportPendingKey(runtimeID), redis.Z{
+	pipe.ZAdd(ctx, localSkillImportPendingKey(input.RuntimeID), redis.Z{
 		Score:  float64(now.UnixNano()),
 		Member: req.ID,
 	})
-	pipe.Expire(ctx, localSkillImportPendingKey(runtimeID), runtimeLocalSkillStoreRetention*2)
+	pipe.Expire(ctx, localSkillImportPendingKey(input.RuntimeID), runtimeLocalSkillStoreRetention*2)
 	if _, err := pipe.Exec(ctx); err != nil {
 		return nil, fmt.Errorf("persist import request: %w", err)
 	}
@@ -490,6 +493,21 @@ func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, sk
 	}
 	req.Status = RuntimeLocalSkillCompleted
 	req.Skill = &skill
+	req.UpdatedAt = time.Now()
+	return s.persistImportRequest(ctx, req)
+}
+
+func (s *RedisLocalSkillImportStore) Conflict(ctx context.Context, id string, info LocalSkillImportConflict) error {
+	req, err := s.loadImportRequest(ctx, id)
+	if err != nil {
+		return err
+	}
+	if req == nil {
+		return nil
+	}
+	req.Status = RuntimeLocalSkillConflict
+	conflict := info
+	req.Conflict = &conflict
 	req.UpdatedAt = time.Now()
 	return s.persistImportRequest(ctx, req)
 }

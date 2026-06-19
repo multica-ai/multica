@@ -194,6 +194,55 @@ func TestRunRuntimePollerSkipsClaimWhenAtCapacity(t *testing.T) {
 	}
 }
 
+func TestRunRuntimePollerClaimsWhenSlotBecomesAvailable(t *testing.T) {
+	t.Parallel()
+
+	var claimAttempts atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/tasks/claim") {
+			claimAttempts.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"task":null}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       time.Hour,
+		MaxConcurrentTasks: 1,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	slot := <-sem
+
+	var taskWG sync.WaitGroup
+	wakeup := make(chan struct{}, 1)
+	go d.runRuntimePoller(ctx, ctx, "runtime-waiting", sem, wakeup, &taskWG)
+	wakeup <- struct{}{}
+
+	time.Sleep(100 * time.Millisecond)
+	if got := claimAttempts.Load(); got != 0 {
+		t.Fatalf("poller claimed before a slot was available; got %d claims", got)
+	}
+
+	sem <- slot
+
+	deadline := time.After(2 * time.Second)
+	for claimAttempts.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("poller did not claim after a slot became available")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 // TestPollLoopShutdownWaitsForPollersBeforeTaskWG is a race-detector
 // regression for the WaitGroup misuse GPT-Boy flagged: pollLoop must not
 // call taskWG.Wait while a poller goroutine could still execute
@@ -263,6 +312,84 @@ func TestPollLoopShutdownWaitsForPollersBeforeTaskWG(t *testing.T) {
 	case <-pollDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("pollLoop did not return within shutdown deadline")
+	}
+}
+
+func TestPollLoopTargetsRuntimeWakeup(t *testing.T) {
+	t.Parallel()
+
+	var fastClaims atomic.Int64
+	var slowClaims atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasSuffix(path, "/runtimes/runtime-fast/tasks/claim"):
+			fastClaims.Add(1)
+		case strings.HasSuffix(path, "/runtimes/runtime-slow/tasks/claim"):
+			slowClaims.Add(1)
+		default:
+			http.Error(w, "unexpected path: "+path, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"task":null}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       time.Hour,
+		MaxConcurrentTasks: 4,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{
+		workspaceID: "ws-1",
+		runtimeIDs:  []string{"runtime-fast", "runtime-slow"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	taskWakeups := make(chan taskWakeup, 1)
+	pollDone := make(chan error, 1)
+	go func() {
+		pollDone <- d.pollLoop(ctx, taskWakeups)
+	}()
+
+	taskWakeups <- taskWakeup{}
+
+	deadline := time.After(2 * time.Second)
+	for fastClaims.Load() < 1 || slowClaims.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("initial poll did not claim both runtimes; fast=%d slow=%d", fastClaims.Load(), slowClaims.Load())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	fastClaims.Store(0)
+	slowClaims.Store(0)
+	taskWakeups <- taskWakeup{runtimeID: "runtime-fast"}
+
+	deadline = time.After(2 * time.Second)
+	for fastClaims.Load() < 1 {
+		select {
+		case <-deadline:
+			t.Fatal("targeted wakeup did not wake runtime-fast")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	if got := slowClaims.Load(); got != 0 {
+		t.Fatalf("targeted wakeup woke runtime-slow %d times; want 0", got)
+	}
+
+	cancel()
+	select {
+	case <-pollDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pollLoop did not stop")
 	}
 }
 

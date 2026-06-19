@@ -547,6 +547,16 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched');
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched');
 
+-- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
+-- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
+-- current comment being edited. Edit preview needs this because save cancels
+-- that comment's old queued/dispatched tasks before re-computing triggers.
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND status IN ('queued', 'dispatched')
+  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid;
+
 -- name: GetLatestTaskIsLeaderForIssueAndAgent :one
 -- Returns the is_leader_task flag of the agent's most recent task on this
 -- issue, or NULL if the agent has never had a task on this issue. Used by

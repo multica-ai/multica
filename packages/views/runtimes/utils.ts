@@ -151,7 +151,9 @@ const MODEL_PRICING: Record<
   string,
   { input: number; output: number; cacheRead: number; cacheWrite: number }
 > = {
-  // -- Anthropic: current generation (4.5+ — Opus dropped from 15/75 to 5/25 here) --
+  // -- Anthropic: current generation. Fable 5 is a Mythos-class SKU at 10/50;
+  //    Opus 4.5+ stays on the lower 5/25 Opus tier. --
+  "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -226,6 +228,24 @@ const MODEL_PRICING: Record<
   "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
   "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
   "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+
+  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
+  //    cursor.com/docs/models/cursor-composer-2,
+  //    cursor.com/docs/models/cursor-composer-2-5).
+  //    Cursor result events often omit `model`, so the daemon falls back to
+  //    the configured runtime model or the legacy key `cursor`.
+  //    Cursor does not publish a cache-write rate for these rows; keep it at
+  //    0 so reported cache_write_tokens don't invent spend from input pricing.
+  "auto":               { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
+  "composer-2.5-fast":  { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
+  "composer-2.5":       { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
+  "composer-2-fast":    { input: 1.5,  output: 7.5,  cacheRead: 0.35,   cacheWrite: 0 },
+  "composer-2":         { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
+  "composer-1.5":       { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
+  "composer-1":         { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
+  // Legacy fallback bucket when neither the result event nor the runtime
+  // model is known — price at the current Composer 2.5 Fast default.
+  "cursor":             { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
 // Resolve a model string to its pricing tier. Exact match, with four

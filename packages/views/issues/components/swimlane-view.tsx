@@ -27,6 +27,8 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { filterIssues, type IssueFilters } from "../utils/filter";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -442,6 +444,7 @@ function buildAssigneeLanes(
 export function SwimLaneView({
   issues,
   unfilteredIssues,
+  activeFilters: activeFiltersProp,
   visibleStatuses = BOARD_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
@@ -461,6 +464,7 @@ export function SwimLaneView({
    * a parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
+  activeFilters?: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
@@ -482,6 +486,29 @@ export function SwimLaneView({
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
+
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const runningIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of snapshot) {
+      if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
+    }
+    return ids;
+  }, [snapshot]);
+
+  const activeFilters = useMemo(() => ({
+    // Status is enforced by visible-column rendering, not by filterIssues
+    statusFilters: [],
+    priorityFilters: activeFiltersProp?.priorityFilters ?? [],
+    assigneeFilters: activeFiltersProp?.assigneeFilters ?? [],
+    includeNoAssignee: activeFiltersProp?.includeNoAssignee ?? false,
+    creatorFilters: activeFiltersProp?.creatorFilters ?? [],
+    projectFilters: activeFiltersProp?.projectFilters ?? [],
+    includeNoProject: activeFiltersProp?.includeNoProject ?? false,
+    labelFilters: activeFiltersProp?.labelFilters ?? [],
+    agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    runningIssueIds,
+  }), [activeFiltersProp, runningIssueIds]);
   const { data: projects = EMPTY_PROJECTS } = useQuery({
     ...projectListOptions(wsId),
     enabled: swimlaneGrouping === "project",
@@ -606,8 +633,9 @@ export function SwimLaneView({
         }
       }
     }
-    return extra.length === 0 ? issues : [...issues, ...extra];
-  }, [swimlaneGrouping, issues, perParentChildrenLists, subscribedParentIds, batchChildrenMap]);
+    const filteredExtra = filterIssues(extra, activeFilters);
+    return filteredExtra.length === 0 ? issues : [...issues, ...filteredExtra];
+  }, [swimlaneGrouping, issues, perParentChildrenLists, subscribedParentIds, batchChildrenMap, activeFilters]);
 
   const laneGroups = useMemo<LaneGroup[]>(() => {
     if (swimlaneGrouping === "project") {

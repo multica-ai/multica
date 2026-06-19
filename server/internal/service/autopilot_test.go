@@ -26,6 +26,44 @@ func TestAutopilotErrorType(t *testing.T) {
 	}
 }
 
+func TestTaskFailureReasonForAutopilotRun(t *testing.T) {
+	cases := []struct {
+		name string
+		task db.AgentTaskQueue
+		want string
+	}{
+		{
+			name: "prefers raw error text",
+			task: db.AgentTaskQueue{
+				Error:         pgtype.Text{String: "tests failed", Valid: true},
+				FailureReason: pgtype.Text{String: "agent_error", Valid: true},
+			},
+			want: "tests failed",
+		},
+		{
+			name: "falls back to classified reason when error is blank",
+			task: db.AgentTaskQueue{
+				Error:         pgtype.Text{String: "   ", Valid: true},
+				FailureReason: pgtype.Text{String: "codex_semantic_inactivity", Valid: true},
+			},
+			want: "codex_semantic_inactivity",
+		},
+		{
+			name: "generic default when nothing is set",
+			task: db.AgentTaskQueue{},
+			want: "task failed",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := taskFailureReasonForAutopilotRun(tc.task); got != tc.want {
+				t.Fatalf("taskFailureReasonForAutopilotRun() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	s := &AutopilotService{}
 	ap := db.Autopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}

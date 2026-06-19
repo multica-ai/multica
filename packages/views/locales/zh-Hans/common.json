@@ -9,5 +9,20 @@
     "minutes_ago": "{{count}} 分钟前",
     "hours_ago": "{{count}} 小时前",
     "days_ago": "{{count}} 天前"
+  },
+  "lark_bind": {
+    "page_title": "绑定飞书账号",
+    "redeeming": "正在兑换绑定 token…",
+    "needs_auth_description": "需要登录 Multica 才能完成绑定。链接中的 token 会将你的飞书账号绑定到当前登录的 Multica 用户。",
+    "sign_in": "登录",
+    "done_title": "已绑定。",
+    "done_description": "下次在飞书向 Bot 发送消息时，会直接送达绑定的智能体。可以关闭此页面。",
+    "error_title": "绑定未完成",
+    "error_admin_hint": "如果反复失败，请让工作区管理员从飞书重新发送绑定链接。",
+    "error_missing_token": "链接缺少绑定 token。请让 Bot 在飞书重新发送一份。",
+    "error_expired": "绑定链接无效或已过期（有效期 15 分钟）。请让 Bot 重新发送一份。",
+    "error_already_bound": "该飞书账号已绑定到其他 Multica 用户。账户转移需要先显式解绑。",
+    "error_not_member": "你登录的 Multica 账号不是当前工作区成员。",
+    "error_unknown": "出现未知错误。请稍后再试，如反复失败请联系工作区管理员。"
   }
 }

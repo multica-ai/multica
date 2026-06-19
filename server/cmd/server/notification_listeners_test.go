@@ -753,7 +753,7 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
 
-	dueDate := "2026-04-15T00:00:00Z"
+	dueDate := "2026-04-15"
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,
@@ -814,7 +814,7 @@ func TestNotification_StartDateChanged(t *testing.T) {
 	addTestSubscriber(t, issueID, "member", testUserID, "creator")
 	addTestSubscriber(t, issueID, "member", sub1ID, "assignee")
 
-	startDate := "2026-04-01T00:00:00Z"
+	startDate := "2026-04-01"
 	bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: testWorkspaceID,

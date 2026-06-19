@@ -1,26 +1,18 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Trash2, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
-import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
+import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -29,14 +21,22 @@ import { api } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  PickerEmpty,
+  PickerItem,
+  PickerSection,
+  PropertyPicker,
+} from "../../issues/components/pickers/property-picker";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import {
   chatSessionsOptions,
-  chatMessagesOptions,
+  chatMessagesPageOptions,
   pendingChatTaskOptions,
   pendingChatTasksOptions,
   chatKeys,
+  isTaskMessageTaskId,
 } from "@multica/core/chat/queries";
 import {
   useCreateChatSession,
@@ -47,20 +47,135 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
-import {
-  ContextAnchorButton,
-  ContextAnchorCard,
-  buildAnchorMarkdown,
-  useRouteAnchorCandidate,
-} from "./context-anchor";
 import { ChatResizeHandles } from "./chat-resize-handles";
+import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, ChatMessage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
+import type { Agent, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
+const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+
+function seedChatMessagesPageCache(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  messages: ChatMessage[],
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
+    chatKeys.messagesPage(sessionId),
+    (old) => old ?? {
+      pages: [{
+        messages,
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
+      }],
+      pageParams: [null],
+    },
+  );
+}
+
+function appendChatMessageToLatestPageCache(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  message: ChatMessage,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage>>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) {
+        return {
+          pages: [{
+            messages: [message],
+            limit: 50,
+            has_more: false,
+            next_cursor: null,
+          }],
+          pageParams: [null],
+        };
+      }
+      if (old.pages.some((page) => page.messages.some((m) => m.id === message.id))) {
+        return old;
+      }
+      return {
+        ...old,
+        pages: old.pages.map((page, index) =>
+          index === 0 ? { ...page, messages: [...page.messages, message] } : page,
+        ),
+      };
+    },
+  );
+}
+
+function removeChatMessageFromPageCache(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: page.messages.filter((m) => m.id !== messageId),
+        })),
+      };
+    },
+  );
+}
+
+function removeChatMessageFromCaches(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    (old) => old?.filter((m) => m.id !== messageId) ?? old,
+  );
+  removeChatMessageFromPageCache(qc, sessionId, messageId);
+}
+
+function replaceOptimisticChatMessageId(
+  qc: ReturnType<typeof useQueryClient>,
+  sessionId: string,
+  optimisticId: string,
+  messageId: string,
+  taskId: string,
+) {
+  const replace = (messages: ChatMessage[] | undefined) => {
+    if (!messages) return messages;
+    if (messages.some((m) => m.id === messageId)) {
+      return messages.filter((m) => m.id !== optimisticId);
+    }
+    return messages.map((m) =>
+      m.id === optimisticId ? { ...m, id: messageId, task_id: taskId } : m,
+    );
+  };
+
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    replace,
+  );
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: replace(page.messages) ?? page.messages,
+        })),
+      };
+    },
+  );
+}
 
 export function ChatWindow() {
   const { t } = useT("chat");
@@ -77,11 +192,25 @@ export function ChatWindow() {
   // Single sessions cache — eliminates the separate active/all queries
   // that used to drift during the WS-invalidate window.
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
-  const { data: rawMessages, isLoading: messagesLoading } = useQuery(
-    chatMessagesOptions(activeSessionId ?? ""),
-  );
-  // When no active session, always show empty — don't use stale cache
-  const messages = activeSessionId ? rawMessages ?? [] : [];
+  const {
+    data: rawMessagePages,
+    isLoading: messagesLoading,
+    fetchNextPage: fetchOlderMessages,
+    hasNextPage: hasOlderMessages,
+    isFetchingNextPage: isFetchingOlderMessages,
+  } = useInfiniteQuery(chatMessagesPageOptions(activeSessionId ?? ""));
+  // When no active session, always show empty — don't use stale cache.
+  // Page 0 contains the latest chronological window; later cursor pages are
+  // older chronological windows. Reverse pages so older fetched pages render
+  // above the initial latest page. The Virtuoso firstItemIndex is client-owned:
+  // it starts from a large stable base and only subtracts the count of loaded
+  // prepended rows, so concurrent server inserts cannot drift the scroll anchor.
+  const messagePages = activeSessionId ? rawMessagePages?.pages ?? [] : [];
+  const messages = [...messagePages].reverse().flatMap((page) => page.messages);
+  const olderMessageCount = messagePages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
+  const firstItemIndex = messages.length > 0
+    ? CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX - olderMessageCount
+    : 0;
   // Skeleton only shows for an un-cached session fetch. Cached switches
   // return data synchronously — no flash. `enabled: false` (new chat)
   // keeps isLoading false so the starter prompts aren't hidden.
@@ -96,6 +225,14 @@ export function ChatWindow() {
     pendingChatTaskOptions(activeSessionId ?? ""),
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const stopRequestedBeforeTaskRef = useRef(false);
+  const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
+    id: string;
+    content: string;
+  } | null>(null);
+  const handleRestoreDraftConsumed = useCallback(() => {
+    setRestoreDraftRequest(null);
+  }, []);
 
   // Legacy archived sessions (the old soft-archive feature was removed but
   // pre-existing rows with status='archived' may still exist) are excluded
@@ -181,11 +318,6 @@ export function ChatWindow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isOpen, activeSessionId, currentHasUnread]);
 
-  // Focus-mode anchor: derived from route each render. Prepended to the
-  // outgoing message when focus is on; the anchor persists across sends
-  // (focus mode tracks the user's page, not a per-message attachment).
-  const { candidate: anchorCandidate } = useRouteAnchorCandidate(wsId);
-
   const { uploadWithToast } = useFileUpload(api);
 
   // Lazy-creates a chat_session the first time the user needs an id —
@@ -244,6 +376,7 @@ export function ChatWindow() {
       // ChatMessageList mounts directly (no Skeleton frame). Skip the write
       // when an entry already exists — a concurrent handleSend may have
       // seeded an optimistic message we must not clobber.
+      seedChatMessagesPageCache(qc, sessionId, []);
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
         (old) => old ?? [],
@@ -254,17 +387,61 @@ export function ChatWindow() {
     [ensureSession, uploadWithToast, qc, setActiveSession],
   );
 
+  const cancelChatTask = useCallback(
+    async (
+      taskId: string,
+      sessionId: string,
+      options: { restoreDraftToInput: boolean; source: string },
+    ) => {
+      apiLogger.info("cancelTask.start", {
+        taskId,
+        sessionId,
+        source: options.source,
+      });
+      qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+
+      try {
+        const result = await api.cancelTaskById(taskId);
+        const restored = result.cancelled_chat_message;
+        if (restored?.restore_to_input) {
+          removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
+          if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
+            setRestoreDraftRequest({
+              id: restored.message_id,
+              content: restored.content,
+            });
+          }
+        }
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+        apiLogger.info("cancelTask.success", {
+          taskId,
+          sessionId,
+          restoredToInput: !!restored?.restore_to_input && options.restoreDraftToInput,
+        });
+        return result;
+      } catch (err) {
+        apiLogger.warn("cancelTask.error (task may have already finished)", {
+          taskId,
+          sessionId,
+          err,
+        });
+        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+        return null;
+      }
+    },
+    [qc],
+  );
+
   const handleSend = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[]): Promise<boolean> => {
       if (!activeAgent) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
-        return;
+        return false;
       }
 
-      const focusOn = useChatStore.getState().focusMode;
-      const finalContent = focusOn && anchorCandidate
-        ? `${buildAnchorMarkdown(anchorCandidate)}\n\n${content}`
-        : content;
+      const finalContent = content;
 
       const isNewSession = !activeSessionId;
 
@@ -273,14 +450,20 @@ export function ChatWindow() {
         isNewSession,
         agentId: activeAgent.id,
         contentLength: finalContent.length,
-        hasAnchor: focusOn && !!anchorCandidate,
         attachmentCount: attachmentIds?.length ?? 0,
       });
 
-      const sessionId = await ensureSession(finalContent);
+      let sessionId: string | null = null;
+      try {
+        sessionId = await ensureSession(finalContent);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.ensureSession.error", err);
+        toast.error(t(($) => $.input.send_failed_toast));
+        return false;
+      }
       if (!sessionId) {
         apiLogger.warn("sendChatMessage aborted: ensureSession returned null");
-        return;
+        return false;
       }
 
       // Optimistic burst — everything that gives the user "I sent a message
@@ -303,6 +486,7 @@ export function ChatWindow() {
       // "new-chat first-message" white flash. Priming the cache first means
       // the very first read after activeSessionId flips hits data
       // synchronously and ChatMessageList mounts directly.
+      appendChatMessageToLatestPageCache(qc, sessionId, optimistic);
       qc.setQueryData<ChatMessage[]>(
         chatKeys.messages(sessionId),
         (old) => (old ? [...old, optimistic] : [optimistic]),
@@ -322,12 +506,23 @@ export function ChatWindow() {
       setActiveSession(sessionId);
       apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
 
-      const result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+      let result;
+      try {
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+      } catch (err) {
+        apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
+        stopRequestedBeforeTaskRef.current = false;
+        removeChatMessageFromCaches(qc, sessionId, optimistic.id);
+        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+        toast.error(t(($) => $.input.send_failed_toast));
+        return false;
+      }
       apiLogger.info("sendChatMessage.success", {
         sessionId,
         messageId: result.message_id,
         taskId: result.task_id,
       });
+      replaceOptimisticChatMessageId(qc, sessionId, optimistic.id, result.message_id, result.task_id);
       // Replace the temporary task_id with the server's real one (so the WS
       // task: handlers can match against it) and snap the anchor to the
       // server's created_at — keeping the elapsed-seconds reading stable.
@@ -336,15 +531,26 @@ export function ChatWindow() {
         status: "queued",
         created_at: result.created_at,
       });
+      if (stopRequestedBeforeTaskRef.current) {
+        stopRequestedBeforeTaskRef.current = false;
+        await cancelChatTask(result.task_id, sessionId, {
+          restoreDraftToInput: true,
+          source: "deferred-send",
+        });
+        return false;
+      }
       qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+      return true;
     },
     [
       activeSessionId,
       activeAgent,
-      anchorCandidate,
       ensureSession,
+      cancelChatTask,
       qc,
       setActiveSession,
+      t,
     ],
   );
 
@@ -353,26 +559,19 @@ export function ChatWindow() {
       apiLogger.debug("cancelTask skipped: no pending task");
       return;
     }
-    // Optimistic clear — pill disappears + input unlocks the moment the
-    // user clicks Stop, instead of after the HTTP roundtrip. WS
-    // task:cancelled will confirm later (no-op if cache is already empty);
-    // if the cancel POST fails because the task already finished, the
-    // assistant message arrives via task:completed → chat:done and renders
-    // normally. Either way the UI is in sync with reality without latency.
-    apiLogger.info("cancelTask.start", { taskId: pendingTaskId, sessionId: activeSessionId });
-    qc.setQueryData(chatKeys.pendingTask(activeSessionId), {});
-    qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
-    // Fire-and-forget — UI is already in its post-cancel state. We log the
-    // outcome but never block on it.
-    api.cancelTaskById(pendingTaskId).then(
-      () => apiLogger.info("cancelTask.success", { taskId: pendingTaskId }),
-      (err) =>
-        apiLogger.warn("cancelTask.error (task may have already finished)", {
-          taskId: pendingTaskId,
-          err,
-        }),
-    );
-  }, [pendingTaskId, activeSessionId, qc]);
+    if (!isTaskMessageTaskId(pendingTaskId)) {
+      stopRequestedBeforeTaskRef.current = true;
+      apiLogger.info("cancelTask.deferred until server task id", {
+        taskId: pendingTaskId,
+        sessionId: activeSessionId,
+      });
+      return;
+    }
+    void cancelChatTask(pendingTaskId, activeSessionId, {
+      restoreDraftToInput: true,
+      source: "active-input",
+    });
+  }, [pendingTaskId, activeSessionId, cancelChatTask]);
 
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -442,6 +641,8 @@ export function ChatWindow() {
     transformOrigin: "bottom right",
     pointerEvents: isOpen ? "auto" : "none",
   };
+
+  const contextItems = useChatContextItems(wsId);
 
   return (
     <motion.div
@@ -531,9 +732,14 @@ export function ChatWindow() {
         <ChatMessageSkeleton />
       ) : hasMessages ? (
         <ChatMessageList
+          key={activeSessionId}
           messages={messages}
           pendingTask={pendingTask}
           availability={availability}
+          firstItemIndex={firstItemIndex}
+          hasOlderMessages={!!hasOlderMessages}
+          isFetchingOlderMessages={isFetchingOlderMessages}
+          onLoadOlderMessages={() => void fetchOlderMessages()}
         />
       ) : (
         <EmptyState
@@ -546,8 +752,8 @@ export function ChatWindow() {
       {/* Status banner above the input — single mutually-exclusive slot.
        *  Priority: no-agent > offline / unstable. Agent presence is the
        *  hard prerequisite (you can't send anything without one), so it
-       *  always wins over a presence hint. ContextAnchorCard stays in
-       *  topSlot because that's per-message context, not session state.
+       *  always wins over a presence hint. Recent issue/project navigation
+       *  lives in the input action row; it is not message/session state.
        *
        *  We key off `noAgent` (the resolved-empty state) rather than
        *  `!activeAgent`, so the loading window between mount and the
@@ -562,13 +768,14 @@ export function ChatWindow() {
        *  when there's no agent (the EmptyState above carries the CTA). */}
       <ChatInput
         onSend={handleSend}
+        restoreDraftRequest={restoreDraftRequest}
+        onRestoreDraftConsumed={handleRestoreDraftConsumed}
         onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         disabled={isSessionArchived}
         noAgent={noAgent}
         agentName={activeAgent?.name}
-        topSlot={<ContextAnchorCard />}
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}
@@ -577,7 +784,7 @@ export function ChatWindow() {
             onSelect={handleSelectAgent}
           />
         }
-        rightAdornment={<ContextAnchorButton />}
+        contextItems={contextItems}
       />
     </motion.div>
   );
@@ -588,7 +795,7 @@ export function ChatWindow() {
  * different agent = switch agent + start a fresh chat (session=null).
  * The current agent is marked with a check and not clickable.
  */
-function AgentDropdown({
+export function AgentDropdown({
   agents,
   activeAgent,
   userId,
@@ -600,6 +807,8 @@ function AgentDropdown({
   onSelect: (agent: Agent) => void;
 }) {
   const { t } = useT("chat");
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState("");
   // Split into the user's own agents and everyone else so the menu groups
   // them — matches the old AgentSelector layout.
   const { mine, others } = useMemo(() => {
@@ -612,57 +821,86 @@ function AgentDropdown({
     return { mine, others };
   }, [agents, userId]);
 
+  const query = filter.trim().toLowerCase();
+  const matches = (name: string) =>
+    !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
+  const filteredMine = mine.filter((agent) => matches(agent.name));
+  const filteredOthers = others.filter((agent) => matches(agent.name));
+
+  const handlePick = (agent: Agent) => {
+    onSelect(agent);
+    setOpen(false);
+  };
+
   if (!activeAgent) {
     return <span className="text-xs text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-        <ActorAvatar
-          actorType="agent"
-          actorId={activeAgent.id}
-          size={24}
-          enableHoverCard
-          showStatusDot
+    <PropertyPicker
+      open={open}
+      onOpenChange={setOpen}
+      width="w-64"
+      align="start"
+      side="top"
+      searchable
+      searchPlaceholder={t(($) => $.window.agent_filter_placeholder)}
+      onSearchChange={setFilter}
+      triggerRender={
+        <button
+          type="button"
+          className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent"
         />
-        <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
-        <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="max-h-80 w-auto max-w-64">
-        {mine.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{t(($) => $.window.my_agents)}</DropdownMenuLabel>
-            {mine.map((agent) => (
-              <AgentMenuItem
-                key={agent.id}
-                agent={agent}
-                isCurrent={agent.id === activeAgent.id}
-                onSelect={onSelect}
-              />
-            ))}
-          </DropdownMenuGroup>
-        )}
-        {mine.length > 0 && others.length > 0 && <DropdownMenuSeparator />}
-        {others.length > 0 && (
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>{t(($) => $.window.others)}</DropdownMenuLabel>
-            {others.map((agent) => (
-              <AgentMenuItem
-                key={agent.id}
-                agent={agent}
-                isCurrent={agent.id === activeAgent.id}
-                onSelect={onSelect}
-              />
-            ))}
-          </DropdownMenuGroup>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      }
+      trigger={
+        <>
+          <ActorAvatar
+            actorType="agent"
+            actorId={activeAgent.id}
+            size={24}
+            enableHoverCard
+            showStatusDot
+          />
+          <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+        </>
+      }
+    >
+      {filteredMine.length === 0 && filteredOthers.length === 0 ? (
+        <PickerEmpty />
+      ) : (
+        <>
+          {filteredMine.length > 0 && (
+            <PickerSection label={t(($) => $.window.my_agents)}>
+              {filteredMine.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === activeAgent.id}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
+          {filteredOthers.length > 0 && (
+            <PickerSection label={t(($) => $.window.others)}>
+              {filteredOthers.map((agent) => (
+                <AgentPickerItem
+                  key={agent.id}
+                  agent={agent}
+                  isCurrent={agent.id === activeAgent.id}
+                  onSelect={handlePick}
+                />
+              ))}
+            </PickerSection>
+          )}
+        </>
+      )}
+    </PropertyPicker>
   );
 }
 
-function AgentMenuItem({
+function AgentPickerItem({
   agent,
   isCurrent,
   onSelect,
@@ -672,9 +910,9 @@ function AgentMenuItem({
   onSelect: (agent: Agent) => void;
 }) {
   return (
-    <DropdownMenuItem
+    <PickerItem
+      selected={isCurrent}
       onClick={() => onSelect(agent)}
-      className="flex min-w-0 items-center gap-2"
     >
       <ActorAvatar
         actorType="agent"
@@ -684,8 +922,7 @@ function AgentMenuItem({
         showStatusDot
       />
       <span className="truncate flex-1">{agent.name}</span>
-      {isCurrent && <Check className="size-3.5 text-muted-foreground shrink-0" />}
-    </DropdownMenuItem>
+    </PickerItem>
   );
 }
 
@@ -854,9 +1091,16 @@ function SessionDropdown({
     });
     queryClient.setQueryData(chatKeys.pendingTask(session.id), {});
     queryClient.invalidateQueries({ queryKey: chatKeys.messages(session.id) });
+    queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(session.id) });
 
     api.cancelTaskById(task.task_id).then(
-      () => apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id }),
+      (result) => {
+        const restored = result.cancelled_chat_message;
+        if (restored?.restore_to_input) {
+          removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
+        }
+        apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id });
+      },
       (err) =>
         apiLogger.warn("cancelTask.error (history row; task may have already finished)", {
           taskId: task.task_id,

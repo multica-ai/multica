@@ -1,6 +1,16 @@
 package storage
 
-import "testing"
+import (
+	"context"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+)
 
 func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
 	s := &S3Storage{
@@ -12,6 +22,60 @@ func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
 
 	if got := s.KeyFromURL(rawURL); got != "uploads/abc/file.png" {
 		t.Fatalf("KeyFromURL(%q) = %q, want %q", rawURL, got, "uploads/abc/file.png")
+	}
+}
+
+func TestS3StoragePresignGet(t *testing.T) {
+	store := &S3Storage{
+		client: s3.New(s3.Options{
+			Region:      "us-east-1",
+			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+		}),
+		bucket: "test-bucket",
+	}
+
+	got, err := store.PresignGet(context.Background(), "uploads/abc/file.txt", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("PresignGet: %v", err)
+	}
+	for _, want := range []string{
+		"https://test-bucket.s3.us-east-1.amazonaws.com/uploads/abc/file.txt",
+		"X-Amz-Signature=",
+		"X-Amz-Expires=300",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("presigned URL %q does not contain %q", got, want)
+		}
+	}
+}
+
+func TestS3StoragePresignGetWithContentDisposition(t *testing.T) {
+	store := &S3Storage{
+		client: s3.New(s3.Options{
+			Region:      "us-east-1",
+			Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+		}),
+		bucket: "test-bucket",
+	}
+
+	got, err := store.PresignGetWithContentDisposition(
+		context.Background(),
+		"uploads/abc/file.txt",
+		5*time.Minute,
+		`attachment; filename="report.txt"`,
+	)
+	if err != nil {
+		t.Fatalf("PresignGetWithContentDisposition: %v", err)
+	}
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse presigned URL: %v", err)
+	}
+	if got := u.Query().Get("response-content-disposition"); got != `attachment; filename="report.txt"` {
+		t.Fatalf("response-content-disposition = %q", got)
+	}
+	if sig := u.Query().Get("X-Amz-Signature"); sig == "" {
+		t.Fatalf("missing X-Amz-Signature in %q", got)
 	}
 }
 

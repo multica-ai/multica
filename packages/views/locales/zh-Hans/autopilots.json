@@ -6,15 +6,23 @@
     "table": {
       "name": "名称",
       "agent": "智能体",
+      "created_by": "创建者",
       "mode": "模式",
       "status": "状态",
-      "last_run": "上次运行"
+      "last_run": "上次运行",
+      "assignee": "执行者",
+      "trigger": "触发器",
+      "next_run": "下次运行",
+      "created": "创建时间"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "还没有自动化",
       "hint": "为你的智能体安排周期性 task。从模板选一个，或从空白开始。"
-    }
+    },
+    "scope_all": "全部",
+    "no_matches": "没有匹配的自动化",
+    "retry": "重试"
   },
   "status": {
     "active": "启用",
@@ -71,6 +79,7 @@
     "section_run_history": "运行历史",
     "section_danger": "危险操作",
     "field_agent": "智能体",
+    "field_created_by": "创建者",
     "field_output_mode": "输出模式",
     "field_project": "关联项目",
     "no_project": "不关联项目",
@@ -95,8 +104,7 @@
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
-    "failed": "失败",
-    "skipped": "已跳过"
+    "failed": "失败"
   },
   "run_source": {
     "schedule": "时间表",
@@ -346,5 +354,39 @@
   },
   "timezone_picker": {
     "search_placeholder": "搜索时区..."
+  },
+  "toolbar": {
+    "result_count_title": "当前结果 / 全部自动化",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选",
+    "section_assignee": "执行者",
+    "section_mode": "模式",
+    "section_trigger": "触发器",
+    "section_creator": "创建者",
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列"
+  },
+  "actions": {
+    "row_menu": "自动化操作",
+    "pause": "暂停",
+    "resume": "恢复",
+    "delete": "删除",
+    "selected_one": "已选 {{count}} 项",
+    "selected_other": "已选 {{count}} 项",
+    "clear_selection": "清除选择",
+    "delete_dialog": {
+      "title": "删除自动化？",
+      "description_one": "将永久删除“{{name}}”及其运行历史。",
+      "description_other": "将永久删除 {{count}} 个自动化及其运行历史。",
+      "warning": "此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "永久删除",
+      "deleting": "删除中…"
+    }
   }
 }

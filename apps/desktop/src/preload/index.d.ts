@@ -1,6 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
+import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -45,6 +46,8 @@ interface DesktopAPI {
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Report the renderer's memory-router path for recovery diagnostics. */
+  setRendererRouteContext: (context: RendererRouteContextInput) => void;
   /** Open the OS folder picker and return the chosen absolute path.
    *  Used by the Project settings "Add local directory" flow. */
   pickDirectory: (
@@ -71,10 +74,22 @@ interface DesktopAPI {
       | "error";
     error?: string;
   }>;
+  /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
+   *  Returns an unsubscribe function. */
+  onCloseActiveTab: (callback: () => void) => () => void;
+  /** Ask the main process to close the window. */
+  closeWindow: () => void;
 }
 
 interface DaemonStatus {
-  state: "running" | "stopped" | "starting" | "stopping" | "installing_cli" | "cli_not_found";
+  state:
+    | "running"
+    | "stopped"
+    | "starting"
+    | "stopping"
+    | "installing_cli"
+    | "cli_not_found"
+    | "auth_expired";
   pid?: number;
   uptime?: string;
   daemonId?: string;
@@ -90,6 +105,11 @@ interface DaemonPrefs {
   autoStop: boolean;
 }
 
+type DaemonReauthResult =
+  | { ok: true }
+  | { ok: false; reason: "session_invalid" }
+  | { ok: false; reason: "transient"; message: string };
+
 interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
@@ -100,6 +120,10 @@ interface DaemonAPI {
   setTargetApiUrl: (url: string) => Promise<void>;
   syncToken: (token: string, userId: string) => Promise<void>;
   clearToken: () => Promise<void>;
+  reauthenticate: (
+    token: string,
+    userId: string,
+  ) => Promise<DaemonReauthResult>;
   isCliInstalled: () => Promise<boolean>;
   getPrefs: () => Promise<DaemonPrefs>;
   setPrefs: (prefs: Partial<DaemonPrefs>) => Promise<DaemonPrefs>;

@@ -1,5 +1,28 @@
-import { beforeEach, describe, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { useIssueDraftStore } from "./draft-store";
+import { setCurrentWorkspace } from "../../platform/workspace-storage";
+
+const flush = () => new Promise((resolve) => queueMicrotask(() => resolve(null)));
+
+// Node 25 ships a partial `localStorage` shim under jsdom that's missing
+// `clear`/`removeItem`; replace it with a real in-memory Storage so persist
+// can round-trip values.
+beforeAll(() => {
+  if (typeof globalThis.localStorage?.clear !== "function") {
+    const values = new Map<string, string>();
+    const storage: Storage = {
+      get length() { return values.size; },
+      clear: () => values.clear(),
+      getItem: (k) => values.get(k) ?? null,
+      key: (i) => Array.from(values.keys())[i] ?? null,
+      removeItem: (k) => { values.delete(k); },
+      setItem: (k, v) => { values.set(k, v); },
+    };
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage });
+    Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
+  }
+});
 
 const RESET_STATE = {
   draft: {
@@ -11,6 +34,7 @@ const RESET_STATE = {
     assigneeId: undefined,
     startDate: null,
     dueDate: null,
+    attachments: [],
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
@@ -46,6 +70,36 @@ describe("issue draft store — last assignee", () => {
     expect(draft.assigneeId).toBeUndefined();
   });
 
+  it("clearDraft removes persisted draft attachments", () => {
+    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+
+    setDraft({
+      title: "first",
+      attachments: [
+        {
+          id: "11111111-2222-3333-4444-555555555555",
+          workspace_id: "ws-1",
+          issue_id: null,
+          comment_id: null,
+          chat_session_id: null,
+          chat_message_id: null,
+          uploader_type: "member",
+          uploader_id: "alice",
+          filename: "shot.png",
+          url: "https://cdn.example.test/shot.png",
+          download_url: "https://cdn.example.test/shot.png",
+          markdown_url: "https://app.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
+          content_type: "image/png",
+          size_bytes: 123,
+          created_at: "2026-06-12T00:00:00Z",
+        },
+      ],
+    });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.attachments).toEqual([]);
+  });
+
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {
     const { setLastAssignee, clearDraft } = useIssueDraftStore.getState();
 
@@ -57,5 +111,44 @@ describe("issue draft store — last assignee", () => {
     clearDraft();
     expect(useIssueDraftStore.getState().draft.assigneeId).toBeUndefined();
     expect(useIssueDraftStore.getState().draft.assigneeType).toBeUndefined();
+  });
+});
+
+describe("issue draft store — legacy rehydrate", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setCurrentWorkspace(null, null);
+  });
+
+  afterEach(() => {
+    setCurrentWorkspace(null, null);
+  });
+
+  it("backfills attachments for drafts persisted before the field existed", async () => {
+    localStorage.setItem(
+      "multica_issue_draft:acme",
+      JSON.stringify({
+        state: {
+          draft: {
+            title: "legacy",
+            description: "body",
+            status: "todo",
+            priority: "none",
+            startDate: null,
+            dueDate: null,
+            // no `attachments` — written by a build that predates the field
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+
+    const { draft } = useIssueDraftStore.getState();
+    expect(draft.title).toBe("legacy");
+    expect(draft.attachments).toEqual([]);
   });
 });

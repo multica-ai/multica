@@ -114,12 +114,18 @@ API server 上：
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<你刚生成的 webhook secret>
+
+# 可选但建议配置——安装完成时直接拿到关联账号名，而不是等第一次 webhook 才刷新：
+GITHUB_APP_ID=<App 设置页上的数字 App ID>
+GITHUB_APP_PRIVATE_KEY=<完整 PEM 块，包含 BEGIN/END 行>
 ```
 
-两个都必填。任何一个缺失：
+`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 必填。任何一个缺失：
 
 - Settings 里 `Connect GitHub` 按钮会被 **disable**，并显示「not configured」提示
 - `/api/webhooks/github` 直接返回 **`503 github webhooks not configured`**——Multica 在 secret 没配置时拒绝处理事件，不会出现「没 secret 也接受 webhook」的安全坑
+
+`GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` **可选**。配上之后，setup 回调可以用 App JWT 鉴权调用 GitHub `/app/installations/{id}`，安装完成那一刻就拿到真实的组织名/用户名。不配的话，连接卡片会先显示 `已连接到 unknown`，等 GitHub 的 `installation.created` webhook 到达（通常几秒内），Multica 会刷新 row 并通过 realtime 推送让 Settings 页面无需手动刷新即可更新。私钥从 App 设置页 **Private keys → Generate a private key** 生成，把整段 PEM（含 `-----BEGIN/END RSA PRIVATE KEY-----` 两行）粘到 env 里，保留换行。
 
 `FRONTEND_ORIGIN` 也必须设置（任何生产 self-host 都已经设了）——setup 回调结束后用它把用户跳回 `<FRONTEND_ORIGIN>/settings?tab=github`。
 

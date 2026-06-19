@@ -72,6 +72,15 @@ SMTP_TLS=implicit              # optional on 465; required on a non-standard SMT
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
+**Strict public relays (e.g. Google Workspace `smtp-relay.gmail.com`)** additionally require a valid EHLO name. They reject the default `localhost` greeting from a public IP, and the relay drops the connection — which surfaces as an opaque `EOF` on a later command (`smtp auth: EOF`) rather than at the greeting. Set `SMTP_EHLO_NAME` to the FQDN the relay expects; it defaults to the machine hostname, which inside a container is usually not a valid FQDN:
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
 At startup the server prints which provider it picked, including the negotiated TLS mode — for example `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` or `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…` (or `Resend API` / `DEV mode`). The password is never logged. If you don't see the SMTP line after restart, `SMTP_HOST` didn't reach the process — check the container env (`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`).
 
 **What happens if you set neither**: the server doesn't error, but **every email that should have been sent is written to the server's stdout only**. Handy for local development (copy the code from the logs); in production it's a black hole.

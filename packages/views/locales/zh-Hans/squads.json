@@ -3,7 +3,17 @@
     "title": "小队",
     "new_button": "新建小队",
     "empty_no_squads": "还没有小队，创建一个开始吧。",
-    "empty_no_match": "没有匹配筛选条件的小队。"
+    "empty_no_match": "没有匹配筛选条件的小队。",
+    "table": {
+      "name": "小队",
+      "leader": "队长",
+      "members": "成员",
+      "creator": "创建者",
+      "created": "创建时间"
+    },
+    "no_matches": "没有匹配的小队",
+    "row_menu": "小队操作",
+    "archive_action": "归档"
   },
   "inspector": {
     "details_section": "详情",
@@ -14,7 +24,8 @@
     "description": "“{{name}}” 将被归档，该小队当前承接的 issue 会转交给小队负责人。此操作无法撤销，如需恢复路由请新建小队。",
     "cancel": "取消",
     "confirm": "归档",
-    "archiving": "归档中…"
+    "archiving": "归档中…",
+    "success": "已归档小队"
   },
   "name_editor": {
     "cancel": "取消"
@@ -72,5 +83,21 @@
     "description": "小队指引会在 Leader 智能体处理分配给该小队的 issue 时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次任务都应遵循的上下文。",
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存"
+  },
+  "scope": {
+    "mine": "我的",
+    "all": "全部"
+  },
+  "toolbar": {
+    "display": "显示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列",
+    "result_count_title": "当前结果 / 全部小队",
+    "filter_label": "筛选",
+    "filter_active_count_one": "{{count}} 项筛选",
+    "filter_active_count_other": "{{count}} 项筛选",
+    "clear_filters": "清除筛选"
   }
 }

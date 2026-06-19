@@ -259,10 +259,10 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
       if (!content.trim() || !userId) return;
       try {
-        await createComment({ content, attachmentIds });
+        await createComment({ content, attachmentIds, suppressAgentIds });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -275,7 +275,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const submitReply = useCallback(
-    async (parentId: string, content: string, attachmentIds?: string[]) => {
+    async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => {
       if (!content.trim() || !userId) return;
       try {
         await createComment({
@@ -283,6 +283,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           type: "comment",
           parentId,
           attachmentIds,
+          suppressAgentIds,
         });
       } catch (err) {
         toast.error(
@@ -296,9 +297,9 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[]) => {
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds });
+        await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
       } catch (err) {
         toast.error(
           err instanceof Error && err.message

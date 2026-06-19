@@ -37,7 +37,7 @@ SMTP 経路は、ほとんどのオンプレミスメールサーバー（特に
 |---|---|---|---|
 | 匿名内部 relay | `25` | なし — IP / サブネットで送信を信頼 | 伝送経路上はなし（内部セグメント専用） |
 | 認証付き送信（submission） | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS、自動アップグレード |
-| 暗黙的 TLS（SMTPS） | `465` | — | **まだサポートされていません** — ポート 25 または 587 を使用してください |
+| 暗黙的 TLS（SMTPS） | `465` | 任意（`SMTP_USERNAME` + `SMTP_PASSWORD`） | 接続時に TLS ハンドシェイク — ポート `465` で自動的に有効化、非標準ポートでは `SMTP_TLS=implicit` で強制 |
 
 **ポート 25 の匿名 Exchange relay** — 認証情報なしで信頼されたサブネットからのメールを受け入れる、典型的な「internal SMTP relay」/ Exchange 匿名 receive connector:
 
@@ -61,7 +61,27 @@ SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
 RESEND_FROM_EMAIL=noreply@yourdomain.com
 ```
 
-起動時に、サーバーは選択したプロバイダーを出力します。例えば `EmailService: SMTP relay exchange.internal.example.com:25 from=noreply@example.com`（または `Resend API` / `DEV mode`）のように表示されます。パスワードがログに記録されることは決してありません。再起動後に SMTP の行が見えない場合は `SMTP_HOST` がプロセスに届いていないので、コンテナ環境（`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`）を確認してください。
+**ポート 465 の暗黙的 TLS（SMTPS）** — SMTPS のみを提供し STARTTLS を通知しないプロバイダー（例: Aliyun / Tencent のエンタープライズメール）向け。ポート `465` は暗黙的 TLS を自動的に有効化します。`SMTP_TLS=implicit`（別名: `smtps`、`ssl`）は非標準の SMTPS ポートでこれを強制します:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465                  # implicit TLS auto-enabled on 465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**厳格な公開 relay（例: Google Workspace `smtp-relay.gmail.com`）** はさらに有効な EHLO 名を必要とします。これらの relay は公開 IP からのデフォルトの `localhost` 挨拶を拒否し、relay が接続を切断します — これは挨拶の時点ではなく、後続のコマンドで不明瞭な `EOF`（`smtp auth: EOF`）として表面化します。`SMTP_EHLO_NAME` を relay が期待する FQDN に設定してください。デフォルトはマシンのホスト名で、コンテナ内では通常は有効な FQDN ではありません。
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+起動時に、サーバーは選択したプロバイダーを、ネゴシエートされた TLS モードも含めて出力します。例えば `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` や `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…`（または `Resend API` / `DEV mode`）のように表示されます。パスワードがログに記録されることは決してありません。再起動後に SMTP の行が見えない場合は `SMTP_HOST` がプロセスに届いていないので、コンテナ環境（`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`）を確認してください。
 
 **どちらも設定しない場合**: サーバーはエラーを出しませんが、**送信されるはずだったすべてのメールがサーバーの stdout にのみ書き出されます**。ローカル開発には便利ですが（ログからコードをコピーできます）、プロダクションではブラックホールになります。
 

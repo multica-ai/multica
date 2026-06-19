@@ -7,7 +7,17 @@
     "view_compact": "コンパクト",
     "view_comfortable": "ゆったり",
     "search_placeholder": "プロジェクトを検索...",
-    "no_search_results": "検索条件に一致する結果はありません"
+    "no_search_results": "検索条件に一致する結果はありません",
+    "view_table": "テーブル",
+    "view_cards": "カード",
+    "row_menu": "プロジェクトの操作",
+    "pin": "サイドバーにピン留め",
+    "unpin": "ピン留め解除",
+    "delete": "削除",
+    "no_matches": "該当するプロジェクトはありません",
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除"
   },
   "table": {
     "name": "名前",
@@ -15,7 +25,8 @@
     "status": "ステータス",
     "progress": "進捗",
     "lead": "リード",
-    "created": "作成日"
+    "created": "作成日",
+    "issues": "Issue 数"
   },
   "status": {
     "planned": "計画中",
@@ -116,5 +127,21 @@
   },
   "chip": {
     "fallback_label": "プロジェクト"
+  },
+  "toolbar": {
+    "result_count_title": "該当プロジェクト / すべてのプロジェクト",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_status": "ステータス",
+    "section_priority": "優先度",
+    "section_lead": "リード",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "view": "ビュー"
   }
 }

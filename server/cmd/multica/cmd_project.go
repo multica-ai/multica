@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -94,6 +93,18 @@ var projectResourceRemoveCmd = &cobra.Command{
 
 var validProjectStatuses = []string{
 	"planned", "in_progress", "paused", "completed", "cancelled",
+}
+
+// validateProjectStatus rejects unknown statuses client-side so a typo fails
+// fast with the valid list instead of a server round-trip and a 400. Shared by
+// `project create`, `project update`, and `project status`.
+func validateProjectStatus(status string) error {
+	for _, s := range validProjectStatuses {
+		if s == status {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validProjectStatuses, ", "))
 }
 
 func init() {
@@ -185,7 +196,7 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	params := url.Values{}
@@ -245,7 +256,7 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -296,7 +307,7 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	body := map[string]any{"title": title}
@@ -304,6 +315,9 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["description"] = v
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
+		if err := validateProjectStatus(v); err != nil {
+			return err
+		}
 		body["status"] = v
 	}
 	if v, _ := cmd.Flags().GetString("icon"); v != "" {
@@ -365,7 +379,7 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -384,6 +398,9 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
+		if err := validateProjectStatus(v); err != nil {
+			return err
+		}
 		body["status"] = v
 	}
 	if cmd.Flags().Changed("icon") {
@@ -430,7 +447,7 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -450,15 +467,8 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
 
-	valid := false
-	for _, s := range validProjectStatuses {
-		if s == status {
-			valid = true
-			break
-		}
-	}
-	if !valid {
-		return fmt.Errorf("invalid status %q; valid values: %s", status, strings.Join(validProjectStatuses, ", "))
+	if err := validateProjectStatus(status); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)
@@ -466,7 +476,7 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, id)
@@ -499,7 +509,7 @@ func runProjectResourceList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -595,7 +605,7 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -628,7 +638,7 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])
@@ -839,7 +849,7 @@ func runProjectResourceRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
 	projectRef, err := resolveProjectID(ctx, client, args[0])

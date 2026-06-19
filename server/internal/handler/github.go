@@ -20,12 +20,18 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// githubAPIBase is the base URL for GitHub's REST API. Mutable so tests can
+// point fetchInstallationAccount at an httptest server without touching the
+// real GitHub.
+var githubAPIBase = "https://api.github.com"
 
 // ── Response shapes ─────────────────────────────────────────────────────────
 
@@ -355,20 +361,40 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 }
 
 // fetchInstallationAccount tries to enrich the installation row with the
-// account name + avatar via GitHub's public API. We deliberately do NOT
-// require GitHub App JWT auth here — the install endpoint is publicly
-// readable for installations on public accounts, and on failure we fall
-// back to placeholders that the next webhook will overwrite.
+// account name + avatar from GitHub.
+//
+// GitHub's `GET /app/installations/{id}` endpoint requires GitHub App
+// authentication (a JWT signed with the App's RSA private key). When the
+// operator has configured GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY, we
+// sign a short-lived JWT and use it; on any failure (env not set, key
+// malformed, GitHub returns non-200) we fall back to the "unknown"
+// placeholder. The next `installation` webhook delivery from GitHub will
+// upsert the row with the real account info — see handleInstallationEvent.
+//
+// The HTTP call is synchronous (no independent timeout — that's a pre-
+// existing wart of the install path), but we deliberately do NOT let a
+// failure abort the setup callback: a network blip here just leaves the
+// "unknown" placeholder in place, and the frontend re-queries on the
+// realtime broadcast emitted by the webhook handler, so the UI converges
+// without a manual refresh.
 func fetchInstallationAccount(ctx context.Context, installationID int64) (login, accountType string, avatar *string) {
 	login = "unknown"
 	accountType = "User"
 	avatar = nil
-	url := fmt.Sprintf("https://api.github.com/app/installations/%d", installationID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	endpoint := fmt.Sprintf("%s/app/installations/%d", strings.TrimRight(githubAPIBase, "/"), installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
+	if token, err := signGitHubAppJWT(time.Now()); err != nil {
+		// Misconfigured private key is operator-actionable — log so the
+		// install path doesn't silently fall back to "unknown" forever
+		// without leaving a breadcrumb.
+		slog.Warn("github: sign App JWT failed", "err", err)
+	} else if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return
@@ -398,6 +424,43 @@ func fetchInstallationAccount(ctx context.Context, installationID int64) (login,
 		avatar = &v
 	}
 	return
+}
+
+// signGitHubAppJWT mints the short-lived RS256 JWT GitHub requires for
+// App-authenticated REST calls (see fetchInstallationAccount). Returns
+// ("", nil) when the operator hasn't configured the App identity — that's
+// a soft "App auth not available" signal, not an error, so callers can
+// fall through to their unauthenticated path. A malformed
+// GITHUB_APP_PRIVATE_KEY surfaces as an error so the operator notices.
+//
+// `now` is injected for deterministic tests; production callers pass
+// time.Now().
+func signGitHubAppJWT(now time.Time) (string, error) {
+	appID := strings.TrimSpace(os.Getenv("GITHUB_APP_ID"))
+	pemKey := strings.TrimSpace(os.Getenv("GITHUB_APP_PRIVATE_KEY"))
+	if appID == "" || pemKey == "" {
+		return "", nil
+	}
+	key, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(pemKey))
+	if err != nil {
+		return "", fmt.Errorf("parse GITHUB_APP_PRIVATE_KEY: %w", err)
+	}
+	// GitHub allows JWTs valid for up to 10 minutes. We back-date `iat`
+	// by 60 seconds to absorb modest clock skew between us and GitHub
+	// (otherwise an "iat in the future" verdict from GitHub fails the
+	// request) and cap `exp` at 9 minutes ahead to stay inside the cap
+	// even with the same skew applied.
+	claims := jwt.MapClaims{
+		"iat": now.Add(-60 * time.Second).Unix(),
+		"exp": now.Add(9 * time.Minute).Unix(),
+		"iss": appID,
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	signed, err := token.SignedString(key)
+	if err != nil {
+		return "", fmt.Errorf("sign App JWT: %w", err)
+	}
+	return signed, nil
 }
 
 // ── Listing / disconnect ────────────────────────────────────────────────────
@@ -607,7 +670,7 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 			return
 		}
 		avatar := p.Installation.Account.AvatarURL
-		_, err = h.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		inst, err := h.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
 			WorkspaceID:      existing.WorkspaceID,
 			InstallationID:   p.Installation.ID,
 			AccountLogin:     p.Installation.Account.Login,
@@ -617,7 +680,17 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		})
 		if err != nil {
 			slog.Warn("github: refresh installation failed", "err", err)
+			return
 		}
+		// Broadcast so any open Settings → GitHub tab re-queries the
+		// installations list. Without this, a row created by the setup
+		// callback with the "unknown" placeholder (e.g. because GitHub
+		// App JWT auth wasn't configured, or this webhook arrived after
+		// the user already loaded the page) would stay visibly stale
+		// until the user manually refreshes.
+		h.publish(protocol.EventGitHubInstallationCreated, uuidToString(inst.WorkspaceID), "system", "", map[string]any{
+			"installation": githubInstallationToBroadcast(inst),
+		})
 	}
 }
 

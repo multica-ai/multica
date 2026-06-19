@@ -26,8 +26,8 @@ var attachmentDownloadCmd = &cobra.Command{
 
   # Download to a specific directory
   $ multica attachment download abc123 -o /tmp/images`,
-	Args:  exactArgs(1),
-	RunE:  runAttachmentDownload,
+	Args: exactArgs(1),
+	RunE: runAttachmentDownload,
 }
 
 func init() {
@@ -42,7 +42,7 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
 	defer cancel()
 
 	// Fetch attachment metadata (includes signed download_url).

@@ -26,6 +26,7 @@ import {
   pruneDeletedIssueFromParentChildrenCaches,
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
+import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
@@ -381,6 +382,7 @@ export function useDeleteIssue() {
       }
     },
     onSuccess: (_data, id, ctx) => {
+      useRecentContextStore.getState().forgetContext(wsId, { type: "issue", id });
       cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadata);
     },
     onSettled: (_data, _err, _id, ctx) => {
@@ -538,7 +540,9 @@ export function useBatchDeleteIssues() {
     },
     onSuccess: (data, ids, ctx) => {
       if (data.deleted === ids.length) {
+        const { forgetContext } = useRecentContextStore.getState();
         for (const id of ids) {
+          forgetContext(wsId, { type: "issue", id });
           cleanupDeletedIssueCaches(qc, wsId, id, ctx?.metadataById.get(id));
         }
         return;
@@ -594,12 +598,14 @@ export function useCreateComment(issueId: string) {
       type,
       parentId,
       attachmentIds,
+      suppressAgentIds,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds),
+      suppressAgentIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",
@@ -622,6 +628,10 @@ export function useCreateComment(issueId: string) {
         if (old.some((e) => e.id === entry.id)) return old;
         return sortTimelineEntriesAsc([...old, entry]);
       });
+      // Posting a comment changes the trigger answer itself (the enqueued
+      // task now dedupes follow-up triggers), so cached previews for this
+      // issue are stale the moment the create lands.
+      qc.invalidateQueries({ queryKey: issueKeys.commentTriggerPreview(issueId) });
     },
     // No onSettled invalidate. The `comment:created` WS broadcast keeps
     // the timeline cache fresh after a successful create, and reconnect
@@ -636,8 +646,17 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds: string[] }) =>
-      api.updateComment(commentId, content, attachmentIds),
+    mutationFn: ({
+      commentId,
+      content,
+      attachmentIds,
+      suppressAgentIds,
+    }: {
+      commentId: string;
+      content: string;
+      attachmentIds: string[];
+      suppressAgentIds?: string[];
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
@@ -705,6 +724,51 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+// Every comment id in the same thread as `commentId` — the thread root plus
+// every descendant. Mirrors the server's thread walk in
+// ClearOtherThreadResolutions so the resolve optimistic update can clear sibling
+// resolutions exactly as the backend will, instead of briefly showing two
+// resolutions until the refetch settles.
+function collectThreadCommentIds(
+  entries: TimelineCache,
+  commentId: string,
+): Set<string> {
+  const byId = new Map<string, TimelineEntry>();
+  for (const e of entries) {
+    if (e.type === "comment") byId.set(e.id, e);
+  }
+  // Walk up to the thread root (cycle-guarded against malformed parent chains).
+  let rootId = commentId;
+  const guard = new Set<string>();
+  let cur = byId.get(commentId);
+  while (cur?.parent_id && byId.has(cur.parent_id) && !guard.has(cur.id)) {
+    guard.add(cur.id);
+    rootId = cur.parent_id;
+    cur = byId.get(cur.parent_id);
+  }
+  // Expand back down over the whole subtree.
+  const childrenByParent = new Map<string, string[]>();
+  for (const e of byId.values()) {
+    if (e.parent_id) {
+      const list = childrenByParent.get(e.parent_id) ?? [];
+      list.push(e.id);
+      childrenByParent.set(e.parent_id, list);
+    }
+  }
+  const ids = new Set<string>([rootId]);
+  const stack = [rootId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    for (const child of childrenByParent.get(id) ?? []) {
+      if (!ids.has(child)) {
+        ids.add(child);
+        stack.push(child);
+      }
+    }
+  }
+  return ids;
+}
+
 export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -713,18 +777,29 @@ export function useResolveComment(issueId: string) {
     onMutate: async ({ commentId, resolved }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
-      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) =>
-          e.id === commentId
-            ? {
-                ...e,
-                resolved_at: resolved ? new Date().toISOString() : null,
-                resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
-                resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
-              }
-            : e,
-        ),
-      );
+      qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) => {
+        if (!old) return old;
+        // Resolving makes this comment the sole resolution in its thread, so
+        // mirror the server (ClearOtherThreadResolutions) and clear every other
+        // resolution in the same thread. Without this the cache shows two
+        // resolutions until the settle refetch, which is exactly the flash the
+        // single-resolution fix removes. Unresolve only clears its own row.
+        const threadIds = resolved ? collectThreadCommentIds(old, commentId) : null;
+        return old.map((e) => {
+          if (e.id === commentId) {
+            return {
+              ...e,
+              resolved_at: resolved ? new Date().toISOString() : null,
+              resolved_by_type: resolved ? e.resolved_by_type ?? null : null,
+              resolved_by_id: resolved ? e.resolved_by_id ?? null : null,
+            };
+          }
+          if (resolved && e.resolved_at && threadIds?.has(e.id)) {
+            return { ...e, resolved_at: null, resolved_by_type: null, resolved_by_id: null };
+          }
+          return e;
+        });
+      });
       return { prev };
     },
     onError: (_err, _vars, ctx) => {

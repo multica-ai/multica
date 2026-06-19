@@ -1,6 +1,7 @@
 "use client";
 
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
@@ -33,12 +34,10 @@ export function useTypeLabels(): Record<InboxItemType, string> {
   };
 }
 
+// start_date / due_date are calendar days — format timezone-safely so the day
+// never shifts with the viewer's offset (see @multica/core/issues/date).
 function shortDate(dateStr: string): string {
-  if (!dateStr) return "";
-  return new Date(dateStr).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
 }
 
 export function InboxDetailLabel({ item }: { item: InboxItem }) {

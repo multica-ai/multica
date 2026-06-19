@@ -17,6 +17,7 @@ type ReloadPromptResult = "reload" | "dismiss";
 type RendererRecoveryOptions = {
   isDev: boolean;
   showReloadPrompt: (payload: ReloadPromptPayload) => Promise<ReloadPromptResult>;
+  getDiagnosticContext?: () => Record<string, unknown>;
   log?: (tag: string, ...args: unknown[]) => void;
   unresponsivePromptDelayMs?: number;
 };
@@ -26,11 +27,16 @@ export function installRendererRecoveryHandlers(
   {
     isDev,
     showReloadPrompt,
+    getDiagnosticContext,
     log = defaultDevLog,
     unresponsivePromptDelayMs = 1500,
   }: RendererRecoveryOptions,
 ) {
   let unresponsivePromptTimer: ReturnType<typeof setTimeout> | null = null;
+  const mergeDiagnosticContext = (context: Record<string, unknown>) => ({
+    ...readDiagnosticContext(getDiagnosticContext),
+    ...context,
+  });
   const maybePromptReload = (payload: ReloadPromptPayload) => {
     if (isDev) return;
     void showReloadPrompt(payload).then((result) => {
@@ -43,14 +49,17 @@ export function installRendererRecoveryHandlers(
   window.webContents.on("render-process-gone", (_event, details) => {
     if (isDev) log("process-gone", JSON.stringify(details));
     if (!isRecoverableRendererExit(details)) return;
-    maybePromptReload({ kind: "render-process-gone", context: { details } });
+    maybePromptReload({
+      kind: "render-process-gone",
+      context: mergeDiagnosticContext({ details }),
+    });
   });
 
   window.webContents.on("preload-error", (_event, preloadPath, error) => {
     if (isDev) log("preload-error", `path=${preloadPath} err=${formatError(error)}`);
     maybePromptReload({
       kind: "preload-error",
-      context: { preloadPath, error: formatError(error) },
+      context: mergeDiagnosticContext({ preloadPath, error: formatError(error) }),
     });
   });
 
@@ -58,7 +67,10 @@ export function installRendererRecoveryHandlers(
     if (isDev || unresponsivePromptTimer) return;
     unresponsivePromptTimer = setTimeout(() => {
       unresponsivePromptTimer = null;
-      maybePromptReload({ kind: "unresponsive", context: {} });
+      maybePromptReload({
+        kind: "unresponsive",
+        context: mergeDiagnosticContext({}),
+      });
     }, unresponsivePromptDelayMs);
   });
 
@@ -109,18 +121,30 @@ function isRecoverableRendererExit(details: unknown) {
 function rendererRecoveryMessage(kind: ReloadPromptPayload["kind"]) {
   switch (kind) {
     case "render-process-gone":
-      return "The desktop renderer process stopped responding or crashed.";
+      return "The desktop window stopped unexpectedly.";
     case "preload-error":
-      return "The desktop preload script failed before the app could start.";
+      return "The desktop window could not finish starting.";
     case "unresponsive":
-      return "The desktop window is not responding.";
+      return "The desktop window has been stuck for a few seconds.";
   }
 }
 
 function rendererRecoveryDetail(payload: ReloadPromptPayload) {
+  const guidance = [
+    "Click Reload to refresh this window and keep using Multica.",
+    "If this keeps happening, please tell us what you were doing right before this message appeared and whether Reload recovered the window.",
+  ];
+
+  if (payload.kind === "unresponsive") {
+    guidance.push(
+      "For macOS reports, an Activity Monitor sample of the Multica Helper (Renderer) process helps us find what blocked the app.",
+    );
+  }
+
   return [
-    "Reloading is the safest recovery path for this window.",
+    ...guidance,
     "",
+    "Diagnostic details:",
     `kind: ${payload.kind}`,
     `context: ${JSON.stringify(payload.context)}`,
   ].join("\n");
@@ -128,6 +152,17 @@ function rendererRecoveryDetail(payload: ReloadPromptPayload) {
 
 function defaultDevLog(tag: string, ...args: unknown[]) {
   process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
+}
+
+function readDiagnosticContext(
+  getDiagnosticContext: (() => Record<string, unknown>) | undefined,
+) {
+  if (!getDiagnosticContext) return {};
+  try {
+    return getDiagnosticContext();
+  } catch {
+    return {};
+  }
 }
 
 function formatError(error: unknown) {

@@ -79,6 +79,25 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
 | `multica skill files ...` | Nested: manage a skill's files |
 
+### Skill import conflicts
+
+`multica skill import --url <url>` defaults to `--on-conflict fail`. If a skill
+with the same name already exists, the command exits with a structured
+`conflict` result and does not change the workspace.
+
+Use `--on-conflict overwrite` when you created the existing skill and want to
+replace its content while preserving its ID and agent bindings. Use
+`--on-conflict rename` to import a copy with an automatic suffix such as `-2`.
+Use `--on-conflict skip` to leave the existing skill untouched and report
+`skipped`.
+
+```bash
+multica skill import --url https://skills.sh/acme/repo/review-helper
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+```
+
 ## Squads
 
 | Command | Purpose |

@@ -129,6 +129,18 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices Claude Fable 5 at the Mythos-class tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -251,6 +263,39 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("prices Cursor Composer rows at the published rates without cache-write spend", () => {
+    const costWithAllTokenTypes = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+
+    expect(costWithAllTokenTypes("auto")).toBeCloseTo(1.25 + 6 + 0.25, 5);
+    expect(costWithAllTokenTypes("composer-2.5-fast")).toBeCloseTo(
+      3 + 15 + 0.5,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2.5")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-2-fast")).toBeCloseTo(
+      1.5 + 7.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-1.5")).toBeCloseTo(
+      3.5 + 17.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-1")).toBeCloseTo(
+      1.25 + 10 + 0.125,
+      5,
+    );
+    expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
   // The Chinese-model rates below are spot-checked against the literal
   // numbers on the three official price sheets cited in MODEL_PRICING's
   // header comment. Pinning them in tests is what catches a future edit
@@ -346,6 +391,7 @@ describe("estimateCost", () => {
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -369,6 +415,7 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });

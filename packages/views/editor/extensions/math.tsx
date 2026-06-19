@@ -1,7 +1,7 @@
 "use client";
 
 import katex from "katex";
-import { Node, mergeAttributes, nodeInputRule } from "@tiptap/core";
+import { Node, mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer, NodeViewWrapper } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 
@@ -82,43 +82,12 @@ export const InlineMathExtension = Node.create({
     ];
   },
 
-  markdownTokenizer: {
-    name: "inlineMath",
-    level: "inline" as const,
-    start(src: string) {
-      return src.indexOf("$");
-    },
-    tokenize(src: string) {
-      if (!src.startsWith("$") || src.startsWith("$$")) return undefined;
-      const match = src.match(/^\$((?:\\.|[^$\\\n])+?)\$/);
-      if (!match) return undefined;
-      return {
-        type: "inlineMath",
-        raw: match[0],
-        attributes: { expression: match[1] },
-      };
-    },
-  },
-
-  parseMarkdown: (token: any, helpers: any) => {
-    return helpers.createNode("inlineMath", token.attributes);
-  },
-
+  // Single-dollar inline math is intentionally not parsed from Markdown and has
+  // no typing input rule. Dollar amounts like `$100~$120` must stay literal;
+  // users should write explicit `$$...$$` blocks for math.
   renderMarkdown: (node: any) => {
     const expression = String(node.attrs?.expression ?? "");
     return `$${expression}$`;
-  },
-
-  addInputRules() {
-    return [
-      nodeInputRule({
-        find: /\$(?:\\.|[^$\\\n])+\$$/,
-        type: this.type,
-        getAttributes: (match) => ({
-          expression: match[0].slice(1, -1),
-        }),
-      }),
-    ];
   },
 
   addNodeView() {

@@ -2,15 +2,15 @@
  * Frontend mirror of the server's MinQuickCreateCLIVersion gate. The
  * agent-create flow (Quick Create modal) requires the daemon's bundled
  * multica CLI to be at least this version — older daemons either
- * double-create issues on partial CLI failures or mishandle pasted
- * screenshot URLs (see PR #1851 / MUL-1496).
+ * double-create issues on partial CLI failures, drop quick-create attachment
+ * bindings, or mishandle pasted screenshot URLs (see PR #1851 / MUL-1496).
  *
  * Both the frontend pre-validation in the modal and the server's
  * `/api/issues/quick-create` handler enforce this; the server is the
  * authoritative trust boundary, the frontend just lets us tell the user
  * "your daemon needs an upgrade" before they hit submit.
  */
-export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.20";
+export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.21";
 
 export type CliVersionState = "ok" | "too_old" | "missing";
 

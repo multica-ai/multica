@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +72,14 @@ func (c *client) markSeen(eventID string) bool {
 // the ack and is logged at debug level.
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
 
+// MessageKindRecorder is the optional metric hook called once per inbound
+// daemon WebSocket frame. kind is the protocol message type with the
+// "daemon:" prefix stripped (e.g. "heartbeat") or the literal "unknown" for
+// types we don't model. A nil recorder is safely no-op'd.
+type MessageKindRecorder interface {
+	RecordDaemonWSMessageReceived(kind string)
+}
+
 // Hub keeps daemon WebSocket connections indexed by runtime ID. Messages are
 // best-effort wakeup hints; the daemon still uses HTTP claim for correctness.
 type Hub struct {
@@ -82,6 +91,9 @@ type Hub struct {
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
+
+	kindMu       sync.RWMutex
+	kindRecorder MessageKindRecorder
 }
 
 func NewHub() *Hub {
@@ -117,6 +129,27 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetMessageKindRecorder installs an optional callback fired exactly once per
+// inbound daemon WebSocket frame. Used by the metrics layer to count traffic
+// by handler kind without hard-coupling the hub to any specific collector.
+func (h *Hub) SetMessageKindRecorder(rec MessageKindRecorder) {
+	if h == nil {
+		return
+	}
+	h.kindMu.Lock()
+	h.kindRecorder = rec
+	h.kindMu.Unlock()
+}
+
+func (h *Hub) messageKindRecorder() MessageKindRecorder {
+	if h == nil {
+		return nil
+	}
+	h.kindMu.RLock()
+	defer h.kindMu.RUnlock()
+	return h.kindRecorder
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
@@ -343,7 +376,17 @@ func (c *client) handleFrame(raw []byte) {
 	var msg protocol.Message
 	if err := json.Unmarshal(raw, &msg); err != nil {
 		slog.Debug("daemon websocket invalid frame", "error", err, "daemon_id", c.identity.DaemonID)
+		if rec := c.hub.messageKindRecorder(); rec != nil {
+			rec.RecordDaemonWSMessageReceived("invalid")
+		}
 		return
+	}
+	kind := strings.TrimPrefix(msg.Type, "daemon:")
+	if kind == "" {
+		kind = "unknown"
+	}
+	if rec := c.hub.messageKindRecorder(); rec != nil {
+		rec.RecordDaemonWSMessageReceived(kind)
 	}
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:

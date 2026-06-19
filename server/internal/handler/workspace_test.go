@@ -303,6 +303,97 @@ VALUES ($1, $2, 'owner')
 	}
 }
 
+func TestUpdateWorkspace_ReposValidation(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "handler-tests-repos-validation"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO workspace (name, slug, description)
+VALUES ($1, $2, $3)
+RETURNING id
+`, "Handler Test Repos Validation", slug, "UpdateWorkspace repos validation test").Scan(&wsID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+`, wsID, testUserID); err != nil {
+		t.Fatalf("create owner member: %v", err)
+	}
+
+	t.Run("rejects invalid repo URLs without persisting", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+			"repos": []map[string]any{
+				{"url": "not-a-url"},
+			},
+		})
+		req = withURLParam(req, "id", wsID)
+		testHandler.UpdateWorkspace(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 from invalid repos update, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var raw []byte
+		if err := testPool.QueryRow(ctx, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw); err != nil {
+			t.Fatalf("read repos: %v", err)
+		}
+		if string(raw) != "[]" {
+			t.Fatalf("invalid repos update should not persist, got %s", raw)
+		}
+	})
+
+	t.Run("normalizes valid repos", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+			"repos": []map[string]any{
+				{
+					"url":         "  https://github.com/multica-ai/multica.git  ",
+					"description": "  main monorepo  ",
+				},
+				{
+					"url": "https://github.com/multica-ai/multica.git",
+				},
+				{
+					"url": "git@github.com:multica-ai/multica-cloud.git",
+				},
+			},
+		})
+		req = withURLParam(req, "id", wsID)
+		testHandler.UpdateWorkspace(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 from valid repos update, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var raw []byte
+		if err := testPool.QueryRow(ctx, `SELECT repos FROM workspace WHERE id = $1`, wsID).Scan(&raw); err != nil {
+			t.Fatalf("read repos: %v", err)
+		}
+		var repos []workspaceRepoRef
+		if err := json.Unmarshal(raw, &repos); err != nil {
+			t.Fatalf("decode repos: %v", err)
+		}
+		if len(repos) != 2 {
+			t.Fatalf("expected duplicate URL to be deduped, got %d repos: %s", len(repos), raw)
+		}
+		if repos[0].URL != "https://github.com/multica-ai/multica.git" || repos[0].Description != "main monorepo" {
+			t.Fatalf("first repo not normalized: %+v", repos[0])
+		}
+		if repos[1].URL != "git@github.com:multica-ai/multica-cloud.git" {
+			t.Fatalf("second repo not preserved: %+v", repos[1])
+		}
+	})
+}
+
 // revocationFixture is a minimal (workspace, member-to-revoke, runtime,
 // agent, queued-task, daemon-token) bundle used to drive the revocation
 // tests. The "requester" is always testUserID (owner of the workspace) so

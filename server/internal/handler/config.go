@@ -11,6 +11,14 @@ import (
 
 type AppConfig struct {
 	CdnDomain string `json:"cdn_domain"`
+	// CdnSigned tells clients that the CDN domain above serves PRIVATE
+	// content through time-bounded signed URLs (CloudFront signing is
+	// enabled). When true, a raw storage URL on the CDN domain is NOT
+	// publicly fetchable — renderers must not pick it as a native
+	// <img>/<video> source and should fall back to the per-attachment
+	// API endpoint or a freshly signed download_url instead (MUL-3254).
+	// Omitted when false so older clients see the previous shape.
+	CdnSigned bool `json:"cdn_signed,omitempty"`
 	// Public auth config consumed by the web app at runtime so self-hosted
 	// deployments do not need to rebuild the frontend image when operators
 	// toggle signup or wire Google OAuth.
@@ -51,6 +59,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
+	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 
 	// Re-read from env on every request so operators can rotate keys via
@@ -80,7 +89,7 @@ func daemonSetupURLsFromEnv() (string, string) {
 	if serverURL == "" {
 		serverURL = appURL
 	}
-	if isOfficialCloudDaemonConfig(serverURL, appURL) {
+	if isOfficialCloudDaemonConfig(appURL) {
 		return "", ""
 	}
 	return serverURL, appURL
@@ -90,10 +99,16 @@ func normalizePublicURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
-func isOfficialCloudDaemonConfig(serverURL, appURL string) bool {
-	if !urlHostEquals(serverURL, "api.multica.ai") {
-		return false
-	}
+// isOfficialCloudDaemonConfig reports whether this deployment is the official
+// Multica Cloud, identified by its frontend host alone (multica.ai /
+// app.multica.ai). The daemon setup for the managed cloud is always
+// `multica setup` (which hardcodes api.multica.ai), so the per-deployment URLs
+// must be omitted from /api/config even when MULTICA_PUBLIC_URL is unset or
+// misconfigured. Previously this also required serverURL==api.multica.ai, so a
+// cloud deployment that forgot MULTICA_PUBLIC_URL fell through and emitted a
+// `setup self-host --server-url https://multica.ai` command — pointing the
+// daemon's backend at the frontend (no /health, no WebSocket proxy).
+func isOfficialCloudDaemonConfig(appURL string) bool {
 	return urlHostEquals(appURL, "multica.ai") || urlHostEquals(appURL, "app.multica.ai")
 }
 

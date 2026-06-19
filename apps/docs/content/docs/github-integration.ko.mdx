@@ -114,12 +114,19 @@ API 서버에서:
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
+
+# 선택(권장) — 설치 직후 연결된 계정 이름을 바로 확보합니다.
+# 설정하지 않으면 첫 webhook이 도착할 때까지 대기해야 합니다:
+GITHUB_APP_ID=<App 설정 페이지에 표시되는 숫자 App ID>
+GITHUB_APP_PRIVATE_KEY=<BEGIN/END 줄을 포함한 전체 PEM 블록>
 ```
 
-두 변수 모두 필수입니다. 둘 중 하나라도 누락되면:
+`GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET`은 필수입니다. 둘 중 하나라도 누락되면:
 
 - Settings의 `Connect GitHub`이 **비활성화**되고 "not configured" 힌트가 표시됩니다.
 - `/api/webhooks/github` 엔드포인트가 **`503 github webhooks not configured`**를 반환합니다 — Multica는 secret 없이 이벤트를 처리하기를 거부하며, 모든 서명을 조용히 유효한 것으로 취급하지 않습니다.
+
+`GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`는 **선택 사항**입니다. 설정하면 setup 콜백이 GitHub의 App 인증 `/app/installations/{id}` 엔드포인트를 호출해 설치 직후에 실제 조직명/사용자명을 가져옵니다. 설정하지 않으면 연결 카드에 잠시 `Connected to unknown`이 표시되며, GitHub의 `installation.created` 웹훅이 도착하면(보통 몇 초 이내) Multica가 행을 갱신하고 실시간 브로드캐스트를 보내므로 열려 있는 Settings 탭이 수동 새로고침 없이 업데이트됩니다. 비공개 키는 App 설정 페이지의 **Private keys → Generate a private key**에서 생성한 뒤, PEM 블록 전체(`-----BEGIN/END RSA PRIVATE KEY-----` 줄 포함)를 줄바꿈을 유지한 채 env 값에 붙여넣으세요.
 
 `FRONTEND_ORIGIN`도 설정되어 있어야 합니다(어떤 프로덕션 자체 호스팅이든 이미 설정되어 있습니다). 설치 후 setup 콜백이 사용자를 `<FRONTEND_ORIGIN>/settings?tab=github`으로 다시 돌려보냅니다.
 

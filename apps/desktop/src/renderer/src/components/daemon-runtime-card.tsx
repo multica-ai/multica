@@ -6,6 +6,8 @@ import {
   RotateCw,
   Activity,
   ScrollText,
+  LogIn,
+  Info,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -22,6 +24,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
 import { DaemonPanel } from "./daemon-panel";
+import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 import { DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
 
@@ -115,9 +118,24 @@ export function DaemonRuntimeActions() {
     }
   }, []);
 
+  const handleReauth = useCallback(async () => {
+    setActionLoading(true);
+    await reauthenticateDaemon();
+    // onStatusChange resets actionLoading on the next status push; reset here
+    // too in case reauth logged out (unmount) or produced no status change.
+    setActionLoading(false);
+  }, []);
+
   const isRunning = status.state === "running";
+  // The daemon runs somewhere the app can't drive (e.g. inside WSL2): the
+  // lifecycle CLI acts on the host process namespace and can't reach it. Hide
+  // Stop/Restart so they don't silently no-op, mirroring the Settings tab. The
+  // real guard is in the main process (stopDaemon/restartDaemon); this is the
+  // matching UX. See #3916.
+  const externallyManaged = status.externallyManaged === true;
   const isStopped = status.state === "stopped";
   const isCliMissing = status.state === "cli_not_found";
+  const isAuthExpired = status.state === "auth_expired";
   const isTransitioning =
     status.state === "starting" || status.state === "stopping";
   const isInstalling = status.state === "installing_cli";
@@ -131,24 +149,33 @@ export function DaemonRuntimeActions() {
               <ScrollText className="size-3.5 mr-1.5" />
               View logs
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRestart}
-              disabled={actionLoading}
-            >
-              <RotateCw className="size-3.5 mr-1.5" />
-              Restart
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={handleStopClick}
-              disabled={actionLoading}
-            >
-              <Square className="size-3.5 mr-1.5" />
-              Stop
-            </Button>
+            {externallyManaged ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Info className="size-3.5 shrink-0" />
+                Managed outside the app
+              </span>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRestart}
+                  disabled={actionLoading}
+                >
+                  <RotateCw className="size-3.5 mr-1.5" />
+                  Restart
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleStopClick}
+                  disabled={actionLoading}
+                >
+                  <Square className="size-3.5 mr-1.5" />
+                  Stop
+                </Button>
+              </>
+            )}
           </>
         )}
 
@@ -173,6 +200,23 @@ export function DaemonRuntimeActions() {
             <RotateCw className="size-3.5 mr-1.5" />
             Retry setup
           </Button>
+        )}
+
+        {isAuthExpired && (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-xs text-destructive">
+              <AlertCircle className="size-3.5 shrink-0" />
+              Sign-in expired
+            </span>
+            <Button size="sm" onClick={handleReauth} disabled={actionLoading}>
+              {actionLoading ? (
+                <Activity className="size-3.5 mr-1.5 animate-pulse" />
+              ) : (
+                <LogIn className="size-3.5 mr-1.5" />
+              )}
+              Sign in again
+            </Button>
+          </>
         )}
 
         {(isTransitioning || isInstalling) && (

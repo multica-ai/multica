@@ -50,7 +50,22 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-    if (group[0]) merged.push(group[0]);
+    const newest = group[0];
+    if (!newest) continue;
+
+    const commentId =
+      newest.details?.comment_id ??
+      group.find((item) => item.details?.comment_id)?.details?.comment_id;
+
+    if (commentId && newest.details?.comment_id !== commentId) {
+      merged.push({
+        ...newest,
+        details: { ...(newest.details ?? {}), comment_id: commentId },
+      });
+      continue;
+    }
+
+    merged.push(newest);
   }
   return merged.sort(
     (a, b) =>

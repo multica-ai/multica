@@ -92,6 +92,44 @@ func TimestampToPtr(t pgtype.Timestamptz) *string {
 	return &s
 }
 
+// DateToPtr formats a pgtype.Date as a date-only "YYYY-MM-DD" string, or nil
+// when unset. Issue start_date/due_date are calendar days with no time-of-day
+// or timezone, so they must never be rendered through an instant.
+func DateToPtr(d pgtype.Date) *string {
+	if !d.Valid {
+		return nil
+	}
+	s := d.Time.Format(time.DateOnly)
+	return &s
+}
+
+// ParseCalendarDate parses a calendar day from a "YYYY-MM-DD" string into a
+// pgtype.Date carrying no time-of-day or timezone.
+//
+// For backward compatibility it ALSO accepts an RFC3339 timestamp, but ONLY
+// when it lands exactly on a UTC day boundary (e.g. "2026-03-01T00:00:00Z"),
+// which unambiguously denotes that calendar day. A non-midnight instant is a
+// legacy local-midnight-as-UTC value (e.g. UTC+8 sends "2026-02-28T16:00:00Z"
+// for the picked day 2026-03-01) whose intended calendar day is unrecoverable —
+// it is rejected loudly rather than silently stored as the wrong day. New
+// clients always send "YYYY-MM-DD".
+func ParseCalendarDate(s string) (pgtype.Date, error) {
+	if t, err := time.Parse(time.DateOnly, s); err == nil {
+		return pgtype.Date{Time: t, Valid: true}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		u := t.UTC()
+		if u.Hour() == 0 && u.Minute() == 0 && u.Second() == 0 && u.Nanosecond() == 0 {
+			return pgtype.Date{
+				Time:  time.Date(u.Year(), u.Month(), u.Day(), 0, 0, 0, 0, time.UTC),
+				Valid: true,
+			}, nil
+		}
+		return pgtype.Date{}, fmt.Errorf("invalid date %q: timestamps must be a UTC midnight boundary (e.g. 2026-03-01T00:00:00Z); use YYYY-MM-DD", s)
+	}
+	return pgtype.Date{}, fmt.Errorf("invalid date %q: expected YYYY-MM-DD", s)
+}
+
 func UUIDToPtr(u pgtype.UUID) *string {
 	if !u.Valid {
 		return nil

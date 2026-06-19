@@ -60,6 +60,7 @@ import {
   Link2,
   List,
   ListOrdered,
+  ListTodo,
   Quote,
   ChevronDown,
   Check,
@@ -297,7 +298,7 @@ function HeadingDropdown({ editor, onOpenChange, activeLevel }: { editor: Editor
 // List Dropdown
 // ---------------------------------------------------------------------------
 
-function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean }) {
+function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { editor: Editor; onOpenChange: (open: boolean) => void; isBullet: boolean; isOrdered: boolean; isTask: boolean }) {
   const { t } = useT("editor");
   const [open, setOpen] = useState(false);
 
@@ -310,7 +311,7 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={
-          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered} onMouseDown={(e) => e.preventDefault()} />
+          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-xs font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered || isTask} onMouseDown={(e) => e.preventDefault()} />
         }>
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
@@ -348,6 +349,18 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered }: { editor: E
         >
           <ListOrdered className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.ordered_list)}
           {isOrdered && <Check className="ml-auto size-3.5" />}
+        </button>
+        <button
+          type="button"
+          className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            editor.chain().focus().toggleTaskList().run();
+            handleOpenChange(false);
+          }}
+        >
+          <ListTodo className="size-3.5" /> {t(($) => $.bubble_menu.list_dropdown.task_list)}
+          {isTask && <Check className="ml-auto size-3.5" />}
         </button>
       </PopoverContent>
     </Popover>
@@ -478,6 +491,7 @@ function EditorBubbleMenu({
       blockquote: e.isActive("blockquote"),
       bulletList: e.isActive("bulletList"),
       orderedList: e.isActive("orderedList"),
+      taskList: e.isActive("taskList"),
       heading1: e.isActive("heading", { level: 1 }),
       heading2: e.isActive("heading", { level: 2 }),
       heading3: e.isActive("heading", { level: 3 }),
@@ -606,7 +620,7 @@ function EditorBubbleMenu({
             </Tooltip>
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <HeadingDropdown editor={editor} onOpenChange={handleMenuOpenChange} activeLevel={fmt.heading1 ? 1 : fmt.heading2 ? 2 : fmt.heading3 ? 3 : undefined} />
-            <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} />
+            <ListDropdown editor={editor} onOpenChange={handleMenuOpenChange} isBullet={fmt.bulletList} isOrdered={fmt.orderedList} isTask={fmt.taskList} />
             <Tooltip>
               <TooltipTrigger render={
                 <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />

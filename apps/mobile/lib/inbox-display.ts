@@ -62,7 +62,9 @@ export function getInboxDisplayTitle(item: InboxItem): string {
  *   2. Group by `issue_id` (fall back to `id` for items with no issue
  *      attached — e.g. quick_create_failed).
  *   3. In each group, keep the newest by `created_at`.
- *   4. Sort the result newest-first.
+ *   4. Preserve the newest grouped `comment_id` anchor when the newest row
+ *      is a later status/metadata event for the same issue.
+ *   5. Sort the result newest-first.
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
   const active = items.filter((i) => !i.archived);
@@ -79,7 +81,22 @@ export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
       (a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-    if (group[0]) merged.push(group[0]);
+    const newest = group[0];
+    if (!newest) continue;
+
+    const commentId =
+      newest.details?.comment_id ??
+      group.find((item) => item.details?.comment_id)?.details?.comment_id;
+
+    if (commentId && newest.details?.comment_id !== commentId) {
+      merged.push({
+        ...newest,
+        details: { ...(newest.details ?? {}), comment_id: commentId },
+      });
+      continue;
+    }
+
+    merged.push(newest);
   }
   return merged.sort(
     (a, b) =>

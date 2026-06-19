@@ -35,6 +35,8 @@ const {
   mockPathname,
   mockGetShareableUrl,
   mockMembers,
+  mockAgents,
+  mockSquads,
   mockOpenModal,
   mockToastSuccess,
   mockClipboardWrite,
@@ -60,6 +62,20 @@ const {
       avatar_url: string | null;
     }>,
   },
+  mockAgents: {
+    current: [] as Array<{
+      id: string;
+      name: string;
+      avatar_url: string | null;
+    }>,
+  },
+  mockSquads: {
+    current: [] as Array<{
+      id: string;
+      name: string;
+      avatar_url: string | null;
+    }>,
+  },
   mockOpenModal: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockClipboardWrite: vi.fn(() => Promise.resolve()),
@@ -70,6 +86,31 @@ vi.mock("@multica/core/api", () => ({
     getBaseUrl: () => "http://127.0.0.1:8080",
     searchIssues: mockSearchIssues,
     searchProjects: mockSearchProjects,
+  },
+}));
+
+vi.mock("../common/actor-avatar", () => ({
+  ActorAvatar: ({
+    actorType,
+    actorId,
+  }: {
+    actorType: string;
+    actorId: string;
+  }) => {
+    const name =
+      actorType === "member"
+        ? mockMembers.current.find((m) => m.user_id === actorId)?.name
+        : actorType === "agent"
+          ? mockAgents.current.find((a) => a.id === actorId)?.name
+          : actorType === "squad"
+            ? mockSquads.current.find((s) => s.id === actorId)?.name
+            : undefined;
+    return (
+      <span
+        data-testid="issue-assignee-avatar"
+        title={name ?? `${actorType}:${actorId}`}
+      />
+    );
   },
 }));
 
@@ -109,6 +150,8 @@ vi.mock("@multica/core/paths", () => ({
     settings: () => "/ws-test/settings",
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     memberDetail: (id: string) => `/ws-test/members/${id}`,
+    agentDetail: (id: string) => `/ws-test/agents/${id}`,
+    squadDetail: (id: string) => `/ws-test/squads/${id}`,
     projectDetail: (id: string) => `/ws-test/projects/${id}`,
   }),
 }));
@@ -121,6 +164,8 @@ vi.mock("@multica/core/issues/queries", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
+  agentListOptions: () => ({ queryKey: ["workspaces", "ws-test", "agents"] }),
+  squadListOptions: () => ({ queryKey: ["workspaces", "ws-test", "squads"] }),
 }));
 
 vi.mock("@multica/core/modals", () => ({
@@ -143,6 +188,12 @@ vi.mock("@tanstack/react-query", () => ({
     const key = opts.queryKey;
     if (key[0] === "workspaces" && key[2] === "members") {
       return { data: mockMembers.current };
+    }
+    if (key[0] === "workspaces" && key[2] === "agents") {
+      return { data: mockAgents.current };
+    }
+    if (key[0] === "workspaces" && key[2] === "squads") {
+      return { data: mockSquads.current };
     }
     if (opts.enabled === false) return { data: undefined };
     return { data: resolveIssue(key) };
@@ -174,6 +225,8 @@ describe("SearchCommand", () => {
     mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
+    mockAgents.current = [];
+    mockSquads.current = [];
     mockSetTheme.mockReset();
     mockTheme.current = "system";
     mockPathname.current = "/ws-test/issues";
@@ -471,6 +524,90 @@ describe("SearchCommand", () => {
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("Existing issue")).toBeInTheDocument();
     expect(screen.queryByText("deleted-issue")).not.toBeInTheDocument();
+  });
+
+  it("shows the assignee avatar instead of status text for issue search results", async () => {
+    const user = userEvent.setup();
+    mockMembers.current = [
+      {
+        id: "member-1",
+        workspace_id: "ws-test",
+        user_id: "user-1",
+        role: "member",
+        created_at: "2026-01-01T00:00:00Z",
+        name: "Alice Zhang",
+        email: "alice@example.com",
+        avatar_url: null,
+      },
+    ];
+    mockSearchIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-assigned",
+          workspace_id: "ws-test",
+          number: 101,
+          identifier: "MUL-101",
+          title: "Assigned search result",
+          description: null,
+          status: "in_review",
+          priority: "none",
+          assignee_type: "member",
+          assignee_id: "user-1",
+          creator_type: "member",
+          creator_id: "user-1",
+          parent_issue_id: null,
+          project_id: null,
+          position: 0,
+          start_date: null,
+          due_date: null,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+          match_source: "title",
+        },
+      ],
+      total: 1,
+    });
+
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "assigned");
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText((_, el) =>
+            el?.textContent === "Assigned search result" &&
+            el?.tagName === "SPAN",
+          ),
+        ).toBeInTheDocument();
+      },
+      { timeout: 2000 },
+    );
+
+    expect(screen.getByTitle("Alice Zhang")).toBeInTheDocument();
+    expect(screen.queryByText("In Review")).not.toBeInTheDocument();
+  });
+
+  it("shows the assignee avatar instead of status text for recent issues", () => {
+    mockRecentItems.current = [{ id: "issue-1", visitedAt: 1000 }];
+    mockAgents.current = [{ id: "agent-1", name: "Niko", avatar_url: null }];
+    mockAllIssues.current = [
+      {
+        id: "issue-1",
+        identifier: "MUL-1",
+        title: "Recent assigned issue",
+        status: "done",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      },
+    ];
+
+    renderSearch();
+
+    expect(screen.getByText("Recent assigned issue")).toBeInTheDocument();
+    expect(screen.getByTitle("Niko")).toBeInTheDocument();
+    expect(screen.queryByText("Done")).not.toBeInTheDocument();
   });
 
   it("renders description and comment snippets regardless of match_source", async () => {

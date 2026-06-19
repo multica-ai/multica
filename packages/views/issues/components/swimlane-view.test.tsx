@@ -19,9 +19,18 @@ vi.mock("@multica/core/hooks", () => ({
 const mockListChildrenByParents = vi.hoisted(() =>
   vi.fn().mockResolvedValue({ issues: [] }),
 );
+const mockGetAgentTaskSnapshot = vi.hoisted(() =>
+  vi.fn().mockResolvedValue([]),
+);
 vi.mock("@multica/core/api", () => ({
-  api: { listChildrenByParents: mockListChildrenByParents },
-  getApi: () => ({ listChildrenByParents: mockListChildrenByParents }),
+  api: {
+    listChildrenByParents: mockListChildrenByParents,
+    getAgentTaskSnapshot: mockGetAgentTaskSnapshot,
+  },
+  getApi: () => ({
+    listChildrenByParents: mockListChildrenByParents,
+    getAgentTaskSnapshot: mockGetAgentTaskSnapshot,
+  }),
   setApiInstance: vi.fn(),
 }));
 
@@ -154,6 +163,14 @@ const mockViewState: {
   toggleSwimlaneCollapsed: (key: string) => void;
   hideStatus: (s: string) => void;
   showStatus: (s: string) => void;
+  priorityFilters?: string[];
+  assigneeFilters?: any[];
+  includeNoAssignee?: boolean;
+  creatorFilters?: any[];
+  projectFilters?: string[];
+  includeNoProject?: boolean;
+  labelFilters?: string[];
+  agentRunningFilter?: boolean;
 } = {
   sortBy: "position",
   sortDirection: "asc",
@@ -166,6 +183,14 @@ const mockViewState: {
   toggleSwimlaneCollapsed: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
+  priorityFilters: [],
+  assigneeFilters: [],
+  includeNoAssignee: false,
+  creatorFilters: [],
+  projectFilters: [],
+  includeNoProject: false,
+  labelFilters: [],
+  agentRunningFilter: false,
 };
 const mockSetSwimlaneOrder = mockViewState.setSwimlaneOrder as ReturnType<typeof vi.fn>;
 const mockToggleSwimlaneCollapsed = mockViewState.toggleSwimlaneCollapsed as ReturnType<typeof vi.fn>;
@@ -318,7 +343,16 @@ describe("SwimLaneView", () => {
     mockViewState.swimlaneGrouping = "parent";
     mockViewState.swimlaneOrders = { parent: [], project: [], assignee: [] };
     mockViewState.collapsedSwimlanes = { parent: [], project: [], assignee: [] };
+    mockViewState.priorityFilters = [];
+    mockViewState.assigneeFilters = [];
+    mockViewState.includeNoAssignee = false;
+    mockViewState.creatorFilters = [];
+    mockViewState.projectFilters = [];
+    mockViewState.includeNoProject = false;
+    mockViewState.labelFilters = [];
+    mockViewState.agentRunningFilter = false;
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
+    mockGetAgentTaskSnapshot.mockResolvedValue([]);
     useLoadMoreByStatusMock.mockImplementation(() => ({
       total: 0,
       loaded: 0,
@@ -1344,5 +1378,193 @@ describe("SwimLaneView", () => {
     });
 
     expect(mockOnMoveIssue).not.toHaveBeenCalled();
+  });
+
+  it("filters batch-fetched children using active filters", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+
+    const grandparent: Issue = {
+      id: "gp-2",
+      workspace_id: "ws-1",
+      number: 20,
+      identifier: "PROJ-20",
+      title: "Grandparent 2",
+      description: null,
+      status: "todo",
+      priority: "high",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-2",
+      number: 21,
+      identifier: "PROJ-21",
+      title: "Parent 2",
+      parent_issue_id: "gp-2",
+      position: 11,
+    };
+    const matchingGrandchild: Issue = {
+      ...grandparent,
+      id: "gc-matching",
+      number: 22,
+      identifier: "PROJ-22",
+      title: "Matching Child (High Priority)",
+      status: "in_progress",
+      priority: "high",
+      parent_issue_id: "p-2",
+      position: 12,
+    };
+    const nonMatchingGrandchild: Issue = {
+      ...grandparent,
+      id: "gc-non-matching",
+      number: 23,
+      identifier: "PROJ-23",
+      title: "Non-matching Child (Low Priority)",
+      status: "in_progress",
+      priority: "low",
+      parent_issue_id: "p-2",
+      position: 13,
+    };
+
+    mockListChildrenByParents.mockResolvedValueOnce({
+      issues: [matchingGrandchild, nonMatchingGrandchild],
+    });
+
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-2", { done: 0, total: 2 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        activeFilters={{
+          priorityFilters: ["high"],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+          agentRunningFilter: false,
+        }}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Matching Child (High Priority)")).toBeInTheDocument();
+      expect(screen.queryByText("Non-matching Child (Low Priority)")).toBeNull();
+    });
+  });
+
+  it("filters batch-fetched children using working filter", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+
+    const grandparent: Issue = {
+      id: "gp-3",
+      workspace_id: "ws-1",
+      number: 30,
+      identifier: "PROJ-30",
+      title: "Grandparent 3",
+      description: null,
+      status: "todo",
+      priority: "medium",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 10,
+      start_date: null,
+      due_date: null,
+      metadata: {},
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const parent: Issue = {
+      ...grandparent,
+      id: "p-3",
+      number: 31,
+      identifier: "PROJ-31",
+      title: "Parent 3",
+      parent_issue_id: "gp-3",
+      position: 11,
+    };
+    const runningGrandchild: Issue = {
+      ...grandparent,
+      id: "gc-running",
+      number: 32,
+      identifier: "PROJ-32",
+      title: "Running Child",
+      status: "in_progress",
+      parent_issue_id: "p-3",
+      position: 12,
+    };
+    const nonRunningGrandchild: Issue = {
+      ...grandparent,
+      id: "gc-non-running",
+      number: 33,
+      identifier: "PROJ-33",
+      title: "Non-running Child",
+      status: "in_progress",
+      parent_issue_id: "p-3",
+      position: 13,
+    };
+
+    mockGetAgentTaskSnapshot.mockResolvedValueOnce([
+      { id: "task-1", status: "running", issue_id: "gc-running" },
+    ]);
+
+    mockListChildrenByParents.mockResolvedValueOnce({
+      issues: [runningGrandchild, nonRunningGrandchild],
+    });
+
+    const childProgressMap = new Map<string, { done: number; total: number }>([
+      ["p-3", { done: 0, total: 2 }],
+    ]);
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[grandparent, parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+          agentRunningFilter: true,
+        }}
+        childProgressMap={childProgressMap}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Running Child")).toBeInTheDocument();
+      expect(screen.queryByText("Non-running Child")).toBeNull();
+    });
   });
 });

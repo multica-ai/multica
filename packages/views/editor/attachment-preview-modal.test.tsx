@@ -17,6 +17,7 @@ vi.mock("../platform", () => ({
 const {
   getAttachmentTextContentMock,
   downloadMock,
+  getBaseUrlMock,
   FakePreviewTooLargeError,
   FakePreviewUnsupportedError,
 } = vi.hoisted(() => {
@@ -35,13 +36,19 @@ const {
   return {
     getAttachmentTextContentMock: vi.fn(),
     downloadMock: vi.fn(),
+    // Default to the web shape (empty base, same-origin). Tests covering
+    // the desktop-renderer / standalone-shell case override per-test.
+    getBaseUrlMock: vi.fn(() => ""),
     FakePreviewTooLargeError,
     FakePreviewUnsupportedError,
   };
 });
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  api: {
+    getAttachmentTextContent: getAttachmentTextContentMock,
+    getBaseUrl: getBaseUrlMock,
+  },
   PreviewTooLargeError: FakePreviewTooLargeError,
   PreviewUnsupportedError: FakePreviewUnsupportedError,
 }));
@@ -136,6 +143,7 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
     filename: "test.bin",
     url: "https://cdn.example.test/att-1.bin",
     download_url: "https://cdn.example.test/att-1.bin?Signature=s",
+    markdown_url: "https://cdn.example.test/api/attachments/att-1/download",
     content_type: "application/octet-stream",
     size_bytes: 0,
     created_at: "2026-05-13T00:00:00Z",
@@ -147,6 +155,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   navState.hasOpenInNewTab = true;
   slugState.value = "acme";
+  // Default to web's same-origin empty base so existing absolute-URL tests
+  // remain unaffected by the relative-URL resolution added in normalize().
+  getBaseUrlMock.mockReturnValue("");
 });
 
 afterEach(() => {
@@ -161,6 +172,26 @@ describe("AttachmentPreviewModal — dispatch", () => {
     expect(img).toBeTruthy();
     expect(img?.getAttribute("src")).toBe(att.download_url);
     expect(img?.getAttribute("alt")).toBe(att.filename);
+  });
+
+  it("falls back to durable media URLs when a full attachment has no download_url", () => {
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "",
+      markdown_url: "https://api.example.test/api/attachments/att-1/download",
+      url: "https://cdn.example.test/att-1.png?Signature=old",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(att.markdown_url);
+    expect(img?.getAttribute("src")).not.toContain("Signature=");
   });
 
   it("renders an <img> from a URL-only source for image filenames", () => {
@@ -257,6 +288,113 @@ describe("AttachmentPreviewModal — dispatch", () => {
     const att = makeAttachment({ filename: "blob.zip", content_type: "application/zip" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
     expect(screen.getByText("This file type can't be previewed.")).toBeTruthy();
+  });
+});
+
+describe("AttachmentPreviewModal — server-relative download_url resolution (MUL-2976)", () => {
+  // The unified `/api/attachments/{id}/download` endpoint returns a
+  // server-relative path on non-CloudFront deployments. The web app keeps
+  // working same-origin because `apiBaseUrl=""`, but the desktop renderer
+  // is loaded from `app://` / file: / dev-server origin and needs the
+  // absolute URL — otherwise `<img src>`, `<iframe src>`, `<video src>`
+  // hit the shell origin and fail.
+  it("prefixes the configured API base for image previews when download_url is server-relative", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/att-1/download",
+    );
+  });
+
+  it("prefixes the configured API base for PDF previews when download_url is server-relative", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const iframe = document.querySelector("iframe");
+    expect(iframe?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/att-1/download",
+    );
+  });
+
+  it("keeps a same-origin relative URL untouched when the configured base is empty (web)", () => {
+    // Default web shape — empty base. Browser resolves the relative path
+    // against the document origin, no prefix needed.
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe("/api/attachments/att-1/download");
+  });
+
+  it("trims a trailing slash on the configured base when joining a relative URL", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test/");
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "/api/attachments/att-1/download",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://api.example.test/api/attachments/att-1/download",
+    );
+  });
+
+  it("passes an already-absolute CloudFront/presigned download_url through unchanged", () => {
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    const att = makeAttachment({
+      filename: "shot.png",
+      content_type: "image/png",
+      download_url: "https://cdn.example.test/att-1.png?Signature=s",
+    });
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: att }}
+        open
+        onClose={() => {}}
+      />,
+    );
+    const img = document.querySelector("img");
+    expect(img?.getAttribute("src")).toBe(
+      "https://cdn.example.test/att-1.png?Signature=s",
+    );
   });
 });
 

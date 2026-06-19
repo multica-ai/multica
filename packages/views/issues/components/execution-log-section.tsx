@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
@@ -24,8 +25,9 @@ import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 // statuses) collapse behind a "Show past runs (N)" toggle.
 //
 // Replaces:
-//   - the click-to-expand timeline that used to live inside AgentLiveCard
-//     (sticky card stays as a header-only banner)
+//   - the click-to-expand timeline that used to live inside the in-body live
+//     card (the live "agent is working" signal now lives in the header via
+//     IssueAgentHeaderChip)
 //   - the standalone <TaskRunHistory> below the main content
 //
 // Row layout — simple left/right flex:
@@ -46,9 +48,9 @@ interface ExecutionLogSectionProps {
   issueId: string;
 }
 
-// Past-runs sort priority: failed first (needs attention), then
-// cancelled (procedural noise), then completed (the boring 'done'
-// case sinks to the bottom). Within each group, newest first.
+// Past-runs sort priority: newest first by timestamp. When two runs
+// share the same timestamp, failed ranks above cancelled, which ranks
+// above completed.
 const PAST_STATUS_RANK: Record<string, number> = {
   failed: 0,
   cancelled: 1,
@@ -94,17 +96,15 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
         t.status === "failed" ||
         t.status === "cancelled",
     );
-    // Stable sort: failed first, cancelled second, completed last.
-    // Within group: newest completed_at first (fall back to created_at
-    // for malformed rows missing completed_at).
     return past.toSorted((a, b) => {
-      const rankDiff =
-        (PAST_STATUS_RANK[a.status] ?? 99) -
-        (PAST_STATUS_RANK[b.status] ?? 99);
-      if (rankDiff !== 0) return rankDiff;
       const at = a.completed_at ?? a.created_at;
       const bt = b.completed_at ?? b.created_at;
-      return new Date(bt).getTime() - new Date(at).getTime();
+      const timeDiff = new Date(bt).getTime() - new Date(at).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return (
+        (PAST_STATUS_RANK[a.status] ?? 99) -
+        (PAST_STATUS_RANK[b.status] ?? 99)
+      );
     });
   }, [tasks]);
 
@@ -135,7 +135,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveRow key={task.id} task={task} issueId={issueId} />
+            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
 
           {pastTasks.length > 0 && (
@@ -241,13 +241,39 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+// One active (running / queued / dispatched / parked) task row. Running rows
+// keep status to a single live elapsed timer; transcript and stop stay available
+// as hover actions. Transcript content lazy-loads on click via TranscriptButton,
+// so the row no longer fetches task messages just to render a count.
+export function ActiveTaskRow({
+  task,
+  issueId,
+}: {
+  task: AgentTask;
+  issueId: string;
+}) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
+
+  // Running rows show a live-ticking elapsed timer (the ticking digits carry
+  // "alive", the duration carries "how long"). Only running rows tick.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (task.status !== "running") return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [task.status]);
+  const elapsed =
+    task.status === "running"
+      ? formatDuration(
+          task.started_at ?? task.dispatched_at ?? task.created_at,
+          now,
+        )
+      : "";
 
   // Transcript only meaningful once messages exist — pure-queued and
   // waiting_local_directory tasks haven't streamed any agent output yet.
@@ -276,7 +302,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       <RowStatus title={label}>
         {task.status === "running" ? (
           <>
-            <Loader2 className="h-3 w-3 animate-spin text-info" />
+            <span className="text-info tabular-nums">{elapsed}</span>
             <span className="sr-only">{label}</span>
           </>
         ) : (
@@ -288,7 +314,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
           <TranscriptButton
             task={task}
             agentName=""
-            isLive
+            isLive={task.status === "running"}
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}

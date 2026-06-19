@@ -8,10 +8,9 @@ import {
   useRef,
   useState,
 } from "react";
-import { computePosition, flip, offset, shift } from "@floating-ui/dom";
-import { ReactRenderer } from "@tiptap/react";
 import type { QueryClient } from "@tanstack/react-query";
-import type { SuggestionOptions, SuggestionProps } from "@tiptap/suggestion";
+import type { SuggestionOptions } from "@tiptap/suggestion";
+import { PluginKey } from "@tiptap/pm/state";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { getCurrentWsId } from "@multica/core/platform";
@@ -20,19 +19,38 @@ import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { createSuggestionPopupRender } from "./suggestion-popup";
 
 const MAX_ITEMS = 20;
+
+/** Known built-in command ids — the keys under editor `slash_command.commands`. */
+export type BuiltinCommandKey = "note";
 
 export interface SlashCommandItem {
   id: string;
   label: string;
-  description: string;
+  /** Raw description (skill picker). Built-in commands use descriptionKey. */
+  description?: string;
+  /**
+   * For built-in commands: the i18n key under editor `slash_command.commands`.
+   * When set, the menu renders the translated copy instead of `description`,
+   * so the visible string stays localized (the typed `/label` does not).
+   */
+  descriptionKey?: BuiltinCommandKey;
 }
 
 interface SlashCommandListProps {
   items: SlashCommandItem[];
   query: string;
   command: (item: SlashCommandItem) => void;
+  /**
+   * When true, render nothing instead of an empty-state box when there are no
+   * matching items. Used by the built-in command menu in issue comments, where
+   * `/` is common in prose (paths, dates) and a popup on every slash would be
+   * noise. The chat skill picker leaves this false so it can still explain
+   * "no skills configured".
+   */
+  hideOnEmpty?: boolean;
 }
 
 export interface SlashCommandListRef {
@@ -42,7 +60,7 @@ export interface SlashCommandListRef {
 export const SlashCommandList = forwardRef<
   SlashCommandListRef,
   SlashCommandListProps
->(function SlashCommandList({ items, query, command }, ref) {
+>(function SlashCommandList({ items, query, command, hideOnEmpty = false }, ref) {
   const { t } = useT("editor");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -87,6 +105,7 @@ export const SlashCommandList = forwardRef<
   }));
 
   if (items.length === 0) {
+    if (hideOnEmpty) return null;
     return (
       <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
         {t(($) =>
@@ -98,27 +117,37 @@ export const SlashCommandList = forwardRef<
     );
   }
 
+  // Built-in commands carry an i18n key so the visible description stays
+  // localized; skills carry a raw description string from their config.
+  const describe = (item: SlashCommandItem): string | undefined =>
+    item.descriptionKey === "note"
+      ? t(($) => $.slash_command.commands.note)
+      : item.description;
+
   return (
     <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
-      {items.map((item, index) => (
-        <button
-          key={item.id}
-          ref={(el) => {
-            itemRefs.current[index] = el;
-          }}
-          className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
-            selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
-          }`}
-          onClick={() => selectItem(index)}
-        >
-          <span className="font-medium">/{item.label}</span>
-          {item.description && (
-            <span className="truncate text-muted-foreground">
-              {item.description}
-            </span>
-          )}
-        </button>
-      ))}
+      {items.map((item, index) => {
+        const description = describe(item);
+        return (
+          <button
+            key={item.id}
+            ref={(el) => {
+              itemRefs.current[index] = el;
+            }}
+            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
+              selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
+            }`}
+            onClick={() => selectItem(index)}
+          >
+            <span className="font-medium">/{item.label}</span>
+            {description && (
+              <span className="truncate text-muted-foreground">
+                {description}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 });
@@ -162,11 +191,11 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
   SuggestionOptions<SlashCommandItem>,
   "editor"
 > {
-  let renderer: ReactRenderer<SlashCommandListRef> | null = null;
-  let popup: HTMLDivElement | null = null;
+  const pluginKey = new PluginKey("slashCommandSuggestion");
 
   return {
     char: "/",
+    pluginKey,
     items: ({ query }) => buildItems(qc, query),
     command: ({ editor, range, props }) => {
       const nodeAfter = editor.view.state.selection.$to.nodeAfter;
@@ -193,70 +222,75 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
 
       window.getSelection()?.collapseToEnd();
     },
-    render: () => {
-      return {
-        onStart: (props: SuggestionProps<SlashCommandItem>) => {
-          renderer = new ReactRenderer(SlashCommandList, {
-            props: {
-              items: props.items,
-              query: props.query,
-              command: props.command,
-            },
-            editor: props.editor,
-          });
-
-          popup = document.createElement("div");
-          popup.style.position = "fixed";
-          popup.style.zIndex = "50";
-          popup.appendChild(renderer.element);
-          document.body.appendChild(popup);
-
-          updatePosition(popup, props.clientRect);
-        },
-        onUpdate: (props: SuggestionProps<SlashCommandItem>) => {
-          renderer?.updateProps({
-            items: props.items,
-            query: props.query,
-            command: props.command,
-          });
-          if (popup) updatePosition(popup, props.clientRect);
-        },
-        onKeyDown: (props: { event: KeyboardEvent }) => {
-          if (props.event.key === "Escape") {
-            cleanup();
-            return true;
-          }
-          return renderer?.ref?.onKeyDown(props) ?? false;
-        },
-        onExit: () => {
-          cleanup();
-        },
-      };
-    },
+    render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
+      pluginKey,
+      component: SlashCommandList,
+      getProps: (props) => ({
+        items: props.items,
+        query: props.query,
+        command: props.command,
+      }),
+      onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+    }),
   };
+}
 
-  function updatePosition(
-    el: HTMLDivElement,
-    clientRect: (() => DOMRect | null) | null | undefined,
-  ) {
-    if (!clientRect) return;
-    const virtualEl = {
-      getBoundingClientRect: () => clientRect() ?? new DOMRect(),
-    };
-    computePosition(virtualEl, el, {
-      placement: "bottom-start",
-      strategy: "fixed",
-      middleware: [offset(4), flip(), shift({ padding: 8 })],
-    }).then(({ x, y }) => {
-      el.style.left = `${x}px`;
-      el.style.top = `${y}px`;
-    });
-  }
+// ---------------------------------------------------------------------------
+// Built-in command menu (issue comments)
+// ---------------------------------------------------------------------------
 
-  function cleanup() {
-    renderer?.destroy();
-    renderer = null;
-    popup?.remove();
-    popup = null;
-  }
+/**
+ * Built-in slash commands offered in the issue comment composer. Unlike the
+ * chat `/` picker (which lists the active agent's skills), these are a fixed,
+ * hand-curated set. Currently only `/note`, which marks a comment as a
+ * human-only note that won't trigger the assigned agent — mirrors the backend
+ * `noteCommentPrefix` in server/internal/handler/comment.go.
+ */
+export const BUILTIN_COMMANDS: SlashCommandItem[] = [
+  { id: "note", label: "note", descriptionKey: "note" },
+];
+
+// Match on the command label as a prefix only — the description is for display,
+// not search. With a single command this keeps the menu predictable (typing
+// `/no` surfaces `note`; an unrelated `/deploy` shows nothing).
+export function buildBuiltinCommandItems(query: string): SlashCommandItem[] {
+  const q = query.toLowerCase();
+  return BUILTIN_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(q));
+}
+
+export function createBuiltinCommandSuggestion(): Omit<
+  SuggestionOptions<SlashCommandItem>,
+  "editor"
+> {
+  const pluginKey = new PluginKey("builtinCommandSuggestion");
+
+  return {
+    char: "/",
+    pluginKey,
+    items: ({ query }) => buildBuiltinCommandItems(query),
+    command: ({ editor, range, props }) => {
+      // Insert the plain-text prefix (e.g. "/note ") rather than a rich node,
+      // so a menu selection and a hand-typed command are byte-identical and the
+      // backend can detect the marker with a simple prefix match. The trailing
+      // space terminates the suggestion match so the menu does not re-open.
+      editor
+        .chain()
+        .focus()
+        .insertContentAt(range, [{ type: "text", text: `/${props.label} ` }])
+        .run();
+
+      window.getSelection()?.collapseToEnd();
+    },
+    render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
+      pluginKey,
+      component: SlashCommandList,
+      getProps: (props) => ({
+        items: props.items,
+        query: props.query,
+        command: props.command,
+        hideOnEmpty: true,
+      }),
+      onKeyDown: (ref, props) => ref?.onKeyDown(props) ?? false,
+    }),
+  };
 }

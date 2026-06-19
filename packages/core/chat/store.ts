@@ -14,8 +14,6 @@ export const DRAFT_NEW_SESSION = "__new__";
 const CHAT_WIDTH_KEY = "multica:chat:width";
 const CHAT_HEIGHT_KEY = "multica:chat:height";
 const CHAT_EXPANDED_KEY = "multica:chat:expanded";
-/** Focus mode is a personal preference — global across workspaces/sessions. */
-const FOCUS_MODE_KEY = "multica:chat:focusMode";
 /**
  * Open/closed preference, persisted globally (not per-workspace) — most users
  * have one habitual chat-panel preference across workspaces. Missing key =
@@ -66,21 +64,7 @@ export interface ChatTimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
-}
-
-/**
- * A derived "where I am" pointer — not stored, recomputed each render from
- * the current route + react-query cache. The type is exported because
- * consumers (buildAnchorMarkdown, chip props) share the same shape.
- */
-export interface ContextAnchor {
-  type: "issue" | "project";
-  /** UUID for `issue`, UUID for `project`. */
-  id: string;
-  /** Human-readable label: issue identifier (MUL-1) or project title. */
-  label: string;
-  /** Optional secondary text — issue title for issue anchors. */
-  subtitle?: string;
+  created_at?: string;
 }
 
 export interface ChatState {
@@ -89,12 +73,6 @@ export interface ChatState {
   selectedAgentId: string | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
-  /**
-   * When on, the chat tracks whatever issue/project/inbox-item the user is
-   * looking at and prepends it to outgoing messages. Persisted globally so
-   * the preference survives workspace switches and reloads.
-   */
-  focusMode: boolean;
   /** Raw user-chosen size — no clamp applied. UI layer clamps at render time. */
   chatWidth: number;
   chatHeight: number;
@@ -106,7 +84,6 @@ export interface ChatState {
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   clearInputDraft: (sessionId: string) => void;
-  setFocusMode: (on: boolean) => void;
   /** Persist raw size and auto-exit expanded mode. */
   setChatSize: (width: number, height: number) => void;
   setExpanded: (expanded: boolean) => void;
@@ -135,7 +112,6 @@ export function createChatStore(options: ChatStoreOptions) {
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
-    focusMode: storage.getItem(FOCUS_MODE_KEY) === "true",
     chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
     chatHeight: Number(storage.getItem(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
     isExpanded: storage.getItem(wsKey(CHAT_EXPANDED_KEY)) === "true",
@@ -170,12 +146,6 @@ export function createChatStore(options: ChatStoreOptions) {
       const next = { ...get().inputDrafts, [sessionId]: draft };
       writeDrafts(storage, wsKey(DRAFTS_KEY), next);
       set({ inputDrafts: next });
-    },
-    setFocusMode: (on) => {
-      logger.info("setFocusMode", { to: on });
-      if (on) storage.setItem(FOCUS_MODE_KEY, "true");
-      else storage.removeItem(FOCUS_MODE_KEY);
-      set({ focusMode: on });
     },
     clearInputDraft: (sessionId) => {
       const current = get().inputDrafts;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { installRendererRecoveryHandlers } from "./renderer-recovery";
+import { createElectronReloadPrompt, installRendererRecoveryHandlers } from "./renderer-recovery";
 
 type Handler = (...args: unknown[]) => void;
 
@@ -83,10 +83,50 @@ describe("installRendererRecoveryHandlers", () => {
     vi.useFakeTimers();
     const fixture = makeWindow();
     const showReloadPrompt = vi.fn(async () => "dismiss" as const);
+    const desktopRoute = {
+      surface: "tab",
+      path: "/acme/issues/MUL-3239",
+      workspaceSlug: "acme",
+      tabId: "tab-1",
+      reportedAt: "2026-06-15T00:00:00.000Z",
+    };
 
     installRendererRecoveryHandlers(fixture.window, {
       isDev: false,
       showReloadPrompt,
+      getDiagnosticContext: () => ({
+        windowUrl:
+          "file:///Applications/Multica.app/Contents/Resources/app.asar/index.html",
+        desktopRoute,
+      }),
+      unresponsivePromptDelayMs: 100,
+    });
+
+    fixture.windowHandlers.get("unresponsive")?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(showReloadPrompt).toHaveBeenCalledWith({
+      kind: "unresponsive",
+      context: {
+        windowUrl:
+          "file:///Applications/Multica.app/Contents/Resources/app.asar/index.html",
+        desktopRoute,
+      },
+    });
+    expect(fixture.reload).not.toHaveBeenCalled();
+  });
+
+  it("keeps prompting when diagnostic context collection fails", async () => {
+    vi.useFakeTimers();
+    const fixture = makeWindow();
+    const showReloadPrompt = vi.fn(async () => "dismiss" as const);
+
+    installRendererRecoveryHandlers(fixture.window, {
+      isDev: false,
+      showReloadPrompt,
+      getDiagnosticContext: () => {
+        throw new Error("diagnostics unavailable");
+      },
       unresponsivePromptDelayMs: 100,
     });
 
@@ -94,7 +134,6 @@ describe("installRendererRecoveryHandlers", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(showReloadPrompt).toHaveBeenCalledWith({ kind: "unresponsive", context: {} });
-    expect(fixture.reload).not.toHaveBeenCalled();
   });
 
   it("keeps dev diagnostics non-prompting", async () => {
@@ -108,5 +147,31 @@ describe("installRendererRecoveryHandlers", () => {
 
     expect(showReloadPrompt).not.toHaveBeenCalled();
     expect(fixture.reload).not.toHaveBeenCalled();
+  });
+
+  it("shows actionable recovery guidance before diagnostic details", async () => {
+    let detail = "";
+    const showMessageBox = vi.fn(
+      async (options: { title: string; message: string; detail: string }) => {
+        detail = options.detail;
+        return { response: 1 };
+      },
+    );
+    const showReloadPrompt = createElectronReloadPrompt(showMessageBox);
+
+    await showReloadPrompt({ kind: "unresponsive", context: {} });
+
+    expect(showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Multica needs to reload",
+        message: "The desktop window has been stuck for a few seconds.",
+        detail: expect.stringContaining(
+          "Click Reload to refresh this window and keep using Multica.",
+        ),
+      }),
+    );
+    expect(detail).toContain("what you were doing right before this message appeared");
+    expect(detail).toContain("Activity Monitor sample");
+    expect(detail).toContain("Diagnostic details:\nkind: unresponsive\ncontext: {}");
   });
 });

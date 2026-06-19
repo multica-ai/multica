@@ -3,7 +3,17 @@
     "title": "スクワッド",
     "new_button": "新規スクワッド",
     "empty_no_squads": "スクワッドはまだありません。作成して始めましょう。",
-    "empty_no_match": "フィルターに一致するスクワッドはありません。"
+    "empty_no_match": "フィルターに一致するスクワッドはありません。",
+    "table": {
+      "name": "スカッド",
+      "leader": "リーダー",
+      "members": "メンバー",
+      "creator": "作成者",
+      "created": "作成日時"
+    },
+    "no_matches": "該当するスカッドはありません",
+    "row_menu": "スカッドの操作",
+    "archive_action": "アーカイブ"
   },
   "inspector": {
     "details_section": "詳細",
@@ -14,7 +24,8 @@
     "description": "\"{{name}}\" がアーカイブされます。現在このスクワッドに割り当てられているイシューはリーダーに引き継がれます。この操作は取り消せません。ルーティングを元に戻すには、新しいスクワッドを作成してください。",
     "cancel": "キャンセル",
     "confirm": "アーカイブ",
-    "archiving": "アーカイブ中…"
+    "archiving": "アーカイブ中…",
+    "success": "スカッドをアーカイブしました"
   },
   "name_editor": {
     "cancel": "キャンセル"
@@ -69,5 +80,21 @@
     "description": "スクワッドの指示は、リーダーエージェントがこのスクワッドに割り当てられたイシューに取り組むたびに、そのプロンプトに挿入されます。スクワッド全体の方針、作業上の取り決め、リーダーがすべてのタスクで従うべきコンテキストを伝えるために使用します。",
     "unsaved_changes": "保存していない変更",
     "save_button": "保存"
+  },
+  "scope": {
+    "mine": "自分",
+    "all": "すべて"
+  },
+  "toolbar": {
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列",
+    "result_count_title": "該当スカッド / すべてのスカッド",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア"
   }
 }

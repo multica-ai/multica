@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -103,12 +104,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 	case "gemini":
 		return geminiStaticModels(), nil
 	case "antigravity":
-		// Antigravity CLI (`agy`) does not expose a `--model` flag today;
-		// model selection lives in the user's Antigravity settings and is
-		// communicated to the backend internally by the CLI itself. Return
-		// an empty catalog so the daemon's model_list endpoint succeeds
-		// without populating a misleading dropdown.
-		return []Model{}, nil
+		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
+		// command (MUL-3125). Enumerate it on demand like the other
+		// dynamic-discovery backends.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverAntigravityModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -141,26 +142,33 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "codebuddy":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			models, err := discoverCodebuddyModels(ctx, executablePath)
+			if err != nil {
+				return nil, err
+			}
+			annotateCodebuddyThinking(ctx, models, executablePath)
+			return models, nil
+		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
 }
 
 // ModelSelectionSupported reports whether setting `agent.model` has
-// any effect for the given provider. Most providers honour `opts.Model`
-// end-to-end — Hermes routes it through the ACP `session/set_model` RPC
-// before each prompt, Claude / Codex / Cursor / Gemini / Copilot / Kimi /
-// Kiro / OpenCode / OpenClaw / Pi pass it via flag or session config.
+// any effect for the given provider. Every built-in provider now honours
+// `opts.Model` end-to-end — Hermes routes it through the ACP
+// `session/set_model` RPC before each prompt; Claude / Codex / Cursor /
+// Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity
+// pass it via flag or session config (Antigravity gained `--model` in agy
+// 1.0.6 — MUL-3125).
 //
-// Antigravity is the lone exception: `agy` has no `--model` flag today,
-// and the backend in antigravity.go deliberately drops opts.Model on the
-// floor. Returning false here makes the UI render a disabled
-// "Managed by runtime" picker instead of an empty dropdown plus a
-// silently-ignored manual-entry field.
+// The hook is retained — rather than inlining `true` at the call sites — so
+// a future model-less runtime can opt out in one place, which makes the UI
+// render a disabled "Managed by runtime" picker instead of an empty
+// dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	if providerType == "antigravity" {
-		return false
-	}
 	return true
 }
 
@@ -180,6 +188,15 @@ func cachedDiscovery(key string, fn func() ([]Model, error)) ([]Model, error) {
 	models, err := fn()
 	if err != nil {
 		return nil, err
+	}
+
+	// Don't cache an empty result. Zero models is almost always a transient
+	// failure (discovery CLI timeout, not-logged-in, network blip) rather than
+	// a runtime that genuinely has no models; caching it would keep the picker
+	// blank for the full TTL even after the cause clears. Skipping the cache
+	// lets the next request retry immediately. See #3729.
+	if len(models) == 0 {
+		return models, nil
 	}
 
 	modelCacheMu.Lock()
@@ -204,6 +221,7 @@ func discoveryCacheKey(providerType, executablePath string) string {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
@@ -352,20 +370,32 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
+	// network on `opencode models`, which can take ~6s; the previous 5s cap
+	// timed out and returned an empty list, so the runtime showed online but
+	// the model picker was empty. See multica-ai/multica#3627.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
-	if err != nil {
+	// Parse whatever the verbose command printed, even on a non-zero exit — a
+	// stale config entry can make `opencode models` exit non-zero while still
+	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
+	out, _ := cmd.Output()
+	models := parseOpenCodeModels(string(out))
+	if len(models) == 0 {
+		// Verbose yielded nothing usable (unsupported flag, error text, or an
+		// empty list). Retry the plain command, which omits the per-model JSON
+		// but still prints the IDs.
 		cmd = exec.CommandContext(runCtx, executablePath, "models")
 		hideAgentWindow(cmd)
-		out, err = cmd.Output()
-		if err != nil {
-			return []Model{}, nil
-		}
+		out, _ = cmd.Output()
+		models = parseOpenCodeModels(string(out))
 	}
-	return parseOpenCodeModels(string(out)), nil
+	if len(models) == 0 {
+		return []Model{}, nil
+	}
+	return models, nil
 }
 
 // parseOpenCodeModels accepts the `opencode models` text output and
@@ -551,14 +581,20 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// Newer pi fetches its catalog from each configured provider over the
+	// network, so discovery time scales with provider count — a multi-provider
+	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
+	// over, the daemon killed the command before it printed anything and the
+	// model picker came back empty while the runtime stayed online. 15s matches
+	// the opencode discovery cap (see #3729, same class as #3627).
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
 	text := string(stdout)
@@ -583,6 +619,14 @@ func parsePiModels(output string) []Model {
 		if line == "" {
 			continue
 		}
+		// pi interleaves human-readable diagnostics with the catalog when an
+		// agent config references stale patterns — e.g.
+		//   Warning: No models match pattern "opencode-go/mimo-v2-omni"
+		// Skip them before field-splitting; otherwise prose tokens are coined
+		// into bogus models like `No/models` or `Warning/`. See #3729.
+		if isPiDiscoveryNoise(line) {
+			continue
+		}
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
@@ -602,6 +646,12 @@ func parsePiModels(output string) []Model {
 		} else {
 			continue
 		}
+		// A real id has a non-empty provider and model on both sides of the
+		// slash. Drop anything that doesn't (e.g. a stray `something:` token),
+		// a cheap structural backstop on top of the diagnostic filter above.
+		if slash := strings.Index(id, "/"); slash <= 0 || slash == len(id)-1 {
+			continue
+		}
 		if seen[id] {
 			continue
 		}
@@ -613,6 +663,26 @@ func parsePiModels(output string) []Model {
 		models = append(models, Model{ID: id, Label: id, Provider: provider})
 	}
 	return models
+}
+
+// isPiDiscoveryNoise reports whether a `pi --list-models` line is a diagnostic
+// message rather than a catalog row. pi prints these alongside the table when
+// an agent config references stale provider/model patterns, e.g.
+//
+//	Warning: No models match pattern "opencode-go/mimo-v2-omni"
+//
+// The `Warning:` prefix is not guaranteed across versions, so the unmatched-
+// pattern message is also matched on its own. These are prose, not
+// `provider model` rows; without skipping them the field splitter coins bogus
+// models like `No/models`. See #3729.
+func isPiDiscoveryNoise(line string) bool {
+	lower := strings.ToLower(line)
+	if strings.Contains(lower, "no models match pattern") {
+		return true
+	}
+	return strings.HasPrefix(lower, "warning:") ||
+		strings.HasPrefix(lower, "error:") ||
+		strings.HasPrefix(lower, "info:")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
@@ -920,6 +990,62 @@ func acpModelLabel(name, modelID string) string {
 	return label
 }
 
+// discoverAntigravityModels runs `agy models` and returns the catalog the
+// installed Antigravity CLI advertises (one display name per line).
+//
+// Unlike cursor / pi / opencode there is deliberately NO static fallback.
+// agy's `--model` takes the exact human display string (e.g.
+// "Claude Opus 4.6 (Thinking)") and silently no-ops on any value it doesn't
+// recognise — empty output, exit 0 — so a guessed static list would risk
+// offering a model the installed CLI can't honour, turning a typo into a
+// "successful" empty run. On any discovery failure we return an empty
+// catalog instead; agent.model stays unset and agy resolves its own
+// default. cachedDiscovery never caches empty results, so this retries on
+// the next request once the cause clears.
+func discoverAntigravityModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "agy"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return nil, nil
+	}
+	// `agy models` is a local enumeration (no network round-trip), so a
+	// short cap is plenty; keep it generous enough to absorb cold starts.
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(cmd)
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return nil, nil
+	}
+	return parseAntigravityModels(string(out)), nil
+}
+
+// parseAntigravityModels turns `agy models` output — one model display name
+// per line — into Model entries. The display string IS the value `--model`
+// expects, so ID and Label are identical and the daemon ships opts.Model
+// verbatim. Blank and duplicate lines are skipped.
+func parseAntigravityModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	for scanner.Scan() {
+		name := strings.TrimSpace(scanner.Text())
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		models = append(models, Model{
+			ID:       name,
+			Label:    name,
+			Provider: "antigravity",
+		})
+	}
+	return models
+}
+
 // discoverCursorModels runs `cursor-agent --list-models` and parses
 // the `id - Label` rows. Cursor's catalog changes often and ships
 // many variants of the same base model (thinking / fast / max
@@ -933,12 +1059,15 @@ func discoverCursorModels(ctx context.Context, executablePath string) ([]Model, 
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return cursorStaticModels(), nil
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	// 15s to match the other network-backed discovery paths (pi/opencode/ACP);
+	// cursor-agent fetches its frequently-changing catalog, so a tight cap can
+	// time out and fall back to the minimal static list. See #3729.
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return cursorStaticModels(), nil
 	}
 	models := parseCursorModels(string(out))
@@ -1035,7 +1164,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 		cmd := exec.CommandContext(runCtx, executablePath, jsonArgs...)
 		hideAgentWindow(cmd)
 		out, err := cmd.Output()
-		if err != nil {
+		if err != nil && len(out) == 0 {
 			continue
 		}
 		if models, ok := parseOpenclawAgentsJSON(out); ok {
@@ -1049,7 +1178,7 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 	cmd := exec.CommandContext(runCtx, executablePath, "agents", "list")
 	hideAgentWindow(cmd)
 	out, err := cmd.Output()
-	if err != nil {
+	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}
 	return parseOpenclawAgents(string(out)), nil
@@ -1187,4 +1316,112 @@ func isOpenclawIdentifier(s string) bool {
 		}
 	}
 	return true
+}
+
+// ── CodeBuddy model discovery ──
+
+// codebuddyModelRe matches the `--model <model> ... Currently supported: (m1, m2, ...)`
+// line in `codebuddy --help` output.
+var codebuddyModelRe = regexp.MustCompile(`--model\s*<[^>]+>\s*.*?Currently supported:\s*\(([^)]+)\)`)
+
+// discoverCodebuddyModels runs `codebuddy --help` and extracts the
+// supported model list from its output. Falls back to a static list
+// when the binary is missing or the output cannot be parsed.
+func discoverCodebuddyModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return codebuddyStaticModels(), nil
+	}
+	helpOut := codebuddyHelpOutput(ctx, executablePath)
+	if helpOut == "" {
+		return codebuddyStaticModels(), nil
+	}
+	models := parseCodebuddyModels(helpOut)
+	if len(models) == 0 {
+		return codebuddyStaticModels(), nil
+	}
+	return models, nil
+}
+
+// parseCodebuddyModels extracts model IDs from codebuddy --help output.
+// The help text contains a line like:
+//
+//	--model <model>  ... Currently supported: (model1, model2, ...)
+//
+// The first model in the list is marked as default.
+func parseCodebuddyModels(helpOutput string) []Model {
+	match := codebuddyModelRe.FindStringSubmatch(helpOutput)
+	if len(match) < 2 {
+		return nil
+	}
+	raw := strings.Split(match[1], ",")
+	var models []Model
+	for _, s := range raw {
+		id := strings.TrimSpace(s)
+		if id == "" {
+			continue
+		}
+		models = append(models, Model{
+			ID:       id,
+			Label:    codebuddyModelLabel(id),
+			Provider: codebuddyModelProvider(id),
+			Default:  len(models) == 0,
+		})
+	}
+	return models
+}
+
+// codebuddyModelProvider infers a provider name from a model ID prefix.
+func codebuddyModelProvider(id string) string {
+	switch {
+	case strings.HasPrefix(id, "claude-"):
+		return "anthropic"
+	case strings.HasPrefix(id, "gemini-"):
+		return "google"
+	case strings.HasPrefix(id, "gpt-"):
+		return "openai"
+	case strings.HasPrefix(id, "glm-"):
+		return "zhipu"
+	case strings.HasPrefix(id, "minimax-"):
+		return "minimax"
+	case strings.HasPrefix(id, "kimi-"):
+		return "kimi"
+	case len(id) >= 3 && id[0] == 'h' && id[1] == 'y' && id[2] >= '0' && id[2] <= '9':
+		return "hunyuan"
+	case strings.HasPrefix(id, "deepseek-"):
+		return "deepseek"
+	default:
+		return ""
+	}
+}
+
+// codebuddyModelLabel generates a human-readable label from a model ID.
+// Capitalizes each dash-separated part; special-cases GPT/GLM to uppercase
+// and rewrites the "-ioa" suffix as "IOA".
+func codebuddyModelLabel(id string) string {
+	parts := strings.Split(id, "-")
+	for i, p := range parts {
+		if strings.EqualFold(p, "gpt") || strings.EqualFold(p, "glm") {
+			parts[i] = strings.ToUpper(p)
+		} else if strings.EqualFold(p, "ioa") {
+			parts[i] = "IOA"
+		} else if len(p) > 0 {
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// codebuddyStaticModels is the fallback catalog when dynamic discovery
+// fails (binary missing, parse error, timeout).
+func codebuddyStaticModels() []Model {
+	return []Model{
+		{ID: "claude-sonnet-4.6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-opus-4.7", Label: "Claude Opus 4.7", Provider: "anthropic"},
+		{ID: "gemini-3.1-pro", Label: "Gemini 3.1 Pro", Provider: "google"},
+		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
+		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
+	}
 }

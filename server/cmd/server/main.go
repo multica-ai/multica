@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -18,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/redis/go-redis/v9"
@@ -259,15 +261,40 @@ func main() {
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
 	var httpMetrics *obsmetrics.HTTPMetrics
+	var businessMetrics *obsmetrics.BusinessMetrics
+	var samplerPool *pgxpool.Pool
 	if metricsConfig.Enabled() {
+		// Build a dedicated tiny pool for the BusinessSamplerCollector
+		// so a stalled scrape can never starve business traffic. If the
+		// pool fails to construct we log and continue without the
+		// sampler — the rest of /metrics is still useful.
+		var err error
+		samplerPool, err = newSamplerDBPool(ctx, dbURL)
+		if err != nil {
+			slog.Warn("metrics: failed to build sampler pgxpool; sampler disabled", "error", err)
+			samplerPool = nil
+		}
+
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
 			Pool:     pool,
 			Realtime: realtime.M,
 			DaemonWS: daemonws.M,
 			Version:  version,
 			Commit:   commit,
+			BusinessSampler: func() *obsmetrics.BusinessSamplerOptions {
+				if samplerPool == nil {
+					return nil
+				}
+				return &obsmetrics.BusinessSamplerOptions{Pool: samplerPool}
+			}(),
 		})
 		httpMetrics = metricsRegistry.HTTP
+		businessMetrics = metricsRegistry.Business
+		// Forward inbound daemon WS frames into the per-kind counter so
+		// dashboards can split heartbeat / unknown / invalid traffic.
+		if daemonHub != nil {
+			daemonHub.SetMessageKindRecorder(businessMetrics)
+		}
 		metricsServer = obsmetrics.NewServer(metricsConfig.Addr, metricsRegistry.Gatherer)
 		if !obsmetrics.IsLoopbackAddr(metricsConfig.Addr) {
 			slog.Warn(
@@ -276,6 +303,9 @@ func main() {
 			)
 		}
 	}
+	if samplerPool != nil {
+		defer samplerPool.Close()
+	}
 
 	// Construct the BatchedHeartbeatScheduler before the router so it can
 	// be injected into the Handler. The Run goroutine starts below
@@ -283,8 +313,9 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
-	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
+		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
 		HeartbeatScheduler: heartbeatScheduler,
@@ -300,6 +331,7 @@ func main() {
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
@@ -318,6 +350,39 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+
+	// Lark inbound supervisor: holds the §4.4 WS lease per installation
+	// and runs the EventConnector for each. Nil when the Lark master
+	// key is unset — self-host deployments that have not opted in to
+	// Lark do not pay any goroutine cost. Lifecycle is bound to
+	// sweepCtx so the Hub winds down alongside the other long-running
+	// workers, AFTER the HTTP server has drained.
+	if h.LarkHub != nil {
+		go h.LarkHub.Run(sweepCtx)
+	}
+
+	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
+	// `sys_cron_executions` table into the distributed lease + audit
+	// log for internal periodic jobs. The first job is
+	// `rollup_task_usage_hourly`, which replaces the previously
+	// operator-registered `pg_cron` entry (still safe to run
+	// concurrently — the SQL function holds advisory lock 4246).
+	//
+	// A failure to register the job is treated as fatal here only at
+	// the registration step (a duplicate name is the only realistic
+	// cause and indicates a code bug). Once running, the manager
+	// surfaces transient errors — DB unreachable, sys_cron_executions
+	// missing because of an unusual partial-migration state — by
+	// logging them on the tick that fails and retrying on the next
+	// cycle, so a temporary outage does not crash the server.
+	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
+	} else {
+		go func() {
+			_ = schedulerMgr.Run(sweepCtx)
+		}()
+	}
 
 	if metricsServer != nil {
 		go func() {
@@ -359,6 +424,22 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+
+	// Join the Lark Hub's per-installation supervisor goroutines so the
+	// lease renewer can issue a final release before process exit;
+	// otherwise the next replica would have to wait the full LeaseTTL
+	// before picking up the installation on the other side of the
+	// redeploy. The wait is bounded — if a supervisor is wedged (DB
+	// pool stalled, a future real EventConnector ignoring ctx, etc.)
+	// the fallback is the natural LeaseTTL expiry on the other side,
+	// which is strictly better than holding shutdown open forever.
+	if h.LarkHub != nil {
+		if !h.LarkHub.WaitWithTimeout(h.LarkHub.ShutdownTimeout()) {
+			slog.Warn("lark hub: supervisors did not exit within shutdown timeout; proceeding",
+				"timeout", h.LarkHub.ShutdownTimeout().String(),
+			)
+		}
+	}
 
 	if metricsServer != nil {
 		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)

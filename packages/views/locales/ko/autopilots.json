@@ -6,15 +6,23 @@
     "table": {
       "name": "이름",
       "agent": "에이전트",
+      "created_by": "생성자",
       "mode": "모드",
       "status": "상태",
-      "last_run": "마지막 실행"
+      "last_run": "마지막 실행",
+      "assignee": "담당",
+      "trigger": "트리거",
+      "next_run": "다음 실행",
+      "created": "생성일"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "아직 오토파일럿이 없습니다",
       "hint": "AI 에이전트의 반복 작업을 예약하세요. 템플릿을 고르거나 처음부터 시작할 수 있습니다."
-    }
+    },
+    "scope_all": "전체",
+    "no_matches": "일치하는 자동화가 없습니다",
+    "retry": "다시 시도"
   },
   "status": {
     "active": "활성",
@@ -71,6 +79,7 @@
     "section_run_history": "실행 기록",
     "section_danger": "위험 영역",
     "field_agent": "에이전트",
+    "field_created_by": "생성자",
     "field_output_mode": "출력 모드",
     "field_project": "프로젝트",
     "no_project": "프로젝트 없음",
@@ -345,5 +354,39 @@
   },
   "timezone_picker": {
     "search_placeholder": "시간대 검색..."
+  },
+  "toolbar": {
+    "result_count_title": "일치하는 자동화 / 전체 자동화",
+    "filter_label": "필터",
+    "filter_active_count_one": "필터 {{count}}개",
+    "filter_active_count_other": "필터 {{count}}개",
+    "clear_filters": "필터 지우기",
+    "section_assignee": "담당",
+    "section_mode": "모드",
+    "section_trigger": "트리거",
+    "section_creator": "생성자",
+    "display": "표시",
+    "sort_by": "정렬",
+    "direction_asc": "오름차순",
+    "direction_desc": "내림차순",
+    "section_columns": "열"
+  },
+  "actions": {
+    "row_menu": "자동화 작업",
+    "pause": "일시중지",
+    "resume": "재개",
+    "delete": "삭제",
+    "selected_one": "{{count}}개 선택됨",
+    "selected_other": "{{count}}개 선택됨",
+    "clear_selection": "선택 해제",
+    "delete_dialog": {
+      "title": "자동화를 삭제할까요?",
+      "description_one": "\"{{name}}\" 및 실행 기록이 영구 삭제됩니다.",
+      "description_other": "자동화 {{count}}개와 실행 기록이 영구 삭제됩니다.",
+      "warning": "이 작업은 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "영구 삭제",
+      "deleting": "삭제 중…"
+    }
   }
 }

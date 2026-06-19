@@ -249,6 +249,27 @@ func TestBuildPromptSquadLeaderNoActionForAgentTrigger(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
+	task := Task{
+		ChatSessionID: "sess-1",
+		ChatMessage:   "please create an issue with this screenshot",
+		ChatMessageAttachments: []ChatAttachmentMeta{
+			{ID: "019ec09d-6222-722b-bdfa-427b105d80be", Filename: "shot.png", ContentType: "image/png"},
+		},
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"Attachments on this message:",
+		"id=019ec09d-6222-722b-bdfa-427b105d80be",
+		"multica attachment download <id>",
+		"--attachment-id <id>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("chat prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 func TestBuildChatPromptSlashSkills(t *testing.T) {
 	t.Run("injects selected skills block", func(t *testing.T) {
 		task := Task{
@@ -415,6 +436,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "please look",
 		TriggerAuthorType:     "member",
 		NewCommentCount:       3,
@@ -431,7 +453,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 		t.Errorf("hint must discourage blindly reading every new comment, got:\n%s", out)
 	}
 	// Parent thread first: the --thread <trigger> read is the prioritized action.
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --since "+since+" --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --since "+since+" --output json") {
 		t.Errorf("hint must point at the triggering (parent) thread --since read first, got:\n%s", out)
 	}
 	if !strings.Contains(out, "--tail 30") {
@@ -456,6 +478,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "hi",
 		TriggerAuthorType:     "member",
 		NewCommentCount:       0,
@@ -465,7 +488,7 @@ func TestBuildPromptColdStartThreadRead(t *testing.T) {
 	if strings.Contains(out, "new comment(s) since your last run") {
 		t.Errorf("no since-delta hint should render on cold start, got:\n%s", out)
 	}
-	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread trigger-1 --tail 30 --output json") {
+	if !strings.Contains(out, "multica issue comment list "+issueID+" --thread thread-root-1 --tail 30 --output json") {
 		t.Errorf("cold start must point at the triggering thread read, got:\n%s", out)
 	}
 }
@@ -479,6 +502,7 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	task := Task{
 		IssueID:               issueID,
 		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
 		TriggerCommentContent: "hi again",
 		TriggerAuthorType:     "member",
 		PriorSessionID:        "session-123",
@@ -490,10 +514,10 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	for _, want := range []string{
 		"triggering comment is already included above",
 		"No other new comments on this issue since your last run",
-		"triggering comment ID / thread anchor",
+		"active thread anchor `thread-root-1` and triggering comment ID `trigger-1`",
 		"If your reply depends on thread context",
 		"do not rely only on resumed session memory",
-		"multica issue comment list " + issueID + " --thread trigger-1 --tail 30 --output json",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --output json",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("resumed/no-delta prompt missing %q\n--- output ---\n%s", want, out)

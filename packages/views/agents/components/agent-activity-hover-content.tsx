@@ -136,7 +136,10 @@ function runtimeFrom<T extends { id: string }>(
 // Capped at hours — anything over a day for a running task is a sign of a
 // stuck runtime, but the hover card is not the place to relitigate that;
 // the row will read as `26h 12m` and the user can act.
-function formatDuration(fromIso: string, nowMs: number): string {
+//
+// Exported so the issue-detail header live chip formats its collapsed
+// single-agent elapsed with the same `2m 14s` / `1h 03m` rule used here.
+export function formatDuration(fromIso: string, nowMs: number): string {
   const start = new Date(fromIso).getTime();
   if (!Number.isFinite(start)) return "";
   const sec = Math.max(0, Math.round((nowMs - start) / 1000));

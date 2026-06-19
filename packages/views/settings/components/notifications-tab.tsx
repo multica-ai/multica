@@ -9,6 +9,7 @@ import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { BrowserNotificationSetting } from "./browser-notification-setting";
 
 // Inbox event groups rendered in the per-event toggle list. `system_notifications`
 // is a sibling preference key but lives in its own section below.
@@ -110,6 +111,10 @@ export function NotificationsTab() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Web-only: the browser permission banners require. Renders nothing on
+            desktop (OS-native delivery) or where the Notification API is absent. */}
+        <BrowserNotificationSetting />
       </section>
     </div>
   );

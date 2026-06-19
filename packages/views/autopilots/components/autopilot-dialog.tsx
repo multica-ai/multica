@@ -20,6 +20,7 @@ import {
   Zap,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Dialog,
   DialogContent,
@@ -1114,12 +1115,11 @@ function WebhookCreatedPanel({
 
   const handleCopy = async () => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };

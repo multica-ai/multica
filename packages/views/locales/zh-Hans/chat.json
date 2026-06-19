@@ -7,10 +7,11 @@
   "input": {
     "placeholder_no_agent": "创建一个智能体后才能开始对话",
     "placeholder_archived": "此会话已归档",
-    "placeholder_named": "告诉 {{name}} 该做什么...",
-    "placeholder_default": "告诉我该做什么...",
+    "placeholder_named": "给 {{name}} 发消息…",
+    "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
-    "stop_tooltip": "停止"
+    "stop_tooltip": "停止",
+    "send_failed_toast": "发送消息失败"
   },
   "message_list": {
     "show_details": "查看详情",
@@ -23,7 +24,8 @@
     "process_steps_other": "{{count}} 步",
     "copy_action": "复制",
     "copied_toast": "已复制",
-    "copy_failed_toast": "复制失败"
+    "copy_failed_toast": "复制失败",
+    "loading_older": "正在加载更早的消息…"
   },
   "session_history": {
     "untitled": "无标题",
@@ -73,7 +75,8 @@
     "my_agents": "我的智能体",
     "others": "其他",
     "no_agents": "暂无智能体",
-    "history_group": "历史对话"
+    "history_group": "历史对话",
+    "agent_filter_placeholder": "搜索智能体..."
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",
@@ -89,17 +92,6 @@
     "list_open": "按优先级列出我未完成的任务",
     "summarize_today": "总结一下我今天做了什么",
     "plan_next": "规划接下来该做什么"
-  },
-  "context_anchor": {
-    "tooltip_disabled": "当前页面没有可以共享给 Multica 的内容",
-    "tooltip_off": "让 Multica 知道你正在看的内容",
-    "tooltip_on_issue": "Multica 知道你正在看 {{label}}，点击关闭",
-    "tooltip_on_project": "Multica 知道你正在看项目 \"{{label}}\"，点击关闭",
-    "card_tooltip_issue_with_subtitle": "Multica 知道你正在看 {{label}} —— {{subtitle}}",
-    "card_tooltip_issue": "Multica 知道你正在看 {{label}}",
-    "card_tooltip_project": "Multica 知道你正在看项目 \"{{label}}\"",
-    "aria_stop": "停止共享当前页面",
-    "aria_start": "把当前页面共享给 Multica"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "offline_banner": {

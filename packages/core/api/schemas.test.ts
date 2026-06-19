@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AppConfigSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
@@ -268,5 +269,26 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("AppConfigSchema cdn_signed drift", () => {
+  it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
+    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
+    expect(parsed.cdn_signed).toBe(false);
+  });
+
+  it("coerces a malformed cdn_signed to false instead of failing the whole config", () => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      cdn_signed: "yes",
+    });
+    expect(parsed.cdn_signed).toBe(false);
+    expect(parsed.cdn_domain).toBe("cdn.example.com");
+  });
+
+  it("keeps cdn_signed=true from a signing-enabled server", () => {
+    const parsed = AppConfigSchema.parse({ cdn_signed: true });
+    expect(parsed.cdn_signed).toBe(true);
   });
 });

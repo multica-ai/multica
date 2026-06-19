@@ -242,6 +242,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
 	cmd.Flags().StringSlice("attachment", nil, "")
+	cmd.Flags().StringSlice("attachment-id", nil, "")
 	return cmd
 }
 
@@ -280,6 +281,54 @@ func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	}
 	if got := body["allow_duplicate"]; got != true {
 		t.Fatalf("allow_duplicate = %#v, want true in request body", got)
+	}
+}
+
+func TestRunIssueCreateSendsExistingAttachmentIDs(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "issue-1",
+			"identifier": "MUL-1",
+			"title":      "With attachments",
+			"status":     "todo",
+			"priority":   "none",
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS", `["att-env","att-shared"]`)
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "With attachments")
+	_ = cmd.Flags().Set("attachment-id", "att-flag")
+	_ = cmd.Flags().Set("attachment-id", "att-shared")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+
+	got, ok := body["attachment_ids"].([]any)
+	if !ok {
+		t.Fatalf("attachment_ids = %#v, want JSON array", body["attachment_ids"])
+	}
+	want := []string{"att-flag", "att-shared", "att-env"}
+	if len(got) != len(want) {
+		t.Fatalf("attachment_ids length = %d, want %d (%#v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Fatalf("attachment_ids[%d] = %#v, want %q (all=%#v)", i, got[i], w, got)
+		}
 	}
 }
 

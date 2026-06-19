@@ -11,6 +11,93 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearOtherThreadResolutions = `-- name: ClearOtherThreadResolutions :many
+WITH RECURSIVE root_of AS (
+    -- Walk up from the target to its thread root.
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = $1 AND c.issue_id = $2 AND c.workspace_id = $3
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread_root AS (
+    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
+),
+descendants AS (
+    -- Expand back down from the root over the whole subtree. Cycle-safe under
+    -- the PK constraint (a comment cannot be its own ancestor).
+    SELECT c.id
+    FROM comment c
+    JOIN thread_root tr ON c.id = tr.id
+    UNION
+    SELECT c.id
+    FROM comment c
+    JOIN descendants d ON c.parent_id = d.id
+    WHERE c.issue_id = $2 AND c.workspace_id = $3
+)
+UPDATE comment SET
+    resolved_at = NULL,
+    resolved_by_type = NULL,
+    resolved_by_id = NULL,
+    updated_at = now()
+WHERE comment.id IN (SELECT id FROM descendants)
+  AND comment.id <> $1
+  AND comment.resolved_at IS NOT NULL
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id
+`
+
+type ClearOtherThreadResolutionsParams struct {
+	TargetID    pgtype.UUID `json:"target_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Single-resolution invariant: a thread has at most one resolved comment.
+// Resolving @target_id makes it the sole resolution, so this clears resolved_at
+// on every OTHER currently-resolved comment in the same thread (the root of
+// @target_id plus every descendant). The handler runs this in the SAME tx as
+// ResolveComment so the replace is atomic — a crash can never leave two
+// resolutions or zero. Scope is the thread only (id IN descendants AND
+// id <> @target_id), never the whole issue. Returns each cleared row so the
+// handler can emit a comment:unresolved event per row; granular realtime
+// consumers replace a single comment in place and would otherwise keep
+// displaying the stale resolution.
+func (q *Queries) ClearOtherThreadResolutions(ctx context.Context, arg ClearOtherThreadResolutionsParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, clearOtherThreadResolutions, arg.TargetID, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countComments = `-- name: CountComments :one
 SELECT count(*) FROM comment
 WHERE issue_id = $1 AND workspace_id = $2

@@ -575,32 +575,66 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Refuse before any teardown-side effects if the runtime still has active
+	// squads whose leader is already archived on this runtime.
+	activeSquadCount, err := h.Queries.CountActiveSquadsWithArchivedLeadersByRuntime(r.Context(), rt.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check runtime squad dependencies")
+		return
+	}
+	if activeSquadCount > 0 {
+		writeError(w, http.StatusConflict, "cannot delete runtime: it has active squads led by archived agents. Archive those squads or assign them a new leader first.")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
 	// Pause autopilots pointing at the archived agents BEFORE we delete
 	// them. Migration 096 dropped the autopilot.assignee_id agent FK, so a
 	// hard-delete here would otherwise leave dangling rows that subsequent
 	// scheduler ticks would skip with "assignee agent no longer exists" —
 	// quiet, but burning a run record every tick until an operator notices.
 	// Pausing makes the breakage visible in the autopilot list so the owner
-	// can re-point or delete the row instead.
-	archivedAgentIDs, err := h.Queries.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
+	// can re-point or delete the row instead. This runs inside the teardown
+	// transaction so a pause that lands but is followed by a failed delete
+	// rolls back with everything else, matching ArchiveAgentsAndDeleteRuntime.
+	archivedAgentIDs, err := qtx.ListArchivedAgentIDsByRuntime(r.Context(), rt.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to enumerate archived agents")
 		return
 	}
 	if len(archivedAgentIDs) > 0 {
-		if err := h.Queries.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
-			slog.Warn("pause autopilots for archived agents failed",
-				"runtime_id", uuidToString(rt.ID), "error", err)
+		if err := qtx.PauseAutopilotsByAgentAssignees(r.Context(), archivedAgentIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to pause autopilots")
+			return
 		}
 	}
 
+	// Remove archived squads whose leader is an archived agent on this runtime
+	// so the RESTRICT FK on squad.leader_id won't block the subsequent agent
+	// deletion. Active squads are handled by the 409 guard above instead.
+	if err := qtx.DeleteSquadsByArchivedAgentsOnRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
+		return
+	}
+
 	// Remove archived agents so the FK constraint (ON DELETE RESTRICT) won't block deletion.
-	if err := h.Queries.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
 	}
 
-	if err := h.Queries.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+	if err := qtx.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
 		return
 	}

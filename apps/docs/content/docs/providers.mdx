@@ -13,11 +13,11 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 | Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
 |---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Managed inside the Antigravity CLI itself |
+| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Dynamic discovery (`agy models`) |
 | **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
 | **Codex** | OpenAI | ⚠️ Code exists but unreachable | ✅ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
-| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ❌ | `.cursor/skills/` | Dynamic discovery |
+| **Cursor** | Anysphere | ⚠️ Code exists but unusable | ✅ | `.cursor/skills/` | Dynamic discovery |
 | **Gemini** | Google | ❌ | ❌ | `.agent_context/skills/` | Static |
 | **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` (fallback) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
@@ -30,7 +30,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 
 ### Antigravity
 
-From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. There is no `--model` flag — model selection lives inside the Antigravity CLI settings, so Multica disables the per-agent model picker for this provider. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
+From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. **Model selection works** via the `--model` flag (added in agy 1.0.6): the daemon enumerates the catalog with `agy models` and ships the chosen value verbatim. Note these are human display strings such as `Claude Opus 4.6 (Thinking)`, not `provider/model` slugs — and agy silently no-ops on a value it doesn't recognise, so prefer picking from the discovered list over typing a custom one. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
 
 ### Claude Code
 
@@ -46,7 +46,7 @@ From GitHub. Model routing goes through your GitHub account entitlement — the 
 
 ### Cursor
 
-From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else.
+From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption code exists but doesn't actually work** — the Cursor CLI event stream doesn't return a session ID, so any resume value you pass is always invalid. If you need resume, pick something else. MCP config is materialized into the task workspace's `.cursor/mcp.json`, with Cursor's project approval file written under a per-task `CURSOR_DATA_DIR` so managed MCP servers do not depend on the user's global Cursor approvals.
 
 ### Gemini
 
@@ -90,9 +90,9 @@ The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continu
 
 ## MCP configuration: provider-specific support
 
-**Of the 12 tools, seven consume `mcp_config`: Claude Code, Codex, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other five accept the field but **ignore it** — no error, no warning, the config just has no effect.
+**Of the 12 tools, eight consume `mcp_config`: Claude Code, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, and OpenClaw**. The other four accept the field but **ignore it** — no error, no warning, the config just has no effect.
 
-The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
+The runtime paths are provider-specific: Claude Code receives it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, and Kiro CLI receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
 
 <Callout type="warning">
 If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.

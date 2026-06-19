@@ -30,10 +30,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
 
@@ -110,10 +107,18 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// fires. The field symptom is "write |1: The pipe has been ended."
 	// surfacing exactly at the per-task timeout when the kill invalidates
 	// the still-blocked pipe.
+	//
+	// Keep stdin open after the initial user message. Claude's stream-json
+	// protocol can emit control_request events mid-run and expects matching
+	// control_response frames on the same input stream; closing stdin here
+	// leaves the child stuck waiting for a response until its own fallback
+	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
 		err := writeClaudeInput(stdin, prompt)
-		closeStdin()
+		if err != nil {
+			closeStdin()
+		}
 		writeDone <- err
 	}()
 
@@ -135,6 +140,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -175,6 +181,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				closeStdin()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -183,8 +190,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Content: msg.Log.Message,
 					})
 				}
+			case "control_request":
+				b.handleControlRequest(msg, stdin)
 			}
 		}
+
+		closeStdin()
 
 		// Wait for process exit
 		exitErr := cmd.Wait()
@@ -590,10 +601,36 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	return env
 }
 
+// isFilteredChildEnvKey reports whether an inherited env var is an internal
+// Claude Code runtime/session marker that must NOT leak into the spawned child
+// (otherwise the child mistakes itself for a nested or resumed session, or
+// inherits the parent's exec path / transport).
+//
+// It must NOT strip the user-facing CLAUDE_CODE_* configuration namespace
+// (CLAUDE_CODE_GIT_BASH_PATH, CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX,
+// CLAUDE_CODE_MAX_OUTPUT_TOKENS, CLAUDE_CODE_TMPDIR, ...): users set those
+// deliberately and the child needs them. Blanket-stripping the whole prefix is
+// what broke Windows — CLAUDE_CODE_GIT_BASH_PATH was silently removed, so Claude
+// Code could not find bash.exe and exited immediately. Strip internal markers by
+// exact name and let every other CLAUDE_CODE_* var through.
+//
+// The denylist holds only undocumented, per-process runtime markers. Anything in
+// the public env-vars reference (https://code.claude.com/docs/en/env-vars) is
+// user config and stays out of this list — including CLAUDE_CODE_TMPDIR, a
+// documented temp-dir override under which Claude Code creates its own
+// per-session subdir, so inheriting it is harmless.
 func isFilteredChildEnvKey(key string) bool {
-	return key == "CLAUDECODE" ||
-		strings.HasPrefix(key, "CLAUDECODE_") ||
-		strings.HasPrefix(key, "CLAUDE_CODE_")
+	switch key {
+	case "CLAUDECODE", // "1" when running inside Claude Code
+		"CLAUDE_CODE_ENTRYPOINT", // entrypoint marker (cli/sdk-cli/...)
+		"CLAUDE_CODE_EXECPATH",   // path to the running CLI binary
+		"CLAUDE_CODE_SESSION_ID", // per-session identifier
+		"CLAUDE_CODE_SSE_PORT":   // IDE-extension transport port
+		return true
+	}
+	// CLAUDECODE_* (no underscore between CLAUDE and CODE) is wholly internal;
+	// keep stripping it. The user-facing config namespace is CLAUDE_CODE_*.
+	return strings.HasPrefix(key, "CLAUDECODE_")
 }
 
 // blockedArgMode specifies whether a blocked arg takes a value or is standalone.

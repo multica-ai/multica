@@ -180,9 +180,9 @@ docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 
 **가능한 원인**:
 
-1. **`rollup_task_usage_hourly()`가 전혀 스케줄링되지 않음** — 사용량 / 런타임 대시보드는 파생 테이블 `task_usage_hourly`에서 읽으며, 이 테이블은 해당 함수로 채워집니다. 번들된 `pgvector/pgvector:pg17` 이미지에는 `pg_cron`이 포함되어 있지 않으며, 백엔드도 프로세스 내에서 rollup을 실행하지 않습니다. 외부 스케줄러 없이 새로 설치한 자체 호스팅에서는 이것이 기본 상태입니다.
-2. **`pg_cron`이 설치되었지만 잘못된 데이터베이스를 가리킴** — `pg_cron.database_name`의 기본값은 `postgres`입니다. Multica 데이터베이스 이름이 다르면 스케줄된 작업이 `rollup_task_usage_hourly()`를 전혀 보지 못합니다.
-3. **스케줄러는 실행되지만 rollup이 조용히 오류를 냄** — 예를 들어 cron 항목 내부의 DB 역할 / search_path가 잘못됨.
+1. **`rollup_task_usage_hourly()`가 클레임되지 않음** — 사용량 / 런타임 대시보드는 파생 테이블 `task_usage_hourly`에서 읽으며, 이 테이블은 해당 함수로 채워집니다. MUL-2957부터 백엔드는 DB 기반 스케줄러(`sys_cron_executions`)를 통해 인프로세스로 rollup을 실행합니다. 오래된 빌드, 적용되지 않은 migration `113`, 또는 레플리카가 남아있지 않은 장기간의 백엔드 중단이 있으면 최근 SUCCESS 행이 없는 테이블이 남을 수 있습니다.
+2. **`pg_cron`이 호환성 용도로 구성되었지만 잘못된 데이터베이스를 가리킴** — `pg_cron.database_name`의 기본값은 `postgres`입니다. Multica 데이터베이스 이름이 다르면 스케줄된 작업이 `rollup_task_usage_hourly()`를 전혀 보지 못합니다. 인프로세스 스케줄러는 이에 의존하지 않지만, 인프로세스 스케줄러를 제거하고 `pg_cron`에 의존한다면 DB 이름이 일치해야 합니다.
+3. **핸들러가 클레임되지만 조용히 오류를 냄** — 예: 마이그레이션이 일부만 적용되어 SQL 함수가 누락되었거나, DB 역할 / search_path가 잘못 구성됨. `sys_cron_executions`의 FAILED 감사 행을 확인하세요.
 
 **진단 방법**:
 
@@ -191,24 +191,30 @@ docker exec <container> env | grep -E 'APP_ENV|MULTICA_DEV_VERIFICATION_CODE'
 SELECT count(*) AS raw_rows FROM task_usage;
 SELECT count(*) AS hourly_rows FROM task_usage_hourly;
 
--- Confirm pg_cron is (or isn't) available.
-SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
-SHOW shared_preload_libraries;
-
--- If pg_cron is installed, check the schedule + last run.
-SELECT jobname, schedule, database, active FROM cron.job;
-SELECT jobname, status, return_message, start_time, end_time
-  FROM cron.job_run_details ORDER BY start_time DESC LIMIT 10;
+-- Inspect the in-process scheduler's audit log.
+SELECT plan_time, status, attempt, runner_id,
+       error_code, error_msg, started_at, finished_at
+  FROM sys_cron_executions
+ WHERE job_name = 'rollup_task_usage_hourly'
+ ORDER BY plan_time DESC
+ LIMIT 20;
 
 -- Watermark — if this is 1970-01-01, the rollup has never run.
 SELECT watermark_at FROM task_usage_hourly_rollup_state;
+
+-- Compatibility path: if you previously registered pg_cron, confirm
+-- it is (or isn't) available and pointing at the right database.
+SELECT * FROM pg_available_extensions WHERE name = 'pg_cron';
+SHOW shared_preload_libraries;
+SELECT jobname, schedule, database, active FROM cron.job;
 ```
 
 **해결 방법**:
 
-- rollup을 수동으로 한 번 호출하여 동작하는지 확인하세요: `SELECT rollup_task_usage_hourly();` — 대시보드를 새로고침하세요. 숫자가 나타나면 빠진 것은 스케줄러뿐입니다.
-- [자체 호스팅 빠른 시작 → 사용량 rollup 스케줄링](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)에서 지원되는 방식 중 하나를 선택하세요: 외부 cron / systemd-timer / Kubernetes CronJob, 또는 Postgres를 `pg_cron`이 포함된 이미지로 교체.
-- 스케줄 설정 이전의 이력이 이미 있다면, 백엔드 컨테이너 내부에서 `backfill_task_usage_hourly`를 실행하여 워터마크 이전의 버킷을 채우세요.
+- 적어도 하나의 백엔드 레플리카에서 스케줄러가 실제로 실행 중인지 확인하세요 — 30초마다 `sys_cron_executions`의 `rollup_task_usage_hourly`에 SUCCESS 행이 추가되어야 합니다.
+- SQL 경로를 검증하기 위해 rollup을 수동으로 한 번 호출하세요: `SELECT rollup_task_usage_hourly();` — 대시보드를 새로고침하세요. 숫자가 나타나면 SQL 함수는 정상이며, 문제는 스케줄러 클레임 경로에 있습니다.
+- migration `113_sys_cron_executions`가 아직 적용되지 않았다면 백엔드를 재시작해 마이그레이션을 실행하거나 수동으로 `migrate up`을 호출하세요.
+- 인프로세스 스케줄러 이전의 레거시 `pg_cron` 이력이 있어도 SQL 함수가 내부적으로 advisory lock 4246을 잡고 있어 두 경로가 이중 쓰기할 수 없습니다 — 선택적 `cron.unschedule` 정리는 [자체 호스팅 빠른 시작 → 사용량 롤업](/self-host-quickstart#7-usage-rollup-no-operator-action-required)을 참고하세요.
 
 ## 마이그레이션 `103`이 `refusing to drop legacy daily rollups`로 실패함
 
@@ -224,9 +230,11 @@ ERROR: refusing to drop legacy daily rollups:
 
 **가능한 원인**: 이것은 마이그레이션 `103`의 fail-closed 가드입니다. `task_usage_hourly`가 원시 `task_usage`를 따라잡을 때까지 레거시 daily rollup 삭제를 거부합니다. 기존 행이 존재하고 rollup 워터마크가 여전히 epoch에 머물러 있을 때 — 즉 아직 어떤 이력도 hourly 테이블로 rollup되지 않았을 때 — 이 가드가 발동합니다.
 
+MUL-2957부터 migrate 명령은 migration `103`을 적용하기 직전에 멱등한 월별 슬라이스 backfill(advisory lock 4246 보호)을 자동으로 실행하므로, v0.3.4 → v0.3.5+ 직접 업그레이드는 단일 `migrate up` 호출로 완료됩니다. 그래도 이 오류가 보인다면, MUL-2957 이전 바이너리를 사용 중이거나 훅 자체가 실패한 것입니다 — migrate 로그에서 `task_usage hourly rollup hook` 로그를 확인하세요.
+
 **해결 방법**:
 
-1. 같은 데이터베이스에 대해 backfill을 실행하세요(멱등하며, 중단해도 안전하고, 다시 실행해도 안전합니다):
+1. MUL-2957 이전 바이너리를 사용 중이고 바이너리를 먼저 업그레이드할 수 없다면, 같은 데이터베이스에 대해 스탠드얼론 backfill을 실행하세요(멱등하며, 중단해도 안전하고, 다시 실행해도 안전합니다):
 
    ```bash
    # Docker Compose
@@ -239,7 +247,7 @@ ERROR: refusing to drop legacy daily rollups:
    ```
 
 2. 업그레이드를 다시 실행하세요 — 백엔드 컨테이너를 재시작하는 것으로 충분하며, 마이그레이션은 시작 시 실행됩니다. 이제 가드가 최신 워터마크를 확인하고 `103`을 적용하도록 허용합니다.
-3. 워터마크가 계속 진행되도록 지속적인 rollup 스케줄(cron / `pg_cron`)을 설정하세요 — [자체 호스팅 빠른 시작 → 사용량 rollup 스케줄링](/self-host-quickstart#7-schedule-the-usage-rollup-required-for-the-usage-dashboard)을 참고하세요.
+3. 인프로세스 스케줄러가 이후 워터마크를 계속 진행시킵니다 — [자체 호스팅 빠른 시작 → 사용량 롤업](/self-host-quickstart#7-usage-rollup-no-operator-action-required)을 참고하세요.
 
 `--sleep-between-slices=2s`는 수년 치 이력이 있는 프로덕션 데이터베이스에서 적절한 기본값입니다. 최근 N개월만 보관하고 더 오래된 버킷을 영구히 포기해도 괜찮다면 `--months-back N --force-partial`을 사용하세요.
 

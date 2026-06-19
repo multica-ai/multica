@@ -27,14 +27,14 @@ describe("ImageExtension.renderMarkdown", () => {
     expect(md).toContain("\\\\");
     expect(md).toContain("\\[");
     expect(md).toContain("\\(");
-    expect(md).toMatch(/^!\[.*\]\(https:\/\/cdn\.example\.com\/img\.png\)\n\n$/);
+    expect(md).toMatch(/^!\[.*\]\(https:\/\/cdn\.example\.com\/img\.png\)$/);
   });
 
   it("leaves normal alt text unchanged", () => {
     const md = imageRenderMarkdown({
       attrs: { src: "https://cdn.example.com/img.png", alt: "screenshot" },
     });
-    expect(md).toBe("![screenshot](https://cdn.example.com/img.png)\n\n");
+    expect(md).toBe("![screenshot](https://cdn.example.com/img.png)");
   });
 });
 

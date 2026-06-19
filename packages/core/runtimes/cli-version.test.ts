@@ -3,11 +3,12 @@ import { checkQuickCreateCliVersion } from "./cli-version";
 
 describe("checkQuickCreateCliVersion", () => {
   it("returns ok for a tagged release at or above the minimum", () => {
-    expect(checkQuickCreateCliVersion("v0.2.20").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("v0.2.21").state).toBe("ok");
     expect(checkQuickCreateCliVersion("0.3.1").state).toBe("ok");
   });
 
   it("returns too_old for a tagged release below the minimum", () => {
+    expect(checkQuickCreateCliVersion("v0.2.20").state).toBe("too_old");
     expect(checkQuickCreateCliVersion("v0.2.15").state).toBe("too_old");
   });
 

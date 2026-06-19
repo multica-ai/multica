@@ -1083,6 +1083,63 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 }
 
+// ── Mode matrix (issue #3260) ──
+//
+// `openclaw agent` runs through the Gateway by default; `--local` is the
+// embedded-mode escape hatch. Multica historically hard-coded `--local` so
+// every spawn went embedded. The OpenclawMode field lets a user-configured
+// agent opt into Gateway routing by setting mode="gateway" in runtime_config.
+
+func TestBuildOpenclawArgsLocalModeIsDefault(t *testing.T) {
+	t.Parallel()
+
+	// Both empty and explicit "local" must keep the historical --local
+	// behaviour so existing agents do not silently change routing.
+	for _, mode := range []string{"", "local"} {
+		args := buildOpenclawArgs("do work", "ses-local", ExecOptions{
+			OpenclawMode: mode,
+		}, slog.Default())
+		if idx := indexOf(args, "--local"); idx == -1 {
+			t.Errorf("mode=%q: expected --local in args, got %v", mode, args)
+		}
+	}
+}
+
+func TestBuildOpenclawArgsGatewayModeDropsLocal(t *testing.T) {
+	t.Parallel()
+
+	args := buildOpenclawArgs("do work", "ses-gw", ExecOptions{
+		OpenclawMode: "gateway",
+	}, slog.Default())
+
+	if idx := indexOf(args, "--local"); idx != -1 {
+		t.Errorf("gateway mode must not append --local, got %v", args)
+	}
+	// Daemon-managed flags must still be present so the run is well-formed.
+	for _, want := range []string{"agent", "--json", "--session-id", "--message"} {
+		if idx := indexOf(args, want); idx == -1 {
+			t.Errorf("gateway mode dropped daemon-managed flag %q: %v", want, args)
+		}
+	}
+}
+
+func TestBuildOpenclawArgsGatewayModeStillFiltersLocalFromCustomArgs(t *testing.T) {
+	t.Parallel()
+
+	// Mode is the single source of truth for local/gateway routing. A user
+	// trying to re-introduce --local via custom_args under gateway mode is
+	// expressing contradictory intent; the filter wins so the run actually
+	// reaches the gateway as the agent config requested.
+	args := buildOpenclawArgs("do work", "ses-mix", ExecOptions{
+		OpenclawMode: "gateway",
+		CustomArgs:   []string{"--local"},
+	}, slog.Default())
+
+	if idx := indexOf(args, "--local"); idx != -1 {
+		t.Errorf("gateway mode must filter custom_args --local, got %v", args)
+	}
+}
+
 func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
 	t.Parallel()
 
