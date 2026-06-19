@@ -14,6 +14,23 @@ describe("viewableKind", () => {
   });
 
   it.each([
+    // FIR-1510: the upload sniffer stores markdown/html/json as text/plain.
+    // The filename extension must win so they render formatted, not as raw text.
+    ["text/plain", "notes.md", "markdown"],
+    ["text/plain", "NOTES.MARKDOWN", "markdown"],
+    ["text/plain; charset=utf-8", "ak-trace.md", "markdown"],
+    ["text/plain", "report.html", "html"],
+    ["text/plain", "data.json", "json"],
+    ["text/plain", "plain.txt", "text"],
+    ["text/plain", "noext", "text"],
+  ] as const)(
+    "prefers extension over text/plain for %s/%s",
+    (ct, name, expected) => {
+      expect(viewableKind(ct, name)).toBe(expected);
+    },
+  );
+
+  it.each([
     ["image/png", "x.png", "image"],
     ["image/jpeg", "photo.jpg", "image"],
     ["image/webp", "shot.webp", "image"],

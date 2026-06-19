@@ -75,14 +75,23 @@ export function viewableKind(
   filename: string,
 ): ViewableKind | null {
   const ct = normalizeContentType(contentType);
+  const ext = extensionOf(filename);
   if (ct === "text/html") return "html";
   if (ct === "text/markdown") return "markdown";
   if (ct === "application/json") return "json";
   if (ct === "application/pdf") return "pdf";
-  if (ct === "text/plain") return "text";
+  // Markdown/HTML/JSON files are commonly stored as text/plain because the
+  // upload sniffer (Go's http.DetectContentType) reports text/plain for them.
+  // Prefer the filename extension so they render formatted instead of as raw
+  // text in a code block. See FIR-1510.
+  if (ct === "text/plain") {
+    if (ext === "md" || ext === "markdown") return "markdown";
+    if (ext === "html" || ext === "htm") return "html";
+    if (ext === "json") return "json";
+    return "text";
+  }
   if (isViewableImage(contentType, filename)) return "image";
 
-  const ext = extensionOf(filename);
   if (ext === "html" || ext === "htm") return "html";
   if (ext === "md" || ext === "markdown") return "markdown";
   if (ext === "json") return "json";
