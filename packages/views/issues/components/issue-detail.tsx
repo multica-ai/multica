@@ -87,6 +87,11 @@ import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
+import {
+  AnimatedRightSidebar,
+  rightSidebarPanelMotionProps,
+  useAnimatedRightSidebarState,
+} from "../../layout/animated-right-sidebar";
 
 function SubscriberPopoverContent({
   members,
@@ -683,7 +688,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(defaultSidebarOpen);
+  const {
+    open: desktopSidebarOpen,
+    visualOpen: desktopSidebarVisualOpen,
+    beginToggle: beginDesktopSidebarToggle,
+    handleResize: handleDesktopSidebarResize,
+  } = useAnimatedRightSidebarState(defaultSidebarOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -1296,9 +1306,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
     const panel = sidebarRef.current;
     if (!panel) return;
-    if (panel.isCollapsed()) panel.expand();
+    const nextOpen = panel.isCollapsed();
+    beginDesktopSidebarToggle(nextOpen);
+    if (nextOpen) panel.expand();
     else panel.collapse();
-  }, [isMobile, sidebarRef]);
+  }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,
@@ -2155,19 +2167,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ResizableHandle />
       <ResizablePanel
         id="sidebar"
+        {...rightSidebarPanelMotionProps}
         defaultSize={defaultSidebarOpen ? 320 : 0}
         minSize={260}
         maxSize={420}
         collapsible
         groupResizeBehavior="preserve-pixel-size"
         panelRef={sidebarRef}
-        onResize={(size) => setDesktopSidebarOpen(size.inPixels > 0)}
+        onResize={handleDesktopSidebarResize}
       >
-      <div className="overflow-y-auto border-l h-full">
-        <div className="p-4">
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen}>
           {sidebarContent}
-        </div>
-      </div>
+        </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>
   );
