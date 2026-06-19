@@ -29,7 +29,7 @@ import { TriggerTargetBar, memberMentionMarkdown } from "./trigger-target-bar";
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for thread replies.
 import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
-// CEREBRO-PATCH(composer-height-cap): TECH-3536 — cap the reply field at 50% of the space above the mobile keyboard, with an expand-to-80% pill.
+// CEREBRO-PATCH(composer-height-cap): TECH-3536 — cap the collapsed reply field at 4 lines (FIR-1625), with an expand pill that grows it to the viewport cap.
 import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 
 // ---------------------------------------------------------------------------

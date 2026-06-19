@@ -3,14 +3,21 @@
 import { useEffect, useState } from "react";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 
-// Fractions of the visible viewport a compose field may occupy.
+// Collapsed cap: the field shows at most COLLAPSED_LINES lines of body text,
+// then scrolls. The editor body is 16px on mobile / 14px on desktop
+// (`text-base md:text-sm`) at line-height 1.625 (see editor prose.css), so one
+// line is ~26px on mobile and ~23px on desktop. FIR-1625.
+const COLLAPSED_LINES = 4;
+const MOBILE_LINE_HEIGHT = 26; // 16px * 1.625
+const DESKTOP_LINE_HEIGHT = 23; // 14px * 1.625
+const MOBILE_COLLAPSED_MAX = COLLAPSED_LINES * MOBILE_LINE_HEIGHT; // 104
+const DESKTOP_COLLAPSED_MAX = COLLAPSED_LINES * DESKTOP_LINE_HEIGHT; // 92
+
+// Expanded fractions of the visible viewport a compose field may occupy.
 // On mobile `window.visualViewport.height` already excludes the on-screen
-// keyboard, so these are fractions of the space left ABOVE the keyboard.
-// On desktop there is no keyboard, so we cap against the window height and
-// keep the collapsed field compact with a fixed pixel ceiling. TECH-3536.
-const DEFAULT_FRACTION = 0.5;
+// keyboard, so this is a fraction of the space left ABOVE the keyboard. On
+// desktop there is no keyboard, so we cap against the window height. TECH-3536.
 const EXPANDED_FRACTION = 0.8;
-const DESKTOP_COLLAPSED_MAX = 240;
 const DESKTOP_EXPANDED_FRACTION = 0.7;
 
 export interface ComposerHeight {
@@ -39,9 +46,9 @@ export interface ComposerHeight {
  * (issue comments, channel/DM, agent chat) so the expand control is
  * identical everywhere. TECH-3536.
  *
- * Mobile: caps against `visualViewport.height` (space above the keyboard) —
- * 50% collapsed, 80% expanded. Desktop: 240px collapsed, 70% of the window
- * height expanded.
+ * Collapsed: at most 4 lines of body text (~104px mobile, ~92px desktop),
+ * then the field scrolls (FIR-1625). Expanded caps against the viewport —
+ * 80% of the space above the keyboard on mobile, 70% of the window on desktop.
  */
 export function useComposerHeight(): ComposerHeight {
   const isMobile = useIsMobile();
@@ -82,10 +89,11 @@ export function useComposerHeight(): ComposerHeight {
       // Pinning flexBasis makes the field actually grow on expand.
       containerStyle = { height: expandedHeight, flexBasis: expandedHeight };
     } else {
+      // Collapsed: cap at 4 lines of body text, then scroll. Fixed line-based
+      // ceiling (not a viewport fraction) so a long draft never grows the
+      // field past 4 lines. FIR-1625.
       containerStyle = {
-        maxHeight: isMobile
-          ? Math.round(viewportHeight * DEFAULT_FRACTION)
-          : DESKTOP_COLLAPSED_MAX,
+        maxHeight: isMobile ? MOBILE_COLLAPSED_MAX : DESKTOP_COLLAPSED_MAX,
       };
     }
   }
