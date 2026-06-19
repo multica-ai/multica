@@ -245,7 +245,8 @@
       "description_label": "Description (optional)",
       "description_placeholder": "What happens in this stage?",
       "delete_confirm_title": "Delete stage?",
-      "delete_confirm_description": "This stage contains {{count}} node(s). Deleting it will move them to \"Unassigned\"."
+      "delete_confirm_description": "This stage contains {{count}} node(s). Deleting it will move them to \"Unassigned\".",
+      "cancel": "Cancel"
     }
   },
   "my_tasks": {

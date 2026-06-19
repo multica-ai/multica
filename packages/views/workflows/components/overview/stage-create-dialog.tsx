@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCreateStage } from "@multica/core/workflows/queries";
 import { useT } from "../../../i18n";
 
@@ -30,9 +30,17 @@ export function StageCreateDialog({
       });
       onClose();
     } catch {
-      // Error handled by mutation state
+      // Error captured by mutation state and displayed below
     }
   }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   return (
     <div
@@ -43,8 +51,11 @@ export function StageCreateDialog({
       <div
         className="bg-background rounded-lg shadow-xl w-full max-w-md mx-4 p-6"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="stage-dialog-title"
       >
-        <h2 className="text-lg font-semibold">
+        <h2 id="stage-dialog-title" className="text-lg font-semibold">
           {t(($) => $.overview.stage_dialog.create_title)}
         </h2>
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
@@ -80,7 +91,7 @@ export function StageCreateDialog({
               onClick={onClose}
               className="px-4 py-2 text-sm rounded-md border hover:bg-muted"
             >
-              Cancel
+              {t(($) => $.overview.stage_dialog.cancel)}
             </button>
             <button
               type="submit"
@@ -91,6 +102,11 @@ export function StageCreateDialog({
               {createStage.isPending ? "Creating..." : "Create"}
             </button>
           </div>
+          {createStage.error && (
+            <p className="text-xs text-destructive mt-1">
+              {createStage.error.message}
+            </p>
+          )}
         </form>
       </div>
     </div>

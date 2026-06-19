@@ -244,7 +244,8 @@
       "description_label": "描述（可选）",
       "description_placeholder": "这个阶段做什么？",
       "delete_confirm_title": "删除阶段？",
-      "delete_confirm_description": "此阶段包含 {{count}} 个节点。删除阶段后节点将移至「未分组」。"
+      "delete_confirm_description": "此阶段包含 {{count}} 个节点。删除阶段后节点将移至「未分组」。",
+      "cancel": "取消"
     }
   },
   "my_tasks": {
