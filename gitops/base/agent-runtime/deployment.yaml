@@ -19,7 +19,7 @@ spec:
         - name: regcred
       containers:
         - name: opencode
-          image: ghcr.io/g2crowd/agentrunner-runtime
+          image: ghcr.io/g2crowd/agentrunner-runtime-prod
           imagePullPolicy: Always
           env:
             - name: WORKSPACE_SLUG
