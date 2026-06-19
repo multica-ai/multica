@@ -171,6 +171,9 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_time"
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
+  // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
+  // mirroring the running banner (live countdown / waited-for status / CI).
+  | "cerebro_wakeup_bar"
   // TECH-3173: staged rollout of per-tool enforcement on LOCAL CLI runtimes
   // (Claude/Codex/Cursor/Gemini). Master on/off; when on the daemon resolves each
   // tool call through the same tool-policy chain + approval inbox as the gateway.
@@ -410,6 +413,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_wakeup_time: true,
   cerebro_wakeup_issue_status: true,
   cerebro_wakeup_github_ci: true,
+  // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
+  // sidebar-only wakeup list with no banner.
+  cerebro_wakeup_bar: true,
   // TECH-3173: OFF by default — local-runtime per-tool enforcement stays dormant
   // until an admin opts in from Settings, so a deploy never changes behaviour.
   cerebro_local_tool_policy: false,
@@ -1131,6 +1137,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Let agents schedule a wakeup that fires on a GitHub pull-request / CI update for a watched issue. Off blocks new CI wakeups and stops any pending ones from firing for this workspace; turning it back on lets pending ones resume. TECH-3176.",
+  },
+  {
+    key: "cerebro_wakeup_bar",
+    label: "Scheduled wakeup banner",
+    group: "issues",
+    description:
+      "Show a prominent orange banner at the top of an issue when it has a pending agent wakeup, mirroring the running-agent banner: a live countdown for time-based wakeups, the watched status for status wakeups, and a CI label for GitHub-CI wakeups, each with a cancel button. Multiple pending wakeups fold into one expandable banner. Off keeps the wakeups visible only in the sidebar list. FIR-1521.",
   },
   // TECH-3173: local-runtime per-tool enforcement, staged from settings.
   {

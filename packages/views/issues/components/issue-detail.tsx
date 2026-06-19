@@ -102,7 +102,8 @@ import { StatusIcon } from "./status-icon";
 import { DependenciesSection } from "./dependencies-section";
 // CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3176 — wakeup list + cancel, now from the cerebro-wakeup extension package.
 // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — wakeup timeline action note.
-import { CerebroWakeupSection, WakeupNote, isWakeupEntry } from "@multica/cerebro-wakeup";
+// CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — top-of-issue scheduled-wakeup banner.
+import { CerebroWakeupSection, CerebroWakeupBar, WakeupNote, isWakeupEntry } from "@multica/cerebro-wakeup";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
@@ -1160,6 +1161,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const sprintsEnabled = useFeatureFlag("cerebro_sprints");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
+  // CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 gate the top-of-issue wakeup banner.
+  const wakeupBarEnabled = useFeatureFlag("cerebro_wakeup_bar");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2444,6 +2447,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             {/* CEREBRO-PATCH(issue-detail-tabs): Agent live output and run/session tabs are task-only.
                 Chat threads run conversationally — there is no agent-run history to surface here. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} />}
+
+            {/* CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — orange scheduled-wakeup banner under the running card. */}
+            {!isChat && wakeupBarEnabled && <CerebroWakeupBar issueId={id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />
