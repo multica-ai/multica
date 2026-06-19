@@ -260,38 +260,7 @@ func (s *Store) BuildMCPConfigRelayed(ctx context.Context, workspaceID pgtype.UU
 		if c.Type != TypeMCPHTTP {
 			continue
 		}
-		if rewriter != nil {
-			if relayURL, bearer, ok := rewriter.RelayEntry(c.WorkspaceID, c.Name, c.URL, c.Internal); ok {
-				entry := map[string]any{"url": relayURL}
-				if bearer != "" {
-					entry["headers"] = map[string]string{"Authorization": "Bearer " + bearer}
-				}
-				servers[c.Name] = entry
-				continue
-			}
-		}
-		entry := map[string]any{"url": c.URL}
-		headers := make(map[string]string)
-		if c.AuthConfig.BearerToken != "" {
-			headers["Authorization"] = "Bearer " + c.AuthConfig.BearerToken
-		}
-		if c.AuthConfig.APIKey != "" {
-			key := c.AuthConfig.APIKeyHeader
-			if key == "" {
-				key = "X-API-Key"
-			}
-			headers[key] = c.AuthConfig.APIKey
-		}
-		if c.AuthConfig.CFAccessID != "" {
-			headers["CF-Access-Client-Id"] = c.AuthConfig.CFAccessID
-		}
-		if c.AuthConfig.CFAccessSecret != "" {
-			headers["CF-Access-Client-Secret"] = c.AuthConfig.CFAccessSecret
-		}
-		if len(headers) > 0 {
-			entry["headers"] = headers
-		}
-		servers[c.Name] = entry
+		servers[c.Name] = mcpServerEntry(c, rewriter)
 	}
 	if len(servers) == 0 {
 		return nil
@@ -301,6 +270,48 @@ func (s *Store) BuildMCPConfigRelayed(ctx context.Context, workspaceID pgtype.UU
 		return nil
 	}
 	return b
+}
+
+// mcpServerEntry builds the Claude Code --mcp-config entry for a single
+// mcp_http connection, applying the relay rewriter when one is supplied.
+//
+// "type": "http" is mandatory: Claude Code's MCP client uses it as the
+// transport discriminator and silently ignores an HTTP server entry that omits
+// it — which is exactly why a local runtime saw zero tools before this was
+// added (FIR-1563). Codex/OpenCode translators key off "url", so the field is
+// harmless there.
+func mcpServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
+	if rewriter != nil {
+		if relayURL, bearer, ok := rewriter.RelayEntry(c.WorkspaceID, c.Name, c.URL, c.Internal); ok {
+			entry := map[string]any{"type": "http", "url": relayURL}
+			if bearer != "" {
+				entry["headers"] = map[string]string{"Authorization": "Bearer " + bearer}
+			}
+			return entry
+		}
+	}
+	entry := map[string]any{"type": "http", "url": c.URL}
+	headers := make(map[string]string)
+	if c.AuthConfig.BearerToken != "" {
+		headers["Authorization"] = "Bearer " + c.AuthConfig.BearerToken
+	}
+	if c.AuthConfig.APIKey != "" {
+		key := c.AuthConfig.APIKeyHeader
+		if key == "" {
+			key = "X-API-Key"
+		}
+		headers[key] = c.AuthConfig.APIKey
+	}
+	if c.AuthConfig.CFAccessID != "" {
+		headers["CF-Access-Client-Id"] = c.AuthConfig.CFAccessID
+	}
+	if c.AuthConfig.CFAccessSecret != "" {
+		headers["CF-Access-Client-Secret"] = c.AuthConfig.CFAccessSecret
+	}
+	if len(headers) > 0 {
+		entry["headers"] = headers
+	}
+	return entry
 }
 
 // GetEnabledByName returns one enabled connection by its (workspace-unique)
