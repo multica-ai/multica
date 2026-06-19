@@ -26,21 +26,57 @@ test.describe("Many Nodes FitView", () => {
       1
     );
 
-    // Create 15+ nodes arranged in a grid pattern to test fitView
-    const nodeNames: string[] = [];
+    // Create 16 nodes (4x4 grid) with complex edges between them
+    const nodes: { id: string; title: string }[] = [];
     for (let row = 0; row < 4; row++) {
       for (let col = 0; col < 4; col++) {
         const name = `Node R${row + 1}C${col + 1}`;
-        nodeNames.push(name);
-        await seededApi.createWorkflowNode(workflow.id, {
+        const node = await seededApi.createWorkflowNode(workflow.id, {
           title: name,
           stage_id: stage.id,
           position_x: col * 250,
           position_y: row * 150,
         });
+        nodes.push({ id: node.id, title: name });
       }
     }
-    // Total: 16 nodes (4x4 grid)
+
+    // Connect grid nodes with horizontal and vertical edges to create
+    // a complex edge network (18 total edges)
+    const edgeSet = new Set<string>();
+    // Horizontal edges within each row
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 3; col++) {
+        const srcIdx = row * 4 + col;
+        const tgtIdx = row * 4 + col + 1;
+        const key = `${srcIdx}-${tgtIdx}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          await seededApi.createWorkflowEdge(
+            workflow.id,
+            nodes[srcIdx].id,
+            nodes[tgtIdx].id
+          );
+        }
+      }
+    }
+    // Vertical edges within each column
+    for (let col = 0; col < 4; col++) {
+      for (let row = 0; row < 3; row++) {
+        const srcIdx = row * 4 + col;
+        const tgtIdx = (row + 1) * 4 + col;
+        const key = `${srcIdx}-${tgtIdx}`;
+        if (!edgeSet.has(key)) {
+          edgeSet.add(key);
+          await seededApi.createWorkflowEdge(
+            workflow.id,
+            nodes[srcIdx].id,
+            nodes[tgtIdx].id
+          );
+        }
+      }
+    }
+    // Total: 16 nodes + 18 edges (6 horizontal + 12 vertical)
 
     // ── Navigate to the overview page ──
     await page.goto(`/${slug}/workflows/${workflow.id}/overview`);

@@ -185,6 +185,24 @@ export class TestApiClient {
     return node;
   }
 
+  async createWorkflowEdge(
+    workflowId: string,
+    sourceNodeId: string,
+    targetNodeId: string
+  ) {
+    const res = await this.authedFetch(
+      `/api/workflows/${workflowId}/edges`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          source_node_id: sourceNodeId,
+          target_node_id: targetNodeId,
+        }),
+      }
+    );
+    return res.json();
+  }
+
   async assignNodeToStage(workflowId: string, nodeId: string, stageId: string | null) {
     const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes/${nodeId}/stage`, {
       method: "PUT",

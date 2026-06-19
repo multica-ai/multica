@@ -96,12 +96,12 @@ test.describe("DAG on Stage Selection", () => {
     await stage2Card.click();
 
     // ── Step 2: Verify stage 2 card gets selected state ──
-    // Selected state can be aria-selected, data-selected, or a CSS class
-    await expect(
-      stage2Card.or(page.locator('[aria-selected="true"]'))
-    ).toBeVisible({ timeout: 3000 });
+    // Use aria-selected as the primary selection attribute
+    await expect(stage2Card).toHaveAttribute("aria-selected", "true", {
+      timeout: 3000,
+    });
 
-    // Verify the stage 2 card has selected visual state
+    // Extra verification for any additional selected visual state
     const stage2Selected = await stage2Card.evaluate((el) => {
       return (
         el.getAttribute("aria-selected") === "true" ||
@@ -116,6 +116,31 @@ test.describe("DAG on Stage Selection", () => {
     // ── Step 3: Verify DAG updates to show stage 2's nodes ──
     // Wait for any transition/animation to complete
     await page.waitForTimeout(500);
+
+    // Verify DAG auto-fits view — all nodes within viewport bounds
+    const allNodesVisible = await page.evaluate(() => {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const nodes = document.querySelectorAll(".react-flow__node");
+      if (nodes.length === 0) return false;
+
+      let allInView = true;
+      nodes.forEach((node) => {
+        const rect = node.getBoundingClientRect();
+        const nodeCX = rect.left + rect.width / 2;
+        const nodeCY = rect.top + rect.height / 2;
+        if (
+          nodeCX < -50 ||
+          nodeCX > viewportWidth + 50 ||
+          nodeCY < -50 ||
+          nodeCY > viewportHeight + 50
+        ) {
+          allInView = false;
+        }
+      });
+      return allInView;
+    });
+    expect(allNodesVisible).toBe(true);
 
     // Check that stage 2 nodes appear in the DAG
     // ReactFlow renders nodes as .react-flow__node elements
