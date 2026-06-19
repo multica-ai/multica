@@ -1,0 +1,238 @@
+{
+  "$schema": "https://multica.ai/seed-data-schema.json",
+  "$description": "全量研发流程 Workflow 种子数据 — JSON 格式，可直接用于 API POST/PUT 调用",
+  "$spec": "docs/superpowers/specs/2026-06-19-workflow-stage-overview-design.md",
+  "workflow": {
+    "title": "全栈Web应用研发流程 v2.0",
+    "description": "覆盖从需求收集到生产发布的完整研发流程。整合 AI Agent 进行代码生成、代码评审和自动化测试，支持多人协作与质量门禁。",
+    "status": "active",
+    "max_retries": 3,
+    "is_template": true
+  },
+  "stages": [
+    { "ref": "requirements", "name": "需求分析", "description": "收集、分析并确认产品需求，产出 PRD 文档和用户故事", "sort_order": 0 },
+    { "ref": "design", "name": "技术设计", "description": "完成架构设计、接口定义和数据库建模，产出技术方案文档", "sort_order": 1 },
+    { "ref": "implementation", "name": "编码实现", "description": "前后端及 AI Agent 模块的编码与集成联调", "sort_order": 2 },
+    { "ref": "code-review", "name": "代码评审", "description": "AI 预审 + 人工评审双重质量保障", "sort_order": 3 },
+    { "ref": "testing", "name": "测试验证", "description": "单元测试、集成测试、E2E 测试和性能基准测试", "sort_order": 4 },
+    { "ref": "release", "name": "发布上线", "description": "", "sort_order": 5 }
+  ],
+  "nodes": [
+    {
+      "ref": "req-collect", "stageRef": "requirements", "title": "需求收集",
+      "description": "从产品经理和客户处收集原始需求，整理为需求清单",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "title": { "type": "string", "description": "需求标题" }, "priority": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] }, "description": { "type": "string" } }, "required": ["title", "priority"] }
+    },
+    {
+      "ref": "req-review", "stageRef": "requirements", "title": "需求评审",
+      "description": "技术负责人和产品负责人共同评审需求可行性和优先级",
+      "position_x": 350, "position_y": 100, "sort_order": 1,
+      "worker_type": "squad", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "approved": { "type": "boolean" }, "comments": { "type": "string" }, "estimated_effort": { "type": "string", "enum": ["S", "M", "L", "XL"] } }, "required": ["approved"] }
+    },
+    {
+      "ref": "req-confirm", "stageRef": "requirements", "title": "需求确认",
+      "description": "最终确认需求范围、验收标准和排期计划",
+      "position_x": 600, "position_y": 100, "sort_order": 2,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "confirmed": { "type": "boolean" }, "acceptance_criteria": { "type": "array", "items": { "type": "string" } }, "sprint": { "type": "string" } }, "required": ["confirmed", "acceptance_criteria"] }
+    },
+    {
+      "ref": "arch-design", "stageRef": "design", "title": "架构设计",
+      "description": "确定系统整体架构、技术选型和模块划分",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "architecture_diagram": { "type": "string" }, "tech_stack": { "type": "array", "items": { "type": "string" } }, "modules": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "responsibility": { "type": "string" } } } } }, "required": ["architecture_diagram", "tech_stack"] }
+    },
+    {
+      "ref": "api-design", "stageRef": "design", "title": "接口设计",
+      "description": "定义 RESTful API 和 WebSocket 事件规范",
+      "position_x": 350, "position_y": 50, "sort_order": 1,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "endpoints": { "type": "array", "items": { "type": "object", "properties": { "method": { "type": "string" }, "path": { "type": "string" }, "request_body": { "type": "object" }, "response_body": { "type": "object" } } } } }, "required": ["endpoints"] }
+    },
+    {
+      "ref": "db-design", "stageRef": "design", "title": "数据库设计",
+      "description": "设计数据库表结构、索引策略和迁移方案",
+      "position_x": 350, "position_y": 200, "sort_order": 2,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "tables": { "type": "array", "items": { "type": "object", "properties": { "name": { "type": "string" }, "columns": { "type": "array" }, "indexes": { "type": "array" } } } }, "migration_plan": { "type": "string" } }, "required": ["tables"] }
+    },
+    {
+      "ref": "design-review", "stageRef": "design", "title": "设计评审",
+      "description": "团队集体评审技术方案，识别风险和优化点",
+      "position_x": 600, "position_y": 120, "sort_order": 3,
+      "worker_type": "squad", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "approved": { "type": "boolean" }, "risks": { "type": "array", "items": { "type": "object", "properties": { "description": { "type": "string" }, "severity": { "type": "string", "enum": ["low", "medium", "high"] }, "mitigation": { "type": "string" } } } }, "action_items": { "type": "array", "items": { "type": "string" } } }, "required": ["approved"] }
+    },
+    {
+      "ref": "frontend-dev", "stageRef": "implementation", "title": "前端开发",
+      "description": "实现 UI 组件、页面路由和状态管理",
+      "position_x": 100, "position_y": 50, "sort_order": 0,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "components": { "type": "array", "items": { "type": "string" } }, "tests_included": { "type": "boolean" }, "accessibility_check": { "type": "boolean" } }, "required": ["components", "tests_included"] }
+    },
+    {
+      "ref": "backend-dev", "stageRef": "implementation", "title": "后端开发",
+      "description": "实现 API handler、业务逻辑和数据访问层",
+      "position_x": 100, "position_y": 170, "sort_order": 1,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "api", "critic_id": null, "critic_api_url": "https://api.validator.internal/v1/lint",
+      "format_schema": { "type": "object", "properties": { "handlers": { "type": "array", "items": { "type": "string" } }, "sqlc_queries": { "type": "array", "items": { "type": "string" } }, "test_coverage_pct": { "type": "number", "minimum": 80 } }, "required": ["handlers", "test_coverage_pct"] }
+    },
+    {
+      "ref": "agent-dev", "stageRef": "implementation", "title": "AI Agent 开发",
+      "description": "开发 Workflow Agent 节点逻辑和 Prompt 工程",
+      "position_x": 350, "position_y": 110, "sort_order": 2,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "agent_config": { "type": "object" }, "prompt_template": { "type": "string" }, "tool_definitions": { "type": "array" }, "expected_output_schema": { "type": "object" } }, "required": ["agent_config", "prompt_template"] }
+    },
+    {
+      "ref": "db-migration", "stageRef": "implementation", "title": "数据库迁移",
+      "description": "编写和执行数据库 migration 脚本",
+      "position_x": 100, "position_y": 270, "sort_order": 3,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "up_script": { "type": "string" }, "down_script": { "type": "string" }, "tested_on_staging": { "type": "boolean" } }, "required": ["up_script", "down_script", "tested_on_staging"] }
+    },
+    {
+      "ref": "integration", "stageRef": "implementation", "title": "集成联调",
+      "description": "前后端联调、Agent 集成验证和端到端流程测试",
+      "position_x": 600, "position_y": 130, "sort_order": 4,
+      "worker_type": "squad", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "integration_tests_passed": { "type": "boolean" }, "issues_found": { "type": "array", "items": { "type": "object", "properties": { "description": { "type": "string" }, "severity": { "type": "string" }, "resolved": { "type": "boolean" } } } }, "ready_for_review": { "type": "boolean" } }, "required": ["integration_tests_passed", "ready_for_review"] }
+    },
+    {
+      "ref": "ai-preview", "stageRef": "code-review", "title": "AI 预审",
+      "description": "AI Agent 自动扫描代码，检测常见问题、安全漏洞和代码异味",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": null
+    },
+    {
+      "ref": "human-review", "stageRef": "code-review", "title": "人工评审",
+      "description": "团队成员对代码进行全面评审，关注业务逻辑和架构一致性",
+      "position_x": 350, "position_y": 100, "sort_order": 1,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "overall_score": { "type": "number", "minimum": 0, "maximum": 100 }, "categories": { "type": "object", "properties": { "correctness": { "type": "number" }, "security": { "type": "number" }, "performance": { "type": "number" }, "maintainability": { "type": "number" } } }, "comments": { "type": "array", "items": { "type": "object", "properties": { "file": { "type": "string" }, "line": { "type": "number" }, "severity": { "type": "string" }, "message": { "type": "string" } } } } }, "required": ["overall_score"] }
+    },
+    {
+      "ref": "review-fix", "stageRef": "code-review", "title": "评审修正",
+      "description": "根据评审意见修复代码问题，重新提交评审",
+      "position_x": 600, "position_y": 100, "sort_order": 2,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": null
+    },
+    {
+      "ref": "unit-test", "stageRef": "testing", "title": "单元测试",
+      "description": "编写和执行单元测试，确保代码覆盖率达到标准",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "agent", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "coverage_pct": { "type": "number", "minimum": 80 }, "tests_generated": { "type": "number" }, "tests_passed": { "type": "number" }, "tests_failed": { "type": "number" } }, "required": ["coverage_pct", "tests_passed"] }
+    },
+    {
+      "ref": "integration-test", "stageRef": "testing", "title": "集成测试",
+      "description": "验证模块间接口调用、数据流和状态转换的正确性",
+      "position_x": 350, "position_y": 50, "sort_order": 1,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "scenarios": { "type": "number" }, "passed": { "type": "number" }, "failed": { "type": "number" }, "blocked": { "type": "number" } }, "required": ["scenarios", "passed", "failed"] }
+    },
+    {
+      "ref": "e2e-test", "stageRef": "testing", "title": "E2E 测试",
+      "description": "使用 Playwright 执行端到端用户流程测试",
+      "position_x": 350, "position_y": 170, "sort_order": 2,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "browser_matrix": { "type": "array", "items": { "type": "string" } }, "specs": { "type": "number" }, "passed": { "type": "number" }, "flaky": { "type": "number" } }, "required": ["specs", "passed"] }
+    },
+    {
+      "ref": "perf-test", "stageRef": "testing", "title": "性能测试",
+      "description": "执行负载测试和性能基准对比，确保服务 SLA",
+      "position_x": 600, "position_y": 120, "sort_order": 3,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "api", "critic_id": null, "critic_api_url": "https://perf.internal/v1/benchmark/validate",
+      "format_schema": { "type": "object", "properties": { "p50_ms": { "type": "number" }, "p95_ms": { "type": "number" }, "p99_ms": { "type": "number" }, "rps": { "type": "number" }, "error_rate": { "type": "number", "maximum": 0.01 }, "passed": { "type": "boolean" } }, "required": ["p95_ms", "error_rate", "passed"] }
+    },
+    {
+      "ref": "pre-release", "stageRef": "release", "title": "预发布验证",
+      "description": "在 staging 环境验证完整功能，执行冒烟测试",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "squad", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": { "type": "object", "properties": { "smoke_tests_passed": { "type": "boolean" }, "staging_deploy_version": { "type": "string" }, "verified_features": { "type": "array", "items": { "type": "string" } }, "go_no_go": { "type": "boolean" } }, "required": ["smoke_tests_passed", "go_no_go"] }
+    },
+    {
+      "ref": "prod-release", "stageRef": "release", "title": "生产发布",
+      "description": "执行生产环境发布，监控系统健康指标和业务指标",
+      "position_x": 350, "position_y": 100, "sort_order": 1,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "api", "critic_id": null, "critic_api_url": "https://monitor.internal/v1/health/validate",
+      "format_schema": { "type": "object", "properties": { "version": { "type": "string" }, "deploy_timestamp": { "type": "string", "format": "date-time" }, "health_check_passed": { "type": "boolean" }, "rollback_plan_ready": { "type": "boolean" } }, "required": ["version", "health_check_passed", "rollback_plan_ready"] }
+    },
+    {
+      "ref": "tech-research", "stageRef": null, "title": "技术调研",
+      "description": "调研新技术栈、第三方服务和开源方案的技术可行性",
+      "position_x": 100, "position_y": 100, "sort_order": 0,
+      "worker_type": "agent", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": null
+    },
+    {
+      "ref": "doc-update", "stageRef": null, "title": "文档更新",
+      "description": "更新 API 文档、用户手册和运维 Runbook",
+      "position_x": 350, "position_y": 100, "sort_order": 1,
+      "worker_type": "human", "worker_id": null,
+      "critic_type": "human", "critic_id": null,
+      "format_schema": null
+    }
+  ],
+  "edges": [
+    { "ref": "e-req-1", "sourceRef": "req-collect", "targetRef": "req-review" },
+    { "ref": "e-req-2", "sourceRef": "req-review", "targetRef": "req-confirm" },
+    { "ref": "e-design-1", "sourceRef": "arch-design", "targetRef": "api-design", "condition": { "type": "architecture_approved" } },
+    { "ref": "e-design-2", "sourceRef": "arch-design", "targetRef": "db-design", "condition": { "type": "architecture_approved" } },
+    { "ref": "e-design-3", "sourceRef": "api-design", "targetRef": "design-review" },
+    { "ref": "e-design-4", "sourceRef": "db-design", "targetRef": "design-review" },
+    { "ref": "e-impl-1", "sourceRef": "frontend-dev", "targetRef": "agent-dev" },
+    { "ref": "e-impl-2", "sourceRef": "backend-dev", "targetRef": "agent-dev" },
+    { "ref": "e-impl-3", "sourceRef": "db-migration", "targetRef": "backend-dev" },
+    { "ref": "e-impl-4", "sourceRef": "frontend-dev", "targetRef": "integration" },
+    { "ref": "e-impl-5", "sourceRef": "agent-dev", "targetRef": "integration" },
+    { "ref": "e-impl-6", "sourceRef": "backend-dev", "targetRef": "integration" },
+    { "ref": "e-review-1", "sourceRef": "ai-preview", "targetRef": "human-review" },
+    { "ref": "e-review-2", "sourceRef": "human-review", "targetRef": "review-fix", "condition": { "type": "changes_requested" } },
+    { "ref": "e-test-1", "sourceRef": "unit-test", "targetRef": "integration-test" },
+    { "ref": "e-test-2", "sourceRef": "unit-test", "targetRef": "e2e-test" },
+    { "ref": "e-test-3", "sourceRef": "integration-test", "targetRef": "perf-test" },
+    { "ref": "e-test-4", "sourceRef": "e2e-test", "targetRef": "perf-test" },
+    { "ref": "e-release-1", "sourceRef": "pre-release", "targetRef": "prod-release", "condition": { "type": "go_no_go", "value": true } }
+  ],
+  "stats": {
+    "totalStages": 6,
+    "totalNodes": 23,
+    "totalEdges": 19,
+    "unassignedNodes": 2,
+    "workerTypes": { "agent": 13, "human": 6, "squad": 4 },
+    "criticTypes": { "agent": 7, "human": 13, "api": 3 },
+    "withFormatSchema": 19,
+    "withoutFormatSchema": 4,
+    "withApiCriticUrl": 3
+  }
+}

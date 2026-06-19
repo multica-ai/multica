@@ -1392,9 +1392,9 @@ const (
 
 // ── Template management ──────────────────────────────────────────────────────
 
-// CloneWorkflowFromTemplate creates a new workflow by cloning a template's nodes
-// and edges within a single transaction. The new workflow is created with
-// is_template=false, source_template_id=templateID, status="draft".
+// CloneWorkflowFromTemplate creates a new workflow by cloning a template's
+// stages, nodes, and edges within a single transaction. The new workflow is
+// created with is_template=false, source_template_id=templateID, status="draft".
 // Returns the created workflow, its nodes, and edges.
 func (s *WorkflowService) CloneWorkflowFromTemplate(
 	ctx context.Context,
@@ -1436,7 +1436,27 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 		}
 		newWorkflow = wf
 
-		// 3. Clone all template nodes with new UUIDs and new workflow_id.
+		// 3. Clone all template stages with new UUIDs and new workflow_id.
+		tmplStages, err := qtx.ListWorkflowStagesByWorkflow(ctx, templateID)
+		if err != nil {
+			return fmt.Errorf("list template stages: %w", err)
+		}
+		oldStageToNew := make(map[string]pgtype.UUID, len(tmplStages))
+		for _, stage := range tmplStages {
+			stageDesc := pgtype.Text{String: stage.Description, Valid: true}
+			s, err := qtx.CreateWorkflowStage(ctx, db.CreateWorkflowStageParams{
+				WorkflowID:  wf.ID,
+				Name:        stage.Name,
+				SortOrder:   stage.SortOrder,
+				Description: stageDesc,
+			})
+			if err != nil {
+				return fmt.Errorf("clone stage %s: %w", stage.Name, err)
+			}
+			oldStageToNew[util.UUIDToString(stage.ID)] = s.ID
+		}
+
+		// 4. Clone all template nodes with new UUIDs and new workflow_id.
 		tmplNodes, err := qtx.ListWorkflowNodes(ctx, templateID)
 		if err != nil {
 			return fmt.Errorf("list template nodes: %w", err)
@@ -1461,10 +1481,25 @@ func (s *WorkflowService) CloneWorkflowFromTemplate(
 				return fmt.Errorf("clone node %s: %w", node.Title, err)
 			}
 			oldToNew[util.UUIDToString(node.ID)] = n.ID
+
+			// 4a. Remap stage_id to the cloned stage.
+			if node.StageID.Valid {
+				newStageID, ok := oldStageToNew[util.UUIDToString(node.StageID)]
+				if ok {
+					_, err := qtx.AssignNodeToStage(ctx, db.AssignNodeToStageParams{
+						ID:      n.ID,
+						StageID: newStageID,
+					})
+					if err != nil {
+						return fmt.Errorf("assign cloned node %s to stage: %w", node.Title, err)
+					}
+					n.StageID = newStageID
+				}
+			}
 			newNodes = append(newNodes, n)
 		}
 
-		// 4. Clone all template edges with remapped node IDs.
+		// 5. Clone all template edges with remapped node IDs.
 		tmplEdges, err := qtx.ListWorkflowEdges(ctx, templateID)
 		if err != nil {
 			return fmt.Errorf("list template edges: %w", err)
