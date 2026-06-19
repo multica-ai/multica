@@ -242,7 +242,7 @@ func TestAutoLabelEligibleCreatorType(t *testing.T) {
 func TestIssueAutoLabelServiceLabelsAgentCreatedIssueInFallbackMode(t *testing.T) {
 	pool, queries := autoLabelTestQueries(t)
 	workspaceID, userID := createAutoLabelFixture(t, pool, `{"auto_label_new_issues":true}`)
-	issueID := createAutoLabelIssue(t, pool, workspaceID, "agent", userID, "Fix crash on login", "The login screen fails after submit.")
+	issueID := createAutoLabelIssue(t, pool, workspaceID, "agent", userID, "Fix crash on login", "The login handler fails after submit.")
 
 	svc := NewIssueAutoLabelService(queries, events.New(), nil)
 	if err := svc.AutoLabelCreatedIssue(context.Background(), issueID); err != nil {
