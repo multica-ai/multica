@@ -376,19 +376,24 @@ describe("ChannelListItem", () => {
     expect(screen.queryByText("Xd")).toBeNull();
   });
 
-  it("falls back to updated_at when the channel has no messages yet", () => {
+  it("hides the timestamp when the channel has no messages yet", () => {
     const fortyDaysAgo = new Date(
       Date.now() - 40 * 24 * 60 * 60 * 1000,
     ).toISOString();
     render(
       <ChannelListItem
-        channel={makeChannel({ updated_at: fortyDaysAgo, last_message: null })}
+        channel={makeChannel({
+          description: null,
+          updated_at: fortyDaysAgo,
+          last_message: null,
+        })}
         isSelected={false}
         onClick={() => {}}
         onArchive={() => {}}
       />,
     );
-    expect(screen.getByText("Xd")).toBeInTheDocument();
+    expect(screen.queryByText("Xd")).toBeNull();
+    expect(screen.getByText("No messages yet")).toBeInTheDocument();
   });
 
   it("does not show participant names line for DMs", () => {

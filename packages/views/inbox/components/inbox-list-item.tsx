@@ -223,6 +223,8 @@ export function ChannelListItem({
   const display = useChannelDisplay(channel);
   const unread = channel.unread_count > 0;
   const timeAgo = useTimeAgo();
+  // CEREBRO-PATCH(channel-empty-row-no-fake-time): FIR-1549 — empty channels/DMs have no message timestamp; updated_at is channel metadata.
+  const latestMessageAt = channel.last_message?.created_at;
   const showParticipants =
     display.isChannel && display.otherParticipants.length > 0;
 
@@ -256,12 +258,14 @@ export function ChannelListItem({
             )}
           </div>
           {mentioned && <MentionBadge />}
-          <span
-            className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
-          >
-            {/* CEREBRO-PATCH(channel-row-last-message-time): TECH-3619 — show time since the last message, not the channel/DM's updated_at (which doesn't bump on new messages). */}
-            {timeAgo(channel.last_message?.created_at ?? channel.updated_at)}
-          </span>
+          {latestMessageAt && (
+            <span
+              className={`shrink-0 text-xs ${unread ? "text-muted-foreground" : "text-muted-foreground/60"}`}
+            >
+              {/* CEREBRO-PATCH(channel-row-last-message-time): TECH-3619 — show time since the last message, not channel/DM metadata. */}
+              {timeAgo(latestMessageAt)}
+            </span>
+          )}
         </div>
         {showParticipants && (
           <ParticipantsLine participants={display.otherParticipants} />
