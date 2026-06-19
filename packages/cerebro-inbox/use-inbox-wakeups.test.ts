@@ -11,7 +11,7 @@ describe("buildInboxWakeupHints", () => {
       { issue_id: "i-1", trigger_type: "time", fire_at: "2026-06-10T14:30:00Z" },
     ]);
     expect(hints.get("i-1")?.fireAt).toBe("2026-06-10T14:30:00Z");
-    expect(hints.get("i-1")?.title).toContain("Planlagt");
+    expect(hints.get("i-1")?.title).toContain("Scheduled run");
   });
 
   it("keeps the earliest time trigger when an issue has several", () => {

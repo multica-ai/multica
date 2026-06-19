@@ -1,47 +1,29 @@
-// CEREBRO: FIR-1521 (part 2 polish) — inbox row indicator for a scheduled wakeup.
-// The previous inbox marker was a static grey clock with no countdown, so a user
-// couldn't tell it was live (Jesper feedback). This renders an orange alarm clock
-// with a ticking countdown (for time triggers), matching the top-of-issue banner
-// and the list/board pip. For condition triggers (status / CI) there is no fire
-// time, so it shows just the orange clock with the label as a tooltip.
+// CEREBRO: FIR-1521 — inbox row indicator for a scheduled wakeup. Jesper feedback:
+// this must be a DOT like the running-job pip (AgentRunPip), NOT a clock — a clock
+// reads as an issue-status icon. So it renders the same pulsing dot as the live-run
+// indicator, in the orange "warning" hue to mean "scheduled to run" (vs the blue
+// "running now" dot). No Danish copy; the tooltip carries the English label.
 "use client";
 
-import { useEffect, useState } from "react";
-import { AlarmClock } from "lucide-react";
-import { formatCountdown } from "../lib/wakeup-format";
-
 export function CerebroInboxWakeupPip({
-  fireAt,
   title,
   className = "",
 }: {
-  /** RFC3339 fire time for a time trigger; absent for status / CI triggers. */
+  /** RFC3339 fire time for a time trigger; absent for status / CI triggers.
+   *  Accepted for call-site compatibility; the dot itself shows no countdown. */
   fireAt?: string;
-  /** Tooltip / fallback label (e.g. "Planlagt: kører ved statusskift"). */
+  /** Tooltip / accessible label (e.g. "Scheduled run ~Thu, 11:53"). */
   title?: string;
   className?: string;
 }) {
-  const [now, setNow] = useState(() => Date.now());
-
-  // Tick once a second so the countdown is visibly live. Only time triggers have
-  // a countdown, so condition triggers never start a timer.
-  useEffect(() => {
-    if (!fireAt) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [fireAt]);
-
-  const countdown = fireAt ? formatCountdown(fireAt, now) : undefined;
-
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-0.5 text-warning ${className}`}
       title={title}
+      aria-label={title}
+      className={`relative inline-flex size-2 shrink-0 items-center justify-center ${className}`}
     >
-      <AlarmClock className="size-3 shrink-0" />
-      {countdown && (
-        <span className="text-[10px] leading-none tabular-nums">{countdown}</span>
-      )}
+      <span className="absolute inline-flex size-2 animate-ping rounded-full bg-warning opacity-50" />
+      <span className="relative inline-flex size-1.5 rounded-full bg-warning" />
     </span>
   );
 }

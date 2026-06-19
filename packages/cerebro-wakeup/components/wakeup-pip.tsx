@@ -54,10 +54,10 @@ function PipRow({
         onClick={onCancel}
         disabled={cancelling}
         className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-        title="Annuller planlagt kørsel"
+        title="Cancel scheduled run"
       >
         <X className="h-3 w-3" />
-        <span>Annuller</span>
+        <span>Cancel</span>
       </button>
     </div>
   );
@@ -97,7 +97,7 @@ export function CerebroIssueWakeupPip({
       await api.cancelWakeup(id);
       await queryClient.invalidateQueries({ queryKey: WAKEUP_QUERY_KEY(issueId) });
     } catch {
-      toast.error("Kunne ikke annullere planlagt kørsel");
+      toast.error("Couldn't cancel scheduled run");
     } finally {
       setCancellingIds((prev) => {
         const next = new Set(prev);
@@ -112,7 +112,7 @@ export function CerebroIssueWakeupPip({
   const soonest = wakeups[0]!;
   const label =
     wakeups.length > 1
-      ? `${wakeups.length} planlagte kørsler — næste ${wakeupCounter(soonest, now)}`
+      ? `${wakeups.length} scheduled runs — next ${wakeupCounter(soonest, now)}`
       : `${wakeupLabel(soonest)} ${wakeupCounter(soonest, now)}`;
 
   return (
@@ -133,7 +133,11 @@ export function CerebroIssueWakeupPip({
           />
         }
       >
-        <AlarmClock className="h-3.5 w-3.5" />
+        {/* FIR-1521 — orange pulsing dot (like the running-job pip), not a clock. */}
+        <span className="relative inline-flex size-2 items-center justify-center">
+          <span className="absolute inline-flex size-2 animate-ping rounded-full bg-warning opacity-50" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-warning" />
+        </span>
         {wakeups.length > 1 && (
           <span className="ml-0.5 text-[10px] font-medium leading-none tabular-nums">
             {wakeups.length}

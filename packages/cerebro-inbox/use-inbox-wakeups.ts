@@ -3,7 +3,8 @@
 // TECH-3322 — workspace-wide pending wakeups for the inbox. An issue with a
 // scheduled wakeup has no in-flight task yet, so the upstream run-state queries
 // don't surface it; this hook fills that gap so the inbox can drop such issues
-// into the "Running" action group and mark their row with a clock.
+// into the "Running" action group and mark their row with a scheduled-run dot
+// (FIR-1521 — a dot like the running-job pip, not a clock; English copy only).
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
@@ -12,7 +13,7 @@ import { api } from "@multica/core/api";
 export interface InboxWakeupHint {
   /** RFC3339 fire time of the soonest time-trigger wakeup, if any. */
   fireAt?: string;
-  /** Short, localized "scheduled ~HH:MM" tooltip for the clock pip. */
+  /** Short "Scheduled run ~HH:MM" tooltip for the scheduled-run dot. */
   title: string;
 }
 
@@ -20,7 +21,8 @@ const WAKEUP_QUERY_KEY = (wsId: string) => ["cerebro-inbox-wakeups", wsId] as co
 
 function formatClock(iso: string): string {
   try {
-    return new Intl.DateTimeFormat("da-DK", {
+    // English locale; Copenhagen time so the displayed clock matches local time.
+    return new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/Copenhagen",
       weekday: "short",
       hour: "2-digit",
@@ -31,12 +33,12 @@ function formatClock(iso: string): string {
   }
 }
 
-/** Tooltip text for an issue's scheduled wakeup. "(cirka)" wording per TECH-3322. */
+/** Tooltip text for an issue's scheduled wakeup. English copy only (FIR-1521). */
 function hintTitle(triggerType: string, fireAt?: string): string {
-  if (triggerType === "time" && fireAt) return `Planlagt kørsel ca. ${formatClock(fireAt)}`;
-  if (triggerType === "issue_status") return "Planlagt: kører ved statusskift";
-  if (triggerType === "github_ci") return "Planlagt: kører ved CI-opdatering";
-  return "Planlagt kørsel";
+  if (triggerType === "time" && fireAt) return `Scheduled run ~${formatClock(fireAt)}`;
+  if (triggerType === "issue_status") return "Scheduled: runs on status change";
+  if (triggerType === "github_ci") return "Scheduled: runs on CI update";
+  return "Scheduled run";
 }
 
 /**

@@ -13,7 +13,7 @@ const WAKEUP_QUERY_KEY = (issueId: string) => ["cerebro-wakeups", issueId];
 
 function formatWakeupTime(isoString: string): string {
   try {
-    return new Intl.DateTimeFormat("da-DK", {
+    return new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/Copenhagen",
       year: "numeric",
       month: "2-digit",
@@ -28,8 +28,8 @@ function formatWakeupTime(isoString: string): string {
 
 function triggerLabel(triggerType: string, fireAt?: string, watchStatus?: string): string {
   if (triggerType === "time" && fireAt) return formatWakeupTime(fireAt);
-  if (triggerType === "issue_status" && watchStatus) return `Ved status: ${watchStatus}`;
-  if (triggerType === "github_ci") return "Ved CI-opdatering";
+  if (triggerType === "issue_status" && watchStatus) return `On status: ${watchStatus}`;
+  if (triggerType === "github_ci") return "On CI update";
   return triggerType;
 }
 
@@ -50,7 +50,7 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
       await api.cancelWakeup(id);
       await queryClient.invalidateQueries({ queryKey: WAKEUP_QUERY_KEY(issueId) });
     } catch {
-      toast.error("Kunne ikke annullere wakeup");
+      toast.error("Couldn't cancel wakeup");
     }
   }
 
@@ -62,7 +62,7 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
     <div>
       <div className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-muted-foreground mb-1">
         <AlarmClock className="!size-3 shrink-0" />
-        <span className="flex-1 text-left">Planlagte wakeups</span>
+        <span className="flex-1 text-left">Scheduled runs</span>
         <span className="tabular-nums">{wakeups.length}</span>
       </div>
 
@@ -86,13 +86,13 @@ export function CerebroWakeupSection({ issueId }: { issueId: string }) {
                     type="button"
                     className="shrink-0 mt-0.5 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-destructive/10 hover:text-destructive transition-all"
                     onClick={() => handleCancel(w.id)}
-                    aria-label="Annuller wakeup"
+                    aria-label="Cancel wakeup"
                   />
                 }
               >
                 <X className="!size-3" />
               </TooltipTrigger>
-              <TooltipContent side="left">Annuller</TooltipContent>
+              <TooltipContent side="left">Cancel</TooltipContent>
             </Tooltip>
           </div>
         ))}

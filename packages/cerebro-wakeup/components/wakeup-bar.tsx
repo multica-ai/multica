@@ -47,10 +47,10 @@ function WakeupBarRow({
           onClick={onCancel}
           disabled={cancelling}
           className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
-          title="Annuller planlagt kørsel"
+          title="Cancel scheduled run"
         >
           <X className="h-3 w-3" />
-          <span>Annuller</span>
+          <span>Cancel</span>
         </button>
       </div>
     </div>
@@ -88,7 +88,7 @@ export function CerebroWakeupBar({ issueId }: { issueId: string }) {
       await api.cancelWakeup(id);
       await queryClient.invalidateQueries({ queryKey: WAKEUP_QUERY_KEY(issueId) });
     } catch {
-      toast.error("Kunne ikke annullere planlagt kørsel");
+      toast.error("Couldn't cancel scheduled run");
     } finally {
       setCancellingIds((prev) => {
         const next = new Set(prev);
@@ -118,10 +118,10 @@ export function CerebroWakeupBar({ issueId }: { issueId: string }) {
             <AlarmClock className="h-3.5 w-3.5 shrink-0 text-warning" />
             <span className="flex min-w-0 items-center gap-1.5 text-xs">
               <span className="truncate font-medium text-foreground">
-                {wakeups.length} planlagte kørsler
+                {wakeups.length} scheduled runs
               </span>
               <span className="text-muted-foreground truncate">
-                næste: {wakeupLabel(soonest)}
+                next: {wakeupLabel(soonest)}
               </span>
               <span className="text-warning tabular-nums shrink-0">
                 {wakeupCounter(soonest, now)}
