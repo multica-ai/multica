@@ -1798,6 +1798,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateArtifactFolder)
 				r.Put("/{id}", h.UpdateArtifactFolder)
 				r.Delete("/{id}", h.DeleteArtifactFolder)
+				// CEREBRO-PATCH(folder-access-routes): FIR-1590 folder access control.
+				r.Put("/{id}/visibility", h.SetArtifactFolderVisibility)
+				r.Get("/{id}/shares", h.ListArtifactFolderShares)
 			})
 			r.Post("/api/artifact-uploads", h.UploadArtifactFile)
 

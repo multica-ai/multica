@@ -97,6 +97,7 @@ export type {
   ArtifactScope,
   ArtifactFolder,
   ArtifactFolderKind, // CEREBRO-PATCH(artifact-folder-kind): TECH-3637
+  FolderVisibility, // CEREBRO-PATCH(folder-access): FIR-1590
   ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,

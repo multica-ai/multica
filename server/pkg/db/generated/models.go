@@ -169,6 +169,8 @@ type ArtifactFolder struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Kind        string             `json:"kind"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
 }
 
 type Attachment struct {
@@ -392,6 +394,12 @@ type CerebroApprovalRequest struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroArtifactFolderShare struct {
+	FolderID  pgtype.UUID        `json:"folder_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroCapability struct {

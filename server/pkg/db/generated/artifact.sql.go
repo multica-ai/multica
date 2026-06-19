@@ -426,6 +426,13 @@ WHERE workspace_id = $1
      OR title ILIKE '%' || $9::text || '%'
      OR body  ILIKE '%' || $9::text || '%'
   )
+  -- CEREBRO-PATCH(folder-access-artifact-search): FIR-1590 — when a viewer is
+  -- given, hide artifacts inside folders that viewer may not see. NULL viewer
+  -- (agent/gateway callers) skips the gate and keeps full visibility.
+  AND (
+        $10::uuid IS NULL
+     OR cerebro_artifact_folder_visible(folder_id, $10::uuid)
+  )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -440,6 +447,7 @@ type SearchArtifactsInWorkspaceParams struct {
 	AuthorID      pgtype.UUID `json:"author_id"`
 	OriginIssueID pgtype.UUID `json:"origin_issue_id"`
 	Q             pgtype.Text `json:"q"`
+	ViewerID      pgtype.UUID `json:"viewer_id"`
 }
 
 // Cross-scope search across the entire workspace. All filter parameters are
@@ -458,6 +466,7 @@ func (q *Queries) SearchArtifactsInWorkspace(ctx context.Context, arg SearchArti
 		arg.AuthorID,
 		arg.OriginIssueID,
 		arg.Q,
+		arg.ViewerID,
 	)
 	if err != nil {
 		return nil, err

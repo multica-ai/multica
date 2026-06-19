@@ -3967,6 +3967,23 @@ export class ApiClient {
     await this.fetch(`/api/artifact-folders/${id}`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(folder-access-client): FIR-1590 — folder-level access control.
+  async setArtifactFolderVisibility(
+    id: string,
+    body: { visibility: string; shared_user_ids?: string[] },
+  ): Promise<ArtifactFolder> {
+    return this.fetch(`/api/artifact-folders/${id}/visibility`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async listArtifactFolderShares(
+    id: string,
+  ): Promise<{ shared_user_ids: string[] }> {
+    return this.fetch(`/api/artifact-folders/${id}/shares`);
+  }
+
   async uploadArtifactFile(file: File): Promise<ArtifactUploadResponse> {
     const formData = new FormData();
     formData.append("file", file);

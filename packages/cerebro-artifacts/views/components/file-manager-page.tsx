@@ -18,6 +18,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { NoteTypesPanel } from "./note-types-panel";
+import { FolderAccessControl } from "./folder-access-control";
 import { Input } from "@multica/ui/components/ui/input";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -394,6 +395,8 @@ function FolderTreeItem({
             <FolderIcon className="size-4 text-muted-foreground" />
             <span className="flex-1 truncate">{node.name}</span>
           </button>
+          {/* FIR-1590: per-folder access control. */}
+          <FolderAccessControl folder={node} />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={

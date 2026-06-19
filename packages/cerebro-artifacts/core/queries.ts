@@ -25,6 +25,9 @@ export const artifactKeys = {
     ] as const,
   folders: (wsId: string, kind?: string) =>
     [...artifactKeys.all(wsId), "folders", kind ?? "all"] as const,
+  // FIR-1590: per-folder share list (who a "shared" folder is visible to).
+  folderShares: (wsId: string, folderId: string) =>
+    [...artifactKeys.all(wsId), "folder-shares", folderId] as const,
 };
 
 export function artifactsByIssueOptions(wsId: string, issueId: string) {
@@ -67,5 +70,22 @@ export function artifactFoldersOptions(
     queryKey: artifactKeys.folders(wsId, opts?.kind),
     queryFn: () => api.listArtifactFolders(opts?.kind),
     enabled: Boolean(wsId),
+  });
+}
+
+// FIR-1590: the user IDs a "shared" folder is shared with. Owner-only on the
+// server; only fetched when the access picker is open for a shared folder.
+export function artifactFolderSharesOptions(
+  wsId: string,
+  folderId: string,
+  opts?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: artifactKeys.folderShares(wsId, folderId),
+    queryFn: async () => {
+      const res = await api.listArtifactFolderShares(folderId);
+      return res?.shared_user_ids ?? [];
+    },
+    enabled: Boolean(wsId && folderId) && (opts?.enabled ?? true),
   });
 }

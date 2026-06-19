@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util" // CEREBRO-PATCH(folder-access-import): FIR-1590
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -37,11 +38,11 @@ var validArtifactFormats = map[string]bool{
 }
 
 type ArtifactResponse struct {
-	ID            string         `json:"id"`
-	WorkspaceID   string         `json:"workspace_id"`
-	ProjectID     *string        `json:"project_id"`
-	IssueID       *string        `json:"issue_id"`
-	FolderID      *string        `json:"folder_id"`
+	ID              string         `json:"id"`
+	WorkspaceID     string         `json:"workspace_id"`
+	ProjectID       *string        `json:"project_id"`
+	IssueID         *string        `json:"issue_id"`
+	FolderID        *string        `json:"folder_id"`
 	OriginIssueID   *string        `json:"origin_issue_id"`
 	Kind            string         `json:"kind"`
 	Format          string         `json:"format"`
@@ -299,6 +300,12 @@ func (h *Handler) GetArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "artifact not found")
 		return
 	}
+	// CEREBRO-PATCH(folder-access-artifact-get): FIR-1590 — a document inside a
+	// restricted folder is hidden (404) from members who may not see the folder.
+	if !h.folderVisibleToCaller(r, artifact.FolderID) {
+		writeError(w, http.StatusNotFound, "artifact not found")
+		return
+	}
 	resp := artifactToResponse(artifact)
 	// CEREBRO-PATCH(persona-mask-artifact-get): JEH-1173 redaction.
 	if !h.maskArtifactForCaller(w, r, artifact, &resp) {
@@ -502,6 +509,13 @@ func (h *Handler) SearchArtifacts(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: parseUUID(workspaceID),
 		Limit:       50,
 		Offset:      0,
+	}
+	// CEREBRO-PATCH(folder-access-artifact-search): FIR-1590 — gate results by
+	// folder visibility for the requesting member.
+	if uid := requestUserID(r); uid != "" {
+		if parsed, perr := util.ParseUUID(uid); perr == nil {
+			params.ViewerID = parsed
+		}
 	}
 
 	if v := q.Get("kind"); v != "" {

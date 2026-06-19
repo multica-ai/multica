@@ -35,6 +35,9 @@ export type CerebroFlagKey =
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
   | "cerebro_notes"
+  // FIR-1590: per-folder access control — "Only you / Selected colleagues /
+  // Whole team" on note + document folders. Gates the folder and its contents.
+  | "cerebro_folder_access"
   // TECH-3556 (Wave 3): the heavy Google-Docs note features, each independently
   // flagged so they can ship + be QA'd one at a time on staging.
   //   - comments + suggestions on a span of a note (margin comments, replies,
@@ -245,6 +248,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the Notes nav entry, quick-capture, the notes list/editor surface, and the
   // Notes box in the dynamic inbox.
   cerebro_notes: false,
+  // FIR-1590: OFF until the folder access picker is QA'd on staging. Server
+  // enforcement is always correct (folders default to "Whole team"); this flag
+  // only gates the UI that lets a user restrict a folder.
+  cerebro_folder_access: false,
   // TECH-3556 (Wave 3): OFF until each surface ships + is QA'd on staging.
   cerebro_note_comments: false,
   cerebro_note_versions: false,
@@ -531,6 +538,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Enable the cerebro-fork access-control flow (combined restrict + pick) for issues and projects.",
+  },
+  {
+    key: "cerebro_folder_access",
+    label: "Folder access control",
+    group: "permissions",
+    description:
+      "Let folder owners set who can see a note or document folder — Only you, Selected colleagues, or Whole team. The choice locks the whole folder and its contents.",
   },
   {
     key: "cerebro_members_admin",

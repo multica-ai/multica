@@ -11,6 +11,7 @@ import type {
   UpdateArtifactScopeRequest,
   UpdateArtifactFolderRequest,
   MoveArtifactToFolderRequest,
+  FolderVisibility,
 } from "@multica/core/types";
 
 function invalidateArtifactScopes(
@@ -208,6 +209,46 @@ export function useDeleteArtifactFolder() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: artifactKeys.folders(wsId) });
       // Artifacts inside the folder reset to root via SET NULL; refresh lists.
+      qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
+    },
+  });
+}
+
+// FIR-1590: set a folder's access level (and, for "shared", the colleagues it
+// is shared with). Patches the returned folder into its kind list and refreshes
+// the share list + the artifact/folder caches so hidden content disappears.
+export function useSetArtifactFolderVisibility() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      id,
+      visibility,
+      sharedUserIds,
+    }: {
+      id: string;
+      visibility: FolderVisibility;
+      sharedUserIds?: string[];
+    }) =>
+      api.setArtifactFolderVisibility(id, {
+        visibility,
+        shared_user_ids: visibility === "shared" ? sharedUserIds : undefined,
+      }),
+    onSuccess: (folder) => {
+      qc.setQueryData<ArtifactFolder[]>(
+        artifactKeys.folders(wsId, folder.kind),
+        (old) =>
+          old ? old.map((f) => (f.id === folder.id ? folder : f)) : old,
+      );
+    },
+    onSettled: (folder, _err, vars) => {
+      qc.invalidateQueries({
+        queryKey: artifactKeys.folders(wsId, folder?.kind),
+      });
+      qc.invalidateQueries({
+        queryKey: artifactKeys.folderShares(wsId, vars.id),
+      });
+      // Restricting a folder hides its notes/documents — refresh those lists.
       qc.invalidateQueries({ queryKey: artifactKeys.all(wsId) });
     },
   });

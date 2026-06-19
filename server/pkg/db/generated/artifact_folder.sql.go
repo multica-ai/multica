@@ -11,10 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addArtifactFolderShare = `-- name: AddArtifactFolderShare :exec
+INSERT INTO cerebro_artifact_folder_share (folder_id, user_id)
+VALUES ($1, $2)
+ON CONFLICT (folder_id, user_id) DO NOTHING
+`
+
+type AddArtifactFolderShareParams struct {
+	FolderID pgtype.UUID `json:"folder_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) AddArtifactFolderShare(ctx context.Context, arg AddArtifactFolderShareParams) error {
+	_, err := q.db.Exec(ctx, addArtifactFolderShare, arg.FolderID, arg.UserID)
+	return err
+}
+
+const canUserSeeArtifactFolder = `-- name: CanUserSeeArtifactFolder :one
+SELECT cerebro_artifact_folder_visible($1, $2::uuid) AS allowed
+`
+
+type CanUserSeeArtifactFolderParams struct {
+	PFolder pgtype.UUID `json:"p_folder"`
+	Column2 pgtype.UUID `json:"column_2"`
+}
+
+// True when the user may see this folder under the access rule (gated up the
+// whole folder chain). Used for single-folder checks in handlers.
+func (q *Queries) CanUserSeeArtifactFolder(ctx context.Context, arg CanUserSeeArtifactFolderParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserSeeArtifactFolder, arg.PFolder, arg.Column2)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
 const createArtifactFolder = `-- name: CreateArtifactFolder :one
-INSERT INTO artifact_folder (id, workspace_id, parent_id, name, kind)
-VALUES ($1, $2, $5, $3, $4)
-RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind
+INSERT INTO artifact_folder (id, workspace_id, parent_id, name, kind, owner_id)
+VALUES ($1, $2, $5, $3, $4, $6)
+RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind, owner_id, visibility
 `
 
 type CreateArtifactFolderParams struct {
@@ -23,9 +57,12 @@ type CreateArtifactFolderParams struct {
 	Name        string      `json:"name"`
 	Kind        string      `json:"kind"`
 	ParentID    pgtype.UUID `json:"parent_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
 }
 
 // CEREBRO-PATCH(sqlc-artifact-folder): cerebro modification of upstream file
+// CEREBRO-PATCH(folder-access-owner): FIR-1590 — record the creator as owner so
+// the folder can be made private/shared. NULL owner = legacy/workspace folder.
 func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFolderParams) (ArtifactFolder, error) {
 	row := q.db.QueryRow(ctx, createArtifactFolder,
 		arg.ID,
@@ -33,6 +70,7 @@ func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFo
 		arg.Name,
 		arg.Kind,
 		arg.ParentID,
+		arg.OwnerID,
 	)
 	var i ArtifactFolder
 	err := row.Scan(
@@ -43,6 +81,8 @@ func (q *Queries) CreateArtifactFolder(ctx context.Context, arg CreateArtifactFo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.OwnerID,
+		&i.Visibility,
 	)
 	return i, err
 }
@@ -65,7 +105,7 @@ func (q *Queries) DeleteArtifactFolder(ctx context.Context, arg DeleteArtifactFo
 }
 
 const getArtifactFolder = `-- name: GetArtifactFolder :one
-SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind, owner_id, visibility FROM artifact_folder
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -85,12 +125,46 @@ func (q *Queries) GetArtifactFolder(ctx context.Context, arg GetArtifactFolderPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.OwnerID,
+		&i.Visibility,
 	)
 	return i, err
 }
 
+const listArtifactFolderShares = `-- name: ListArtifactFolderShares :many
+SELECT user_id, created_at
+FROM cerebro_artifact_folder_share
+WHERE folder_id = $1
+ORDER BY created_at
+`
+
+type ListArtifactFolderSharesRow struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListArtifactFolderShares(ctx context.Context, folderID pgtype.UUID) ([]ListArtifactFolderSharesRow, error) {
+	rows, err := q.db.Query(ctx, listArtifactFolderShares, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArtifactFolderSharesRow{}
+	for rows.Next() {
+		var i ListArtifactFolderSharesRow
+		if err := rows.Scan(&i.UserID, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArtifactFoldersByParent = `-- name: ListArtifactFoldersByParent :many
-SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind, owner_id, visibility FROM artifact_folder
 WHERE workspace_id = $1
   AND (
         ($2::uuid IS NULL AND parent_id IS NULL)
@@ -121,6 +195,8 @@ func (q *Queries) ListArtifactFoldersByParent(ctx context.Context, arg ListArtif
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.OwnerID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -133,21 +209,25 @@ func (q *Queries) ListArtifactFoldersByParent(ctx context.Context, arg ListArtif
 }
 
 const listArtifactFoldersByWorkspace = `-- name: ListArtifactFoldersByWorkspace :many
-SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind FROM artifact_folder
+SELECT id, workspace_id, parent_id, name, created_at, updated_at, kind, owner_id, visibility FROM artifact_folder
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR kind = $2)
+  AND cerebro_artifact_folder_visible(id, $3::uuid)
 ORDER BY name ASC
 `
 
 type ListArtifactFoldersByWorkspaceParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Kind        pgtype.Text `json:"kind"`
+	UserID      pgtype.UUID `json:"user_id"`
 }
 
 // CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter scopes
 // the folder list to one surface so notes and documents don't mix.
+// CEREBRO-PATCH(folder-access-list): FIR-1590 — only return folders the user is
+// allowed to see (own + workspace + shared-with-them), gated up the tree.
 func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, arg ListArtifactFoldersByWorkspaceParams) ([]ArtifactFolder, error) {
-	rows, err := q.db.Query(ctx, listArtifactFoldersByWorkspace, arg.WorkspaceID, arg.Kind)
+	rows, err := q.db.Query(ctx, listArtifactFoldersByWorkspace, arg.WorkspaceID, arg.Kind, arg.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +243,8 @@ func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, arg ListAr
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Kind,
+			&i.OwnerID,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -174,13 +256,65 @@ func (q *Queries) ListArtifactFoldersByWorkspace(ctx context.Context, arg ListAr
 	return items, nil
 }
 
+const removeArtifactFolderShare = `-- name: RemoveArtifactFolderShare :exec
+DELETE FROM cerebro_artifact_folder_share WHERE folder_id = $1 AND user_id = $2
+`
+
+type RemoveArtifactFolderShareParams struct {
+	FolderID pgtype.UUID `json:"folder_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) RemoveArtifactFolderShare(ctx context.Context, arg RemoveArtifactFolderShareParams) error {
+	_, err := q.db.Exec(ctx, removeArtifactFolderShare, arg.FolderID, arg.UserID)
+	return err
+}
+
+const replaceArtifactFolderShares = `-- name: ReplaceArtifactFolderShares :exec
+DELETE FROM cerebro_artifact_folder_share WHERE folder_id = $1
+`
+
+// Clears the share list for a folder; callers re-add the desired users.
+func (q *Queries) ReplaceArtifactFolderShares(ctx context.Context, folderID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, replaceArtifactFolderShares, folderID)
+	return err
+}
+
+const setArtifactFolderVisibility = `-- name: SetArtifactFolderVisibility :exec
+UPDATE artifact_folder
+SET visibility = $2,
+    owner_id = COALESCE(owner_id, $4),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $3
+`
+
+type SetArtifactFolderVisibilityParams struct {
+	ID          pgtype.UUID `json:"id"`
+	Visibility  string      `json:"visibility"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// CEREBRO-PATCH(folder-access-queries): FIR-1590 — folder-level access control.
+// Legacy folders predate ownership (owner_id NULL); the first member to set
+// access on one claims ownership so future changes are gated to them.
+func (q *Queries) SetArtifactFolderVisibility(ctx context.Context, arg SetArtifactFolderVisibilityParams) error {
+	_, err := q.db.Exec(ctx, setArtifactFolderVisibility,
+		arg.ID,
+		arg.Visibility,
+		arg.WorkspaceID,
+		arg.OwnerID,
+	)
+	return err
+}
+
 const updateArtifactFolder = `-- name: UpdateArtifactFolder :one
 UPDATE artifact_folder SET
     name = $2,
     parent_id = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
-RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind
+RETURNING id, workspace_id, parent_id, name, created_at, updated_at, kind, owner_id, visibility
 `
 
 type UpdateArtifactFolderParams struct {
@@ -206,6 +340,8 @@ func (q *Queries) UpdateArtifactFolder(ctx context.Context, arg UpdateArtifactFo
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Kind,
+		&i.OwnerID,
+		&i.Visibility,
 	)
 	return i, err
 }

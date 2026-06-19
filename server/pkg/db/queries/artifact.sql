@@ -93,6 +93,13 @@ WHERE workspace_id = $1
      OR title ILIKE '%' || sqlc.narg('q')::text || '%'
      OR body  ILIKE '%' || sqlc.narg('q')::text || '%'
   )
+  -- CEREBRO-PATCH(folder-access-artifact-search): FIR-1590 — when a viewer is
+  -- given, hide artifacts inside folders that viewer may not see. NULL viewer
+  -- (agent/gateway callers) skips the gate and keeps full visibility.
+  AND (
+        sqlc.narg('viewer_id')::uuid IS NULL
+     OR cerebro_artifact_folder_visible(folder_id, sqlc.narg('viewer_id')::uuid)
+  )
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 

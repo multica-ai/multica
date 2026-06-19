@@ -5,6 +5,7 @@ export {
   artifactDetailOptions,
   artifactSearchOptions,
   artifactFoldersOptions,
+  artifactFolderSharesOptions,
 } from "./queries";
 export {
   useCreateArtifact,
@@ -16,7 +17,13 @@ export {
   useCreateArtifactFolder,
   useUpdateArtifactFolder,
   useDeleteArtifactFolder,
+  useSetArtifactFolderVisibility,
 } from "./mutations";
+export {
+  FOLDER_VISIBILITY_VALUES,
+  FOLDER_VISIBILITY_LABELS,
+  folderVisibility,
+} from "./folder-access";
 export {
   noteTypeKeys,
   noteTypesOptions,

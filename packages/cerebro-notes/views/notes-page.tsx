@@ -37,6 +37,7 @@ import {
 import {
   NoteTypesPanel,
   DocumentToolsSidebar,
+  FolderAccessControl,
 } from "@multica/cerebro-artifacts/views/components";
 import {
   DropdownMenu,
@@ -611,6 +612,10 @@ function FolderRail({
                 >
                   <Pencil className="size-3.5" />
                 </button>
+                {/* FIR-1590: per-folder access control (Only you / Selected
+                    colleagues / Whole team). Renders nothing when the flag is
+                    off or the folder is open to the whole team for non-owners. */}
+                <FolderAccessControl folder={f} />
                 <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
               </div>
             ),

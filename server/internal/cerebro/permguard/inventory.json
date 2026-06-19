@@ -1325,6 +1325,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/artifact-folders/{id}/visibility",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/artifacts/{id}",
       "gate": "workspace_member"
     },

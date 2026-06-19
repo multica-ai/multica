@@ -76,6 +76,9 @@ export interface ListArtifactsParams {
 // the artifact engine but keep separate folder trees.
 export type ArtifactFolderKind = "document" | "note";
 
+// CEREBRO-PATCH(folder-access): FIR-1590 — who may see a folder and its contents.
+export type FolderVisibility = "private" | "shared" | "workspace";
+
 export interface ArtifactFolder {
   id: string;
   workspace_id: string;
@@ -84,6 +87,9 @@ export interface ArtifactFolder {
   kind: ArtifactFolderKind;
   created_at: string;
   updated_at: string;
+  // CEREBRO-PATCH(folder-access): FIR-1590 — folder-level access control.
+  owner_id?: string | null;
+  visibility?: FolderVisibility;
 }
 
 export interface CreateArtifactFolderRequest {
