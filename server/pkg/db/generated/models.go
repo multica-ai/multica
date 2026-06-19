@@ -8,6 +8,7 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type ActivityLog struct {
@@ -428,6 +429,14 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueSkillSource struct {
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssueSubscriber struct {
 	IssueID   pgtype.UUID        `json:"issue_id"`
 	UserType  string             `json:"user_type"`
@@ -608,6 +617,15 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SkillEmbedding struct {
+	SkillID        pgtype.UUID        `json:"skill_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Embedding      pgvector.Vector    `json:"embedding"`
+	EmbeddingModel string             `json:"embedding_model"`
+	ContentHash    string             `json:"content_hash"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type SkillFile struct {

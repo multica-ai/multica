@@ -110,3 +110,42 @@ FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
 ORDER BY s.name ASC;
+
+-- Issue-sourced skills
+
+-- name: CreateIssueSkillSource :one
+INSERT INTO issue_skill_source (skill_id, issue_id, workspace_id, created_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (issue_id) DO NOTHING
+RETURNING *;
+
+-- name: UpsertSkillEmbedding :one
+INSERT INTO skill_embedding (skill_id, workspace_id, embedding, embedding_model, content_hash)
+VALUES ($1, $2, sqlc.arg('embedding')::text::vector, $3, $4)
+ON CONFLICT (skill_id) DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    embedding = EXCLUDED.embedding,
+    embedding_model = EXCLUDED.embedding_model,
+    content_hash = EXCLUDED.content_hash,
+    updated_at = now()
+RETURNING skill_id, workspace_id, embedding_model, content_hash, updated_at;
+
+-- name: SearchSkillEmbeddings :many
+SELECT
+    s.id,
+    s.workspace_id,
+    s.name,
+    s.description,
+    s.config,
+    s.created_by,
+    s.created_at,
+    s.updated_at,
+    iss.issue_id,
+    (se.embedding <=> sqlc.arg('embedding')::text::vector)::float8 AS distance
+FROM skill_embedding se
+JOIN skill s ON s.id = se.skill_id AND s.workspace_id = se.workspace_id
+LEFT JOIN issue_skill_source iss ON iss.skill_id = s.id AND iss.workspace_id = s.workspace_id
+WHERE se.workspace_id = $1
+  AND se.embedding_model = $2
+ORDER BY se.embedding <=> sqlc.arg('embedding')::text::vector
+LIMIT $3;

@@ -27,6 +27,40 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 	return err
 }
 
+const createIssueSkillSource = `-- name: CreateIssueSkillSource :one
+
+INSERT INTO issue_skill_source (skill_id, issue_id, workspace_id, created_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (issue_id) DO NOTHING
+RETURNING skill_id, issue_id, workspace_id, created_by, created_at
+`
+
+type CreateIssueSkillSourceParams struct {
+	SkillID     pgtype.UUID `json:"skill_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	CreatedBy   pgtype.UUID `json:"created_by"`
+}
+
+// Issue-sourced skills
+func (q *Queries) CreateIssueSkillSource(ctx context.Context, arg CreateIssueSkillSourceParams) (IssueSkillSource, error) {
+	row := q.db.QueryRow(ctx, createIssueSkillSource,
+		arg.SkillID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.CreatedBy,
+	)
+	var i IssueSkillSource
+	err := row.Scan(
+		&i.SkillID,
+		&i.IssueID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -475,6 +509,83 @@ func (q *Queries) RemoveAllAgentSkills(ctx context.Context, agentID pgtype.UUID)
 	return err
 }
 
+const searchSkillEmbeddings = `-- name: SearchSkillEmbeddings :many
+SELECT
+    s.id,
+    s.workspace_id,
+    s.name,
+    s.description,
+    s.config,
+    s.created_by,
+    s.created_at,
+    s.updated_at,
+    iss.issue_id,
+    (se.embedding <=> $4::text::vector)::float8 AS distance
+FROM skill_embedding se
+JOIN skill s ON s.id = se.skill_id AND s.workspace_id = se.workspace_id
+LEFT JOIN issue_skill_source iss ON iss.skill_id = s.id AND iss.workspace_id = s.workspace_id
+WHERE se.workspace_id = $1
+  AND se.embedding_model = $2
+ORDER BY se.embedding <=> $4::text::vector
+LIMIT $3
+`
+
+type SearchSkillEmbeddingsParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	EmbeddingModel string      `json:"embedding_model"`
+	Limit          int32       `json:"limit"`
+	Embedding      string      `json:"embedding"`
+}
+
+type SearchSkillEmbeddingsRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Distance    float64            `json:"distance"`
+}
+
+func (q *Queries) SearchSkillEmbeddings(ctx context.Context, arg SearchSkillEmbeddingsParams) ([]SearchSkillEmbeddingsRow, error) {
+	rows, err := q.db.Query(ctx, searchSkillEmbeddings,
+		arg.WorkspaceID,
+		arg.EmbeddingModel,
+		arg.Limit,
+		arg.Embedding,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SearchSkillEmbeddingsRow{}
+	for rows.Next() {
+		var i SearchSkillEmbeddingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Config,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IssueID,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateSkill = `-- name: UpdateSkill :one
 UPDATE skill SET
     name = COALESCE($2, name),
@@ -512,6 +623,53 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.Config,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertSkillEmbedding = `-- name: UpsertSkillEmbedding :one
+INSERT INTO skill_embedding (skill_id, workspace_id, embedding, embedding_model, content_hash)
+VALUES ($1, $2, $5::text::vector, $3, $4)
+ON CONFLICT (skill_id) DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    embedding = EXCLUDED.embedding,
+    embedding_model = EXCLUDED.embedding_model,
+    content_hash = EXCLUDED.content_hash,
+    updated_at = now()
+RETURNING skill_id, workspace_id, embedding_model, content_hash, updated_at
+`
+
+type UpsertSkillEmbeddingParams struct {
+	SkillID        pgtype.UUID `json:"skill_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	EmbeddingModel string      `json:"embedding_model"`
+	ContentHash    string      `json:"content_hash"`
+	Embedding      string      `json:"embedding"`
+}
+
+type UpsertSkillEmbeddingRow struct {
+	SkillID        pgtype.UUID        `json:"skill_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	EmbeddingModel string             `json:"embedding_model"`
+	ContentHash    string             `json:"content_hash"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertSkillEmbedding(ctx context.Context, arg UpsertSkillEmbeddingParams) (UpsertSkillEmbeddingRow, error) {
+	row := q.db.QueryRow(ctx, upsertSkillEmbedding,
+		arg.SkillID,
+		arg.WorkspaceID,
+		arg.EmbeddingModel,
+		arg.ContentHash,
+		arg.Embedding,
+	)
+	var i UpsertSkillEmbeddingRow
+	err := row.Scan(
+		&i.SkillID,
+		&i.WorkspaceID,
+		&i.EmbeddingModel,
+		&i.ContentHash,
 		&i.UpdatedAt,
 	)
 	return i, err

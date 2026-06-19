@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,6 +101,18 @@ type SkillSearchCandidateResponse struct {
 type SkillWithFilesResponse struct {
 	SkillResponse
 	Files []SkillFileResponse `json:"files"`
+}
+
+type IssueSkillResponse struct {
+	Skill           SkillWithFilesResponse `json:"skill"`
+	SourceIssueID   string                 `json:"source_issue_id"`
+	EmbeddingStored bool                   `json:"embedding_stored"`
+}
+
+type SkillVectorSearchResult struct {
+	SkillSummaryResponse
+	SourceIssueID *string `json:"source_issue_id,omitempty"`
+	Distance      float64 `json:"distance"`
 }
 
 type SkillImportResult struct {
@@ -215,6 +229,22 @@ type CreateSkillRequest struct {
 	Files       []CreateSkillFileRequest `json:"files,omitempty"`
 }
 
+type CreateIssueSkillRequest struct {
+	CreateSkillRequest
+	Embedding *SkillEmbeddingRequest `json:"embedding,omitempty"`
+}
+
+type SkillEmbeddingRequest struct {
+	Model       string    `json:"model"`
+	Vector      []float64 `json:"vector"`
+	ContentHash string    `json:"content_hash"`
+}
+
+type SkillVectorSearchRequest struct {
+	Embedding SkillEmbeddingRequest `json:"embedding"`
+	Limit     int32                 `json:"limit"`
+}
+
 type CreateSkillFileRequest struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
@@ -251,6 +281,29 @@ func validateFilePath(p string) bool {
 		return false
 	}
 	return true
+}
+
+const skillEmbeddingDimension = 1536
+
+func vectorLiteral(vector []float64) (string, bool) {
+	if len(vector) != skillEmbeddingDimension {
+		return "", false
+	}
+	parts := make([]string, len(vector))
+	for i, v := range vector {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return "", false
+		}
+		parts[i] = strconv.FormatFloat(v, 'g', -1, 64)
+	}
+	return "[" + strings.Join(parts, ",") + "]", true
+}
+
+func validateEmbedding(req SkillEmbeddingRequest) (string, bool) {
+	if strings.TrimSpace(req.Model) == "" {
+		return "", false
+	}
+	return vectorLiteral(req.Vector)
 }
 
 func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id string) (db.Skill, bool) {
@@ -392,6 +445,174 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
 	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) CreateIssueSkill(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	creatorID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	issueID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "issue id")
+	if !ok {
+		return
+	}
+
+	issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID:          issueID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "issue not found")
+		return
+	}
+	if issue.Status != "done" {
+		writeError(w, http.StatusConflict, "issue must be done before creating a skill")
+		return
+	}
+
+	var req CreateIssueSkillRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	for _, f := range req.Files {
+		if !validateFilePath(f.Path) {
+			writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
+			return
+		}
+	}
+
+	var embeddingLiteral string
+	if req.Embedding != nil {
+		var valid bool
+		embeddingLiteral, valid = validateEmbedding(*req.Embedding)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "embedding must include model and 1536 finite vector values")
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	skill, err := createSkillWithFilesInTx(r.Context(), qtx, skillCreateInput{
+		WorkspaceID: workspaceUUID,
+		CreatorID:   parseUUID(creatorID),
+		Name:        req.Name,
+		Description: req.Description,
+		Content:     req.Content,
+		Config:      req.Config,
+		Files:       req.Files,
+	})
+	if err != nil {
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "a skill with this name already exists")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create skill: "+err.Error())
+		return
+	}
+	skillID := parseUUID(skill.ID)
+	if _, err := qtx.CreateIssueSkillSource(r.Context(), db.CreateIssueSkillSourceParams{
+		SkillID:     skillID,
+		IssueID:     issue.ID,
+		WorkspaceID: workspaceUUID,
+		CreatedBy:   parseUUID(creatorID),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create skill source")
+		return
+	}
+	if req.Embedding != nil {
+		if _, err := qtx.UpsertSkillEmbedding(r.Context(), db.UpsertSkillEmbeddingParams{
+			SkillID:        skillID,
+			WorkspaceID:    workspaceUUID,
+			EmbeddingModel: req.Embedding.Model,
+			ContentHash:    req.Embedding.ContentHash,
+			Embedding:      embeddingLiteral,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to store skill embedding")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit")
+		return
+	}
+
+	resp := IssueSkillResponse{
+		Skill:           skill,
+		SourceIssueID:   uuidToString(issue.ID),
+		EmbeddingStored: req.Embedding != nil,
+	}
+	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": skill})
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+func (h *Handler) SearchSkillEmbeddings(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	var req SkillVectorSearchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	embeddingLiteral, ok := validateEmbedding(req.Embedding)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "embedding must include model and 1536 finite vector values")
+		return
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+
+	rows, err := h.Queries.SearchSkillEmbeddings(r.Context(), db.SearchSkillEmbeddingsParams{
+		WorkspaceID:    workspaceUUID,
+		EmbeddingModel: req.Embedding.Model,
+		Limit:          limit,
+		Embedding:      embeddingLiteral,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to search skill embeddings")
+		return
+	}
+
+	resp := make([]SkillVectorSearchResult, len(rows))
+	for i, row := range rows {
+		var sourceIssueID *string
+		if row.IssueID.Valid {
+			v := uuidToString(row.IssueID)
+			sourceIssueID = &v
+		}
+		resp[i] = SkillVectorSearchResult{
+			SkillSummaryResponse: skillSummaryToResponse(
+				row.ID, row.WorkspaceID, row.Name, row.Description, row.Config,
+				row.CreatedBy, row.CreatedAt, row.UpdatedAt,
+			),
+			SourceIssueID: sourceIssueID,
+			Distance:      row.Distance,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // canManageSkill checks whether the current user can update or delete a skill.
