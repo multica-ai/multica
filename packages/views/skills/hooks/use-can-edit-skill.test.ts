@@ -15,6 +15,9 @@ function makeSkill(createdBy: string | null): Skill {
     owner_id: createdBy,
     approver_ids: [],
     current_version: "v1",
+    notify_change_requests: true,
+    notify_forks: true,
+    notify_agent_assigned: true,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
   };

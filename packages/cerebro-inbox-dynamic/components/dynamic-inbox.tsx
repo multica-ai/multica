@@ -300,6 +300,15 @@ export function DynamicInbox() {
         push(`${paths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`);
         return true;
       }
+      // FIR-1587 — fork / agent-assignment items deep-link to the relevant skill detail.
+      if (item.type === "skill_forked" && item.details?.forked_skill_id) {
+        push(paths.skillDetail(String(item.details.forked_skill_id)));
+        return true;
+      }
+      if (item.type === "skill_agent_assigned" && item.details?.skill_id) {
+        push(paths.skillDetail(String(item.details.skill_id)));
+        return true;
+      }
       if (item.details?.note_id) {
         // TECH-3690 — open the note in the detail pane (parity with the Notes
         // box); fall back to the full Notes page when the pane is off.

@@ -39,20 +39,24 @@ func sanitizeNullBytes(s string) string {
 // --- Response structs ---
 
 type SkillResponse struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
-	Config      any    `json:"config"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Content     string  `json:"content"`
+	Config      any     `json:"config"`
 	CreatedBy   *string `json:"created_by"`
 	// CEREBRO-PATCH(skill-ownership): cerebro skill ownership / approval /
 	// versioning fields.
 	OwnerID        *string  `json:"owner_id"`
 	ApproverIDs    []string `json:"approver_ids"`
 	CurrentVersion string   `json:"current_version"`
-	CreatedAt      string   `json:"created_at"`
-	UpdatedAt      string   `json:"updated_at"`
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled notify toggles.
+	NotifyChangeRequests bool   `json:"notify_change_requests"`
+	NotifyForks          bool   `json:"notify_forks"`
+	NotifyAgentAssigned  bool   `json:"notify_agent_assigned"`
+	CreatedAt            string `json:"created_at"`
+	UpdatedAt            string `json:"updated_at"`
 }
 
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
@@ -138,8 +142,12 @@ func skillToResponse(s db.Skill) SkillResponse {
 		OwnerID:        uuidToPtr(s.OwnerID),
 		ApproverIDs:    approverIDs,
 		CurrentVersion: s.CurrentVersion,
-		CreatedAt:      timestampToString(s.CreatedAt),
-		UpdatedAt:      timestampToString(s.UpdatedAt),
+		// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — surface notify toggles.
+		NotifyChangeRequests: s.NotifyChangeRequests,
+		NotifyForks:          s.NotifyForks,
+		NotifyAgentAssigned:  s.NotifyAgentAssigned,
+		CreatedAt:            timestampToString(s.CreatedAt),
+		UpdatedAt:            timestampToString(s.UpdatedAt),
 	}
 }
 
@@ -2038,6 +2046,9 @@ func (h *Handler) SetAgentSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — notify each skill owner of the assignment.
+	h.notifySkillsAgentAssigned(r.Context(), skillUUIDs, agent, parseUUID(requestUserID(r)))
+
 	h.writeUpdatedAgentSkills(w, r, agent)
 }
 
@@ -2086,6 +2097,9 @@ func (h *Handler) AddAgentSkills(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit")
 		return
 	}
+
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — notify each skill owner of the assignment.
+	h.notifySkillsAgentAssigned(r.Context(), skillUUIDs, agent, parseUUID(requestUserID(r)))
 
 	h.writeUpdatedAgentSkills(w, r, agent)
 }

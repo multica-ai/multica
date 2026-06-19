@@ -23,14 +23,14 @@ import (
 // --- Response structs ---
 
 type SkillVersionResponse struct {
-	ID          string                 `json:"id"`
-	SkillID     string                 `json:"skill_id"`
-	Version     string                 `json:"version"`
-	Content     string                 `json:"content"`
-	Files       []skillVersionFile     `json:"files"`
-	Description string                 `json:"description"`
-	CreatedBy   *string                `json:"created_by"`
-	CreatedAt   string                 `json:"created_at"`
+	ID          string             `json:"id"`
+	SkillID     string             `json:"skill_id"`
+	Version     string             `json:"version"`
+	Content     string             `json:"content"`
+	Files       []skillVersionFile `json:"files"`
+	Description string             `json:"description"`
+	CreatedBy   *string            `json:"created_by"`
+	CreatedAt   string             `json:"created_at"`
 }
 
 type skillVersionFile struct {
@@ -72,6 +72,12 @@ type SkillForkResponse struct {
 type UpdateSkillOwnershipRequest struct {
 	OwnerID     *string  `json:"owner_id"`
 	ApproverIDs []string `json:"approver_ids"`
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled
+	// notify toggles. Pointers so an omitted field leaves the stored value
+	// untouched (a partial update of just one toggle).
+	NotifyChangeRequests *bool `json:"notify_change_requests"`
+	NotifyForks          *bool `json:"notify_forks"`
+	NotifyAgentAssigned  *bool `json:"notify_agent_assigned"`
 }
 
 type CreateSkillChangeRequestRequest struct {
@@ -227,6 +233,16 @@ func (h *Handler) UpdateSkillOwnership(w http.ResponseWriter, r *http.Request) {
 			approvers = append(approvers, parseUUID(raw))
 		}
 		params.ApproverIds = approvers
+	}
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — map notify toggles (narg → pgtype.Bool).
+	if req.NotifyChangeRequests != nil {
+		params.NotifyChangeRequests = pgtype.Bool{Bool: *req.NotifyChangeRequests, Valid: true}
+	}
+	if req.NotifyForks != nil {
+		params.NotifyForks = pgtype.Bool{Bool: *req.NotifyForks, Valid: true}
+	}
+	if req.NotifyAgentAssigned != nil {
+		params.NotifyAgentAssigned = pgtype.Bool{Bool: *req.NotifyAgentAssigned, Valid: true}
 	}
 
 	updated, err := h.Queries.UpdateSkillOwnership(r.Context(), params)
@@ -711,6 +727,9 @@ func (h *Handler) CreateSkillFork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — notify the parent owner of the fork.
+	h.notifySkillForked(r.Context(), parent, forked, parseUUID(userID))
+
 	writeJSON(w, http.StatusCreated, SkillWithFilesResponse{
 		SkillResponse: skillToResponse(forked),
 		Files:         fileResps,
@@ -726,10 +745,17 @@ func (h *Handler) CreateSkillFork(w http.ResponseWriter, r *http.Request) {
 const (
 	inboxTypeSkillChangeRequestCreated  = "skill_change_request_created"
 	inboxTypeSkillChangeRequestReviewed = "skill_change_request_reviewed"
-	maxSkillDiffChars                   = 8 * 1024
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — fork + agent-assignment inbox types.
+	inboxTypeSkillForked        = "skill_forked"
+	inboxTypeSkillAgentAssigned = "skill_agent_assigned"
+	maxSkillDiffChars           = 8 * 1024
 )
 
 func (h *Handler) notifySkillChangeRequestCreated(ctx context.Context, skill db.Skill, cr db.SkillChangeRequest) {
+	// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner can mute the change-request stream per skill.
+	if !skill.NotifyChangeRequests {
+		return
+	}
 	recipients := skillChangeRequestRecipients(skill, cr.ProposedBy)
 	if len(recipients) == 0 {
 		return
@@ -771,6 +797,60 @@ func (h *Handler) notifySkillChangeRequestReviewed(ctx context.Context, skill db
 	}
 	h.writeSkillInboxItem(ctx, skill.WorkspaceID, cr.ProposedBy, inboxTypeSkillChangeRequestReviewed,
 		severity, title, body, "member", reviewerID, details)
+}
+
+// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — notify the parent
+// skill's owner when someone forks it. Gated by the parent's notify_forks
+// toggle; the forker is skipped so an owner forking their own skill is silent.
+func (h *Handler) notifySkillForked(ctx context.Context, parent db.Skill, forked db.Skill, forkedBy pgtype.UUID) {
+	if !parent.NotifyForks || !parent.OwnerID.Valid {
+		return
+	}
+	if forkedBy.Valid && uuidToString(parent.OwnerID) == uuidToString(forkedBy) {
+		return
+	}
+	title := fmt.Sprintf("%s was forked", parent.Name)
+	body := fmt.Sprintf("%s forked %s into %s", shortUUID(forkedBy), parent.Name, forked.Name)
+	details := map[string]any{
+		"parent_skill_id": uuidToString(parent.ID),
+		"parent_name":     parent.Name,
+		"forked_skill_id": uuidToString(forked.ID),
+		"forked_name":     forked.Name,
+		"forked_by":       uuidToString(forkedBy),
+	}
+	h.writeSkillInboxItem(ctx, parent.WorkspaceID, parent.OwnerID, inboxTypeSkillForked,
+		"info", title, body, "member", forkedBy, details)
+}
+
+// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — notify each skill's
+// owner when an agent is assigned that skill. Gated per skill by
+// notify_agent_assigned; the assigner is skipped when they own the skill.
+func (h *Handler) notifySkillsAgentAssigned(ctx context.Context, skillIDs []pgtype.UUID, agent db.Agent, assignedBy pgtype.UUID) {
+	for _, sid := range skillIDs {
+		skill, err := h.Queries.GetSkill(ctx, sid)
+		if err != nil {
+			slog.Warn("skill agent-assigned notify: failed to load skill",
+				"skill_id", uuidToString(sid), "error", err)
+			continue
+		}
+		if !skill.NotifyAgentAssigned || !skill.OwnerID.Valid {
+			continue
+		}
+		if assignedBy.Valid && uuidToString(skill.OwnerID) == uuidToString(assignedBy) {
+			continue
+		}
+		title := fmt.Sprintf("%s assigned to an agent", skill.Name)
+		body := fmt.Sprintf("%s assigned %s to agent %s", shortUUID(assignedBy), skill.Name, agent.Name)
+		details := map[string]any{
+			"skill_id":    uuidToString(skill.ID),
+			"skill_name":  skill.Name,
+			"agent_id":    uuidToString(agent.ID),
+			"agent_name":  agent.Name,
+			"assigned_by": uuidToString(assignedBy),
+		}
+		h.writeSkillInboxItem(ctx, skill.WorkspaceID, skill.OwnerID, inboxTypeSkillAgentAssigned,
+			"info", title, body, "member", assignedBy, details)
+	}
 }
 
 // skillChangeRequestRecipients returns the deduplicated set of users who should
@@ -1029,4 +1109,3 @@ func truncateForInbox(s string) string {
 	}
 	return s[:maxSkillDiffChars] + "\n... (truncated)"
 }
-

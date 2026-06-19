@@ -521,6 +521,10 @@ export interface SkillSummary {
   owner_id: string | null;
   approver_ids: string[];
   current_version: string;
+  // CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled notify toggles.
+  notify_change_requests: boolean;
+  notify_forks: boolean;
+  notify_agent_assigned: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -606,6 +610,11 @@ export interface SkillForkParent {
 export interface UpdateSkillOwnershipRequest {
   owner_id?: string | null;
   approver_ids?: string[];
+  // CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled
+  // notify toggles; omitted fields leave the stored value untouched.
+  notify_change_requests?: boolean;
+  notify_forks?: boolean;
+  notify_agent_assigned?: boolean;
 }
 
 export interface CreateSkillChangeRequestRequest {

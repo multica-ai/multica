@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, UserCircle2, X } from "lucide-react";
+import { Bell, Crown, Shield, UserCircle2, X } from "lucide-react";
 import { toast } from "sonner";
 import type { MemberWithUser, Skill } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { useUpdateSkillOwnership } from "../../core/mutations";
 
 interface Props {
@@ -37,6 +38,14 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
   const [selectedApprovers, setSelectedApprovers] = useState<string[]>(
     skill.approver_ids ?? [],
   );
+  // FIR-1587 — owner-controlled notification toggles (default on).
+  const [notifyChangeRequests, setNotifyChangeRequests] = useState(
+    skill.notify_change_requests ?? true,
+  );
+  const [notifyForks, setNotifyForks] = useState(skill.notify_forks ?? true);
+  const [notifyAgentAssigned, setNotifyAgentAssigned] = useState(
+    skill.notify_agent_assigned ?? true,
+  );
 
   const mutation = useUpdateSkillOwnership(skill.id, wsId);
 
@@ -48,6 +57,9 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
   const handleOpen = () => {
     setSelectedOwner(skill.owner_id ?? null);
     setSelectedApprovers(skill.approver_ids ?? []);
+    setNotifyChangeRequests(skill.notify_change_requests ?? true);
+    setNotifyForks(skill.notify_forks ?? true);
+    setNotifyAgentAssigned(skill.notify_agent_assigned ?? true);
     setEditOpen(true);
   };
 
@@ -56,6 +68,9 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
       await mutation.mutateAsync({
         owner_id: selectedOwner,
         approver_ids: selectedApprovers,
+        notify_change_requests: notifyChangeRequests,
+        notify_forks: notifyForks,
+        notify_agent_assigned: notifyAgentAssigned,
       });
       toast.success("Ownership updated");
       setEditOpen(false);
@@ -114,6 +129,22 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
               ))}
             </div>
           )}
+        </div>
+
+        <div className="flex items-start gap-1.5">
+          <Bell className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+          <span className="text-muted-foreground shrink-0">Notifications:</span>
+          <span className="font-medium">
+            {[
+              skill.notify_change_requests ? "change requests" : null,
+              skill.notify_forks ? "forks" : null,
+              skill.notify_agent_assigned ? "agent assigned" : null,
+            ]
+              .filter(Boolean)
+              .join(", ") || (
+              <span className="italic text-muted-foreground">All off</span>
+            )}
+          </span>
         </div>
       </div>
 
@@ -197,6 +228,53 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
                   })}
                 </div>
               )}
+            </div>
+
+            <div className="space-y-2 border-t pt-3">
+              <label className="text-xs font-medium text-muted-foreground">
+                Notifications
+              </label>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                You control which of these land in your inbox as the owner.
+              </p>
+              {(
+                [
+                  {
+                    label: "Change requests",
+                    hint: "Owner + approvers notified when someone proposes a change",
+                    value: notifyChangeRequests,
+                    set: setNotifyChangeRequests,
+                  },
+                  {
+                    label: "Forks",
+                    hint: "When someone forks this skill",
+                    value: notifyForks,
+                    set: setNotifyForks,
+                  },
+                  {
+                    label: "Agent assigned",
+                    hint: "When this skill is assigned to an agent",
+                    value: notifyAgentAssigned,
+                    set: setNotifyAgentAssigned,
+                  },
+                ] as const
+              ).map((row) => (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium">{row.label}</div>
+                    <div className="truncate text-[11px] text-muted-foreground">
+                      {row.hint}
+                    </div>
+                  </div>
+                  <Switch
+                    checked={row.value}
+                    onCheckedChange={(v: boolean) => row.set(v)}
+                  />
+                </div>
+              ))}
             </div>
           </div>
 

@@ -40,6 +40,9 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     // CEREBRO-PATCH(inbox-skill-change-request): FIR-2629 inline Danish labels (cerebro feature) — keeps en/ko/zh-Hans parity untouched.
     skill_change_request_created: "Foreslået ændring til skill",
     skill_change_request_reviewed: "Dit skill-forslag er behandlet",
+    // CEREBRO-PATCH(inbox-skill-notify-settings): FIR-1587 inline Danish labels.
+    skill_forked: "Dit skill blev forked",
+    skill_agent_assigned: "Skill tildelt en agent",
     runtime_auto_paused: t(($) => $.types.runtime_auto_paused), // CEREBRO-PATCH(inbox-runtime-pause-label): FIR-2611.
     agent_capability_drift: "Capability drift", // CEREBRO-PATCH(inbox-capability-drift-label): TECH-3738 Bid C inline label (locale parity untouched).
     // CEREBRO-PATCH(inbox-detail-label-agent-comment-split): TECH-2961 — three labels for agent-authored comments split by the tag they carry.

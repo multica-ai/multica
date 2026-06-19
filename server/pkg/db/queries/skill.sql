@@ -47,9 +47,13 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateSkillOwnership :one
+-- CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled notify toggles updated alongside ownership; all narg so a partial update (just a toggle) leaves owner/approvers untouched.
 UPDATE skill SET
     owner_id = COALESCE(sqlc.narg('owner_id'), owner_id),
     approver_ids = COALESCE(sqlc.narg('approver_ids'), approver_ids),
+    notify_change_requests = COALESCE(sqlc.narg('notify_change_requests'), notify_change_requests),
+    notify_forks = COALESCE(sqlc.narg('notify_forks'), notify_forks),
+    notify_agent_assigned = COALESCE(sqlc.narg('notify_agent_assigned'), notify_agent_assigned),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

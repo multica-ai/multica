@@ -1556,19 +1556,22 @@ type RuntimeSetupToken struct {
 }
 
 type Skill struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	Content        string             `json:"content"`
-	Config         []byte             `json:"config"`
-	CreatedBy      pgtype.UUID        `json:"created_by"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	OwnerID        pgtype.UUID        `json:"owner_id"`
-	ApproverIds    []pgtype.UUID      `json:"approver_ids"`
-	CurrentVersion string             `json:"current_version"`
-	Metadata       []byte             `json:"metadata"`
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Content              string             `json:"content"`
+	Config               []byte             `json:"config"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	OwnerID              pgtype.UUID        `json:"owner_id"`
+	ApproverIds          []pgtype.UUID      `json:"approver_ids"`
+	CurrentVersion       string             `json:"current_version"`
+	Metadata             []byte             `json:"metadata"`
+	NotifyChangeRequests bool               `json:"notify_change_requests"`
+	NotifyForks          bool               `json:"notify_forks"`
+	NotifyAgentAssigned  bool               `json:"notify_agent_assigned"`
 }
 
 type SkillAutomationLink struct {

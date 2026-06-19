@@ -70,6 +70,9 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   private_agent_run_request: "Private agent request",
   skill_change_request_created: "Skill change requested",
   skill_change_request_reviewed: "Skill change reviewed",
+  // FIR-1587: per-skill notify toggles — fork + agent-assignment streams.
+  skill_forked: "Skill forked",
+  skill_agent_assigned: "Skill assigned to agent",
   runtime_auto_paused: "Runtime paused", // FIR-2611: aggregated auth/quota auto-pause card.
   // TECH-2961: agent-authored comments split by tag. Mirrors useTypeLabels in
   // packages/views/inbox/components/inbox-detail-label.tsx — labels match the

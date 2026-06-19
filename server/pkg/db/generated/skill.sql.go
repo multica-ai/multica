@@ -30,7 +30,7 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by, owner_id)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned
 `
 
 type CreateSkillParams struct {
@@ -68,6 +68,9 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
@@ -106,7 +109,7 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 }
 
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned FROM skill
 WHERE id = $1
 `
 
@@ -127,12 +130,15 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
 
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned FROM skill
 WHERE workspace_id = $1 AND name = $2
 `
 
@@ -162,6 +168,9 @@ func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillBy
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
@@ -186,7 +195,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned FROM skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -212,6 +221,9 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
@@ -268,7 +280,7 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.owner_id, s.approver_ids, s.current_version, s.metadata FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.owner_id, s.approver_ids, s.current_version, s.metadata, s.notify_change_requests, s.notify_forks, s.notify_agent_assigned FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
@@ -298,6 +310,9 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.ApproverIds,
 			&i.CurrentVersion,
 			&i.Metadata,
+			&i.NotifyChangeRequests,
+			&i.NotifyForks,
+			&i.NotifyAgentAssigned,
 		); err != nil {
 			return nil, err
 		}
@@ -437,7 +452,7 @@ func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID
 
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -466,6 +481,9 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 			&i.ApproverIds,
 			&i.CurrentVersion,
 			&i.Metadata,
+			&i.NotifyChangeRequests,
+			&i.NotifyForks,
+			&i.NotifyAgentAssigned,
 		); err != nil {
 			return nil, err
 		}
@@ -509,7 +527,7 @@ UPDATE skill SET
     config = COALESCE($5, config),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned
 `
 
 type UpdateSkillParams struct {
@@ -543,6 +561,9 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
@@ -553,7 +574,7 @@ UPDATE skill SET
     content = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned
 `
 
 type UpdateSkillCurrentVersionParams struct {
@@ -579,6 +600,9 @@ func (q *Queries) UpdateSkillCurrentVersion(ctx context.Context, arg UpdateSkill
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
@@ -587,19 +611,33 @@ const updateSkillOwnership = `-- name: UpdateSkillOwnership :one
 UPDATE skill SET
     owner_id = COALESCE($2, owner_id),
     approver_ids = COALESCE($3, approver_ids),
+    notify_change_requests = COALESCE($4, notify_change_requests),
+    notify_forks = COALESCE($5, notify_forks),
+    notify_agent_assigned = COALESCE($6, notify_agent_assigned),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, owner_id, approver_ids, current_version, metadata, notify_change_requests, notify_forks, notify_agent_assigned
 `
 
 type UpdateSkillOwnershipParams struct {
-	ID          pgtype.UUID   `json:"id"`
-	OwnerID     pgtype.UUID   `json:"owner_id"`
-	ApproverIds []pgtype.UUID `json:"approver_ids"`
+	ID                   pgtype.UUID   `json:"id"`
+	OwnerID              pgtype.UUID   `json:"owner_id"`
+	ApproverIds          []pgtype.UUID `json:"approver_ids"`
+	NotifyChangeRequests pgtype.Bool   `json:"notify_change_requests"`
+	NotifyForks          pgtype.Bool   `json:"notify_forks"`
+	NotifyAgentAssigned  pgtype.Bool   `json:"notify_agent_assigned"`
 }
 
+// CEREBRO-PATCH(skill-notification-settings): FIR-1587 — owner-controlled notify toggles updated alongside ownership; all narg so a partial update (just a toggle) leaves owner/approvers untouched.
 func (q *Queries) UpdateSkillOwnership(ctx context.Context, arg UpdateSkillOwnershipParams) (Skill, error) {
-	row := q.db.QueryRow(ctx, updateSkillOwnership, arg.ID, arg.OwnerID, arg.ApproverIds)
+	row := q.db.QueryRow(ctx, updateSkillOwnership,
+		arg.ID,
+		arg.OwnerID,
+		arg.ApproverIds,
+		arg.NotifyChangeRequests,
+		arg.NotifyForks,
+		arg.NotifyAgentAssigned,
+	)
 	var i Skill
 	err := row.Scan(
 		&i.ID,
@@ -615,6 +653,9 @@ func (q *Queries) UpdateSkillOwnership(ctx context.Context, arg UpdateSkillOwner
 		&i.ApproverIds,
 		&i.CurrentVersion,
 		&i.Metadata,
+		&i.NotifyChangeRequests,
+		&i.NotifyForks,
+		&i.NotifyAgentAssigned,
 	)
 	return i, err
 }
