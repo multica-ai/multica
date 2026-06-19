@@ -23,6 +23,9 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+// CEREBRO-PATCH(list-row-wakeup-dot): FIR-1521 — orange scheduled-wakeup pip stacked next to the running indicator.
+import { CerebroIssueWakeupPip } from "@multica/cerebro-wakeup";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 export interface ChildProgress {
   done: number;
@@ -57,6 +60,7 @@ function ListRowContent({
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const wakeupDotEnabled = useFeatureFlag("cerebro_activity_wakeup_dot"); // CEREBRO-PATCH(list-row-wakeup-dot): FIR-1521
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(issue.id));
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
@@ -122,7 +126,10 @@ function ListRowContent({
           <span className="w-16 shrink-0 text-xs text-muted-foreground">
             {issue.identifier}
           </span>
-          <IssueAgentActivityIndicator issueId={issue.id} />
+          <span className="inline-flex shrink-0 items-center gap-0.5">
+            <IssueAgentActivityIndicator issueId={issue.id} />
+            {wakeupDotEnabled && <CerebroIssueWakeupPip issueId={issue.id} />}
+          </span>
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>

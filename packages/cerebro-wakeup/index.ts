@@ -6,6 +6,10 @@ export { CerebroWakeupSection } from "./components/wakeup-section";
 // CEREBRO: FIR-1521 — prominent top-of-issue orange wakeup banner (countdown +
 // status/CI), mirroring the running-agent banner. Feature flag cerebro_wakeup_bar.
 export { CerebroWakeupBar } from "./components/wakeup-bar";
+// CEREBRO: FIR-1521 (part 2) — small orange clock pip that stacks next to the
+// running-agent indicator on issue lists + board cards. Feature flag
+// cerebro_activity_wakeup_dot.
+export { CerebroIssueWakeupPip } from "./components/wakeup-pip";
 // CEREBRO: TECH-3298 — wakeup action-note rendering in the issue timeline +
 // the self-wakeup limit settings shown inline in the Cerebro features tab.
 export { WakeupNote, isWakeupEntry } from "./components/wakeup-note";

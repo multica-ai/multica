@@ -114,6 +114,7 @@ export function InboxListItem({
   isSelected,
   agentRunState,
   agentRunTitle, // CEREBRO-PATCH(inbox-wakeup-pip): TECH-3322 — approximate wakeup time for the clock pip.
+  scheduledStackTitle, // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — extra clock pip stacked next to a live run pip.
   onClick,
   onArchive,
   onUnarchive, // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -122,6 +123,7 @@ export function InboxListItem({
   isSelected: boolean;
   agentRunState?: AgentRunState;
   agentRunTitle?: string; // CEREBRO-PATCH(inbox-wakeup-pip): TECH-3322
+  scheduledStackTitle?: string; // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
   onClick: () => void;
   onArchive: () => void;
   onUnarchive?: () => void; // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166
@@ -173,6 +175,8 @@ export function InboxListItem({
           className={`mt-0.5 flex items-start gap-1.5 text-xs leading-snug line-clamp-2 ${unread ? "text-foreground" : "text-muted-foreground/70"}`}
         >
           {agentRunState && <AgentRunPip state={agentRunState} title={agentRunTitle} className="mt-1" />}
+          {/* CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — clock pip overlapping the run pip when an issue is both running and scheduled. */}
+          {scheduledStackTitle && <AgentRunPip state="scheduled" title={scheduledStackTitle} className="mt-1 -ml-1" />}
           <span className="line-clamp-2">
             <InboxDetailLabel item={item} />
           </span>

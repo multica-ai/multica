@@ -174,6 +174,9 @@ export type CerebroFlagKey =
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
   // mirroring the running banner (live countdown / waited-for status / CI).
   | "cerebro_wakeup_bar"
+  // FIR-1521 (part 2): stack a small orange scheduled-wakeup clock pip next to the
+  // running-agent indicator on issue lists + board cards; click expands the list.
+  | "cerebro_activity_wakeup_dot"
   // TECH-3173: staged rollout of per-tool enforcement on LOCAL CLI runtimes
   // (Claude/Codex/Cursor/Gemini). Master on/off; when on the daemon resolves each
   // tool call through the same tool-policy chain + approval inbox as the gateway.
@@ -416,6 +419,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1521: ON by default — additive top-of-issue banner. Off restores the
   // sidebar-only wakeup list with no banner.
   cerebro_wakeup_bar: true,
+  // FIR-1521 (part 2): ON by default — additive clock pip on list/board rows. Off
+  // restores the rows to running-only indicators with no scheduled-wakeup dot.
+  cerebro_activity_wakeup_dot: true,
   // TECH-3173: OFF by default — local-runtime per-tool enforcement stays dormant
   // until an admin opts in from Settings, so a deploy never changes behaviour.
   cerebro_local_tool_policy: false,
@@ -1144,6 +1150,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "issues",
     description:
       "Show a prominent orange banner at the top of an issue when it has a pending agent wakeup, mirroring the running-agent banner: a live countdown for time-based wakeups, the watched status for status wakeups, and a CI label for GitHub-CI wakeups, each with a cancel button. Multiple pending wakeups fold into one expandable banner. Off keeps the wakeups visible only in the sidebar list. FIR-1521.",
+  },
+  {
+    key: "cerebro_activity_wakeup_dot",
+    label: "Scheduled wakeup dot on lists & boards",
+    group: "issues",
+    description:
+      "Show a small orange clock dot on issue list rows and board cards when the issue has a pending agent wakeup, stacked next to the running-agent indicator so a row can show both at once. Click the dot to expand a list of every scheduled run with a live countdown and a cancel button. Off keeps lists and boards showing only the running-agent indicator. FIR-1521.",
   },
   // TECH-3173: local-runtime per-tool enforcement, staged from settings.
   {

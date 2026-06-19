@@ -993,6 +993,11 @@ export function InboxPage() {
       ? issueRunStates.get(item.issue_id) ??
         (subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
       : undefined;
+    // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — when a row already shows a live
+    // run pip but also has a pending wakeup, stack a clock pip next to it so both
+    // "running now" and "scheduled to run" are visible at once.
+    const scheduledStackTitle =
+      wakeupHint && agentRunState && agentRunState !== "scheduled" ? wakeupHint.title : undefined;
     return (
       <InboxListItem
         key={`notif:${item.id}`}
@@ -1000,6 +1005,7 @@ export function InboxPage() {
         isSelected={(item.issue_id ?? item.id) === selectedKey}
         agentRunState={agentRunState}
         agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : undefined}
+        scheduledStackTitle={scheduledStackTitle} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
         onClick={() => handleSelect(item)}
         onArchive={() => handleArchive(item.id)}
         // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — archived view wires

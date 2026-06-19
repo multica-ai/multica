@@ -26,6 +26,9 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+// CEREBRO-PATCH(board-card-wakeup-dot): FIR-1521 — orange scheduled-wakeup pip stacked next to the running indicator.
+import { CerebroIssueWakeupPip } from "@multica/cerebro-wakeup";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -66,6 +69,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   childProgress?: ChildProgress;
 }) {
   const { t } = useT("issues");
+  const wakeupDotEnabled = useFeatureFlag("cerebro_activity_wakeup_dot"); // CEREBRO-PATCH(board-card-wakeup-dot): FIR-1521
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
@@ -179,7 +183,10 @@ export const BoardCardContent = memo(function BoardCardContent({
           {priorityIconNode}
           <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
         </div>
-        <IssueAgentActivityIndicator issueId={issue.id} />
+        <span className="inline-flex shrink-0 items-center gap-0.5">
+          <IssueAgentActivityIndicator issueId={issue.id} />
+          {wakeupDotEnabled && <CerebroIssueWakeupPip issueId={issue.id} />}
+        </span>
       </div>
 
       {/* Row 2: Title */}
