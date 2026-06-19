@@ -94,32 +94,24 @@ test.describe("Node Detail Panel - Open", () => {
     // ── Step 3: Verify the panel shows the node name as title ──
     // The panel should display the clicked node's title somewhere prominent
     await expect(
-      detailPanel.or(page.locator("text=/Input Validation/")),
+      detailPanel.locator("text=/Input Validation/"),
     ).toBeVisible({ timeout: 3000 });
 
     // ── Step 4: Verify all four key sections are present ──
     // Worker section
-    const workerSection = detailPanel.locator("text=/Worker/").or(
-      page.locator("text=/Worker/"),
-    );
+    const workerSection = detailPanel.locator("text=/Worker/");
     await expect(workerSection.first()).toBeVisible({ timeout: 3000 });
 
     // Critic section
-    const criticSection = detailPanel.locator("text=/Critic/").or(
-      page.locator("text=/Critic/"),
-    );
+    const criticSection = detailPanel.locator("text=/Critic/");
     await expect(criticSection.first()).toBeVisible({ timeout: 3000 });
 
     // Format Schema section
-    const formatSchemaSection = detailPanel
-      .locator("text=/Format Schema/")
-      .or(page.locator("text=/Format Schema|Format Schema/"));
+    const formatSchemaSection = detailPanel.locator("text=/Format Schema/");
     await expect(formatSchemaSection.first()).toBeVisible({ timeout: 3000 });
 
     // Relations section
-    const relationsSection = detailPanel.locator("text=/Relations/").or(
-      page.locator("text=/Relations/"),
-    );
+    const relationsSection = detailPanel.locator("text=/Relations/");
     await expect(relationsSection.first()).toBeVisible({ timeout: 3000 });
 
     // ── Step 5: Verify DAG node gets selected visual state ──

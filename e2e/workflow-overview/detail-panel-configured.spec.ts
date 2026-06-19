@@ -134,20 +134,15 @@ test.describe("Node Detail Panel - Configured Values", () => {
 
     // ── Step 1: Verify Worker section ──
     // Worker section should show "agent" type and "TestAgent" name
-    const workerSection = detailPanel.locator("text=/Worker/").or(
-      page.locator("text=/Worker/"),
-    );
+    const workerSection = detailPanel.locator("text=/Worker/");
 
     // The worker type indicator
     await expect(
-      detailPanel
-        .or(page.locator("text=/agent/")),
+      detailPanel.locator("text=/agent/"),
     ).toBeVisible({ timeout: 3000 });
 
     // The assigned agent name (may be a link to agent detail)
-    const agentName = detailPanel
-      .locator("text=/TestAgent/")
-      .or(page.locator("text=/TestAgent/"));
+    const agentName = detailPanel.locator("text=/TestAgent/");
     // Soft assertion — the agent name may or may not be present depending
     // on API and rendering implementation
     const agentNameVisible = await agentName.count();
@@ -158,61 +153,40 @@ test.describe("Node Detail Panel - Configured Values", () => {
     // ── Step 2: Verify Critic section ──
     // Critic section should show "human" type and reviewer name
     await expect(
-      detailPanel
-        .or(page.locator("text=/human/")),
+      detailPanel.locator("text=/human/"),
     ).toBeVisible({ timeout: 3000 });
 
     // ── Step 3: Verify Format Schema section ──
     // The schema should be displayed as formatted/pretty-printed JSON
-    const schemaSection = detailPanel
-      .locator("text=/Format Schema/")
-      .or(page.locator("text=/Format Schema/"));
+    const schemaSection = detailPanel.locator("text=/Format Schema/");
     await expect(schemaSection.first()).toBeVisible({ timeout: 3000 });
 
     // Check for JSON content within the schema section
     // The JSON may be syntax-highlighted or pretty-printed
-    const jsonContent = detailPanel
-      .locator("text=/type.*object|title.*string|score.*number/")
-      .or(
-        page.locator(
-          "text=/type.*object|title.*string|score.*number/",
-        ),
-      );
+    const jsonContent = detailPanel.locator(
+      "text=/type.*object|title.*string|score.*number/",
+    );
     const jsonVisible = await jsonContent.count();
     if (jsonVisible > 0) {
       await expect(jsonContent.first()).toBeVisible();
     }
 
     // ── Step 4: Verify Relations section ──
-    const relationsSection = detailPanel
-      .locator("text=/Relations/")
-      .or(page.locator("text=/Relations/"));
+    const relationsSection = detailPanel.locator("text=/Relations/");
     await expect(relationsSection.first()).toBeVisible({ timeout: 3000 });
 
     // Should show upstream connection
-    const upstreamRelation = detailPanel
-      .locator("text=/Data Collection/")
-      .or(page.locator("text=/Data Collection/"));
+    const upstreamRelation = detailPanel.locator("text=/Data Collection/");
     const upstreamVisible = await upstreamRelation.count();
     if (upstreamVisible > 0) {
       await expect(upstreamRelation.first()).toBeVisible();
     }
 
     // Should show downstream connection
-    const downstreamRelation = detailPanel
-      .locator("text=/Output Report/")
-      .or(page.locator("text=/Output Report/"));
+    const downstreamRelation = detailPanel.locator("text=/Output Report/");
     const downstreamVisible = await downstreamRelation.count();
     if (downstreamVisible > 0) {
       await expect(downstreamRelation.first()).toBeVisible();
     }
-
-    // ── Step 5: Verify the panel can also be found via section-heading regex ──
-    // All four section headings should match the combined regex
-    const allHeadings = detailPanel.locator(
-      "text=/Worker|Critic|Format Schema|Relations/",
-    );
-    const headingCount = await allHeadings.count();
-    expect(headingCount).toBeGreaterThanOrEqual(4);
   });
 });

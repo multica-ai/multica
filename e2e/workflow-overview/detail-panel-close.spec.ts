@@ -103,7 +103,6 @@ test.describe("Node Detail Panel - Close Methods", () => {
         .getByTestId("node-detail-close")
         .or(page.locator('[data-testid="node-detail-close"]'))
         .or(detailPanel().locator('[aria-label="Close"]'))
-        .or(detailPanel().locator("button").first())
         .or(page.locator('[aria-label="Close"]'));
 
       await closeButton.first().click();

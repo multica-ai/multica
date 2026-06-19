@@ -111,7 +111,7 @@ test.describe("Node Detail Panel - Switch Node", () => {
 
       // Verify panel shows node A's name
       await expect(
-        detailPanel().or(page.locator("text=/Market Research/")),
+        detailPanel().locator("text=/Market Research/"),
       ).toBeVisible({ timeout: 3000 });
     });
 
@@ -130,7 +130,7 @@ test.describe("Node Detail Panel - Switch Node", () => {
       // Verify panel content now shows node B's details
       // Node B's title should be visible
       await expect(
-        detailPanel().or(page.locator("text=/Competitor Analysis/")),
+        detailPanel().locator("text=/Competitor Analysis/"),
       ).toBeVisible({ timeout: 3000 });
 
       // Node A's title should NOT be the panel's primary heading anymore
@@ -145,8 +145,7 @@ test.describe("Node Detail Panel - Switch Node", () => {
       if (nodeAStillTitle > 0) {
         // Verify the heading-level element shows node B instead
         const panelTitle = detailPanel()
-          .locator("h1, h2, h3, h4, [role='heading'], [class*='title']")
-          .or(page.locator("h1, h2, h3, h4, [role='heading'], [class*='title']"));
+          .locator("h1, h2, h3, h4, [role='heading'], [class*='title']");
 
         const titleText = await panelTitle.first().textContent();
         expect(titleText).toContain("Competitor Analysis");
@@ -211,7 +210,7 @@ test.describe("Node Detail Panel - Switch Node", () => {
 
       // Verify panel shows node C's details
       await expect(
-        detailPanel().or(page.locator("text=/Prototype Build/")),
+        detailPanel().locator("text=/Prototype Build/"),
       ).toBeVisible({ timeout: 3000 });
 
       // Verify previous node names are not the primary content

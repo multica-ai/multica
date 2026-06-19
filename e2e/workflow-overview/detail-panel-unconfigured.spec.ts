@@ -95,51 +95,39 @@ test.describe("Node Detail Panel - Unconfigured State", () => {
 
     // ── Step 2: Verify node title is shown ──
     await expect(
-      detailPanel.or(page.locator("text=/Raw Task/")),
+      detailPanel.locator("text=/Raw Task/"),
     ).toBeVisible({ timeout: 3000 });
 
     // ── Step 3: Verify Worker section shows unconfigured state ──
-    const workerSection = detailPanel
-      .locator("text=/Worker/")
-      .or(page.locator("text=/Worker/"));
+    const workerSection = detailPanel.locator("text=/Worker/");
     await expect(workerSection.first()).toBeVisible({ timeout: 3000 });
 
     // Should show "Not configured" or "未配置" in muted style
-    const notConfiguredWorker = detailPanel
-      .locator("text=/Not configured|未配置/")
-      .or(page.locator("text=/Not configured|未配置/"));
+    const notConfiguredWorker = detailPanel.locator(
+      "text=/Not configured|未配置/",
+    );
     await expect(notConfiguredWorker.first()).toBeVisible({ timeout: 3000 });
 
     // ── Step 4: Verify Critic section shows unconfigured state ──
-    const criticSection = detailPanel
-      .locator("text=/Critic/")
-      .or(page.locator("text=/Critic/"));
+    const criticSection = detailPanel.locator("text=/Critic/");
     await expect(criticSection.first()).toBeVisible({ timeout: 3000 });
 
     // Should also show "Not configured" or "未配置"
-    const notConfiguredCritic = detailPanel
-      .locator("text=/Not configured|未配置/")
-      .or(page.locator("text=/Not configured|未配置/"));
+    const notConfiguredCritic = detailPanel.locator(
+      "text=/Not configured|未配置/",
+    );
     const criticUnconfiguredCount = await notConfiguredCritic.count();
     expect(criticUnconfiguredCount).toBeGreaterThanOrEqual(2);
 
     // ── Step 5: Verify Format Schema section shows empty state ──
-    const schemaSection = detailPanel
-      .locator("text=/Format Schema/")
-      .or(page.locator("text=/Format Schema/"));
+    const schemaSection = detailPanel.locator("text=/Format Schema/");
     await expect(schemaSection.first()).toBeVisible({ timeout: 3000 });
 
     // The schema section should show "No format constraints" or "无格式约束",
     // or it may be collapsed/inaccessible
-    const noFormatConstraints = detailPanel
-      .locator(
-        "text=/No format constraints|无格式约束|No schema|No constraints|No format/",
-      )
-      .or(
-        page.locator(
-          "text=/No format constraints|无格式约束|No schema|No constraints|No format/",
-        ),
-      );
+    const noFormatConstraints = detailPanel.locator(
+      "text=/No format constraints|无格式约束|No schema|No constraints|No format/",
+    );
     const constraintsVisible = await noFormatConstraints.count();
     if (constraintsVisible > 0) {
       await expect(noFormatConstraints.first()).toBeVisible();
