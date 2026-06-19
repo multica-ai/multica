@@ -388,8 +388,6 @@ var catalog = []Capability{
 			"PUT /api/agents/{id}/tools/{name}/",
 			"PUT /api/agents/{id}/tool-overrides/{toolName}",
 			"DELETE /api/agents/{id}/tool-overrides/{toolName}",
-			"POST /api/agents/{id}/tool-grants",
-			"DELETE /api/agents/{id}/tool-grants",
 		},
 	},
 	{
