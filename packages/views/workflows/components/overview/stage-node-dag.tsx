@@ -38,10 +38,15 @@ export function StageNodeDag({ stageId, nodes, edges, onNodeSelect }: StageNodeD
   const { t } = useT("workflows");
 
   // ── Filter nodes & edges by stage ──
+  // "unassigned" is a pseudo stage that groups nodes with no stage assignment (stage_id = null/empty).
+  const isUnassigned = stageId === "unassigned";
 
   const stageNodes = useMemo(
-    () => nodes.filter((n) => n.stage_id === stageId),
-    [nodes, stageId],
+    () =>
+      isUnassigned
+        ? nodes.filter((n) => !n.stage_id || n.stage_id === null)
+        : nodes.filter((n) => n.stage_id === stageId),
+    [nodes, stageId, isUnassigned],
   );
 
   const stageNodeIds = useMemo(

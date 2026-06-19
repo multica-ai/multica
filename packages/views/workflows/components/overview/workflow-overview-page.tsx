@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -69,6 +69,19 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
   );
 
   const isLoading = workflowLoading || stagesLoading || nodesLoading;
+
+  // ── Derived data ──
+  const unassignedNodeCount = useMemo(
+    () => nodes.filter((n) => !n.stage_id || n.stage_id === null).length,
+    [nodes],
+  );
+
+  // ── Auto-select first stage on data load ──
+  useEffect(() => {
+    if (!isLoading && stages.length > 0 && selectedStageId === null) {
+      setSelectedStageId(stages[0]!.id);
+    }
+  }, [isLoading, stages, selectedStageId]);
 
   // ── Handlers ──
 
@@ -167,10 +180,11 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
             selectedStageId={selectedStageId}
             onStageSelect={handleStageSelect}
             onAddStage={handleAddStage}
+            unassignedNodeCount={unassignedNodeCount}
           />
         </div>
 
-        {/* Node DAG for selected stage */}
+        {/* Node DAG for selected stage (or unassigned nodes) */}
         {selectedStageId ? (
           <StageNodeDag
             stageId={selectedStageId}
@@ -178,11 +192,11 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
             edges={edges}
             onNodeSelect={handleNodeSelect}
           />
-        ) : (
+        ) : stages.length > 0 ? (
           <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
             {t(($) => $.overview.node_dag.empty_title)}
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Node detail panel — slide-out drawer */}

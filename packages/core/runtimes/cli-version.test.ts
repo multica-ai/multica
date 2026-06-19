@@ -17,6 +17,12 @@ describe("checkQuickCreateCliVersion", () => {
     expect(checkQuickCreateCliVersion("not-a-version").state).toBe("missing");
   });
 
+  it("treats git-describe dev builds as ok regardless of base tag", () => {
+    expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935-dirty").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("0.1.0-1-gabc1234").state).toBe("ok");
+  });
+
   it("treats dev build from source (go run / bare go build) as ok", () => {
     expect(checkQuickCreateCliVersion("dev").state).toBe("ok");
   });

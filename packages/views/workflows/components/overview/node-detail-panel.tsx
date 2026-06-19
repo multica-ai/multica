@@ -77,7 +77,7 @@ export function NodeDetailPanel({
         <button
           onClick={onClose}
           className="text-muted-foreground hover:text-foreground"
-          data-testid="close-detail-panel"
+          data-testid="node-detail-close"
         >
           ×
         </button>

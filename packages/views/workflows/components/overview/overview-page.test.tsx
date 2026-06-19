@@ -214,8 +214,11 @@ describe("WorkflowOverviewPage", () => {
     it("selects a stage and shows its DAG", () => {
       const { getByTestId, queryByTestId } = renderWithI18n(<WorkflowOverviewPage workflowId="wf-1" />);
 
-      // Initially no stage selected — DAG not rendered
-      expect(queryByTestId("stage-node-dag")).toBeNull();
+      // Auto-select: the first stage (stage-1) is selected on load
+      // DAG should show stage 1's nodes (n1, n2)
+      expect(getByTestId("stage-node-dag")).toBeTruthy();
+      expect(getByTestId("dag-node-n1")).toBeTruthy();
+      expect(getByTestId("dag-node-n2")).toBeTruthy();
 
       // Click stage 2
       fireEvent.click(getByTestId("stage-card-stage-2"));
