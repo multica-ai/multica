@@ -51,6 +51,8 @@ import (
 	cerebrogrants "github.com/multica-ai/multica/server/internal/cerebro/grants"
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy handler import
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	// CEREBRO-PATCH(cerebro-permission-explain-route): FIR-1496 one-read-model explain handler import
+	cerebropermissionexplain "github.com/multica-ai/multica/server/internal/cerebro/permissionexplain"
 	// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective runtime tool access preview.
 	cerebrotoolaccess "github.com/multica-ai/multica/server/internal/cerebro/toolaccess"
 	// CEREBRO-PATCH(cerebro-wakeup-routes): FIR-3013 agent wakeup API.
@@ -574,6 +576,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
+	cerebroPermissionExplainHandler := cerebropermissionexplain.NewHandler(pool, queries) // CEREBRO-PATCH(cerebro-permission-explain-route): FIR-1496
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
 	cerebroSandboxProfileHandler := cerebrosandboxprofile.NewHandler()
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
@@ -1045,6 +1048,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/grants/{grantId}", cerebroGrantsHandler.Get)
 					// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 per-tool policy table read (any member).
 					r.Get("/tool-policy", cerebroToolPolicyHandler.Table)
+					r.Get("/permissions/explain", cerebroPermissionExplainHandler.Explain) // CEREBRO-PATCH(cerebro-permission-explain-route): FIR-1496
 					// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog (any member).
 					r.Get("/sandbox-profiles", cerebroSandboxProfileHandler.List)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox reads (any member). /audit before /{approvalId} so it is not shadowed.

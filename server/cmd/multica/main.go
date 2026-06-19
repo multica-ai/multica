@@ -85,7 +85,8 @@ func init() {
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(groupCmd)
-	rootCmd.AddCommand(grantCmd) // CEREBRO-PATCH(cerebro-grants-cli): JEH-1179
+	rootCmd.AddCommand(grantCmd)      // CEREBRO-PATCH(cerebro-grants-cli): JEH-1179
+	rootCmd.AddCommand(permissionCmd) // CEREBRO-PATCH(cerebro-permission-explain-cli): FIR-1496
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(orchestrateCmd) // CEREBRO-PATCH(cerebro-orchestration): FIR-2564
 	rootCmd.AddCommand(sprintCmd)      // CEREBRO-PATCH(cerebro-sprints-cli): FIR-2718
