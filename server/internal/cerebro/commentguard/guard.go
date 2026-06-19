@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -33,7 +34,7 @@ import (
 
 // MissingTargetMessage is returned to the caller (e.g. the CLI an agent posts
 // through) when a comment is rejected, so the agent can re-post with a target.
-const MissingTargetMessage = "comment must mention a recipient — a person, an agent, or a squad. A bare issue link (e.g. MUL-123) does not count; address someone (FIR-2674)."
+const MissingTargetMessage = "comment must mention a recipient — a person, another agent, or a squad. A bare issue link (e.g. MUL-123) and mentioning yourself do not count; address someone else or schedule a wakeup (FIR-2674)."
 
 // OwnerMentionOnSubIssueMessage is returned when an agent on a sub-issue tries
 // to @mention the user the task was started for directly (TECH-3099).
@@ -88,8 +89,9 @@ func New(flags flagReader) *Service { return &Service{flags: flags} }
 // Only agent-authored comments are ever gated, and only when the
 // cerebro_comment_target_guard flag is ON for the workspace. content must
 // already have had bare issue identifiers (e.g. "MUL-123") expanded into
-// mention links — but issue mentions do not satisfy the rule (TECH-3279); the
-// expansion only keeps parsing consistent with the rest of the comment pipeline.
+// mention links — but issue mentions and the agent's own mention do not satisfy
+// the rule (TECH-3279/FIR-1501); the expansion only keeps parsing consistent
+// with the rest of the comment pipeline.
 //
 // Additional sub-issue checks (TECH-3099) are enabled via their own flags:
 //   - isSubIssue: whether the target issue has a parent (parent_issue_id != nil)
@@ -103,7 +105,7 @@ func New(flags flagReader) *Service { return &Service{flags: flags} }
 func (s *Service) RejectComment(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
-	authorType, content string,
+	authorType, authorID, content string,
 	isSubIssue bool,
 	ownerUserIDs []string,
 	taskPostedOnParent bool,
@@ -128,7 +130,7 @@ func (s *Service) RejectComment(
 	// wakeup on this issue and the exemption flag is on, the recipient
 	// requirement is waived — the wakeup is itself the follow-up action, so a
 	// human tag is not also required. The sub-issue checks below still run.
-	if !hasRecipient(content) {
+	if !hasRecipient(content, authorID) {
 		exempt := flags[FlagCommentTargetGuardWakeupExempt] && agentHasActiveWakeup
 		if !exempt {
 			return MissingTargetMessage, false
@@ -142,7 +144,7 @@ func (s *Service) RejectComment(
 			return OwnerMentionOnSubIssueMessage, false
 		}
 		// Check 2: must mention at least one agent.
-		if flags[FlagSubIssueRequireAgentTag] && !mentionsAgent(content) {
+		if flags[FlagSubIssueRequireAgentTag] && !mentionsAgent(content, authorID) {
 			return MissingAgentTagOnSubIssueMessage, false
 		}
 		// Check 3: same task must not have posted on the parent issue already.
@@ -155,12 +157,33 @@ func (s *Service) RejectComment(
 }
 
 // hasRecipient reports whether content addresses at least one recipient — a
-// member, an agent, a squad, or @all. An issue mention (mention://issue/...)
-// does NOT count: it points at a case, not a person, so it cannot satisfy the
-// rule that every agent comment must be addressed to someone (TECH-3279).
-func hasRecipient(content string) bool {
+// member, another agent, a squad, or @all. An issue mention
+// (mention://issue/...) does NOT count: it points at a case, not a person, so it
+// cannot satisfy the rule that every agent comment must be addressed to someone
+// (TECH-3279). The authoring agent's own mention does not count either
+// (FIR-1501); self-tagging does not notify or hand off to anyone.
+func hasRecipient(content, authorAgentID string) bool {
 	for _, m := range util.ParseMentions(content) {
-		if m.Type != "issue" {
+		if m.Type == "issue" {
+			continue
+		}
+		if isSelfAgentMention(m, authorAgentID) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func isSelfAgentMention(m util.Mention, authorAgentID string) bool {
+	return m.Type == "agent" && authorAgentID != "" && strings.EqualFold(m.ID, authorAgentID)
+}
+
+// mentionsAgent reports whether content contains at least one agent mention
+// that is not the authoring agent itself.
+func mentionsAgent(content, authorAgentID string) bool {
+	for _, m := range util.ParseMentions(content) {
+		if m.Type == "agent" && !isSelfAgentMention(m, authorAgentID) {
 			return true
 		}
 	}
@@ -178,16 +201,6 @@ func mentionsOwner(content string, ownerUserIDs []string) bool {
 			if m.ID == id {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-// mentionsAgent reports whether content contains at least one agent mention.
-func mentionsAgent(content string) bool {
-	for _, m := range util.ParseMentions(content) {
-		if m.Type == "agent" {
-			return true
 		}
 	}
 	return false

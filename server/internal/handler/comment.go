@@ -939,7 +939,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, req.Content, isSubIssue, ownerUserIDs, taskPostedOnParent, agentHasActiveWakeup); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 + TECH-3099 + TECH-3761.
+		if msg, ok := h.CommentTargetGuard.RejectComment(r.Context(), issue.WorkspaceID, authorType, authorID, req.Content, isSubIssue, ownerUserIDs, taskPostedOnParent, agentHasActiveWakeup); !ok { // CEREBRO-PATCH(comment-target-guard-hook): FIR-2674 + TECH-3099 + TECH-3761.
 			writeError(w, http.StatusUnprocessableEntity, msg)
 			return
 		}

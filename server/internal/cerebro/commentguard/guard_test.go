@@ -63,6 +63,7 @@ func TestRejectCommentFlagOn(t *testing.T) {
 		{"agent with only an issue link rejected", "agent", "see [MUL-123](mention://issue/10fb2c2c-1ec4-449d-a081-b690ef70eb17)", false},
 		{"agent with issue link plus a recipient passes", "agent", "see [MUL-123](mention://issue/10fb2c2c-1ec4-449d-a081-b690ef70eb17) [@Jesper](mention://member/b0edd870-4ea2-4638-a193-5c20f55170e6)", true},
 		{"agent with agent mention passes", "agent", "[@Tine](mention://agent/8bfccab3-89ea-40cc-b57d-c7eabaa30f50) please test", true},
+		{"agent with only self mention rejected", "agent", selfAgentMention + " I will check later", false},
 		{"agent with squad mention passes", "agent", "[@Squad](mention://squad/8bfccab3-89ea-40cc-b57d-c7eabaa30f50)", true},
 		{"agent with all mention passes", "agent", "[@all](mention://all/all)", true},
 		{"agent text that merely looks like a mention is rejected", "agent", "talk to @Jesper soon", false},
@@ -70,7 +71,7 @@ func TestRejectCommentFlagOn(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			msg, ok := g.RejectComment(context.Background(), ws, tc.authorType, tc.content, false, nil, false, false)
+			msg, ok := g.RejectComment(context.Background(), ws, tc.authorType, authorAgentID, tc.content, false, nil, false, false)
 			if ok != tc.wantOK {
 				t.Fatalf("RejectComment(%q, %q) ok=%v, want %v", tc.authorType, tc.content, ok, tc.wantOK)
 			}
@@ -89,7 +90,7 @@ func TestRejectCommentFlagOn(t *testing.T) {
 func TestRejectCommentFlagOffPassesEverything(t *testing.T) {
 	g := New(legacyFakeFlags(false))
 	ws := testWorkspaceID(t)
-	if msg, ok := g.RejectComment(context.Background(), ws, "agent", "no target here", false, nil, false, false); !ok || msg != "" {
+	if msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID, "no target here", false, nil, false, false); !ok || msg != "" {
 		t.Fatalf("flag off must pass everything, got ok=%v msg=%q", ok, msg)
 	}
 }
@@ -99,12 +100,12 @@ func TestRejectCommentNilSafe(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	var nilService *Service
-	if msg, ok := nilService.RejectComment(context.Background(), ws, "agent", "no target", false, nil, false, false); !ok || msg != "" {
+	if msg, ok := nilService.RejectComment(context.Background(), ws, "agent", authorAgentID, "no target", false, nil, false, false); !ok || msg != "" {
 		t.Fatalf("nil service must pass everything, got ok=%v msg=%q", ok, msg)
 	}
 
 	nilReader := New(nil)
-	if msg, ok := nilReader.RejectComment(context.Background(), ws, "agent", "no target", false, nil, false, false); !ok || msg != "" {
+	if msg, ok := nilReader.RejectComment(context.Background(), ws, "agent", authorAgentID, "no target", false, nil, false, false); !ok || msg != "" {
 		t.Fatalf("nil reader must pass everything, got ok=%v msg=%q", ok, msg)
 	}
 }
@@ -122,9 +123,11 @@ func allSubIssueFlags() fakeFlags {
 }
 
 const ownerUserID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+const authorAgentID = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
 const agentID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 const issueRef = "[MUL-1](mention://issue/cccccccc-cccc-cccc-cccc-cccccccccccc)"
 const agentMention = "[@Tine](mention://agent/" + agentID + ")"
+const selfAgentMention = "[@Self](mention://agent/" + authorAgentID + ")"
 const ownerMention = "[@Jesper](mention://member/" + ownerUserID + ")"
 
 // memberMention is a non-owner member — a valid recipient that satisfies the
@@ -139,7 +142,7 @@ func TestSubIssueNoOwnerMention(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	// Sub-issue with owner mention → rejected.
-	msg, ok := g.RejectComment(context.Background(), ws, "agent",
+	msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention+" "+ownerMention,
 		true, []string{ownerUserID}, false, false)
 	if ok {
@@ -150,7 +153,7 @@ func TestSubIssueNoOwnerMention(t *testing.T) {
 	}
 
 	// Top-level issue with owner mention → passes (guard only applies to sub-issues).
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention+" "+ownerMention,
 		false, []string{ownerUserID}, false, false)
 	if !ok {
@@ -159,7 +162,7 @@ func TestSubIssueNoOwnerMention(t *testing.T) {
 
 	// Sub-issue mentioning non-owner member → passes check 1 (but check 2 may catch it).
 	otherMember := "[@Other](mention://member/dddddddd-dddd-dddd-dddd-dddddddddddd)"
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention+" "+otherMember,
 		true, []string{ownerUserID}, false, false)
 	if !ok {
@@ -173,7 +176,7 @@ func TestSubIssueRequireAgentTag(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	// Sub-issue with a recipient but no agent mention → rejected by check 2.
-	msg, ok := g.RejectComment(context.Background(), ws, "agent",
+	msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		memberMention, // a recipient (passes base check) but no agent mention
 		true, []string{ownerUserID}, false, false)
 	if ok {
@@ -183,8 +186,20 @@ func TestSubIssueRequireAgentTag(t *testing.T) {
 		t.Fatalf("wrong rejection message: %q", msg)
 	}
 
+	// Sub-issue with a recipient plus only a self-agent mention → still rejected
+	// by check 2. Self-tagging does not keep another agent in the loop.
+	msg, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
+		memberMention+" "+selfAgentMention,
+		true, []string{ownerUserID}, false, false)
+	if ok {
+		t.Fatalf("sub-issue with only a self-agent tag must be rejected")
+	}
+	if msg != MissingAgentTagOnSubIssueMessage {
+		t.Fatalf("wrong rejection message: %q", msg)
+	}
+
 	// Sub-issue with agent mention → passes.
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention+" "+issueRef,
 		true, []string{ownerUserID}, false, false)
 	if !ok {
@@ -193,7 +208,7 @@ func TestSubIssueRequireAgentTag(t *testing.T) {
 
 	// Top-level issue with a recipient but no agent mention → passes (check 2
 	// only applies to sub-issues).
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		memberMention,
 		false, []string{ownerUserID}, false, false)
 	if !ok {
@@ -207,7 +222,7 @@ func TestSubIssueNoSplitSession(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	// Sub-issue, task already posted on parent → rejected.
-	msg, ok := g.RejectComment(context.Background(), ws, "agent",
+	msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention,
 		true, []string{ownerUserID}, true /* taskPostedOnParent */, false)
 	if ok {
@@ -218,7 +233,7 @@ func TestSubIssueNoSplitSession(t *testing.T) {
 	}
 
 	// Sub-issue, task has NOT posted on parent → passes check 3.
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention,
 		true, []string{ownerUserID}, false /* taskPostedOnParent */, false)
 	if !ok {
@@ -226,7 +241,7 @@ func TestSubIssueNoSplitSession(t *testing.T) {
 	}
 
 	// Top-level issue, task posted on some issue → passes (check 3 only for sub-issues).
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		agentMention,
 		false, nil, true /* taskPostedOnParent ignored for top-level */, false)
 	if !ok {
@@ -243,7 +258,7 @@ func TestSubIssueChecksFlagOff(t *testing.T) {
 	g := New(fakeFlags{flags: map[string]bool{FlagCommentTargetGuard: true}})
 
 	// Owner mention on sub-issue → passes (no_owner_mention flag is off).
-	_, ok := g.RejectComment(context.Background(), ws, "agent",
+	_, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		ownerMention,
 		true, []string{ownerUserID}, false, false)
 	if !ok {
@@ -252,7 +267,7 @@ func TestSubIssueChecksFlagOff(t *testing.T) {
 
 	// Sub-issue with a recipient but no agent tag → passes (require_agent_tag
 	// flag is off; base check is satisfied by the member mention).
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		memberMention,
 		true, []string{ownerUserID}, false, false)
 	if !ok {
@@ -260,7 +275,7 @@ func TestSubIssueChecksFlagOff(t *testing.T) {
 	}
 
 	// Split session on sub-issue → passes (no_split_session flag is off).
-	_, ok = g.RejectComment(context.Background(), ws, "agent",
+	_, ok = g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		ownerMention,
 		true, []string{ownerUserID}, true, false)
 	if !ok {
@@ -275,7 +290,7 @@ func TestSubIssueTopLevelPassesUnchanged(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	// Worst-case top-level comment: owner mention, no agent, split session.
-	_, ok := g.RejectComment(context.Background(), ws, "agent",
+	_, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		ownerMention, // has a target, so base check passes
 		false, []string{ownerUserID}, true, false)
 	if !ok {
@@ -300,12 +315,12 @@ func TestWakeupExemptionWaivesRecipient(t *testing.T) {
 	ws := testWorkspaceID(t)
 
 	// No recipient + active wakeup → exempt → passes.
-	if msg, ok := g.RejectComment(context.Background(), ws, "agent", "work done, will follow up", false, nil, false, true); !ok || msg != "" {
+	if msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID, "work done, will follow up", false, nil, false, true); !ok || msg != "" {
 		t.Fatalf("agent with active wakeup must be exempt, got ok=%v msg=%q", ok, msg)
 	}
 
 	// No recipient + no wakeup → not exempt → rejected.
-	if _, ok := g.RejectComment(context.Background(), ws, "agent", "work done", false, nil, false, false); ok {
+	if _, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID, "work done", false, nil, false, false); ok {
 		t.Fatalf("agent without a wakeup must still be rejected")
 	}
 }
@@ -316,7 +331,7 @@ func TestWakeupExemptionFlagOffStillRejects(t *testing.T) {
 	g := New(fakeFlags{flags: map[string]bool{FlagCommentTargetGuard: true}})
 	ws := testWorkspaceID(t)
 
-	if _, ok := g.RejectComment(context.Background(), ws, "agent", "work done", false, nil, false, true /* active wakeup */); ok {
+	if _, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID, "work done", false, nil, false, true /* active wakeup */); ok {
 		t.Fatalf("active wakeup must not exempt when the exemption flag is off")
 	}
 }
@@ -334,7 +349,7 @@ func TestWakeupExemptionDoesNotWaiveSubIssueChecks(t *testing.T) {
 
 	// Sub-issue, member recipient (satisfies base check), no agent tag, active
 	// wakeup → still rejected by the require-agent-tag check.
-	msg, ok := g.RejectComment(context.Background(), ws, "agent",
+	msg, ok := g.RejectComment(context.Background(), ws, "agent", authorAgentID,
 		memberMention,
 		true, []string{ownerUserID}, false, true /* active wakeup */)
 	if ok {

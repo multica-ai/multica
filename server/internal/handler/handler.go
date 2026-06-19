@@ -342,7 +342,7 @@ type CommentTargetGuardInvoker interface {
 	// CEREBRO-PATCH(handler-comment-target-guard-iface): TECH-3099 adds isSubIssue,
 	// ownerUserIDs, taskPostedOnParent for the three new sub-issue checks;
 	// TECH-3761 adds agentHasActiveWakeup for the wakeup exemption.
-	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, content string, isSubIssue bool, ownerUserIDs []string, taskPostedOnParent bool, agentHasActiveWakeup bool) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 + TECH-3099 + TECH-3761.
+	RejectComment(ctx context.Context, workspaceID pgtype.UUID, authorType, authorID, content string, isSubIssue bool, ownerUserIDs []string, taskPostedOnParent bool, agentHasActiveWakeup bool) (string, bool) // CEREBRO-PATCH(handler-comment-target-guard-iface): FIR-2674 + TECH-3099 + TECH-3761.
 }
 
 // ChannelCreateGuardInvoker is the upstream-side seam for Cerebro's
