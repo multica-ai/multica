@@ -46,7 +46,12 @@ jobs:
     uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
     with:
       environment: prod
-      branch: ${{ github.head_ref || github.ref_name }}
+      # Pass the exact trigger SHA so the reusable workflow pins to this commit
+      # rather than resolving the branch name to HEAD. By the time per-arch legs
+      # run, sibling commit-to-gitops-* jobs may have already pushed tag bumps
+      # that advance main; the merge job below uses github.sha and expects
+      # arch-suffixed tags built from that same SHA.
+      branch: ${{ github.sha }}
       bakefile: docker/agent-runtime-base/docker-bake.hcl
       targets: ${{ matrix.target }}
       runs-on: ${{ matrix.runs-on }}
