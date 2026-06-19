@@ -111,3 +111,85 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
+  # ---- Server group: bump backend then web in environments/development/kustomization.yaml ----
+  # backend and web write the same file (indices [0] and [1]); chaining them
+  # keeps the two pushes ordered and avoids a non-fast-forward rejection.
+  extract-server-tags:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [bake-build-backend, bake-build-web]
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.extract.outputs.backend_tag }}
+      web_tag: ${{ steps.extract.outputs.web_tag }}
+    steps:
+      - name: Extract server image tags
+        id: extract
+        env:
+          BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
+          WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+        run: |
+          echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+  commit-to-gitops-backend:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [extract-server-tags]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-server-tags.outputs.backend_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/kustomization.yaml
+      image_yq_matcher: .images[0].newTag
+
+  commit-to-gitops-web:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [extract-server-tags, commit-to-gitops-backend]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-server-tags.outputs.web_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/kustomization.yaml
+      image_yq_matcher: .images[1].newTag
+
+  # ---- Runner group: bump agentrunner-runtime in agent-runtime-devserver ----
+  bake-build-agentrunner-runtime:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [bake-build-agent-runtime-base]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: dev
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker/agentrunner-runtime/docker-bake.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
+  extract-agentrunner-runtime-tag:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [bake-build-agentrunner-runtime]
+    runs-on: ubuntu-latest
+    outputs:
+      agentrunner_runtime_tag: ${{ steps.extract.outputs.agentrunner_runtime_tag }}
+    steps:
+      - name: Extract agentrunner-runtime image tag
+        id: extract
+        env:
+          AGENTRUNNER_RUNTIME_IMAGE: ${{ needs.bake-build-agentrunner-runtime.outputs.image_name }}
+        run: |
+          echo "agentrunner_runtime_tag=${AGENTRUNNER_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+
+  commit-to-gitops-agent-runtime-devserver:
+    if: contains(github.event.pull_request.labels.*.name, 'Development')
+    needs: [extract-agentrunner-runtime-tag]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-agentrunner-runtime-tag.outputs.agentrunner_runtime_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/development/agent-runtime-devserver/kustomization.yaml
+      image_yq_matcher: .images[0].newTag
+
