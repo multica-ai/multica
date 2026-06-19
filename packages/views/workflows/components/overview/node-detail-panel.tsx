@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { WorkflowNode, WorkflowEdge } from "@multica/core/types";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../../../navigation";
 import { useT } from "../../../i18n";
 
@@ -20,6 +21,7 @@ export function NodeDetailPanel({
 }: NodeDetailPanelProps) {
   const { t } = useT("workflows");
   const nav = useNavigation();
+  const wsPaths = useWorkspacePaths();
 
   const node = useMemo(
     () => nodes.find((n) => n.id === nodeId) ?? null,
@@ -200,7 +202,7 @@ export function NodeDetailPanel({
       {/* Footer */}
       <div className="sticky bottom-0 bg-background border-t p-3">
         <button
-          onClick={() => nav.push(`/workflows/${workflowId}`)}
+          onClick={() => nav.push(wsPaths.workflowDetail(workflowId))}
           className="w-full py-2 text-sm bg-primary text-primary-foreground rounded-md hover:opacity-90"
         >
           {t(($) => $.overview.detail_panel.open_in_editor)}

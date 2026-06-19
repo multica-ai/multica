@@ -94,6 +94,7 @@ type WorkflowNodeResponse struct {
 	CriticID           *string         `json:"critic_id"`
 	CriticApiURL       *string         `json:"critic_api_url"`
 	SortOrder          int32           `json:"sort_order"`
+	StageID            *string         `json:"stage_id"`
 	CreatedAt          string          `json:"created_at"`
 	UpdatedAt          string          `json:"updated_at"`
 }
@@ -186,6 +187,7 @@ func workflowNodeToResponse(node db.MulticaWorkflowNode) WorkflowNodeResponse {
 		CriticID:           uuidToPtr(node.CriticID),
 		CriticApiURL:       textToPtr(node.CriticApiUrl),
 		SortOrder:          node.SortOrder,
+		StageID:            uuidToPtr(node.StageID),
 		CreatedAt:          timestampToString(node.CreatedAt),
 		UpdatedAt:          timestampToString(node.UpdatedAt),
 	}
@@ -869,7 +871,7 @@ func (h *Handler) DeleteWorkflowStage(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ReorderWorkflowStages(w http.ResponseWriter, r *http.Request) {
 	wfID := chi.URLParam(r, "id")
-	_, ok := h.loadWorkflowInWorkspace(w, r, wfID)
+	wf, ok := h.loadWorkflowInWorkspace(w, r, wfID)
 	if !ok {
 		return
 	}
@@ -899,7 +901,16 @@ func (h *Handler) ReorderWorkflowStages(w http.ResponseWriter, r *http.Request) 
 	}
 
 	for _, item := range validated {
-		_, err := h.Queries.UpdateWorkflowStage(r.Context(), db.UpdateWorkflowStageParams{
+		stage, err := h.Queries.GetWorkflowStage(r.Context(), item.ID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "stage not found")
+			return
+		}
+		if uuidToString(stage.WorkflowID) != uuidToString(wf.ID) {
+			writeError(w, http.StatusBadRequest, "stage does not belong to this workflow")
+			return
+		}
+		_, err = h.Queries.UpdateWorkflowStage(r.Context(), db.UpdateWorkflowStageParams{
 			ID:        item.ID,
 			SortOrder: int32ToInt4(&item.SortOrder),
 		})

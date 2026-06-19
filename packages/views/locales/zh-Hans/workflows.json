@@ -207,6 +207,7 @@
   },
   "overview": {
     "title": "Workflow 概览",
+    "error_retry": "重试",
     "stage_canvas": {
       "empty_title": "尚未定义阶段",
       "empty_description": "阶段可帮助你按业务逻辑组织 Workflow 节点。创建你的第一个阶段开始吧。",
