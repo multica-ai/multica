@@ -27,22 +27,22 @@ const TypeAPI = "api"
 
 // Connection is the wire + domain model for one workspace connection.
 type Connection struct {
-	ID                  string              `json:"id"`
-	WorkspaceID         string              `json:"workspace_id"`
-	Name                string              `json:"name"`
-	DisplayName         string              `json:"display_name"`
-	Type                string              `json:"type"`
-	URL                 string              `json:"url"`
-	Internal            bool                `json:"internal"`
-	AuthConfig          AuthConfig          `json:"auth_config"`
+	ID                  string               `json:"id"`
+	WorkspaceID         string               `json:"workspace_id"`
+	Name                string               `json:"name"`
+	DisplayName         string               `json:"display_name"`
+	Type                string               `json:"type"`
+	URL                 string               `json:"url"`
+	Internal            bool                 `json:"internal"`
+	AuthConfig          AuthConfig           `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
 	// Tools is the tool list discovered the last time the connection was tested
 	// (mcp_http only). Persisted so the permissions UI can render one row per
 	// underlying tool without re-probing the server. Empty for API connections.
-	Tools               []Tool              `json:"tools"`
-	Enabled             bool                `json:"enabled"`
-	CreatedAt           time.Time           `json:"created_at"`
-	UpdatedAt           time.Time           `json:"updated_at"`
+	Tools     []Tool    `json:"tools"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Tool is one MCP tool exposed by a connection, persisted on the connection row.
@@ -226,10 +226,31 @@ func CapabilityKey(name string) string {
 	return "connection:" + name
 }
 
+// MCPURLRewriter, when supplied to BuildMCPConfigRelayed, replaces a
+// connection's direct URL (often an internal-only host a local runtime cannot
+// reach) with a Multica-hosted relay URL the runtime CAN reach, plus a scoped
+// bearer the relay authenticates. Returning ok=false leaves the direct entry
+// untouched (the runtime can already reach that connection). See
+// internal/cerebro/mcprelay (FIR-1563).
+type MCPURLRewriter interface {
+	RelayEntry(workspaceID, connectionName, connectionURL string, internal bool) (url, bearer string, ok bool)
+}
+
 // BuildMCPConfig returns a {"mcpServers": {...}} JSON document for all enabled
 // mcp_http connections in the workspace, ready to merge into RuntimeToolsConfig
 // at task claim time. Returns nil if there are no enabled MCP connections.
 func (s *Store) BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) json.RawMessage {
+	return s.BuildMCPConfigRelayed(ctx, workspaceID, nil)
+}
+
+// BuildMCPConfigRelayed is BuildMCPConfig with optional URL relaying. When
+// rewriter is non-nil, each enabled mcp_http connection is offered to it; if it
+// returns a relay entry, the connection's real URL + credentials are withheld
+// from the runtime and replaced by the relay URL + scoped bearer. This is how a
+// LOCAL runtime reaches an internal-only connection — through Multica, never the
+// internal path directly (FIR-1563). A nil rewriter reproduces the direct path
+// used by cloud runtimes that already sit on the internal network.
+func (s *Store) BuildMCPConfigRelayed(ctx context.Context, workspaceID pgtype.UUID, rewriter MCPURLRewriter) json.RawMessage {
 	conns, err := s.ListEnabled(ctx, workspaceID)
 	if err != nil || len(conns) == 0 {
 		return nil
@@ -238,6 +259,16 @@ func (s *Store) BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) jso
 	for _, c := range conns {
 		if c.Type != TypeMCPHTTP {
 			continue
+		}
+		if rewriter != nil {
+			if relayURL, bearer, ok := rewriter.RelayEntry(c.WorkspaceID, c.Name, c.URL, c.Internal); ok {
+				entry := map[string]any{"url": relayURL}
+				if bearer != "" {
+					entry["headers"] = map[string]string{"Authorization": "Bearer " + bearer}
+				}
+				servers[c.Name] = entry
+				continue
+			}
 		}
 		entry := map[string]any{"url": c.URL}
 		headers := make(map[string]string)
@@ -270,6 +301,22 @@ func (s *Store) BuildMCPConfig(ctx context.Context, workspaceID pgtype.UUID) jso
 		return nil
 	}
 	return b
+}
+
+// GetEnabledByName returns one enabled connection by its (workspace-unique)
+// name. Used by the MCP relay to resolve a connection server-side from a token.
+func (s *Store) GetEnabledByName(ctx context.Context, workspaceID pgtype.UUID, name string) (Connection, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, workspace_id, name, display_name, type, url, internal,
+		       auth_config, endpoint_permissions, enabled, created_at, updated_at, tools
+		FROM workspace_connection
+		WHERE workspace_id = $1 AND name = $2 AND enabled = true
+	`, workspaceID, name)
+	c, err := scanRow(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Connection{}, ErrNotFound
+	}
+	return c, err
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -312,11 +359,11 @@ type scanFn func(dest ...any) error
 
 func scanRowValues(scan scanFn) (Connection, error) {
 	var (
-		id, wsID                     pgtype.UUID
-		name, displayName, typ, url  string
-		internal, enabled            bool
-		authRaw, epRaw, toolsRaw     []byte
-		createdAt, updatedAt         pgtype.Timestamptz
+		id, wsID                    pgtype.UUID
+		name, displayName, typ, url string
+		internal, enabled           bool
+		authRaw, epRaw, toolsRaw    []byte
+		createdAt, updatedAt        pgtype.Timestamptz
 	)
 	if err := scan(&id, &wsID, &name, &displayName, &typ, &url, &internal,
 		&authRaw, &epRaw, &enabled, &createdAt, &updatedAt, &toolsRaw); err != nil {

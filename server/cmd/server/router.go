@@ -117,6 +117,8 @@ import (
 	cerebrowebfetchpolicy "github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	// CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 Agent Vault broker module import
 	cerebroagentvault "github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	// CEREBRO-PATCH(cerebro-mcp-relay-wire): FIR-1563 MCP connection relay module import
+	cerebromcprelay "github.com/multica-ai/multica/server/internal/cerebro/mcprelay"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -563,6 +565,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
+	// CEREBRO-PATCH(cerebro-mcp-relay-wire): FIR-1563 — when the relay is configured,
+	// swap the injector for the relay-aware module so internal connections are
+	// injected into LOCAL runtimes as Multica relay URLs (kald gennem Multica),
+	// never the internal path. Cloud runtimes are unaffected (connections without
+	// the internal flag inject directly). nil-safe: unconfigured → direct path.
+	var cerebroMCPRelay *cerebromcprelay.Module
+	if relayMod, relayOK := cerebromcprelay.NewModule(pool); relayOK {
+		cerebroMCPRelay = relayMod
+		h.ConnectionsInjector = relayMod
+	}
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
 	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
@@ -744,6 +756,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// dev keeps working without exposing the metrics on a public listener.
 	r.Get("/health/realtime", realtimeMetricsHandler(os.Getenv("REALTIME_METRICS_TOKEN")))
 
+	// CEREBRO-PATCH(cerebro-mcp-relay-route): FIR-1563 — public MCP connection
+	// relay. A LOCAL runtime's MCP client calls this (publicly reachable on
+	// Sliplane) instead of an internal-only connection host; the relay
+	// authenticates the injected scoped token and forwards over the internal
+	// path with the connection's real credentials. Mounted top-level (no session
+	// middleware) because it carries its own token, mirroring the Agent Vault
+	// relay. All MCP methods share one path: POST for requests, GET for SSE.
+	if cerebroMCPRelay != nil {
+		r.Handle("/mcp-relay/{name}", cerebroMCPRelay.Relay)
+	}
+
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
 	pr := &patResolver{queries: queries, cache: patCache}
@@ -896,7 +919,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			agentToolScope := middleware.AllowTaskScopeForAgent("id")
 			r.With(agentToolScope).Get("/api/agents/{id}/tools", h.ListAgentTools)
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess) // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
 			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
 
@@ -1832,8 +1855,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/cerebro/dashboard/all-messages", cerebroDashboardHandler.AllMessages)
 			// CEREBRO-PATCH(cerebro-dashboard-session-messages-route): TECH-3139 message detail sheet full session + cost
 			r.Get("/api/cerebro/dashboard/session-messages", cerebroDashboardHandler.SessionMessages)
-				// CEREBRO-PATCH(channel-message-search-admin): FIR-407 — workspace-admin search across all channels/DMs (agent coaching).
-				r.Get("/api/cerebro/channel-messages/search", h.SearchAllChannelMessages)
+			// CEREBRO-PATCH(channel-message-search-admin): FIR-407 — workspace-admin search across all channels/DMs (agent coaching).
+			r.Get("/api/cerebro/channel-messages/search", h.SearchAllChannelMessages)
 			// CEREBRO-PATCH(cerebro-duplicate-check-route): FIR-2504 "find similar at create" endpoint + adoption-event sink.
 			r.Post("/api/cerebro/issues/check-similar", h.CheckSimilarIssues)
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
