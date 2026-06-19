@@ -305,6 +305,45 @@ func TestPrepareOpenclawConfigFreshInstallNoOnDiskConfig(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigHandlesConfigFileUnsupported is the regression
+// test for #4299. Some OpenClaw 2026.2.x builds reject `openclaw config file`
+// while still supporting `config get`; the preparer must not fail before it
+// gets to the real config inspection step.
+func TestPrepareOpenclawConfigHandlesConfigFileUnsupported(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	stateDir := t.TempDir()
+	userConfigPath := filepath.Join(stateDir, "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	t.Setenv("OPENCLAW_CONFIG_PATH", "")
+	t.Setenv("OPENCLAW_STATE_DIR", stateDir)
+	t.Setenv("OPENCLAW_HOME", "")
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {err: errors.New("openclaw config file: exit status 1 (stderr: error: too many arguments for 'config'. Expected 0 arguments but got 1.)")},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok || len(include) != 1 || include[0] != userConfigPath {
+		t.Fatalf("$include = %v, want [%q]", got["$include"], userConfigPath)
+	}
+	if result.IncludeRoot != stateDir {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, stateDir)
+	}
+}
+
 // TestPrepareOpenclawConfigExpandsTilde — `openclaw config file` reports
 // paths with `~` shortened. The $include in our wrapper must be absolute so
 // the loader resolves it unambiguously.

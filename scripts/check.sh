@@ -31,6 +31,11 @@ EXIT_CODE=0
 # Cleanup: kill only services this script started
 # --------------------------------------------------------------------------
 cleanup() {
+  local status=$?
+  if [ "$EXIT_CODE" -eq 0 ] && [ "$status" -ne 0 ]; then
+    EXIT_CODE=$status
+  fi
+
   echo ""
   if [ "$STARTED_BACKEND" = true ] && [ -n "$BACKEND_PID" ]; then
     kill "$BACKEND_PID" 2>/dev/null && wait "$BACKEND_PID" 2>/dev/null || true

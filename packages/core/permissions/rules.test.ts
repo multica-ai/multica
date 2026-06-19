@@ -5,6 +5,7 @@ import {
   canChangeMemberRole,
   canDeleteComment,
   canDeleteRuntime,
+  canDeleteProject,
   canDeleteSkill,
   canDeleteWorkspace,
   canEditAgent,
@@ -268,6 +269,17 @@ describe("canDeleteRuntime", () => {
 });
 
 describe("workspace-level rules", () => {
+  it("only owner+admin can delete projects", () => {
+    expect(canDeleteProject({ userId: ALICE, role: "owner" }).allowed).toBe(
+      true,
+    );
+    expect(canDeleteProject({ userId: ALICE, role: "admin" }).allowed).toBe(
+      true,
+    );
+    expect(canDeleteProject({ userId: ALICE, role: "member" }).allowed)
+      .toBe(false);
+  });
+
   it("only owner can delete workspace", () => {
     expect(canDeleteWorkspace({ userId: ALICE, role: "owner" }).allowed).toBe(
       true,

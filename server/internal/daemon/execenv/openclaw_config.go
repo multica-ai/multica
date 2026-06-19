@@ -132,7 +132,8 @@ type OpenclawConfigResult struct {
 //
 //  1. Run `openclaw config file` to find the user's active config path
 //     (handles OPENCLAW_CONFIG_PATH, OPENCLAW_STATE_DIR, OPENCLAW_HOME, and
-//     the default location).
+//     the default location). If an OpenClaw build rejects that read-only
+//     helper, fall back to deriving the documented path locally.
 //  2. Run `openclaw config get agents.list --json` to enumerate every
 //     registered agent ID with its resolved fields. The CLI parses JSON5,
 //     follows $include, and substitutes ${VAR} for us.
@@ -435,15 +436,19 @@ func stripUserMcpServers(resolved map[string]any) {
 //
 // The CLI handles the full resolution chain — OPENCLAW_CONFIG_PATH, the
 // state directory (OPENCLAW_STATE_DIR / OPENCLAW_HOME / default), legacy
-// migration, and `~` expansion — so we don't re-implement it here.
+// migration, and `~` expansion — so we prefer it when available.
 //
-// The reported path uses `~` shorthand for the user's home; we expand it
-// so the $include reference we write is unambiguous absolute.
+// Some OpenClaw 2026.2.x builds reject `config file` while still supporting
+// `config get`. In that narrow compatibility case we derive the documented
+// active path locally so task setup can continue to the real config reads.
 func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := openclawExec(ctx, bin, "config", "file")
 	if err != nil {
+		if isOpenclawConfigFileUnsupported(err) {
+			return openclawActiveConfigPathFromEnv()
+		}
 		return "", false, err
 	}
 	// OpenClaw may print terminal UI borders (e.g., Doctor warnings) before
@@ -460,16 +465,50 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 	if path == "" {
 		return "", false, fmt.Errorf("`openclaw config file` returned empty output")
 	}
-	if path == "~" || strings.HasPrefix(path, "~/") {
-		home, herr := os.UserHomeDir()
-		if herr != nil {
-			return "", false, fmt.Errorf("expand `~` in openclaw config path: %w", herr)
-		}
-		if path == "~" {
-			path = home
+	return openclawConfigPathStatus(path)
+}
+
+// openclawActiveConfigPathFromEnv mirrors OpenClaw's documented config-path
+// precedence for builds where `openclaw config file` is unavailable:
+//
+//   - OPENCLAW_CONFIG_PATH
+//   - OPENCLAW_STATE_DIR/openclaw.json
+//   - OPENCLAW_HOME/.openclaw/openclaw.json
+//   - ~/.openclaw/openclaw.json
+func openclawActiveConfigPathFromEnv() (string, bool, error) {
+	if path := strings.TrimSpace(os.Getenv("OPENCLAW_CONFIG_PATH")); path != "" {
+		return openclawConfigPathStatus(path)
+	}
+
+	stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
+	if stateDir == "" {
+		home := strings.TrimSpace(os.Getenv("OPENCLAW_HOME"))
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return "", false, fmt.Errorf("resolve openclaw home for default config path: %w", err)
+			}
 		} else {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+			expanded, err := expandOpenclawUserPath(home)
+			if err != nil {
+				return "", false, fmt.Errorf("expand OPENCLAW_HOME: %w", err)
+			}
+			home = expanded
 		}
+		stateDir = filepath.Join(home, ".openclaw")
+	}
+
+	return openclawConfigPathStatus(filepath.Join(stateDir, "openclaw.json"))
+}
+
+func openclawConfigPathStatus(path string) (string, bool, error) {
+	path, err := expandOpenclawUserPath(path)
+	if err != nil {
+		return "", false, err
+	}
+	if path == "" {
+		return "", false, fmt.Errorf("openclaw config path is empty")
 	}
 	if !filepath.IsAbs(path) {
 		return "", false, fmt.Errorf("openclaw reported non-absolute config path %q", path)
@@ -485,6 +524,34 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		return "", false, fmt.Errorf("openclaw config path %s is a directory, not a file", path)
 	}
 	return path, true, nil
+}
+
+func expandOpenclawUserPath(path string) (string, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, herr := os.UserHomeDir()
+		if herr != nil {
+			return "", fmt.Errorf("expand `~` in openclaw config path: %w", herr)
+		}
+		if path == "~" {
+			path = home
+		} else {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	return path, nil
+}
+
+func isOpenclawConfigFileUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "too many arguments for 'config'") ||
+		strings.Contains(msg, "too many arguments for \"config\"") ||
+		strings.Contains(msg, "unknown command \"file\"") ||
+		strings.Contains(msg, "unknown command 'file'") ||
+		strings.Contains(msg, "invalid command \"file\"") ||
+		strings.Contains(msg, "invalid command 'file'")
 }
 
 // openclawResolvedFullConfig fetches the user's fully resolved openclaw

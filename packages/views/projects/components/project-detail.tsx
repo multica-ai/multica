@@ -29,6 +29,7 @@ import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { canDeleteProject } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
@@ -443,6 +444,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const currentMember = members.find((m) => m.user_id === userId) ?? null;
+  const deletePermission = canDeleteProject({
+    userId: userId ?? null,
+    role: currentMember?.role ?? null,
+  });
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
@@ -522,14 +528,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
 
   const handleDelete = useCallback(() => {
-    if (!project) return;
+    if (!project || !deletePermission.allowed) return;
     deleteProject.mutate(project.id, {
       onSuccess: () => {
         toast.success(t(($) => $.detail.toast_project_deleted));
         router.push(wsPaths.projects());
       },
     });
-  }, [project, deleteProject, router, wsPaths, t]);
+  }, [project, deletePermission.allowed, deleteProject, router, wsPaths, t]);
 
   if (isLoading) {
     return (
@@ -813,14 +819,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    {t(($) => $.detail.delete_action)}
-                  </DropdownMenuItem>
+                  {deletePermission.allowed && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_action)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               <Tooltip>

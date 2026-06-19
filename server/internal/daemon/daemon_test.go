@@ -1987,6 +1987,32 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 	}
 }
 
+func TestReportTaskResult_FailSurvivesCancelledParentContext(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/fail") {
+			failCalls.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.reportTaskResult(ctx, "task-shutdown", TaskResult{
+		Status:  "cancelled",
+		Comment: "daemon shutting down",
+	}, slog.Default())
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("cancelled parent context must not drop /fail callback; got %d calls", got)
+	}
+}
+
 // Regression test for the MUL-2780 incident: a short 502 burst on the
 // /complete callback used to (a) drop the task at the first failure and
 // (b) wrongly fall back to /fail, surfacing a successful run as red.

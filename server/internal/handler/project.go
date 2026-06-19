@@ -518,10 +518,11 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	userID, ok := requireUserID(w, r)
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "project not found", "owner", "admin")
 	if !ok {
 		return
 	}
+	userID := uuidToString(member.UserID)
 	if err := h.Queries.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,

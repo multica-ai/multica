@@ -149,6 +149,19 @@ export function canDeleteRuntime(
   );
 }
 
+// ---- Projects --------------------------------------------------------------
+
+export function canDeleteProject(ctx: PermissionContext): Decision {
+  if (ctx.userId === null) {
+    return deny("not_authenticated", "Sign in to delete projects.");
+  }
+  if (isAdminLike(ctx.role)) return ALLOW;
+  return deny(
+    "not_admin_role",
+    "Only workspace owners and admins can delete projects.",
+  );
+}
+
 // ---- Workspace -------------------------------------------------------------
 
 export function canUpdateWorkspaceSettings(ctx: PermissionContext): Decision {

@@ -2805,7 +2805,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		if failErr := d.failTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -2871,7 +2871,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, d.cfg.DaemonID)
 	if err != nil {
 		taskLog.Error("local_directory: resolve resource failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.failTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
 			taskLog.Error("fail task after local_directory resolve error", "error", failErr)
 		}
 		return nil, true
@@ -2882,7 +2882,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	taskLog = taskLog.With("local_directory", assignment.AbsPath)
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+		if failErr := d.failTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)
 		}
 		return nil, true
@@ -2954,7 +2954,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			failureReason = "cancelled"
 		}
-		if failErr := d.client.FailTask(ctx, task.ID, fmt.Sprintf("local_directory wait cancelled: %s", err.Error()), "", "", failureReason); failErr != nil {
+		if failErr := d.failTask(ctx, task.ID, fmt.Sprintf("local_directory wait cancelled: %s", err.Error()), "", "", failureReason); failErr != nil {
 			taskLog.Error("fail task after local_directory lock cancel", "error", failErr)
 		}
 		return nil, true
@@ -2977,7 +2977,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		err := d.completeTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
 		if err == nil {
 			return
 		}
@@ -3006,7 +3006,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// which is the canonical replacement for the legacy
 		// "agent_error" coarse bucket.
 		fallbackErrMsg := fmt.Sprintf("complete task failed: %s", err.Error())
-		if failErr := d.client.FailTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
+		if failErr := d.failTask(ctx, taskID, fallbackErrMsg, result.SessionID, result.WorkDir, taskfailure.Classify(fallbackErrMsg).String()); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
 	default:
@@ -3029,10 +3029,31 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := d.failTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
+}
+
+const terminalCallbackDetachedTimeout = 5 * time.Second
+
+func terminalCallbackContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx != nil && ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.Background(), terminalCallbackDetachedTimeout)
+}
+
+func (d *Daemon) completeTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
+	callbackCtx, cancel := terminalCallbackContext(ctx)
+	defer cancel()
+	return d.client.CompleteTask(callbackCtx, taskID, output, branchName, sessionID, workDir)
+}
+
+func (d *Daemon) failTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
+	callbackCtx, cancel := terminalCallbackContext(ctx)
+	defer cancel()
+	return d.client.FailTask(callbackCtx, taskID, errMsg, sessionID, workDir, failureReason)
 }
 
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right
