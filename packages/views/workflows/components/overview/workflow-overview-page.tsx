@@ -168,6 +168,7 @@ export function WorkflowOverviewPage({ workflowId }: WorkflowOverviewPageProps) 
       {selectedNodeId && (
         <NodeDetailPanel
           nodeId={selectedNodeId}
+          workflowId={workflowId}
           nodes={nodes}
           edges={edges}
           onClose={handleNodeDetailClose}
