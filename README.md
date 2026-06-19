@@ -59,6 +59,7 @@ Multica manages the full agent lifecycle: from task assignment to execution moni
 - **Autonomous Execution** — set it and forget it. Full task lifecycle management (enqueue, claim, start, complete/fail) with real-time progress streaming via WebSocket.
 - **Autopilots** — schedule recurring work for agents. Cron triggers, webhooks, or manual runs — each autopilot creates the issue and routes it to an agent automatically, so daily standups, weekly reports, and periodic audits run themselves.
 - **Reusable Skills** — every solution becomes a reusable skill for the whole team. Deployments, migrations, code reviews — skills compound your team's capabilities over time.
+- **Deterministic Tools** — when "did the tests actually pass?" must be *measured*, not guessed, write a typed Go step that the agent calls over MCP. Authored and tested right in the workspace, run in a sandbox, and return an auditable result. See [Deterministic Tools](#deterministic-tools).
 - **Unified Runtimes** — one dashboard for all your compute. Local daemons and cloud runtimes, auto-detection of available CLIs, real-time monitoring.
 - **Multi-Workspace** — organize work across teams with workspace-level isolation. Each workspace has its own agents, issues, and settings.
 
@@ -132,6 +133,117 @@ Create an issue from the board (or via `multica issue create`), then assign it t
 
 ---
 
+## Deterministic Tools
+
+Skills are *advisory* — Markdown the agent reads and may follow, paraphrase, or ignore. That's the right shape for judgment ("how to frame a PR", naming conventions). It's the wrong shape for anything correctness-sensitive: a skill that says *"make sure the tests pass"* is a suggestion the model can hallucinate its way around.
+
+**Deterministic tools** close that gap. A tool is typed Go that *runs* — it inspects the repo, enforces a policy, or runs a gate — and returns a verifiable result the agent can branch on. The agent reaches tools over [MCP](https://modelcontextprotocol.io); a built-in catalog (`repo_facts`, `policy_check`, `build_probe`, `test_gate`, `dotnet_test_gate`, `diff_summarize`, `artifact_emit`) ships compiled into the daemon binary, and you can author your own from the workspace.
+
+| | Skill (advisory) | Deterministic tool |
+|---|---|---|
+| What it is | Markdown in the agent's context | Typed Go that executes |
+| Wrong answer | A suggestion the model acted on | A bug caught by tests |
+| Use it for | Framing, conventions, judgment | Repo facts, gates, "did it pass?" |
+
+### Authoring a tool
+
+Open your workspace and go to **Tools** in the sidebar. Write a deterministic Go *step*, give it sample input, and click **Test** to run it instantly in the sandbox — no deploy, no rebuild.
+
+You can also create and refresh workspace tools from source files with the CLI:
+
+```bash
+multica dettool import-file dettools/my_tool.go
+multica dettool test my_tool --input '{"name":"world"}'
+```
+
+`import-file` uses the file stem as the default tool name, creates the tool on
+the first run, and updates an existing tool with the same name on later runs.
+
+A step is a Go package named `step` exposing one function:
+
+```go
+package step
+
+import "strings"
+
+// Run receives the decoded JSON input and returns a Result envelope.
+func Run(input map[string]any) map[string]any {
+	name, _ := input["name"].(string)
+	if name == "" {
+		return map[string]any{
+			"status":     "error",
+			"error_code": "INVALID_INPUT",
+			"summary":    "input.name is required",
+		}
+	}
+	return map[string]any{
+		"status":  "ok",
+		"summary": "Greeted " + name,
+		"machine_data": map[string]any{
+			"greeting": "Hello, " + strings.ToUpper(name),
+			"length":   len(name),
+		},
+	}
+}
+```
+
+Testing it with the input `{ "name": "world" }` returns the standard **Result envelope** — the same contract the built-in tools and the agent use:
+
+```json
+{
+  "status": "ok",
+  "summary": "Greeted world",
+  "machine_data": { "greeting": "Hello, WORLD", "length": 5 },
+  "retryable": false
+}
+```
+
+`status` is `"ok"` or `"error"`; on failure, set a stable `error_code` (`INVALID_INPUT`, `MISSING_DEPENDENCY`, `POLICY_FAILURE`, `TIMEOUT`, `INTERNAL_ERROR`). A step that just returns data without a `status` is treated as success.
+
+### A gate, not a guess
+
+The point of a deterministic tool is to *enforce*, not suggest. A policy gate returns a hard failure the agent cannot wave away:
+
+```go
+package step
+
+import "strings"
+
+// Fail the task if work landed on a branch that isn't a feature branch.
+func Run(input map[string]any) map[string]any {
+	branch, _ := input["branch"].(string)
+	if !strings.HasPrefix(branch, "feature/") {
+		return map[string]any{
+			"status":     "error",
+			"error_code": "POLICY_FAILURE",
+			"summary":    "branch " + branch + " must start with feature/",
+			"machine_data": map[string]any{"branch": branch},
+		}
+	}
+	return map[string]any{"status": "ok", "summary": "branch policy ok"}
+}
+```
+
+### Sandbox
+
+Steps run in an embedded Go interpreter, not the compiled binary, so they can be written and changed at runtime without redeploying. The interpreter is **allow-list only**: a step may import pure, deterministic standard-library packages (`fmt`, `strings`, `strconv`, `regexp`, `encoding/json`, `time`, `slices`, `math`, …) and nothing else. `os`, `os/exec`, `io`, `net/*`, and `syscall` are not importable — a step can compute over its input but cannot touch the host, the filesystem, or the network.
+
+Each run also happens in a **separate, isolated process** (the binary re-exec'd as a one-shot sandbox) rather than in-process: the child gets a minimal environment with none of the server's secrets and a kernel CPU-time limit, a runaway step is hard-killed (`SIGKILL`) when it exceeds its timeout, and a panic surfaces as an `INTERNAL_ERROR` — never a crash or a leaked goroutine in a long-lived process.
+
+### Enabling the agent-facing plane
+
+The deterministic tool plane is off by default. Enable it on the daemon so agents receive the tools over MCP:
+
+```bash
+export MULTICA_DETTOOLS_ENABLED=true                                   # master switch
+export MULTICA_DETTOOLS_ALLOWED=repo_facts,policy_check,build_probe,test_gate,dotnet_test_gate  # allow-list (defaults to the full read-only catalog)
+export MULTICA_DETTOOLS_TIMEOUT=90s                                    # per-tool timeout
+```
+
+Once enabled, a workspace's **saved** tools are delivered to each task alongside the built-ins: on claim the daemon writes the enabled tools into the task work dir and the per-task MCP server runs each in the sandbox, so the agent calls them by name like any other tool. Per-agent narrowing is available via the agent's `runtime_config` (`deterministic_tools.allowed_tools` / `denied_tools`) — an agent can only narrow the daemon allow-list, never widen it.
+
+---
+
 ## CLI
 
 The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
@@ -147,6 +259,8 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
+| `multica skill` | Create, update, import, and manage workspace skills |
+| `multica dettool` | Create, update, test, and import workspace deterministic tools |
 | `multica update` | Update to the latest version |
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference.

@@ -1,0 +1,22 @@
+[0;1;31m×[0m caddy.service - Caddy
+     Loaded: loaded (]8;;file://server.turk/usr/lib/systemd/system/caddy.service\/usr/lib/systemd/system/caddy.service]8;;\; [0;1;32menabled[0m; preset: [0;1;38:5:185mdisabled[0m)
+    Drop-In: /usr/lib/systemd/system/service.d
+             └─]8;;file://server.turk/usr/lib/systemd/system/service.d/10-timeout-abort.conf\10-timeout-abort.conf]8;;\
+     Active: [0;1;31mfailed[0m (Result: exit-code) since Tue 2026-06-02 14:58:44 CDT; 12s ago
+ Invocation: 4c5b20a269e24d5191cde74ddce6e5e7
+       Docs: ]8;;https://caddyserver.com/docs/\https://caddyserver.com/docs/]8;;\
+    Process: 33118 ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile [0;1;31m(code=exited, status=1/FAILURE)[0m
+   Main PID: 33118 (code=exited, status=1/FAILURE)
+   Mem peak: 18.1M
+        CPU: 64ms
+
+Jun 02 14:58:44 server.turk caddy[33118]: SYSTEMD_EXEC_PID=33118
+Jun 02 14:58:44 server.turk caddy[33118]: MEMORY_PRESSURE_WATCH=/sys/fs/cgroup/system.slice/caddy.service/memory.pressure
+Jun 02 14:58:44 server.turk caddy[33118]: MEMORY_PRESSURE_WRITE=c29tZSAyMDAwMDAgMjAwMDAwMAA=
+Jun 02 14:58:44 server.turk caddy[33118]: NOTIFY_SOCKET=/run/systemd/notify
+Jun 02 14:58:44 server.turk caddy[33118]: {"level":"info","ts":1780430324.258862,"msg":"maxprocs: Leaving GOMAXPROCS=24: CPU quota undefined"}
+Jun 02 14:58:44 server.turk caddy[33118]: {"level":"info","ts":1780430324.25888,"msg":"GOMEMLIMIT is updated","GOMEMLIMIT":30219389337,"previous":9223372036854775807}
+Jun 02 14:58:44 server.turk caddy[33118]: Error: reading config from file: open /etc/caddy/Caddyfile: permission denied
+Jun 02 14:58:44 server.turk systemd[1]: [0;1;39m[0;1;31m[0;1;39mcaddy.service: Main process exited, code=exited, status=1/FAILURE[0m
+Jun 02 14:58:44 server.turk systemd[1]: [0;1;38:5:185m[0;1;39m[0;1;38:5:185mcaddy.service: Failed with result 'exit-code'.[0m
+Jun 02 14:58:44 server.turk systemd[1]: [0;1;31m[0;1;39m[0;1;31mFailed to start caddy.service - Caddy.[0m

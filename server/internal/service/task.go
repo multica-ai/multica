@@ -31,7 +31,11 @@ type TaskService struct {
 	Bus       *events.Bus
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	// Stage1Telemetry receives compact, normalized lifecycle events for the
+	// agent-improvement loop pipeline. It must stay best-effort: telemetry
+	// write failures should never block task processing.
+	Stage1Telemetry Stage1EventSink
+	Wakeup          TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -111,7 +115,14 @@ func NewTaskService(q *db.Queries, tx TxStarter, hub *realtime.Hub, bus *events.
 	if len(wakeups) > 0 {
 		wakeup = wakeups[0]
 	}
-	return &TaskService{Queries: q, TxStarter: tx, Hub: hub, Bus: bus, Wakeup: wakeup}
+	return &TaskService{
+		Queries:         q,
+		TxStarter:       tx,
+		Hub:             hub,
+		Bus:             bus,
+		Wakeup:          wakeup,
+		Stage1Telemetry: NewStage1EventSinkFromEnv(),
+	}
 }
 
 var trivialDoneMarkers = []string{
@@ -139,6 +150,7 @@ func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQu
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskEnqueued(source, runtimeMode)
 	}
+	s.emitTaskLifecycleEvent(ctx, "agent_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
@@ -146,6 +158,7 @@ func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTa
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskDispatched(util.UUIDToString(task.ID), source, runtimeMode, taskQueueWaitSeconds(task))
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) AnalyticsContextForTask(ctx context.Context, task db.AgentTaskQueue) analytics.TaskContext {
@@ -157,6 +170,7 @@ func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQ
 		source, runtimeMode, provider := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskStarted(source, runtimeMode, provider)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", "running", task, "", "")
 }
 
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
@@ -164,6 +178,7 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
@@ -173,6 +188,7 @@ func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQu
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 		s.Metrics.RecordTaskFailed(source, runtimeMode, failureReason)
 	}
+	s.emitTaskLifecycleEvent(ctx, "failure_event", task.Status, task, failureReason, task.Error.String)
 }
 
 func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTaskQueue) {
@@ -190,6 +206,7 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		slog.Warn("cancel task: failed to revoke task tokens",
 			"task_id", util.UUIDToString(task.ID), "error", err)
 	}
+	s.emitTaskLifecycleEvent(ctx, "attempt_event", task.Status, task, "", "")
 }
 
 func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQueue, provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
@@ -1180,7 +1197,10 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 }
 
 // CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// Issue status is normally NOT changed here — the agent manages it via the CLI.
+// Coding Team Watchdog scan issues are the exception: the watchdog's own scan
+// issue is implementation detail bookkeeping, so completing its task also marks
+// that scan issue done even if the agent never ran an explicit CLI status update.
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -1255,6 +1275,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.markCodingTeamWatchdogIssueDone(ctx, task)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -1352,6 +1373,58 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
 	return &task, nil
+}
+
+func (s *TaskService) markCodingTeamWatchdogIssueDone(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+
+	agent, err := s.Queries.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: load agent failed",
+			"task_id", util.UUIDToString(task.ID),
+			"agent_id", util.UUIDToString(task.AgentID),
+			"error", err,
+		)
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(agent.Name), "Coding Team Watchdog") {
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: load issue failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		return
+	}
+
+	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      "done",
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("coding-team watchdog completion: mark issue done failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issue.ID),
+			"error", err,
+		)
+		return
+	}
+
+	slog.Info("coding-team watchdog completion: marked issue done",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(updated.ID),
+	)
+	s.broadcastIssueUpdated(updated)
 }
 
 // FailTask marks a task as failed.

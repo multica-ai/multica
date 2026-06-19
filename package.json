@@ -40,11 +40,11 @@
     }
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@types/node": "catalog:",
+    "@playwright/test": "^1.60.0",
+    "@types/node": "^25.9.3",
     "@types/pg": "^8.20.0",
-    "pg": "^8.20.0",
-    "turbo": "^2.5.4",
-    "typescript": "catalog:"
+    "pg": "^8.21.0",
+    "turbo": "^2.9.18",
+    "typescript": "^5.9.3"
   }
 }

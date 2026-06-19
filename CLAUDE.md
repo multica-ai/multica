@@ -214,7 +214,9 @@ make check
 
 Do not claim verification passed unless you ran it. If you skip checks because the change is docs-only or the user asked not to run them, say so.
 
-## Commits and Releases
+**Automatic releases (this fork):** `auto-release.yml` cuts a release on every merge to `main` once **CI passes** — it picks the next version, tags the commit, runs GoReleaser to publish a GitHub Release (CLI binaries for every OS/arch), and calls the reusable `docker-images.yml` to build + push the backend/web images to GHCR (`ghcr.io/<owner>/multica-backend`, `-web`, multi-arch). The version bump defaults to **patch**; label the merged PR `minor` or `major` to bump that segment instead, or run the workflow manually (`workflow_dispatch`) with an explicit `version`. The tag is pushed with the default `GITHUB_TOKEN`, which deliberately does not re-trigger `release.yml`, so there is no double release. Use a `[skip release]` marker in the merge commit to opt out. Homebrew publishing requires the `HOMEBREW_TAP_GITHUB_TOKEN` secret; without it that step is skipped and the GitHub Release still ships.
+
+## Multi-tenancy
 
 - Commits should be atomic and use conventional prefixes: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`.
 - A production deployment requires a CLI release tag on `main`: create `v0.x.x`, push it, and let `release.yml` publish binaries and the Homebrew tap.

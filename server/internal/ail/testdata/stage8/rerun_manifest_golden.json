@@ -1,0 +1,12 @@
+{
+  "tool_name": "detect_timeout",
+  "approve_ref": "PER-14",
+  "promoted_at": "2026-01-15T12:00:00Z",
+  "reevaluate_after_days": 30,
+  "next_reevaluation_at": "2026-02-14T12:00:00Z",
+  "timer_status": "scheduled",
+  "generated_at": "2026-01-20T09:00:00Z",
+  "stage_summary_path": "diagnostics/stage-summary.jsonl",
+  "candidate_decision_path": "diagnostics/candidate-decision.json",
+  "promotion_log_path": "diagnostics/stage8-promotion.jsonl"
+}

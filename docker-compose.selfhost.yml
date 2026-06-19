@@ -1,4 +1,4 @@
-# Self-hosting Docker Compose — starts PostgreSQL, backend, and frontend.
+# Self-hosting Docker Compose — starts backend and frontend against a shared PostgreSQL server.
 #
 # Services bind to 127.0.0.1 only. For cross-machine or public access, front
 # them with a reverse proxy (Caddy / nginx / Cloudflare Tunnel) that terminates
@@ -40,22 +40,20 @@ services:
 
   backend:
     image: ${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:${MULTICA_IMAGE_TAG:-latest}
-    depends_on:
-      postgres:
-        condition: service_healthy
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+      - "0.0.0.0:${BACKEND_PORT:-${API_PORT:-${SERVER_PORT:-${PORT:-8080}}}}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      - ${HOME}/.multica:/root/.multica:Z
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL must be set to your shared PostgreSQL connection string}
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
-      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@ethanturk.com}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-25}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
@@ -77,9 +75,9 @@ services:
       CLOUDFRONT_KEY_PAIR_ID: ${CLOUDFRONT_KEY_PAIR_ID:-}
       CLOUDFRONT_PRIVATE_KEY: ${CLOUDFRONT_PRIVATE_KEY:-}
       COOKIE_DOMAIN: ${COOKIE_DOMAIN:-}
-      APP_ENV: ${APP_ENV:-production}
-      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
-      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      APP_ENV: ${APP_ENV:-development}
+      MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-888888}
+      MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:${FRONTEND_PORT:-3000}}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
@@ -118,7 +116,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "0.0.0.0:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
     restart: unless-stopped

@@ -2417,6 +2417,60 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	}
 }
 
+func TestCompleteTask_CodingTeamWatchdogMarksIssueDone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Coding Team Watchdog", nil)
+	runtimeID := handlerTestRuntimeID(t)
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, assignee_type, assignee_id, creator_id, creator_type, number, position)
+		VALUES ($1, 'coding-team-watchdog-completion fixture', 'in_progress', 'none', 'agent', $2, $3, 'member', 81202, 0)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create watchdog task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
+		map[string]any{"output": "Scan complete."},
+		testWorkspaceID, "legit-daemon")
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", taskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.CompleteTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("query issue status: %v", err)
+	}
+	if status != "done" {
+		t.Fatalf("watchdog issue status = %q, want done", status)
+	}
+}
+
 func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

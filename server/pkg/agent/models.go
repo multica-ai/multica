@@ -138,6 +138,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverPiModels(ctx, executablePath)
 		})
+	case "omp":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOmpModels(ctx, executablePath)
+		})
 	case "openclaw":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
@@ -1485,4 +1489,101 @@ func codebuddyStaticModels() []Model {
 		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
 		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
 	}
+}
+
+// discoverOmpModels runs `omp --list-models` and parses its tabular output.
+// The output format: `provider  model  context  max-out  ...` columns.
+// On any failure we fall back to an empty list.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "omp"
+	}
+	if _, err := exec.LookPath(executablePath); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return []Model{}, nil
+	}
+	text := string(stdout)
+	if strings.TrimSpace(text) == "" {
+		text = stderr.String()
+	}
+	return parseOmpModels(text), nil
+}
+
+// parseOmpModels parses `omp --list-models` output. omp prints two
+// sections: "Canonical models" and "Provider models". Each section is a
+// table with its own column layout:
+//
+//   Canonical models:
+//     canonical     selected               variants  context  max-out
+//     claude-sonnet anthropic/claude-sonnet  2      200000   32000
+//
+//   Provider models:
+//     provider  model         context  max-out  thinking  images
+//     anthropic claude-sonnet  200000   32000   low,high  yes
+//
+// For the Canonical section we use fields[1] (selected) as the canonical ID.
+// For the Provider section we join fields[0] + "/" + fields[1] as the ID.
+// Both map to the same `provider/model` form for deduplication.
+func parseOmpModels(output string) []Model {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	var models []Model
+	seen := map[string]bool{}
+	inProvider := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		first := fields[0]
+
+		// Detect section boundaries and skip header rows.
+		if strings.EqualFold(first, "provider") {
+			inProvider = true
+			continue
+		}
+		if strings.EqualFold(first, "canonical") {
+			inProvider = false
+			continue
+		}
+
+		var id string
+		var provider string
+		if inProvider {
+			// Provider section: "anthropic claude-sonnet ..."
+			id = first + "/" + fields[1]
+			provider = first
+		} else {
+			// Canonical section: "claude-sonnet anthropic/claude-sonnet ..."
+			// Use fields[1] (selected) as the canonical ID. It's already
+			// in provider/model form.
+			id = fields[1]
+			provider = first
+			// Validate canonical ID has a "/" — skip non-data rows like
+			// "No models available." messages and column headers.
+			if !strings.Contains(id, "/") {
+				continue
+			}
+		}
+
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		models = append(models, Model{ID: id, Label: id, Provider: provider})
+	}
+	return models
 }

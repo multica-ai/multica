@@ -1016,3 +1016,56 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
 };
+
+// Deterministic tool plane — the Result envelope a sandboxed step returns. It
+// mirrors server/pkg/dettools.Result. `.loose()` keeps unknown future fields so
+// a newer backend that adds to the envelope never fails an older client.
+export const DeterministicToolResultSchema = z.object({
+  status: z.string().default("error"),
+  summary: z.string().default(""),
+  machine_data: z.record(z.string(), z.unknown()).optional(),
+  artifacts: z
+    .array(z.object({ type: z.string().default(""), path: z.string().default("") }).loose())
+    .optional(),
+  retryable: z.boolean().default(false),
+  error_code: z.string().optional(),
+}).loose();
+
+export type DeterministicToolResult = z.infer<typeof DeterministicToolResultSchema>;
+
+export const EMPTY_DETERMINISTIC_TOOL_RESULT: DeterministicToolResult = {
+  status: "error",
+  summary: "The server returned an unexpected response.",
+  retryable: false,
+  error_code: "INTERNAL_ERROR",
+};
+
+// A persisted workspace-authored deterministic tool (the entity, distinct from
+// the Result envelope a test run returns). `.loose()` tolerates future fields.
+export const DeterministicToolSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  source: z.string().default(""),
+  enabled: z.boolean().default(true),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export type DeterministicTool = z.infer<typeof DeterministicToolSchema>;
+
+export const DeterministicToolListSchema = z.array(DeterministicToolSchema);
+
+export const EMPTY_DETERMINISTIC_TOOL: DeterministicTool = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  source: "",
+  enabled: true,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_DETERMINISTIC_TOOL_LIST: DeterministicTool[] = [];

@@ -1,0 +1,180 @@
+# Auto Release
+#
+# Generates and posts a new release whenever a merge to `main` passes CI. The
+# trigger is the CI workflow *completing successfully* on `main`, so a release
+# is only ever cut after a green build (the "on successful merge and build"
+# gate). On success it picks the next version, tags the commit, runs GoReleaser
+# to publish a GitHub Release with the CLI for every OS/arch, and builds + pushes
+# the backend/web container images to GHCR.
+#
+# Version bump:
+#   - default: patch (v0.1.12 -> v0.1.13)
+#   - label the merged PR `minor` -> v0.2.0, or `major` -> v1.0.0
+#   - workflow_dispatch `version` input overrides everything
+#
+# Notes:
+#   - The tag is pushed with the default GITHUB_TOKEN, which by design does NOT
+#     re-trigger the tag-driven `release.yml`, so there is no double release.
+#   - Homebrew publishing (ethanturk/homebrew-tap, per .goreleaser.yml) runs only
+#     when the HOMEBREW_TAP_GITHUB_TOKEN secret is set; otherwise it is skipped so
+#     a missing tap token never fails the GitHub Release.
+#   - Uses workflow_run, so it takes effect from the copy of this file on the
+#     default branch — i.e. once merged to `main`.
+
+name: Auto Release
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit version tag (e.g. v0.2.0). Blank = label/auto bump."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+
+concurrency:
+  # Never cut two releases at once; queue rather than cancel a half-done one.
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Only on this fork, and only for a successful CI run that came from a push
+    # to main (not a pull_request CI run) — or a manual dispatch.
+    if: >-
+      github.repository_owner == 'ethanturk' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' &&
+         github.event.workflow_run.event == 'push' &&
+         github.event.workflow_run.head_branch == 'main')
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      skip: ${{ steps.guard.outputs.skip }}
+      version: ${{ steps.ver.outputs.next }}
+      sha: ${{ steps.ver.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The exact commit CI validated (falls back to the dispatch ref).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Decide whether to release
+        id: guard
+        run: |
+          skip=false
+          # Already carries a release tag → nothing new to cut.
+          if git describe --exact-match --tags HEAD 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "HEAD already has a release tag; skipping."
+            skip=true
+          fi
+          # Honor an explicit opt-out on the auto path (not manual dispatch).
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && git log -1 --pretty=%B | grep -q '\[skip release\]'; then
+            echo "Found [skip release] in the commit message; skipping."
+            skip=true
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next version
+        if: steps.guard.outputs.skip == 'false'
+        id: ver
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          # Bump size comes from the merged PR's labels (auto path). A manual
+          # `version` input below overrides this entirely.
+          bump=patch
+          labels=$(gh api "repos/${{ github.repository }}/commits/$SHA/pulls" \
+            -H "Accept: application/vnd.github+json" --jq '.[].labels[].name' 2>/dev/null | tr '\n' ' ' || true)
+          echo "Merged-PR labels: $labels"
+          if echo " $labels " | grep -qw major; then
+            bump=major
+          elif echo " $labels " | grep -qw minor; then
+            bump=minor
+          fi
+          echo "Bump: $bump"
+
+          override="${{ github.event.inputs.version }}"
+          if [ -n "$override" ]; then
+            next="$override"
+          else
+            latest=$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1)
+            base="${latest:-v0.0.0}"
+            v=${base#v}
+            IFS=. read -r major minor patch <<< "$v"
+            case "$bump" in
+              major) next="v$((major + 1)).0.0" ;;
+              minor) next="v${major}.$((minor + 1)).0" ;;
+              *)     next="v${major}.${minor}.$((patch + 1))" ;;
+            esac
+          fi
+
+          if ! printf '%s' "$next" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Computed version '$next' is not a vX.Y.Z tag."
+            exit 1
+          fi
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+          echo "Releasing $next"
+
+      - name: Setup Go
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Create and push tag
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.ver.outputs.next }}" -m "Release ${{ steps.ver.outputs.next }}"
+          git push origin "${{ steps.ver.outputs.next }}"
+
+      - name: Decide Homebrew publishing
+        if: steps.guard.outputs.skip == 'false'
+        id: brew
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -n "$TAP_TOKEN" ]; then
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+          else
+            echo "No HOMEBREW_TAP_GITHUB_TOKEN; skipping Homebrew formula publish."
+            echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run GoReleaser
+        if: steps.guard.outputs.skip == 'false'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: ${{ steps.brew.outputs.args }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  # Build + push the self-host container images to GHCR for the same release.
+  docker:
+    needs: release
+    if: needs.release.outputs.skip == 'false'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-images.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+      sha: ${{ needs.release.outputs.sha }}
+    secrets: inherit

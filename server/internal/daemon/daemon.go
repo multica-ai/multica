@@ -3216,8 +3216,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
 	var agentMcpConfig json.RawMessage
+	var agentRuntimeConfig json.RawMessage
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		agentRuntimeConfig = task.Agent.RuntimeConfig
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
 	// ExecOptions all see the same mode + gateway pin (issue #3260). Parse
@@ -3228,6 +3230,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+
+	// OpenClaw materializes mcp.servers from this config during execenv.Prepare,
+	// so the deterministic tool server must be merged in before Prepare/Reuse.
+	// No-op for every other provider.
+	agentMcpConfig = d.injectExecenvTools(agentMcpConfig, provider, agentRuntimeConfig, task.DeterministicTools, d.logger)
+
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkDir:         task.PriorWorkDir,
@@ -3417,6 +3425,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// Pi reaches the deterministic tool plane through pi-mcp-adapter (opt-in,
+	// experimental): the daemon writes a project-local .pi/mcp.json the adapter
+	// auto-discovers. No-op for every other provider and when disabled. The
+	// cleanup restores the user's file on local_directory tasks.
+	piCleanup := d.preparePiToolPlane(provider, env.WorkDir, env.LocalDirectory, agentMcpConfig, agentRuntimeConfig, task.DeterministicTools, agentEnv, d.logger)
+	defer piCleanup()
+
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -3444,6 +3459,31 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+	}
+	// Merge the daemon-managed deterministic tool server into the agent's MCP
+	// config when the tool plane is enabled and the provider consumes MCP via
+	// ExecOptions. Additive and fail-open: returns mcpConfig unchanged otherwise.
+	var execAgentRuntimeConfig json.RawMessage
+	if task.Agent != nil {
+		execAgentRuntimeConfig = task.Agent.RuntimeConfig
+	}
+	mcpConfig = d.injectExecOptionsTools(mcpConfig, provider, env.WorkDir, execAgentRuntimeConfig, task.DeterministicTools, taskLog)
+	// Deterministic tools guidance: when the tool plane is enabled and MCP
+	// servers were injected, append instructions telling the agent to prefer
+	// deterministic tools over shell commands. Without this, agents silently
+	// fall through to Bash/exec_command even when MCP tools are available,
+	// because shell commands are more familiar and the tools are never
+	// mentioned in the runtime brief.
+	if d.cfg.DetTools.Enabled && len(mcpConfig) > 0 {
+		runtimeBrief += "\n\n## Deterministic Tools (MCP)\n\n"
+		runtimeBrief += "The `multica-tools` MCP server provides typed, verifiable tools that must be used instead of shell commands for correctness-sensitive operations. Each tool returns an auditable Result with stable error codes.\n\n"
+		runtimeBrief += "- **repo_facts** — current branch, changed files, package managers. USE over raw git commands.\n"
+		runtimeBrief += "- **policy_check** — branch naming, forbidden paths, required files. USE instead of manual grep/git checks.\n"
+		runtimeBrief += "- **build_probe** — toolchain detection with version. USE instead of raw `make`/`npm`/`cargo` probes.\n"
+		runtimeBrief += "- **test_gate** — run test suites, normalize outcomes to pass/fail. USE instead of raw test runners.\n"
+		runtimeBrief += "- **diff_summarize** — stable machine-readable diff. USE instead of `git diff`.\n"
+		runtimeBrief += "- **artifact_emit** — write structured artifacts. USE instead of `echo > file`.\n\n"
+		runtimeBrief += "When a skill or workflow tells you to use one of these tools, call it through MCP. Do NOT replicate its behavior with shell commands — shell output lacks audit logging, policy enforcement, and typed results.\n"
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If

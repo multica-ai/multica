@@ -302,3 +302,28 @@ func TestUpdateDownloadTimeoutOrDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateRepoSlug(t *testing.T) {
+	t.Setenv("MULTICA_UPDATE_REPO", "")
+	if got := updateRepoSlug(); got != defaultUpdateRepo {
+		t.Errorf("default = %q, want fork default %q", got, defaultUpdateRepo)
+	}
+	if defaultUpdateRepo != "ethanturk/multica" {
+		t.Errorf("baked-in update repo = %q, want the fork ethanturk/multica", defaultUpdateRepo)
+	}
+	t.Setenv("MULTICA_UPDATE_REPO", "someone/else")
+	if got := updateRepoSlug(); got != "someone/else" {
+		t.Errorf("override = %q, want someone/else", got)
+	}
+}
+
+func TestBrewFormula(t *testing.T) {
+	t.Setenv("MULTICA_UPDATE_BREW_FORMULA", "")
+	if got := brewFormula(); got != defaultBrewFormula {
+		t.Errorf("default = %q, want fork default %q", got, defaultBrewFormula)
+	}
+	t.Setenv("MULTICA_UPDATE_BREW_FORMULA", "x/tap/y")
+	if got := brewFormula(); got != "x/tap/y" {
+		t.Errorf("override = %q, want x/tap/y", got)
+	}
+}

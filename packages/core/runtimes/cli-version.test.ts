@@ -18,6 +18,13 @@ describe("checkQuickCreateCliVersion", () => {
     expect(checkQuickCreateCliVersion("not-a-version").state).toBe("missing");
   });
 
+  it("treats development/build-hash versions as ok", () => {
+    expect(checkQuickCreateCliVersion("dev").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("development").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("db01ce593").state).toBe("ok");
+    expect(checkQuickCreateCliVersion("gdb01ce593-dirty").state).toBe("ok");
+  });
+
   it("treats git-describe dev builds as ok regardless of base tag", () => {
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935").state).toBe("ok");
     expect(checkQuickCreateCliVersion("v0.2.15-235-gdaf0e935-dirty").state).toBe("ok");

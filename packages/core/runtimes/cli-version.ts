@@ -27,10 +27,15 @@ const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
 // Matches the `git describe --tags --always --dirty` output for a build past
 // the latest tag, e.g. `v0.2.15-235-gdaf0e935` or `v0.2.15-235-gdaf0e935-dirty`.
 // Daemons built from source (Makefile `make build` / `make daemon`) report this
-// shape; tagged releases are bare semver. Treating dev-described daemons as OK
-// is what keeps `pnpm dev:desktop` + `make daemon` unblocked without weakening
-// the gate for staging or production users running stale stable releases.
+// shape; tagged releases are bare semver. Treating these as OK is what keeps
+// `pnpm dev:desktop` + `make daemon` unblocked without weakening the gate for
+// staging or production users running stale stable releases.
 const DEV_DESCRIBE_RE = /^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+/;
+// Builds that don't produce strict 3-part semantic versions (fork/local git hashes,
+// source checkout `--always` outputs, or explicit `dev` development markers) are
+// still accepted for the quick-create gate to avoid blocking custom forks that don't
+// share the parent repo's version metadata.
+const NON_SEMVER_BUILD_RE = /^(?:v?g?[0-9a-fA-F]{7,40}(?:-dirty)?|dev(?:elopment)?)$/;
 
 function parseSemver(raw: string): [number, number, number] | null {
   const m = SEMVER_RE.exec(raw.trim());
@@ -53,7 +58,7 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
  */
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
   const current = (detected ?? "").trim();
-  if (DEV_DESCRIBE_RE.test(current)) {
+  if (DEV_DESCRIBE_RE.test(current) || NON_SEMVER_BUILD_RE.test(current)) {
     return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
   }
   const parsed = current ? parseSemver(current) : null;

@@ -1226,10 +1226,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
 		}
-		// runtime_config is stored as JSONB and may legitimately be the
-		// empty object `{}` for agents that haven't opted into any
-		// provider-specific tuning. Forward only non-empty payloads so the
-		// daemon's per-provider decoders treat absent-or-empty identically.
 		var runtimeConfig json.RawMessage
 		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
@@ -1798,6 +1794,25 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.AuthToken = tokenStr
+
+	// Attach the workspace's enabled deterministic tools so the daemon can expose
+	// them to the agent's tool plane alongside the built-ins. Best-effort: a query
+	// error logs and the task still runs (with built-in tools only).
+	if resp.WorkspaceID != "" {
+		if wsUUID, err := util.ParseUUID(resp.WorkspaceID); err == nil {
+			if tools, terr := h.Queries.ListEnabledDeterministicToolsByWorkspace(r.Context(), wsUUID); terr != nil {
+				slog.Warn("task claim: failed to load deterministic tools", "workspace_id", resp.WorkspaceID, "error", terr)
+			} else {
+				for _, t := range tools {
+					resp.DeterministicTools = append(resp.DeterministicTools, DeterministicToolData{
+						Name:        t.Name,
+						Description: t.Description,
+						Source:      t.Source,
+					})
+				}
+			}
+		}
+	}
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

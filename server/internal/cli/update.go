@@ -221,9 +221,50 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 	return nil
 }
 
+// Auto-update source. Defaults target this fork, so a built binary updates
+// itself from the fork's GitHub releases (and the fork's Homebrew tap) rather
+// than the upstream project. Both are overridable at runtime — no recompile —
+// via MULTICA_UPDATE_REPO ("owner/name") and MULTICA_UPDATE_BREW_FORMULA
+// ("owner/tap/formula"), e.g. to point a build back at upstream or a different
+// fork.
+const (
+	defaultUpdateRepo  = "ethanturk/multica"
+	defaultBrewFormula = "ethanturk/tap/multica"
+)
+
+// updateRepoSlug returns the "owner/name" GitHub repo the self-updater fetches
+// releases from.
+func updateRepoSlug() string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_UPDATE_REPO")); v != "" {
+		return v
+	}
+	return defaultUpdateRepo
+}
+
+// UpdateRepoSlug returns the "owner/name" GitHub repo the self-updater fetches
+// releases from. It is exposed for CLI messages and diagnostics.
+func UpdateRepoSlug() string {
+	return updateRepoSlug()
+}
+
+// brewFormula returns the Homebrew "owner/tap/formula" the self-updater upgrades
+// for Homebrew installs.
+func brewFormula() string {
+	if v := strings.TrimSpace(os.Getenv("MULTICA_UPDATE_BREW_FORMULA")); v != "" {
+		return v
+	}
+	return defaultBrewFormula
+}
+
+// BrewFormula returns the Homebrew "owner/tap/formula" the self-updater upgrades.
+// It is exposed for CLI messages and diagnostics.
+func BrewFormula() string {
+	return brewFormula()
+}
+
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+updateRepoSlug()+"/releases/tags/"+tag, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +290,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/"+updateRepoSlug()+"/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -317,10 +358,10 @@ func GetBrewPrefix() string {
 	return strings.TrimSpace(string(out))
 }
 
-// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
+// UpdateViaBrew runs `brew upgrade <fork tap formula>` (see brewFormula).
 // Returns the combined output and any error.
 func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	cmd := exec.Command("brew", "upgrade", brewFormula())
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
