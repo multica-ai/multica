@@ -220,8 +220,9 @@
 
 /* Right detail sidebars use react-resizable-panels, which sizes panels by
  * updating the outer panel's flex-grow. Animate that property for button
- * toggles, but disable it while the resize handle is actively dragged. */
-[data-right-sidebar-panel] {
+ * toggles only; mount-time layout restoration and resize sync should snap
+ * directly to the final state. */
+[data-right-sidebar-panel][data-right-sidebar-motion="enabled"] {
   transition-property: flex-grow;
   transition-duration: 220ms;
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);

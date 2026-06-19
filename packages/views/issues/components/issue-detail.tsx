@@ -89,6 +89,7 @@ import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import {
   AnimatedRightSidebar,
+  getAnimatedRightSidebarInitialOpen,
   rightSidebarPanelMotionProps,
   useAnimatedRightSidebarState,
 } from "../../layout/animated-right-sidebar";
@@ -688,12 +689,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
+  const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
+    defaultSidebarOpen,
+    defaultLayout,
+  );
   const {
     open: desktopSidebarOpen,
     visualOpen: desktopSidebarVisualOpen,
+    motionEnabled: desktopSidebarMotionEnabled,
     beginToggle: beginDesktopSidebarToggle,
     handleResize: handleDesktopSidebarResize,
-  } = useAnimatedRightSidebarState(defaultSidebarOpen);
+  } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
@@ -1308,8 +1314,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!panel) return;
     const nextOpen = panel.isCollapsed();
     beginDesktopSidebarToggle(nextOpen);
-    if (nextOpen) panel.expand();
-    else panel.collapse();
+    window.requestAnimationFrame(() => {
+      if (nextOpen) panel.expand();
+      else panel.collapse();
+    });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   useIssueDetailScrollRestore({
@@ -2168,7 +2176,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ResizablePanel
         id="sidebar"
         {...rightSidebarPanelMotionProps}
-        defaultSize={defaultSidebarOpen ? 320 : 0}
+        data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
+        defaultSize={desktopSidebarOpen ? 320 : 0}
         minSize={260}
         maxSize={420}
         collapsible
@@ -2176,7 +2185,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         panelRef={sidebarRef}
         onResize={handleDesktopSidebarResize}
       >
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen}>
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>

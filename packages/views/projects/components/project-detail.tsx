@@ -74,6 +74,7 @@ import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import {
   AnimatedRightSidebar,
+  getAnimatedRightSidebarInitialOpen,
   rightSidebarPanelMotionProps,
   useAnimatedRightSidebarState,
 } from "../../layout/animated-right-sidebar";
@@ -465,6 +466,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     id: "multica_project_detail_layout",
   });
   const sidebarRef = usePanelRef();
+  const desktopSidebarInitialOpen = getAnimatedRightSidebarInitialOpen(
+    true,
+    defaultLayout,
+  );
   // Desktop and mobile sidebar state must be separate. A single state defaulting
   // to `true` made the mobile <Sheet> mount in the open position on first render
   // (after `useIsMobile()` flipped from false→true), briefly covering the page
@@ -472,9 +477,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const {
     open: desktopSidebarOpen,
     visualOpen: desktopSidebarVisualOpen,
+    motionEnabled: desktopSidebarMotionEnabled,
     beginToggle: beginDesktopSidebarToggle,
     handleResize: handleDesktopSidebarResize,
-  } = useAnimatedRightSidebarState(true);
+  } = useAnimatedRightSidebarState(desktopSidebarInitialOpen);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
 
@@ -494,8 +500,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     if (!panel) return;
     const nextOpen = panel.isCollapsed();
     beginDesktopSidebarToggle(nextOpen);
-    if (nextOpen) panel.expand();
-    else panel.collapse();
+    window.requestAnimationFrame(() => {
+      if (nextOpen) panel.expand();
+      else panel.collapse();
+    });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
   // Lead popover
@@ -848,6 +856,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         <ResizablePanel
           id="sidebar"
           {...rightSidebarPanelMotionProps}
+          data-right-sidebar-motion={desktopSidebarMotionEnabled ? "enabled" : undefined}
           defaultSize={desktopSidebarOpen ? 320 : 0}
           minSize={260}
           maxSize={420}
@@ -856,7 +865,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           panelRef={sidebarRef}
           onResize={handleDesktopSidebarResize}
         >
-          <AnimatedRightSidebar open={desktopSidebarVisualOpen}>
+          <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
             {sidebarContent}
           </AnimatedRightSidebar>
         </ResizablePanel>

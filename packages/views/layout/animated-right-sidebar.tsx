@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
+import type { Layout, PanelSize } from "react-resizable-panels";
 import { cn } from "@multica/ui/lib/utils";
 
 export const rightSidebarPanelMotionProps = {
@@ -19,14 +20,29 @@ const rightSidebarTransition = {
   mass: 0.8,
 } as const;
 
+export function getAnimatedRightSidebarInitialOpen(
+  defaultOpen: boolean,
+  defaultLayout: Layout | undefined,
+  panelId = "sidebar",
+) {
+  const restoredSize = defaultLayout?.[panelId];
+  return typeof restoredSize === "number" ? restoredSize > 0 : defaultOpen;
+}
+
+function isRightSidebarPanelOpen(size: PanelSize) {
+  return size.asPercentage > 0 || size.inPixels > 0;
+}
+
 export function useAnimatedRightSidebarState(initialOpen: boolean) {
   const [open, setOpen] = useState(initialOpen);
   const [visualOpen, setVisualOpen] = useState(initialOpen);
+  const [motionEnabled, setMotionEnabled] = useState(false);
   const toggleTargetRef = useRef<boolean | null>(null);
   const settleTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const beginToggle = useCallback((nextOpen: boolean) => {
     toggleTargetRef.current = nextOpen;
+    setMotionEnabled(true);
     setOpen(nextOpen);
     setVisualOpen(nextOpen);
 
@@ -37,11 +53,12 @@ export function useAnimatedRightSidebarState(initialOpen: boolean) {
     settleTimeoutRef.current = setTimeout(() => {
       toggleTargetRef.current = null;
       settleTimeoutRef.current = null;
+      setMotionEnabled(false);
     }, RIGHT_SIDEBAR_PANEL_SETTLE_MS);
   }, []);
 
-  const handleResize = useCallback((size: { inPixels: number }) => {
-    const nextOpen = size.inPixels > 0;
+  const handleResize = useCallback((size: PanelSize) => {
+    const nextOpen = isRightSidebarPanelOpen(size);
     const toggleTarget = toggleTargetRef.current;
 
     if (toggleTarget === null) {
@@ -61,15 +78,17 @@ export function useAnimatedRightSidebarState(initialOpen: boolean) {
     };
   }, []);
 
-  return { open, visualOpen, beginToggle, handleResize };
+  return { open, visualOpen, motionEnabled, beginToggle, handleResize };
 }
 
 export function AnimatedRightSidebar({
   open,
+  motionEnabled,
   children,
   className,
 }: {
   open: boolean;
+  motionEnabled?: boolean;
   children: ReactNode;
   className?: string;
 }) {
@@ -82,7 +101,7 @@ export function AnimatedRightSidebar({
         className,
       )}
       initial={false}
-      transition={rightSidebarTransition}
+      transition={motionEnabled ? rightSidebarTransition : { duration: 0 }}
     >
       <div className="p-4">{children}</div>
     </motion.div>
