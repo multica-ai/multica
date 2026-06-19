@@ -39,15 +39,14 @@ const SAVE_DEBOUNCE_MS = 600;
 /** FIR-1487 — available font sizes for the Quick note editor. */
 export type NoteFontSize = "xs" | "sm" | "base" | "lg";
 
-// Each value includes a `md:` variant so tailwind-merge overrides the
-// Textarea component's built-in `md:text-sm` responsive default; without it
-// `md:text-sm` wins in the CSS cascade on desktop and the size never changes.
+// Inline style bypasses the Textarea component's `text-base md:text-sm`
+// defaults entirely — no breakpoint dependency, works on all viewport sizes.
 // Sizes: XS=8px, +2px per step (FIR-1487).
-const FONT_SIZE_CLASS: Record<NoteFontSize, string> = {
-  xs: "text-[8px] md:text-[8px]",
-  sm: "text-[10px] md:text-[10px]",
-  base: "text-[12px] md:text-[12px]",
-  lg: "text-[14px] md:text-[14px]",
+const FONT_SIZE_PX: Record<NoteFontSize, string> = {
+  xs: "8px",
+  sm: "10px",
+  base: "12px",
+  lg: "14px",
 };
 
 const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
@@ -247,7 +246,8 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
         onChange={(e) => onChange(e.target.value)}
         onBlur={flush}
         placeholder="Write a note… (the first line becomes the title)"
-        className={`min-h-28 resize-y border-0 bg-transparent ${FONT_SIZE_CLASS[fontSize ?? "sm"]} shadow-none focus-visible:ring-0`}
+        style={{ fontSize: FONT_SIZE_PX[fontSize ?? "sm"] }}
+        className="min-h-28 resize-y border-0 bg-transparent shadow-none focus-visible:ring-0"
       />
     </div>
   );
