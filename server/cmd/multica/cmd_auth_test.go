@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 func TestMain(m *testing.M) {
@@ -22,6 +24,65 @@ func testCmd() *cobra.Command {
 	cmd := &cobra.Command{}
 	cmd.PersistentFlags().String("profile", "", "")
 	return cmd
+}
+
+func TestResolveToken(t *testing.T) {
+	writeConfig := func(t *testing.T, cfg cli.CLIConfig) *cobra.Command {
+		t.Helper()
+		t.Setenv("HOME", t.TempDir())
+		if err := cli.SaveCLIConfig(cfg); err != nil {
+			t.Fatalf("SaveCLIConfig() error: %v", err)
+		}
+		return testCmd()
+	}
+
+	t.Run("prefers MULTICA_TOKEN even inside daemon context", func(t *testing.T) {
+		cmd := writeConfig(t, cli.CLIConfig{Token: "mul_owner_config"})
+		t.Setenv("MULTICA_TOKEN", "mat_task_token")
+		t.Setenv("MULTICA_DAEMON_PORT", "18100")
+		t.Setenv("MULTICA_AGENT_ID", "agent-1")
+		t.Setenv("MULTICA_TASK_ID", "task-1")
+
+		if got := resolveToken(cmd); got != "mat_task_token" {
+			t.Fatalf("resolveToken() = %q, want daemon task token", got)
+		}
+	})
+
+	t.Run("falls back to config outside daemon context", func(t *testing.T) {
+		cmd := writeConfig(t, cli.CLIConfig{Token: "mul_owner_config"})
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "")
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+		t.Setenv("MULTICA_SERVER_URL", "http://localhost:8080")
+
+		if got := resolveToken(cmd); got != "mul_owner_config" {
+			t.Fatalf("resolveToken() = %q, want config token outside daemon context", got)
+		}
+	})
+
+	t.Run("refuses config fallback when daemon token is missing from agent task", func(t *testing.T) {
+		cmd := writeConfig(t, cli.CLIConfig{Token: "mul_owner_config"})
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_AGENT_ID", "agent-1")
+		t.Setenv("MULTICA_TASK_ID", "task-1")
+
+		if got := resolveToken(cmd); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty token instead of owner config fallback", got)
+		}
+	})
+
+	t.Run("refuses config fallback when only daemon port survives", func(t *testing.T) {
+		cmd := writeConfig(t, cli.CLIConfig{Token: "mul_owner_config"})
+		t.Setenv("MULTICA_TOKEN", "")
+		t.Setenv("MULTICA_DAEMON_PORT", "18100")
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+
+		if got := resolveToken(cmd); got != "" {
+			t.Fatalf("resolveToken() = %q, want empty token instead of owner config fallback", got)
+		}
+	})
 }
 
 func TestResolveAppURL(t *testing.T) {

@@ -71,12 +71,19 @@ func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}
-	if inAgentExecutionContext() {
+	// Daemon-managed tasks must use the daemon-injected task token. Falling
+	// back to a user-global PAT would corrupt auth attribution if a child CLI
+	// process loses MULTICA_TOKEN but keeps daemon/task context.
+	if inDaemonManagedAuthContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	return cfg.Token
+}
+
+func inDaemonManagedAuthContext() bool {
+	return inAgentExecutionContext() || strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT")) != ""
 }
 
 func resolveAppURL(cmd *cobra.Command) string {
