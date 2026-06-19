@@ -9,12 +9,13 @@ import (
 
 // Recurrence frequencies accepted by the issue-side panel (FIR-334 mockup).
 const (
-	FreqDaily     = "daily"
-	FreqWeekly    = "weekly"
-	FreqMonthly   = "monthly"
-	FreqYearly    = "yearly"
-	FreqDaysAfter = "days_after"
-	FreqCustom    = "custom"
+	FreqDaily        = "daily"
+	FreqWeekly       = "weekly"
+	FreqMonthly      = "monthly"
+	FreqYearly       = "yearly"
+	FreqDaysAfter    = "days_after"
+	FreqCustom       = "custom"
+	FreqEveryWeekday = "every_weekday"
 )
 
 // Anchor modes — where the next due date is measured from.
@@ -25,7 +26,7 @@ const (
 
 // ValidFrequencies is the source-of-truth list used by validators; exported
 // so the handler can echo allowed values in its 400 response.
-var ValidFrequencies = []string{FreqDaily, FreqWeekly, FreqMonthly, FreqYearly, FreqDaysAfter, FreqCustom}
+var ValidFrequencies = []string{FreqDaily, FreqWeekly, FreqMonthly, FreqYearly, FreqDaysAfter, FreqCustom, FreqEveryWeekday}
 
 // ValidAnchors mirrors the anchor CHECK constraint.
 var ValidAnchors = []string{AnchorCompletion, AnchorDueDate}
@@ -85,6 +86,12 @@ func NextDueDate(base time.Time, freq string, interval int, weekdays []int, days
 	case FreqWeekly, FreqCustom:
 		next := base.AddDate(0, 0, 7*interval)
 		return snapToWeekday(next, weekdays)
+	case FreqEveryWeekday:
+		next := base.AddDate(0, 0, 1)
+		for isoWeekday(next) > 5 {
+			next = next.AddDate(0, 0, 1)
+		}
+		return next
 	default:
 		return base.AddDate(0, 0, interval)
 	}

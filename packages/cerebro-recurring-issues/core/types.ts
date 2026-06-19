@@ -1,7 +1,7 @@
 // TECH-3064 / FIR-334 recurring issues — shared types. Mirror the backend
 // RecurrenceResponse (server/internal/cerebro/recurringissue/types.go).
 
-export type Frequency = "daily" | "weekly" | "monthly" | "yearly" | "days_after" | "custom";
+export type Frequency = "daily" | "weekly" | "monthly" | "yearly" | "days_after" | "custom" | "every_weekday";
 export const FREQUENCIES: Frequency[] = [
   "daily",
   "weekly",
@@ -9,6 +9,7 @@ export const FREQUENCIES: Frequency[] = [
   "yearly",
   "days_after",
   "custom",
+  "every_weekday",
 ];
 
 export type Anchor = "completion" | "due_date";

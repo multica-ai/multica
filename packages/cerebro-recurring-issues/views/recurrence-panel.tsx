@@ -45,6 +45,7 @@ const FREQUENCY_LABELS: Record<Frequency, string> = {
   yearly: "Yearly",
   days_after: "Days after",
   custom: "Custom",
+  every_weekday: "Every weekday",
 };
 
 function defaultForm(): RecurrenceWriteInput {
@@ -109,6 +110,7 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
 
   const showWeekdays = form.frequency === "weekly" || form.frequency === "custom";
   const showDaysAfter = form.frequency === "days_after";
+  const showInterval = form.frequency !== "every_weekday";
 
   function toggleWeekday(day: number) {
     const set = new Set(form.weekdays ?? []);
@@ -150,7 +152,7 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
           <div className="text-sm font-medium">Recurring</div>
 
           {/* Frequency + interval */}
-          <div className="grid grid-cols-2 gap-2">
+          <div className={showInterval ? "grid grid-cols-2 gap-2" : "grid gap-2"}>
             <div className="grid gap-1.5">
               <Label htmlFor="rec-freq" className="text-xs">Frequency</Label>
               <Select
@@ -169,7 +171,7 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
                 </SelectContent>
               </Select>
             </div>
-            {showDaysAfter ? (
+            {showInterval && (showDaysAfter ? (
               <div className="grid gap-1.5">
                 <Label htmlFor="rec-days" className="text-xs">Days after</Label>
                 <Input
@@ -191,7 +193,7 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
                   onChange={(e) => setForm({ ...form, interval_count: Number(e.target.value) })}
                 />
               </div>
-            )}
+            ))}
           </div>
 
           {/* Weekday picker (weekly / custom) */}
