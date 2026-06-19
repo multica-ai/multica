@@ -65,6 +65,8 @@
 
 页面以查看/浏览为主（阶段画布、节点 DAG 只读），阶段层面支持轻量编辑（添加/删除/排序/节点分配）。节点内部配置编辑保留在原编辑器。
 
+**编辑器中的阶段分配**：编辑器的 `NodeConfigPanel` 也提供阶段下拉选择器。选中阶段后即时调用 `assignNodeToStage` mutation（乐观更新 + 错误回退），不进入编辑器的"Edit → Done"批量保存周期。新建节点默认 `stage_id = null`（未分组），节点创建后自动打开配置面板，用户可立即选择阶段。
+
 ### 4.5 组件架构：双层画布
 
 上层为 HTML/CSS 实现的横向滚动阶段卡片条，下层为 ReactFlow 只读画布渲染当前选中阶段的节点 DAG，侧边抽屉面板展示节点详情。
@@ -231,6 +233,7 @@ WorkflowOverviewPage                            ← entry point, fetches workflo
 - **Node-to-flow mapping**: extract shared logic from `dag-canvas.tsx` into a `useReadonlyFlowData(stageNodes, stageEdges)` hook
 - **AssigneePicker data**: reuse agent/member resolution from existing queries
 - **API client**: extend `ApiClient` class with stage-related methods
+- **NodeConfigPanel stage selector**: the existing editor's `NodeConfigPanel` receives `stages` via prop and includes a `<select>` dropdown that immediately calls `assignNodeToStage` mutation (optimistic update, revert on error). Enabled only in edit mode; disabled in view mode.
 
 ## 8. Data Flow & State Management
 
