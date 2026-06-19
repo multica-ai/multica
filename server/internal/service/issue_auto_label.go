@@ -20,6 +20,7 @@ import (
 
 const (
 	WorkspaceSettingAutoLabelNewIssues = "auto_label_new_issues"
+	WorkspaceSettingAutoLabelAgentID   = "auto_label_agent_id"
 	maxAutoLabelsPerIssue              = 2
 	minAutoLabelConfidence             = 0.65
 )
@@ -37,10 +38,14 @@ type IssueLabelRecommender interface {
 	RecommendIssueLabels(ctx context.Context, issue db.Issue, existing []db.IssueLabel) ([]IssueLabelRecommendation, error)
 }
 
-// IssueAutoLabelService applies labels to newly created member-authored issues.
+// IssueAutoLabelService handles labels for newly created member- or
+// agent-authored issues. In production it enqueues an internal Multica agent
+// task so the agent can classify via LLM judgment; the recommender path remains
+// as a deterministic fallback for tests and deployments without TaskService.
 type IssueAutoLabelService struct {
 	Queries     *db.Queries
 	Bus         *events.Bus
+	TaskService *TaskService
 	Recommender IssueLabelRecommender
 }
 
@@ -66,6 +71,24 @@ func AutoLabelNewIssuesEnabled(settings []byte) bool {
 	return parsed[WorkspaceSettingAutoLabelNewIssues] == true
 }
 
+func AutoLabelEligibleCreatorType(creatorType string) bool {
+	return creatorType == "member" || creatorType == "agent"
+}
+
+func AutoLabelAgentID(settings []byte) string {
+	if len(settings) == 0 {
+		return ""
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(settings, &parsed); err != nil {
+		return ""
+	}
+	if id, ok := parsed[WorkspaceSettingAutoLabelAgentID].(string); ok {
+		return strings.TrimSpace(id)
+	}
+	return ""
+}
+
 func (s *IssueAutoLabelService) AutoLabelCreatedIssue(ctx context.Context, issueID string) error {
 	if s == nil || s.Queries == nil || s.Recommender == nil {
 		return nil
@@ -78,7 +101,7 @@ func (s *IssueAutoLabelService) AutoLabelCreatedIssue(ctx context.Context, issue
 	if err != nil {
 		return err
 	}
-	if issue.CreatorType != "member" {
+	if !AutoLabelEligibleCreatorType(issue.CreatorType) {
 		return nil
 	}
 	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
@@ -98,6 +121,73 @@ func (s *IssueAutoLabelService) AutoLabelCreatedIssue(ctx context.Context, issue
 	if len(current) > 0 {
 		return nil
 	}
+	if s.TaskService != nil {
+		return s.enqueueAgentAutoLabelTask(ctx, issue, workspace.Settings)
+	}
+
+	return s.applyRecommendedLabels(ctx, issue)
+}
+
+func (s *IssueAutoLabelService) enqueueAgentAutoLabelTask(ctx context.Context, issue db.Issue, settings []byte) error {
+	agentID, ok, err := s.selectAutoLabelAgent(ctx, issue, settings)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		slog.Debug("issue auto-label: no ready agent available",
+			"issue_id", util.UUIDToString(issue.ID),
+			"workspace_id", util.UUIDToString(issue.WorkspaceID),
+		)
+		return nil
+	}
+	_, err = s.TaskService.EnqueueIssueAutoLabelTask(ctx, issue, agentID)
+	return err
+}
+
+func (s *IssueAutoLabelService) selectAutoLabelAgent(ctx context.Context, issue db.Issue, settings []byte) (pgtype.UUID, bool, error) {
+	if configuredID := AutoLabelAgentID(settings); configuredID != "" {
+		agentID, err := util.ParseUUID(configuredID)
+		if err != nil {
+			slog.Warn("issue auto-label: configured agent id is invalid",
+				"issue_id", util.UUIDToString(issue.ID),
+				"agent_id", configuredID,
+				"error", err,
+			)
+		} else if s.isReadyWorkspaceAgent(ctx, agentID, issue.WorkspaceID) {
+			return agentID, true, nil
+		}
+	}
+	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+		if s.isReadyWorkspaceAgent(ctx, issue.AssigneeID, issue.WorkspaceID) {
+			return issue.AssigneeID, true, nil
+		}
+	}
+	if issue.CreatorType == "agent" && issue.CreatorID.Valid {
+		if s.isReadyWorkspaceAgent(ctx, issue.CreatorID, issue.WorkspaceID) {
+			return issue.CreatorID, true, nil
+		}
+	}
+	agents, err := s.Queries.ListAgents(ctx, issue.WorkspaceID)
+	if err != nil {
+		return pgtype.UUID{}, false, err
+	}
+	for _, agent := range agents {
+		if agent.RuntimeID.Valid && !agent.ArchivedAt.Valid {
+			return agent.ID, true, nil
+		}
+	}
+	return pgtype.UUID{}, false, nil
+}
+
+func (s *IssueAutoLabelService) isReadyWorkspaceAgent(ctx context.Context, agentID, workspaceID pgtype.UUID) bool {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return false
+	}
+	return agent.WorkspaceID == workspaceID && agent.RuntimeID.Valid && !agent.ArchivedAt.Valid
+}
+
+func (s *IssueAutoLabelService) applyRecommendedLabels(ctx context.Context, issue db.Issue) error {
 	existing, err := s.Queries.ListLabels(ctx, issue.WorkspaceID)
 	if err != nil {
 		return err

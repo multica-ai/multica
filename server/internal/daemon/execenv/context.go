@@ -483,6 +483,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.IssueAutoLabel {
+		return renderIssueAutoLabelContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -508,6 +511,16 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("\n")
 	}
 
+	return b.String()
+}
+
+func renderIssueAutoLabelContext(ctx TaskContextForEnv) string {
+	var b strings.Builder
+	b.WriteString("# Issue Auto Label\n\n")
+	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
+	b.WriteString("**Trigger:** Internal auto-label task\n\n")
+	b.WriteString("## Quick Start\n\n")
+	fmt.Fprintf(&b, "Run `multica issue get %s --output json`, inspect existing workspace labels, attach at most two useful labels, then exit without comments or status changes.\n\n", ctx.IssueID)
 	return b.String()
 }
 

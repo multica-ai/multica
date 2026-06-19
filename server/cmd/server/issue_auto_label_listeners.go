@@ -15,7 +15,7 @@ func registerIssueAutoLabelListeners(bus *events.Bus, svc *service.IssueAutoLabe
 		return
 	}
 	bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
-		if e.ActorType != "member" {
+		if !service.AutoLabelEligibleCreatorType(e.ActorType) {
 			return
 		}
 		issueID := issueIDFromCreatedPayload(e.Payload)

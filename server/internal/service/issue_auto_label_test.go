@@ -78,6 +78,37 @@ func createAutoLabelIssue(t *testing.T, pool *pgxpool.Pool, workspaceID, creator
 	return issueID
 }
 
+func createReadyAutoLabelAgent(t *testing.T, pool *pgxpool.Pool, workspaceID, ownerID string) string {
+	t.Helper()
+	ctx := context.Background()
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, $2, 'Auto Label Runtime', 'local', 'codex', 'online',
+		        'test runtime', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, workspaceID, fmt.Sprintf("auto-label-daemon-%d", time.Now().UnixNano()), ownerID).Scan(&runtimeID); err != nil {
+		t.Fatalf("insert agent_runtime: %v", err)
+	}
+	var agentID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'Auto Labeler', 'Labels newly created issues', 'local', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, workspaceID, runtimeID, ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("insert agent: %v", err)
+	}
+	return agentID
+}
+
 func TestIssueAutoLabelServiceAttachesExistingLabel(t *testing.T) {
 	pool, queries := autoLabelTestQueries(t)
 	workspaceID, userID := createAutoLabelFixture(t, pool, `{"auto_label_new_issues":true}`)
@@ -196,7 +227,19 @@ func TestIssueAutoLabelServiceSkipsAlreadyLabeledIssue(t *testing.T) {
 	}
 }
 
-func TestIssueAutoLabelServiceSkipsAgentCreatedIssue(t *testing.T) {
+func TestAutoLabelEligibleCreatorType(t *testing.T) {
+	if !AutoLabelEligibleCreatorType("member") {
+		t.Fatal("expected member-created issues to be eligible")
+	}
+	if !AutoLabelEligibleCreatorType("agent") {
+		t.Fatal("expected agent-created issues to be eligible")
+	}
+	if AutoLabelEligibleCreatorType("system") {
+		t.Fatal("expected unsupported creator types to be ineligible")
+	}
+}
+
+func TestIssueAutoLabelServiceLabelsAgentCreatedIssueInFallbackMode(t *testing.T) {
 	pool, queries := autoLabelTestQueries(t)
 	workspaceID, userID := createAutoLabelFixture(t, pool, `{"auto_label_new_issues":true}`)
 	issueID := createAutoLabelIssue(t, pool, workspaceID, "agent", userID, "Fix crash on login", "The login screen fails after submit.")
@@ -213,7 +256,52 @@ func TestIssueAutoLabelServiceSkipsAgentCreatedIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListLabelsByIssue: %v", err)
 	}
+	if len(labels) != 1 || labels[0].Name != "bug" {
+		t.Fatalf("expected bug label for agent-created issue, got %+v", labels)
+	}
+}
+
+func TestIssueAutoLabelServiceEnqueuesAgentTaskWhenTaskServiceProvided(t *testing.T) {
+	pool, queries := autoLabelTestQueries(t)
+	workspaceID, userID := createAutoLabelFixture(t, pool, `{"auto_label_new_issues":true}`)
+	agentID := createReadyAutoLabelAgent(t, pool, workspaceID, userID)
+	issueID := createAutoLabelIssue(t, pool, workspaceID, "member", userID, "코드베이스 mcp 조사하고 연결하기", "MCP 연결 방식을 조사합니다.")
+
+	taskSvc := NewTaskService(queries, pool, nil, events.New())
+	svc := NewIssueAutoLabelService(queries, events.New(), nil)
+	svc.TaskService = taskSvc
+	if err := svc.AutoLabelCreatedIssue(context.Background(), issueID); err != nil {
+		t.Fatalf("AutoLabelCreatedIssue: %v", err)
+	}
+	if err := svc.AutoLabelCreatedIssue(context.Background(), issueID); err != nil {
+		t.Fatalf("AutoLabelCreatedIssue second call: %v", err)
+	}
+
+	tasks, err := queries.ListTasksByIssue(context.Background(), util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("ListTasksByIssue: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one auto-label task after dedupe, got %d", len(tasks))
+	}
+	if tasks[0].AgentID != util.MustParseUUID(agentID) {
+		t.Fatalf("task agent = %s, want %s", util.UUIDToString(tasks[0].AgentID), agentID)
+	}
+	if !IsIssueAutoLabelTaskContext(tasks[0].Context) {
+		t.Fatalf("expected issue_auto_label task context, got %s", string(tasks[0].Context))
+	}
+	if !tasks[0].ForceFreshSession {
+		t.Fatal("expected auto-label task to force a fresh session")
+	}
+
+	labels, err := queries.ListLabelsByIssue(context.Background(), db.ListLabelsByIssueParams{
+		IssueID:     util.MustParseUUID(issueID),
+		WorkspaceID: util.MustParseUUID(workspaceID),
+	})
+	if err != nil {
+		t.Fatalf("ListLabelsByIssue: %v", err)
+	}
 	if len(labels) != 0 {
-		t.Fatalf("expected no labels for agent-created issue, got %+v", labels)
+		t.Fatalf("expected agent task path not to attach labels synchronously, got %+v", labels)
 	}
 }

@@ -257,7 +257,6 @@ func main() {
 	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
-	registerIssueAutoLabelListeners(bus, service.NewIssueAutoLabelService(queries, bus, nil))
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -333,6 +332,9 @@ func main() {
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
+	autoLabelSvc := service.NewIssueAutoLabelService(queries, bus, nil)
+	autoLabelSvc.TaskService = taskSvc
+	registerIssueAutoLabelListeners(bus, autoLabelSvc)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 

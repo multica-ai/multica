@@ -289,6 +289,7 @@ type AgentTaskResponse struct {
 	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
 	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
 	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	IssueAutoLabel           bool                 `json:"issue_auto_label,omitempty"`            // true for internal LLM-powered issue auto-label tasks
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -404,6 +405,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// with issue_id = "" once a task has no linked issue.
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
+		IssueAutoLabel: service.IsIssueAutoLabelTaskContext(t.Context),
 		Kind:           computeTaskKind(t),
 	}
 }

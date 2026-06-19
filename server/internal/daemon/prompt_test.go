@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestBuildIssueAutoLabelPromptRules(t *testing.T) {
+	out := buildIssueAutoLabelPrompt(Task{
+		IssueID:        "issue-123",
+		IssueAutoLabel: true,
+	})
+
+	for _, want := range []string{
+		"internal issue auto-labeling agent",
+		"multica issue get issue-123 --output json",
+		"multica issue label list issue-123 --output json",
+		"multica label list --output json",
+		"multica label create --name <name> --color <hex> --output json",
+		"multica issue label add issue-123 <label-id> --output json",
+		"Use semantic understanding, not keyword counting.",
+		"Do NOT comment on the issue.",
+		"Do NOT change issue status",
+		"Do NOT create or update any issue other than labels on the assigned issue.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("buildIssueAutoLabelPrompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
 // quick-create agent is allowed to translate raw user input into the issue
 // description body. Each substring corresponds to a concrete failure mode

@@ -24,6 +24,9 @@ func BuildPrompt(task Task, provider string) string {
 	if task.AutopilotRunID != "" {
 		return buildAutopilotPrompt(task)
 	}
+	if task.IssueAutoLabel {
+		return buildIssueAutoLabelPrompt(task)
+	}
 	if task.QuickCreatePrompt != "" {
 		return buildQuickCreatePrompt(task)
 	}
@@ -32,6 +35,32 @@ func BuildPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). `multica issue comment list %s --output json` returns all comments for the issue (server caps at 2000). On long-running issues use `--recent 20 --output json` to read the 20 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
+	return b.String()
+}
+
+func buildIssueAutoLabelPrompt(task Task) string {
+	var b strings.Builder
+	b.WriteString("You are running as an internal issue auto-labeling agent for a Multica workspace.\n\n")
+	fmt.Fprintf(&b, "Issue ID: %s\n\n", task.IssueID)
+	b.WriteString("Your only job is to use your LLM judgment to attach useful labels to this issue.\n\n")
+	b.WriteString("Workflow:\n\n")
+	fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to read the title, description, creator, status, project, and existing labels.\n", task.IssueID)
+	fmt.Fprintf(&b, "2. Run `multica issue label list %s --output json`. If the issue already has labels, make no changes and exit.\n", task.IssueID)
+	b.WriteString("3. Run `multica label list --output json` to see the workspace's existing label vocabulary.\n")
+	b.WriteString("4. Choose at most two labels. Prefer existing labels when they fit semantically. If no existing label fits but a concise, reusable label is clearly useful, create one with `multica label create --name <name> --color <hex> --output json`.\n")
+	fmt.Fprintf(&b, "5. Attach selected labels with `multica issue label add %s <label-id> --output json`.\n\n", task.IssueID)
+	b.WriteString("Label judgment rules:\n\n")
+	b.WriteString("- Use semantic understanding, not keyword counting.\n")
+	b.WriteString("- Prefer broad, reusable labels over one-off phrases.\n")
+	b.WriteString("- Do not create a duplicate label that differs only by case, spacing, or translation from an existing label.\n")
+	b.WriteString("- Keep new label names 32 characters or fewer.\n")
+	b.WriteString("- If the issue is too ambiguous for a useful label, attach nothing.\n\n")
+	b.WriteString("Hard limits:\n\n")
+	b.WriteString("- Do NOT comment on the issue.\n")
+	b.WriteString("- Do NOT change issue status, assignee, title, description, metadata, subscribers, PRs, or code.\n")
+	b.WriteString("- Do NOT mention members, agents, squads, or issues.\n")
+	b.WriteString("- Do NOT create or update any issue other than labels on the assigned issue.\n")
+	b.WriteString("- When finished, print one short line such as `Auto-labeled <issue> with: bug, backend` or `No labels applied: <reason>` and exit.\n")
 	return b.String()
 }
 

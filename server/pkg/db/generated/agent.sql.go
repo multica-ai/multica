@@ -813,13 +813,14 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 const createAgentTask = `-- name: CreateAgentTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, force_fresh_session, is_leader_task
+    trigger_summary, force_fresh_session, is_leader_task, context
 )
 VALUES (
     $1, $2, $3, 'queued', $4, $5,
     $6,
     COALESCE($7::boolean, FALSE),
-    COALESCE($8::boolean, FALSE)
+    COALESCE($8::boolean, FALSE),
+    $9
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id
 `
@@ -833,6 +834,7 @@ type CreateAgentTaskParams struct {
 	TriggerSummary    pgtype.Text `json:"trigger_summary"`
 	ForceFreshSession pgtype.Bool `json:"force_fresh_session"`
 	IsLeaderTask      pgtype.Bool `json:"is_leader_task"`
+	Context           []byte      `json:"context"`
 }
 
 func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams) (AgentTaskQueue, error) {
@@ -845,6 +847,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.TriggerSummary,
 		arg.ForceFreshSession,
 		arg.IsLeaderTask,
+		arg.Context,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -1647,6 +1650,23 @@ WHERE issue_id = $1 AND status IN ('queued', 'dispatched')
 // task already exists (natural dedup).
 func (q *Queries) HasPendingTaskForIssue(ctx context.Context, issueID pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, hasPendingTaskForIssue, issueID)
+	var has_pending bool
+	err := row.Scan(&has_pending)
+	return has_pending, err
+}
+
+const hasPendingIssueAutoLabelTask = `-- name: HasPendingIssueAutoLabelTask :one
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE issue_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  AND context @> '{"type":"issue_auto_label"}'::jsonb
+`
+
+// Returns true if the issue already has an active auto-label task. Auto-label
+// tasks are internal housekeeping jobs, so a running one should dedupe future
+// enqueue attempts too.
+func (q *Queries) HasPendingIssueAutoLabelTask(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingIssueAutoLabelTask, issueID)
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
