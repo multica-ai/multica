@@ -3,6 +3,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Artifact, ArtifactFolder } from "@multica/core/types";
 
+// Stub the FIR-1590 folder access-control picker. It's an independent widget
+// (auth store + member queries + visibility mutations) that FileManagerPage
+// only renders per row; these drag-and-drop tests don't exercise it, and
+// rendering the real one would require booting the platform auth store.
+vi.mock("./folder-access-control", () => ({
+  FolderAccessControl: () => null,
+}));
+
 // ---------- Hoisted mocks ----------
 
 const moveArtifactMutate = vi.hoisted(() => vi.fn());
