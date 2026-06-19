@@ -13,7 +13,7 @@ import (
 
 const getProjectNesting = `-- name: GetProjectNesting :one
 
-SELECT project_id, parent_project_id, show_descendants, depth, created_at, updated_at FROM project_nesting
+SELECT project_id, parent_project_id, show_descendants, depth, created_at, updated_at, position FROM project_nesting
 WHERE project_id = $1
 `
 
@@ -29,6 +29,7 @@ func (q *Queries) GetProjectNesting(ctx context.Context, projectID pgtype.UUID) 
 		&i.Depth,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Position,
 	)
 	return i, err
 }
@@ -93,7 +94,7 @@ func (q *Queries) ListProjectAndDescendantIDs(ctx context.Context, dollar_1 pgty
 }
 
 const listProjectNesting = `-- name: ListProjectNesting :many
-SELECT pn.project_id, pn.parent_project_id, pn.show_descendants, pn.depth, pn.created_at, pn.updated_at
+SELECT pn.project_id, pn.parent_project_id, pn.show_descendants, pn.depth, pn.created_at, pn.updated_at, pn.position
 FROM project_nesting pn
 JOIN project p ON p.id = pn.project_id
 WHERE p.workspace_id = $1
@@ -115,6 +116,7 @@ func (q *Queries) ListProjectNesting(ctx context.Context, workspaceID pgtype.UUI
 			&i.Depth,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Position,
 		); err != nil {
 			return nil, err
 		}
@@ -124,6 +126,36 @@ func (q *Queries) ListProjectNesting(ctx context.Context, workspaceID pgtype.UUI
 		return nil, err
 	}
 	return items, nil
+}
+
+const setProjectNestingPosition = `-- name: SetProjectNestingPosition :exec
+INSERT INTO project_nesting (project_id, parent_project_id, show_descendants, depth, position)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (project_id) DO UPDATE
+  SET position   = EXCLUDED.position,
+      updated_at = now()
+`
+
+type SetProjectNestingPositionParams struct {
+	ProjectID       pgtype.UUID `json:"project_id"`
+	ParentProjectID pgtype.UUID `json:"parent_project_id"`
+	ShowDescendants bool        `json:"show_descendants"`
+	Depth           int16       `json:"depth"`
+	Position        int32       `json:"position"`
+}
+
+// FIR-1614: set a project's sibling order. Inserts a default nesting row (with
+// the supplied parent/depth) when the project has none yet, else updates only
+// the position so a reorder never disturbs parent/depth.
+func (q *Queries) SetProjectNestingPosition(ctx context.Context, arg SetProjectNestingPositionParams) error {
+	_, err := q.db.Exec(ctx, setProjectNestingPosition,
+		arg.ProjectID,
+		arg.ParentProjectID,
+		arg.ShowDescendants,
+		arg.Depth,
+		arg.Position,
+	)
+	return err
 }
 
 const updateProjectNestingDepth = `-- name: UpdateProjectNestingDepth :exec
@@ -151,7 +183,7 @@ ON CONFLICT (project_id) DO UPDATE
       show_descendants  = EXCLUDED.show_descendants,
       depth             = EXCLUDED.depth,
       updated_at        = now()
-RETURNING project_id, parent_project_id, show_descendants, depth, created_at, updated_at
+RETURNING project_id, parent_project_id, show_descendants, depth, created_at, updated_at, position
 `
 
 type UpsertProjectNestingParams struct {
@@ -176,6 +208,7 @@ func (q *Queries) UpsertProjectNesting(ctx context.Context, arg UpsertProjectNes
 		&i.Depth,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Position,
 	)
 	return i, err
 }

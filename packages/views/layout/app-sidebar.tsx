@@ -117,8 +117,8 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
-// CEREBRO-PATCH(sidebar-sprints-nav): TECH-3684 sprints listed under each project.
-import { ProjectSprintsNav } from "./cerebro-project-sprints-nav";
+// CEREBRO-PATCH(project-tree): FIR-1614 nested project tree (design, 3-dot menu, sprints, DnD).
+import { CerebroProjectTree } from "./cerebro-project-tree";
 import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
@@ -410,11 +410,6 @@ function filterActiveProjectTree(projects: ProjectTreeItem[]): ProjectTreeItem[]
   return projects
     .filter((p) => p.status !== "completed" && p.status !== "cancelled")
     .map((p) => ({ ...p, children: filterActiveProjectTree(p.children ?? []) }));
-}
-
-function projectTreeContainsPath(project: ProjectTreeItem, pathname: string, projectHref: (id: string) => string): boolean {
-  if (pathname === projectHref(project.id)) return true;
-  return (project.children ?? []).some((child) => projectTreeContainsPath(child, pathname, projectHref));
 }
 
 interface AppSidebarProps {
@@ -905,73 +900,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <span>New Project</span>
                           </SidebarMenuButton>
                         </SidebarMenuItem>
-                        {activeProjects.map((project) => {
-                          const renderProject = (item: ProjectTreeItem, level: number): React.ReactNode => {
-                            const href = p.projectDetail(item.id);
-                            const isActive = pathname === href;
-                            const children = item.children ?? [];
-                            const hasChildren = children.length > 0;
-                            const isExpanded = localExpandedProjects[item.id] ?? true;
-                            const hasActiveChild = children.some((child) => projectTreeContainsPath(child, pathname, p.projectDetail));
-                            // CEREBRO-PATCH(nested-projects-indent): each nesting level adds 12px margin + 8px padding (v3 mockup).
-                            const nestedStyle = level > 0 ? { marginLeft: level * 12, paddingLeft: level * 8 } : undefined;
-                            return (
-                              <SidebarMenuItem key={item.id}>
-                                <div className="relative" style={nestedStyle}>
-                                  <SidebarMenuButton
-                                    isActive={isActive}
-                                    render={<AppLink href={href} />}
-                                    onClick={handleNavClick}
-                                    className={cn(
-                                      "h-7 text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
-                                      hasActiveChild && "bg-sidebar-accent/45 text-sidebar-accent-foreground",
-                                    )}
-                                  >
-                                    {hasChildren ? (
-                                      <span
-                                        role="button"
-                                        tabIndex={0}
-                                        className="flex size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-                                        onClick={(event) => {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          setProjectExpanded(item.id, !isExpanded);
-                                        }}
-                                        onKeyDown={(event) => {
-                                          if (event.key !== "Enter" && event.key !== " ") return;
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          setProjectExpanded(item.id, !isExpanded);
-                                        }}
-                                      >
-                                        <ChevronRight className={cn("!size-3 transition-transform", isExpanded && "rotate-90")} />
-                                      </span>
-                                    ) : (
-                                      <span className="size-3.5 shrink-0" />
-                                    )}
-                                    {level === 0 && <ProjectIcon project={item} size="sm" />}
-                                    <span className="truncate">{item.title}</span>
-                                    {level === 0 && item.issue_count > 0 && (
-                                      <span className="ml-auto text-[10px] text-muted-foreground">
-                                        {item.done_count}/{item.issue_count}
-                                      </span>
-                                    )}
-                                  </SidebarMenuButton>
-                                </div>
-                                {hasChildren && isExpanded && (
-                                  // CEREBRO-PATCH(nested-projects-guide-line): single continuous spine on children-ul, anchored at parent's chevron column. Formula: level*(marginLeft+paddingLeft)+button-px-2 = level*20+8.
-                                  <ul className="relative flex w-full min-w-0 flex-col gap-0">
-                                    <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px" style={{ left: level * 20 + 8, background: "color-mix(in oklch, var(--sidebar-foreground) 20%, transparent)" }} />
-                                    {children.map((child) => renderProject(child, level + 1))}
-                                  </ul>
-                                )}
-                                {/* CEREBRO-PATCH(sidebar-sprints-nav): TECH-3684 sprints under the project. */}
-                                <ProjectSprintsNav projectId={item.id} level={level} />
-                              </SidebarMenuItem>
-                            );
-                          };
-                          return renderProject(project, 0);
-                        })}
+                        {/* CEREBRO-PATCH(project-tree): FIR-1614 nested project tree (design + DnD) lives in cerebro-project-tree. */}
+                        <CerebroProjectTree
+                          projects={activeProjects}
+                          expandedMap={localExpandedProjects}
+                          onToggleExpand={setProjectExpanded}
+                          onNavigate={handleNavClick}
+                        />
                       </SidebarMenu>
                     </CollapsibleContent>
                   </SidebarMenuItem>

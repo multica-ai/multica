@@ -70,6 +70,7 @@ export interface ProjectTreeItem extends Project {
   parent_project_id: string | null;
   show_descendants: boolean;
   depth: number;
+  position?: number; // CEREBRO-PATCH(project-nesting-position): FIR-1614 sibling order.
   children?: ProjectTreeItem[];
 }
 

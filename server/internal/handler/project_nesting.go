@@ -21,10 +21,18 @@ type ProjectTreeItemResponse struct {
 	// `parent_project_id` here. Tree-only metadata stays below.
 	ShowDescendants bool  `json:"show_descendants"`
 	Depth           int16 `json:"depth"`
+	// CEREBRO-PATCH(project-nesting-position): FIR-1614 sibling display order.
+	Position int32 `json:"position"`
 }
 
 type setProjectParentRequest struct {
 	ParentProjectID *string `json:"parent_project_id"`
+}
+
+// CEREBRO-PATCH(project-reorder-request): FIR-1614 drag-to-reorder a sibling group.
+type reorderProjectsRequest struct {
+	ParentProjectID *string  `json:"parent_project_id"`
+	OrderedIDs      []string `json:"ordered_ids"`
 }
 
 type setProjectShowDescendantsRequest struct {
@@ -154,6 +162,8 @@ func (h *Handler) ListProjectTree(w http.ResponseWriter, r *http.Request) {
 			ProjectResponse: projectToResponse(project),
 			ShowDescendants: row.ShowDescendants,
 			Depth:           row.Depth,
+			// CEREBRO-PATCH(project-nesting-position): FIR-1614 expose sibling order.
+			Position: row.Position,
 		}
 		resp[i].ParentProjectID = nestingParentID(row)
 		if row.ShowDescendants {
@@ -234,8 +244,9 @@ func (h *Handler) SetProjectParent(w http.ResponseWriter, r *http.Request) {
 		}
 		newDepth = parentRow.Depth + 1
 	}
-	if newDepth+maxRelativeDepth(projectID, childrenByParent(rows)) > 2 {
-		writeError(w, http.StatusBadRequest, "project nesting supports max 3 levels")
+	// CEREBRO-PATCH(project-nesting-4-levels): FIR-1614 allow up to 4 nesting levels (absolute depth 0..3).
+	if newDepth+maxRelativeDepth(projectID, childrenByParent(rows)) > 3 {
+		writeError(w, http.StatusBadRequest, "project nesting supports max 4 levels")
 		return
 	}
 
@@ -339,6 +350,81 @@ func (h *Handler) SetProjectShowDescendants(w http.ResponseWriter, r *http.Reque
 	userID := requestUserID(r)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// CEREBRO-PATCH(project-reorder-handler): FIR-1614 drag-to-reorder one sibling
+// group. Body: { parent_project_id, ordered_ids }. Assigns position=index to
+// each id, creating a nesting row for parentless roots that lack one. Parent
+// and depth are preserved (the upsert only writes position on conflict).
+func (h *Handler) ReorderProjects(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	var req reorderProjectsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.OrderedIDs) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	var parentUUID pgtype.UUID
+	if req.ParentProjectID != nil && *req.ParentProjectID != "" {
+		parentUUID, ok = parseUUIDOrBadRequest(w, *req.ParentProjectID, "parent_project_id")
+		if !ok {
+			return
+		}
+	}
+
+	rows, err := h.Queries.ListProjectNesting(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project nesting")
+		return
+	}
+	nesting := nestingByProject(rows)
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	for i, id := range req.OrderedIDs {
+		projUUID, ok := parseUUIDOrBadRequest(w, id, "ordered_ids")
+		if !ok {
+			return
+		}
+		if _, err := qtx.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projUUID, WorkspaceID: wsUUID}); err != nil {
+			writeError(w, http.StatusBadRequest, "project not found in workspace")
+			return
+		}
+		row, exists := nesting[id]
+		if !exists {
+			row = defaultProjectNesting(projUUID)
+		}
+		if err := qtx.SetProjectNestingPosition(r.Context(), db.SetProjectNestingPositionParams{
+			ProjectID:       projUUID,
+			ParentProjectID: parentUUID,
+			ShowDescendants: row.ShowDescendants,
+			Depth:           row.Depth,
+			Position:        int32(i),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reorder projects")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit reorder")
+		return
+	}
+	userID := requestUserID(r)
+	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"reordered": true})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h *Handler) GetProjectRollupStats(w http.ResponseWriter, r *http.Request) {

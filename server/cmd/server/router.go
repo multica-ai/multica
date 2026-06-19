@@ -1430,6 +1430,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/tree", h.ListProjectTree)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
+				// CEREBRO-PATCH(project-reorder-route): FIR-1614 drag-to-reorder a sibling group.
+				r.Put("/reorder", h.ReorderProjects)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)

@@ -1473,6 +1473,10 @@
       "gate": "self_only"
     },
     {
+      "id": "PUT /api/projects/reorder",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/projects/{id}/",
       "gate": "project_access"
     },

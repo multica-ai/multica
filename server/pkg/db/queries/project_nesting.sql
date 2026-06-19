@@ -21,6 +21,17 @@ SET depth = $2,
     updated_at = now()
 WHERE project_id = $1;
 
+-- CEREBRO-PATCH(project-reorder-query): FIR-1614 sibling-order setter.
+-- name: SetProjectNestingPosition :exec
+-- FIR-1614: set a project's sibling order. Inserts a default nesting row (with
+-- the supplied parent/depth) when the project has none yet, else updates only
+-- the position so a reorder never disturbs parent/depth.
+INSERT INTO project_nesting (project_id, parent_project_id, show_descendants, depth, position)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (project_id) DO UPDATE
+  SET position   = EXCLUDED.position,
+      updated_at = now();
+
 -- name: ListProjectNesting :many
 SELECT pn.*
 FROM project_nesting pn

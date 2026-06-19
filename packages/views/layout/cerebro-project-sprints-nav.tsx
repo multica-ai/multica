@@ -44,8 +44,8 @@ export function ProjectSprintsNav({ projectId, level }: Props) {
 
   return (
     <ul className="relative flex w-full min-w-0 flex-col gap-0">
-      {/* CEREBRO-PATCH(sidebar-sprints-guide-line): FIR-1457 hang sprints off the same vertical spine as sub-projects (same formula as app-sidebar nested-projects-guide-line) so a sprint reads as a child of its project, not a detached sibling. */}
-      <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px" style={{ left: level * 20 + 8, background: "color-mix(in oklch, var(--sidebar-foreground) 20%, transparent)" }} />
+      {/* CEREBRO-PATCH(sidebar-sprints-guide-line): FIR-1457 hang sprints off the same vertical spine as sub-projects (same formula as app-sidebar nested-projects-guide-line, centered on the parent chevron) so a sprint reads as a child of its project, not a detached sibling. */}
+      <span aria-hidden="true" className="pointer-events-none absolute -top-3.5 bottom-0 w-px" style={{ left: level * 20 + 15, background: "color-mix(in oklch, var(--sidebar-foreground) 20%, transparent)" }} />
       {sprints.map((sprint) => {
         const href = paths.sprintDetail(sprint.id);
         const isActive = pathname === href;

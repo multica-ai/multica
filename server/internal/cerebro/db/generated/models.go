@@ -1577,6 +1577,7 @@ type ProjectNesting struct {
 	Depth           int16              `json:"depth"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Position        int32              `json:"position"`
 }
 
 type ProjectResource struct {

@@ -3442,6 +3442,14 @@ export class ApiClient {
     return this.fetch("/api/projects/tree");
   }
 
+  // CEREBRO-PATCH(project-reorder-client): FIR-1614 drag-to-reorder a sibling group.
+  async reorderProjects(parentProjectId: string | null, orderedIds: string[]): Promise<void> {
+    await this.fetch(`/api/projects/reorder`, {
+      method: "PUT",
+      body: JSON.stringify({ parent_project_id: parentProjectId, ordered_ids: orderedIds }),
+    });
+  }
+
   async createProject(data: CreateProjectRequest): Promise<Project> {
     return this.fetch("/api/projects", {
       method: "POST",

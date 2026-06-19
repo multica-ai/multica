@@ -28,8 +28,10 @@ export function buildProjectTree(projects: ProjectTreeItem[]): ProjectTreeItem[]
     }
   }
 
+  // FIR-1614: respect the user-set sibling order (position), falling back to
+  // title for projects that have never been reordered (position 0).
   const sortProjects = (items: ProjectTreeItem[]) => {
-    items.sort((a, b) => a.title.localeCompare(b.title));
+    items.sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title));
     for (const item of items) sortProjects(item.children ?? []);
   };
   sortProjects(roots);
@@ -49,6 +51,18 @@ export function projectRollupStatsOptions(wsId: string, projectId: string) {
   return queryOptions({
     queryKey: projectNestingKeys.rollupStats(wsId, projectId),
     queryFn: () => api.getProjectRollupStats(projectId),
+  });
+}
+
+// CEREBRO-PATCH(project-reorder-hook): FIR-1614 drag-to-reorder a sibling group (roots when parentProjectId is null).
+export function useReorderProjects(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ parentProjectId, orderedIds }: { parentProjectId: string | null; orderedIds: string[] }) =>
+      api.reorderProjects(parentProjectId, orderedIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: projectAllKey(wsId) });
+    },
   });
 }
 
