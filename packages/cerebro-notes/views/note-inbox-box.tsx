@@ -39,11 +39,14 @@ const SAVE_DEBOUNCE_MS = 600;
 /** FIR-1487 — available font sizes for the Quick note editor. */
 export type NoteFontSize = "xs" | "sm" | "base" | "lg";
 
+// Each value includes a `md:` variant so tailwind-merge overrides the
+// Textarea component's built-in `md:text-sm` responsive default; without it
+// `md:text-sm` wins in the CSS cascade on desktop and the size never changes.
 const FONT_SIZE_CLASS: Record<NoteFontSize, string> = {
-  xs: "text-[8px]",
-  sm: "text-[11px]",
-  base: "text-sm",
-  lg: "text-lg",
+  xs: "text-[8px] md:text-[8px]",
+  sm: "text-[11px] md:text-[11px]",
+  base: "text-sm md:text-sm",
+  lg: "text-lg md:text-lg",
 };
 
 const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
