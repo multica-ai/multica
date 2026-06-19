@@ -155,6 +155,44 @@ export class TestApiClient {
     return stage;
   }
 
+  async createWorkflowNode(workflowId: string, data: {
+    title: string;
+    description?: string;
+    position_x?: number;
+    position_y?: number;
+    worker_type?: string;
+    critic_type?: string;
+    stage_id?: string | null;
+  }) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: data.title,
+        description: data.description ?? "",
+        position_x: data.position_x ?? 0,
+        position_y: data.position_y ?? 0,
+        worker_type: data.worker_type ?? "agent",
+        critic_type: data.critic_type ?? "human",
+      }),
+    });
+    const node = await res.json();
+
+    // If stage_id is provided, assign the node to the stage
+    if (data.stage_id !== undefined) {
+      await this.assignNodeToStage(workflowId, node.id, data.stage_id);
+    }
+
+    return node;
+  }
+
+  async assignNodeToStage(workflowId: string, nodeId: string, stageId: string | null) {
+    const res = await this.authedFetch(`/api/workflows/${workflowId}/nodes/${nodeId}/stage`, {
+      method: "PUT",
+      body: JSON.stringify({ stage_id: stageId }),
+    });
+    return res.json();
+  }
+
   async deleteIssue(id: string) {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
