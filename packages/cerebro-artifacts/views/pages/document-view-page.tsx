@@ -12,9 +12,7 @@ import {
   Save,
   Replace,
   MessageSquare,
-  X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -32,9 +30,6 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useDeleteArtifact,
   useUpdateArtifact,
-  countMatches,
-  replaceAll,
-  replaceFirst,
 } from "@multica/cerebro-artifacts/core";
 import { Input } from "@multica/ui/components/ui/input";
 import {
@@ -56,6 +51,7 @@ import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { MoveScopeMenu } from "../components/move-scope-menu";
 import { DocumentToolsSidebar } from "../components/document-tools-sidebar";
+import { FindReplaceBar } from "../components/find-replace-bar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Artifact } from "@multica/core/types";
 
@@ -350,103 +346,6 @@ function MarkdownDocumentEditor({
         />
       </div>
     </section>
-  );
-}
-
-/**
- * Inline find & replace bar for the open note. It works directly on the note's
- * content (the document is inline-edited, so there is no separate edit field):
- * the parent passes the current body, this bar computes matches and hands back
- * the replaced body, which the parent writes into the inline editor + autosaves.
- */
-function FindReplaceBar({
-  body,
-  onReplaceAll,
-  onReplaceFirst,
-  onClose,
-}: {
-  body: string;
-  onReplaceAll: (newBody: string) => void;
-  onReplaceFirst: (newBody: string) => void;
-  onClose: () => void;
-}) {
-  const [find, setFind] = React.useState("");
-  const [replacement, setReplacement] = React.useState("");
-  const matches = React.useMemo(() => countMatches(body, find), [body, find]);
-
-  const doReplaceAll = () => {
-    if (!find) return;
-    const { body: next, count } = replaceAll(body, find, replacement);
-    if (count === 0) {
-      toast.info("No matches to replace.");
-      return;
-    }
-    onReplaceAll(next);
-    toast.success(`Replaced ${count} ${count === 1 ? "match" : "matches"}.`);
-  };
-
-  const doReplaceFirst = () => {
-    if (!find) return;
-    const { body: next, replaced } = replaceFirst(body, find, replacement);
-    if (!replaced) {
-      toast.info("No matches to replace.");
-      return;
-    }
-    onReplaceFirst(next);
-  };
-
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-      <div className="flex items-center gap-1.5">
-        <Input
-          autoFocus
-          value={find}
-          onChange={(e) => setFind(e.target.value)}
-          placeholder="Search…"
-          className="h-8 w-40"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onClose();
-          }}
-        />
-        <span className="min-w-14 text-xs text-muted-foreground">
-          {find ? `${matches} found` : ""}
-        </span>
-      </div>
-      <Input
-        value={replacement}
-        onChange={(e) => setReplacement(e.target.value)}
-        placeholder="Replace with…"
-        className="h-8 w-40"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={doReplaceFirst}
-        disabled={matches === 0}
-      >
-        Replace
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={doReplaceAll}
-        disabled={matches === 0}
-      >
-        Replace all
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="ml-auto"
-        title="Close"
-        onClick={onClose}
-      >
-        <X className="size-4" />
-      </Button>
-    </div>
   );
 }
 

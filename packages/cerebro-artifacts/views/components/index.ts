@@ -9,6 +9,7 @@ export { ArtifactList, type ArtifactListProps } from "./artifact-list";
 export { ArtifactSheet } from "./artifact-sheet";
 export { CreateArtifactSheet, type CreateArtifactSheetProps } from "./create-artifact-sheet";
 export { DocumentToolsSidebar } from "./document-tools-sidebar";
+export { FindReplaceBar } from "./find-replace-bar";
 export { FolderAccessControl } from "./folder-access-control";
 export { KindIcon, KIND_LABELS } from "./kind-icon";
 export { KIND_TEMPLATES, KIND_HELP } from "./kind-templates";

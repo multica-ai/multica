@@ -23,6 +23,7 @@ import {
   ExternalLink,
   User,
   Pencil,
+  Replace,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -37,6 +38,7 @@ import {
 import {
   NoteTypesPanel,
   DocumentToolsSidebar,
+  FindReplaceBar,
   FolderAccessControl,
 } from "@multica/cerebro-artifacts/views/components";
 import {
@@ -763,6 +765,11 @@ export function NoteEditor({
   // counts react while typing, without waiting for the save round-trip.
   const [liveBody, setLiveBody] = React.useState(note.body);
   const contentScrollRef = React.useRef<HTMLDivElement>(null);
+  // Inline find & replace, shared with the Documents surface (FIR-1647). The bar
+  // operates on the markdown body; replacements remount the editor (replaceToken)
+  // so the new text appears and autosaves, mirroring the Documents view.
+  const [findOpen, setFindOpen] = React.useState(false);
+  const [replaceToken, setReplaceToken] = React.useState(0);
 
   const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
   const isOwner = note.owner_id === myId;
@@ -822,6 +829,26 @@ export function NoteEditor({
     setLiveBody(markdown);
     if (markdown !== note.body) updateNote.mutate({ id: note.id, body: markdown });
   }
+
+  // Find & replace hands back the fully replaced body. Remount the editor so the
+  // new text shows, keep the outline/counts in sync, and persist it.
+  function applyReplacedBody(next: string) {
+    setReplaceToken((t) => t + 1);
+    saveBody(next);
+  }
+
+  // Cmd/Ctrl+F opens the inline find & replace bar (only when editable).
+  React.useEffect(() => {
+    if (readOnly) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [readOnly]);
 
   function applyVisibility(v: NoteVisibility) {
     setVisibility.mutate({
@@ -1020,6 +1047,12 @@ export function NoteEditor({
                 History
               </DropdownMenuItem>
             )}
+            {!readOnly && (
+              <DropdownMenuItem onClick={() => setFindOpen(true)}>
+                <Replace className="size-4" />
+                Find & replace
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => setAddRefOpen(true)}>
               <Link2 className="size-4" />
               Add reference
@@ -1080,9 +1113,18 @@ export function NoteEditor({
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col">
+              {findOpen && (
+                <FindReplaceBar
+                  body={liveBody}
+                  onReplaceAll={applyReplacedBody}
+                  onReplaceFirst={applyReplacedBody}
+                  onClose={() => setFindOpen(false)}
+                />
+              )}
               <ContentEditor
+                key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
-                defaultValue={note.body}
+                defaultValue={liveBody}
                 onUpdate={saveBody}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
