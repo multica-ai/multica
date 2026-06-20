@@ -335,12 +335,14 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 // SendMarkdownCard posts the agent's reply as an interactive card
 // using Lark's schema-2.0 envelope with a single `tag: "markdown"`
 // body element. Lark's client renders the markdown into formatted
-// text (bold, italics, lists, links, fenced code blocks, tables, …)
+// text (bold, italics, lists, links, fenced code blocks, …)
 // rather than showing raw markdown characters as it does for
-// `msg_type=text`. We deliberately keep `SendTextMessage` as a
-// separate path for plain-prose replies — a card around a one-line
-// "Hello!" adds visual chrome that the user doesn't want; the
-// routing decision (markdown vs text) lives at the Patcher layer.
+// `msg_type=text`. Table blocks are downgraded to fenced text blocks
+// before send because Feishu/Lark rejects cards with too many table
+// elements. We deliberately keep `SendTextMessage` as a separate path
+// for plain-prose replies — a card around a one-line "Hello!" adds
+// visual chrome that the user doesn't want; the routing decision
+// (markdown vs text) lives at the Patcher layer.
 //
 // Why schema 2.0 rather than the legacy schema with a `div` +
 // `lark_md` text element: the legacy `lark_md` tag's markdown
@@ -362,7 +364,7 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 		"schema": "2.0",
 		"body": map[string]any{
 			"elements": []any{
-				map[string]any{"tag": "markdown", "content": p.Markdown},
+				map[string]any{"tag": "markdown", "content": downgradeMarkdownTablesForLark(p.Markdown)},
 			},
 		},
 	}
