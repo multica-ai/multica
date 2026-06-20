@@ -75,10 +75,6 @@ vi.mock("@multica/views/common/actor-avatar", () => ({
   ActorAvatar: () => null,
 }));
 
-vi.mock("../components/move-scope-menu", () => ({
-  MoveScopeMenu: () => <button type="button">Move</button>,
-}));
-
 vi.mock("../components/artifact-content", () => ({
   ArtifactContent: () => <div data-testid="readonly-artifact-content" />,
 }));

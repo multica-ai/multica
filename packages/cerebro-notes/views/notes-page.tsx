@@ -38,6 +38,7 @@ import {
 import {
   NoteTypesPanel,
   DocumentToolsSidebar,
+  EditableTitle,
   FindReplaceBar,
   FolderAccessControl,
 } from "@multica/cerebro-artifacts/views/components";
@@ -749,7 +750,6 @@ export function NoteEditor({
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
   const isMobile = useIsMobile();
 
-  const [title, setTitle] = React.useState(note.title);
   const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
@@ -815,10 +815,6 @@ export function NoteEditor({
     setShowComments(false);
     setDraftQuote(null);
     setActiveAnchorId(null);
-  }
-
-  function saveTitle() {
-    if (title !== note.title) updateNote.mutate({ id: note.id, title });
   }
 
   // The body is the shared rich editor (same as issue comments/descriptions):
@@ -1093,13 +1089,11 @@ export function NoteEditor({
           ref={contentScrollRef}
           className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-6"
         >
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={saveTitle}
-            disabled={readOnly}
+          <EditableTitle
+            value={note.title}
+            onSave={(next) => updateNote.mutate({ id: note.id, title: next })}
+            readOnly={readOnly}
             placeholder="Title (optional — first line becomes the title)"
-            className="w-full bg-transparent text-2xl font-bold outline-none placeholder:text-muted-foreground/50 disabled:opacity-70"
           />
 
           <NoteReferences noteId={note.id} />
