@@ -25,6 +25,7 @@ type SettingsResponse struct {
 	MoveIncompleteEnabled      bool   `json:"move_incomplete_enabled"`
 	MoveIncompleteTargetStatus string `json:"move_incomplete_target_status"`
 	Timezone                   string `json:"timezone"`
+	AcceptsExternalIssues      bool   `json:"accepts_external_issues"`
 	CreatedAt                  string `json:"created_at"`
 	UpdatedAt                  string `json:"updated_at"`
 }
@@ -43,9 +44,50 @@ func settingsToResponse(s cerebrodb.CerebroSprintSetting) SettingsResponse {
 		MoveIncompleteEnabled:      s.MoveIncompleteEnabled,
 		MoveIncompleteTargetStatus: s.MoveIncompleteTargetStatus,
 		Timezone:                   s.Timezone,
+		AcceptsExternalIssues:      s.AcceptsExternalIssues,
 		CreatedAt:                  tsString(s.CreatedAt),
 		UpdatedAt:                  tsString(s.UpdatedAt),
 	}
+}
+
+// SelectableSprintResponse is one row of the issue sprint picker: a sprint the
+// issue may be assigned to, annotated with its owning project's title and
+// whether that project is the issue's own home project (FIR-1657).
+type SelectableSprintResponse struct {
+	ID           string `json:"id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ProjectID    string `json:"project_id"`
+	ProjectTitle string `json:"project_title"`
+	Name         string `json:"name"`
+	SequenceNo   int32  `json:"sequence_no"`
+	Status       string `json:"status"`
+	StartDate    string `json:"start_date"`
+	EndDate      string `json:"end_date"`
+	Goal         string `json:"goal,omitempty"`
+	IsOwnProject bool   `json:"is_own_project"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+func selectableSprintToResponse(s cerebrodb.ListSelectableCerebroSprintsForIssueRow) SelectableSprintResponse {
+	out := SelectableSprintResponse{
+		ID:           util.UUIDToString(s.ID),
+		WorkspaceID:  util.UUIDToString(s.WorkspaceID),
+		ProjectID:    util.UUIDToString(s.ProjectID),
+		ProjectTitle: s.ProjectTitle,
+		Name:         s.Name,
+		SequenceNo:   s.SequenceNo,
+		Status:       s.Status,
+		StartDate:    dateString(s.StartDate),
+		EndDate:      dateString(s.EndDate),
+		IsOwnProject: s.IsOwnProject,
+		CreatedAt:    tsString(s.CreatedAt),
+		UpdatedAt:    tsString(s.UpdatedAt),
+	}
+	if s.Goal.Valid {
+		out.Goal = s.Goal.String
+	}
+	return out
 }
 
 // SprintResponse is the JSON shape returned by the sprint endpoints.

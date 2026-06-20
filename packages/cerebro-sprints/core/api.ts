@@ -1,10 +1,12 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import {
   EMPTY_RECURRING_TASKS_LIST,
+  EMPTY_SELECTABLE_SPRINTS_LIST,
   EMPTY_SPRINT_ISSUES_LIST,
   EMPTY_SPRINTS_LIST,
   recurringTaskSchema,
   recurringTasksListSchema,
+  selectableSprintsListSchema,
   sprintIssueLinkSchema,
   sprintIssuesListSchema,
   sprintSchema,
@@ -15,6 +17,7 @@ import type {
   RecurringTask,
   RecurringTasksResponse,
   RecurringTaskWriteInput,
+  SelectableSprintsResponse,
   Sprint,
   SprintCreateInput,
   SprintIssueLink,
@@ -75,6 +78,19 @@ export async function fetchSprints(projectId: string): Promise<SprintsListRespon
   const raw = await api.cerebroRequest<unknown>(`/api/cerebro/projects/${projectId}/sprints`);
   return parseWithFallback(raw, sprintsListSchema, EMPTY_SPRINTS_LIST, {
     endpoint: "fetchSprints",
+  });
+}
+
+// FIR-1657: every sprint an issue may be assigned to — its own project's
+// sprints plus any opted-in project's sprints in the workspace.
+export async function fetchSelectableSprints(
+  issueId: string,
+): Promise<SelectableSprintsResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/issues/${issueId}/selectable-sprints`,
+  );
+  return parseWithFallback(raw, selectableSprintsListSchema, EMPTY_SELECTABLE_SPRINTS_LIST, {
+    endpoint: "fetchSelectableSprints",
   });
 }
 

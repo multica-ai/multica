@@ -22,6 +22,12 @@ export interface SprintSettings {
   move_incomplete_enabled: boolean;
   move_incomplete_target_status: string;
   timezone: string;
+  /**
+   * FIR-1657: when true, issues from OTHER projects in the same workspace may
+   * be assigned to this project's sprints. Default false keeps the project
+   * closed until its owner opts in.
+   */
+  accepts_external_issues: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +43,7 @@ export interface SprintSettingsWriteInput {
   move_incomplete_enabled?: boolean;
   move_incomplete_target_status?: string;
   timezone?: string;
+  accepts_external_issues?: boolean;
 }
 
 export interface Sprint {
@@ -57,6 +64,21 @@ export interface Sprint {
 
 export interface SprintsListResponse {
   sprints: Sprint[];
+}
+
+/**
+ * FIR-1657: one option in an issue's sprint picker. A sprint the issue may be
+ * assigned to, annotated with its owning project's title and whether that
+ * project is the issue's own home project (so the picker can group them as
+ * "This project" vs "Other projects").
+ */
+export interface SelectableSprint extends Sprint {
+  project_title: string;
+  is_own_project: boolean;
+}
+
+export interface SelectableSprintsResponse {
+  sprints: SelectableSprint[];
 }
 
 export interface SprintCreateInput {

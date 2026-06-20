@@ -1984,6 +1984,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)
 				r.Put("/", cerebroSprintsHandler.AssignIssue)
 			})
+			r.Get("/api/cerebro/issues/{issueID}/selectable-sprints", cerebroSprintsHandler.ListSelectableSprints) // CEREBRO-PATCH(cerebro-sprints-selectable): FIR-1657 cross-project sprint picker.
 			// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 optional start/due time-of-day per issue.
 			r.Route("/api/cerebro/issues/{issueID}/date-times", func(r chi.Router) {
 				r.Get("/", cerebroIssueDateTimeHandler.Get)

@@ -1007,6 +1007,7 @@ type CerebroSprintSetting struct {
 	Timezone                   string             `json:"timezone"`
 	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	AcceptsExternalIssues      bool               `json:"accepts_external_issues"`
 }
 
 type CerebroStatusModel struct {

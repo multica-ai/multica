@@ -9,6 +9,7 @@ import {
   deleteSprintSettings,
   fetchIssueSprintAssignment,
   fetchRecurringTasks,
+  fetchSelectableSprints,
   fetchSprint,
   fetchSprintIssues,
   fetchSprintSettings,
@@ -42,6 +43,8 @@ export const sprintsKeys = {
     [...sprintsKeys.all(wsId), "recurring", projectId] as const,
   issueAssignment: (wsId: string, issueId: string) =>
     [...sprintsKeys.all(wsId), "issue-assignment", issueId] as const,
+  selectableSprints: (wsId: string, issueId: string) =>
+    [...sprintsKeys.all(wsId), "selectable-sprints", issueId] as const,
 };
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,17 @@ export function projectSprintsOptions(wsId: string, projectId: string) {
     queryKey: sprintsKeys.projectSprints(wsId, projectId),
     queryFn: () => fetchSprints(projectId),
     enabled: !!wsId && !!projectId,
+    staleTime: 15 * 1000,
+  });
+}
+
+// FIR-1657: the issue sprint picker's data source — own-project sprints plus
+// opted-in projects' sprints. Keyed on issueId so it refreshes per issue.
+export function selectableSprintsOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: sprintsKeys.selectableSprints(wsId, issueId),
+    queryFn: () => fetchSelectableSprints(issueId),
+    enabled: !!wsId && !!issueId,
     staleTime: 15 * 1000,
   });
 }
