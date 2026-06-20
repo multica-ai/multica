@@ -395,8 +395,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
           </div>
           {/* CEREBRO-PATCH(channel-typing): TECH-3664 — "X is typing…" above composer. */}
           <ChannelTypingIndicator typingUserIds={typingUserIds} />
-          {/* CEREBRO-PATCH(channel-composer-spacing): TECH-3720 align Channels/DM composer spacing with the standard chat input. */}
-          <div className="shrink-0 px-5 pb-3 pt-0">
+          {/* CEREBRO-PATCH(channel-composer-spacing): TECH-3720 keeps px-5 pb-3 to match the chat input; border-t + pt-2 mirror the inbox-chat-panel host wrapper so Channels/DM get the same full-width divider line and top gap as an agent chat session — gives the expand-toggle pill room instead of butting against the last message. */}
+          <div className="shrink-0 border-t px-5 pb-3 pt-2">
             {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
                 chat-like; entering one should land the caret in the input. */}
             {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}

@@ -255,11 +255,12 @@ describe("ChannelDetail thread header", () => {
   const openSettings = async (user: ReturnType<typeof userEvent.setup>) => {
     await user.click(screen.getByLabelText("Channel settings"));
   };
-  it("renders the composer without the old channel-only top border", () => {
+  it("gives the composer the chat-style divider line + top gap (border-t pt-2)", () => {
     render(<ChannelDetail channelId="c1" initialChannel={baseChannel} />);
     const shell = screen.getByTestId("comment-input").parentElement;
-    expect(shell).toHaveClass("px-5", "pb-3", "pt-0");
-    expect(shell).not.toHaveClass("border-t");
+    // Mirrors the inbox-chat-panel host wrapper around an agent chat session,
+    // so Channels/DM get the same full-width line + room for the expand pill.
+    expect(shell).toHaveClass("px-5", "pb-3", "pt-2", "border-t");
   });
 
   it("pins the channel when not yet pinned", async () => {
