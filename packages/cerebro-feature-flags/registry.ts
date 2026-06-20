@@ -110,6 +110,10 @@ export type CerebroFlagKey =
   | "cerebro_date_reminders"
   // FIR-2490: Firtal-branded welcome page for new members (replaces upstream onboarding).
   | "cerebro_firtal_welcome"
+  // FIR-252: turn off upstream onboarding (questionnaire + create-workspace) on the
+  // fork — members with a workspace go straight in; 0-workspace users land on
+  // NewWorkspacePage, which always exposes a Log out / switch-account escape.
+  | "cerebro_disable_onboarding"
   // FIR-2504: show similar open issues + LLM verdict when creating an issue.
   | "cerebro_duplicate_check_on_create"
   // FIR-2523: Auth & Permissions settings tab + Google Workspace auto-membership hook.
@@ -347,6 +351,13 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // workspace) instead of upstream `/onboarding`. Per-user override still
   // lets anyone opt out from the cerebro settings panel.
   cerebro_firtal_welcome: true,
+  // FIR-252: ON by default for the fork. Upstream onboarding (questionnaire →
+  // "create workspace") never applies to invited Firtal members and traps anyone
+  // who lands on the wrong/empty Google account on desktop (no URL bar, no
+  // logout). When on, users with a workspace go straight in and users without
+  // one land on NewWorkspacePage, which always exposes Log out / switch account.
+  // Off restores the upstream onboarding flow.
+  cerebro_disable_onboarding: true,
   // FIR-2504: surface similar open issues + Haiku verdict in the create-issue
   // modal so users can open an existing sag or attach as a sub-issue instead
   // of duplicating. Defaults ON so the feature lands behind the standard
@@ -994,6 +1005,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "onboarding",
     description:
       "Replace the upstream onboarding flow with a Firtal-branded welcome page for new members: desktop install guide (with hard-gate modal), PWA install guide (iOS Safari + Android Chrome), members documentation link, and a bug-melding button that opens the Multica support workspace at multica.firtal.com. Each member is shown the page once — completion is tracked client-side. FIR-2490.",
+  },
+  {
+    key: "cerebro_disable_onboarding",
+    label: "Disable upstream onboarding",
+    group: "onboarding",
+    description:
+      "Turn off Multica's generic onboarding (questionnaire + 'create workspace') on the fork. Invited members who already have a workspace go straight in; anyone without a workspace lands on the create-workspace page, which always shows a Log out / switch-account button (and a 'no workspace' notice when workspace creation is disabled). This closes the desktop trap where a user signed into the wrong Google account had only 'Create workspace' and no way out. Off restores the upstream onboarding flow. FIR-252.",
   },
   {
     key: "cerebro_duplicate_check_on_create",

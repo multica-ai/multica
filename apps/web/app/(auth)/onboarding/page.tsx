@@ -17,6 +17,7 @@ import {
   useFirtalWelcomeEnabled,
   markFirtalWelcomeSeen,
 } from "@multica/cerebro-firtal-welcome";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 
 /**
  * Web shell for the onboarding flow. The route is the platform chrome on
@@ -36,6 +37,12 @@ export default function OnboardingPage() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const hasOnboarded = useHasOnboarded();
   const firtalWelcomeEnabled = useFirtalWelcomeEnabled();
+  // FIR-252: fork-wide switch that turns off upstream onboarding. When on (and
+  // the Firtal welcome page is not handling this user), the route stops
+  // rendering the questionnaire/create-workspace OnboardingFlow and instead
+  // redirects: a user with a workspace goes straight in, a user without one
+  // lands on /workspaces/new (NewWorkspacePage), which always has Log out.
+  const disableOnboarding = useFlagValue("cerebro_disable_onboarding");
   const logout = useLogout();
   const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
     ...workspaceListOptions(),
@@ -64,10 +71,23 @@ export default function OnboardingPage() {
     // (runtime / agent / first issue) can run. The new entry-point
     // judgment in callback / login handles "where should this user go on
     // login" so OnboardingPage no longer needs to second-guess it.
-    if (hasOnboarded) {
-      router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
+    // `disableOnboarding && !firtalWelcomeEnabled` collapses the upstream
+    // onboarding into a redirect — pass `true` so resolvePostAuthDestination
+    // routes onboarded-style (has ws → workspace; no ws → /workspaces/new)
+    // instead of looping back to /onboarding.
+    if (hasOnboarded || (disableOnboarding && !firtalWelcomeEnabled)) {
+      router.replace(resolvePostAuthDestination(workspaces, true));
     }
-  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
+  }, [
+    isLoading,
+    user,
+    hasOnboarded,
+    disableOnboarding,
+    firtalWelcomeEnabled,
+    workspacesFetched,
+    workspaces,
+    router,
+  ]);
 
   if (isLoading || !user || hasOnboarded) return null;
 
@@ -94,6 +114,11 @@ export default function OnboardingPage() {
       </div>
     );
   }
+
+  // FIR-252: with onboarding disabled on the fork (and no Firtal welcome page
+  // for this user), the guard effect above is redirecting — render nothing
+  // rather than flashing the upstream OnboardingFlow for a frame.
+  if (disableOnboarding) return null;
 
   // Layout: page owns its own scroll (root layout sets `body {
   // overflow: hidden }` for the app-shell convention). OnboardingFlow

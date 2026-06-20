@@ -7,6 +7,7 @@ import { workspaceKeys, workspaceListOptions } from "@multica/core/workspace/que
 import { api } from "@multica/core/api";
 import { useHasOnboarded } from "@multica/core/paths";
 import { useApplyStartPage } from "@multica/cerebro-preferences/views";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
@@ -121,6 +122,13 @@ function AppContent() {
   });
   const wsCount = workspaces.length;
   const hasOnboarded = useHasOnboarded();
+  // FIR-252: on the cerebro fork we turn off upstream onboarding entirely.
+  // Read the default-backed flag (no workspace context here, so useFlagValue
+  // not useFeatureFlag) — when on, a 0-workspace user never sees the
+  // questionnaire/create-workspace OnboardingFlow; they land on the
+  // new-workspace overlay (NewWorkspacePage), which always has a Log out /
+  // switch-account escape.
+  const disableOnboarding = useFlagValue("cerebro_disable_onboarding");
 
   // Bridge local daemon IPC status into the runtimes cache so this user's
   // own daemon flips to offline/online sub-second instead of waiting on the
@@ -140,6 +148,11 @@ function AppContent() {
   //     no invites &  onboarded  → /workspaces/new overlay
   //   ≥1 workspaces              → no overlay, fall through to dashboard
   //
+  // FIR-252: when `cerebro_disable_onboarding` is on (fork default), the
+  // !onboarded branch is collapsed into /workspaces/new too — upstream
+  // onboarding never shows, and the new-workspace overlay (NewWorkspacePage)
+  // is the 0-workspace surface, which always exposes Log out / switch account.
+  //
   // Users with zero workspaces always get the invitation lookup first —
   // they have no sidebar in which pending-invitation chips could surface,
   // so accepting an invite has to be possible from this entry point.
@@ -154,9 +167,8 @@ function AppContent() {
     // fall through to onboarding / new-workspace so the user isn't stuck
     // on a blank window.
     let cancelled = false;
-    const fallbackOverlayType: "onboarding" | "new-workspace" = hasOnboarded
-      ? "new-workspace"
-      : "onboarding";
+    const fallbackOverlayType: "onboarding" | "new-workspace" =
+      hasOnboarded || disableOnboarding ? "new-workspace" : "onboarding";
     void api
       .listMyInvitations()
       .then((invites) => {
@@ -181,7 +193,15 @@ function AppContent() {
     return () => {
       cancelled = true;
     };
-  }, [user, workspaceListFetched, wsCount, workspaces, hasOnboarded, qc]);
+  }, [
+    user,
+    workspaceListFetched,
+    wsCount,
+    workspaces,
+    hasOnboarded,
+    disableOnboarding,
+    qc,
+  ]);
 
 
   // Validate persisted tab state against the current user's workspace list,
