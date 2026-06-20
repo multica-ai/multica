@@ -92,8 +92,8 @@ export interface AutopilotsViewState {
 
 const DEFAULTS = {
   scope: "all" as AutopilotScope,
-  sortField: "lastRun" as AutopilotSortField,
-  sortDirection: AUTOPILOT_SORT_DEFAULT_DIRECTION.lastRun,
+  sortField: "created" as AutopilotSortField,
+  sortDirection: AUTOPILOT_SORT_DEFAULT_DIRECTION.created,
   hiddenColumns: AUTOPILOT_DEFAULT_HIDDEN_COLUMNS,
   filters: EMPTY_AUTOPILOT_FILTERS,
 };

@@ -718,7 +718,11 @@ export function AutopilotsPage() {
       // lastRun: never-ran rows sort as oldest.
       const av = a.last_run_at ? Date.parse(a.last_run_at) : 0;
       const bv = b.last_run_at ? Date.parse(b.last_run_at) : 0;
-      return (av - bv) * dir || a.title.localeCompare(b.title);
+      return (
+        (av - bv) * dir ||
+        Date.parse(b.created_at) - Date.parse(a.created_at) ||
+        a.title.localeCompare(b.title)
+      );
     });
     return filtered;
   }, [scopeRows, filters, sortField, sortDirection]);
