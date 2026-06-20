@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -163,6 +165,40 @@ func TestSelfHostAppURLHonorsEnv(t *testing.T) {
 			t.Fatalf("app_url: want flag value, got %q", got)
 		}
 	})
+}
+
+func TestSetupCallbackHostFlagWiring(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  *cobra.Command
+	}{
+		{name: "setup", cmd: setupCmd},
+		{name: "setup cloud", cmd: setupCloudCmd},
+		{name: "setup self-host", cmd: setupSelfHostCmd},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.cmd.Flag(callbackHostFlag) == nil {
+				t.Fatalf("%s is missing --%s", tc.name, callbackHostFlag)
+			}
+		})
+	}
+}
+
+func TestSetupHelpShowsCallbackHostFlag(t *testing.T) {
+	var out bytes.Buffer
+	setupCmd.SetOut(&out)
+	setupCmd.SetErr(&out)
+	defer setupCmd.SetOut(nil)
+	defer setupCmd.SetErr(nil)
+	if err := setupCmd.Help(); err != nil {
+		t.Fatalf("setup help: %v", err)
+	}
+	if !strings.Contains(out.String(), "--callback-host") {
+		t.Fatalf("setup help should show --%s, got:\n%s", callbackHostFlag, out.String())
+	}
 }
 
 func TestServerHostIsLocal(t *testing.T) {
