@@ -160,7 +160,9 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
                 onValueChange={(v) => setForm({ ...form, frequency: v as Frequency })}
               >
                 <SelectTrigger id="rec-freq">
-                  <SelectValue />
+                  <SelectValue>
+                    {() => FREQUENCY_LABELS[form.frequency] ?? form.frequency}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {FREQUENCIES.map((f) => (
