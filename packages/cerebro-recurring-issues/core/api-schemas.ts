@@ -4,7 +4,7 @@ import { z } from "zod";
 // degrades to safe defaults instead of breaking the UI (CLAUDE.md → API
 // Response Compatibility).
 
-const frequency = z.enum(["daily", "weekly", "monthly", "yearly", "days_after", "custom"]);
+const frequency = z.enum(["daily", "weekly", "monthly", "yearly", "days_after", "custom", "every_weekday"]);
 const anchor = z.enum(["completion", "due_date"]);
 
 export const issueRecurrenceSchema = z.object({
