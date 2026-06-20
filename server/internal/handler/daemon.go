@@ -3026,6 +3026,8 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		// (repo.checkout→"checkout"…) so an action-scoped Condition bites here.
 		// Without it ctx.Action is "" and an action-scoped Deny silently fails OPEN.
 		RequestContext: toolpolicy.RequestContext{Action: toolpolicy.ActionOf(req.Capability)},
+		// CEREBRO-PATCH(repo-policy-cel): FIR-1609 — inject the flag-gated CEL evaluator so an Expr condition on a repo rule evaluates (twin of the daemon/registry gates); nil (flag off) keeps the prior fail-closed behaviour.
+		Eval: h.daemonPolicyCELEvaluator(r.Context(), wsUUID),
 	})
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)

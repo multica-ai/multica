@@ -513,7 +513,7 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
 		}
-		if err := t.chainGateDataSource(ctx, dsID); err != nil {
+		if err := t.chainGateDataSource(ctx, action, dsID); err != nil {
 			return "", err
 		}
 		return t.callExecute(ctx, baseURL, apiKey, map[string]any{
@@ -524,7 +524,7 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
 		}
-		if err := t.chainGateDataSource(ctx, dsID); err != nil {
+		if err := t.chainGateDataSource(ctx, action, dsID); err != nil {
 			return "", err
 		}
 		body := map[string]any{"dataSourceId": dsID}
@@ -587,7 +587,18 @@ func (t *FirtalRegistryTool) registryGrantsEnabled(ctx context.Context) bool {
 // this gate: a registry query is an autonomous tool call with no inbox round-trip,
 // so anything other than Allow denies — mirroring the daemon repo and credential
 // gates' "only an explicit Allow passes" rule.
-func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, dsID string) error {
+//
+// The WHEN layer (FIR-1609) is threaded so a CONDITIONAL rule on a data source
+// actually evaluates here. action is the registry verb (get_schema/execute), put
+// on RequestContext.Action so both an action-scoped Condition (Actions term) and
+// a CEL `action` variable bind; Host is empty because a data source has no single
+// target host at this layer. Eval is the shared CEL evaluator, injected only when
+// cerebro_policy_cel is on — without this, a CEL-conditioned Allow silently became
+// unconditional and a CEL-conditioned Deny silently blocked always (Eval nil ⇒
+// undecidable ⇒ fail-closed by effect), so a "conditional yes on a data source"
+// could not work. This makes the registry gate the twin of the daemon/local-CLI
+// gate for conditions.
+func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, dsID string) error {
 	if t.cerebro == nil || !t.registryGrantsEnabled(ctx) {
 		return nil
 	}
@@ -598,6 +609,8 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, dsID strin
 		AgentID:         t.tctx.AgentID,
 		UserID:          t.tctx.UserID,
 		Base:            toolpolicy.SettingAllow,
+		RequestContext:  toolpolicy.RequestContext{Action: action},
+		Eval:            t.registryPolicyCELEvaluator(ctx),
 	})
 	if err != nil {
 		// Fail closed: a resolver error on an enabled gate must not silently
@@ -609,6 +622,32 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, dsID strin
 		return fmt.Errorf("firtal_registry: data_source_id %q is blocked by a permission rule (%s)", dsID, eff.Reason)
 	}
 	return nil
+}
+
+// registryPolicyCELEvaluator returns the shared CEL evaluator when the default-OFF
+// cerebro_policy_cel flag is on for this workspace, else nil — the gateway twin of
+// the daemon gate's daemonPolicyCELEvaluator, so a firtal_registry data-source rule
+// and a local-CLI tool rule evaluate an Expr (CEL) condition identically. nil
+// leaves Query.Eval unset, so an Expr condition is undecidable and fails closed by
+// effect (an Allow drops, a Deny/Ask is kept). A lookup miss or DB error resolves
+// to OFF (the flag default), never switching the expression path on by accident.
+func (t *FirtalRegistryTool) registryPolicyCELEvaluator(ctx context.Context) toolpolicy.ExprEvaluator {
+	if t.cerebro == nil {
+		return nil
+	}
+	enabled, err := t.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: t.tctx.WorkspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagPolicyCEL,
+	})
+	if err != nil || !enabled {
+		return nil // no override or DB error → default OFF → Expr stays undecidable
+	}
+	eval, err := toolpolicy.SharedCELEvaluator()
+	if err != nil {
+		return nil // evaluator unavailable → Expr conditions fail closed
+	}
+	return eval.Eval
 }
 
 // grant's allowlist. allowed_data_sources_all=true short-circuits to allow.

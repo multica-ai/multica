@@ -107,6 +107,34 @@ type multicaCredentialPolicy struct {
 	// verdict falls through to deny exactly as before; non-nil routes it to the
 	// one /approvals inbox and blocks until a human decides.
 	gate *permgate.Gate
+	// cerebroQueries reads the cerebro_policy_cel feature flag so a CEL Expr
+	// condition on a credential cap row evaluates (FIR-1609). nil leaves Query.Eval
+	// unset, so an Expr condition is undecidable and fails closed by effect — the
+	// same default-OFF behaviour as the daemon and registry gates.
+	cerebroQueries *cerebrodb.Queries
+}
+
+// policyCELEvaluator returns the shared CEL evaluator when the default-OFF
+// cerebro_policy_cel flag is on for this workspace, else nil — the credential-gate
+// twin of the daemon/registry gates, so a credential cap row's Expr condition
+// evaluates identically everywhere. A lookup miss or DB error resolves to OFF.
+func (m *multicaCredentialPolicy) policyCELEvaluator(ctx context.Context, workspaceID pgtype.UUID) toolpolicy.ExprEvaluator {
+	if m.cerebroQueries == nil {
+		return nil
+	}
+	enabled, err := m.cerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagPolicyCEL,
+	})
+	if err != nil || !enabled {
+		return nil
+	}
+	eval, err := toolpolicy.SharedCELEvaluator()
+	if err != nil {
+		return nil
+	}
+	return eval.Eval
 }
 
 // agentRuntimeLookup is the slim surface needed to map an agent actor onto its
@@ -270,6 +298,10 @@ func (m *multicaCredentialPolicy) resolveCap(ctx context.Context, base toolpolic
 	// drops; mirrors the repo gate. No conditioned credential rows exist yet, so this
 	// is behaviour-preserving.
 	q.RequestContext = toolpolicy.RequestContext{Action: toolpolicy.ActionOf(action)}
+	// Inject the CEL evaluator (flag-gated) so an Expr condition on a credential cap
+	// row evaluates rather than failing closed undecided — FIR-1609, twin of the
+	// daemon/registry gates. nil (flag off) keeps the prior fail-closed behaviour.
+	q.Eval = m.policyCELEvaluator(ctx, q.WorkspaceID)
 	eff, err := m.caps.Resolve(ctx, q)
 	if err != nil {
 		return toolpolicy.SettingDeny, "", err
@@ -382,9 +414,10 @@ func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries
 			// Unified tool-policy chain as the tighten-only cap layer (FIR-1609
 			// Phase 7) — built from the same cerebro queries; agent→runtime/owner
 			// mapping comes from the upstream queries (GetAgent).
-			caps:   toolpolicy.NewStoreFromQueries(cerebroQueries),
-			agents: queries,
-			gate:   gate,
+			caps:           toolpolicy.NewStoreFromQueries(cerebroQueries),
+			agents:         queries,
+			gate:           gate,
+			cerebroQueries: cerebroQueries,
 		}
 	}
 	return credentials.NewChainPolicyChecker(owner, multica)

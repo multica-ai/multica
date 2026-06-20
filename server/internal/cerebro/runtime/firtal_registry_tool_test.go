@@ -275,8 +275,20 @@ func TestFirtalRegistryCallRejectsMissingAction(t *testing.T) {
 // gate must allow — it never blocks a source the legacy allowlist already passed.
 func TestFirtalRegistryChainGateNoOpWithoutResolver(t *testing.T) {
 	tool := &FirtalRegistryTool{} // cerebro == nil
-	if err := tool.chainGateDataSource(context.Background(), "ds-anything"); err != nil {
+	if err := tool.chainGateDataSource(context.Background(), "execute", "ds-anything"); err != nil {
 		t.Fatalf("chainGateDataSource with no resolver must allow, got %v", err)
+	}
+}
+
+// registryPolicyCELEvaluator fails closed (returns nil) when no cerebro queries
+// are wired, so an Expr condition on a data source is undecidable rather than
+// silently evaluated — the gateway twin of the daemon gate's behaviour. The
+// flag-on path is exercised end-to-end against a real workspace in the QA plan;
+// here we pin the no-queries floor that keeps CEL from arming by accident.
+func TestFirtalRegistryPolicyCELEvaluatorNilWithoutQueries(t *testing.T) {
+	tool := &FirtalRegistryTool{} // cerebro == nil
+	if eval := tool.registryPolicyCELEvaluator(context.Background()); eval != nil {
+		t.Fatal("registryPolicyCELEvaluator must be nil without cerebro queries (fail closed)")
 	}
 }
 
