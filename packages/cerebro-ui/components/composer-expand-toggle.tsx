@@ -10,6 +10,14 @@ interface ComposerExpandToggleProps {
   expandLabel: string;
   collapseLabel: string;
   className?: string;
+  /**
+   * CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — when the editor
+   * body has scrolled up UNDER the pill (collapsed field at its cap), fade the
+   * pill to translucent so the text behind stays readable, back to full on
+   * hover. While the field is short enough that text sits below the pill, this
+   * is `false` and the pill stays fully opaque.
+   */
+  faded?: boolean;
 }
 
 /**
@@ -30,6 +38,7 @@ export function ComposerExpandToggle({
   expandLabel,
   collapseLabel,
   className,
+  faded = false,
 }: ComposerExpandToggleProps) {
   const label = isExpanded ? collapseLabel : expandLabel;
   return (
@@ -40,9 +49,16 @@ export function ComposerExpandToggle({
       title={label}
       className={cn(
         "absolute top-1 right-1 z-20 flex items-center gap-1 rounded-full",
-        "bg-background/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
-        "ring-1 ring-border/60 backdrop-blur-sm transition-colors",
+        // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — more
+        // translucent base so the pill reads as a light overlay, not a solid
+        // chip sitting on the text.
+        "bg-background/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground",
+        "ring-1 ring-border/50 backdrop-blur-sm transition-opacity transition-colors",
         "hover:bg-background/90 active:bg-background",
+        // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — fade to
+        // translucent only once text has scrolled under the pill; full opacity
+        // on hover so it stays operable.
+        faded ? "opacity-40 hover:opacity-100" : "opacity-100",
         className,
       )}
     >

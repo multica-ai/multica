@@ -204,8 +204,12 @@ describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
     );
 
     const scrollContainer = getByTestId("content-editor").parentElement!;
-    // Collapsed: cap at 4 lines of body text (~104px mobile), then scroll (FIR-1625).
-    expect(scrollContainer.style.maxHeight).toBe("104px"); // 4 lines × 26px mobile
+    // Collapsed: 4 lines of body text below the overlay band. The scroll body
+    // is padded down by the 28px band (so text starts below the floating
+    // trigger bar / expand pill), and the cap grows by the same band so 4 full
+    // lines stay visible below it: 104 (4 × 26px mobile) + 28 = 132px. FIR-1625.
+    expect(scrollContainer.style.maxHeight).toBe("132px");
+    expect(scrollContainer.style.paddingTop).toBe("28px");
     expect(scrollContainer.style.height).toBe("");
 
     // Expanded: a concrete height so the field visibly jumps even when empty.
@@ -214,18 +218,20 @@ describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
     expect(scrollContainer.style.maxHeight).toBe("");
 
     fireEvent.click(getByRole("button", { name: "Collapse" }));
-    expect(scrollContainer.style.maxHeight).toBe("104px");
+    expect(scrollContainer.style.maxHeight).toBe("132px");
     expect(scrollContainer.style.height).toBe("");
   });
 
-  it("caps at 4 lines (92px) on desktop and still shows the unified pill", () => {
+  it("caps at 4 lines (+overlay band) on desktop and still shows the unified pill", () => {
     setViewport(1280, 900); // desktop width
     const { getByTestId, getByRole } = renderWithI18n(
       <CommentInput issueId="c1" onSubmit={vi.fn()} />,
     );
 
     const scrollContainer = getByTestId("content-editor").parentElement!;
-    expect(scrollContainer.style.maxHeight).toBe("92px"); // 4 lines × 23px desktop
+    // 92 (4 × 23px desktop) + 28px overlay band = 120px below the band.
+    expect(scrollContainer.style.maxHeight).toBe("120px");
+    expect(scrollContainer.style.paddingTop).toBe("28px");
 
     // The expand control is identical on every surface now (mobile + desktop).
     fireEvent.click(getByRole("button", { name: "Expand" }));

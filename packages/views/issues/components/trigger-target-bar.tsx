@@ -44,15 +44,16 @@ interface TriggerTargetBarProps {
    */
   onTagOwner: (owner: MemberWithUser) => void;
   /**
-   * CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — when the editor
-   * already has text, the bar overlays the first line, so it fades to
-   * translucent (and back to full opacity on hover) to keep the text behind
-   * it readable. `false` / empty editor keeps it fully opaque.
+   * CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — true once the
+   * editor body has scrolled up UNDER this bar (collapsed field at its cap).
+   * Only then does the bar actually overlap text, so it fades to translucent
+   * (full opacity on hover) to keep that text readable. While the draft still
+   * sits below the bar (first lines), this is `false` and the bar stays opaque.
    */
-  hasContent?: boolean;
+  faded?: boolean;
 }
 
-function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner, hasContent = false }: TriggerTargetBarProps) {
+function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner, faded = false }: TriggerTargetBarProps) {
   const { t } = useT("issues");
   const wsId = getCurrentWsId();
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -88,7 +89,7 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner, hasContent = f
     <div
       className={cn(
         "pointer-events-none absolute left-2 top-1 z-10 flex max-w-[68%] items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground transition-opacity",
-        hasContent ? "opacity-40 hover:opacity-100" : "opacity-100",
+        faded ? "opacity-40 hover:opacity-100" : "opacity-100",
       )}
     >
       <span className="shrink-0 font-medium">{t(($) => $.reply.target_label)}</span>

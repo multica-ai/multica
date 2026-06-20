@@ -67,6 +67,10 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — true once the
+  // editor body has scrolled up under the trigger bar / expand pill, so the
+  // overlays only fade when text is actually behind them (not on line one).
+  const [scrolled, setScrolled] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
   // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
@@ -129,6 +133,26 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
       })
     : undefined;
 
+  // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — pad the
+  // scrollable body down past the floating trigger bar / expand pill so the
+  // first lines of text sit BELOW them, and grow the collapsed cap by the same
+  // band so the 4-line window stays below the overlays. (px-3 py-2 stays on the
+  // container; inline paddingTop only overrides the top.) Text slides under the
+  // overlays only once the draft is long enough to scroll — when they fade.
+  const OVERLAY_BAND = 28; // px — clears the ~24px chip row anchored at top-1
+  const hasOverlay = !!triggerAgentId || composerHeight.showExpandToggle;
+  const baseStyle = composerHeight.containerStyle;
+  const scrollStyle =
+    hasOverlay
+      ? {
+          ...baseStyle,
+          paddingTop: OVERLAY_BAND,
+          ...(baseStyle?.maxHeight != null
+            ? { maxHeight: baseStyle.maxHeight + OVERLAY_BAND }
+            : {}),
+        }
+      : baseStyle;
+
   return (
     <div ref={anchorRef}>
       {/* CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — portals itself; renders nothing until a send needs confirming. */}
@@ -173,7 +197,7 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
           <TriggerTargetBar
             markdown={markdown}
             triggerAgentId={triggerAgentId}
-            hasContent={!isEmpty}
+            faded={scrolled}
             onTagOwner={(owner) => {
               editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
             }}
@@ -185,10 +209,16 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
               onToggle={composerHeight.toggleExpanded}
               expandLabel={t(($) => $.comment.expand_tooltip)}
               collapseLabel={t(($) => $.comment.collapse_tooltip)}
+              faded={scrolled}
             />
           )}
-          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={composerHeight.containerStyle}>
+          {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size.
+              CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — padded down so text starts below the overlay band; track scroll so the overlays fade only once text is under them. */}
+          <div
+            className="flex-1 min-h-0 overflow-y-auto px-3 py-2"
+            style={scrollStyle}
+            onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
+          >
             <ContentEditor
               // CEREBRO-PATCH(input-autofocus): JEH-756 — remount on
               // channel/DM switch so ContentEditor re-evaluates `autoFocus`

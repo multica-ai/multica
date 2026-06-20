@@ -80,6 +80,11 @@ function ReplyInput({
   const [isEmpty, setIsEmpty] = useState(true);
   const [markdown, setMarkdown] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — true once the
+  // editor body has scrolled up under the trigger bar / expand pill. Drives
+  // the overlay fade so they only turn translucent when text is actually
+  // behind them (not on the first line).
+  const [scrolled, setScrolled] = useState(false);
   const uploadMapRef = useRef<Map<string, string>>(new Map());
   const { uploadWithToast } = useFileUpload(api);
   // CEREBRO-PATCH(private-agent-send-confirm): FIR-32 — gate send on a foreign-private-agent confirm.
@@ -134,6 +139,26 @@ function ReplyInput({
   };
 
   const avatarSize = size === "sm" ? 22 : 28;
+
+  // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — the trigger bar
+  // and expand pill float over the field's top band. Pad the scrollable body
+  // down by that band so the first lines of text sit BELOW the overlays rather
+  // than under them, and grow the collapsed cap by the same amount so the
+  // 4-line window is measured below the band. Text only slides under the
+  // overlays once the draft is long enough to scroll — which is when they fade.
+  const OVERLAY_BAND = 28; // px — clears the ~24px chip row anchored at top-1
+  const hasOverlay = !!triggerAgentId || composerHeight.showExpandToggle;
+  const baseStyle = composerHeight.containerStyle;
+  const scrollStyle =
+    hasOverlay && baseStyle
+      ? {
+          ...baseStyle,
+          paddingTop: OVERLAY_BAND,
+          ...(baseStyle.maxHeight != null
+            ? { maxHeight: baseStyle.maxHeight + OVERLAY_BAND }
+            : {}),
+        }
+      : baseStyle;
 
   // Sticky-bottom: stay in normal flow until the viewport scrolls past the
   // anchor; then float with `position: fixed` matching the anchor's width and
@@ -204,7 +229,7 @@ function ReplyInput({
               <TriggerTargetBar
                 markdown={markdown}
                 triggerAgentId={triggerAgentId}
-                hasContent={!isEmpty}
+                faded={scrolled}
                 onTagOwner={(owner) => {
                   editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
                 }}
@@ -216,10 +241,16 @@ function ReplyInput({
                   onToggle={composerHeight.toggleExpanded}
                   expandLabel={t(($) => $.reply.expand_tooltip)}
                   collapseLabel={t(($) => $.reply.collapse_tooltip)}
+                  faded={scrolled}
                 />
               )}
-              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
-              <div className="flex-1 min-h-0 overflow-y-auto" style={composerHeight.containerStyle}>
+              {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size.
+                  CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — padded down so text starts below the overlay band; track scroll so the overlays fade only once text is under them. */}
+              <div
+                className="flex-1 min-h-0 overflow-y-auto"
+                style={scrollStyle}
+                onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
+              >
                 <div ref={measureRef}>
                   <ContentEditor
                     ref={editorRef}
