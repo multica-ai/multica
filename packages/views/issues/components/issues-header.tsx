@@ -624,16 +624,19 @@ function DateSubContent({
       {dueDatePresets && (
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuLabel>{t(($) => $.filters.date_due_section)}</DropdownMenuLabel>
-          <DropdownMenuItem onClick={() => applyDuePreset("overdue")}>
-            {t(($) => $.filters.date_due_overdue)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => applyDuePreset("this_week")}>
-            {t(($) => $.filters.date_due_this_week)}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => applyDuePreset("none")}>
-            {t(($) => $.filters.date_due_none)}
-          </DropdownMenuItem>
+          {/* CEREBRO-PATCH(my-issues-due-date-presets): GroupLabel must live inside a Group or Base UI throws (error #31). */}
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>{t(($) => $.filters.date_due_section)}</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => applyDuePreset("overdue")}>
+              {t(($) => $.filters.date_due_overdue)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => applyDuePreset("this_week")}>
+              {t(($) => $.filters.date_due_this_week)}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => applyDuePreset("none")}>
+              {t(($) => $.filters.date_due_none)}
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
         </>
       )}
 
