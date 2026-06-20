@@ -582,6 +582,7 @@ export function DocumentViewPage({
           >
             <SheetContent
               side="right"
+              showCloseButton={false}
               className="flex flex-col p-0 data-[side=right]:w-[94vw]"
             >
               <SheetHeader className="sr-only">

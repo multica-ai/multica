@@ -34,6 +34,7 @@ import {
 import type { Editor } from "@tiptap/react";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
+import { NoteCoupleAndSend } from "./note-couple-and-send";
 
 // FIR-1621 — the reference `object` kinds a note can be coupled to as a send
 // destination. Mirrors couplingIssue/couplingChat in the Go send handler.
@@ -270,10 +271,11 @@ export function NoteCommentsPanel({
               </span>
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground">
-              Link this note to a task or chat (References) to send these
-              comments to its agent.
-            </p>
+            <NoteCoupleAndSend
+              noteId={noteId}
+              noteBody={noteBody}
+              unsentCount={unsent.length}
+            />
           )}
         </div>
       )}

@@ -878,8 +878,11 @@ export function NoteEditor({
       )}
       {/* Action bar (TECH-3690): one tidy row. Folder + Share sit up front; the
           rest (pin, comments, history, add reference, create issue, delete)
-          collapse into a single "⋯" menu so the bar no longer feels cluttered. */}
-      <div className="flex items-center gap-2 border-b px-4 py-2.5 sm:px-5">
+          collapse into a single "⋯" menu so the bar no longer feels cluttered.
+          FIR-1676: on mobile the row wraps to a second line instead of clipping
+          the "⋯" menu off the right edge (Jesper: "ellers skal der være 2
+          rækker"). On desktop it stays a single row with "⋯" pushed right. */}
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
           variant="ghost"
@@ -1006,7 +1009,7 @@ export function NoteEditor({
             component the Documents view uses (FIR-1647, request 5 + 6). */}
         <EditorActionsMenu
           triggerLabel="Note actions"
-          className="ml-auto"
+          className="sm:ml-auto"
           items={[
             // Pin is an owner-only action on the backend (FIR-1460, request 2).
             isOwner && {
@@ -1164,6 +1167,7 @@ export function NoteEditor({
         >
           <SheetContent
             side="right"
+            showCloseButton={false}
             className="flex flex-col p-0 data-[side=right]:w-[94vw]"
           >
             <SheetHeader className="sr-only">

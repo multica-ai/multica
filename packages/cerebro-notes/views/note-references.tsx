@@ -129,10 +129,15 @@ export function NoteAddReferenceDialog({
   noteId,
   open,
   onOpenChange,
+  onPicked,
 }: {
   noteId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  // FIR-1676 — when provided, the dialog hands the picked issue to the caller
+  // instead of linking it itself, so a flow like couple-and-send can take over
+  // (link + dispatch). Omitted = the default behaviour: just add the reference.
+  onPicked?: (issue: { id: string; identifier: string; title: string }) => void;
 }) {
   const addReference = useAddNoteReference(noteId);
   const paths = useWorkspacePaths();
@@ -161,6 +166,11 @@ export function NoteAddReferenceDialog({
     identifier: string;
     title: string;
   }) => {
+    if (onPicked) {
+      onPicked(issue);
+      onOpenChange(false);
+      return;
+    }
     addReference.mutate({
       object: "issue",
       ref_id: issue.id,

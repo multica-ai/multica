@@ -614,6 +614,9 @@ function EditorBubbleMenu({
         position: "fixed",
         zIndex: 50,
         width: "max-content",
+        // CEREBRO-PATCH(bubble-menu-mobile-scroll): FIR-1676 — cap the floating
+        // toolbar to the viewport so it never clips off the right edge on mobile.
+        maxWidth: "calc(100vw - 0.5rem)",
         visibility: visible ? "visible" : "hidden",
       }}
       onMouseDown={(e) => e.preventDefault()}
@@ -622,7 +625,7 @@ function EditorBubbleMenu({
         <LinkEditBar editor={editor} onClose={() => { setMode("toolbar"); editor.commands.focus(); }} />
       ) : (
         <TooltipProvider delay={300}>
-          <div className="bubble-menu">
+          <div className="bubble-menu max-w-full overflow-x-auto">{/* CEREBRO-PATCH(bubble-menu-mobile-scroll): FIR-1676 — scroll the pill horizontally when its tools exceed the viewport width. */}
             <MarkButton editor={editor} mark="bold" icon={Bold} label={t(($) => $.bubble_menu.bold)} shortcut={`${modKey}+B`} isActive={fmt.bold} />
             <MarkButton editor={editor} mark="italic" icon={Italic} label={t(($) => $.bubble_menu.italic)} shortcut={`${modKey}+I`} isActive={fmt.italic} />
             <MarkButton editor={editor} mark="strike" icon={Strikethrough} label={t(($) => $.bubble_menu.strikethrough)} shortcut={`${modKey}+Shift+S`} isActive={fmt.strike} />
