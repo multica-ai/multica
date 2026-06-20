@@ -161,7 +161,11 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
               >
                 <SelectTrigger id="rec-freq">
                   <SelectValue>
-                    {() => FREQUENCY_LABELS[form.frequency] ?? form.frequency}
+                    {() =>
+                      form.frequency
+                        ? FREQUENCY_LABELS[form.frequency] ?? form.frequency
+                        : null
+                    }
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
