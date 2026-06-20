@@ -25,6 +25,12 @@ export interface IssueDateFilter {
   field: IssueDateField;
   from: string;
   to: string;
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — "none" matches issues
+  // that have NO due date (field is due_date by construction; from/to are
+  // ignored). Undefined/"range" is the normal from..to range filter. Only the
+  // client-side My Issues filter sets "none"; the server-backed /issues page
+  // never produces it (its picker offers ranges only).
+  mode?: "range" | "none";
 }
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];

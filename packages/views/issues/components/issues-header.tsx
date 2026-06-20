@@ -539,9 +539,12 @@ function LabelSubContent({
 function DateSubContent({
   value,
   onChange,
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date quick presets.
+  dueDatePresets = false,
 }: {
   value: IssueDateFilter | null;
   onChange: (filter: IssueDateFilter | null) => void;
+  dueDatePresets?: boolean;
 }) {
   const { t } = useT("issues");
   const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
@@ -575,6 +578,21 @@ function DateSubContent({
     });
   };
 
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date quick filters.
+  // Each forces field=due_date. Overdue = before today; This week = today..+6d;
+  // No due date = the special "none" mode (issues with an empty due_date).
+  const applyDuePreset = (preset: "overdue" | "this_week" | "none") => {
+    setField("due_date");
+    setRange(undefined);
+    if (preset === "overdue") {
+      onChange({ field: "due_date", from: "1970-01-01", to: addDaysDateOnly(-1) });
+    } else if (preset === "this_week") {
+      onChange({ field: "due_date", from: todayDateOnly(), to: addDaysDateOnly(6) });
+    } else {
+      onChange({ field: "due_date", from: todayDateOnly(), to: todayDateOnly(), mode: "none" });
+    }
+  };
+
   return (
     <>
       <DropdownMenuGroup>
@@ -599,6 +617,23 @@ function DateSubContent({
       <DropdownMenuItem onClick={() => applyPreset(7)}>
         {t(($) => $.filters.date_last_7_days)}
       </DropdownMenuItem>
+
+      {/* CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date quick presets. */}
+      {dueDatePresets && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuLabel>{t(($) => $.filters.date_due_section)}</DropdownMenuLabel>
+          <DropdownMenuItem onClick={() => applyDuePreset("overdue")}>
+            {t(($) => $.filters.date_due_overdue)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => applyDuePreset("this_week")}>
+            {t(($) => $.filters.date_due_this_week)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => applyDuePreset("none")}>
+            {t(($) => $.filters.date_due_none)}
+          </DropdownMenuItem>
+        </>
+      )}
 
       <div className="px-1.5 py-1">
         <Popover>
@@ -779,12 +814,16 @@ export function IssueDisplayControls({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  dueDatePresets = false,
 }: {
   scopedIssues: Issue[];
   /** Hide the board/list/swimlane/gantt view toggle entirely. */
   hideViewToggle?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — show Overdue/This week/No
+  // due date quick presets in the date submenu (client-side My Issues filter only).
+  dueDatePresets?: boolean;
   /** Whether the Gantt view option is offered (project surface only). */
   // Only Project Detail renders <GanttView>; other surfaces (global /issues,
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
@@ -857,9 +896,12 @@ export function IssueDisplayControls({
   };
   const dateFilterLabel = showDateFilter && dateFilter
     ? `${t(($) => $.filters[DATE_FIELD_LABEL_KEY[dateFilter.field]])}: ${
-        dateFilter.from === dateFilter.to
-          ? shortDateLabel(dateFilter.from)
-          : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
+        // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — "no due date" label.
+        dateFilter.mode === "none"
+          ? t(($) => $.filters.date_due_none)
+          : dateFilter.from === dateFilter.to
+            ? shortDateLabel(dateFilter.from)
+            : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
       }`
     : null;
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
@@ -1005,6 +1047,7 @@ export function IssueDisplayControls({
                   <DateSubContent
                     value={dateFilter}
                     onChange={onDateFilterChange}
+                    dueDatePresets={dueDatePresets}
                   />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>

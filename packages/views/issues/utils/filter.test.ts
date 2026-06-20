@@ -248,4 +248,55 @@ describe("filterIssues", () => {
     // in the running set → only "1" survives.
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
+
+  // --- Date / due-date filter (My Issues, client-side) ---
+  const dueIssues: Issue[] = [
+    makeIssue({ id: "D1", due_date: "2026-06-15" }), // before window
+    makeIssue({ id: "D2", due_date: "2026-06-20" }), // start of window (inclusive)
+    makeIssue({ id: "D3", due_date: "2026-06-26" }), // end of window (inclusive)
+    makeIssue({ id: "D4", due_date: "2026-07-01" }), // after window
+    makeIssue({ id: "D5", due_date: null }), // no due date
+  ];
+
+  it("filters by a due_date range (inclusive both ends)", () => {
+    const result = filterIssues(dueIssues, {
+      ...NO_FILTER,
+      dateFilter: { field: "due_date", from: "2026-06-20", to: "2026-06-26" },
+    });
+    expect(result.map((i) => i.id)).toEqual(["D2", "D3"]);
+  });
+
+  it("excludes issues with no due date from a due_date range filter", () => {
+    const result = filterIssues(dueIssues, {
+      ...NO_FILTER,
+      dateFilter: { field: "due_date", from: "2026-06-20", to: "2026-06-26" },
+    });
+    expect(result.map((i) => i.id)).not.toContain("D5");
+  });
+
+  it("keeps only issues with no due date in 'none' mode", () => {
+    const result = filterIssues(dueIssues, {
+      ...NO_FILTER,
+      dateFilter: { field: "due_date", from: "2026-06-20", to: "2026-06-20", mode: "none" },
+    });
+    expect(result.map((i) => i.id)).toEqual(["D5"]);
+  });
+
+  it("matches the Overdue preset shape (due before today)", () => {
+    // Overdue = from far-past .. yesterday. Anchor "today" at 2026-06-20.
+    const result = filterIssues(dueIssues, {
+      ...NO_FILTER,
+      dateFilter: { field: "due_date", from: "1970-01-01", to: "2026-06-19" },
+    });
+    expect(result.map((i) => i.id)).toEqual(["D1"]);
+  });
+
+  it("filters by created_at when that field is chosen", () => {
+    const result = filterIssues(dueIssues, {
+      ...NO_FILTER,
+      // All fixtures share created_at 2025-01-01 → a 2026 window matches none.
+      dateFilter: { field: "created_at", from: "2026-01-01", to: "2026-12-31" },
+    });
+    expect(result).toHaveLength(0);
+  });
 });
