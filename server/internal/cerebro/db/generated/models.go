@@ -932,6 +932,18 @@ type CerebroRuntimeToolUserGrant struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroSavedFilter struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Name        string             `json:"name"`
+	Surface     string             `json:"surface"`
+	FilterState []byte             `json:"filter_state"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroSearchEmbeddingQueue struct {
 	ID          int64              `json:"id"`
 	TargetType  string             `json:"target_type"`

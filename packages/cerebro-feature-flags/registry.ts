@@ -122,6 +122,8 @@ export type CerebroFlagKey =
   | "cerebro_recurring_issues"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
   | "cerebro_issue_date_times"
+  // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
+  | "cerebro_saved_filters"
   // TECH-3738 Bid C: capability drift watcher — periodically alert owners when an agent uses a tool its policy denies.
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
@@ -358,6 +360,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1597: OFF by default. Hides the time-of-day control next to the
   // start/due date pickers. The sweeper still treats a no-time date as before.
   cerebro_issue_date_times: false,
+  // FIR-1659: OFF by default while the feature is built across phases. Hides the
+  // "Saved filters" section + "Save current filter" action in the issue Filter menu.
+  cerebro_saved_filters: false,
   // TECH-3738 Bid C: OFF by default. The capability drift watcher does nothing
   // until an admin turns it on; then it periodically alerts owners/admins when
   // an agent uses a tool its declared policy denies.
@@ -1006,6 +1011,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Add an optional time-of-day next to an issue's Start date and Due date. A start time auto-starts an agent-assigned issue at that exact moment (same as a fresh assignment); a due time makes the due reminder fire at that moment instead of at the start of the day. Leaving a time empty keeps the date behaving exactly as before. Off hides the time control. FIR-1597.",
+  },
+  {
+    key: "cerebro_saved_filters",
+    label: "Saved filters",
+    group: "workspace",
+    description:
+      "Let users save the current issue filter as a named, personal filter and recall it with one click from the Filter menu — across the Issues list, My Issues, project view and member/agent panels. Personal filters only for now; sharing with colleagues/groups/the whole team and the group permission for who may create shared filters land in later phases. Off hides the Saved filters section and the Save action. FIR-1659.",
   },
   {
     key: "cerebro_capability_drift_watcher",
