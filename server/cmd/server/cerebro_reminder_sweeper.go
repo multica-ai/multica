@@ -45,7 +45,41 @@ func tickCerebroReminders(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 		return
 	}
 	for _, rem := range due {
+		// Fan out by recipient: an agent recipient fires a wakeup (a scheduled
+		// agent run); a member recipient re-surfaces the source in the inbox.
+		if rem.RecipientType == "agent" {
+			fireAgentReminder(ctx, cerebro, rem)
+			continue
+		}
 		surfaceFiredReminder(ctx, cerebro, bus, rem)
+	}
+}
+
+// fireAgentReminder turns a due agent-recipient reminder into a cerebro agent
+// wakeup: a one-shot 'time' wakeup due now, which the existing wakeup dispatcher
+// claims and runs. creator_id carries the human origin a real agent run needs;
+// the wakeup needs an issue context, guaranteed by the create-time validation
+// that an agent reminder is anchored to a message or an issue (conversation_id).
+func fireAgentReminder(ctx context.Context, cerebro *cerebrodb.Queries, rem cerebrodb.ClaimDueRemindersRow) {
+	if !rem.ConversationID.Valid {
+		slog.Warn("cerebro reminder sweeper: agent reminder has no issue context, skipping", "reminder_id", util.UUIDToString(rem.ID))
+		return
+	}
+	prompt := rem.Text
+	if prompt == "" {
+		prompt = "Reminder"
+	}
+	if _, err := cerebro.CreateCerebroAgentWakeup(ctx, cerebrodb.CreateCerebroAgentWakeupParams{
+		WorkspaceID:     rem.WorkspaceID,
+		AgentID:         rem.RecipientID,
+		IssueID:         rem.ConversationID,
+		Prompt:          prompt,
+		TriggerType:     "time",
+		FireAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		CreatedByID:     rem.CreatorID,
+		OriginCommentID: rem.MessageID,
+	}); err != nil {
+		slog.Warn("cerebro reminder sweeper: failed to create agent wakeup", "error", err)
 	}
 }
 
@@ -54,6 +88,13 @@ func tickCerebroReminders(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 // it), then ensure a manually-added inbox row exists and is unread so the
 // reminder "lands in the inbox" linking to the original message's conversation.
 func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *events.Bus, rem cerebrodb.ClaimDueRemindersRow) {
+	// A chat-message reminder has no conversation (a chat is not an issue); it
+	// re-surfaces by stamping its chat session unread, which makes the chat
+	// reappear in the inbox's chat list (FIR-394).
+	if rem.AnchorType == "chat_message" {
+		surfaceFiredChatReminder(ctx, cerebro, bus, rem)
+		return
+	}
 	if !rem.ConversationID.Valid {
 		// Source conversation was deleted; the reminder still shows in the
 		// overview as fired, but there is nothing to re-surface.
@@ -64,7 +105,7 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 	//    conversation the user archived reappears in their list.
 	if err := cerebro.UnarchiveChannelForUser(ctx, cerebrodb.UnarchiveChannelForUserParams{
 		ChannelID: rem.ConversationID,
-		UserID:    rem.UserID,
+		UserID:    rem.RecipientID,
 	}); err != nil {
 		slog.Warn("cerebro reminder sweeper: failed to unarchive channel", "error", err)
 	}
@@ -73,7 +114,7 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 	if _, err := cerebro.UnarchiveInboxByIssue(ctx, cerebrodb.UnarchiveInboxByIssueParams{
 		WorkspaceID:   rem.WorkspaceID,
 		RecipientType: "member",
-		RecipientID:   rem.UserID,
+		RecipientID:   rem.RecipientID,
 		IssueID:       rem.ConversationID,
 	}); err != nil {
 		slog.Warn("cerebro reminder sweeper: failed to unarchive inbox rows", "error", err)
@@ -85,7 +126,7 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 	var inboxItemID pgtype.UUID
 	if existing, err := cerebro.FindManualInboxItem(ctx, cerebrodb.FindManualInboxItemParams{
 		WorkspaceID: rem.WorkspaceID,
-		RecipientID: rem.UserID,
+		RecipientID: rem.RecipientID,
 		IssueID:     rem.ConversationID,
 	}); err == nil {
 		inboxItemID = existing.ID
@@ -99,7 +140,7 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 		}
 		created, cerr := cerebro.CreateManualInboxItem(ctx, cerebrodb.CreateManualInboxItemParams{
 			WorkspaceID: rem.WorkspaceID,
-			RecipientID: rem.UserID,
+			RecipientID: rem.RecipientID,
 			IssueID:     rem.ConversationID,
 			Title:       title,
 		})
@@ -127,8 +168,35 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 			WorkspaceID: util.UUIDToString(rem.WorkspaceID),
 			ActorType:   "system",
 			Payload: map[string]any{
-				"recipient_id": util.UUIDToString(rem.UserID),
+				"recipient_id": util.UUIDToString(rem.RecipientID),
 				"issue_id":     util.UUIDToString(rem.ConversationID),
+				"type":         "reminder",
+			},
+		})
+	}
+}
+
+// surfaceFiredChatReminder re-surfaces a fired chat-message reminder: it stamps
+// the chat session unread (idempotent), which makes the chat reappear in the
+// inbox's chat list. A chat is not an issue, so none of the conversation/inbox
+// machinery above applies.
+func surfaceFiredChatReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *events.Bus, rem cerebrodb.ClaimDueRemindersRow) {
+	if !rem.ChatMessageID.Valid {
+		// The chat message was deleted; the reminder still shows fired in the
+		// overview, but there is no chat to re-surface.
+		return
+	}
+	if err := cerebro.MarkChatSessionUnreadByMessage(ctx, rem.ChatMessageID); err != nil {
+		slog.Warn("cerebro reminder sweeper: failed to mark chat session unread", "error", err)
+		return
+	}
+	if bus != nil {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(rem.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"recipient_id": util.UUIDToString(rem.RecipientID),
 				"type":         "reminder",
 			},
 		})

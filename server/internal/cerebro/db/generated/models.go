@@ -866,6 +866,12 @@ type CerebroReminder struct {
 	FiredAt          pgtype.Timestamptz `json:"fired_at"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	CreatorID        pgtype.UUID        `json:"creator_id"`
+	RecipientType    string             `json:"recipient_type"`
+	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	AnchorType       string             `json:"anchor_type"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
 }
 
 type CerebroRole struct {

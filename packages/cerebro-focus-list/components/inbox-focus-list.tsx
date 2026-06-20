@@ -47,6 +47,7 @@ import {
   useUpdateFocusListItem,
   useMarkFocusListItemDone,
   useSnoozeFocusListItem,
+  useSnoozeFocusItemAsReminder,
   useDeleteFocusListItem,
   useReorderFocusListItems,
 } from "../mutations";
@@ -193,6 +194,7 @@ function FocusListRow({
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const markDone = useMarkFocusListItemDone();
   const snooze = useSnoozeFocusListItem();
+  const snoozeAsReminder = useSnoozeFocusItemAsReminder();
   const deleteItem = useDeleteFocusListItem();
   const updateItem = useUpdateFocusListItem();
   const isDone = !!item.done_at;
@@ -213,6 +215,8 @@ function FocusListRow({
     snooze.mutate({ id: item.id, until }, {
       onError: () => toast.error("Could not snooze"),
     });
+    // Also record the snooze as a reminder so it shows in the unified overview.
+    snoozeAsReminder.mutate({ until, text: item.text, issueId: item.issue_id });
   };
 
   return (

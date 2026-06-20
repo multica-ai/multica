@@ -64,6 +64,59 @@ export function useMarkFocusListItemDone() {
   });
 }
 
+// FIR-394 — record a focus-list snooze as a reminder on the ONE reminder
+// entity too, so the snooze shows up in the unified reminder overview. Anchored to
+// the item's issue when it has one, else a free reminder carried by its text.
+// Posted inline to keep focus-list free of a @multica/cerebro-reminders dep.
+interface AnchoredReminderRow {
+  id: string;
+  status: string;
+  message_id: string | null;
+  conversation_id: string | null;
+}
+
+export function useSnoozeFocusItemAsReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({
+      until,
+      text,
+      issueId,
+    }: {
+      until: Date;
+      text: string;
+      issueId?: string | null;
+    }) => {
+      // Idempotent for an issue-anchored item: re-snoozing replaces its reminder
+      // instead of stacking a second one. (Free items have no anchor to dedupe.)
+      if (issueId) {
+        const list =
+          await api.cerebroRequest<AnchoredReminderRow[]>("/api/cerebro/reminders");
+        const stale = (Array.isArray(list) ? list : []).filter(
+          (r) => r && r.status !== "done" && !r.message_id && r.conversation_id === issueId,
+        );
+        await Promise.all(
+          stale.map((r) =>
+            api.cerebroRequest(`/api/cerebro/reminders/${r.id}`, { method: "DELETE" }),
+          ),
+        );
+      }
+      return api.cerebroRequest("/api/cerebro/reminders", {
+        method: "POST",
+        body: JSON.stringify({
+          remind_at: until.toISOString(),
+          text: text.trim() || "Reminder",
+          ...(issueId ? { issue_id: issueId } : {}),
+        }),
+      });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}
+
 export function useSnoozeFocusListItem() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

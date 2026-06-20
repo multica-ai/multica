@@ -406,9 +406,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // by default; per-channel push stays opt-in). Off hides the menu action and
   // the server rejects comment-referencing reminders.
   cerebro_comment_reminders: true,
-  // FIR-394: OFF until the reminder overview is QA'd on staging. Gates only the
-  // nav entry + /reminders route; the backend entity + sweeper are always live.
-  cerebro_reminders: false,
+  // FIR-394: ON by default — the unified reminder is the product's reminder
+  // system. Gates the nav entry + /reminders route + the per-surface "remind me"
+  // entries; the backend entity + sweeper are always live.
+  cerebro_reminders: true,
   // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
   // no target at all (no person, agent, or issue) is rejected by the server
   // with a 422 telling the agent to add one. Members are never affected. Off

@@ -2,16 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BellRing } from "lucide-react";
+import { BellRing, Plus } from "lucide-react";
 
+import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 
+import { useTranslation } from "react-i18next";
+
 import { remindersListOptions } from "../core/queries";
 import type { Reminder } from "../core/types";
-import { formatReminderSource, formatReminderWhen } from "../lib/format";
+import { formatReminderAnchor, formatReminderWhen } from "../lib/format";
+import { useCerebroReminderStrings } from "../strings";
 import { ReminderCard } from "./reminder-card";
+import { CreateReminderSheet } from "./create-reminder-sheet";
 
 /**
  * Reminder overview (FIR-394): the member's reminders as their own entity. Left
@@ -20,9 +25,12 @@ import { ReminderCard } from "./reminder-card";
  */
 export function ReminderOverview() {
   const wsId = useWorkspaceId();
+  const s = useCerebroReminderStrings();
+  const { i18n } = useTranslation();
   const { data: reminders = [], isLoading } = useQuery(remindersListOptions(wsId));
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
 
   // Keep a valid selection: default to the first reminder, and recover if the
   // selected one is completed/deleted out from under us.
@@ -48,12 +56,21 @@ export function ReminderOverview() {
       <div className="w-full overflow-hidden rounded-xl border border-border bg-card shadow-sm md:w-[340px] md:shrink-0">
         <div className="flex items-center gap-2 border-b border-border px-4 py-4 text-[15px] font-semibold">
           <BellRing className="size-4 text-primary" />
-          Mine reminders
+          {s.overview_title}
           {reminders.length > 0 && (
-            <span className="ml-auto rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+            <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
               {reminders.length}
             </span>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 gap-1 px-2 text-xs"
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="size-3.5" />
+            {s.overview_new}
+          </Button>
         </div>
 
         {isLoading ? (
@@ -62,9 +79,9 @@ export function ReminderOverview() {
           </div>
         ) : reminders.length === 0 ? (
           <div className="px-4 py-12 text-center text-sm text-muted-foreground">
-            Du har ingen reminders.
+            {s.overview_empty_title}
             <br />
-            Sæt en på en besked for at blive mindet om den her.
+            {s.overview_empty_hint}
           </div>
         ) : (
           <ul>
@@ -81,10 +98,10 @@ export function ReminderOverview() {
                     )}
                   >
                     <div className="mb-1 text-xs font-semibold text-primary">
-                      {formatReminderWhen(r.remind_at)}
+                      {formatReminderWhen(r.remind_at, s, i18n.language)}
                     </div>
                     <div className="mb-1 text-xs text-muted-foreground">
-                      {formatReminderSource(r.conversation_kind, r.conversation_title)}
+                      {formatReminderAnchor(r, s).label}
                     </div>
                     <div className="line-clamp-2 text-sm text-foreground">{r.text}</div>
                   </button>
@@ -102,11 +119,13 @@ export function ReminderOverview() {
         ) : (
           !isLoading && (
             <div className="rounded-xl border border-dashed border-border px-6 py-16 text-center text-sm text-muted-foreground">
-              Vælg en reminder for at se beskeden.
+              {s.overview_select_prompt}
             </div>
           )
         )}
       </div>
+
+      <CreateReminderSheet open={createOpen} onOpenChange={setCreateOpen} />
     </div>
   );
 }

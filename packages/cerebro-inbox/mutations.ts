@@ -259,3 +259,129 @@ export function useCreateCommentReminder() {
     },
   });
 }
+
+// FIR-394 — consolidate the legacy "remind me later / snooze" entries (inbox
+// row, channel, focus list) onto the ONE reminder entity. Each of those
+// surfaces still hides its row via its own mute/snooze, but now ALSO records a
+// reminder so it shows up in the unified reminder overview and re-fires at the
+// chosen time. Anchored to the row's issue/project. Posted inline (not via
+// @multica/cerebro-reminders) to keep the inbox package free of a reminders-
+// package dependency.
+
+// The subset of the reminder API shape we need to find a row's snooze-reminder.
+interface AnchoredReminderRow {
+  id: string;
+  status: string;
+  message_id: string | null;
+  conversation_id: string | null;
+  project_id: string | null;
+}
+
+// The active reminders the CURRENT row's snooze created: anchored to this
+// issue/project and NOT message-level (a comment reminder must survive). Used to
+// keep snooze idempotent (no stacking) and to remove the reminder when the row
+// is un-muted (so "remove" means remove everywhere).
+async function findRowSnoozeReminderIds(
+  issueId?: string | null,
+  projectId?: string | null,
+): Promise<string[]> {
+  if (!issueId && !projectId) return [];
+  const list = await api.cerebroRequest<AnchoredReminderRow[]>("/api/cerebro/reminders");
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter(
+      (r) =>
+        r &&
+        r.status !== "done" &&
+        !r.message_id &&
+        ((issueId != null && r.conversation_id === issueId) ||
+          (projectId != null && r.project_id === projectId)),
+    )
+    .map((r) => r.id);
+}
+
+async function deleteReminders(ids: string[]): Promise<void> {
+  await Promise.all(
+    ids.map((id) =>
+      api.cerebroRequest(`/api/cerebro/reminders/${id}`, { method: "DELETE" }),
+    ),
+  );
+}
+
+export function useSnoozeAsReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({
+      remindAt,
+      text,
+      issueId,
+      projectId,
+    }: {
+      remindAt: Date;
+      text: string;
+      issueId?: string | null;
+      projectId?: string | null;
+    }) => {
+      // Idempotent per row: snoozing the same row again replaces its reminder
+      // instead of stacking a second one.
+      await deleteReminders(await findRowSnoozeReminderIds(issueId, projectId));
+      return api.cerebroRequest("/api/cerebro/reminders", {
+        method: "POST",
+        body: JSON.stringify({
+          remind_at: remindAt.toISOString(),
+          text: text.trim() || "Reminder",
+          ...(issueId
+            ? { issue_id: issueId }
+            : projectId
+              ? { project_id: projectId }
+              : {}),
+        }),
+      });
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}
+
+// FIR-394 — the inbox-toolbar "New reminder" now creates a free reminder on the
+// ONE reminder entity (POST /api/cerebro/reminders) instead of the legacy
+// inbox-item reminder (/api/inbox/reminders), so every "remind me" entry point
+// feeds the same overview. Posted inline to keep the inbox package free of a
+// reminders-package dependency.
+export function useCreateGlobalReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ text, plannedAt }: { text: string; plannedAt: Date }) =>
+      api.cerebroRequest("/api/cerebro/reminders", {
+        method: "POST",
+        body: JSON.stringify({ text, remind_at: plannedAt.toISOString() }),
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}
+
+// Un-muting a row removes the reminder its snooze created, so "remove" means
+// remove in BOTH places (the row reappears AND it leaves the reminder overview).
+export function useRemoveRowSnoozeReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({
+      issueId,
+      projectId,
+    }: {
+      issueId?: string | null;
+      projectId?: string | null;
+    }) => {
+      await deleteReminders(await findRowSnoozeReminderIds(issueId, projectId));
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}

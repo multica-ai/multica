@@ -18,6 +18,19 @@ vi.mock("@multica/cerebro-ui/hooks/use-sticky-bottom", () => ({
   useStickyBottom: () => ({ hasNewBelow: false, scrollToBottom: () => {} }),
 }));
 
+// The chat-message footer renders the FIR-394 reminder action, which reads
+// workspace-scoped hooks (useWorkspaceId) that require a workspace route.
+// These fold-behavior tests render bare, so stub the action — it is covered
+// by its own component test, not here.
+vi.mock("@multica/cerebro-chat/views", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@multica/cerebro-chat/views")>();
+  return {
+    ...actual,
+    CerebroChatMessageReminderAction: () => null,
+  };
+});
+
 import { ChatMessageList } from "./chat-message-list";
 import { ChatStatusLine } from "@multica/cerebro-chat/views";
 

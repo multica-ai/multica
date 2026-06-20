@@ -43,7 +43,13 @@ import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { useMuteInbox, useUnmuteInbox, useMarkInboxUnread } from "../mutations";
+import {
+  useMuteInbox,
+  useUnmuteInbox,
+  useMarkInboxUnread,
+  useSnoozeAsReminder,
+  useRemoveRowSnoozeReminder,
+} from "../mutations";
 import {
   addHours,
   fromDateTimeLocalValue,
@@ -117,6 +123,8 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   const markUnread = useMarkInboxUnread();
   const mute = useMuteInbox();
   const unmute = useUnmuteInbox();
+  const snoozeAsReminder = useSnoozeAsReminder();
+  const removeRowReminder = useRemoveRowSnoozeReminder();
   const strings = useCerebroInboxStrings();
   const muted = isMuted(item.muted_until);
   const [reminderOpen, setReminderOpen] = useState(false);
@@ -130,17 +138,31 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   }, [item.id, item.read, markRead, markUnread]);
 
   const handleToggleMute = useCallback(() => {
-    if (muted) unmute.mutate(item.id);
-    else setReminderOpen(true);
-  }, [item.id, muted, unmute]);
+    if (muted) {
+      unmute.mutate(item.id);
+      // Remove the reminder this row's snooze created, so un-muting clears it
+      // from the unified overview too (FIR-394).
+      removeRowReminder.mutate({ issueId: item.issue_id, projectId: item.project_id });
+    } else {
+      setReminderOpen(true);
+    }
+  }, [item.id, item.issue_id, item.project_id, muted, unmute, removeRowReminder]);
 
   const handleScheduleReminder = useCallback(
     (mutedUntil: Date) => {
+      // Hide the row now (mute) AND record it as a reminder so it surfaces in
+      // the unified reminder overview and re-fires at the chosen time (FIR-394).
       mute.mutate({ id: item.id, mutedUntil });
+      snoozeAsReminder.mutate({
+        remindAt: mutedUntil,
+        text: item.title,
+        issueId: item.issue_id,
+        projectId: item.project_id,
+      });
       setReminderOpen(false);
       setCustomReminder(toDateTimeLocalValue(mutedUntil));
     },
-    [item.id, mute],
+    [item.id, item.title, item.issue_id, item.project_id, mute, snoozeAsReminder],
   );
 
   // Feature-flag off — render the simple hover-only archive button so the

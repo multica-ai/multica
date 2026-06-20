@@ -23,23 +23,31 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, workspace_id, user_id, remind_at, text, message_id, conversation_id
+RETURNING id, workspace_id, creator_id, recipient_type, recipient_id,
+          remind_at, text, anchor_type, message_id, conversation_id, project_id,
+          chat_message_id
 `
 
 type ClaimDueRemindersRow struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	UserID         pgtype.UUID        `json:"user_id"`
+	CreatorID      pgtype.UUID        `json:"creator_id"`
+	RecipientType  string             `json:"recipient_type"`
+	RecipientID    pgtype.UUID        `json:"recipient_id"`
 	RemindAt       pgtype.Timestamptz `json:"remind_at"`
 	Text           string             `json:"text"`
+	AnchorType     string             `json:"anchor_type"`
 	MessageID      pgtype.UUID        `json:"message_id"`
 	ConversationID pgtype.UUID        `json:"conversation_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
 }
 
 // Atomically claim pending reminders whose time has arrived by flipping them to
 // 'fired'. FOR UPDATE SKIP LOCKED keeps concurrent sweeper ticks from
-// double-claiming. Returns the rows the sweeper needs to re-surface the source
-// conversation in the inbox.
+// double-claiming. Returns everything the sweeper needs to fan out: a member
+// recipient re-surfaces the source in the inbox; an agent recipient fires a
+// wakeup (needs creator_id for human origin + the anchor/issue context).
 func (q *Queries) ClaimDueReminders(ctx context.Context, limit int32) ([]ClaimDueRemindersRow, error) {
 	rows, err := q.db.Query(ctx, claimDueReminders, limit)
 	if err != nil {
@@ -52,11 +60,16 @@ func (q *Queries) ClaimDueReminders(ctx context.Context, limit int32) ([]ClaimDu
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
-			&i.UserID,
+			&i.CreatorID,
+			&i.RecipientType,
+			&i.RecipientID,
 			&i.RemindAt,
 			&i.Text,
+			&i.AnchorType,
 			&i.MessageID,
 			&i.ConversationID,
+			&i.ProjectID,
+			&i.ChatMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -69,30 +82,45 @@ func (q *Queries) ClaimDueReminders(ctx context.Context, limit int32) ([]ClaimDu
 }
 
 const createReminder = `-- name: CreateReminder :one
-INSERT INTO cerebro_reminder (workspace_id, user_id, remind_at, text, message_id, conversation_id)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO cerebro_reminder (
+    workspace_id, user_id, creator_id, recipient_type, recipient_id,
+    remind_at, text, anchor_type, message_id, conversation_id, project_id,
+    chat_message_id
+)
+VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING id
 `
 
 type CreateReminderParams struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
 	UserID         pgtype.UUID        `json:"user_id"`
+	RecipientType  string             `json:"recipient_type"`
+	RecipientID    pgtype.UUID        `json:"recipient_id"`
 	RemindAt       pgtype.Timestamptz `json:"remind_at"`
 	Text           string             `json:"text"`
+	AnchorType     string             `json:"anchor_type"`
 	MessageID      pgtype.UUID        `json:"message_id"`
 	ConversationID pgtype.UUID        `json:"conversation_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
 }
 
-// Create a reminder anchored to a message in a conversation. Returns the id;
-// the handler re-reads via GetReminder to build the joined response.
+// Create a reminder for any recipient, anchored to any (or no) entity. user_id
+// is kept populated (= creator) for back-compat with the v1 column; recipient_id
+// is the authority. Returns the id; the handler re-reads via GetReminder.
 func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, createReminder,
 		arg.WorkspaceID,
 		arg.UserID,
+		arg.RecipientType,
+		arg.RecipientID,
 		arg.RemindAt,
 		arg.Text,
+		arg.AnchorType,
 		arg.MessageID,
 		arg.ConversationID,
+		arg.ProjectID,
+		arg.ChatMessageID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)
@@ -108,31 +136,80 @@ func (q *Queries) DeleteReminder(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getChatMessageWithWorkspace = `-- name: GetChatMessageWithWorkspace :one
+SELECT cm.id, cm.chat_session_id, cm.content, cs.workspace_id, cs.title AS chat_title
+FROM chat_message cm
+JOIN chat_session cs ON cs.id = cm.chat_session_id
+WHERE cm.id = $1 AND cs.workspace_id = $2
+`
+
+type GetChatMessageWithWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetChatMessageWithWorkspaceRow struct {
+	ID            pgtype.UUID `json:"id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	Content       string      `json:"content"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	ChatTitle     string      `json:"chat_title"`
+}
+
+// Resolve + authorize a chat message for the chat-message reminder anchor: the
+// row only comes back if it belongs to the given workspace (via its session).
+// Returns the message's session so the reminder can re-open the right chat.
+func (q *Queries) GetChatMessageWithWorkspace(ctx context.Context, arg GetChatMessageWithWorkspaceParams) (GetChatMessageWithWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getChatMessageWithWorkspace, arg.ID, arg.WorkspaceID)
+	var i GetChatMessageWithWorkspaceRow
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Content,
+		&i.WorkspaceID,
+		&i.ChatTitle,
+	)
+	return i, err
+}
+
 const getReminder = `-- name: GetReminder :one
 SELECT
-    r.id, r.workspace_id, r.user_id, r.remind_at, r.status, r.text,
-    r.message_id, r.conversation_id, r.fired_inbox_item_id, r.fired_at,
-    r.created_at, r.updated_at,
+    r.id, r.workspace_id, r.creator_id, r.recipient_type, r.recipient_id,
+    r.remind_at, r.status, r.text, r.anchor_type,
+    r.message_id, r.conversation_id, r.project_id, r.chat_message_id,
+    r.fired_inbox_item_id, r.fired_at, r.created_at, r.updated_at,
     c.content      AS source_content,
     c.author_type  AS source_author_type,
     c.author_id    AS source_author_id,
     i.kind         AS conversation_kind,
-    i.title        AS conversation_title
+    i.title        AS conversation_title,
+    p.title        AS project_title,
+    cm.content     AS chat_source_content,
+    cs.id          AS chat_session_id,
+    cs.title       AS chat_session_title
 FROM cerebro_reminder r
-LEFT JOIN comment c ON c.id = r.message_id
-LEFT JOIN issue   i ON i.id = r.conversation_id
+LEFT JOIN comment      c  ON c.id  = r.message_id
+LEFT JOIN issue        i  ON i.id  = r.conversation_id
+LEFT JOIN project      p  ON p.id  = r.project_id
+LEFT JOIN chat_message cm ON cm.id = r.chat_message_id
+LEFT JOIN chat_session cs ON cs.id = cm.chat_session_id
 WHERE r.id = $1
 `
 
 type GetReminderRow struct {
 	ID                pgtype.UUID        `json:"id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	UserID            pgtype.UUID        `json:"user_id"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
 	RemindAt          pgtype.Timestamptz `json:"remind_at"`
 	Status            string             `json:"status"`
 	Text              string             `json:"text"`
+	AnchorType        string             `json:"anchor_type"`
 	MessageID         pgtype.UUID        `json:"message_id"`
 	ConversationID    pgtype.UUID        `json:"conversation_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	ChatMessageID     pgtype.UUID        `json:"chat_message_id"`
 	FiredInboxItemID  pgtype.UUID        `json:"fired_inbox_item_id"`
 	FiredAt           pgtype.Timestamptz `json:"fired_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
@@ -142,22 +219,31 @@ type GetReminderRow struct {
 	SourceAuthorID    pgtype.UUID        `json:"source_author_id"`
 	ConversationKind  pgtype.Text        `json:"conversation_kind"`
 	ConversationTitle pgtype.Text        `json:"conversation_title"`
+	ProjectTitle      pgtype.Text        `json:"project_title"`
+	ChatSourceContent pgtype.Text        `json:"chat_source_content"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ChatSessionTitle  pgtype.Text        `json:"chat_session_title"`
 }
 
-// Single reminder with the same source join, used for the opened reminder card
-// and as the authorization load (returns user_id + workspace_id).
+// Single reminder with the same anchor joins, used for the opened reminder card
+// and as the authorization load (returns recipient_type + recipient_id).
 func (q *Queries) GetReminder(ctx context.Context, id pgtype.UUID) (GetReminderRow, error) {
 	row := q.db.QueryRow(ctx, getReminder, id)
 	var i GetReminderRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
-		&i.UserID,
+		&i.CreatorID,
+		&i.RecipientType,
+		&i.RecipientID,
 		&i.RemindAt,
 		&i.Status,
 		&i.Text,
+		&i.AnchorType,
 		&i.MessageID,
 		&i.ConversationID,
+		&i.ProjectID,
+		&i.ChatMessageID,
 		&i.FiredInboxItemID,
 		&i.FiredAt,
 		&i.CreatedAt,
@@ -167,6 +253,10 @@ func (q *Queries) GetReminder(ctx context.Context, id pgtype.UUID) (GetReminderR
 		&i.SourceAuthorID,
 		&i.ConversationKind,
 		&i.ConversationTitle,
+		&i.ProjectTitle,
+		&i.ChatSourceContent,
+		&i.ChatSessionID,
+		&i.ChatSessionTitle,
 	)
 	return i, err
 }
@@ -174,35 +264,52 @@ func (q *Queries) GetReminder(ctx context.Context, id pgtype.UUID) (GetReminderR
 const listReminders = `-- name: ListReminders :many
 
 SELECT
-    r.id, r.workspace_id, r.user_id, r.remind_at, r.status, r.text,
-    r.message_id, r.conversation_id, r.fired_inbox_item_id, r.fired_at,
-    r.created_at, r.updated_at,
+    r.id, r.workspace_id, r.creator_id, r.recipient_type, r.recipient_id,
+    r.remind_at, r.status, r.text, r.anchor_type,
+    r.message_id, r.conversation_id, r.project_id, r.chat_message_id,
+    r.fired_inbox_item_id, r.fired_at, r.created_at, r.updated_at,
     c.content      AS source_content,
     c.author_type  AS source_author_type,
     c.author_id    AS source_author_id,
     i.kind         AS conversation_kind,
-    i.title        AS conversation_title
+    i.title        AS conversation_title,
+    p.title        AS project_title,
+    cm.content     AS chat_source_content,
+    cs.id          AS chat_session_id,
+    cs.title       AS chat_session_title
 FROM cerebro_reminder r
-LEFT JOIN comment c ON c.id = r.message_id
-LEFT JOIN issue   i ON i.id = r.conversation_id
-WHERE r.workspace_id = $1 AND r.user_id = $2 AND r.status <> 'done'
+LEFT JOIN comment      c  ON c.id  = r.message_id
+LEFT JOIN issue        i  ON i.id  = r.conversation_id
+LEFT JOIN project      p  ON p.id  = r.project_id
+LEFT JOIN chat_message cm ON cm.id = r.chat_message_id
+LEFT JOIN chat_session cs ON cs.id = cm.chat_session_id
+WHERE r.workspace_id = $1
+  AND r.recipient_type = $2
+  AND r.recipient_id = $3
+  AND r.status <> 'done'
 ORDER BY r.remind_at ASC
 `
 
 type ListRemindersParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
 }
 
 type ListRemindersRow struct {
 	ID                pgtype.UUID        `json:"id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	UserID            pgtype.UUID        `json:"user_id"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
 	RemindAt          pgtype.Timestamptz `json:"remind_at"`
 	Status            string             `json:"status"`
 	Text              string             `json:"text"`
+	AnchorType        string             `json:"anchor_type"`
 	MessageID         pgtype.UUID        `json:"message_id"`
 	ConversationID    pgtype.UUID        `json:"conversation_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	ChatMessageID     pgtype.UUID        `json:"chat_message_id"`
 	FiredInboxItemID  pgtype.UUID        `json:"fired_inbox_item_id"`
 	FiredAt           pgtype.Timestamptz `json:"fired_at"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
@@ -212,16 +319,21 @@ type ListRemindersRow struct {
 	SourceAuthorID    pgtype.UUID        `json:"source_author_id"`
 	ConversationKind  pgtype.Text        `json:"conversation_kind"`
 	ConversationTitle pgtype.Text        `json:"conversation_title"`
+	ProjectTitle      pgtype.Text        `json:"project_title"`
+	ChatSourceContent pgtype.Text        `json:"chat_source_content"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	ChatSessionTitle  pgtype.Text        `json:"chat_session_title"`
 }
 
-// CEREBRO-PATCH(cerebro-reminder): FIR-394 — reminder as its own entity, linked
-// back to the source message + conversation. Decouples reminder state from the
-// DM/channel thread so a reminder can never lock a conversation (FIR-249).
-// A member's reminders for the overview, joined with the source message preview
-// and the conversation it belongs to. Source columns are nullable: the reminder
-// survives (ON DELETE SET NULL) even if the message/conversation was deleted.
+// CEREBRO-PATCH(cerebro-reminder): FIR-394 — the unified reminder. A reminder is
+// "remind [a member OR an agent] about [a comment / issue / project / nothing]
+// at [a time]". It links BACK to its anchor (ON DELETE SET NULL) so it never
+// couples to thread loading (FIR-249), and agent recipients fire as wakeups.
+// A recipient's reminders for the overview, joined with whatever the reminder is
+// anchored to (message preview + conversation, or project). All anchor columns
+// are nullable: the reminder survives even if its anchor was deleted.
 func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([]ListRemindersRow, error) {
-	rows, err := q.db.Query(ctx, listReminders, arg.WorkspaceID, arg.UserID)
+	rows, err := q.db.Query(ctx, listReminders, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	if err != nil {
 		return nil, err
 	}
@@ -232,12 +344,17 @@ func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
-			&i.UserID,
+			&i.CreatorID,
+			&i.RecipientType,
+			&i.RecipientID,
 			&i.RemindAt,
 			&i.Status,
 			&i.Text,
+			&i.AnchorType,
 			&i.MessageID,
 			&i.ConversationID,
+			&i.ProjectID,
+			&i.ChatMessageID,
 			&i.FiredInboxItemID,
 			&i.FiredAt,
 			&i.CreatedAt,
@@ -247,6 +364,10 @@ func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([
 			&i.SourceAuthorID,
 			&i.ConversationKind,
 			&i.ConversationTitle,
+			&i.ProjectTitle,
+			&i.ChatSourceContent,
+			&i.ChatSessionID,
+			&i.ChatSessionTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -256,6 +377,21 @@ func (q *Queries) ListReminders(ctx context.Context, arg ListRemindersParams) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const markChatSessionUnreadByMessage = `-- name: MarkChatSessionUnreadByMessage :exec
+UPDATE chat_session
+SET unread_since = NOW()
+WHERE id = (SELECT cm.chat_session_id FROM chat_message cm WHERE cm.id = $1)
+  AND unread_since IS NULL
+`
+
+// Re-surface a chat in the inbox when a chat-message reminder fires: stamp the
+// session unread (idempotent — no-op if it is already unread) by the message id,
+// so the sweeper needs only the chat_message_id it already carries.
+func (q *Queries) MarkChatSessionUnreadByMessage(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markChatSessionUnreadByMessage, id)
+	return err
 }
 
 const markReminderDone = `-- name: MarkReminderDone :one

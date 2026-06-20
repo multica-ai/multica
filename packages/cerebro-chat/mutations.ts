@@ -209,3 +209,30 @@ export function useMarkChatUnread() {
     },
   });
 }
+
+// FIR-394 — "Mind mig" on a specific chat message. Creates a reminder anchored
+// to that chat message on the unified reminder entity (POST /api/cerebro/
+// reminders). Posted inline so cerebro-chat takes no dependency on the
+// reminders package. Text is left empty so the server auto-suggests it from the
+// chat message body. The query key mirrors reminderKeys.all so the reminder
+// overview refreshes.
+export function useCreateChatMessageReminder() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({
+      chat_message_id,
+      remind_at,
+    }: {
+      chat_message_id: string;
+      remind_at: string;
+    }) =>
+      api.cerebroRequest("/api/cerebro/reminders", {
+        method: "POST",
+        body: JSON.stringify({ chat_message_id, remind_at }),
+      }),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ["cerebro-reminders", wsId] });
+    },
+  });
+}

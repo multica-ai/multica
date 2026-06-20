@@ -13,7 +13,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import { useCreateInboxReminder } from "../mutations";
+import { useCreateGlobalReminder } from "../mutations";
 import { nextBusinessDayNineAm, toDateTimeLocalValue } from "../mute-time";
 
 export interface GlobalInboxReminderDialogLabels {
@@ -68,7 +68,7 @@ export function GlobalInboxReminderDialog({
   const [planned, setPlanned] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
   );
-  const createReminder = useCreateInboxReminder();
+  const createReminder = useCreateGlobalReminder();
 
   const handleCreate = () => {
     const plannedAt = new Date(planned);

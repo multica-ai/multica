@@ -18,6 +18,8 @@ import {
   MobileRowActions,
   ReminderSheet,
   useCerebroInboxStrings,
+  useSnoozeAsReminder,
+  useRemoveRowSnoozeReminder,
   isMuted,
   toDateTimeLocalValue,
   nextBusinessDayNineAm,
@@ -43,6 +45,8 @@ export function CerebroChannelRowActions({
   const isMobile = useIsMobile();
   const mute = useMuteChannel();
   const unmute = useUnmuteChannel();
+  const snoozeAsReminder = useSnoozeAsReminder();
+  const removeRowReminder = useRemoveRowSnoozeReminder();
   const markUnread = useMarkChannelUnread();
   const markRead = useMarkChannelRead();
   const strings = useCerebroInboxStrings();
@@ -66,8 +70,13 @@ export function CerebroChannelRowActions({
   // "Remind me" = open the shared reminder sheet (presets + custom). Unmuting a
   // snoozed channel is the inverse and happens directly.
   const toggleMute = () => {
-    if (muted) unmute.mutate(channel.id);
-    else setReminderOpen(true);
+    if (muted) {
+      unmute.mutate(channel.id);
+      // Removing the channel snooze also removes the reminder it created.
+      removeRowReminder.mutate({ issueId: channel.id });
+    } else {
+      setReminderOpen(true);
+    }
   };
 
   const schedule = (mutedUntil: Date) => {
@@ -75,6 +84,13 @@ export function CerebroChannelRowActions({
       { id: channel.id, mutedUntil },
       { onError: () => toast.error("Kunne ikke sætte påmindelse") },
     );
+    // A channel/DM IS an issue, so anchor the reminder to it — the unified
+    // overview then lists this snooze and "Go to message" reopens the thread.
+    snoozeAsReminder.mutate({
+      remindAt: mutedUntil,
+      text: channel.title,
+      issueId: channel.id,
+    });
     setReminderOpen(false);
     setCustomReminder(toDateTimeLocalValue(mutedUntil));
   };

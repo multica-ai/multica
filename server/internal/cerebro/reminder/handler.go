@@ -1,7 +1,8 @@
-// Package reminder holds the cerebro-only HTTP handlers for reminders modelled
-// as their own entity (FIR-394). A reminder links BACK to the message and
-// conversation it was set on instead of living inside the conversation, so it
-// can never again lock a DM/channel thread (FIR-249).
+// Package reminder holds the cerebro-only HTTP handlers for the unified reminder
+// entity (FIR-394). A reminder is "remind [a member OR an agent] about [a
+// comment / issue / project / nothing] at [a time]". It links BACK to its anchor
+// instead of living inside it, so it can never lock a DM/channel thread
+// (FIR-249); agent recipients fire as agent wakeups (see the reminder sweeper).
 package reminder
 
 import (
@@ -20,9 +21,9 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Handler exposes the cerebro-only reminder endpoints. Upstream is used to
-// resolve the source comment (to fix the conversation and auto-suggest text);
-// Cerebro owns the reminder table.
+// Handler exposes the cerebro-only reminder endpoints. Upstream resolves the
+// anchor entities (comment / issue / project / agent); Cerebro owns the reminder
+// table.
 type Handler struct {
 	Upstream *db.Queries
 	Cerebro  *cerebrodb.Queries
@@ -33,21 +34,41 @@ func New(upstream *db.Queries, cerebro *cerebrodb.Queries) *Handler {
 	return &Handler{Upstream: upstream, Cerebro: cerebro}
 }
 
-// reminderResponse is the JSON shape returned to the client. Source fields are
-// optional: the reminder outlives the message it points at.
+// reminderResponse is the JSON shape returned to the client. Anchor fields are
+// optional: the reminder outlives whatever it points at.
 type reminderResponse struct {
 	ID                string  `json:"id"`
+	CreatorID         string  `json:"creator_id"`
+	RecipientType     string  `json:"recipient_type"`
+	RecipientID       string  `json:"recipient_id"`
 	RemindAt          string  `json:"remind_at"`
 	Status            string  `json:"status"`
 	Text              string  `json:"text"`
+	AnchorType        string  `json:"anchor_type"`
 	MessageID         *string `json:"message_id"`
 	ConversationID    *string `json:"conversation_id"`
 	ConversationKind  *string `json:"conversation_kind"`
 	ConversationTitle *string `json:"conversation_title"`
+	ProjectID         *string `json:"project_id"`
+	ProjectTitle      *string `json:"project_title"`
+	ChatMessageID     *string `json:"chat_message_id"`
+	ChatSessionID     *string `json:"chat_session_id"`
+	ChatSessionTitle  *string `json:"chat_session_title"`
 	SourcePreview     *string `json:"source_preview"`
 	FiredAt           *string `json:"fired_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
+}
+
+// sourcePreview prefers the chat-message body for a chat-message anchor so the
+// opened card shows the message you were reminded about; otherwise it falls back
+// to the comment body.
+func sourcePreview(comment pgtype.Text, chat pgtype.Text) *string {
+	if chat.Valid {
+		s := chat.String
+		return &s
+	}
+	return optText(comment)
 }
 
 func optUUID(u pgtype.UUID) *string {
@@ -77,14 +98,23 @@ func optTime(t pgtype.Timestamptz) *string {
 func getRowToResponse(r cerebrodb.GetReminderRow) reminderResponse {
 	return reminderResponse{
 		ID:                util.UUIDToString(r.ID),
+		CreatorID:         util.UUIDToString(r.CreatorID),
+		RecipientType:     r.RecipientType,
+		RecipientID:       util.UUIDToString(r.RecipientID),
 		RemindAt:          r.RemindAt.Time.Format(time.RFC3339),
 		Status:            r.Status,
 		Text:              r.Text,
+		AnchorType:        r.AnchorType,
 		MessageID:         optUUID(r.MessageID),
 		ConversationID:    optUUID(r.ConversationID),
 		ConversationKind:  optText(r.ConversationKind),
 		ConversationTitle: optText(r.ConversationTitle),
-		SourcePreview:     optText(r.SourceContent),
+		ProjectID:         optUUID(r.ProjectID),
+		ProjectTitle:      optText(r.ProjectTitle),
+		ChatMessageID:     optUUID(r.ChatMessageID),
+		ChatSessionID:     optUUID(r.ChatSessionID),
+		ChatSessionTitle:  optText(r.ChatSessionTitle),
+		SourcePreview:     sourcePreview(r.SourceContent, r.ChatSourceContent),
 		FiredAt:           optTime(r.FiredAt),
 		CreatedAt:         r.CreatedAt.Time.Format(time.RFC3339),
 		UpdatedAt:         r.UpdatedAt.Time.Format(time.RFC3339),
@@ -94,29 +124,40 @@ func getRowToResponse(r cerebrodb.GetReminderRow) reminderResponse {
 func listRowToResponse(r cerebrodb.ListRemindersRow) reminderResponse {
 	return reminderResponse{
 		ID:                util.UUIDToString(r.ID),
+		CreatorID:         util.UUIDToString(r.CreatorID),
+		RecipientType:     r.RecipientType,
+		RecipientID:       util.UUIDToString(r.RecipientID),
 		RemindAt:          r.RemindAt.Time.Format(time.RFC3339),
 		Status:            r.Status,
 		Text:              r.Text,
+		AnchorType:        r.AnchorType,
 		MessageID:         optUUID(r.MessageID),
 		ConversationID:    optUUID(r.ConversationID),
 		ConversationKind:  optText(r.ConversationKind),
 		ConversationTitle: optText(r.ConversationTitle),
-		SourcePreview:     optText(r.SourceContent),
+		ProjectID:         optUUID(r.ProjectID),
+		ProjectTitle:      optText(r.ProjectTitle),
+		ChatMessageID:     optUUID(r.ChatMessageID),
+		ChatSessionID:     optUUID(r.ChatSessionID),
+		ChatSessionTitle:  optText(r.ChatSessionTitle),
+		SourcePreview:     sourcePreview(r.SourceContent, r.ChatSourceContent),
 		FiredAt:           optTime(r.FiredAt),
 		CreatedAt:         r.CreatedAt.Time.Format(time.RFC3339),
 		UpdatedAt:         r.UpdatedAt.Time.Format(time.RFC3339),
 	}
 }
 
-// List returns the authenticated member's reminders (excludes done).
+// List returns the authenticated member's reminders — i.e. the ones they are the
+// recipient of (excludes done).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	wsID, userID, ok := requireContext(w, r)
 	if !ok {
 		return
 	}
 	rows, err := h.Cerebro.ListReminders(r.Context(), cerebrodb.ListRemindersParams{
-		WorkspaceID: wsID,
-		UserID:      userID,
+		WorkspaceID:   wsID,
+		RecipientType: "member",
+		RecipientID:   userID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list reminders")
@@ -129,18 +170,27 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// Create adds a reminder anchored to a message.
-// Body: {"message_id": "uuid", "remind_at": "RFC3339", "text": "...optional..."}
+// createBody is the Create request. Recipient defaults to the caller (a member);
+// the anchor is whichever of message_id / issue_id / project_id is set, else a
+// free reminder carried entirely by text.
+type createBody struct {
+	RemindAt      string `json:"remind_at"`
+	Text          string `json:"text"`
+	RecipientType string `json:"recipient_type"`
+	RecipientID   string `json:"recipient_id"`
+	MessageID     string `json:"message_id"`
+	IssueID       string `json:"issue_id"`
+	ProjectID     string `json:"project_id"`
+	ChatMessageID string `json:"chat_message_id"`
+}
+
+// Create adds a reminder for any recipient, anchored to any (or no) entity.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	wsID, userID, ok := requireContext(w, r)
 	if !ok {
 		return
 	}
-	var body struct {
-		MessageID string `json:"message_id"`
-		RemindAt  string `json:"remind_at"`
-		Text      string `json:"text"`
-	}
+	var body createBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid json body")
 		return
@@ -154,25 +204,127 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "remind_at must be in the future")
 		return
 	}
-	messageUUID, err := util.ParseUUID(strings.TrimSpace(body.MessageID))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid message_id")
+
+	// Resolve the recipient (defaults to the caller as a member).
+	recipientType := strings.TrimSpace(body.RecipientType)
+	if recipientType == "" {
+		recipientType = "member"
+	}
+	if recipientType != "member" && recipientType != "agent" {
+		writeError(w, http.StatusBadRequest, "recipient_type must be 'member' or 'agent'")
 		return
 	}
-	// Resolve the source comment in this workspace: it fixes the conversation the
-	// reminder belongs to and supplies the default reminder text.
-	comment, err := h.Upstream.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
-		ID:          messageUUID,
-		WorkspaceID: wsID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "message not found")
+	recipientID := userID
+	if rid := strings.TrimSpace(body.RecipientID); rid != "" {
+		parsed, perr := util.ParseUUID(rid)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid recipient_id")
+			return
+		}
+		recipientID = parsed
+	} else if recipientType == "agent" {
+		writeError(w, http.StatusBadRequest, "recipient_id is required for an agent recipient")
 		return
 	}
+	if recipientType == "agent" {
+		if _, aerr := h.Upstream.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          recipientID,
+			WorkspaceID: wsID,
+		}); aerr != nil {
+			writeError(w, http.StatusNotFound, "agent recipient not found")
+			return
+		}
+	}
+
+	// Resolve the anchor — at most one of message/issue/project/chat may be set.
+	anchorType := "none"
+	var messageID, conversationID, projectID, chatMessageID pgtype.UUID
 	text := strings.TrimSpace(body.Text)
-	if text == "" {
-		text = suggestReminderText(comment.Content)
+
+	switch {
+	case strings.TrimSpace(body.ChatMessageID) != "":
+		anchorType = "chat_message"
+		cmID, cmerr := util.ParseUUID(strings.TrimSpace(body.ChatMessageID))
+		if cmerr != nil {
+			writeError(w, http.StatusBadRequest, "invalid chat_message_id")
+			return
+		}
+		chatMsg, gerr := h.Cerebro.GetChatMessageWithWorkspace(r.Context(), cerebrodb.GetChatMessageWithWorkspaceParams{
+			ID:          cmID,
+			WorkspaceID: wsID,
+		})
+		if gerr != nil {
+			writeError(w, http.StatusNotFound, "chat message not found")
+			return
+		}
+		chatMessageID = cmID
+		if text == "" {
+			text = suggestReminderText(chatMsg.Content)
+		}
+	case strings.TrimSpace(body.MessageID) != "":
+		anchorType = "comment"
+		mID, merr := util.ParseUUID(strings.TrimSpace(body.MessageID))
+		if merr != nil {
+			writeError(w, http.StatusBadRequest, "invalid message_id")
+			return
+		}
+		comment, cerr := h.Upstream.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+			ID:          mID,
+			WorkspaceID: wsID,
+		})
+		if cerr != nil {
+			writeError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		messageID = mID
+		conversationID = comment.IssueID
+		if text == "" {
+			text = suggestReminderText(comment.Content)
+		}
+	case strings.TrimSpace(body.IssueID) != "":
+		anchorType = "issue"
+		iID, ierr := util.ParseUUID(strings.TrimSpace(body.IssueID))
+		if ierr != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		issue, gerr := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          iID,
+			WorkspaceID: wsID,
+		})
+		if gerr != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		conversationID = issue.ID
+	case strings.TrimSpace(body.ProjectID) != "":
+		anchorType = "project"
+		pID, perr := util.ParseUUID(strings.TrimSpace(body.ProjectID))
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid project_id")
+			return
+		}
+		project, gerr := h.Upstream.GetProject(r.Context(), pID)
+		if gerr != nil || util.UUIDToString(project.WorkspaceID) != util.UUIDToString(wsID) {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		projectID = pID
+	default:
+		// Free reminder: text is the whole payload, so it must be present.
+		if text == "" {
+			writeError(w, http.StatusBadRequest, "a reminder with no anchor needs text")
+			return
+		}
 	}
+
+	// An agent recipient fires as a wakeup, which needs an issue context. Only a
+	// comment- or issue-anchored reminder has one (v1 limitation).
+	if recipientType == "agent" && !conversationID.Valid {
+		writeError(w, http.StatusBadRequest, "an agent reminder must be anchored to a message or an issue")
+		return
+	}
+
 	if text == "" {
 		text = "Reminder"
 	}
@@ -180,10 +332,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	id, err := h.Cerebro.CreateReminder(r.Context(), cerebrodb.CreateReminderParams{
 		WorkspaceID:    wsID,
 		UserID:         userID,
+		RecipientType:  recipientType,
+		RecipientID:    recipientID,
 		RemindAt:       pgtype.Timestamptz{Time: remindAt, Valid: true},
 		Text:           text,
-		MessageID:      messageUUID,
-		ConversationID: comment.IssueID,
+		AnchorType:     anchorType,
+		MessageID:      messageID,
+		ConversationID: conversationID,
+		ProjectID:      projectID,
+		ChatMessageID:  chatMessageID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create reminder")
@@ -290,7 +447,8 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// loadReminder fetches a reminder by URL param "id" and authorizes ownership.
+// loadReminder fetches a reminder by URL param "id" and authorizes the caller.
+// A member may manage a reminder if they are its recipient or its creator.
 func (h *Handler) loadReminder(w http.ResponseWriter, r *http.Request, userID pgtype.UUID) (cerebrodb.GetReminderRow, bool) {
 	id, err := util.ParseUUID(chi.URLParam(r, "id"))
 	if err != nil {
@@ -306,7 +464,10 @@ func (h *Handler) loadReminder(w http.ResponseWriter, r *http.Request, userID pg
 		}
 		return cerebrodb.GetReminderRow{}, false
 	}
-	if util.UUIDToString(row.UserID) != util.UUIDToString(userID) {
+	caller := util.UUIDToString(userID)
+	isRecipient := row.RecipientType == "member" && util.UUIDToString(row.RecipientID) == caller
+	isCreator := util.UUIDToString(row.CreatorID) == caller
+	if !isRecipient && !isCreator {
 		writeError(w, http.StatusForbidden, "not your reminder")
 		return cerebrodb.GetReminderRow{}, false
 	}
