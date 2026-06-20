@@ -10,6 +10,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
 }));
 
+// The editor mounts the cerebro dictation mic, which resolves workspace context
+// (useWorkspaceId → useQuery). These tests cover editor focus/click behavior,
+// not dictation, so stub the mic to null instead of standing up react-query.
+vi.mock("@multica/cerebro-dictation", () => ({
+  EditorDictationMic: () => null,
+}));
+
 vi.mock("./extensions", () => ({
   createEditorExtensions: () => [],
 }));
