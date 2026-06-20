@@ -14,11 +14,9 @@ FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git
 
 WORKDIR /src
-# server/go.mod has `replace` directives pointing at ../packages/cerebro-persona-sdk
-# and ../packages/cerebro-pdf-text, so those module trees must be present before
-# `go mod download` runs.
+# server/go.mod has a `replace` directive pointing at ../packages/cerebro-pdf-text,
+# so that module tree must be present before `go mod download` runs.
 COPY server/go.mod server/go.sum ./server/
-COPY packages/cerebro-persona-sdk/ ./packages/cerebro-persona-sdk/
 COPY packages/cerebro-pdf-text/ ./packages/cerebro-pdf-text/
 RUN cd server && go mod download
 COPY server/ ./server/
