@@ -1244,6 +1244,9 @@ importers:
 
   packages/cerebro-artifacts:
     dependencies:
+      '@multica/cerebro-dictation':
+        specifier: workspace:*
+        version: link:../cerebro-dictation
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -2496,6 +2499,9 @@ importers:
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../cerebro-artifacts
+      '@multica/cerebro-dictation':
+        specifier: workspace:*
+        version: link:../cerebro-dictation
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags

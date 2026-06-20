@@ -23,6 +23,10 @@ export {
   type EditorDictationMicProps,
 } from "./views/editor-dictation-mic";
 export {
+  TextareaDictationMic,
+  type TextareaDictationMicProps,
+} from "./views/textarea-dictation-mic";
+export {
   playPCMStream,
   type PCMStreamPlayback,
   type PlayPCMStreamOptions,
