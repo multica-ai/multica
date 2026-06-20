@@ -18,6 +18,20 @@ export type SwimlaneGrouping = "parent" | "project" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 export type SubIssueDisplay = "standalone" | "on-parent" | "hidden";
+// CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — add due_date to the upstream date filter.
+export type IssueDateField = "created_at" | "updated_at" | "due_date";
+
+export interface IssueDateFilter {
+  field: IssueDateField;
+  from: string;
+  to: string;
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — "none" matches issues
+  // that have NO due date (field is due_date by construction; from/to are
+  // ignored). Undefined/"range" is the normal from..to range filter. Only the
+  // client-side My Issues filter sets "none"; the server-backed /issues page
+  // never produces it (its picker offers ranges only).
+  mode?: "range" | "none";
+}
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
 
@@ -75,6 +89,7 @@ export interface IssueViewState {
   labelFilters: string[];
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 selected on-behalf-of member user UUIDs.
   onBehalfOfFilters: string[];
+  dateFilter: IssueDateFilter | null;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -111,6 +126,7 @@ export interface IssueViewState {
   toggleLabelFilter: (labelId: string) => void;
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle one on-behalf-of member.
   toggleOnBehalfOfFilter: (userId: string) => void;
+  setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
@@ -141,6 +157,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   labelFilters: [],
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 default empty.
   onBehalfOfFilters: [],
+  dateFilter: null,
   agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
@@ -228,6 +245,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.onBehalfOfFilters.filter((id) => id !== userId)
         : [...state.onBehalfOfFilters, userId],
     })),
+  setDateFilter: (filter) => set({ dateFilter: filter }),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
@@ -258,6 +276,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       labelFilters: [],
       // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 reset on clear.
       onBehalfOfFilters: [],
+      dateFilter: null,
       agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
@@ -303,6 +322,8 @@ export const viewStorePersistOptions = (name: string) => ({
     // state changes second-to-second, and a stored toggle would let users
     // return to an unexplained empty list. Keep it ephemeral. See the
     // field comment on IssueViewState.
+    // `dateFilter` is also intentionally not persisted: relative presets such
+    // as Today would otherwise become stale after a calendar-day rollover.
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,

@@ -67,6 +67,10 @@ export interface ListIssuesParams {
    * `<object>:<ref_id>`, for example `github_pr:firtal-group/firtal-cerebro#525`.
    */
   reference?: string;
+  // CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — due_date as a filterable date field.
+  date_field?: "created_at" | "updated_at" | "due_date";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
@@ -107,6 +111,10 @@ export interface ListGroupedIssuesParams {
   reference?: string;
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  // CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — due_date as a filterable date field.
+  date_field?: "created_at" | "updated_at" | "due_date";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }

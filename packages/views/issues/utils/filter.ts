@@ -1,5 +1,7 @@
 import type { Issue, IssueStatus, IssuePriority } from "@multica/core/types";
-import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { ActorFilterValue, IssueDateFilter } from "@multica/core/issues/stores/view-store";
+// CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — client-side date matching for My Issues.
+import { dateOnlyToUTCDate } from "@multica/core/issues/date";
 
 export interface IssueFilters {
   statusFilters: IssueStatus[];
@@ -16,6 +18,31 @@ export interface IssueFilters {
   // free of any data-fetching dependency.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
+  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — client-side date
+  // filter for My Issues. The global /issues page applies the same
+  // IssueDateFilter server-side; My Issues fetches by scope and filters in the
+  // client, so the range (or the "no due date" mode) is matched here.
+  dateFilter?: IssueDateFilter | null;
+}
+
+// CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — match an issue against
+// an IssueDateFilter. `mode: "none"` keeps only issues with no due date;
+// otherwise the chosen field's calendar day must fall within [from, to]
+// inclusive (server uses >= from AND < to+1day — the same closed range).
+function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
+  if (filter.mode === "none") return !issue.due_date;
+  const raw =
+    filter.field === "due_date"
+      ? issue.due_date
+      : filter.field === "created_at"
+        ? issue.created_at
+        : issue.updated_at;
+  if (!raw) return false;
+  const day = dateOnlyToUTCDate(raw);
+  const from = dateOnlyToUTCDate(filter.from);
+  const to = dateOnlyToUTCDate(filter.to);
+  if (!day || !from || !to) return false;
+  return day.getTime() >= from.getTime() && day.getTime() <= to.getTime();
 }
 
 /**
@@ -28,7 +55,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilter } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -88,6 +115,9 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       if (!issueLabels || issueLabels.length === 0) return false;
       if (!issueLabels.some((l) => labelFilters.includes(l.id))) return false;
     }
+
+    // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — date / due-date filter.
+    if (dateFilter && !matchesDateFilter(issue, dateFilter)) return false;
 
     return true;
   });
