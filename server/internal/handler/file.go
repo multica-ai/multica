@@ -113,15 +113,15 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 	return resp
 }
 
-// CEREBRO-PATCH(persona-mask-attachment-embeds): JEH-1184 — shared response
-// builder for embedded attachment payloads. Keeps comment/chat embeds on the
-// same redaction path as the direct attachment endpoints.
+// attachmentResponsesForCaller is the shared response builder for embedded
+// attachment payloads (comment/chat embeds), matching the direct attachment
+// endpoints.
 func (h *Handler) attachmentResponsesForCaller(r *http.Request, workspaceID string, attachments []db.Attachment) []AttachmentResponse {
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a)
 	}
-	return h.maskAttachmentsForCaller(r, workspaceID, attachments, resp)
+	return resp
 }
 
 func attachmentDownloadPath(id string) string {
@@ -377,17 +377,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// so the file is usable. Log the error for investigation.
 		} else {
 			uploadResp := h.attachmentToResponse(att)
-			// CEREBRO-PATCH(persona-mask-upload-file): JEH-1189 redaction.
-			// Self-upload is expected to receive pii via policy. A deny outcome
-			// means the policy disallows even the uploader from seeing the
-			// response — fail closed with 403 so the full filename/url/
-			// download_url is NOT echoed back. Rasp review feedback on PR #272.
-			masked := h.maskAttachmentsForCaller(r, workspaceID, []db.Attachment{att}, []AttachmentResponse{uploadResp})
-			if len(masked) == 0 {
-				writeError(w, http.StatusForbidden, "upload not visible to caller")
-				return
-			}
-			writeJSON(w, http.StatusOK, masked[0])
+			writeJSON(w, http.StatusOK, uploadResp)
 			return
 		}
 
@@ -438,8 +428,6 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a)
 	}
-	// CEREBRO-PATCH(persona-mask-list-attachments): JEH-1189 redaction.
-	resp = h.maskAttachmentsForCaller(r, uuidToString(issue.WorkspaceID), attachments, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -493,8 +481,6 @@ func (h *Handler) ListChatMessageAttachments(w http.ResponseWriter, r *http.Requ
 	for i, a := range attachments {
 		resp[i] = h.attachmentToResponse(a)
 	}
-	// CEREBRO-PATCH(persona-mask-list-chat-attachments): JEH-1189 redaction.
-	resp = h.maskAttachmentsForCaller(r, workspaceID, attachments, resp)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -551,13 +537,6 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.Storage == nil {
 		writeError(w, http.StatusServiceUnavailable, "storage not configured")
-		return
-	}
-
-	// CEREBRO-PATCH(persona-mask-attachment-get): JEH-1173 redaction — check
-	// before redirecting so masked callers get a proper error response.
-	resp := h.attachmentToResponse(att)
-	if !h.maskAttachmentForCaller(w, r, att, &resp) {
 		return
 	}
 

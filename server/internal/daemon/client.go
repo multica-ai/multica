@@ -344,7 +344,6 @@ type (
 )
 
 // SendHeartbeatOpts bundles optional fields the daemon attaches to a
-// CEREBRO-PATCH(client): persona integration additions.
 // heartbeat. Each field is independently optional — the zero value of
 // SendHeartbeatOpts gives the original `(runtime_id only)` wire shape.
 type SendHeartbeatOpts struct {
@@ -578,31 +577,6 @@ func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterRes
 		return nil, err
 	}
 	return &resp, nil
-}
-
-// PersonaAgent mirrors handler.PersonaAgentEntry — every agent in a
-// workspace whose persona_sandbox is set, joined with its runtime row.
-type PersonaAgent struct {
-	ID                    string          `json:"id"`
-	Name                  string          `json:"name"`
-	PersonaSandbox        string          `json:"persona_sandbox"`
-	RuntimeID             string          `json:"runtime_id"`
-	RuntimeName           string          `json:"runtime_name"`
-	Provider              string          `json:"provider"`
-	RuntimePersonaSandbox string          `json:"runtime_persona_sandbox"`
-	McpConfig             json.RawMessage `json:"mcp_config,omitempty"`
-}
-
-// ListWorkspacePersonaAgents fetches the agents-with-persona for a workspace.
-// Daemon uses it at start to seed persona-actor attributes (E3 part 3).
-func (c *Client) ListWorkspacePersonaAgents(ctx context.Context, workspaceID string) ([]PersonaAgent, error) {
-	var resp struct {
-		Agents []PersonaAgent `json:"agents"`
-	}
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/agents/persona", workspaceID), &resp); err != nil {
-		return nil, err
-	}
-	return resp.Agents, nil
 }
 
 type WorkspaceReposResponse struct {

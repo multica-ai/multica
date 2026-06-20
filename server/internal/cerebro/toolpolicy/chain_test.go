@@ -221,3 +221,73 @@ func TestMoreRestrictive(t *testing.T) {
 		}
 	}
 }
+
+// --- System actor (FIR-1609) ---------------------------------------------
+
+// TestResolve_SystemDowngradesAskToDeny: a System actor has no human to answer
+// an approval prompt, so an effective Ask becomes Deny, attributed to system.
+func TestResolve_SystemDowngradesAskToDeny(t *testing.T) {
+	e := Resolve(Input{
+		Settings: set(LayerAgent, SettingAsk),
+		IsSystem: true,
+	})
+	if e.Setting != SettingDeny {
+		t.Fatalf("expected Deny for system Ask, got %s", e.Setting)
+	}
+	if e.CappedBy != LayerSystem || e.DecidedBy != LayerSystem {
+		t.Fatalf("expected attribution to system, got DecidedBy=%q CappedBy=%q", e.DecidedBy, e.CappedBy)
+	}
+	if e.Allowed() {
+		t.Fatal("Allowed() must be false after downgrade")
+	}
+}
+
+// TestResolve_SystemKeepsAllow: the downgrade only touches Ask. A System actor
+// that resolves to Allow stays Allow — no spurious tightening.
+func TestResolve_SystemKeepsAllow(t *testing.T) {
+	e := Resolve(Input{
+		Settings: set(LayerAgent, SettingAllow),
+		IsSystem: true,
+	})
+	if e.Setting != SettingAllow {
+		t.Fatalf("expected Allow to survive, got %s", e.Setting)
+	}
+}
+
+// TestResolve_SystemKeepsDeny: an explicit Deny stays Deny under a System actor.
+func TestResolve_SystemKeepsDeny(t *testing.T) {
+	e := Resolve(Input{
+		Settings: set(LayerAgent, SettingDeny),
+		IsSystem: true,
+	})
+	if e.Setting != SettingDeny {
+		t.Fatalf("expected Deny, got %s", e.Setting)
+	}
+}
+
+// TestResolve_NonSystemAskUnchanged: the same chain for a human run keeps Ask —
+// the downgrade must not leak into normal (User) resolution.
+func TestResolve_NonSystemAskUnchanged(t *testing.T) {
+	e := Resolve(Input{Settings: set(LayerAgent, SettingAsk)})
+	if e.Setting != SettingAsk {
+		t.Fatalf("expected Ask to survive for human run, got %s", e.Setting)
+	}
+}
+
+// TestResolve_SystemLayerCaps: the System layer acts as a ceiling like User —
+// a Deny authored at LayerSystem caps an Allow below it.
+func TestResolve_SystemLayerCaps(t *testing.T) {
+	e := Resolve(Input{
+		Settings: set(
+			LayerAgent, SettingAllow,
+			LayerSystem, SettingDeny,
+		),
+		IsSystem: true,
+	})
+	if e.Setting != SettingDeny {
+		t.Fatalf("expected Deny, got %s", e.Setting)
+	}
+	if e.CappedBy != LayerSystem {
+		t.Fatalf("expected CappedBy=system, got %q", e.CappedBy)
+	}
+}

@@ -615,90 +615,6 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
-// PersonaAgentEntry is the shape returned by ListWorkspacePersonaAgents.
-// Slim on purpose: the daemon only needs identity + the runtime that's
-// claimed for it, plus the configured persona_sandbox so attributes can be
-// rebuilt without a second roundtrip.
-type PersonaAgentEntry struct {
-	ID             string `json:"id"`
-	Name           string `json:"name"`
-	PersonaSandbox string `json:"persona_sandbox"`
-	RuntimeID      string `json:"runtime_id"`
-	RuntimeName    string `json:"runtime_name"`
-	Provider       string `json:"provider"`
-	// RuntimePersonaSandbox is the runtime-level cap (E1) that wins over
-	// the per-agent value at spawn time. Surfacing it here lets the daemon
-	// build accurate "effective_sandbox" attributes at start without
-	// having to fetch the runtime row separately.
-	RuntimePersonaSandbox string `json:"runtime_persona_sandbox"`
-	// McpConfig is the agent's raw MCP configuration JSON (standard
-	// {"mcpServers": {...}} shape). Surfaced so refreshPersonaActorAttrs
-	// can extract the server-name list at daemon start without a second
-	// roundtrip per agent. Sent omitempty so older daemons see the same
-	// payload they always did.
-	McpConfig json.RawMessage `json:"mcp_config,omitempty"`
-}
-
-// ListWorkspacePersonaAgents returns every agent in a workspace whose
-// persona_sandbox is set, joined with its runtime's persona context. Used by
-// the daemon at start (E3 part 3, "fornyes ved hver start"): the daemon
-// pushes fresh actor attributes to persona for each entry so persona's UI
-// reflects "what the runtime currently supports" without waiting for the
-// next spawn.
-func (h *Handler) ListWorkspacePersonaAgents(w http.ResponseWriter, r *http.Request) {
-	workspaceID := strings.TrimSpace(chi.URLParam(r, "workspaceId"))
-	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
-		return
-	}
-
-	agents, err := h.Queries.ListAgents(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list agents")
-		return
-	}
-
-	// Pull runtimes once and index by id so we don't N+1 inside the loop.
-	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list runtimes")
-		return
-	}
-	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
-	for _, rt := range runtimes {
-		runtimeByID[uuidToString(rt.ID)] = rt
-	}
-
-	out := make([]PersonaAgentEntry, 0, len(agents))
-	for _, a := range agents {
-		if !a.PersonaSandbox.Valid || a.PersonaSandbox.String == "" {
-			continue
-		}
-		rt, ok := runtimeByID[uuidToString(a.RuntimeID)]
-		if !ok {
-			// Agent points at a runtime not in the workspace's list — skip
-			// rather than returning a half-populated row the daemon would
-			// have to special-case.
-			continue
-		}
-		var mcp json.RawMessage
-		if len(a.McpConfig) > 0 {
-			mcp = json.RawMessage(a.McpConfig)
-		}
-		out = append(out, PersonaAgentEntry{
-			ID:                    uuidToString(a.ID),
-			Name:                  a.Name,
-			PersonaSandbox:        a.PersonaSandbox.String,
-			RuntimeID:             uuidToString(rt.ID),
-			RuntimeName:           rt.Name,
-			Provider:              rt.Provider,
-			RuntimePersonaSandbox: rt.PersonaSandbox.String,
-			McpConfig:             mcp,
-		})
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"agents": out})
-}
-
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
 func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -3106,6 +3022,10 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		ResourcePattern: req.URL,
 		AgentID:         agentID,
 		Base:            toolpolicy.SettingAllow,
+		// CEREBRO-PATCH(repo-action-condition): FIR-1609 — derive the action verb
+		// (repo.checkout→"checkout"…) so an action-scoped Condition bites here.
+		// Without it ctx.Action is "" and an action-scoped Deny silently fails OPEN.
+		RequestContext: toolpolicy.RequestContext{Action: toolpolicy.ActionOf(req.Capability)},
 	})
 	if err != nil {
 		slog.Error("repo capability check failed", "workspace_id", workspaceID, "url", req.URL, "error", err)

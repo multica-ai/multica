@@ -234,7 +234,8 @@ func TestGateToolPolicy_AskCreatesInboxAndAwaits(t *testing.T) {
 	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
-	allowed, _ := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{})
+	// A human triggered this run, so the Ask has someone to answer it.
+	allowed, _ := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
 	if !allowed {
 		t.Fatal("approved Ask must let the tool continue")
 	}
@@ -251,7 +252,8 @@ func TestGateToolPolicy_AskRejectedBlocks(t *testing.T) {
 	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{})
+	// A human triggered this run, so the Ask reaches the inbox before being rejected.
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
 	if allowed {
 		t.Fatal("rejected Ask must block the tool")
 	}
@@ -260,6 +262,67 @@ func TestGateToolPolicy_AskRejectedBlocks(t *testing.T) {
 	}
 	if ap.intakes != 1 {
 		t.Fatalf("Ask must create exactly one inbox request, got %d", ap.intakes)
+	}
+}
+
+// TestGateToolPolicy_SystemRunAskBecomesDeny proves the FIR-1609 resolution-context
+// fail-safe through the live executor path: the same Ask row that a human run sends
+// to the inbox is instead denied outright on a human-less System run (empty
+// TriggerUserID) — there is no one to answer, so the gate must not create an inbox
+// request and must block the tool.
+func TestGateToolPolicy_SystemRunAskBecomesDeny(t *testing.T) {
+	ap := &gateFakeApprovals{status: approvals.StatusApproved} // would approve if asked
+	e, agentID := newToolPolicyGatedExecutor(t, ap)
+	const tool = "web_fetch"
+	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
+
+	// No triggering human → System run. The Ask must collapse to Deny.
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{})
+	if allowed {
+		t.Fatal("a System run (no human) must not let an Ask tool through")
+	}
+	if reason == "" {
+		t.Fatal("blocked system call must carry a reason")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("a System run must not create an inbox request, got %d", ap.intakes)
+	}
+}
+
+// TestGateToolPolicy_WorkspaceFlagOffBypassesGate proves the cerebro_approval_gate
+// workspace flag is honoured: with the flag set OFF for the workspace, even a Deny
+// row on the agent layer is bypassed — guardToolCall returns allowed before it
+// ever resolves the chain — so an admin can disable enforcement from Settings →
+// Features without a server restart. The default-ON path is exercised by every
+// other test here (no flag row → GetCerebroFeatureFlag default true).
+func TestGateToolPolicy_WorkspaceFlagOffBypassesGate(t *testing.T) {
+	ap := &gateFakeApprovals{}
+	e, agentID := newToolPolicyGatedExecutor(t, ap)
+	const tool = "deploy_restart"
+	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingDeny)
+
+	// Turn the workspace flag OFF (all-zero sentinel user_id = workspace-level row).
+	ctx := context.Background()
+	if err := e.cerebro.UpsertCerebroFeatureFlag(ctx, cerebrodb.UpsertCerebroFeatureFlagParams{
+		WorkspaceID: runtimeAccountTestWSID,
+		UserID:      pgtype.UUID{Valid: true},
+		FlagKey:     "cerebro_approval_gate",
+		Enabled:     false,
+	}); err != nil {
+		t.Fatalf("seed cerebro_approval_gate=false: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = runtimeAccountTestPool.Exec(context.Background(),
+			`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1 AND flag_key = 'cerebro_approval_gate'`,
+			runtimeAccountTestWSID)
+	})
+
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, GatewayRequestMeta{})
+	if !allowed {
+		t.Fatal("with cerebro_approval_gate OFF, even a Deny row must be bypassed")
+	}
+	if ap.intakes != 0 {
+		t.Fatalf("a bypassed gate must not create an inbox request, got %d", ap.intakes)
 	}
 }
 

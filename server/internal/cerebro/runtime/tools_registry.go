@@ -191,11 +191,21 @@ func (r *Registry) GetCascadeEnabledToolsForAgent(ctx context.Context, cerebro *
 //
 // It resolves the identical chain query as guardToolCallViaPolicy — same tool
 // key, same (workspace, runtime, agent, owner) context, same default-Allow base
-// — so the tool LIST an agent is given and the per-call GATE that guards each
-// invocation are decided by one engine and cannot disagree. The default-deny
-// posture (an agent only gets explicitly-allowed tools) is authored as policy
-// rows (a workspace/runtime Deny base + per-tool Allow), exactly as the gate
-// expects; the engine itself stays faithful to the stored chain.
+// — so for UNCONDITIONED rows the tool LIST an agent is given and the per-call
+// GATE that guards each invocation are decided by one engine and cannot disagree.
+// The default-deny posture (an agent only gets explicitly-allowed tools) is
+// authored as policy rows (a workspace/runtime Deny base + per-tool Allow),
+// exactly as the gate expects; the engine itself stays faithful to the stored
+// chain.
+//
+// Conditioned rows (the FIR-1609 WHEN layer — host/action/Expr) are the one place
+// the list and the gate legitimately differ: list-time has no live request, so it
+// passes an empty RequestContext and no CEL evaluator. A conditioned row therefore
+// resolves here as not-applicable (it drops, fail-closed), so a tool gated only by
+// a conditioned Allow is conservatively HIDDEN from the model rather than offered;
+// the gate then makes the real per-call decision against the live host/action. The
+// divergence is one-directional (the list never offers more than the gate allows),
+// so it can only hide a usable tool, never leak a forbidden one.
 //
 // runtimeID is the agent's runtime; ownerID is the agent's owner — the chain's
 // user ceiling. The caller resolves both from the agent row. Resolution is

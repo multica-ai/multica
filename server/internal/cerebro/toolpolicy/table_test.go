@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 // clearCaps removes every capability row for the test workspace so each Table
@@ -367,5 +369,157 @@ func TestTable_GroupsCombinedInRow(t *testing.T) {
 	}
 	if row.Effective.Setting != SettingAllow {
 		t.Fatalf("effective = %q, want allow", row.Effective.Setting)
+	}
+}
+
+// TestTable_SurfacesConditions is the FIR-1609 Phase 4 read-model check: a rule
+// authored with a Condition (the WHEN layer) surfaces that condition on the
+// table row at its single-subject layer, so the editor can render and edit it
+// next to the Decision pill. A row with no condition leaves the layer's
+// condition nil ("always applies").
+func TestTable_SurfacesConditions(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(2)
+	addCap(t, s, "web_fetch", "Fetch a URL", "Web", "builtin")
+	addCap(t, s, "add_comment", "Add comment", "Issues", "builtin")
+
+	// web_fetch: Allow, but only for the firtal.com host family — the host
+	// allowlist folded into the rule as a Condition.
+	cond := &Condition{HostAllowlist: []string{"firtal.com", "*.firtal.com"}}
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: "web_fetch", Layer: LayerAgent, SubjectID: agent, Setting: SettingAllow, Conditions: cond}); err != nil {
+		t.Fatalf("set web_fetch with condition: %v", err)
+	}
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+
+	web, ok := findRow(rows, "web_fetch")
+	if !ok {
+		t.Fatal("web_fetch missing from table")
+	}
+	got := web.Conditions[LayerAgent]
+	if got == nil {
+		t.Fatalf("web_fetch agent condition missing; want host allowlist, conditions=%v", web.Conditions)
+	}
+	if len(got.HostAllowlist) != 2 || got.HostAllowlist[0] != "firtal.com" || got.HostAllowlist[1] != "*.firtal.com" {
+		t.Fatalf("web_fetch host allowlist = %v, want [firtal.com *.firtal.com]", got.HostAllowlist)
+	}
+	// The condition does not change the setting — Allow stays Allow.
+	if web.Layers[LayerAgent] != SettingAllow {
+		t.Fatalf("web_fetch agent setting = %q, want allow (condition never decides)", web.Layers[LayerAgent])
+	}
+
+	// A tool with no condition leaves the layer's condition nil.
+	comment, ok := findRow(rows, "add_comment")
+	if !ok {
+		t.Fatal("add_comment missing from table")
+	}
+	if c := comment.Conditions[LayerAgent]; c != nil {
+		t.Fatalf("add_comment should carry no condition, got %v", c)
+	}
+}
+
+// setWebFetchPolicy upserts the standalone web_fetch host policy for the test
+// workspace and registers cleanup so it never leaks into a later test's view.
+func setWebFetchPolicy(t *testing.T, s *Store, mode string, rules string) {
+	t.Helper()
+	if _, err := s.q.UpsertCerebroWebFetchPolicy(context.Background(), cerebrodb.UpsertCerebroWebFetchPolicyParams{
+		WorkspaceID: tpTestWorkspaceID,
+		Mode:        mode,
+		HostRules:   []byte(rules),
+	}); err != nil {
+		t.Fatalf("upsert web_fetch policy: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM cerebro_web_fetch_policy WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+}
+
+// TestTable_FoldsWebFetchPolicyAsCondition is the FIR-1609 fold-in check: the
+// standalone per-workspace web_fetch host policy surfaces on the web_fetch row as
+// a workspace-layer Allow rule conditioned on the host allow-list, so the unified
+// Permissions surface shows it instead of a separate page. An explicit admin
+// override wins, and disallow-list mode is left to the dedicated page.
+func TestTable_FoldsWebFetchPolicyAsCondition(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+	addCap(t, s, "web_fetch", "Fetch a URL", "Web", "builtin")
+
+	// Allow-list policy → projected as workspace Allow + host_allowlist condition.
+	setWebFetchPolicy(t, s, "allow", `["firtal.com","*.firtal.com"]`)
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	web, ok := findRow(rows, "web_fetch")
+	if !ok {
+		t.Fatal("web_fetch missing from table")
+	}
+	if web.Layers[LayerWorkspace] != SettingAllow {
+		t.Fatalf("workspace layer = %q, want allow (the host policy as a rule)", web.Layers[LayerWorkspace])
+	}
+	cond := web.Conditions[LayerWorkspace]
+	if cond == nil {
+		t.Fatalf("expected folded host condition on workspace layer, conditions=%v", web.Conditions)
+	}
+	if len(cond.HostAllowlist) != 2 || cond.HostAllowlist[0] != "firtal.com" || cond.HostAllowlist[1] != "*.firtal.com" {
+		t.Fatalf("folded host allowlist = %v, want [firtal.com *.firtal.com]", cond.HostAllowlist)
+	}
+	if web.Effective.Setting != SettingAllow {
+		t.Fatalf("effective = %q, want allow", web.Effective.Setting)
+	}
+
+	// An explicit admin override on the workspace layer wins — the projection must
+	// not clobber it, nor inject a condition.
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: "web_fetch", Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, Setting: SettingDeny}); err != nil {
+		t.Fatalf("set workspace override: %v", err)
+	}
+	rows, err = s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("table after override: %v", err)
+	}
+	web, _ = findRow(rows, "web_fetch")
+	if web.Layers[LayerWorkspace] != SettingDeny {
+		t.Fatalf("override workspace layer = %q, want deny (admin choice wins)", web.Layers[LayerWorkspace])
+	}
+	if c := web.Conditions[LayerWorkspace]; c != nil {
+		t.Fatalf("projection must not add a condition over an explicit override, got %v", c)
+	}
+}
+
+// TestTable_WebFetchDisallowNotFolded proves a disallow-list policy is NOT folded
+// in: a host_allowlist cannot represent "everything except these", so that mode
+// is left to the dedicated Web fetch page and the row stays unauthored.
+func TestTable_WebFetchDisallowNotFolded(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+	addCap(t, s, "web_fetch", "Fetch a URL", "Web", "builtin")
+	setWebFetchPolicy(t, s, "disallow", `["evil.com"]`)
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+	web, ok := findRow(rows, "web_fetch")
+	if !ok {
+		t.Fatal("web_fetch missing from table")
+	}
+	if _, has := web.Layers[LayerWorkspace]; has {
+		t.Fatalf("disallow policy must not inject a workspace rule, got %q", web.Layers[LayerWorkspace])
+	}
+	if c := web.Conditions[LayerWorkspace]; c != nil {
+		t.Fatalf("disallow policy must not inject a condition, got %v", c)
 	}
 }

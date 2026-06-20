@@ -806,22 +806,6 @@ type CerebroNoteVersion struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
-type CerebroPersonaMaskAudit struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ActorType      string             `json:"actor_type"`
-	ActorID        string             `json:"actor_id"`
-	Action         string             `json:"action"`
-	ResourceKind   string             `json:"resource_kind"`
-	ResourceID     string             `json:"resource_id"`
-	Classification string             `json:"classification"`
-	Decision       string             `json:"decision"`
-	MaskedFields   []byte             `json:"masked_fields"`
-	DecisionID     string             `json:"decision_id"`
-	Reason         string             `json:"reason"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
 type CerebroProjectGroupMember struct {
 	ProjectID pgtype.UUID        `json:"project_id"`
 	GroupID   pgtype.UUID        `json:"group_id"`
@@ -1016,6 +1000,7 @@ type CerebroToolPolicy struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ResourcePattern string             `json:"resource_pattern"`
+	Conditions      []byte             `json:"conditions"`
 }
 
 type CerebroUserInfisicalFolder struct {

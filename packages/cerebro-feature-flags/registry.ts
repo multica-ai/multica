@@ -205,6 +205,13 @@ export type CerebroFlagKey =
   // (resolve + log what WOULD block, allow everything) to enforce (Allow proceeds,
   // Block stops, Ask → inbox + wait). Default OFF = observe-only dry run.
   | "cerebro_local_tool_policy_enforce"
+  // FIR-1609: enables the CEL expression escape hatch on tool-policy Conditions
+  // (the WHEN layer of a rule). While OFF, only structured conditions (host-
+  // allowlist, action-list) bite; a rule carrying an `expr` is undecidable and
+  // fails closed by effect. Turning it ON wires the cel-go evaluator into both
+  // gates so genuine dynamics ("only in business hours") can be expressed.
+  // Default OFF — structured terms cover the common cases.
+  | "cerebro_policy_cel"
   // TECH-3196: Agent Vault — per-agent secret brokering via the internal path.
   | "cerebro_agent_vault"
   // TECH-3491: per-device draft persistence for the comment / channel / DM
@@ -464,6 +471,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3173: OFF by default — when the master is on, observe-only (dry run)
   // until an admin explicitly flips to enforce. Staged rollout, fail-safe.
   cerebro_local_tool_policy_enforce: false,
+  // FIR-1609: OFF by default — the CEL expression escape hatch on tool-policy
+  // Conditions stays dormant; structured host/action terms bite, an `expr` rule
+  // fails closed until an admin opts in. No deploy-time behaviour change.
+  cerebro_policy_cel: false,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -1236,6 +1247,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Only matters when 'Tool enforcement on local runtimes' is on. Off = observe-only dry run: the daemon resolves every tool call and logs what an enforce WOULD block, but allows everything through (safe to watch before committing). On = enforce: Allow proceeds, Block stops, Ask routes to the approval inbox and blocks until a human decides. Default off so you can watch the would-block stream first. TECH-3173.",
+  },
+  {
+    key: "cerebro_policy_cel",
+    label: "Expression conditions on rules (CEL)",
+    group: "permissions",
+    description:
+      "Let a per-tool rule carry a CEL expression as its WHEN condition, for genuine dynamics that the structured terms (host allowlist, action list) can't express — for example 'only during business hours'. Off by default: only the structured conditions apply, and a rule that carries an expression stays inert (it fails closed, never silently allows). On wires the expression evaluator into both the gateway and local-runtime gates. No restart needed. FIR-1609.",
   },
 ];
 

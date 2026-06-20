@@ -3,7 +3,6 @@ package credentials
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,73 +74,6 @@ func TestPolicyDeniedError_WrapsErrPolicyDenied(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// CutoverPolicyChecker — Persona rollback, parallel-run, Multica cut-over.
-// ---------------------------------------------------------------------------
-
-type countingPolicyChecker struct {
-	decision PolicyDecision
-	calls    int
-}
-
-func (c *countingPolicyChecker) Check(_ context.Context, _ PolicyRequest) PolicyDecision {
-	c.calls++
-	return c.decision
-}
-
-func TestCutoverPolicyChecker_PersonaModeUsesPersonaOnly(t *testing.T) {
-	persona := &countingPolicyChecker{decision: Allow("persona")}
-	multica := &countingPolicyChecker{decision: Deny("multica")}
-	checker := NewCutoverPolicyChecker(persona, multica, PermissionEnginePersona, 100, slog.Default())
-
-	dec := checker.Check(context.Background(), cutoverPolicyRequest(t))
-	if !dec.Allowed || dec.Reason != "persona" {
-		t.Fatalf("expected persona answer, got %+v", dec)
-	}
-	if persona.calls != 1 || multica.calls != 0 {
-		t.Fatalf("persona mode should not shadow-run: persona=%d multica=%d", persona.calls, multica.calls)
-	}
-}
-
-func TestCutoverPolicyChecker_ParallelModeReturnsPersonaAndComparesMultica(t *testing.T) {
-	persona := &countingPolicyChecker{decision: Allow("persona")}
-	multica := &countingPolicyChecker{decision: Deny("multica")}
-	checker := NewCutoverPolicyChecker(persona, multica, PermissionEngineParallel, 100, slog.Default())
-
-	dec := checker.Check(context.Background(), cutoverPolicyRequest(t))
-	if !dec.Allowed || dec.Reason != "persona" {
-		t.Fatalf("parallel mode must keep Persona as answering engine, got %+v", dec)
-	}
-	if persona.calls != 1 || multica.calls != 1 {
-		t.Fatalf("parallel mode should run both engines: persona=%d multica=%d", persona.calls, multica.calls)
-	}
-}
-
-func TestCutoverPolicyChecker_MulticaModeReturnsMulticaAndCanComparePersona(t *testing.T) {
-	persona := &countingPolicyChecker{decision: Allow("persona")}
-	multica := &countingPolicyChecker{decision: Deny("multica")}
-	checker := NewCutoverPolicyChecker(persona, multica, PermissionEngineMultica, 100, slog.Default())
-
-	dec := checker.Check(context.Background(), cutoverPolicyRequest(t))
-	if dec.Allowed || dec.Reason != "multica" {
-		t.Fatalf("multica mode must return Multica's answer, got %+v", dec)
-	}
-	if persona.calls != 1 || multica.calls != 1 {
-		t.Fatalf("multica mode should answer with multica and shadow persona: persona=%d multica=%d", persona.calls, multica.calls)
-	}
-}
-
-func TestCutoverPolicyChecker_ZeroSampleSkipsShadowRun(t *testing.T) {
-	persona := &countingPolicyChecker{decision: Allow("persona")}
-	multica := &countingPolicyChecker{decision: Deny("multica")}
-	checker := NewCutoverPolicyChecker(persona, multica, PermissionEngineParallel, 0, slog.Default())
-
-	_ = checker.Check(context.Background(), cutoverPolicyRequest(t))
-	if persona.calls != 1 || multica.calls != 0 {
-		t.Fatalf("zero sample should skip shadow engine: persona=%d multica=%d", persona.calls, multica.calls)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // OwnerPolicyChecker — exercise role mapping with a stub MemberLookup.
 // ---------------------------------------------------------------------------
 
@@ -199,111 +131,6 @@ func TestOwnerPolicyChecker_AgentNeverOwner(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// PersonaPolicyChecker — id-scoped first, then type-scoped fallback.
-// ---------------------------------------------------------------------------
-
-type stubPersona struct {
-	allowResource string
-	calls         []string
-}
-
-func (s *stubPersona) CheckCredential(_ context.Context, action, resource, _ string) PolicyDecision {
-	s.calls = append(s.calls, action+"|"+resource)
-	if resource == s.allowResource {
-		return Allow("persona allow")
-	}
-	return Deny("persona deny")
-}
-
-func TestPersonaPolicyChecker_IDScopeAllowsWithoutFallback(t *testing.T) {
-	credID := uuidFromString(t, "33333333-3333-3333-3333-333333333333")
-	stub := &stubPersona{allowResource: "cerebro-credential:" + util.UUIDToString(credID)}
-	checker := NewPersonaPolicyChecker(stub)
-
-	dec := checker.Check(context.Background(), PolicyRequest{
-		WorkspaceID:    uuidFromString(t, "44444444-4444-4444-4444-444444444444"),
-		CredentialID:   credID,
-		CredentialType: TypeAPIKey,
-		Permission:     PermReveal,
-		ActorType:      "agent",
-		ActorID:        uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
-	})
-	if !dec.Allowed {
-		t.Fatalf("expected allow on id-scope, got %+v", dec)
-	}
-	if len(stub.calls) != 1 {
-		t.Fatalf("expected exactly one persona call (id-scope), got %d: %v", len(stub.calls), stub.calls)
-	}
-}
-
-func TestPersonaPolicyChecker_TypeFallback(t *testing.T) {
-	credID := uuidFromString(t, "33333333-3333-3333-3333-333333333333")
-	stub := &stubPersona{allowResource: "cerebro-credential-type:api_key"}
-	checker := NewPersonaPolicyChecker(stub)
-
-	dec := checker.Check(context.Background(), PolicyRequest{
-		WorkspaceID:    uuidFromString(t, "44444444-4444-4444-4444-444444444444"),
-		CredentialID:   credID,
-		CredentialType: TypeAPIKey,
-		Permission:     PermReveal,
-		ActorType:      "agent",
-		ActorID:        uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
-	})
-	if !dec.Allowed {
-		t.Fatalf("expected allow via type fallback, got %+v", dec)
-	}
-	if len(stub.calls) != 2 {
-		t.Fatalf("expected id-scope then type-fallback (2 calls), got %d: %v", len(stub.calls), stub.calls)
-	}
-}
-
-func TestPersonaPolicyChecker_BothDeny(t *testing.T) {
-	credID := uuidFromString(t, "33333333-3333-3333-3333-333333333333")
-	stub := &stubPersona{allowResource: "never-matches"}
-	checker := NewPersonaPolicyChecker(stub)
-
-	dec := checker.Check(context.Background(), PolicyRequest{
-		WorkspaceID:    uuidFromString(t, "44444444-4444-4444-4444-444444444444"),
-		CredentialID:   credID,
-		CredentialType: TypeAPIKey,
-		Permission:     PermReveal,
-		ActorType:      "agent",
-		ActorID:        uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
-	})
-	if dec.Allowed {
-		t.Fatalf("expected deny when neither scope matches, got %+v", dec)
-	}
-	if len(stub.calls) != 2 {
-		t.Fatalf("expected two checks before final deny, got %d: %v", len(stub.calls), stub.calls)
-	}
-}
-
-func TestPersonaPolicyChecker_PermissionMappedToCredentialAction(t *testing.T) {
-	credID := uuidFromString(t, "33333333-3333-3333-3333-333333333333")
-	stub := &stubPersona{}
-	checker := NewPersonaPolicyChecker(stub)
-
-	for _, p := range []Permission{PermAttach, PermReadRedacted, PermReveal, PermRotate, PermRevoke} {
-		stub.calls = nil
-		_ = checker.Check(context.Background(), PolicyRequest{
-			CredentialID:   credID,
-			CredentialType: TypeAPIKey,
-			Permission:     p,
-			ActorType:      "agent",
-			ActorID:        uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
-		})
-		if len(stub.calls) == 0 {
-			t.Fatalf("expected at least one persona call for permission %s", p)
-		}
-		want := "credential." + string(p)
-		got := stub.calls[0]
-		if got[:len(want)] != want {
-			t.Fatalf("permission %s: expected action prefix %q, got %q", p, want, got)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
 // permissionToAuditAction — mapping kept in one place; verify it.
 // ---------------------------------------------------------------------------
 
@@ -336,16 +163,4 @@ func uuidFromString(t *testing.T, s string) pgtype.UUID {
 		t.Fatalf("ParseUUID(%q): %v", s, err)
 	}
 	return id
-}
-
-func cutoverPolicyRequest(t *testing.T) PolicyRequest {
-	t.Helper()
-	return PolicyRequest{
-		WorkspaceID:    uuidFromString(t, "44444444-4444-4444-4444-444444444444"),
-		CredentialID:   uuidFromString(t, "33333333-3333-3333-3333-333333333333"),
-		CredentialType: TypeAPIKey,
-		Permission:     PermReveal,
-		ActorType:      "agent",
-		ActorID:        uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
-	}
 }

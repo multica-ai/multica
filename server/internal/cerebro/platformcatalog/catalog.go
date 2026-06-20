@@ -212,6 +212,7 @@ var catalog = []Capability{
 			"PUT /api/cerebro/issues/{issueID}/recurrence/",
 			"DELETE /api/cerebro/issues/{issueID}/recurrence/",
 			"POST /api/cerebro/issue-recurrences/{id}/run",
+			"PUT /api/cerebro/issues/{issueID}/date-times/",
 		},
 	},
 
@@ -307,6 +308,7 @@ var catalog = []Capability{
 			"PUT /api/artifact-folders/{id}",
 			"PUT /api/artifact-folders/{id}/visibility",
 			"DELETE /api/artifact-folders/{id}",
+			"PUT /api/artifact-folders/{id}/visibility",
 			"POST /api/artifact-uploads",
 			"POST /api/upload-file",
 			"DELETE /api/attachments/{id}",

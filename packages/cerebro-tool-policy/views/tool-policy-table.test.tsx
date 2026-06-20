@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockListAutopilots = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/api")>(
@@ -12,7 +13,7 @@ vi.mock("@multica/core/api", async () => {
   );
   return {
     ...actual,
-    api: { cerebroRequest: mockCerebroRequest },
+    api: { cerebroRequest: mockCerebroRequest, listAutopilots: mockListAutopilots },
   };
 });
 
@@ -49,6 +50,60 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     </button>
   ),
 }));
+
+// The Condition editor lives in a Radix Popover, which portals + relies on
+// pointer APIs jsdom doesn't implement. We flatten it the same way the dropdown
+// is flattened: a context threads the `open`/`onOpenChange` the component drives,
+// the trigger toggles it, and the content renders only while open — so opening,
+// editing and saving a condition can be driven directly.
+vi.mock("@multica/ui/components/ui/popover", async () => {
+  const React = await import("react");
+  const Ctx = React.createContext<{ open: boolean; onOpenChange: (v: boolean) => void }>({
+    open: false,
+    onOpenChange: () => {},
+  });
+  return {
+    Popover: ({
+      open,
+      onOpenChange,
+      children,
+    }: {
+      open?: boolean;
+      onOpenChange?: (v: boolean) => void;
+      children: ReactNode;
+    }) => (
+      <Ctx.Provider value={{ open: !!open, onOpenChange: onOpenChange ?? (() => {}) }}>
+        {children}
+      </Ctx.Provider>
+    ),
+    PopoverTrigger: ({
+      children,
+      onClick,
+      ...props
+    }: { children: ReactNode } & ButtonHTMLAttributes<HTMLButtonElement>) => {
+      const { open, onOpenChange } = React.useContext(Ctx);
+      return (
+        <button
+          type="button"
+          {...props}
+          onClick={(e) => {
+            onClick?.(e);
+            onOpenChange(!open);
+          }}
+        >
+          {children}
+        </button>
+      );
+    },
+    PopoverContent: ({ children }: { children: ReactNode }) => {
+      const { open } = React.useContext(Ctx);
+      return open ? <div>{children}</div> : null;
+    },
+    PopoverTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    PopoverDescription: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    PopoverHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  };
+});
 
 import { ToolPolicyTable } from "./tool-policy-table";
 
@@ -99,6 +154,11 @@ function findPutCalls() {
 beforeEach(() => {
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(TABLE);
+  // Default: no autopilots → the System-layer picker stays hidden, so every
+  // existing test renders the human-context table unchanged. The System suite
+  // below overrides this to surface the picker.
+  mockListAutopilots.mockReset();
+  mockListAutopilots.mockResolvedValue({ autopilots: [] });
 });
 
 // The desktop table and the mobile cards both render in jsdom (CSS hides one),
@@ -436,6 +496,311 @@ describe("ToolPolicyTable (repo groups)", () => {
         setting: "ask",
         resource_pattern: REPO_URL,
       });
+    });
+  });
+});
+
+// FIR-1609 — the WHEN layer (Condition) sits beside the Decision pill. A
+// condition only narrows when a rule applies; it never moves Allow/Ask/Deny, and
+// it can only attach to a concrete rule already authored on this page's layer.
+describe("ToolPolicyTable (Condition editor)", () => {
+  const COND_TABLE = {
+    tools: [
+      {
+        // Concrete agent rule (allow) carrying a host condition.
+        tool_key: "web_fetch",
+        title: "Fetch a URL",
+        category: "Built-in tools",
+        source: "builtin",
+        layers: { runtime: null, agent: "allow", group: null, user: null },
+        conditions: {
+          workspace: null,
+          runtime: null,
+          agent: { host_allowlist: ["firtal.com", "*.firtal.com"], actions: [], expr: "" },
+          user: null,
+        },
+        effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+      },
+      {
+        // No override on the agent layer → nothing for a condition to refine.
+        tool_key: "list_issues",
+        title: "List issues",
+        category: "Built-in tools",
+        source: "builtin",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockCerebroRequest.mockReset();
+    mockCerebroRequest.mockResolvedValue(COND_TABLE);
+  });
+
+  function renderCondTable() {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view="agent" subjectId="agent-1" runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("shows the persisted condition as the trigger summary", async () => {
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    // "firtal.com +1" — first host plus the count of the rest.
+    expect(within(row).getByTestId("condition-control-web_fetch")).toHaveTextContent(
+      "firtal.com +1",
+    );
+  });
+
+  it("disables the When control on a layer with no concrete rule", async () => {
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-list_issues");
+    const control = within(row).getByTestId("condition-control-list_issues");
+    expect(control).toBeDisabled();
+    expect(control).toHaveTextContent("When");
+  });
+
+  it("editing a condition writes the unchanged Decision plus the condition", async () => {
+    const user = userEvent.setup();
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    // Open the editor (seeded from the persisted host list), add a second host.
+    await user.click(within(row).getByTestId("condition-control-web_fetch"));
+    const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
+    // Enter adds the host (the same path the Add button drives).
+    await user.type(editor.getByLabelText("Add host"), "docs.anthropic.com{Enter}");
+    await user.click(editor.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        tool_key: "web_fetch",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "allow",
+      });
+      expect(body.condition.host_allowlist).toEqual([
+        "firtal.com",
+        "*.firtal.com",
+        "docs.anthropic.com",
+      ]);
+    });
+  });
+
+  it("clearing a condition writes the Decision with condition: null", async () => {
+    const user = userEvent.setup();
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    await user.click(within(row).getByTestId("condition-control-web_fetch"));
+    const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
+    await user.click(editor.getByRole("button", { name: "Clear" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({ tool_key: "web_fetch", layer: "agent", setting: "allow" });
+      expect(body.condition).toBeNull();
+    });
+  });
+});
+
+describe("ToolPolicyTable (firtal_registry data sources — FIR-1609 Phase 5)", () => {
+  it("surfaces per-data-source rows under a Data sources button, not as flat rows", async () => {
+    // The server folds each registry data source into a per-resource row under
+    // firtal_registry. They must NOT appear as flat catalog rows or repo groups —
+    // they belong in the firtal_registry row's "Data sources" sheet.
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "firtal_registry",
+          resource_pattern: "",
+          title: "Firtal Data Registry",
+          category: "Built-in tools",
+          source: "builtin",
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+        {
+          tool_key: "firtal_registry",
+          resource_pattern: "ds-orders",
+          title: "Orders",
+          category: "Data sources",
+          source: "registry-data-source",
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+        {
+          tool_key: "firtal_registry",
+          resource_pattern: "ds-finance",
+          title: "Finance",
+          category: "Data sources",
+          source: "registry-data-source",
+          layers: { runtime: null, agent: "deny", group: null, user: null },
+          effective: { setting: "deny", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+    renderTable("agent");
+
+    // The capability row renders, with a "Data sources (2)" button.
+    const capRow = await screen.findByTestId("tool-row-firtal_registry");
+    expect(within(capRow).getByText("Firtal Data Registry")).toBeInTheDocument();
+    expect(
+      within(capRow).getAllByRole("button", { name: /Data sources \(2\)/ }).length,
+    ).toBeGreaterThan(0);
+
+    // The per-source rows are NOT flat catalog rows of their own.
+    expect(screen.queryByText("Orders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Finance")).not.toBeInTheDocument();
+  });
+});
+
+// FIR-1609 Phase 2 — the System layer governs human-less autopilot runs. Picking
+// an autopilot in the System-layer bar scopes the table to system_id, reveals a
+// System column, and authors layer="system" keyed on the autopilot — a peer of
+// the User ceiling, independent of the page's own layer.
+describe("ToolPolicyTable (System layer — FIR-1609)", () => {
+  const SYS_TABLE = {
+    tools: [
+      {
+        tool_key: "web_fetch",
+        title: "Fetch a URL",
+        category: "Built-in tools",
+        source: "builtin",
+        layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: "allow" },
+        conditions: {
+          workspace: null,
+          runtime: null,
+          agent: null,
+          user: null,
+          system: { host_allowlist: ["firtal.com"], actions: [], expr: "" },
+        },
+        effective: { setting: "allow", decided_by: "system", capped_by: "", reason: "" },
+      },
+    ],
+  };
+
+  beforeEach(() => {
+    mockCerebroRequest.mockReset();
+    mockCerebroRequest.mockResolvedValue(SYS_TABLE);
+    mockListAutopilots.mockReset();
+    mockListAutopilots.mockResolvedValue({
+      autopilots: [
+        {
+          id: "ap-1",
+          workspace_id: "ws-1",
+          title: "Nightly sync",
+          status: "active",
+          assignee_type: "agent",
+          assignee_id: "agent-9",
+          execution_mode: "run_only",
+          created_by_type: "member",
+          created_by_id: "user-1",
+          is_private: false,
+        },
+        {
+          id: "ap-archived",
+          workspace_id: "ws-1",
+          title: "Retired pilot",
+          status: "archived",
+          assignee_type: "agent",
+          assignee_id: "agent-8",
+          execution_mode: "run_only",
+          created_by_type: "member",
+          created_by_id: "user-1",
+          is_private: false,
+        },
+      ],
+    });
+  });
+
+  function renderSysTable(view: "workspace" | "agent" = "workspace", subjectId = "ws-1") {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable wsId="ws-1" view={view} subjectId={subjectId} runtimeId="rt-1" userId="user-1" />
+      </QueryClientProvider>,
+    );
+  }
+
+  async function scopeToAutopilot(user: ReturnType<typeof userEvent.setup>) {
+    const picker = await screen.findByLabelText("Scope the System layer to an autopilot");
+    await user.click(picker);
+    // Archived autopilots are not offered…
+    expect(screen.queryByRole("option", { name: "Retired pilot" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("option", { name: "Nightly sync" }));
+  }
+
+  it("hides the System column until an autopilot is scoped", async () => {
+    renderSysTable();
+    // The picker is present (an autopilot exists) but no System cell yet.
+    expect(await screen.findByTestId("system-layer-bar")).toBeInTheDocument();
+    expect(screen.queryByTestId("system-cell-web_fetch")).not.toBeInTheDocument();
+  });
+
+  it("scoping to an autopilot sends system_id and reveals the System column", async () => {
+    const user = userEvent.setup();
+    renderSysTable();
+    await screen.findByTestId("system-layer-bar");
+    await scopeToAutopilot(user);
+
+    // The table refetch carries the chosen autopilot as system_id.
+    await waitFor(() => {
+      const get = mockCerebroRequest.mock.calls.find(
+        (c) => (c[1] as RequestInit | undefined)?.method === undefined && String(c[0]).includes("system_id=ap-1"),
+      );
+      expect(get).toBeTruthy();
+    });
+    // The System cell now renders for the row.
+    expect(await screen.findByTestId("system-cell-web_fetch")).toBeInTheDocument();
+  });
+
+  it("the System Decision writes layer=system keyed on the autopilot, not the page subject", async () => {
+    const user = userEvent.setup();
+    renderSysTable("workspace", "ws-1");
+    await screen.findByTestId("system-layer-bar");
+    await scopeToAutopilot(user);
+
+    const sysCell = within(await screen.findByTestId("system-cell-web_fetch"));
+    await user.click(sysCell.getByLabelText(/^Decision:/));
+    await user.click(sysCell.getByRole("menuitem", { name: "Deny" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      expect(put).toBeTruthy();
+      expect(JSON.parse((put![1] as RequestInit).body as string)).toMatchObject({
+        tool_key: "web_fetch",
+        layer: "system",
+        subject_id: "ap-1",
+        setting: "deny",
+      });
+    });
+  });
+
+  it("the System When editor refines the system rule, writing layer=system with the condition", async () => {
+    const user = userEvent.setup();
+    renderSysTable("workspace", "ws-1");
+    await screen.findByTestId("system-layer-bar");
+    await scopeToAutopilot(user);
+
+    const sysCell = within(await screen.findByTestId("system-cell-web_fetch"));
+    // The persisted system condition is summarised on the trigger.
+    expect(sysCell.getByTestId("condition-control-web_fetch")).toHaveTextContent("firtal.com");
+    await user.click(sysCell.getByTestId("condition-control-web_fetch"));
+    const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
+    await user.type(editor.getByLabelText("Add host"), "docs.anthropic.com{Enter}");
+    await user.click(editor.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({ tool_key: "web_fetch", layer: "system", subject_id: "ap-1", setting: "allow" });
+      expect(body.condition.host_allowlist).toEqual(["firtal.com", "docs.anthropic.com"]);
     });
   });
 });

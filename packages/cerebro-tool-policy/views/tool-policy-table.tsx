@@ -23,20 +23,36 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { autopilotListOptions } from "@multica/core/autopilots";
+import type { Autopilot } from "@multica/core/types";
 import {
+  Bot,
   ChevronDown,
   ChevronRight,
   FolderGit2,
+  Globe,
   Lock,
+  Plus,
   Search,
   ShieldAlert,
   ShieldCheck,
   ShieldQuestion,
+  SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -75,6 +91,7 @@ import {
   useSetToolPolicy,
   type ClassFacet,
   type SideEffect,
+  type ToolCondition,
   type ToolEffectiveSetting,
   type ToolLayer,
   type ToolPolicyRow,
@@ -82,6 +99,7 @@ import {
 } from "../core";
 import { FirtalRegistryRowConfigure } from "./firtal-registry-row-configure";
 import { ConnectionRowConfigure } from "./connection-row-configure";
+import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
 
 /**
  * The five surfaces (FIR-2284 Bid 5). Each page renders the same catalog but
@@ -171,6 +189,7 @@ const LAYER_LABEL: Record<string, string> = {
   agent: "Agent",
   group: "Group",
   user: "User",
+  system: "System",
   "": "Default",
 };
 
@@ -183,25 +202,54 @@ export function ToolPolicyTable({
   groupIds,
   tabFilter,
 }: ToolPolicyTableProps) {
+  // The autopilot whose System (mandate-actor) ceiling we view/author, FIR-1609.
+  // null = the human-context table (System column hidden); set = the table is
+  // scoped to one autopilot → ctx.autopilotId → system_id, and the System column
+  // appears with its own editable Decision + When controls.
+  const [autopilotId, setAutopilotId] = useState<string | null>(null);
+
   // Each surface assembles only the chain context it authors. The workspace
   // root layer is always loaded server-side from wsId, so the workspace view
   // passes no extra subject and still resolves its own layer's Effective column.
+  // The System scope (autopilotId) is orthogonal to the page's own layer — it is
+  // keyed on the chosen autopilot, not the page subject — so it is folded into
+  // every view's context when an autopilot is picked.
   const ctx = useMemo(() => {
+    const sys = autopilotId ? { autopilotId } : {};
     switch (view) {
       case "agent":
-        return { agentId: subjectId, runtimeId, userId, groupIds };
+        return { agentId: subjectId, runtimeId, userId, groupIds, ...sys };
       case "runtime":
-        return { runtimeId: subjectId };
+        return { runtimeId: subjectId, ...sys };
       case "group":
-        return { groupIds: [subjectId] };
+        return { groupIds: [subjectId], ...sys };
       case "member":
-        return { userId: subjectId };
+        return { userId: subjectId, ...sys };
       case "workspace":
-        return {};
+        return { ...sys };
     }
-  }, [view, subjectId, runtimeId, userId, groupIds]);
+  }, [view, subjectId, runtimeId, userId, groupIds, autopilotId]);
 
   const query = useQuery(toolPolicyTableOptions(wsId, ctx));
+  // The autopilots offered in the System-layer picker. Archived ones are dropped
+  // — you can't author a ceiling for an autopilot that can no longer run.
+  const autopilotsQuery = useQuery({
+    ...autopilotListOptions(wsId),
+    enabled: !!wsId,
+  });
+  const autopilots = useMemo(
+    () => (autopilotsQuery.data ?? []).filter((a) => a.status !== "archived"),
+    [autopilotsQuery.data],
+  );
+  // A picked autopilot that has since disappeared (archived/deleted) leaves a
+  // dangling System scope — fall back to no scope so the column never authors a
+  // ghost subject.
+  const activeAutopilot = useMemo(
+    () => autopilots.find((a) => a.id === autopilotId) ?? null,
+    [autopilots, autopilotId],
+  );
+  // The System column is shown only when a live autopilot is scoped.
+  const systemScoped = !!activeAutopilot;
   const setPolicy = useSetToolPolicy();
   const clearPolicy = useClearToolPolicy();
 
@@ -225,10 +273,30 @@ export function ToolPolicyTable({
   // from the repo set.
   const isConnectionSubRow = (r: ToolPolicyRow) =>
     r.source === "connection-tool" || r.source === "connection-endpoint";
+  // firtal_registry per-data-source rows (FIR-1609 Phase 5) carry a resource
+  // pattern too, but — like connection sub-rows — they are surfaced through their
+  // own "Data sources" sheet, not as repo groups, so exclude them from repos.
+  const isRegistrySubRow = (r: ToolPolicyRow) => r.source === "registry-data-source";
   const allRepoRows = useMemo(
-    () => rows.filter((r) => r.resource_pattern && !isConnectionSubRow(r)),
+    () =>
+      rows.filter(
+        (r) =>
+          r.resource_pattern && !isConnectionSubRow(r) && !isRegistrySubRow(r),
+      ),
     [rows],
   );
+  // Registry data-source sub-rows grouped by their tool key ("firtal_registry"),
+  // so the capability row can hand its data sources to the per-source sheet.
+  const registryDataSourcesByKey = useMemo(() => {
+    const map = new Map<string, ToolPolicyRow[]>();
+    for (const r of rows) {
+      if (!isRegistrySubRow(r)) continue;
+      const list = map.get(r.tool_key) ?? [];
+      list.push(r);
+      map.set(r.tool_key, list);
+    }
+    return map;
+  }, [rows]);
   // Connection sub-rows grouped by their connection capability key
   // ("connection:<name>") so each connection row can hand its tools to the sheet.
   const connectionToolsByKey = useMemo(() => {
@@ -279,6 +347,60 @@ export function ToolPolicyTable({
     setPolicy.mutate({ tool_key: toolKey, layer: editLayer, subject_id: subjectId, setting, ...scope });
   }
 
+  // Write (or clear) the Condition — the WHEN layer (FIR-1609) — on this page's
+  // own rule for one tool. A condition refines a rule, so it can only attach to a
+  // CONCRETE rule (allow/ask/deny) already authored on this layer; the control is
+  // disabled otherwise, and we re-guard here so a drifted row can never create an
+  // override as a side effect. Passing null clears the condition ("always
+  // applies"). The Decision is sent unchanged — a condition never moves it.
+  function applyCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    const setting = editLayer === "group" ? null : row.layers[editLayer];
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    const scope = row.resource_pattern ? { resource_pattern: row.resource_pattern } : {};
+    setPolicy.mutate({
+      tool_key: row.tool_key,
+      layer: editLayer,
+      subject_id: subjectId,
+      setting,
+      condition,
+      ...scope,
+    });
+  }
+
+  // Write (or clear) the System-layer Decision for the scoped autopilot. The
+  // System layer is keyed on the autopilot id, not the page subject, so these
+  // writes always target layer="system" with the chosen autopilot as the
+  // subject — independent of whichever layer the page's own Decision column
+  // authors. The server rejects (422) a System rule looser than the autopilot
+  // owner's own ceiling, so the UI just surfaces that error via the mutation.
+  function applySystemSetting(toolKey: string, setting: ToolSetting, resourcePattern?: string) {
+    if (!activeAutopilot) return;
+    const scope = resourcePattern ? { resource_pattern: resourcePattern } : {};
+    if (setting === "inherit") {
+      clearPolicy.mutate({ tool_key: toolKey, layer: "system", subject_id: activeAutopilot.id, ...scope });
+      return;
+    }
+    setPolicy.mutate({ tool_key: toolKey, layer: "system", subject_id: activeAutopilot.id, setting, ...scope });
+  }
+
+  // Attach/clear the When condition on the autopilot's own System rule. Like the
+  // page-layer applyCondition, it only refines a CONCRETE system rule already
+  // authored (allow/ask/deny) and never moves the Decision.
+  function applySystemCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    if (!activeAutopilot) return;
+    const setting = row.layers.system;
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    const scope = row.resource_pattern ? { resource_pattern: row.resource_pattern } : {};
+    setPolicy.mutate({
+      tool_key: row.tool_key,
+      layer: "system",
+      subject_id: activeAutopilot.id,
+      setting,
+      condition,
+      ...scope,
+    });
+  }
+
   // Cascade one choice onto every capability of a repo (the group header
   // control): "set the repo to Allow and every row under it follows."
   function applyRepoGroup(group: RepoGroupData, setting: ToolSetting) {
@@ -320,6 +442,15 @@ export function ToolPolicyTable({
         editLayerLabel={LAYER_LABEL[editLayer]!}
       />
 
+      {autopilots.length > 0 && (
+        <SystemLayerBar
+          autopilots={autopilots}
+          value={autopilotId}
+          onChange={setAutopilotId}
+          scopedTitle={activeAutopilot?.title ?? null}
+        />
+      )}
+
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading tools…</p>
       ) : repoGroups.length === 0 && filtered.length === 0 ? (
@@ -351,6 +482,14 @@ export function ToolPolicyTable({
                   <TableHead>Class</TableHead>
                   <TableHead>Side effect</TableHead>
                   <TableHead>Decision</TableHead>
+                  {systemScoped && (
+                    <TableHead>
+                      <span className="inline-flex items-center gap-1.5">
+                        <Bot className="size-3.5 text-muted-foreground" />
+                        System
+                      </span>
+                    </TableHead>
+                  )}
                   <TableHead>Origin</TableHead>
                 </TableRow>
               </TableHeader>
@@ -384,6 +523,12 @@ export function ToolPolicyTable({
                           disabled={busy}
                           onChange={(s) => applySetting(row.tool_key, s)}
                         />
+                        <ConditionControl
+                          row={row}
+                          editLayer={editLayer}
+                          disabled={busy}
+                          onChange={(c) => applyCondition(row, c)}
+                        />
                         {view === "agent" && subjectId ? (
                           <FirtalRegistryRowConfigure
                             toolKey={row.tool_key}
@@ -401,8 +546,36 @@ export function ToolPolicyTable({
                             subjectId={subjectId}
                           />
                         ) : null}
+                        <FirtalRegistryDataSourceConfigure
+                          toolKey={row.tool_key}
+                          toolLabel={row.title || row.tool_key}
+                          sourceRows={registryDataSourcesByKey.get(row.tool_key) ?? []}
+                          editLayer={editLayer}
+                          subjectId={subjectId}
+                        />
                       </div>
                     </TableCell>
+                    {systemScoped && (
+                      <TableCell>
+                        <div
+                          className="flex items-center gap-2"
+                          data-testid={`system-cell-${row.tool_key}`}
+                        >
+                          <DecisionControl
+                            row={row}
+                            editLayer="system"
+                            disabled={busy}
+                            onChange={(s) => applySystemSetting(row.tool_key, s)}
+                          />
+                          <ConditionControl
+                            row={row}
+                            editLayer="system"
+                            disabled={busy}
+                            onChange={(c) => applySystemCondition(row, c)}
+                          />
+                        </div>
+                      </TableCell>
+                    )}
                     <TableCell>
                       <OriginTag row={row} editLayer={editLayer} />
                     </TableCell>
@@ -447,6 +620,13 @@ export function ToolPolicyTable({
                         subjectId={subjectId}
                       />
                     ) : null}
+                    <FirtalRegistryDataSourceConfigure
+                      toolKey={row.tool_key}
+                      toolLabel={row.title || row.tool_key}
+                      sourceRows={registryDataSourcesByKey.get(row.tool_key) ?? []}
+                      editLayer={editLayer}
+                      subjectId={subjectId}
+                    />
                     <DecisionControl
                       row={row}
                       editLayer={editLayer}
@@ -462,7 +642,35 @@ export function ToolPolicyTable({
                   {row.managed_externally && <ManagedExternallyTag />}
                   <SideEffectTag effect={classifySideEffect(row)} />
                   <OriginTag row={row} editLayer={editLayer} />
+                  <ConditionControl
+                    row={row}
+                    editLayer={editLayer}
+                    disabled={busy}
+                    onChange={(c) => applyCondition(row, c)}
+                  />
                 </div>
+                {systemScoped && (
+                  <div
+                    className="mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2"
+                    data-testid={`system-card-${row.tool_key}`}
+                  >
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      <Bot className="size-3.5" /> System
+                    </span>
+                    <DecisionControl
+                      row={row}
+                      editLayer="system"
+                      disabled={busy}
+                      onChange={(s) => applySystemSetting(row.tool_key, s)}
+                    />
+                    <ConditionControl
+                      row={row}
+                      editLayer="system"
+                      disabled={busy}
+                      onChange={(c) => applySystemCondition(row, c)}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -700,6 +908,73 @@ function FilterBar({
   );
 }
 
+// --- system-layer picker (FIR-1609) -----------------------------------------
+
+// The sentinel the Select uses for "no autopilot scoped" — the base UI Select
+// can't carry an empty-string value, mirroring the class filter's "__all__".
+const SYSTEM_NONE = "__none__";
+
+// SystemLayerBar scopes the table to one autopilot's System (mandate-actor)
+// ceiling. The System layer governs human-less autopilot runs — the run has no
+// human at the top of the chain, so the autopilot itself supplies the ceiling
+// (FIR-1609). Picking an autopilot here sets ctx.autopilotId → system_id, which
+// makes the backend resolve + return the System rules and reveals the System
+// column. Picking "No autopilot" hides the column and returns to the human view.
+function SystemLayerBar({
+  autopilots,
+  value,
+  onChange,
+  scopedTitle,
+}: {
+  autopilots: Autopilot[];
+  value: string | null;
+  onChange: (id: string | null) => void;
+  scopedTitle: string | null;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
+      data-testid="system-layer-bar"
+    >
+      <div className="flex items-start gap-2">
+        <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="flex flex-col">
+          <span className="text-sm font-medium">System layer (autopilot ceiling)</span>
+          <span className="max-w-xl text-xs text-muted-foreground">
+            {scopedTitle
+              ? `Editing the System ceiling for “${scopedTitle}”. These rules cap what the autopilot may do on a human-less run — they can never be looser than the autopilot owner.`
+              : "Pick an autopilot to view and edit the ceiling that governs its human-less runs."}
+          </span>
+        </div>
+      </div>
+      <Select
+        value={value ?? SYSTEM_NONE}
+        onValueChange={(v) => {
+          if (!v) return;
+          onChange(v === SYSTEM_NONE ? null : v);
+        }}
+      >
+        <SelectTrigger
+          className="h-9 w-full sm:w-64"
+          aria-label="Scope the System layer to an autopilot"
+        >
+          <span data-slot="select-value" className="flex flex-1 text-left">
+            {scopedTitle ?? "No autopilot"}
+          </span>
+        </SelectTrigger>
+        <SelectContent align="end">
+          <SelectItem value={SYSTEM_NONE}>No autopilot</SelectItem>
+          {autopilots.map((a) => (
+            <SelectItem key={a.id} value={a.id}>
+              {a.title}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -799,6 +1074,8 @@ function changeHint(layer: string): string {
       return "Ændr det under Settings → Groups.";
     case "user":
       return "Det er sat på brugerens egne rettigheder (loftet).";
+    case "system":
+      return "Det er sat på autopilotens System-loft (vælg autopiloten ovenfor).";
     default:
       return "";
   }
@@ -895,7 +1172,7 @@ function OriginTag({
 // verdict — what actually happens — coloured and with a Lock icon when a layer
 // above this page capped it. Opening it writes this page's own layer; choosing
 // Inherit clears that layer. A subtle ring marks rows this page has overridden.
-function DecisionControl({
+export function DecisionControl({
   row,
   editLayer,
   disabled,
@@ -949,6 +1226,315 @@ function DecisionControl({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+// --- condition editor (FIR-1609 — the WHEN layer) ---------------------------
+
+// Bare host or subdomain wildcard, e.g. firtal.com or *.firtal.com. Mirrors the
+// server-side rule grammar (webfetchpolicy.HostMatchesRule) so the host-allowlist
+// condition speaks the exact same language as the standalone Web fetch policy it
+// folds in.
+const HOST_RULE_RE = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)+$/;
+
+function normalizeHost(raw: string): string {
+  return raw.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+}
+
+// A condition with nothing in it means "always applies" — there is no rule to
+// refine, so it is treated as no condition (and cleared to NULL server-side).
+export function conditionIsEmpty(c: ToolCondition | null | undefined): boolean {
+  if (!c) return true;
+  return (
+    c.host_allowlist.length === 0 && c.actions.length === 0 && c.expr.trim() === ""
+  );
+}
+
+// The Condition lives only on single-subject layers. The Group layer is a
+// combined value across several group rules, for which a single condition is
+// undefined — so the control is not shown there (mirrors ToolPolicyConditions).
+function conditionForLayer(
+  row: ToolPolicyRow,
+  editLayer: ToolLayer,
+): ToolCondition | null {
+  if (editLayer === "group") return null;
+  return row.conditions?.[editLayer] ?? null;
+}
+
+// summarizeCondition renders a non-empty condition as a compact trigger label:
+// "firtal.com +1 · 2 actions · CEL".
+export function summarizeCondition(c: ToolCondition): string {
+  const parts: string[] = [];
+  if (c.host_allowlist.length > 0) {
+    parts.push(
+      c.host_allowlist.length === 1
+        ? c.host_allowlist[0]!
+        : `${c.host_allowlist[0]} +${c.host_allowlist.length - 1}`,
+    );
+  }
+  if (c.actions.length > 0) {
+    parts.push(c.actions.length === 1 ? c.actions[0]! : `${c.actions.length} actions`);
+  }
+  if (c.expr.trim()) parts.push("CEL");
+  return parts.join(" · ");
+}
+
+function ConditionChips({
+  items,
+  onRemove,
+}: {
+  items: string[];
+  onRemove: (value: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <ul className="flex flex-wrap gap-1.5">
+      {items.map((it) => (
+        <li key={it}>
+          <Badge variant="secondary" className="gap-1 py-0.5 pl-2 pr-1 font-mono text-xs">
+            {it}
+            <button
+              type="button"
+              aria-label={`Remove ${it}`}
+              onClick={() => onRemove(it)}
+              className="rounded-sm p-0.5 text-muted-foreground hover:bg-muted-foreground/20 hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          </Badge>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// ConditionControl is the WHEN editor that sits beside the Decision pill. A
+// condition NEVER changes Allow/Ask/Deny — it only narrows whether this layer's
+// rule applies to a request (host allow-list, allowed actions, or a CEL escape
+// hatch for genuine dynamics). It can therefore only attach to a CONCRETE rule
+// already authored on this page's own layer: with no override here there is
+// nothing to refine, so the control reads as a disabled "When" hint that points
+// the admin at the Decision first. The Group layer has no single condition, so
+// the control is omitted entirely on that page.
+export function ConditionControl({
+  row,
+  editLayer,
+  disabled,
+  onChange,
+}: {
+  row: ToolPolicyRow;
+  editLayer: ToolLayer;
+  disabled?: boolean;
+  onChange: (condition: ToolCondition | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [actions, setActions] = useState<string[]>([]);
+  const [expr, setExpr] = useState("");
+  const [hostDraft, setHostDraft] = useState("");
+  const [actionDraft, setActionDraft] = useState("");
+  const [hostError, setHostError] = useState<string | null>(null);
+
+  const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
+  const hasConcreteRule =
+    ruleSetting === "allow" || ruleSetting === "ask" || ruleSetting === "deny";
+  const current = conditionForLayer(row, editLayer);
+  const active = !conditionIsEmpty(current);
+
+  // Group has no single condition — show nothing there.
+  if (editLayer === "group") return null;
+
+  // Seed the form from the persisted condition each time the popover opens, so an
+  // abandoned edit never leaks into the next open.
+  function handleOpenChange(next: boolean) {
+    if (next) {
+      setHosts(current?.host_allowlist ?? []);
+      setActions(current?.actions ?? []);
+      setExpr(current?.expr ?? "");
+      setHostDraft("");
+      setActionDraft("");
+      setHostError(null);
+    }
+    setOpen(next);
+  }
+
+  function addHost() {
+    const h = normalizeHost(hostDraft);
+    if (!h) return;
+    if (!HOST_RULE_RE.test(h)) {
+      setHostError("Enter a host like firtal.com or *.firtal.com.");
+      return;
+    }
+    setHostError(null);
+    if (!hosts.includes(h)) setHosts([...hosts, h]);
+    setHostDraft("");
+  }
+
+  function addAction() {
+    const a = actionDraft.trim().toLowerCase();
+    if (!a) return;
+    if (!actions.includes(a)) setActions([...actions, a]);
+    setActionDraft("");
+  }
+
+  function save() {
+    const next: ToolCondition = { host_allowlist: hosts, actions, expr: expr.trim() };
+    onChange(conditionIsEmpty(next) ? null : next);
+    setOpen(false);
+  }
+
+  function clear() {
+    onChange(null);
+    setOpen(false);
+  }
+
+  // No concrete rule on this layer → nothing to refine. Disabled hint that names
+  // the prerequisite, rather than silently creating an override.
+  if (!hasConcreteRule) {
+    return (
+      <button
+        type="button"
+        disabled
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label="Condition unavailable"
+        title="Set a decision (Allow/Ask/Deny) on this level first to add a condition."
+        className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs font-medium text-muted-foreground opacity-50"
+      >
+        <SlidersHorizontal className="size-3.5" />
+        When
+      </button>
+    );
+  }
+
+  const draftEmpty = conditionIsEmpty({ host_allowlist: hosts, actions, expr });
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        disabled={disabled}
+        data-testid={`condition-control-${row.tool_key}`}
+        aria-label={active ? `Condition: ${summarizeCondition(current!)}` : "Add condition"}
+        title={
+          active
+            ? `Applies only when: ${summarizeCondition(current!)}`
+            : "Add a condition — narrow when this rule applies"
+        }
+        className={cn(
+          "inline-flex max-w-[12rem] items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+          active
+            ? "border-primary/40 bg-primary/10 text-primary"
+            : "border-dashed border-border bg-background text-muted-foreground hover:bg-muted",
+        )}
+      >
+        <SlidersHorizontal className="size-3.5 shrink-0" />
+        <span className="truncate">{active ? summarizeCondition(current!) : "When…"}</span>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80">
+        <div className="flex flex-col gap-4" data-testid={`condition-editor-${row.tool_key}`}>
+          <div className="flex flex-col gap-1">
+            <PopoverTitle className="text-sm font-semibold">When this rule applies</PopoverTitle>
+            <PopoverDescription className="text-xs text-muted-foreground">
+              Narrows when the <strong>{SETTING_LABEL[ruleSetting!]}</strong> rule applies —
+              it never changes the decision. Empty means it always applies.
+            </PopoverDescription>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label className="flex items-center gap-1.5 text-xs">
+              <Globe className="size-3.5" /> Host allow-list
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                value={hostDraft}
+                onChange={(e) => {
+                  setHostDraft(e.target.value);
+                  setHostError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addHost();
+                  }
+                }}
+                placeholder="firtal.com or *.firtal.com"
+                className="h-8"
+                aria-label="Add host"
+              />
+              <Button type="button" size="sm" variant="outline" onClick={addHost}>
+                <Plus className="size-4" />
+              </Button>
+            </div>
+            {hostError && <p className="text-xs text-destructive">{hostError}</p>}
+            <ConditionChips items={hosts} onRemove={(h) => setHosts(hosts.filter((x) => x !== h))} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label className="text-xs">Actions</Label>
+            <div className="flex gap-2">
+              <Input
+                value={actionDraft}
+                onChange={(e) => setActionDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAction();
+                  }
+                }}
+                placeholder="read, push, reveal…"
+                className="h-8"
+                aria-label="Add action"
+              />
+              <Button type="button" size="sm" variant="outline" onClick={addAction}>
+                <Plus className="size-4" />
+              </Button>
+            </div>
+            <ConditionChips
+              items={actions}
+              onRemove={(a) => setActions(actions.filter((x) => x !== a))}
+            />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor={`cel-${row.tool_key}`} className="text-xs">
+              Advanced (CEL)
+            </Label>
+            <Textarea
+              id={`cel-${row.tool_key}`}
+              value={expr}
+              onChange={(e) => setExpr(e.target.value)}
+              placeholder="request.time.getHours() >= 8 && request.time.getHours() < 17"
+              className="min-h-16 font-mono text-xs"
+              aria-label="CEL expression"
+            />
+            <p className="text-xs text-muted-foreground">
+              A CEL expression for genuine dynamics (e.g. business hours). Leave empty
+              unless you need it.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-muted-foreground"
+              onClick={clear}
+              disabled={!active && draftEmpty}
+            >
+              Clear
+            </Button>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={save}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

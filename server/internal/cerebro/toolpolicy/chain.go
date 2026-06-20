@@ -68,12 +68,22 @@ const (
 	LayerGroup Layer = "group"
 	// LayerUser is the ceiling — the requesting user's own access.
 	LayerUser Layer = "user"
+	// LayerSystem is the ceiling for runs with no human behind them (autopilot /
+	// system-triggered). It is a PEER of LayerUser at the mandate level: exactly
+	// one of User or System fills the ceiling slot per run, never both. A System
+	// is born from a User and is capped at that owner's permissions at authoring
+	// time, so the human ceiling never disappears — it is inherited at birth
+	// (FIR-1609).
+	LayerSystem Layer = "system"
 )
 
 // chainOrder lists layers from base (index 0) to ceiling (last). Resolution
 // walks this order so that, on ties, a higher layer takes responsibility for
 // the effective value — which is what makes "Capped by user" attributable.
-var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser}
+// LayerUser and LayerSystem are mutually exclusive per run (one mandate actor),
+// so listing both at the ceiling is safe: the absent one is Inherit and does not
+// constrain. Either can cap below the base, like a ceiling should.
+var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerSystem}
 
 // rank maps a concrete setting to its restrictiveness. Higher is tighter.
 // Inherit (and any unknown value) returns -1 — "no opinion, pass through".
@@ -114,6 +124,11 @@ type Input struct {
 	// default applied when even the runtime layer inherits. An empty or Inherit
 	// Base defaults to Allow.
 	Base Setting
+	// IsSystem marks this as a run driven by a System actor (autopilot, no human
+	// behind it). A System has no one to answer an approval prompt, so any Ask it
+	// would resolve to is treated as Deny — fail-safe (FIR-1609). Default false
+	// preserves existing human-run behavior for every current caller.
+	IsSystem bool
 }
 
 // Effective is the resolved verdict for one tool.
@@ -183,6 +198,19 @@ func Resolve(in Input) Effective {
 			decidedBy = layer
 		default:
 			// Loosening is not permitted; the running value stands.
+		}
+	}
+
+	// A System actor (autopilot, no human) cannot answer an approval prompt, so
+	// an Ask it would otherwise resolve to becomes Deny — fail-safe (FIR-1609).
+	// This is a property of the actor, not of any one layer, so it applies even
+	// when the Ask came from a lower layer and no System setting was authored.
+	if in.IsSystem && resolved == SettingAsk {
+		return Effective{
+			Setting:   SettingDeny,
+			DecidedBy: LayerSystem,
+			CappedBy:  LayerSystem,
+			Reason:    "Denied — system actor has no human to answer an Ask",
 		}
 	}
 

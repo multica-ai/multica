@@ -37,6 +37,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
@@ -150,6 +151,26 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// written under, and the same shape the gateway gate resolves. A concrete
 	// resource (a Bash binary, a WebFetch URL) additionally resolves its exact
 	// pattern and may only TIGHTEN the capability-wide verdict, never loosen it.
+	// The request attributes a Condition (the WHEN layer) is matched against:
+	// the host the call targets, parsed from the resource it names. A rule with
+	// a host-allowlist Condition only bites when the call's host is on the list;
+	// rows without a Condition (every row today) ignore this entirely.
+	// The action verb is derived from the canonical tool key so an action-scoped
+	// Condition can bite once repo/credential capabilities resolve through this
+	// chain under a verbed dotted key ("repo.checkout" → "checkout"). The keys this
+	// gate sees today are "tools:<Name>" and "mcp__…", which carry no verbed
+	// namespace, so ActionOf yields "" and no Actions term matches — the derivation
+	// is wired and inert until a verbed key flows here, never altering behaviour.
+	reqCtx := toolpolicy.RequestContext{
+		Host:   toolpolicy.HostOf(req.ResourcePattern),
+		Action: toolpolicy.ActionOf(toolKey),
+	}
+	// The CEL evaluator for the Expr escape hatch is injected only when the
+	// default-OFF cerebro_policy_cel flag is on for the workspace; otherwise Eval
+	// stays nil and an Expr-bearing row is undecidable and fails closed by effect.
+	// No row carries an Expr today, so this is behaviour-preserving until enabled.
+	// Resolved once and reused across the capability-wide and per-resource calls.
+	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
 	resolveAt := func(pattern string) (toolpolicy.Effective, error) {
 		return store.Resolve(r.Context(), toolpolicy.Query{
 			WorkspaceID:     wsUUID,
@@ -157,6 +178,8 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			ResourcePattern: pattern,
 			RuntimeID:       runtimeID,
 			AgentID:         agentID,
+			RequestContext:  reqCtx,
+			Eval:            celEval,
 			UserID:          ownerID,
 			Base:            toolpolicy.SettingAllow,
 		})
@@ -358,6 +381,33 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 		}
 	}
 	return localtoolpolicy.ModeFromFlags(enabled, enforce)
+}
+
+// daemonPolicyCELEvaluator returns the shared CEL evaluator when the default-OFF
+// cerebro_policy_cel flag is enabled for the workspace, else nil — mirroring the
+// gateway gate (runtime.FlagPolicyCEL) so a local CLI and a gateway tool call see
+// the same Expr behaviour. nil leaves Query.Eval unset, so an Expr condition is
+// undecidable and fails closed; a lookup miss or error resolves to OFF (the
+// flag's default), never switching the expression path on by accident.
+func (h *Handler) daemonPolicyCELEvaluator(ctx context.Context, wsID pgtype.UUID) toolpolicy.ExprEvaluator {
+	if h.CerebroQueries == nil {
+		return nil
+	}
+	enabled, err := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: wsID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagPolicyCEL,
+	})
+	if err != nil || !enabled {
+		return nil // no override or DB error → default OFF → Expr stays undecidable
+	}
+	eval, err := toolpolicy.SharedCELEvaluator()
+	if err != nil {
+		slog.Warn("local tool-policy: CEL evaluator unavailable — Expr conditions fail closed",
+			"workspace_id", util.UUIDToString(wsID), "error", err)
+		return nil
+	}
+	return eval.Eval
 }
 
 // toolPolicyAsk raises a local-runtime tool call that hit "Ask" against the

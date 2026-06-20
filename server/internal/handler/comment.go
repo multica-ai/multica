@@ -409,8 +409,8 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		}
 		// Apply the summary projection last so it clips whatever content the
 		// chosen read mode produced, uniformly across every mode. Content is
-		// *string (CEREBRO-PATCH persona-mask-comment-list): treat nil as ""
-		// so a redacted row stays nil after the projection too.
+		// *string: treat nil as "" so a nil-content row stays nil after the
+		// projection too.
 		if summary {
 			var src string
 			if resp[i].Content != nil {
@@ -435,8 +435,6 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Multica-Next-Before", result.NextBefore)
 		w.Header().Set("X-Multica-Next-Before-Id", result.NextBeforeID)
 	}
-	// CEREBRO-PATCH(persona-mask-comment-list): JEH-1173 redaction.
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1005,13 +1003,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
-	// CEREBRO-PATCH(persona-mask-create-comment): JEH-1188 redaction.
-	// Self-authorship is expected to receive pii via policy; a deny here
-	// would mean the author can't read what they just wrote — which is
-	// the same "policy mis-configured" defensive zero JEH-1186 applies.
-	if !h.maskSingleCommentForCaller(w, r, comment, &resp) {
-		return
-	}
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publishToAudience(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -1591,10 +1582,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
-	// CEREBRO-PATCH(persona-mask-update-comment): JEH-1188 redaction.
-	if !h.maskSingleCommentForCaller(w, r, comment, &resp) {
-		return
-	}
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	parentIssue, _ := h.Queries.GetIssue(r.Context(), comment.IssueID)
 	h.publishToAudience(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp}, h.audienceForIssue(r.Context(), parentIssue))

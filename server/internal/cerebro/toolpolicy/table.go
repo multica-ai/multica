@@ -23,8 +23,15 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
+
+// webFetchToolKey is the capability key of the gateway web_fetch tool. The
+// standalone per-workspace web_fetch host policy (webfetchpolicy) is folded into
+// THIS row's workspace-layer Condition so the unified Permissions surface shows
+// which hosts agents may fetch, instead of a separate page (FIR-1609).
+const webFetchToolKey = "web_fetch"
 
 // TableRow is one tool's full picture for the admin table: its identity, the
 // explicit setting held at each layer for the queried context, and the resolved
@@ -54,6 +61,14 @@ type TableRow struct {
 	// present, is the combined value across the context's groups (most permissive
 	// group wins, per CombineGroups) — the single value that enters the chain.
 	Layers map[Layer]Setting
+	// Conditions holds the optional WHEN layer (FIR-1609) authored on the rule at
+	// each single-subject layer, so the editor can render and edit the condition
+	// next to the Decision pill. A layer absent from the map carries no condition
+	// ("always applies"). LayerGroup is deliberately omitted: the group layer is a
+	// combine across several group rules (CombineGroups), and a single condition
+	// on that combined value is undefined — group conditions are edited per group
+	// elsewhere, not surfaced on the collapsed table row.
+	Conditions map[Layer]*Condition
 	// Effective is the combined verdict across the whole chain for this tool.
 	Effective Effective
 	// CappedByGroups names the group(s) whose policy drives the group-layer
@@ -83,6 +98,11 @@ type TableQuery struct {
 	AgentID     pgtype.UUID
 	UserID      pgtype.UUID
 	GroupIDs    []pgtype.UUID
+	// SystemID scopes the System (mandate-actor) layer to one autopilot, so the
+	// admin can view/author the System rules for that human-less actor (FIR-1609).
+	// Zero (Valid=false) leaves the System column empty — the existing agent /
+	// runtime / user views pass no autopilot and so never surface a System row.
+	SystemID pgtype.UUID
 	// Base is the workspace/system default applied when every layer inherits.
 	// Empty defaults to Allow (see Resolve).
 	Base Setting
@@ -148,7 +168,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// slice 2 by a separate read path so the UI can group them under each repo.
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.capability_key, c.title, c.category, c.source,
-		       p.layer, p.subject_id, p.setting
+		       p.layer, p.subject_id, p.setting, p.conditions
 		FROM cerebro_capability c
 		LEFT JOIN cerebro_tool_policy p
 		  ON p.workspace_id = c.workspace_id
@@ -159,11 +179,12 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		   (p.layer = 'runtime'   AND p.subject_id = $2) OR
 		   (p.layer = 'agent'     AND p.subject_id = $3) OR
 		   (p.layer = 'user'      AND p.subject_id = $4) OR
-		   (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		   (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		   (p.layer = 'system'    AND p.subject_id = $6)
 		 )
 		WHERE c.workspace_id = $1`+runtimeFilter+`
 		ORDER BY c.category, lower(c.title), c.capability_key
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID)
 	if err != nil {
 		return nil, fmt.Errorf("toolpolicy: load table: %w", err)
 	}
@@ -185,18 +206,20 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		var toolKey, title, category, source string
 		var layer, setting pgtype.Text
 		var subjectID pgtype.UUID
-		if err := rows.Scan(&toolKey, &title, &category, &source, &layer, &subjectID, &setting); err != nil {
+		var conditions []byte
+		if err := rows.Scan(&toolKey, &title, &category, &source, &layer, &subjectID, &setting, &conditions); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan table row: %w", err)
 		}
 
 		a, ok := byTool[toolKey]
 		if !ok {
 			a = &acc{row: TableRow{
-				ToolKey:  toolKey,
-				Title:    title,
-				Category: category,
-				Source:   source,
-				Layers:   map[Layer]Setting{},
+				ToolKey:    toolKey,
+				Title:      title,
+				Category:   category,
+				Source:     source,
+				Layers:     map[Layer]Setting{},
+				Conditions: map[Layer]*Condition{},
 			}}
 			byTool[toolKey] = a
 			order = append(order, toolKey)
@@ -212,10 +235,43 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 			a.groupSubjects = append(a.groupSubjects, groupSubjectSetting{id: subjectID, setting: set})
 		} else {
 			a.row.Layers[l] = set
+			// Surface the rule's WHEN layer for single-subject layers only (group
+			// conditions are undefined on the combined row — see TableRow.Conditions).
+			cond, err := decodeCondition(conditions)
+			if err != nil {
+				return nil, fmt.Errorf("toolpolicy: decode conditions for %q at %s: %w", toolKey, l, err)
+			}
+			if cond != nil {
+				a.row.Conditions[l] = cond
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("toolpolicy: iterate table rows: %w", err)
+	}
+
+	// FIR-1609 fold-in: surface the standalone web_fetch host policy as the
+	// web_fetch row's workspace-layer rule + Condition, so the host allow-list
+	// lives in the unified Permissions model (the ABAC shape: web_fetch @
+	// workspace = Allow WHEN host ∈ list) instead of on its own page. This runs
+	// before Effective is resolved so the injected Allow flows through the chain.
+	//
+	// It is a read-side projection: the web_fetch policy table stays the enforced
+	// source of truth until the gate evaluates conditions (Phase 6), and an
+	// admin's explicit workspace rule/condition always wins, so we never clobber a
+	// real override. Only allow-list mode maps onto a host_allowlist; disallow-list
+	// has no clean condition representation and is left to the dedicated page.
+	if a, ok := byTool[webFetchToolKey]; ok {
+		_, hasWsRule := a.row.Layers[LayerWorkspace]
+		wsCond := a.row.Conditions[LayerWorkspace]
+		alreadyAuthored := hasWsRule || (wsCond != nil && !wsCond.IsZero())
+		if !alreadyAuthored && webfetchpolicy.FeatureEnabled(ctx, s.q, in.WorkspaceID) {
+			if pol, configured, perr := webfetchpolicy.LoadConfigured(ctx, s.q, in.WorkspaceID); perr == nil &&
+				configured && pol.Mode == webfetchpolicy.ModeAllow && len(pol.Rules) > 0 {
+				a.row.Layers[LayerWorkspace] = SettingAllow
+				a.row.Conditions[LayerWorkspace] = &Condition{HostAllowlist: append([]string{}, pol.Rules...)}
+			}
+		}
 	}
 
 	out := make([]TableRow, 0, len(order))

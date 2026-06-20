@@ -67,13 +67,6 @@ func (h *Handler) GetIssueContext(w http.ResponseWriter, r *http.Request) {
 		Labels:   h.buildIssueContextLabels(r, issue),
 	}
 
-	// Persona redaction parity with GetIssue (JEH-1173): mask the issue body for
-	// callers without the pii grant. On a hard failure it writes the response
-	// itself, so bail without double-writing.
-	if !h.maskIssueForCaller(w, r, issue, &resp.Issue) {
-		return
-	}
-
 	h.recordBundledReadUsage(r, issue, bundledPayloadChars(resp))
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -112,7 +105,6 @@ func (h *Handler) buildIssueContextIssue(r *http.Request, issue db.Issue) IssueR
 		for i, a := range attachments {
 			resp.Attachments[i] = h.attachmentToResponse(a)
 		}
-		resp.Attachments = h.maskAttachmentsForCaller(r, uuidToString(issue.WorkspaceID), attachments, resp.Attachments)
 	}
 
 	return resp
@@ -160,7 +152,7 @@ func issueContextAgentComments(comments []db.Comment) []db.Comment { // CEREBRO-
 }
 
 // buildIssueContextMembers returns the workspace members (for @mention lookup),
-// reusing ListMembersWithUser's serialization + persona masking. Best-effort.
+// reusing ListMembersWithUser's serialization. Best-effort.
 func (h *Handler) buildIssueContextMembers(r *http.Request, workspaceID pgtype.UUID) []MemberWithUserResponse {
 	members, err := h.Queries.ListMembersWithUser(r.Context(), workspaceID)
 	if err != nil {
@@ -181,7 +173,7 @@ func (h *Handler) buildIssueContextMembers(r *http.Request, workspaceID pgtype.U
 			BudgetEnforcementEnabled: m.BudgetEnforcementEnabled,
 		}
 	}
-	return h.maskMembersListForCaller(r, uuidToString(workspaceID), out)
+	return out
 }
 
 // buildIssueContextLabels returns the labels attached to the issue, reusing

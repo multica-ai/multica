@@ -170,6 +170,47 @@ func TestStore_LiveCheck(t *testing.T) {
 	}
 }
 
+// TestStore_SystemRunConvertsAskToDeny proves the FIR-1609 resolution-context
+// fail-safe survives the DB round trip: the same stored Ask rule resolves to Ask
+// for a human run (IsSystem=false) but to Deny for a human-less System run
+// (IsSystem=true), because a System actor has no one to answer the prompt.
+func TestStore_SystemRunConvertsAskToDeny(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	runtime, agent, user := uuidByte(20), uuidByte(21), tpTestUserID
+	const tool = "web_fetch"
+
+	// One stored Ask at the agent layer; nothing else opines.
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerAgent, SubjectID: agent, Setting: SettingAsk}); err != nil {
+		t.Fatalf("set agent ask: %v", err)
+	}
+
+	base := Query{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, RuntimeID: runtime, AgentID: agent, UserID: user}
+
+	human := base
+	human.IsSystem = false
+	if eff, err := s.Resolve(ctx, human); err != nil {
+		t.Fatalf("resolve human: %v", err)
+	} else if eff.Setting != SettingAsk {
+		t.Fatalf("human run setting = %q, want %q", eff.Setting, SettingAsk)
+	}
+
+	system := base
+	system.IsSystem = true
+	eff, err := s.Resolve(ctx, system)
+	if err != nil {
+		t.Fatalf("resolve system: %v", err)
+	}
+	if eff.Setting != SettingDeny {
+		t.Fatalf("system run setting = %q, want %q", eff.Setting, SettingDeny)
+	}
+	if eff.DecidedBy != LayerSystem {
+		t.Fatalf("system run decidedBy = %q, want %q", eff.DecidedBy, LayerSystem)
+	}
+}
+
 // TestStore_NoRowsAllowsByDefault proves an unconfigured context keeps working:
 // no stored rows resolves to the Base default (Allow).
 func TestStore_NoRowsAllowsByDefault(t *testing.T) {
@@ -544,5 +585,127 @@ func TestStore_ListForSubject_CarriesResourcePattern(t *testing.T) {
 	}
 	if got[repoA] != SettingDeny {
 		t.Fatalf("per-resource row %q = %q, want deny", repoA, got[repoA])
+	}
+}
+
+// TestStore_SystemLayerAndConditionsRoundTrip exercises the FIR-1609 additions
+// end-to-end through the DB: a System-layer row carrying a Condition persists,
+// reads back with the Condition intact, and the Condition still gates as
+// authored. Proves migration 9088 (system layer) + 9089 (conditions column) +
+// the store wiring agree.
+func TestStore_SystemLayerAndConditionsRoundTrip(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	system := uuidByte(60)
+	const tool = "web_fetch"
+	cond := &Condition{HostAllowlist: []string{"*.firtal.com"}}
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerSystem,
+		SubjectID:   system,
+		Setting:     SettingAllow,
+		Conditions:  cond,
+	}); err != nil {
+		t.Fatalf("set system-layer row with condition: %v", err)
+	}
+
+	got, err := s.ListForSubject(ctx, tpTestWorkspaceID, LayerSystem, system)
+	if err != nil {
+		t.Fatalf("list for system subject: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(got))
+	}
+	row := got[0]
+	if row.Setting != SettingAllow {
+		t.Fatalf("setting round-trip: got %s", row.Setting)
+	}
+	if row.Conditions == nil {
+		t.Fatal("condition was lost on round trip")
+	}
+	if ok, _ := row.Conditions.Matches(RequestContext{Host: "api.firtal.com"}, nil); !ok {
+		t.Fatal("restored condition should match an allowed host")
+	}
+	if ok, _ := row.Conditions.Matches(RequestContext{Host: "evil.com"}, nil); ok {
+		t.Fatal("restored condition should reject a non-allowed host")
+	}
+
+	// A row with no condition reads back as nil (NULL), not an empty struct.
+	plain := uuidByte(61)
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerSystem,
+		SubjectID: plain, Setting: SettingDeny,
+	}); err != nil {
+		t.Fatalf("set conditionless row: %v", err)
+	}
+	plainRows, err := s.ListForSubject(ctx, tpTestWorkspaceID, LayerSystem, plain)
+	if err != nil {
+		t.Fatalf("list plain: %v", err)
+	}
+	if len(plainRows) != 1 || plainRows[0].Conditions != nil {
+		t.Fatalf("conditionless row should read back with nil Conditions, got %+v", plainRows)
+	}
+}
+
+// TestStore_SystemLayerResolvesBySubject proves the System layer joins resolution
+// keyed on the autopilot id (Query.SystemID): an explicit System-layer Deny is
+// applied only to the run that supplies that exact autopilot, and a run with a
+// different (or absent) SystemID never picks the row up (FIR-1609, Phase 2).
+func TestStore_SystemLayerResolvesBySubject(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	autopilot := uuidByte(70)
+	agent := uuidByte(71)
+	owner := uuidByte(72)
+	const tool = "shell"
+
+	// Owner ceiling allows; the System layer for this autopilot denies.
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerUser, SubjectID: owner, Setting: SettingAllow}); err != nil {
+		t.Fatalf("set user: %v", err)
+	}
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, Layer: LayerSystem, SubjectID: autopilot, Setting: SettingDeny}); err != nil {
+		t.Fatalf("set system: %v", err)
+	}
+
+	// A system run carrying the matching autopilot id loads the System Deny.
+	eff, err := s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool,
+		AgentID: agent, UserID: owner, SystemID: autopilot, IsSystem: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve matching system run: %v", err)
+	}
+	if eff.Setting != SettingDeny || eff.DecidedBy != LayerSystem {
+		t.Fatalf("matching system run: got setting=%q decidedBy=%q, want deny/system", eff.Setting, eff.DecidedBy)
+	}
+
+	// A different autopilot id must NOT pick up the row — subject isolation.
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool,
+		AgentID: agent, UserID: owner, SystemID: uuidByte(99), IsSystem: true,
+	})
+	if err != nil {
+		t.Fatalf("resolve other system run: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("other autopilot should not load the System Deny, got %q (%s)", eff.Setting, eff.Reason)
+	}
+
+	// A human run (no SystemID) likewise never matches the System row.
+	eff, err = s.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: tool,
+		AgentID: agent, UserID: owner,
+	})
+	if err != nil {
+		t.Fatalf("resolve human run: %v", err)
+	}
+	if eff.Setting != SettingAllow {
+		t.Fatalf("human run should ignore the System row, got %q (%s)", eff.Setting, eff.Reason)
 	}
 }

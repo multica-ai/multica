@@ -103,13 +103,10 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		q.Get("after") != "" || q.Get("around") != ""
 
 	if wantWrapped {
-		// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 pass issue so embedded comments get the same per-row mask as ListComments.
 		entries := h.mergeTimeline(r, issue, comments, activities, false)
 		if entries == nil {
 			entries = []TimelineEntry{}
 		}
-		// CEREBRO-PATCH(persona-mask-timeline-wrapped): JEH-1190 redaction.
-		entries = h.maskTimelineForCaller(r, issue, comments, activities, entries)
 		resp := timelinePaginatedResponse{Entries: entries}
 		// `around=<id>`: locate the anchor in the DESC slice so the legacy
 		// client can scroll-to-highlight without a follow-up request.
@@ -126,23 +123,19 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 same flat-array path.
 	entries := h.mergeTimeline(r, issue, comments, activities, true)
 	if entries == nil {
 		entries = []TimelineEntry{}
 	}
-	// CEREBRO-PATCH(persona-mask-timeline-flat): JEH-1190 redaction.
-	entries = h.maskTimelineForCaller(r, issue, comments, activities, entries)
 	writeJSON(w, http.StatusOK, entries)
 }
 
 // mergeTimeline merges comments and activities and returns them sorted by
 // (created_at, id). When ascending=true, oldest first (the new flat-array
 // contract); otherwise newest first (the wrapped legacy contract).
-// CEREBRO-PATCH(persona-mask-timeline): JEH-1216 — issue threaded through so embedded comment-entries can be passed through maskCommentEntriesForCaller (per-row Persona decision, denies drop the entry, mask zeros content).
 func (h *Handler) mergeTimeline(r *http.Request, issue db.Issue, comments []db.Comment, activities []db.ActivityLog, ascending bool) []TimelineEntry {
+	_ = issue // retained in signature for callers; no longer used after persona-mask removal
 	commentEntries := h.commentsToEntries(r, comments)
-	commentEntries = h.maskCommentEntriesForCaller(r, issue, comments, commentEntries)
 	out := make([]TimelineEntry, 0, len(commentEntries)+len(activities))
 	out = append(out, commentEntries...)
 	for _, a := range activities {

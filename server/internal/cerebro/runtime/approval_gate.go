@@ -162,7 +162,7 @@ func (e *FirtalGatewayExecutor) guardConnectionAsk(
 		RequesterType: approvals.RequesterAgent,
 		RequesterID:   agentID,
 		Surface:       approvals.SurfaceSystem,
-		Context: askContext(toolName, connName, meta.TaskID, meta.IssueID, meta.TriggerUserID, meta.TriggerUserName, args, true),
+		Context:       askContext(toolName, connName, meta.TaskID, meta.IssueID, meta.TriggerUserID, meta.TriggerUserName, args, true),
 	}
 	decision := permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: "connection tool requires approval"}
 	// GuardDecisionReusing: a still-valid period-grant (an approved row with a
@@ -333,12 +333,54 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 		ownerID = agent.OwnerID
 	}
 
+	// A run with no triggering human is a System run (autopilot / system-triggered):
+	// there is no one to answer an approval prompt, so the chain treats any Ask it
+	// would resolve to as Deny — fail-safe (FIR-1609). The owner's User ceiling is
+	// still loaded below, so a System run is never looser than the same agent driven
+	// by its owner; IsSystem only adds the Ask→Deny safety on top.
+	isSystemRun := meta.TriggerUserID == ""
+
+	// The System layer's subject is the autopilot that drives the human-less run —
+	// the autopilot is the System actor, born from its owner (FIR-1609). It only
+	// enters resolution for a system run that carries one; a malformed id is left
+	// absent (the layer inherits) rather than failing the gate, since the owner's
+	// User ceiling plus the Ask→Deny fail-safe already bound the run.
+	var systemID pgtype.UUID
+	if isSystemRun && meta.AutopilotID != "" {
+		if id, perr := util.ParseUUID(meta.AutopilotID); perr == nil {
+			systemID = id
+		}
+	}
+
+	// The request attributes a Condition (the WHEN layer) is matched against: the
+	// host the call targets (parsed from a url arg when the tool carries one,
+	// web_fetch and the like) and the action verb derived from the tool key. The
+	// tool names this gate sees are the runtime's own snake_case names (web_fetch,
+	// credential_list …), not verbed dotted capability keys, so ActionOf yields ""
+	// here today — the derivation is wired for when repo/credential capabilities
+	// resolve through this chain. A rule with a host- or action-scoped Condition
+	// only bites when those match; rows without a Condition (every row today)
+	// ignore this entirely, so it is behaviour-preserving until conditions exist.
+	reqCtx := toolpolicy.RequestContext{Action: toolpolicy.ActionOf(toolName)}
+	if u, ok := args["url"].(string); ok {
+		reqCtx.Host = toolpolicy.HostOf(u)
+	}
+
 	eff, err := e.toolPolicy.Resolve(ctx, toolpolicy.Query{
-		WorkspaceID: workspaceID,
-		ToolKey:     toolName,
-		RuntimeID:   runtimeID,
-		AgentID:     agentID,
-		UserID:      ownerID,
+		WorkspaceID:    workspaceID,
+		ToolKey:        toolName,
+		RuntimeID:      runtimeID,
+		AgentID:        agentID,
+		UserID:         ownerID,
+		SystemID:       systemID,
+		IsSystem:       isSystemRun,
+		RequestContext: reqCtx,
+		// The CEL evaluator for the Expr escape hatch is injected only when the
+		// default-OFF cerebro_policy_cel flag is on for the workspace. While off,
+		// Eval stays nil — a row with a non-empty Expr is undecidable and fails
+		// closed by effect (ConditionedSetting). No row carries an Expr today, so
+		// the flag's default keeps behaviour identical until it is turned on.
+		Eval: e.policyCELEvaluator(ctx, workspaceID),
 	})
 	if err != nil {
 		e.logger.Warn("tool-policy gate: resolve failed — failing closed",
@@ -381,7 +423,8 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 	}
 	e.logger.Info("tool-policy gate decision",
 		"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
-		"effective", string(eff.Setting), "outcome", string(res.Outcome), "reason", eff.Reason)
+		"effective", string(eff.Setting), "system_run", isSystemRun,
+		"outcome", string(res.Outcome), "reason", eff.Reason)
 	if res.Outcome.Stops() {
 		reason := res.Reason
 		if reason == "" {
@@ -428,6 +471,33 @@ func (e *FirtalGatewayExecutor) workspaceApprovalGateEnabled(ctx context.Context
 		return true // no override or DB error → default ON
 	}
 	return enabled
+}
+
+// policyCELEvaluator returns the shared CEL evaluator when the default-OFF
+// cerebro_policy_cel flag is enabled for the workspace, else nil. Returning nil
+// leaves Query.Eval unset, so an Expr condition is undecidable and fails closed —
+// the behaviour-preserving default. A DB lookup miss or error resolves to OFF
+// (the flag's default), unlike the always-on gates which fail open: an unproven
+// expression-evaluation path must not switch itself on by accident.
+func (e *FirtalGatewayExecutor) policyCELEvaluator(ctx context.Context, workspaceID pgtype.UUID) toolpolicy.ExprEvaluator {
+	if e == nil || e.cerebro == nil {
+		return nil
+	}
+	enabled, err := e.cerebro.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     toolpolicy.FlagPolicyCEL,
+	})
+	if err != nil || !enabled {
+		return nil // no override or DB error → default OFF → Expr stays undecidable
+	}
+	eval, err := toolpolicy.SharedCELEvaluator()
+	if err != nil {
+		e.logger.Warn("tool-policy gate: CEL evaluator unavailable — Expr conditions fail closed",
+			"workspace_id", workspaceID, "error", err)
+		return nil
+	}
+	return eval.Eval
 }
 
 // EnableApprovalGate activates the enforcement gate on this executor, scoped to
