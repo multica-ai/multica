@@ -47,6 +47,7 @@
     "date_field": "Field",
     "date_field_created": "Created",
     "date_field_updated": "Updated",
+    "date_field_due": "Due date",
     "date_today": "Today",
     "date_last_3_days": "Last 3 days",
     "date_last_7_days": "Last 7 days",

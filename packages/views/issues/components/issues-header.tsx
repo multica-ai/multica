@@ -149,9 +149,11 @@ function normalizeDateRange(from: Date, to: Date) {
   return from <= to ? [from, to] as const : [to, from] as const;
 }
 
-const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_field_updated"> = {
+// CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — due_date option in the date-field picker.
+const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_field_updated" | "date_field_due"> = {
   created_at: "date_field_created",
   updated_at: "date_field_updated",
+  due_date: "date_field_due",
 };
 
 function useIssueCounts(allIssues: Issue[]) {
@@ -578,7 +580,8 @@ function DateSubContent({
       <DropdownMenuGroup>
         <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
-          {(["created_at", "updated_at"] as const).map((option) => (
+          {/* CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — offer due_date alongside created/updated. */}
+          {(["created_at", "updated_at", "due_date"] as const).map((option) => (
             <DropdownMenuRadioItem key={option} value={option}>
               {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
             </DropdownMenuRadioItem>

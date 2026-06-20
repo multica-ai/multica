@@ -1143,6 +1143,9 @@ func parseIssueDateFilter(w http.ResponseWriter, values url.Values) (*issueDateF
 		column = "created_at"
 	case "updated_at":
 		column = "updated_at"
+	// CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — allow filtering by due_date.
+	case "due_date":
+		column = "due_date"
 	default:
 		writeError(w, http.StatusBadRequest, "invalid date_field")
 		return nil, false

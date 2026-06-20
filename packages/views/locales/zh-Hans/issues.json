@@ -47,6 +47,7 @@
     "date_field": "字段",
     "date_field_created": "创建时间",
     "date_field_updated": "更新时间",
+    "date_field_due": "截止日期",
     "date_today": "今天",
     "date_last_3_days": "最近 3 天",
     "date_last_7_days": "最近 7 天",

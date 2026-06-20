@@ -18,7 +18,8 @@ export type SwimlaneGrouping = "parent" | "project" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 export type SubIssueDisplay = "standalone" | "on-parent" | "hidden";
-export type IssueDateField = "created_at" | "updated_at";
+// CEREBRO-PATCH(issue-due-date-filter): FIR-1658 — add due_date to the upstream date filter.
+export type IssueDateField = "created_at" | "updated_at" | "due_date";
 
 export interface IssueDateFilter {
   field: IssueDateField;
