@@ -91,24 +91,24 @@ func TestCEL_ProgramIsCachedOnSuccess(t *testing.T) {
 }
 
 // The evaluator must drop cleanly into the ExprEvaluator seam the resolver uses:
-// an Allow with an unmet Expr drops out, a met Expr applies.
+// a whitelist Allow with an unmet Expr CLOSES (Deny), a met Expr applies.
 func TestCEL_FeedsConditionedSetting(t *testing.T) {
 	e := newEval(t)
 	cond := &Condition{Expr: `action == "checkout"`}
 
-	_, applies := ConditionedSetting(SettingAllow, cond, RequestContext{Action: "push"}, e.Eval)
-	if applies {
-		t.Fatal("an Allow whose Expr does not hold must drop out of resolution")
+	got, applies := ConditionedSetting(SettingAllow, cond, RequestContext{Action: "push"}, e.Eval)
+	if !applies || got != SettingDeny {
+		t.Fatalf("an Allow whose Expr does not hold must close (deny); got (%q, %v)", got, applies)
 	}
-	got, applies := ConditionedSetting(SettingAllow, cond, RequestContext{Action: "checkout"}, e.Eval)
+	got, applies = ConditionedSetting(SettingAllow, cond, RequestContext{Action: "checkout"}, e.Eval)
 	if !applies || got != SettingAllow {
 		t.Fatalf("an Allow whose Expr holds must apply unchanged; got (%q, %v)", got, applies)
 	}
 
-	// A compile error is undecidable → fail closed by effect: Allow drops, Deny stays.
+	// A compile error is undecidable → fail closed by effect: Allow denies, Deny stays.
 	broken := &Condition{Expr: `bogus ==`}
-	if _, applies := ConditionedSetting(SettingAllow, broken, RequestContext{}, e.Eval); applies {
-		t.Fatal("an undecidable Allow (compile error) must fail closed and drop")
+	if got, applies := ConditionedSetting(SettingAllow, broken, RequestContext{}, e.Eval); !applies || got != SettingDeny {
+		t.Fatalf("an undecidable Allow (compile error) must fail closed (deny); got (%q, %v)", got, applies)
 	}
 	if got, applies := ConditionedSetting(SettingDeny, broken, RequestContext{}, e.Eval); !applies || got != SettingDeny {
 		t.Fatalf("an undecidable Deny (compile error) must fail closed and keep the Deny; got (%q, %v)", got, applies)

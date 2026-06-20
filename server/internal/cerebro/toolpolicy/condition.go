@@ -52,9 +52,9 @@ func (c Condition) IsZero() bool {
 // Matches reports whether the request satisfies the condition's terms. It is a
 // pure factual predicate and takes NO safety stance: when it cannot decide (a
 // non-empty Expr with no evaluator, or an evaluator error) it returns a non-nil
-// error and the caller chooses fail-open vs fail-closed from the rule's Effect.
-// An unmet condition on an Allow rule must drop the Allow; on a Deny rule it
-// must keep the Deny — that policy lives where Effect is known, not here.
+// error and the caller chooses the safety stance from the rule's Effect.
+// What an unmet/undecidable condition MEANS per Effect (a whitelist Allow closes
+// to Deny, a Deny/Ask restriction drops) lives in ConditionedSetting, not here.
 func (c Condition) Matches(ctx RequestContext, eval ExprEvaluator) (bool, error) {
 	if len(c.HostAllowlist) > 0 && !hostMatches(c.HostAllowlist, ctx.Host) {
 		return false, nil
@@ -73,37 +73,52 @@ func (c Condition) Matches(ctx RequestContext, eval ExprEvaluator) (bool, error)
 
 // ConditionedSetting reports the Setting a single stored row contributes to the
 // chain at its layer, and whether it contributes at all. It is the seam that
-// gives the Terms axis (the WHEN layer) teeth at the gate: a row whose condition
-// is not met drops out of the resolution instead of tightening the chain. The
-// Effect (Allow/Ask/Deny) is never altered here — a row either applies with its
-// own setting or it does not apply at all.
+// gives the Terms axis (the WHEN layer) teeth at the gate. The Effect direction
+// (grant vs. restriction) decides what an UNMET condition means — this is the
+// only place the rule's Effect is consulted, per Matches' contract that the
+// predicate itself takes no safety stance.
+//
+// An Allow row is a WHITELIST grant ("allow ONLY when the condition holds"); a
+// Deny/Ask row is a RESTRICTION ("apply the restriction when the condition holds").
+// That asymmetry is what makes a "conditional yes" real: on a Base=Allow resource
+// (every gate runs Base=Allow), an unmet conditional Allow that merely dropped
+// would be inert — the resource stays allowed by default — so `Allow WHEN
+// action=="get_schema"` would still let `execute` through (FIR-1609, found in QA).
+// An unmet conditional Allow therefore DENIES instead of dropping.
 //
 //   - No condition (nil): the setting applies unchanged — the common case, and
 //     the only case for every row written before conditions existed, so wiring
 //     this into the resolver is behaviour-preserving for unconditioned policy.
 //   - Condition met: the setting applies unchanged.
-//   - Condition not met (clean false): the row does not apply — its layer
-//     inherits, exactly as if the row were absent.
-//   - Condition undecidable (a CEL Expr with no evaluator, or an evaluator
-//     error): fail closed by effect — an Allow is dropped (never grant on
-//     uncertainty), a Deny/Ask is kept (stay restrictive on uncertainty). This
-//     is the only place the rule's Effect is consulted, per Matches' contract
-//     that the predicate itself takes no safety stance.
+//   - Condition not met (clean false):
+//   - Allow (whitelist grant) → DENY applies — access only exists when the
+//     condition holds, so a miss closes the gate rather than falling back to
+//     the base default.
+//   - Deny/Ask (restriction) → the row drops — its layer inherits, exactly as
+//     if the row were absent (no restriction outside its condition).
+//   - Condition undecidable (a CEL Expr with no evaluator, or an evaluator error):
+//     fail closed by effect — an Allow DENIES (never grant on uncertainty), a
+//     Deny/Ask is kept (stay restrictive on uncertainty).
 func ConditionedSetting(setting Setting, cond *Condition, ctx RequestContext, eval ExprEvaluator) (Setting, bool) {
 	if cond == nil {
 		return setting, true
 	}
 	matched, err := cond.Matches(ctx, eval)
 	if err != nil {
+		// Undecidable: a conditional grant fails closed to Deny; a restriction is kept.
 		if setting == SettingAllow {
-			return "", false
+			return SettingDeny, true
 		}
 		return setting, true
 	}
-	if !matched {
-		return "", false
+	if matched {
+		return setting, true
 	}
-	return setting, true
+	// Cleanly not met: a whitelist Allow closes (Deny); a restriction drops (inherit).
+	if setting == SettingAllow {
+		return SettingDeny, true
+	}
+	return "", false
 }
 
 // hostMatches reports whether host matches any pattern. A pattern is either an
