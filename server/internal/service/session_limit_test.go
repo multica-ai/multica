@@ -82,6 +82,17 @@ func TestParseSessionLimitResetTime(t *testing.T) {
 			wantOK:  true,
 		},
 		{
+			// Whole-hour am case that prompted the follow-up test addition:
+			// the real Claude final message uses the `·` separator and an
+			// am hour with no minutes. Locks the full-message path end to
+			// end, not just the `resets …` substring, so a regression in
+			// either the regex or any upstream message split would fail
+			// here rather than silently no-op in production.
+			name:    "full message whole hour 5am UTC",
+			message: "You've hit your session limit · resets 5am (UTC)",
+			wantOK:  true,
+		},
+		{
 			name:    "unresolvable timezone",
 			message: "You've hit your session limit · resets 5:10pm (Mars/Olympus_Mons)",
 			wantOK:  false,
@@ -180,6 +191,16 @@ func TestParseSessionLimitResetTimeConversions(t *testing.T) {
 			name:       "whole-hour 12pm UTC has zero minutes",
 			message:    "resets 12pm (UTC)",
 			wantHour:   12,
+			wantMinute: 0,
+		},
+		{
+			// Pins the empty-minutes path the BLOCKER fix opened up:
+			// a whole-hour am case where the (?:(\\d{2}))? group
+			// matches the empty string and `strconv.Atoi("")` returns 0.
+			// Confirms minute=0 and the am boundary (5 stays 5, not 17).
+			name:       "whole-hour 5am UTC has zero minutes",
+			message:    "You've hit your session limit · resets 5am (UTC)",
+			wantHour:   5,
 			wantMinute: 0,
 		},
 	}
