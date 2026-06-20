@@ -5,6 +5,10 @@ description = "Multica self-hosted inference container — TTS (plapre-nano) and
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115,<1.0",
+  # Required by FastAPI to parse multipart/form-data — the /transcribe endpoint
+  # takes an UploadFile + Form fields (app/hviske/router.py). Without it, FastAPI
+  # raises at import/route-setup time ("Form data requires python-multipart").
+  "python-multipart>=0.0.9,<1.0",
   "uvicorn[standard]>=0.32,<1.0",
   "pydantic>=2.9,<3.0",
   "pydantic-settings>=2.6,<3.0",
