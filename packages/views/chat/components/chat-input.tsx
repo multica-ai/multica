@@ -144,6 +144,23 @@ export function ChatInput({
     editorRef.current?.insertText(text);
   }, []);
 
+  // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — match the
+  // comment/reply/DM/channel composer: reserve a top band so the floating
+  // expand pill sits ABOVE the first lines of text instead of overlapping
+  // them, and grow the collapsed 4-line cap by the same band. (px-3 py-2
+  // stays on the container; inline paddingTop only overrides the top.)
+  const OVERLAY_BAND = 28; // px — clears the ~24px expand pill anchored at top-1
+  const baseStyle = composerHeight.containerStyle;
+  const scrollStyle = composerHeight.showExpandToggle
+    ? {
+        ...baseStyle,
+        paddingTop: OVERLAY_BAND,
+        ...(baseStyle?.maxHeight != null
+          ? { maxHeight: baseStyle.maxHeight + OVERLAY_BAND }
+          : {}),
+      }
+    : baseStyle;
+
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
@@ -194,7 +211,7 @@ export function ChatInput({
           />
         )}
         {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={composerHeight.containerStyle}>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={scrollStyle}>
           <ContentEditor
             // Remount the editor when the active session changes so its
             // uncontrolled defaultValue picks up the new session's draft.
