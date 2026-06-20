@@ -22,6 +22,10 @@ export interface ZoomableImageProps {
   className?: string;
   /** Classes for the clipping viewport (the box the image fits inside). */
   viewportClassName?: string;
+  /** Fired when the underlying <img> finishes loading. */
+  onLoad?: () => void;
+  /** Fired when the underlying <img> fails to load (network stall, 404, …). */
+  onError?: () => void;
 }
 
 export function ZoomableImage({
@@ -29,6 +33,8 @@ export function ZoomableImage({
   alt,
   className,
   viewportClassName,
+  onLoad,
+  onError,
 }: ZoomableImageProps) {
   const { viewportRef, transform, isZoomed, reset } = useZoomPan();
 
@@ -53,6 +59,8 @@ export function ZoomableImage({
         src={src}
         alt={alt}
         draggable={false}
+        onLoad={onLoad}
+        onError={onError}
         className={cn("max-h-full max-w-full object-contain", className)}
         style={{
           transform,

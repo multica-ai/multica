@@ -20,6 +20,8 @@ import (
 
 	pdftext "github.com/multica-ai/multica/packages/cerebro-pdf-text"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/attachmentserve" // CEREBRO-PATCH(rangeable-attachment-serve): range-aware media serving (FIR-1673).
+
 	"github.com/multica-ai/multica/server/internal/storage"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -643,24 +645,12 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	}
 	defer reader.Close()
 
-	if att.ContentType != "" {
-		w.Header().Set("Content-Type", att.ContentType)
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-	if att.SizeBytes >= 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", att.SizeBytes))
-	}
 	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
 	if r.URL.Query().Get("download") == "1" { // CEREBRO-PATCH(force-attachment-download): force explicit Download buttons to save media files.
 		disposition = storage.AttachmentContentDisposition(att.Filename)
 	}
-	w.Header().Set("Content-Disposition", disposition)
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	if _, err := io.Copy(w, reader); err != nil {
-		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
-	}
+	// CEREBRO-PATCH(rangeable-attachment-serve): serve via http.ServeContent so a stalled/partial image load can resume (HTTP Range / 206) — FIR-1673.
+	attachmentserve.ServeRangeable(w, r, att.ContentType, disposition, att.SizeBytes, att.CreatedAt.Time, reader)
 }
 
 // ---------------------------------------------------------------------------

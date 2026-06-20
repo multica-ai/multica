@@ -130,6 +130,9 @@ export type CerebroFlagKey =
   | "cerebro_note_types"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
+  // FIR-1673: recover a stalled/half-loaded image on the document page — loading
+  // state, automatic retry, and a manual "Reload image" button.
+  | "cerebro_image_reload"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
   | "cerebro_comment_reminders"
   // FIR-394: reminder overview page — reminders as their own entity (linked back
@@ -382,6 +385,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // Off restores the prior behaviour (extracted-text dump in the attachment
   // viewer; direct file iframe in the document viewer).
   cerebro_pdf_inline_render: true,
+  // FIR-1673: ON by default. Image documents recover from a stalled/half-load:
+  // a loading indicator, up to two automatic retries, and a manual "Reload
+  // image" button. Off restores the plain image with no retry affordance.
+  cerebro_image_reload: true,
   // FIR-2641: ON by default. Adds "Remind me" to the comment menu — a personal
   // reminder that points at one comment and, when it fires, deep-links the
   // inbox back to that comment. Reuses the existing reminder engine (inbox-only
@@ -952,6 +959,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
+  },
+  {
+    key: "cerebro_image_reload",
+    label: "Reload stalled images",
+    group: "workspace",
+    description:
+      "On a document page showing an image, recover when the image stops mid-load: a loading indicator while it fetches, up to two automatic retries on failure, and a manual \"Reload image\" button so you can try again without reloading the whole page. Off restores the plain image with no retry. FIR-1673.",
   },
   {
     key: "cerebro_comment_reminders",

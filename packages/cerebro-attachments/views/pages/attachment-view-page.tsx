@@ -18,6 +18,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ArtifactBody, PdfViewer } from "@multica/cerebro-artifacts/views/components";
 import { ZoomableImage } from "@multica/cerebro-ui";
+import { ImagePreview } from "../components/image-preview";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 function formatBytes(n: number): string {
@@ -47,6 +48,7 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
   );
 
   const inlinePdf = useFeatureFlag("cerebro_pdf_inline_render");
+  const imageReload = useFeatureFlag("cerebro_image_reload");
   const kind = attachment
     ? viewableKind(attachment.content_type, attachment.filename)
     : null;
@@ -181,11 +183,24 @@ export function AttachmentViewPage({ attachmentId }: { attachmentId: string }) {
               // This is the surface users actually open from an attachment link,
               // so the zoom gesture must live here (not only in the inline
               // lightbox / editor modal). See TECH-3695.
-              <ZoomableImage
-                src={downloadHref}
-                alt={attachment.filename}
-                viewportClassName="mx-auto h-[80vh] w-full max-w-5xl rounded border border-border bg-muted/10"
-              />
+              //
+              // FIR-1673: when cerebro_image_reload is on, ImagePreview adds a
+              // loading state, automatic retries, and a manual "Reload image"
+              // button so a stalled/half-loaded image can recover in place.
+              imageReload ? (
+                <ImagePreview
+                  src={downloadHref}
+                  alt={attachment.filename}
+                  viewportClassName="mx-auto h-[80vh] w-full max-w-5xl rounded border border-border bg-muted/10"
+                  downloadUrl={forcedDownloadHref}
+                />
+              ) : (
+                <ZoomableImage
+                  src={downloadHref}
+                  alt={attachment.filename}
+                  viewportClassName="mx-auto h-[80vh] w-full max-w-5xl rounded border border-border bg-muted/10"
+                />
+              )
             ) : (
               <FallbackUnavailable downloadUrl={forcedDownloadHref} />
             )
