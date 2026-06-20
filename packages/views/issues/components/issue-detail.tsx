@@ -1626,11 +1626,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>}
       </div>
 
-      {/* Execution log — active runs + collapsed past runs. Self-contained;
-          owns its own collapse state and WS subscriptions. Hides itself
-          when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} />
-
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
         <div>
@@ -2221,8 +2216,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0">
         {detailContent}
         <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-          <SheetContent side="right" showCloseButton={false} className="w-[320px] overflow-y-auto p-4">
-            {sidebarContent}
+          <SheetContent side="right" showCloseButton={false} className="w-[320px] p-0">
+            <div className="flex flex-col h-full">
+              {/* Execution log — sticky at the top, visible while scrolling
+                  properties / token usage / metadata below. */}
+              <div className="sticky top-0 z-10 bg-background border-b empty:hidden">
+                <div className="p-4 pb-2">
+                  <ExecutionLogSection issueId={id} />
+                </div>
+              </div>
+              <div className="overflow-y-auto flex-1 p-4">
+                {sidebarContent}
+              </div>
+            </div>
           </SheetContent>
         </Sheet>
       </div>
@@ -2248,7 +2254,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         onResize={handleDesktopSidebarResize}
       >
         <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled}>
-          {sidebarContent}
+          <div className="flex flex-col h-full">
+            {/* Execution log — sticky at the top of the sidebar so agent
+                progress is always visible while scrolling through properties,
+                token usage, and metadata below. */}
+            <div className="sticky top-0 z-10 bg-background border-b empty:hidden">
+              <div className="p-4 pb-2">
+                <ExecutionLogSection issueId={id} />
+              </div>
+            </div>
+            <div className="overflow-y-auto flex-1">
+              <div className="p-4">
+                {sidebarContent}
+              </div>
+            </div>
+          </div>
         </AnimatedRightSidebar>
       </ResizablePanel>
     </ResizablePanelGroup>
