@@ -310,6 +310,8 @@ export function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   }
   // CEREBRO-PATCH(reconnect-timeline-invalidate): timeline cache is keyed by issueId, not wsId, so the workspace sweep above misses it; on reconnect a dropped comment:created leaves the timeline "fresh" and the new comment never appears when the user clicks in from the inbox (FIR-1941).
   qc.invalidateQueries({ queryKey: ["issues", "timeline"] });
+  // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 — the inbox wakeup list has its own key (not under inboxKeys.all), so the wsId sweep above misses it; refresh it on reconnect so a wakeup scheduled while offline still surfaces the row as Running.
+  if (wsId) qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -321,6 +323,8 @@ export function invalidateTaskLifecycleQueries(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
   qc.invalidateQueries({ queryKey: ["issues", "tasks"] });
   qc.invalidateQueries({ queryKey: inboxKeys.activeIssueTasks(wsId) });
+  // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — an agent that finishes a run usually schedules its next wakeup in the same turn; refresh the inbox wakeup list (key mirrors @multica/cerebro-inbox use-inbox-wakeups.ts) so the row moves to Running instead of dropping to Waiting.
+  qc.invalidateQueries({ queryKey: ["cerebro-inbox-wakeups", wsId] });
 }
 
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {

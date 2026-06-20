@@ -158,6 +158,7 @@ describe("invalidateTaskLifecycleQueries", () => {
       agentTasksKeys.all(wsId),
       ["issues", "tasks"] as const,
       inboxKeys.activeIssueTasks(wsId),
+      ["cerebro-inbox-wakeups", wsId] as const,
     ]) {
       qc.setQueryData(key, []);
     }
@@ -170,6 +171,9 @@ describe("invalidateTaskLifecycleQueries", () => {
     expect(qc.getQueryState(agentTasksKeys.all(wsId))?.isInvalidated).toBe(true);
     expect(qc.getQueryState(["issues", "tasks"])?.isInvalidated).toBe(true);
     expect(qc.getQueryState(inboxKeys.activeIssueTasks(wsId))?.isInvalidated).toBe(true);
+    // CEREBRO-PATCH(inbox-wakeup-realtime): FIR-1677 — a finishing agent's
+    // pending wakeup must refresh too, so the row stays in Running.
+    expect(qc.getQueryState(["cerebro-inbox-wakeups", wsId])?.isInvalidated).toBe(true);
   });
 });
 
@@ -181,10 +185,15 @@ describe("invalidateWorkspaceScopedQueries", () => {
     const issueId = "issue-42";
     const timelineKey = issueKeys.timeline(issueId);
     qc.setQueryData(timelineKey, []);
+    // CEREBRO-PATCH(reconnect-wakeup-invalidate): FIR-1677 — the inbox wakeup
+    // list has its own top-level key, missed by the wsId sweep.
+    const wakeupKey = ["cerebro-inbox-wakeups", wsId] as const;
+    qc.setQueryData(wakeupKey, []);
 
     invalidateWorkspaceScopedQueries(qc);
 
     expect(qc.getQueryState(timelineKey)?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(wakeupKey)?.isInvalidated).toBe(true);
 
     setCurrentWorkspace(null, null);
   });

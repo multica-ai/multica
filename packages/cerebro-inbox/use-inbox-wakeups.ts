@@ -17,6 +17,13 @@ export interface InboxWakeupHint {
   title: string;
 }
 
+// NOTE: the literal "cerebro-inbox-wakeups" key is mirrored in two upstream-zone
+// realtime patches — CEREBRO-PATCH(inbox-wakeup-realtime) and
+// CEREBRO-PATCH(reconnect-wakeup-invalidate) in
+// packages/core/realtime/use-realtime-sync.ts — which invalidate it so a newly
+// scheduled wakeup surfaces in the inbox without a manual refresh (FIR-1677).
+// packages/core cannot import this package (dependency direction), so if you
+// rename this key, update those two patches too.
 const WAKEUP_QUERY_KEY = (wsId: string) => ["cerebro-inbox-wakeups", wsId] as const;
 
 function formatClock(iso: string): string {
