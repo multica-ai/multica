@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -375,6 +376,7 @@ func (t *FirtalAssignIssueTool) Call(ctx context.Context, args map[string]any) (
 // allowed dataSourceId values (or sets allowed_data_sources_all=true).
 type FirtalRegistryTool struct {
 	queries  *db.Queries
+	cerebro  *cerebrodb.Queries
 	tctx     ToolContext
 	registry *Registry
 }
@@ -408,6 +410,15 @@ type fdrRegistrySettings struct {
 		APIKey  string `json:"api_key"`
 	} `json:"data_registry"`
 	FirtalGateway *WorkspaceFirtalGatewaySettings `json:"firtal_gateway"`
+	// RegistryGrantsEnabled flips the unified permission engine ON as a
+	// per-data-source gate for firtal_registry (FIR-1609 Phase 6), the twin of
+	// repo_grants_enabled for repo checkout. OFF/absent (the default) keeps the
+	// legacy per-agent allowlist (allowed_data_sources) as the sole enforcing
+	// source — zero behavior change. When ON, the chain runs AFTER the allowlist
+	// and can only TIGHTEN it (Base=Allow, so a source with no explicit row stays
+	// allowed; an Ask/Deny row blocks). It never loosens, so turning it on can
+	// never widen access beyond what the allowlist already grants.
+	RegistryGrantsEnabled *bool `json:"registry_grants_enabled"`
 }
 
 func (t *FirtalRegistryTool) Name() string { return "firtal_registry" }
@@ -502,6 +513,9 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
 		}
+		if err := t.chainGateDataSource(ctx, dsID); err != nil {
+			return "", err
+		}
 		return t.callExecute(ctx, baseURL, apiKey, map[string]any{
 			"dataSourceId":   dsID,
 			"agent_metadata": true,
@@ -509,6 +523,9 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 	case "execute":
 		if !config.allows(dsID) {
 			return "", fmt.Errorf("firtal_registry: data_source_id %q is not in this agent's allowlist", dsID)
+		}
+		if err := t.chainGateDataSource(ctx, dsID); err != nil {
+			return "", err
 		}
 		body := map[string]any{"dataSourceId": dsID}
 		for _, key := range []string{"parameters", "filter_group", "pagination", "aggregation"} {
@@ -541,6 +558,59 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 }
 
 // allows reports whether the given data source UUID is permitted under this
+// registryGrantsEnabled reports whether the unified permission engine is wired
+// as a per-data-source gate for this workspace (FIR-1609 Phase 6), read from the
+// registry_grants_enabled workspace setting. Absent/false (the default) means the
+// legacy allowlist is the sole enforcing source and the chain gate is skipped —
+// the twin of repoGrantsEnabled on the daemon side. A workspace load failure is
+// treated as "off" so a transient DB error never tightens access unexpectedly;
+// the legacy allowlist (already checked by the caller) remains in force either way.
+func (t *FirtalRegistryTool) registryGrantsEnabled(ctx context.Context) bool {
+	ws, err := t.queries.GetWorkspace(ctx, t.tctx.WorkspaceID)
+	if err != nil || len(ws.Settings) == 0 {
+		return false
+	}
+	var envelope fdrRegistrySettings
+	if err := json.Unmarshal(ws.Settings, &envelope); err != nil {
+		return false
+	}
+	return envelope.RegistryGrantsEnabled != nil && *envelope.RegistryGrantsEnabled
+}
+
+// chainGateDataSource runs the unified permission chain for one data source
+// AFTER the legacy allowlist has already allowed it (FIR-1609 Phase 6). It can
+// only TIGHTEN: resource_pattern is the data-source id on the firtal_registry
+// tool key (the same projection rows the Permissions screen shows), Base=Allow,
+// so a source with no explicit row stays allowed and only an Ask/Deny row blocks.
+// Returns nil (allow) when the flag is off, when no resolver is wired (test
+// fixtures), or when the chain resolves to Allow. An Ask resolves to a block at
+// this gate: a registry query is an autonomous tool call with no inbox round-trip,
+// so anything other than Allow denies — mirroring the daemon repo and credential
+// gates' "only an explicit Allow passes" rule.
+func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, dsID string) error {
+	if t.cerebro == nil || !t.registryGrantsEnabled(ctx) {
+		return nil
+	}
+	eff, err := toolpolicy.NewStoreFromQueries(t.cerebro).Resolve(ctx, toolpolicy.Query{
+		WorkspaceID:     t.tctx.WorkspaceID,
+		ToolKey:         "firtal_registry",
+		ResourcePattern: dsID,
+		AgentID:         t.tctx.AgentID,
+		UserID:          t.tctx.UserID,
+		Base:            toolpolicy.SettingAllow,
+	})
+	if err != nil {
+		// Fail closed: a resolver error on an enabled gate must not silently
+		// widen access. The legacy allowlist already passed, so this only ever
+		// blocks a source the admin opted into chain control for.
+		return fmt.Errorf("firtal_registry: permission check failed for data_source_id %q", dsID)
+	}
+	if !eff.Allowed() {
+		return fmt.Errorf("firtal_registry: data_source_id %q is blocked by a permission rule (%s)", dsID, eff.Reason)
+	}
+	return nil
+}
+
 // grant's allowlist. allowed_data_sources_all=true short-circuits to allow.
 func (c firtalRegistryGrantConfig) allows(dsID string) bool {
 	if c.AllowedAll {
@@ -1656,7 +1726,7 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalListGroupsTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalGetGrantTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
-	r.Register(&FirtalRegistryTool{queries: queries, tctx: tctx, registry: r})
+	r.Register(&FirtalRegistryTool{queries: queries, cerebro: cerebroQueries, tctx: tctx, registry: r})
 	r.Register(&WebFetchTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&SheetsWriteTool{queries: queries, tctx: tctx})
 	for _, tool := range customerServiceMCPTools() {

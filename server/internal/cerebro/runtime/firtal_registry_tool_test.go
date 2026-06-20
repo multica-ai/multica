@@ -269,6 +269,46 @@ func TestFirtalRegistryCallRejectsMissingAction(t *testing.T) {
 	}
 }
 
+// FIR-1609 Phase 6: the per-data-source chain gate is a no-op until a resolver
+// is wired AND the workspace flag is on. With no cerebro resolver (the test/
+// fixture path, and the default in any runtime that didn't wire the chain) the
+// gate must allow — it never blocks a source the legacy allowlist already passed.
+func TestFirtalRegistryChainGateNoOpWithoutResolver(t *testing.T) {
+	tool := &FirtalRegistryTool{} // cerebro == nil
+	if err := tool.chainGateDataSource(context.Background(), "ds-anything"); err != nil {
+		t.Fatalf("chainGateDataSource with no resolver must allow, got %v", err)
+	}
+}
+
+// The registry_grants_enabled flag is read from the same workspace.settings
+// envelope as the registry credentials. Absent or false keeps the chain gate
+// off (legacy allowlist is the sole enforcing source); only an explicit true
+// arms it. This pins the JSON contract the daemon/admin screen writes.
+func TestFirtalRegistrySettingsGrantsEnabledFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{"absent → off", `{"data_registry":{"base_url":"x"}}`, false},
+		{"explicit false → off", `{"registry_grants_enabled":false}`, false},
+		{"explicit true → on", `{"registry_grants_enabled":true}`, true},
+		{"empty object → off", `{}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var env fdrRegistrySettings
+			if err := json.Unmarshal([]byte(tc.raw), &env); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			got := env.RegistryGrantsEnabled != nil && *env.RegistryGrantsEnabled
+			if got != tc.want {
+				t.Fatalf("registry_grants_enabled = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestFirtalRegistryFilterAppsByRepo(t *testing.T) {
 	body := []byte(`[
 		{"name":"cerebro","github_repo":"firtal-group/firtal-cerebro","owner_email":"a@firtal.com"},
