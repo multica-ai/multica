@@ -90,7 +90,8 @@ function getMermaidThemeVariables(host: HTMLElement | null) {
 
 function getSandboxCssVariables(host: HTMLElement | null): string {
   const styles = host ? getComputedStyle(host) : null;
-  return ["--muted", "--primary", "--foreground", "--muted-foreground"]
+  // CEREBRO-PATCH(mermaid-lightbox-bg): inline --background so the fullscreen view has a solid surface
+  return ["--background", "--muted", "--primary", "--foreground", "--muted-foreground"]
     .map((name) => `${name}: ${styles?.getPropertyValue(name).trim() || "initial"};`)
     .join(" ");
 }
@@ -176,7 +177,8 @@ function buildSandboxedMermaidDocument(svg: string, host: HTMLElement | null): s
 function buildExpandedMermaidDocument(svg: string, host: HTMLElement | null): string {
   const cssVariables = getSandboxCssVariables(host);
 
-  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { width: 100%; height: 100%; } body { margin: 0; display: flex; align-items: center; justify-content: center; background: transparent; } svg { max-width: 100%; max-height: 100%; width: auto; height: auto; }</style></head><body>${svg}</body></html>`;
+  // CEREBRO-PATCH(mermaid-lightbox-bg): solid background + padding so the diagram reads on its own surface, not the dimmed page
+  return `<!doctype html><html><head><style>:root { ${cssVariables} } html, body { width: 100%; height: 100%; } body { margin: 0; padding: 24px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; background: var(--background); } svg { max-width: 100%; max-height: 100%; width: auto; height: auto; }</style></head><body>${svg}</body></html>`;
 }
 
 function useThemeVersion() {

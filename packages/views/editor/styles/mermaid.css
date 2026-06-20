@@ -79,6 +79,9 @@
   border: 0;
   width: 90vw;
   height: 90vh;
-  background: transparent;
+  /* CEREBRO-PATCH(mermaid-lightbox-bg): solid card behind the diagram so the dimmed page no longer shows through */
+  background: var(--background);
+  border-radius: 12px;
+  box-shadow: 0 10px 40px color-mix(in srgb, black 40%, transparent);
   cursor: default;
 }
