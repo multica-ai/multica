@@ -41,6 +41,15 @@ export function MyIssuesPage() {
   const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
   const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
   const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
+  // CEREBRO-PATCH(my-issues-store-filters): FIR-1659 — read project/assignee/creator/label
+  // filters from the view store so the shared IssueDisplayControls actually narrows the My
+  // Issues list. Upstream hardcoded these to empty in filterIssues(), so the controls were inert.
+  const projectFilters = useStore(myIssuesViewStore, (s) => s.projectFilters);
+  const includeNoProject = useStore(myIssuesViewStore, (s) => s.includeNoProject);
+  const assigneeFilters = useStore(myIssuesViewStore, (s) => s.assigneeFilters);
+  const includeNoAssignee = useStore(myIssuesViewStore, (s) => s.includeNoAssignee);
+  const creatorFilters = useStore(myIssuesViewStore, (s) => s.creatorFilters);
+  const labelFilters = useStore(myIssuesViewStore, (s) => s.labelFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const sort = useMemo(
@@ -143,16 +152,16 @@ export function MyIssuesPage() {
       filterIssues(myIssues, {
         statusFilters,
         priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters,
+        includeNoProject,
+        labelFilters,
         agentRunningFilter,
         runningIssueIds,
       }),
-    [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
+    [myIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   // Status-unfiltered companion for Swimlane.
@@ -161,16 +170,16 @@ export function MyIssuesPage() {
       filterIssues(myIssues, {
         statusFilters: [],
         priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters,
+        includeNoProject,
+        labelFilters,
         agentRunningFilter,
         runningIssueIds,
       }),
-    [myIssues, priorityFilters, agentRunningFilter, runningIssueIds],
+    [myIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
