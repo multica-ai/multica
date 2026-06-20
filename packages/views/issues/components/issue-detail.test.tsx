@@ -1111,13 +1111,16 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
 
-      // The deep-link hook calls native scrollIntoView on the target node.
+      // The deep-link hook activates the highlight once the node is in the DOM
+      // (signalled by the "Latest" pill hiding). FIR-1652: it must scroll only
+      // the issue body's own container, NOT call el.scrollIntoView(), which
+      // bubbles to overflow:hidden ancestors and hides the pane header.
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
+        expect(screen.getByRole("button", { name: "Latest" })).toHaveClass(
+          "opacity-0",
+        );
       });
-      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ block: "start" }),
-      );
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
@@ -1147,21 +1150,19 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "start" }),
+        expect(screen.getByRole("button", { name: "Latest" })).toHaveClass(
+          "opacity-0",
         );
       });
+      // FIR-1652 regression guard: never scrollIntoView (it scrolls ancestors).
+      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
     });
 
     it("hides the Latest pill while the highlighted comment is active", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
-      });
-
-      const latestButton = screen.getByRole("button", { name: "Latest" });
-      await waitFor(() => {
+        const latestButton = screen.getByRole("button", { name: "Latest" });
         expect(latestButton).toHaveClass("opacity-0");
         expect(latestButton).toHaveClass("pointer-events-none");
       });
