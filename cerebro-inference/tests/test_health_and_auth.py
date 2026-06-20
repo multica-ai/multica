@@ -4,12 +4,12 @@ def test_healthz_does_not_require_auth(client):
     assert r.json()["status"] == "ok"
 
 
-def test_readyz_reports_plapre_loaded_in_mock_mode(client):
+def test_readyz_reports_both_models_loaded_in_mock_mode(client):
     r = client.get("/readyz")
     assert r.status_code == 200
     body = r.json()
     assert body["plapre"] is True
-    assert body["hviske"] is False  # Stubbed; JEH-729 slice 4.
+    assert body["hviske"] is True  # hviske now implemented (FIR-1637).
 
 
 def test_synthesize_requires_bearer_token(client):
@@ -39,7 +39,32 @@ def test_voices_lists_five_voices(client, auth_headers):
     assert all("voice_id" in v and "label" in v and "gender" in v for v in voices)
 
 
-def test_hviske_transcribe_returns_503_until_jeh729_lands(client, auth_headers):
-    # Reachable + auth-protected, just not implemented yet.
-    r = client.post("/hviske/transcribe", headers=auth_headers)
-    assert r.status_code == 503
+def test_hviske_transcribe_requires_auth(client):
+    r = client.post(
+        "/hviske/transcribe",
+        files={"file": ("clip.webm", b"abcdef", "audio/webm")},
+    )
+    assert r.status_code == 401
+
+
+def test_hviske_transcribe_returns_text_in_mock_mode(client, auth_headers):
+    # Mock hviske echoes a deterministic marker, so a round-trip is observable
+    # without a GPU model.
+    r = client.post(
+        "/hviske/transcribe",
+        headers=auth_headers,
+        files={"file": ("clip.webm", b"abcdef", "audio/webm")},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "text" in body
+    assert body["language"] == "da"
+
+
+def test_hviske_transcribe_rejects_empty_upload(client, auth_headers):
+    r = client.post(
+        "/hviske/transcribe",
+        headers=auth_headers,
+        files={"file": ("clip.webm", b"", "audio/webm")},
+    )
+    assert r.status_code == 400

@@ -22,23 +22,33 @@ import (
 
 const (
 	envStreamURL = "CEREBRO_DICTATION_STREAM_URL"
+	// One-shot HTTP transcription (record → POST → text). Points at the
+	// cerebro-inference hviske endpoint, e.g.
+	// https://…modal.run/hviske/transcribe.
+	envTranscribeURL = "CEREBRO_DICTATION_TRANSCRIBE_URL"
+	envInferenceKey  = "CEREBRO_DICTATION_INFERENCE_API_KEY"
 
 	writeWait = 10 * time.Second
 )
 
 type Handler struct {
-	streamURL string
-	dialer    *websocket.Dialer
-	upgrader  websocket.Upgrader
-	queries   *db.Queries
-	patCache  *auth.PATCache
+	streamURL     string
+	transcribeURL string
+	inferenceKey  string
+	dialer        *websocket.Dialer
+	httpClient    *http.Client
+	upgrader      websocket.Upgrader
+	queries       *db.Queries
+	patCache      *auth.PATCache
 }
 
 type Options struct {
-	StreamURL string
-	Dialer    *websocket.Dialer
-	Queries   *db.Queries
-	PATCache  *auth.PATCache
+	StreamURL     string
+	TranscribeURL string
+	InferenceKey  string
+	Dialer        *websocket.Dialer
+	Queries       *db.Queries
+	PATCache      *auth.PATCache
 }
 
 type outboundError struct {
@@ -49,9 +59,11 @@ type outboundError struct {
 
 func NewFromEnv(queries *db.Queries, patCache *auth.PATCache) *Handler {
 	return New(Options{
-		StreamURL: os.Getenv(envStreamURL),
-		Queries:   queries,
-		PATCache:  patCache,
+		StreamURL:     os.Getenv(envStreamURL),
+		TranscribeURL: os.Getenv(envTranscribeURL),
+		InferenceKey:  os.Getenv(envInferenceKey),
+		Queries:       queries,
+		PATCache:      patCache,
 	})
 }
 
@@ -61,10 +73,13 @@ func New(opts Options) *Handler {
 		dialer = websocket.DefaultDialer
 	}
 	return &Handler{
-		streamURL: strings.TrimSpace(opts.StreamURL),
-		dialer:    dialer,
-		queries:   opts.Queries,
-		patCache:  opts.PATCache,
+		streamURL:     strings.TrimSpace(opts.StreamURL),
+		transcribeURL: strings.TrimSpace(opts.TranscribeURL),
+		inferenceKey:  strings.TrimSpace(opts.InferenceKey),
+		dialer:        dialer,
+		httpClient:    &http.Client{Timeout: transcribeTimeout},
+		queries:       opts.Queries,
+		patCache:      opts.PATCache,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: checkOrigin,
 		},

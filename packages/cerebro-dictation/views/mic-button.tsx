@@ -36,9 +36,10 @@ export function MicButton({
   onTranscribed,
   onError,
 }: MicButtonProps) {
-  const dictationEnabled = useFeatureFlag("cerebro_voice_dictation_enabled");
-  const voiceEnabled = useFeatureFlag("cerebro_voice_output_enabled");
-  const enabled = dictationEnabled && voiceEnabled;
+  // Dictation (speech → text) gates on its own flag only. The read-aloud flag
+  // (cerebro_voice_output_enabled) is a separate, unrelated TTS feature — it
+  // must not hide the mic.
+  const enabled = useFeatureFlag("cerebro_voice_dictation_enabled");
   const pointerRecordingRef = useRef(false);
   const suppressClickRef = useRef(false);
   const defaultStreamTranscribe = useMemo(

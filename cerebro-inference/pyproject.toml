@@ -46,3 +46,13 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency/parameter markers are calls in argument defaults by
+# design (Depends/File/Form/Query). They are immutable, so B008 doesn't apply.
+extend-immutable-calls = [
+  "fastapi.Depends",
+  "fastapi.File",
+  "fastapi.Form",
+  "fastapi.Query",
+]

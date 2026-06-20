@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     inference_skip_prefetch: bool = False
     inference_mock_mode: bool = False
 
+    # Independent model toggles (JEH-729 slice 4). A tale→tekst-only deploy runs
+    # hviske alone and skips plapre entirely, so the image needs neither the
+    # plapre git package nor vLLM GPU memory. Both default on for the combined
+    # container.
+    inference_enable_plapre: bool = True
+    inference_enable_hviske: bool = True
+
     plapre_model_id: str = "syvai/plapre-nano"
     plapre_default_voice: str = "ida"
     plapre_sample_rate: int = 24000
@@ -20,6 +27,10 @@ class Settings(BaseSettings):
     plapre_gpu_memory_utilization: float = 0.30
 
     hviske_model_id: str = "syvai/hviske-v3-conversation"
+    # ISO-639-1 language hint passed to Whisper decoding. Danish for hviske.
+    hviske_language: str = "da"
+    # Long-form chunking window (seconds) for the ASR pipeline.
+    hviske_chunk_length_s: int = 30
 
     log_level: str = "INFO"
 

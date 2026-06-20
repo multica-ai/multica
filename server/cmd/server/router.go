@@ -788,6 +788,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 	// CEREBRO-PATCH(cerebro-dictation-ws-auth): browsers cannot attach Authorization headers to WebSocket upgrades.
 	r.Get("/api/workspaces/{id}/cerebro/dictation/stream", cerebroDictationHandler.Stream)
+	// CEREBRO-PATCH(cerebro-dictation-routes): FIR-1637 — one-shot HTTP transcribe (record → POST → text); self-authenticates like Stream.
+	r.Post("/api/workspaces/{id}/cerebro/dictation/transcribe", cerebroDictationHandler.Transcribe)
 	// CEREBRO-PATCH(terminal-ws-auth): terminal session WS handles its own auth (cookie or
 	// first-message) and must be outside all auth middleware so browsers can upgrade.
 	r.Get("/api/cerebro/terminal/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)

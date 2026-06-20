@@ -39,6 +39,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react"; // CEREBRO-PATCH(content-editor-on-editor-ready): expose Editor type for onEditorReady (TECH-3637).
+import { EditorDictationMic } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — one-shot dictation mic in every editor.
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -137,6 +138,9 @@ interface ContentEditorProps {
   // the bubble menu shows a "comment on selection" icon; notes use it to open
   // the comments panel anchored to the selected text.
   onCommentOnSelection?: (text: string) => void;
+  // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — chat mounts its own
+  // mic in the composer action row, so it opts out of the in-editor corner mic.
+  hideDictationMic?: boolean;
 }
 
 interface ContentEditorRef {
@@ -183,6 +187,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       enableSlashCommands = false,
       onEditorReady, // CEREBRO-PATCH(content-editor-on-editor-ready): TECH-3637.
       onCommentOnSelection, // CEREBRO-PATCH(content-editor-comment-on-selection): TECH-3637.
+      hideDictationMic = false, // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637.
     },
     ref,
   ) {
@@ -447,6 +452,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
+        {/* CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — flag-gated one-shot dictation mic, in every editor except where the host mounts its own. */}
+        {!hideDictationMic && (
+          <EditorDictationMic
+            onTranscribed={(text) => editor.chain().focus().insertContent(text).run()}
+            className="absolute bottom-1 right-1 z-10"
+          />
+        )}
         {showBubbleMenu && (
           <EditorBubbleMenu
             editor={editor}
