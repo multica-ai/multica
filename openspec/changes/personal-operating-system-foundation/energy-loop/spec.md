@@ -31,7 +31,7 @@ Phase 1 不包含：
 
 - 证据：`server/migrations/039_daily_plan.up.sql` `daily_plan`
 - 当前行为：plan 存储 `draft_content` 和 `top_issue_ids`。
-- 当前缺口：没有 `daily_plan_item`、energy demand、capacity；这些属于 structured planning 后置。
+- 当前缺口：无 Phase 1 阻塞缺口；不新增结构化计划项。
 
 - 证据：`server/internal/service/daily_plan.go` `GeneratePlanDraft`
 - 当前行为：plan 使用 open issues、昨日 confirmed review 和 focus signals，并生成精力安排/低精力 fallback。

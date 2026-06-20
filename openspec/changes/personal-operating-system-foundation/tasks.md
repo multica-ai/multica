@@ -203,7 +203,7 @@ Issue -> Focus -> TimeEntry -> DailyReview -> DailyPlan -> Knowledge -> Agent
 - DailyPlanService 能读取最近 confirmed review 和 focus signal summary。
 - ReviewService 能读取当天 focus signal summary。
 - plan draft 包含 high-energy work 和 low-energy fallback。
-- 不新增 structured daily_plan_item。
+- 不新增结构化计划项。
 
 验证方式：
 
@@ -223,9 +223,8 @@ Issue -> Focus -> TimeEntry -> DailyReview -> DailyPlan -> Knowledge -> Agent
 - Skill visibility。
 - Skill search / global search integration。
 - Skill import/export in manifest。
-- `daily_plan_item`。
-- `planned_time_block`。
-- planned vs actual calendar overlay。
+
+结构化计划项和计划块方向已暂停；不能作为本文档的后续任务实现。
 
 ## 回写要求
 

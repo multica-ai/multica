@@ -242,7 +242,7 @@ Go API
 - 独立 Wiki / Doc 系统。
 - RAG、全文知识检索、双向知识图谱。
 - 系统级勿扰、网站拦截、浏览器插件。
-- 完整 timeboxing / planned calendar 实现。
+- 完整 timeboxing / 计划日历实现。
 - 复杂精力算法、医疗化健康建议或自动诊断。
 
 ## 能力列表
@@ -253,7 +253,7 @@ Go API
 | Knowledge loop | P0 已完成 | P0 | Workspace context 已接通 agent；Skill visibility/search 后置 |
 | Attention loop | P1 已完成 | P1 | Focus 入口、quick start 闭环、review signals 已接通 |
 | Energy loop | P1 已完成 | P1 | Daily review energy check-in 与 energy-aware plan 已接通 |
-| Structured planning | 设计中 | P2 | daily_plan_item / planned_time_block 后置 |
+| Structured planning | 暂停 | - | 会引入平行执行对象；后续必须重新写 spec 并证明 issue 模型不足 |
 
 ## 当前状态基线
 
@@ -309,7 +309,7 @@ Go API
 
 - 证据：`server/internal/service/daily_plan.go` `GeneratePlanDraft`
 - 当前行为：Daily Plan 从 open issues、昨日 confirmed review、focus signals 生成明日 Markdown 计划，并输出精力安排和低精力备选。
-- 当前缺口：不新增 structured daily_plan_item。
+- 当前缺口：不新增结构化计划项。
 
 - 证据：`server/internal/handler/focus.go` `validFocusReason`
 - 当前行为：Focus reason 已包含 `low_energy`。
@@ -317,13 +317,13 @@ Go API
 
 ### Structured planning
 
-- 证据：`server/migrations/039_daily_plan.up.sql` `daily_plan`
-- 当前行为：daily plan 只有 `draft_content`、`top_issue_ids`、`status`。
-- 当前缺口：没有 `daily_plan_item`。
+- 证据：`specs/issue-energy-loop/PRODUCT.md` `Product Hard Rules`
+- 当前行为：`issue` 是当前版本唯一可执行对象，daily plan 只能作为 Markdown 草稿、AI 摘要或轻量记录存在。
+- 当前缺口：无 Phase 1/P2 实现入口；结构化 planner 方向已暂停。
 
-- 证据：`apps/workspace/src/features/time-tracking/pages/MyTimeCalendarPage.tsx` `handleEventDrop` / `handleEventResize`
-- 当前行为：My Time Calendar 支持 actual time entry 的拖拽和 resize。
-- 当前缺口：没有 planned time block，不能做 planned vs actual。
+- 证据：`specs/issue-energy-loop/TECH.md` `Runtime Object Matrix`
+- 当前行为：Daily Plan、Daily Review、Focus 和 Time Entry 都不能承载平行执行语义。
+- 当前缺口：如果未来重新设计结构化 planning，必须先更新 product spec、tech spec 和运行时对象矩阵。
 
 ## 非目标
 
@@ -345,12 +345,13 @@ Go API
    - 原因：先采集信号，再做计划建议，不提前上复杂算法。
 5. Knowledge P1：Skill visibility + search。
    - 原因：让知识被人找到，但不阻塞最小执行闭环。
-6. Structured planning P2：daily_plan_item + planned_time_block。
-   - 原因：牵动数据库、API、日历和 Focus，必须后置。
+6. Structured planning 已暂停。
+   - 原因：当前产品规则要求 issue 是唯一可执行对象，不能继续沿结构化计划项或计划块路线推进。
 
 ## 共享约束
 
-- `issue` 仍是核心工作对象，不新增平行 task model。
+- `issue` 仍是核心工作对象，不新增平行 task model 或平行执行对象。
+- 不新增结构化计划项、计划块或任何能独立启动/完成执行的计划对象。
 - `time_entry` 是 actual work 的主线；`worklog` 保持 legacy issue-bound duration model。
 - `Skill` 和 `workspace.context` 是 Phase 1 的知识载体。
 - 所有数据继续以 `workspace_id` 为租户边界。

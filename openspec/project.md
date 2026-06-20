@@ -26,6 +26,7 @@ Important product assumptions:
 - Treat inbox/notifications separately from work planning unless a change explicitly redefines that behavior.
 - `issue` is the only executable work object by default. Prefer evolving the existing issue model over introducing parallel work-item models unless there is strong evidence the current model is insufficient.
 - Daily plan and review surfaces may summarize, suggest, or reflect execution, but must not introduce independent executable items without a new product and technical spec.
+- Entity discipline: do not create a new persisted entity unless a view, field, filter, summary, suggestion, or issue extension cannot express the behavior cleanly.
 
 ## Repository Structure
 
@@ -284,6 +285,8 @@ When writing OpenSpec artifacts for this project:
 
 - Treat `issue` as the current canonical work item unless the change explicitly replaces that model.
 - Include a runtime object matrix for workflow changes. The matrix must identify first-class runtime objects, which objects can drive execution state, and which fields or models are forbidden from carrying parallel semantics.
+- Before proposing a new table or runtime object, answer: can this be an issue view, issue field, issue filter, Markdown summary, AI suggestion, or lightweight derived state? Only introduce a new entity when the answer is clearly no.
+- If a proposed table can be started, completed, skipped, sorted, reviewed, assigned, or used as a launch point for execution, treat it as a product-level executable object. It requires an explicit product decision and an updated runtime object matrix before API or schema design.
 - Preserve agent execution and assignment semantics in any workflow-related proposal.
 - Treat notifications/inbox and work planning as distinct concerns unless the change intentionally merges them.
 - Keep `apps/workspace` as the primary product shell unless there is a clear reason to move product behavior elsewhere.

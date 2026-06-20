@@ -2,14 +2,14 @@
 
 ## 目标与范围
 
-本 change 设计 Multica 对齐 Super Productivity planning / scheduler / timeboxing 的下一阶段能力。范围覆盖：
+本 change 只保留不会引入平行执行对象的 schedule 可视化能力。范围覆盖：
 
 - deadline visibility：今日到期、已逾期、未来 deadline 的统一提示与入口。
 - calendar overlays：在工时日历中叠加任务 schedule / due 信息，形成计划与实际的同屏对照。
-- daily-weekly planner：把现有 AI 明日计划从 Markdown 面板升级为可操作的日/周计划。
-- timeboxing foundation：建立 planned time block 数据模型和交互契约，让任务可以被安排到具体时间块。
 
-本 change 只创建设计文档，不实现代码。后续实现必须从对应能力包的 `design.md` 和 `tasks.md` 进入。
+结构化 daily/weekly planner、结构化计划项、计划块和 timebox 执行模型已暂停，不能作为后续实现入口。若未来重新设计，必须先更新 product spec、tech spec 和运行时对象矩阵，并证明 `issue` 不能承载该语义。
+
+本 change 只创建设计文档，不实现代码。后续实现只能从仍保留的对应能力包 `design.md` 和 `tasks.md` 进入。
 
 ## 总体 ASCII 图
 
@@ -26,16 +26,10 @@
                     +----------+-----------+
                                |
                                v
-+-------------------+   +----------------------+   +----------------------+
-| actual time entry |-->| calendar overlays    |-->| timeboxing foundation|
-| My Time Calendar  |   | planned vs actual UI |   | planned_time_block  |
-+-------------------+   +----------+-----------+   +----------+-----------+
-                               ^                              ^
-                               |                              |
-                    +----------+-----------+                  |
-                    | daily / weekly plan  |------------------+
-                    | daily_plan_item      |
-                    +----------------------+
++-------------------+   +----------------------+
+| actual time entry |-->| calendar overlays    |
+| My Time Calendar  |   | issue schedule UI    |
++-------------------+   +----------------------+
 ```
 
 ### 数据语义边界
@@ -44,15 +38,8 @@
   issue
     | due/start/end
     v
-  schedule visibility  -----------+
-                                  |
-  daily_plan + daily_plan_item ---+--> planned_time_block --> start timer
-                                                           |
-                                                           v
-                                                     time_entry
-
-  planned_time_block = 要做什么、计划什么时候做
-  time_entry         = 实际做了什么、实际花了多久
+  schedule visibility  -> issue overlays in calendar
+  time_entry           -> actual work only
 ```
 
 ### 页面入口关系
@@ -60,9 +47,7 @@
 ```text
   Today Page        -> DeadlineBanner -> issue detail
   My Time Page      -> DeadlineBanner -> issue detail
-  My Time Calendar  -> TimeEntry events + Issue overlays + Planned blocks
-  Planner / Day     -> Daily plan items -> Schedule timebox
-  Planner / Week    -> Daily summaries  -> Planner / Day
+  My Time Calendar  -> TimeEntry events + Issue overlays
 ```
 
 ## 能力列表
@@ -71,8 +56,8 @@
 | --- | --- | --- | --- | --- |
 | Deadline visibility | 部分完成 | P0 | 小 | 已有 due/start/end 与 overdue 计算，缺统一 banner 和 planner deadline section |
 | Calendar overlays | 部分完成 | P0 | 小到中 | 已有任务日历和工时日历，缺合并 overlay |
-| Daily / weekly planner | 部分完成 | P1 | 中 | 已有 AI 明日计划草稿，缺结构化计划项与周视图 |
-| Timeboxing foundation | 未完成 | P1 | 大 | 已有 time entry 拖拽日历，缺 planned block 模型 |
+| Daily / weekly planner | 暂停 | - | - | 会引入平行执行对象，不能作为当前实现入口 |
+| Timeboxing foundation | 暂停 | - | - | 计划块会承载执行状态，不能作为当前实现入口 |
 
 ## 当前状态证据
 
@@ -100,41 +85,23 @@
   当前行为：已有 react-big-calendar 封装，可以承载日/周/月/agenda 与 DnD。
   当前缺口：缺少 overlay event 类型与只读/可写事件分层。
 
-### Daily / weekly planner
+### Paused structured planning and timeboxing
 
-- 证据：`server/migrations/039_daily_plan.up.sql` `daily_plan`。
-  当前行为：已有 `daily_plan` 表，包含 `plan_date`、`draft_content`、`top_issue_ids`、`status`。
-  当前缺口：计划内容是 Markdown 文本，不是结构化计划项。
-- 证据：`server/internal/service/daily_plan.go` `DailyPlanService.GeneratePlanDraft` / `ConfirmPlan`。
-  当前行为：可生成和确认明日计划。
-  当前缺口：服务只支持单日草稿，没有周计划、计划项编辑、计划项状态。
-- 证据：`apps/workspace/src/features/daily-plan/components/DailyPlanPanel.tsx` `DailyPlanPanel`。
-  当前行为：My Time 页展示明日计划面板，可生成/确认。
-  当前缺口：计划不可作为可操作列表，也不能转成 timebox。
-
-### Timeboxing foundation
-
-- 证据：`apps/workspace/src/features/time-tracking/pages/MyTimeCalendarPage.tsx` `handleEventDrop` / `handleEventResize`。
-  当前行为：已完成 time entry 可以在日历里拖拽和 resize，并写回 `start_time` / `stop_time`。
-  当前缺口：这是 actual time entry，不是 planned time block。
-- 证据：`apps/workspace/src/features/time-tracking/hooks/use-time-entry-actions.ts` `requestStart`。
-  当前行为：可以从任务或描述启动实际计时。
-  当前缺口：启动计时不关联计划时间块，也不能记录 planned vs actual。
-- 证据：`server/pkg/db/queries/time_entry.sql` `CreateTimeEntry`。
-  当前行为：time entry 记录实际工作开始/停止。
-  当前缺口：没有 planned block 表，也没有 planned block 与 time entry 的关联。
+- 证据：`specs/issue-energy-loop/PRODUCT.md` `Product Hard Rules`。
+  当前行为：`issue` 是当前版本唯一可执行对象，daily plan 只能作为 Markdown 草稿、AI 摘要或轻量记录存在。
+  当前缺口：无可执行实现入口；旧 daily/weekly planner 和 timeboxing foundation 文档已删除，避免误导后续实现。
+- 证据：`specs/issue-energy-loop/TECH.md` `Runtime Object Matrix`。
+  当前行为：Focus、Time Entry、Daily Review 和 Daily Plan 都不能承载平行执行语义。
+  当前缺口：若未来重新设计 timeboxing，必须先更新运行时对象矩阵。
 
 ## 外部功能基线
 
 - Super Productivity 官方功能页把 schedule planner、time tracking、pomodoro、integrations 作为核心导航，并说明支持 Kanban、Eisenhower、compact lists、自定义布局、repeating tasks、time tracking、cross-platform sync。
-- Super Productivity time boxing 页面明确描述：把任务拖入 schedule、分配 time boxes、日/周视图、estimated vs actual、overload warnings、focus timer 与 time tracking 数据闭环。
 - Super Productivity v17.5 release notes 提到 Task Deadlines：task list badge、detail panel、approaching reminders、today banner、planner overdue section、context menu deadline。
 
 参考来源：
 
 - https://super-productivity.com/
-- https://super-productivity.com/use-cases/time-boxing/
-- https://super-productivity.com/guides/time-boxing-method/
 - https://github.com/super-productivity/super-productivity/releases
 
 ## 非目标
@@ -142,37 +109,35 @@
 - 不实现 Super Productivity 的完整外部 Calendar / CalDAV 同步。
 - 不实现 GitHub/Jira/GitLab/OpenProject issue provider 导入。
 - 不实现 Focus Mode 全屏专注页；它应归入后续 focus-mode-flowtime spec。
-- 不实现 Pomodoro 规则变化；本 change 只要求 timebox 可选择启动现有 timer。
+- 不实现 Pomodoro 规则变化；本 change 不新增任何可启动 timer 的计划对象。
 - 不引入个人本地离线数据库或跨端同步。
 - 不把 daily plan Markdown 立即删除；迁移需要兼容现有 plan 数据。
+- 不新增结构化计划项、计划块或任何能独立启动/完成执行的计划对象。
 
 ## 优先级与推进顺序
 
 1. 先做 deadline visibility。原因：已有 issue 日期字段和 overdue 工具函数，改动最小，能快速建立 planner 的紧迫感入口。
-2. 再做 calendar overlays。原因：已有两个日历页面，先让 planned schedule 和 actual time 同屏，为后续 timebox 做视觉基线。
-3. 再做 daily / weekly planner。原因：需要把 Markdown 草稿升级为结构化计划项，涉及数据模型但仍可独立验收。
-4. 最后做 timeboxing foundation。原因：需要新 planned block 模型，并要和 issue、daily plan、time entry、timer 串联。
+2. 再做 calendar overlays。原因：已有两个日历页面，先让 issue schedule 和 actual time 同屏。
+3. 结构化 planner 和 timeboxing foundation 暂停。原因：当前产品规则要求 issue 是唯一可执行对象。
 
 ## 共享约束
 
 - 所有数据必须以 `workspace_id` 为租户边界。
 - 所有计划数据必须绑定当前 user；团队可见性要作为后续明确决策，不默认公开个人计划。
-- 第一版必须复用现有 `issue`、`time_entry`、`daily_plan`、calendar 组件，不新建平行任务系统。
-- planned block 与 actual time entry 必须分开建模，避免把“计划”误写成“已工作”。
+- 第一版必须复用现有 `issue`、`time_entry`、`daily_plan`、calendar 组件，不新建平行任务系统或平行执行对象。
 - `time_entry` 是 actual work 的主线，承载普通 timer、Pomodoro、Flowtime、Focus completion 等实际工作记录。
 - `worklog` 是 legacy issue-bound duration model，不参与新的 planner、scheduler、timeboxing、Focus 或 Daily Review 主链路。
-- 前端展示可以先本地派生；跨页面 summary、timeboxing、weekly planner 必须有服务端契约。
+- 前端展示可以先本地派生；跨页面 summary 必须有服务端契约。
 - 执行时如果发现需要改变数据模型，必须先更新对应能力包的 `design.md` 和 `tasks.md`。
 
 ## 风险与依赖
 
 | 风险或依赖 | 影响 | 处理方式 |
 | --- | --- | --- |
-| 直接把 time entry 当 timebox | 实际工时与计划混淆，统计不可用 | 新增 planned block 模型，time entry 只作为 actual |
-| 日计划仍是 Markdown | 无法拖拽、排序、转 timebox | 增加结构化 plan item，保留 Markdown 作为生成摘要或历史兼容 |
-| Calendar overlay 过早可编辑 | 用户可能误以为拖动 overlay 已排程 | 第一版 overlay 只读，timeboxing foundation 再启用拖拽 |
+| 新增平行执行对象 | 会和 issue/focus/time entry 抢执行语义 | 暂停 structured planner 和 timeboxing foundation |
+| 直接把 time entry 当 timebox | 实际工时与计划混淆，统计不可用 | 当前不做 timeboxing；time entry 只作为 actual |
+| Calendar overlay 过早可编辑 | 用户可能误以为拖动 overlay 已排程 | 第一版 overlay 只读；任何可编辑排程都必须重新设计 |
 | Deadline 口径与 due/start/end 混杂 | UI 提示不稳定 | deadline visibility 先定义统一优先级：overdue due/end > today due/end > active window > upcoming |
-| 周计划范围膨胀 | 需要复杂 capacity / recurrence | 第一版周计划只做按天分组和容量摘要，不做 recurring workload |
 
 ## 回写规则
 

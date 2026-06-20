@@ -6,9 +6,9 @@
 
 ## 非目标
 
-- 不实现拖拽 issue 生成 timebox。
+- 不实现拖拽 issue 排程。
 - 不实现外部 calendar sync。
-- 不新增 planned block 模型。
+- 不新增任何计划块模型。
 - 不改变 time entry 的创建、更新、删除接口。
 - 不合并 `/calendar` 和 `/my-time/calendar` 路由。
 
@@ -51,7 +51,7 @@ PlannerCalendarEvent
 
 ## 缺口定义
 
-当前用户需要在两个页面之间切换才能看到“我计划做什么”和“我实际做了什么”。这阻断了后续 timeboxing 的核心闭环：planned vs actual。
+当前用户需要在两个页面之间切换才能看到 issue 的 schedule/deadline 和自己的实际投入，无法在个人执行视图中判断当天时间分布。
 
 ## 方案与权衡
 
@@ -61,7 +61,7 @@ PlannerCalendarEvent
 
 ### 方案 B：在 My Time Calendar 中叠加 issue overlays
 
-优点：My Time Calendar 已有 day/week 时间栅格和 DnD，天然适合 timeboxing。缺点：需要在个人执行页加载 issue list。
+优点：My Time Calendar 已有 day/week 时间栅格和 DnD，适合同屏展示 issue schedule 和 actual time。缺点：需要在个人执行页加载 issue list。
 
 ### 方案 C：新建 Planner Calendar
 
@@ -144,7 +144,7 @@ interface IssueOverlayEvent {
 | 风险 | 对策 |
 | --- | --- |
 | overlay 与 actual event 视觉冲突 | overlay 使用低层级、低对比、可关闭 |
-| 用户误以为可拖拽排程 | cursor 和交互保持只读，拖拽留到 timeboxing |
+| 用户误以为可拖拽排程 | cursor 和交互保持只读，DnD handler 明确拒绝 issue overlay |
 | issue query 过大 | 使用 visible window 日期过滤 |
 | 月视图 all-day 与 day/week timed 口径不一致 | 第一版优先 day/week 体验，month 只做概览 |
 

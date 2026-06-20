@@ -2,8 +2,7 @@
 
 ## Context
 
-本规格对应 [PRODUCT.md](./PRODUCT.md)。结构化 Plan 已从当前版本移除：不保留 `/plan` 页面、`/api/plans` facade、`plan_item` 表、计划项状态，也不让 Focus 或 Time Entry 关联计划项。
-
+本规格对应 [PRODUCT.md](./PRODUCT.md)。
 当前实现保留的闭环基础是：
 
 - Issue 是核心工作对象，后续执行入口必须优先关联 issue。
@@ -22,7 +21,6 @@
 | `focus_session` | 执行中的用户专注状态和事件容器。 | Partially. 只能表达当前专注生命周期。 | 不允许拥有计划项状态、排序或完成语义；只能关联 `issue_id`、description、commitment、label 和原因信号。 |
 | `time_entry` | 实际投入记录。 | No. 只记录实际时间和关联上下文。 | 不允许关联 `plan_item_id` 或作为计划完成状态来源。 |
 | `daily_review` | 当日执行和精力复盘。 | No. 只汇总和反馈信号。 | 不允许创建、排序或完成计划项。 |
-| `daily_plan` | Markdown 草稿和 AI 生成文本。 | No. 只能作为轻量记录。 | 不允许承载结构化计划项、状态流转、执行入口或 Focus/Time Entry 外键。 |
 
 任何新规格如果想新增可执行对象，必须先说明为什么 `issue` 无法承载该语义，并在产品评审前更新本矩阵。
 
