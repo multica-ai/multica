@@ -4416,4 +4416,27 @@ export class ApiClient {
   async releaseNoteLock(noteId: string): Promise<void> {
     await this.fetch<void>(`/api/notes/${noteId}/lock`, { method: "DELETE" });
   }
+
+  // CEREBRO-PATCH(cerebro-notes-client): FIR-1621 — reverse note↔object
+  // coupling + send-comments-to-agent.
+  //   GET  /api/notes/by-reference?object=&ref_id=   — notes coupled to an object
+  //   POST /api/notes/{id}/comments/send             — dispatch unsent comments
+  // Response shapes are generic so @multica/cerebro-notes / cerebro-artifacts
+  // own the zod schema.
+  async listNotesForReference<T = unknown>(
+    object: string,
+    refId: string,
+  ): Promise<T> {
+    const s = new URLSearchParams({ object, ref_id: refId });
+    return this.fetch<T>(`/api/notes/by-reference?${s.toString()}`);
+  }
+  async sendNoteComments<T = unknown>(
+    noteId: string,
+    payload: { comment_ids?: string[] },
+  ): Promise<T> {
+    return this.fetch<T>(`/api/notes/${noteId}/comments/send`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
 }

@@ -27,6 +27,43 @@ func (q *Queries) AddNoteShare(ctx context.Context, arg AddNoteShareParams) erro
 	return err
 }
 
+const canUserCommentOnArtifact = `-- name: CanUserCommentOnArtifact :one
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = $1
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+      AND (
+        n.artifact_id IS NULL
+        OR n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+) AS allowed
+`
+
+type CanUserCommentOnArtifactParams struct {
+	ID    pgtype.UUID `json:"id"`
+	PUser pgtype.UUID `json:"p_user"`
+}
+
+// FIR-1621: comments are not note-only — a plain document (any artifact, kind
+// != 'note') can carry comments too, so the same note-comments panel works in
+// the Documents editor. Access unifies both shapes:
+//   - a note (has a cerebro_note row) applies its owner/visibility/share rule
+//     AND its folder chain (identical to CanUserSeeNote);
+//   - a document (no cerebro_note row) is governed purely by folder access
+//     control — workspace membership is already enforced by the request's
+//     workspace middleware, so the folder rule is the only per-artifact gate.
+func (q *Queries) CanUserCommentOnArtifact(ctx context.Context, arg CanUserCommentOnArtifactParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserCommentOnArtifact, arg.ID, arg.PUser)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
 const canUserSeeNote = `-- name: CanUserSeeNote :one
 SELECT EXISTS (
     SELECT 1 FROM cerebro_note n
@@ -187,6 +224,91 @@ func (q *Queries) ListNotesForUser(ctx context.Context, arg ListNotesForUserPara
 	items := []ListNotesForUserRow{}
 	for rows.Next() {
 		var i ListNotesForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.FolderID,
+			&i.Title,
+			&i.Body,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.Visibility,
+			&i.Pinned,
+			&i.PinnedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotesReferencingObject = `-- name: ListNotesReferencingObject :many
+SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
+       a.created_at, a.updated_at,
+       n.owner_id, n.visibility, n.pinned, n.pinned_at
+FROM cerebro_note n
+JOIN artifact a ON a.id = n.artifact_id
+JOIN cerebro_note_reference ref ON ref.note_id = n.artifact_id
+WHERE a.workspace_id = $1
+  AND ref.object = $2
+  AND ref.ref_id = $3
+  AND (
+    n.owner_id = $4
+    OR n.visibility = 'workspace'
+    OR (n.visibility = 'shared' AND EXISTS (
+        SELECT 1 FROM cerebro_note_share s
+        WHERE s.artifact_id = n.artifact_id AND s.user_id = $4))
+  )
+  AND cerebro_artifact_folder_visible(a.folder_id, $4)
+ORDER BY a.updated_at DESC
+`
+
+type ListNotesReferencingObjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Object      string      `json:"object"`
+	RefID       string      `json:"ref_id"`
+	ViewerID    pgtype.UUID `json:"viewer_id"`
+}
+
+type ListNotesReferencingObjectRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	FolderID    pgtype.UUID        `json:"folder_id"`
+	Title       string             `json:"title"`
+	Body        string             `json:"body"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
+	Pinned      bool               `json:"pinned"`
+	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+}
+
+// FIR-1621 — reverse lookup for the note↔object coupling. Returns every note the
+// viewer may see that carries a reference pointing at the given (object, ref_id)
+// — e.g. all notes coupled to one issue. This is the read behind "coupled notes
+// show up in the issue's document list" (the two-way view). Same visibility rule
+// as ListNotesForUser (owner / workspace / shared) AND folder-chain visibility,
+// so a private note coupled to an issue is still only visible to its owner.
+func (q *Queries) ListNotesReferencingObject(ctx context.Context, arg ListNotesReferencingObjectParams) ([]ListNotesReferencingObjectRow, error) {
+	rows, err := q.db.Query(ctx, listNotesReferencingObject,
+		arg.WorkspaceID,
+		arg.Object,
+		arg.RefID,
+		arg.ViewerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListNotesReferencingObjectRow{}
+	for rows.Next() {
+		var i ListNotesReferencingObjectRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

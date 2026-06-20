@@ -61,3 +61,30 @@ RETURNING *;
 -- Open (unresolved) root-comment count for the note — drives the margin badge.
 SELECT COUNT(*) FROM cerebro_note_comment
 WHERE note_id = $1 AND thread_root_id IS NULL AND resolved = false;
+
+-- name: MarkNoteCommentsSent :many
+-- FIR-1621 — stamp the given comments on a note as sent-to-agent. Idempotent:
+-- an already-sent comment keeps its original timestamp (COALESCE), so re-sending
+-- a batch that includes earlier comments never rewrites their send time. Scoped
+-- by note_id so a caller can only mark comments that belong to the note in hand.
+-- Returns the updated rows so the handler can echo the new state to the client.
+UPDATE cerebro_note_comment
+SET sent_to_agent_at = COALESCE(sent_to_agent_at, now()),
+    updated_at       = now()
+WHERE note_id = sqlc.arg(note_id)
+  AND id = ANY(sqlc.arg(comment_ids)::uuid[])
+RETURNING *;
+
+-- name: CountUnsentNoteComments :one
+-- FIR-1621 — count of comments on the note not yet sent to an agent. Drives the
+-- "you have N unsent comments" notice at the top of the note.
+SELECT COUNT(*) FROM cerebro_note_comment
+WHERE note_id = $1 AND sent_to_agent_at IS NULL;
+
+-- name: ListUnsentNoteComments :many
+-- FIR-1621 — the unsent draft comments on a note (sent_to_agent_at IS NULL),
+-- oldest first. The send-to-agent flow uses this to gather "all unsent" when the
+-- caller did not name specific comment ids.
+SELECT * FROM cerebro_note_comment
+WHERE note_id = $1 AND sent_to_agent_at IS NULL
+ORDER BY created_at ASC, id ASC;

@@ -2,12 +2,18 @@
 
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, Check, X, Reply, Trash2, CornerDownRight } from "lucide-react";
+import { MessageSquarePlus, Check, X, Reply, Trash2, CornerDownRight, Send } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  ContentEditor,
+  ReadonlyContent,
+  type ContentEditorRef,
+} from "@multica/views/editor";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
 import { cn } from "@multica/ui/lib/utils";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
@@ -17,11 +23,22 @@ import {
   useResolveNoteComment,
   useDeleteNoteComment,
   useDecideNoteSuggestion,
+  useSendNoteComments,
+  useNoteReferences,
+  isUnsentToAgent,
   buildThreads,
   noteKeys,
   type NoteComment,
   type NoteThread,
 } from "../core";
+import type { Editor } from "@tiptap/react";
+import { useCommentAnchors } from "./use-comment-anchors";
+import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
+
+// FIR-1621 — the reference `object` kinds a note can be coupled to as a send
+// destination. Mirrors couplingIssue/couplingChat in the Go send handler.
+const COUPLE_ISSUE = "issue";
+const COUPLE_CHAT = "chat_session";
 
 const ANCHOR_CONTEXT = 32;
 
@@ -47,6 +64,12 @@ function anchorContext(body: string, quote: string) {
 // The text selection being commented on (`draftQuote`) and which thread is
 // "active" (`activeAnchorId`) are owned by NoteEditor so the orange highlight
 // in the body and the panel stay in sync (TECH-3637).
+//
+// FIR-1621 — the Documents editor (cerebro-artifacts) reuses this panel but lives
+// in a package that cannot import the comment-anchor plugin. When it passes its
+// live `editor`, the panel paints the highlights itself from its own comments
+// query + draftQuote; the Notes page leaves `editor` undefined and keeps wiring
+// the highlight at the page level (so there is no double-registration).
 export function NoteCommentsPanel({
   noteId,
   noteBody,
@@ -56,6 +79,7 @@ export function NoteCommentsPanel({
   onClearDraft,
   onSelectThread,
   onClose,
+  editor,
 }: {
   noteId: string;
   noteBody: string;
@@ -65,6 +89,7 @@ export function NoteCommentsPanel({
   onClearDraft: () => void;
   onSelectThread: (id: string | null) => void;
   onClose: () => void;
+  editor?: Editor | null;
 }) {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -73,19 +98,107 @@ export function NoteCommentsPanel({
   const { data: comments = [] } = useNoteComments(noteId);
   const create = useCreateNoteComment(noteId);
 
+  // FIR-1621 — when the host hands us a live editor (the Documents view), paint
+  // the orange comment-anchor highlights here: every root comment that carries a
+  // quote, plus the in-progress draft selection. The Notes page wires this at the
+  // page level instead and never passes `editor`, so `useCommentAnchors(null,…)`
+  // is a no-op there — no double registration.
+  const commentAnchors = React.useMemo<CommentAnchor[]>(() => {
+    if (!editor) return [];
+    const list: CommentAnchor[] = comments
+      .filter((c) => !c.thread_root_id && c.anchor_quote)
+      .map((c) => ({ id: c.id, quote: c.anchor_quote as string }));
+    if (draftQuote) list.push({ id: DRAFT_ANCHOR_ID, quote: draftQuote });
+    return list;
+  }, [editor, comments, draftQuote]);
+  const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
+  useCommentAnchors(editor ?? null, commentAnchors, activeAnchor);
+
+  // FIR-1621 — agent-collaboration: collect unsent comments and send the
+  // selected (or all) to the note's coupled issue/chat. Behind a flag; nothing
+  // shows unless the flag is on.
+  const collabEnabled = useFeatureFlag("cerebro_note_agent_collab");
+  const send = useSendNoteComments(noteId);
+  const { data: references = [] } = useNoteReferences(
+    collabEnabled ? noteId : undefined,
+  );
+  const coupling = React.useMemo(
+    () =>
+      references.find(
+        (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
+      ) ?? null,
+    [references],
+  );
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+
   const [mode, setMode] = React.useState<"comment" | "suggestion">("comment");
   const [draft, setDraft] = React.useState("");
+  // FIR-1647 — the comment/suggestion composer is the mention-aware rich editor
+  // (same one used in the note body), so a member can @-tag a person, agent or
+  // issue. Tagging an agent is what drives "unsent" + send-to-agent — a plain
+  // textarea could never produce a `mention://agent/<id>` link, so this is the
+  // input side of that whole feature.
+  const composerRef = React.useRef<ContentEditorRef>(null);
 
   const threads = React.useMemo(() => buildThreads(comments), [comments]);
   const open = threads.filter((t) => !t.root.resolved);
   const resolved = threads.filter((t) => t.root.resolved);
+
+  const unsent = React.useMemo(
+    () => comments.filter(isUnsentToAgent),
+    [comments],
+  );
+  const unsentIds = React.useMemo(
+    () => new Set(unsent.map((c) => c.id)),
+    [unsent],
+  );
+  // Keep the selection in sync with what is still actually unsent (a sent or
+  // deleted comment drops out of the selection automatically).
+  const selectedUnsent = React.useMemo(
+    () => [...selected].filter((id) => unsentIds.has(id)),
+    [selected, unsentIds],
+  );
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function doSend(ids?: string[]) {
+    send.mutate(ids, {
+      onSuccess: (res) => {
+        setSelected(new Set());
+        const n = res.sent.length;
+        const where =
+          res.destination_kind === COUPLE_CHAT ? "the chat" : "the task";
+        toast.success(
+          n === 1
+            ? `Sent 1 comment to ${where}`
+            : `Sent ${n} comments to ${where}`,
+        );
+      },
+      onError: () => {
+        toast.error(
+          coupling
+            ? "Couldn't send the comments. Try again."
+            : "Link this note to a task or chat before sending.",
+        );
+      },
+    });
+  }
 
   function nameFor(id: string) {
     return members.find((m) => m.user_id === id)?.name ?? "Unknown";
   }
 
   function submit() {
-    const text = draft.trim();
+    // Read straight from the editor so a click right after typing isn't lost to
+    // the onUpdate debounce.
+    const text = (composerRef.current?.getMarkdown() ?? draft).trim();
     if (!text) return;
     const ctx = draftQuote ? anchorContext(noteBody, draftQuote) : null;
     create.mutate(
@@ -102,6 +215,7 @@ export function NoteCommentsPanel({
       {
         onSuccess: () => {
           setDraft("");
+          composerRef.current?.clearContent();
           onClearDraft();
         },
       },
@@ -120,6 +234,49 @@ export function NoteCommentsPanel({
           <X className="size-4" />
         </Button>
       </div>
+
+      {/* FIR-1621 — unsent-comments notice + send controls. */}
+      {collabEnabled && unsent.length > 0 && (
+        <div className="flex flex-col gap-2 border-b border-amber-400/40 bg-amber-400/10 px-3 py-2">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Send className="size-3.5 text-amber-600" />
+            <span className="font-medium">
+              {unsent.length === 1
+                ? "1 comment not sent to the agent yet"
+                : `${unsent.length} comments not sent to the agent yet`}
+            </span>
+          </div>
+          {coupling ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => doSend()}
+                disabled={send.isPending}
+              >
+                <Send className="size-3.5" /> Send all
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => doSend(selectedUnsent)}
+                disabled={send.isPending || selectedUnsent.length === 0}
+              >
+                Send selected
+                {selectedUnsent.length > 0 ? ` (${selectedUnsent.length})` : ""}
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                → {coupling.object === COUPLE_CHAT ? "chat" : "task"}
+                {coupling.label ? ` ${coupling.label}` : ""}
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              Link this note to a task or chat (References) to send these
+              comments to its agent.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Composer */}
       <div className="border-b p-3">
@@ -158,16 +315,22 @@ export function NoteCommentsPanel({
             selection to attach it here.
           </p>
         )}
-        <Textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={
-            mode === "suggestion"
-              ? "Replace the selected text with…"
-              : "Write a comment…"
-          }
-          className="min-h-[60px] text-sm"
-        />
+        <div className="rounded-md border px-2 py-1 focus-within:ring-1 focus-within:ring-ring">
+          <ContentEditor
+            ref={composerRef}
+            defaultValue=""
+            onUpdate={setDraft}
+            onSubmit={submit}
+            showBubbleMenu={false}
+            debounceMs={150}
+            placeholder={
+              mode === "suggestion"
+                ? "Replace the selected text with…"
+                : "Write a comment… (type @ to mention a person, agent or issue)"
+            }
+            className="min-h-[60px] text-sm"
+          />
+        </div>
         <div className="mt-2 flex items-center justify-end gap-2">
           <Button
             size="sm"
@@ -204,6 +367,9 @@ export function NoteCommentsPanel({
               isOwner={isOwner}
               nameFor={nameFor}
               active={activeAnchorId === t.root.id}
+              selectable={collabEnabled && Boolean(coupling)}
+              selected={selected}
+              onToggleSelect={toggleSelect}
               onSelect={() =>
                 onSelectThread(t.root.anchor_quote ? t.root.id : null)
               }
@@ -226,6 +392,9 @@ export function NoteCommentsPanel({
                   isOwner={isOwner}
                   nameFor={nameFor}
                   active={activeAnchorId === t.root.id}
+                  selectable={collabEnabled && Boolean(coupling)}
+                  selected={selected}
+                  onToggleSelect={toggleSelect}
                   onSelect={() =>
                     onSelectThread(t.root.anchor_quote ? t.root.id : null)
                   }
@@ -249,6 +418,9 @@ function ThreadView({
   isOwner,
   nameFor,
   active,
+  selectable,
+  selected,
+  onToggleSelect,
   onSelect,
   onAfterDecide,
 }: {
@@ -258,6 +430,9 @@ function ThreadView({
   isOwner: boolean;
   nameFor: (id: string) => string;
   active: boolean;
+  selectable: boolean;
+  selected: Set<string>;
+  onToggleSelect: (id: string) => void;
   onSelect: () => void;
   onAfterDecide: () => void;
 }) {
@@ -268,6 +443,24 @@ function ThreadView({
   const reply = useCreateNoteComment(noteId);
   const [replyText, setReplyText] = React.useState("");
   const [replying, setReplying] = React.useState(false);
+  // FIR-1647 — replies use the same mention-aware editor, so you can @-tag in a
+  // reply too (the reviewer called out that replies couldn't tag either).
+  const replyRef = React.useRef<ContentEditorRef>(null);
+
+  function sendReply() {
+    const body = (replyRef.current?.getMarkdown() ?? replyText).trim();
+    if (!body) return;
+    reply.mutate(
+      { body, thread_root_id: root.id },
+      {
+        onSuccess: () => {
+          setReplyText("");
+          replyRef.current?.clearContent();
+          setReplying(false);
+        },
+      },
+    );
+  }
 
   const isSuggestion = root.kind === "suggestion";
   const pending = isSuggestion && root.suggestion_state === "pending";
@@ -294,7 +487,7 @@ function ThreadView({
           “{root.anchor_quote}”
         </div>
       )}
-      <CommentRow c={root} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} />
+      <CommentRow c={root} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
 
       {isSuggestion && (
         <div className="mt-1.5 rounded bg-emerald-500/10 p-2 text-sm">
@@ -320,7 +513,7 @@ function ThreadView({
 
       {replies.map((r) => (
         <div key={r.id} className="mt-2 pl-4">
-          <CommentRow c={r} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} />
+          <CommentRow c={r} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
         </div>
       ))}
 
@@ -372,26 +565,22 @@ function ThreadView({
       </div>
 
       {replying && (
-        <div className="mt-2 flex gap-2">
-          <Textarea
-            value={replyText}
-            onChange={(e) => setReplyText(e.target.value)}
-            placeholder="Reply…"
-            className="min-h-[40px] text-sm"
-          />
+        <div className="mt-2 flex items-end gap-2">
+          <div className="flex-1 rounded-md border px-2 py-1 focus-within:ring-1 focus-within:ring-ring">
+            <ContentEditor
+              ref={replyRef}
+              defaultValue=""
+              onUpdate={setReplyText}
+              onSubmit={sendReply}
+              showBubbleMenu={false}
+              debounceMs={150}
+              placeholder="Reply… (type @ to mention)"
+              className="min-h-[40px] text-sm"
+            />
+          </div>
           <Button
             size="sm"
-            onClick={() =>
-              reply.mutate(
-                { body: replyText.trim(), thread_root_id: root.id },
-                {
-                  onSuccess: () => {
-                    setReplyText("");
-                    setReplying(false);
-                  },
-                },
-              )
-            }
+            onClick={sendReply}
             disabled={reply.isPending || !replyText.trim()}
           >
             Send
@@ -408,6 +597,9 @@ function CommentRow({
   myId,
   canDelete,
   onDelete,
+  selectable = false,
+  selected = false,
+  onToggleSelect,
 }: {
   c: NoteComment;
   nameFor: (id: string) => string;
@@ -415,14 +607,36 @@ function CommentRow({
   noteId: string;
   canDelete: boolean;
   onDelete: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (id: string) => void;
 }) {
+  const unsent = isUnsentToAgent(c);
   return (
     <div>
       <div className="flex items-center gap-1.5 text-xs">
+        {selectable && unsent && (
+          <input
+            type="checkbox"
+            checked={selected}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => onToggleSelect?.(c.id)}
+            className="size-3 shrink-0 cursor-pointer accent-amber-600"
+            aria-label="Select comment to send"
+          />
+        )}
         <span className="font-medium">
           {c.author_id === myId ? "You" : nameFor(c.author_id)}
         </span>
         <span className="text-muted-foreground">{formatWhen(c.created_at)}</span>
+        {unsent && (
+          <Badge
+            variant="outline"
+            className="border-amber-400/60 text-[10px] text-amber-700"
+          >
+            Unsent
+          </Badge>
+        )}
         {canDelete && (
           <button
             onClick={onDelete}
@@ -434,7 +648,9 @@ function CommentRow({
         )}
       </div>
       {c.body && c.body !== "Suggested edit" && (
-        <p className="mt-0.5 whitespace-pre-wrap break-words text-sm">{c.body}</p>
+        // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
+        // `[@Name](mention://…)` text.
+        <ReadonlyContent content={c.body} className="mt-0.5 break-words" />
       )}
     </div>
   );

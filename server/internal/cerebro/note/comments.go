@@ -73,6 +73,9 @@ type CommentResponse struct {
 	AuthorID        string  `json:"author_id"`
 	CreatedAt       string  `json:"created_at"`
 	UpdatedAt       string  `json:"updated_at"`
+	// SentToAgentAt (FIR-1621) is null while the comment is an unsent local
+	// draft, and the dispatch timestamp once it has been sent to an agent.
+	SentToAgentAt *string `json:"sent_to_agent_at"`
 }
 
 func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
@@ -96,6 +99,7 @@ func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
 		AuthorID:        uuidStr(c.AuthorID),
 		CreatedAt:       tsStr(c.CreatedAt),
 		UpdatedAt:       tsStr(c.UpdatedAt),
+		SentToAgentAt:   tsPtr(c.SentToAgentAt),
 	}
 }
 
@@ -116,7 +120,7 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireCanSee(w, r, noteID, ownerUUID) {
+	if !h.requireCanComment(w, r, noteID, ownerUUID) {
 		return
 	}
 	rows, err := h.Cerebro.ListNoteComments(r.Context(), noteID)
@@ -147,7 +151,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireCanSee(w, r, noteID, ownerUUID) {
+	if !h.requireCanComment(w, r, noteID, ownerUUID) {
 		return
 	}
 	var req createCommentRequest
@@ -262,7 +266,7 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireCanSee(w, r, noteID, ownerUUID) {
+	if !h.requireCanComment(w, r, noteID, ownerUUID) {
 		return
 	}
 	commentID, ok := subPathUUID(w, r, "commentId")
@@ -448,7 +452,7 @@ func (h *Handler) loadCommentForWrite(w http.ResponseWriter, r *http.Request) (c
 	if !good {
 		return
 	}
-	if !h.requireCanSee(w, r, noteID, ownerUUID) {
+	if !h.requireCanComment(w, r, noteID, ownerUUID) {
 		return
 	}
 	commentID, good := subPathUUID(w, r, "commentId")

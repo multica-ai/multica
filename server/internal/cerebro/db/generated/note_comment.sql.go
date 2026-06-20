@@ -24,6 +24,20 @@ func (q *Queries) CountOpenNoteComments(ctx context.Context, noteID pgtype.UUID)
 	return count, err
 }
 
+const countUnsentNoteComments = `-- name: CountUnsentNoteComments :one
+SELECT COUNT(*) FROM cerebro_note_comment
+WHERE note_id = $1 AND sent_to_agent_at IS NULL
+`
+
+// FIR-1621 — count of comments on the note not yet sent to an agent. Drives the
+// "you have N unsent comments" notice at the top of the note.
+func (q *Queries) CountUnsentNoteComments(ctx context.Context, noteID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnsentNoteComments, noteID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createNoteComment = `-- name: CreateNoteComment :one
 
 INSERT INTO cerebro_note_comment (
@@ -32,7 +46,7 @@ INSERT INTO cerebro_note_comment (
     suggestion_text, author_type, author_id
 )
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
 `
 
 type CreateNoteCommentParams struct {
@@ -89,6 +103,7 @@ func (q *Queries) CreateNoteComment(ctx context.Context, arg CreateNoteCommentPa
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }
@@ -96,7 +111,7 @@ func (q *Queries) CreateNoteComment(ctx context.Context, arg CreateNoteCommentPa
 const deleteNoteComment = `-- name: DeleteNoteComment :one
 DELETE FROM cerebro_note_comment
 WHERE id = $1
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
 `
 
 // Deletes a comment; replies cascade via thread_root_id FK ON DELETE CASCADE.
@@ -123,12 +138,13 @@ func (q *Queries) DeleteNoteComment(ctx context.Context, id pgtype.UUID) (Cerebr
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }
 
 const getNoteComment = `-- name: GetNoteComment :one
-SELECT id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at FROM cerebro_note_comment WHERE id = $1
+SELECT id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at FROM cerebro_note_comment WHERE id = $1
 `
 
 func (q *Queries) GetNoteComment(ctx context.Context, id pgtype.UUID) (CerebroNoteComment, error) {
@@ -154,12 +170,13 @@ func (q *Queries) GetNoteComment(ctx context.Context, id pgtype.UUID) (CerebroNo
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }
 
 const listNoteComments = `-- name: ListNoteComments :many
-SELECT id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at FROM cerebro_note_comment
+SELECT id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at FROM cerebro_note_comment
 WHERE note_id = $1
 ORDER BY created_at ASC, id ASC
 `
@@ -195,6 +212,117 @@ func (q *Queries) ListNoteComments(ctx context.Context, noteID pgtype.UUID) ([]C
 			&i.AuthorID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SentToAgentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnsentNoteComments = `-- name: ListUnsentNoteComments :many
+SELECT id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at FROM cerebro_note_comment
+WHERE note_id = $1 AND sent_to_agent_at IS NULL
+ORDER BY created_at ASC, id ASC
+`
+
+// FIR-1621 — the unsent draft comments on a note (sent_to_agent_at IS NULL),
+// oldest first. The send-to-agent flow uses this to gather "all unsent" when the
+// caller did not name specific comment ids.
+func (q *Queries) ListUnsentNoteComments(ctx context.Context, noteID pgtype.UUID) ([]CerebroNoteComment, error) {
+	rows, err := q.db.Query(ctx, listUnsentNoteComments, noteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroNoteComment{}
+	for rows.Next() {
+		var i CerebroNoteComment
+		if err := rows.Scan(
+			&i.ID,
+			&i.NoteID,
+			&i.ThreadRootID,
+			&i.Kind,
+			&i.Body,
+			&i.AnchorQuote,
+			&i.AnchorPrefix,
+			&i.AnchorSuffix,
+			&i.AnchorStart,
+			&i.AnchorEnd,
+			&i.SuggestionText,
+			&i.SuggestionState,
+			&i.Resolved,
+			&i.ResolvedBy,
+			&i.ResolvedAt,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SentToAgentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markNoteCommentsSent = `-- name: MarkNoteCommentsSent :many
+UPDATE cerebro_note_comment
+SET sent_to_agent_at = COALESCE(sent_to_agent_at, now()),
+    updated_at       = now()
+WHERE note_id = $1
+  AND id = ANY($2::uuid[])
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
+`
+
+type MarkNoteCommentsSentParams struct {
+	NoteID     pgtype.UUID   `json:"note_id"`
+	CommentIds []pgtype.UUID `json:"comment_ids"`
+}
+
+// FIR-1621 — stamp the given comments on a note as sent-to-agent. Idempotent:
+// an already-sent comment keeps its original timestamp (COALESCE), so re-sending
+// a batch that includes earlier comments never rewrites their send time. Scoped
+// by note_id so a caller can only mark comments that belong to the note in hand.
+// Returns the updated rows so the handler can echo the new state to the client.
+func (q *Queries) MarkNoteCommentsSent(ctx context.Context, arg MarkNoteCommentsSentParams) ([]CerebroNoteComment, error) {
+	rows, err := q.db.Query(ctx, markNoteCommentsSent, arg.NoteID, arg.CommentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroNoteComment{}
+	for rows.Next() {
+		var i CerebroNoteComment
+		if err := rows.Scan(
+			&i.ID,
+			&i.NoteID,
+			&i.ThreadRootID,
+			&i.Kind,
+			&i.Body,
+			&i.AnchorQuote,
+			&i.AnchorPrefix,
+			&i.AnchorSuffix,
+			&i.AnchorStart,
+			&i.AnchorEnd,
+			&i.SuggestionText,
+			&i.SuggestionState,
+			&i.Resolved,
+			&i.ResolvedBy,
+			&i.ResolvedAt,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SentToAgentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -213,7 +341,7 @@ SET resolved    = $2,
     resolved_at = CASE WHEN $2 THEN now() ELSE NULL END,
     updated_at  = now()
 WHERE id = $1
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
 `
 
 type SetNoteCommentResolvedParams struct {
@@ -247,6 +375,7 @@ func (q *Queries) SetNoteCommentResolved(ctx context.Context, arg SetNoteComment
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }
@@ -259,7 +388,7 @@ SET suggestion_state = $2,
     resolved_at      = CASE WHEN $2 = 'accepted' THEN now() ELSE resolved_at END,
     updated_at       = now()
 WHERE id = $1 AND kind = 'suggestion'
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
 `
 
 type SetNoteSuggestionStateParams struct {
@@ -293,6 +422,7 @@ func (q *Queries) SetNoteSuggestionState(ctx context.Context, arg SetNoteSuggest
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }
@@ -301,7 +431,7 @@ const updateNoteCommentBody = `-- name: UpdateNoteCommentBody :one
 UPDATE cerebro_note_comment
 SET body = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at
 `
 
 type UpdateNoteCommentBodyParams struct {
@@ -333,6 +463,7 @@ func (q *Queries) UpdateNoteCommentBody(ctx context.Context, arg UpdateNoteComme
 		&i.AuthorID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SentToAgentAt,
 	)
 	return i, err
 }

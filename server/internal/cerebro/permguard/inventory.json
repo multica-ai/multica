@@ -1013,6 +1013,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/comments/send",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/comments/{commentId}/resolve",
       "gate": "workspace_member"
     },

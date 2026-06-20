@@ -55,12 +55,21 @@ type Handler struct {
 	Upstream *db.Queries
 	Cerebro  *cerebrodb.Queries
 	Bus      *events.Bus
+	// Tasks dispatches the "send comments to agent" flow (FIR-1621) to the
+	// coupled issue or chat. Optional: nil disables the send endpoint with a 503
+	// (e.g. in unit tests that don't exercise dispatch).
+	Tasks TaskDispatcher
+	// Gate is the agent-mention trigger gate (FIR-1621). Optional: nil skips the
+	// permission check (tests); in production it is wired to the same gate the
+	// issue comment path uses.
+	Gate MentionGate
 }
 
-// New constructs the handler. The router wires both query packages plus the
-// event bus (used to fan person-mentions out to the notification listener).
-func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus) *Handler {
-	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus}
+// New constructs the handler. The router wires both query packages, the event
+// bus (used to fan person-mentions out to the notification listener), and the
+// task dispatcher (FIR-1621 send-to-agent).
+func New(upstream *db.Queries, cerebro *cerebrodb.Queries, bus *events.Bus, tasks TaskDispatcher) *Handler {
+	return &Handler{Upstream: upstream, Cerebro: cerebro, Bus: bus, Tasks: tasks}
 }
 
 // notifyNoteMentions handles person (@member) mentions introduced by a note
@@ -134,6 +143,9 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Get("/", h.ListNotes)
 	r.Post("/", h.CreateNote)
 	r.Get("/recent", h.ListRecentNotes)
+	// FIR-1621 — reverse note↔object coupling: list notes that reference a given
+	// object (e.g. an issue), so the issue page shows its coupled notes.
+	r.Get("/by-reference", h.ListNotesForReference)
 	r.Get("/{id}", h.GetNote)
 	r.Put("/{id}", h.UpdateNote)
 	r.Delete("/{id}", h.DeleteNote)
@@ -153,6 +165,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Delete("/{id}/comments/{commentId}", h.DeleteComment)
 	r.Post("/{id}/comments/{commentId}/resolve", h.ResolveComment)
 	r.Post("/{id}/comments/{commentId}/suggestion", h.DecideSuggestion)
+	// FIR-1621 — dispatch selected/all unsent comments to the coupled destination.
+	r.Post("/{id}/comments/send", h.SendComments)
 
 	// Wave 3 / G2 — version history. See versions.go.
 	r.Get("/{id}/versions", h.ListVersions)
@@ -800,6 +814,17 @@ func tsStr(t pgtype.Timestamptz) string {
 		return ""
 	}
 	return t.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+}
+
+// tsPtr is the nullable variant of tsStr: it returns nil for a NULL timestamp
+// (e.g. an unsent comment's sent_to_agent_at) so the client can distinguish
+// "not yet sent" from a real timestamp, rather than collapsing both to "".
+func tsPtr(t pgtype.Timestamptz) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+	return &s
 }
 
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {

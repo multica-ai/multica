@@ -31,6 +31,7 @@ function comment(over: Partial<NoteComment>): NoteComment {
     author_id: "",
     created_at: "",
     updated_at: "",
+    sent_to_agent_at: null,
     ...over,
   };
 }

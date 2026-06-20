@@ -6,7 +6,11 @@ export { NoteInboxBox } from "./note-inbox-box";
 export type { NoteInboxBoxProps } from "./note-inbox-box";
 export { NoteInboxDetail } from "./note-inbox-detail";
 export type { NoteInboxDetailProps } from "./note-inbox-detail";
-export { NoteReferences, NoteAddReferenceDialog } from "./note-references";
+export {
+  NoteReferences,
+  NoteReferencesSection,
+  NoteAddReferenceDialog,
+} from "./note-references";
 export { NoteCreateIssueDialog } from "./note-create-issue-dialog";
 export { NoteFolderCreateDialog } from "./note-folder-create-dialog";
 export { NoteLockBanner } from "./note-lock-banner";

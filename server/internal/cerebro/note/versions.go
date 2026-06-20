@@ -259,6 +259,24 @@ func (h *Handler) requireCanSee(w http.ResponseWriter, r *http.Request, noteID, 
 	return true
 }
 
+// requireCanComment is the comment-endpoint access gate. Unlike requireCanSee
+// (note-only: owner/visibility/share on a cerebro_note row), it also admits a
+// plain document — any artifact, kind != 'note' — so the same comments panel
+// works in the Documents editor (FIR-1621). A note still applies its note rule;
+// a document is gated purely by folder access control (workspace membership is
+// already enforced by the request's workspace middleware).
+func (h *Handler) requireCanComment(w http.ResponseWriter, r *http.Request, artifactID, userUUID pgtype.UUID) bool {
+	allowed, err := h.Cerebro.CanUserCommentOnArtifact(r.Context(), cerebrodb.CanUserCommentOnArtifactParams{
+		ID:    artifactID,
+		PUser: userUUID,
+	})
+	if err != nil || !allowed {
+		writeError(w, http.StatusNotFound, "document not found")
+		return false
+	}
+	return true
+}
+
 func pgText(s string) pgtype.Text {
 	if s == "" {
 		return pgtype.Text{}

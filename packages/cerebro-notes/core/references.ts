@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { safeParseNotes } from "./types";
 
 // NoteReference parses the /api/notes/{id}/references wire shape defensively
 // (API Response Compatibility rule). Mirrors the server NoteReferenceResponse
@@ -68,6 +69,36 @@ export function useNoteReferences(noteId: string | null | undefined) {
     queryFn: async () =>
       safeParseNoteReferences(await api.listNoteReferences(noteId as string)),
     enabled: Boolean(wsId && noteId),
+    staleTime: 15 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+// FIR-1621 — reverse coupling: the notes that point AT a given object (an
+// issue today), so the issue's document list can show its coupled notes. The
+// backend wraps the list in `{notes: []}`; safeParseNotes runs the same Note
+// schema the personal Notes list uses, so coupled notes render identically.
+export const notesForReferenceKeys = {
+  all: (wsId: string) => ["notes-for-reference", wsId] as const,
+  byObject: (wsId: string, object: string, refId: string) =>
+    [...notesForReferenceKeys.all(wsId), object, refId] as const,
+};
+
+export function useNotesForReference(
+  object: string | null | undefined,
+  refId: string | null | undefined,
+) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: notesForReferenceKeys.byObject(wsId, object ?? "", refId ?? ""),
+    queryFn: async () => {
+      const raw = await api.listNotesForReference<{ notes?: unknown }>(
+        object as string,
+        refId as string,
+      );
+      return safeParseNotes(raw?.notes ?? []);
+    },
+    enabled: Boolean(wsId && object && refId),
     staleTime: 15 * 1000,
     placeholderData: (prev) => prev,
   });

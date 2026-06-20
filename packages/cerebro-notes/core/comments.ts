@@ -30,9 +30,33 @@ export const NoteCommentSchema = z.object({
   author_id: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  // FIR-1621 — null while the comment is an unsent local draft; an RFC3339
+  // timestamp once it has been dispatched to the coupled issue/chat agent.
+  sent_to_agent_at: z.string().nullable().default(null),
 });
 
 export type NoteComment = z.infer<typeof NoteCommentSchema>;
+
+// hasAgentMention — the comment body @-tags at least one agent. Mirrors the
+// server's mention parser (`mention://agent/<id>` links). Only tagged comments
+// are dispatched to an agent.
+export function hasAgentMention(body: string): boolean {
+  return /\]\(mention:\/\/agent\//.test(body);
+}
+
+// isUnsentToAgent — a member-authored comment that @-tags an agent and has not
+// yet been dispatched to the coupled destination. A comment that does not tag
+// an agent is local note discussion, never sent — so it is not "unsent". Agent
+// and suggestion rows are never unsent drafts either. Drives the "unsent
+// comments" notice + per-comment badge.
+export function isUnsentToAgent(c: NoteComment): boolean {
+  return (
+    c.author_type === "member" &&
+    c.kind === "comment" &&
+    !c.sent_to_agent_at &&
+    hasAgentMention(c.body)
+  );
+}
 
 export const NoteCommentListSchema = z.array(NoteCommentSchema).catch([]);
 
@@ -136,6 +160,45 @@ export function useResolveNoteComment(noteId: string) {
       commentId: string;
       resolved: boolean;
     }) => api.resolveNoteComment(noteId, commentId, resolved),
+    onSettled: invalidate,
+  });
+}
+
+// FIR-1621 — send unsent comments to the coupled destination. The server
+// echoes the dispatched comments (with their new sent_to_agent_at), how many
+// drafts remain, and where they went, so the UI can update without a refetch.
+// Every field defaulted (API Response Compatibility rule).
+export const SendNoteCommentsResultSchema = z.object({
+  sent: NoteCommentListSchema.default([]),
+  unsent_remaining: z.number().default(0),
+  destination_kind: z.string().default(""),
+  destination_ref_id: z.string().default(""),
+  agents_triggered: z.number().default(0),
+});
+
+export type SendNoteCommentsResult = z.infer<
+  typeof SendNoteCommentsResultSchema
+>;
+
+export function safeParseSendResult(raw: unknown): SendNoteCommentsResult {
+  const r = SendNoteCommentsResultSchema.safeParse(raw);
+  if (r.success) return r.data;
+  console.warn("[cerebro-notes] send-comments response failed validation", r.error);
+  return SendNoteCommentsResultSchema.parse({});
+}
+
+// useSendNoteComments dispatches the selected unsent comments (or all unsent,
+// when commentIds is omitted/empty) to the note's coupled issue/chat. Sending
+// is always an explicit user action — never auto-fired on @-mention.
+export function useSendNoteComments(noteId: string) {
+  const invalidate = useNoteCommentInvalidate(noteId);
+  return useMutation({
+    mutationFn: async (commentIds?: string[]) =>
+      safeParseSendResult(
+        await api.sendNoteComments(noteId, {
+          comment_ids: commentIds && commentIds.length ? commentIds : undefined,
+        }),
+      ),
     onSettled: invalidate,
   });
 }

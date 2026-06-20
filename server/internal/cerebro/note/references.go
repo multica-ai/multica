@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -100,12 +101,9 @@ func (h *Handler) ListReferences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	allowed, err := h.Cerebro.CanUserSeeNote(r.Context(), cerebrodb.CanUserSeeNoteParams{
-		ArtifactID: noteID,
-		OwnerID:    ownerUUID,
-	})
-	if err != nil || !allowed {
-		writeError(w, http.StatusNotFound, "note not found")
+	// FIR-1621 — references list works for documents too (folder-visible), not
+	// just notes, so a coupled document shows its links.
+	if !h.requireCanComment(w, r, noteID, ownerUUID) {
 		return
 	}
 	rows, err := h.Cerebro.ListNoteReferencesByNote(r.Context(), noteID)
@@ -118,6 +116,21 @@ func (h *Handler) ListReferences(w http.ResponseWriter, r *http.Request) {
 		out = append(out, noteRefToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"references": out})
+}
+
+// requireCanCouple gates reference (coupling) writes. A note keeps owner-only
+// reference management; a document — any artifact with no cerebro_note row —
+// falls back to the comment access rule (folder-visible), since it has no single
+// owner. This lets a document be coupled to an issue/chat so its comments can be
+// sent to an agent, just like a note (FIR-1621).
+func (h *Handler) requireCanCouple(w http.ResponseWriter, r *http.Request, artifactID, userUUID pgtype.UUID) bool {
+	if _, err := h.Cerebro.GetNote(r.Context(), artifactID); err == nil {
+		return h.requireOwner(w, r, artifactID, userUUID)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load note")
+		return false
+	}
+	return h.requireCanComment(w, r, artifactID, userUUID)
 }
 
 // CreateReference handles POST /api/notes/{id}/references. Owner-only. UPSERT
@@ -137,7 +150,7 @@ func (h *Handler) CreateReference(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, noteID, ownerUUID) {
+	if !h.requireCanCouple(w, r, noteID, ownerUUID) {
 		return
 	}
 
@@ -204,7 +217,7 @@ func (h *Handler) DeleteReference(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !h.requireOwner(w, r, noteID, ownerUUID) {
+	if !h.requireCanCouple(w, r, noteID, ownerUUID) {
 		return
 	}
 	refUUID, err := util.ParseUUID(chi.URLParam(r, "refId"))

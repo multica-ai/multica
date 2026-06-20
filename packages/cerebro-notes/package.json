@@ -6,6 +6,8 @@
   "exports": {
     ".": "./index.ts",
     "./views": "./views/index.ts",
+    "./views/note-comments-panel": "./views/note-comments-panel.tsx",
+    "./views/note-references": "./views/note-references.tsx",
     "./views/notes-nav-item": "./views/notes-nav-item.tsx",
     "./settings-tabs": "./views/notes-settings-tabs.tsx",
     "./core": "./core/index.ts"

@@ -327,6 +327,7 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}/references/{refId}",
 			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
 			"POST /api/notes/{id}/comments",
+			"POST /api/notes/{id}/comments/send",
 			"PUT /api/notes/{id}/comments/{commentId}",
 			"DELETE /api/notes/{id}/comments/{commentId}",
 			"POST /api/notes/{id}/comments/{commentId}/resolve",

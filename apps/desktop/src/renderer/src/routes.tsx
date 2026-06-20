@@ -47,6 +47,8 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { NotesPage } from "@multica/cerebro-notes/views";
+import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
+import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
 import { ReminderOverview } from "@multica/cerebro-reminders/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
@@ -363,7 +365,40 @@ function DocumentNewRoute() {
 
 function DocumentViewRoute() {
   const params = useParams<{ id: string }>();
-  return <DocumentViewPage artifactId={params.id ?? ""} />;
+  return (
+    <DocumentViewPage
+      artifactId={params.id ?? ""}
+      // FIR-1621 — inject the Notes comments panel so documents (not just notes)
+      // can carry comments. Wired here to avoid a cerebro-artifacts ↔
+      // cerebro-notes package cycle (see web's documents/[id] page).
+      renderComments={({
+        artifactId,
+        body,
+        isOwner,
+        draftQuote,
+        activeAnchorId,
+        editor,
+        onClearDraft,
+        onSelectThread,
+        onClose,
+      }) => (
+        <NoteCommentsPanel
+          noteId={artifactId}
+          noteBody={body}
+          isOwner={isOwner}
+          draftQuote={draftQuote}
+          activeAnchorId={activeAnchorId}
+          editor={editor}
+          onClearDraft={onClearDraft}
+          onSelectThread={onSelectThread}
+          onClose={onClose}
+        />
+      )}
+      renderReferences={({ artifactId }) => (
+        <NoteReferencesSection noteId={artifactId} />
+      )}
+    />
+  );
 }
 
 function DocumentEditRoute() {

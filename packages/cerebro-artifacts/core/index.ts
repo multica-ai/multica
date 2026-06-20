@@ -52,3 +52,11 @@ export {
   replaceAll,
   replaceFirst,
 } from "./document-find-replace";
+export {
+  CoupledNoteSchema,
+  CoupledNotesListSchema,
+  safeParseCoupledNotes,
+  coupledNotesKeys,
+  coupledNotesForIssueOptions,
+  type CoupledNote,
+} from "./coupled-notes";

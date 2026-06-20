@@ -55,6 +55,12 @@ export type CerebroFlagKey =
   // surface — instead of navigating straight away. Default on; off reverts to
   // the deep-link-to-full-page behavior.
   | "cerebro_note_inbox_pane"
+  // FIR-1621 (Jesper): notes/documents as an agent collaboration surface.
+  // Couple a note/document to an issue or chat (via references), accumulate
+  // comments as local drafts, and explicitly send all-or-selected to the agent
+  // (no auto-fire on @-mention). Gates the coupling UI, the "unsent comments"
+  // notice, and the send controls. Default off until QA'd on staging.
+  | "cerebro_note_agent_collab"
   // TECH-3422: Slack-block in the dynamic inbox — a people/DM/channels block
   // with live presence dots and a typing indicator. Default off; the block is
   // only offered in the dynamic inbox's "Add section" menu when this is on.
@@ -259,12 +265,15 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // enforcement is always correct (folders default to "Whole team"); this flag
   // only gates the UI that lets a user restrict a folder.
   cerebro_folder_access: false,
-  // TECH-3556 (Wave 3): OFF until each surface ships + is QA'd on staging.
-  cerebro_note_comments: false,
+  // TECH-3556 (Wave 3): comments + suggestions on notes/documents. ON (FIR-1647):
+  // shared surface + the comment composer can @-tag people/agents/issues.
+  cerebro_note_comments: true,
   cerebro_note_versions: false,
   cerebro_note_lock: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
+  // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.
+  cerebro_note_agent_collab: true,
   cerebro_inbox_slack_block: false,
   cerebro_inbox_secretary: false,
   cerebro_inbox_favorites: true,

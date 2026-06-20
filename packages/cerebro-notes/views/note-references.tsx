@@ -15,7 +15,7 @@
 // than a rewrite.
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link2, ListTodo, X } from "lucide-react";
+import { Link2, ListTodo, Plus, X } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
@@ -219,7 +219,15 @@ export function NoteAddReferenceDialog({
   );
 }
 
-export function NoteReferences({ noteId }: { noteId: string }) {
+export function NoteReferences({
+  noteId,
+  hideHeader = false,
+}: {
+  noteId: string;
+  // When the caller already renders its own "References" header (e.g. the
+  // NoteReferencesSection composite), suppress the built-in one (FIR-1621).
+  hideHeader?: boolean;
+}) {
   const { data: references = [], isLoading } = useNoteReferences(noteId);
   const deleteReference = useDeleteNoteReference(noteId);
   const navigation = useNavigation();
@@ -247,10 +255,12 @@ export function NoteReferences({ noteId }: { noteId: string }) {
 
   return (
     <div data-testid="note-reference-list" className="flex flex-col gap-2">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        <Link2 className="size-3.5" aria-hidden="true" />
-        References
-      </div>
+      {!hideHeader && (
+        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <Link2 className="size-3.5" aria-hidden="true" />
+          References
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         {references.map((reference) => (
@@ -263,6 +273,40 @@ export function NoteReferences({ noteId }: { noteId: string }) {
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+// NoteReferencesSection bundles the references list with an always-available
+// "link to an issue/chat" action + picker dialog, so any surface — a note, a
+// document, a PDF or uploaded file — can be coupled with one self-contained
+// component (FIR-1621, 2.1). Unlike NoteReferences (which hides itself when
+// empty), the section always shows the header + add button so a first coupling
+// can be created.
+export function NoteReferencesSection({ noteId }: { noteId: string }) {
+  const [addOpen, setAddOpen] = React.useState(false);
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+          <Link2 className="size-3.5" aria-hidden="true" />
+          References
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 gap-1 px-2 text-xs"
+          onClick={() => setAddOpen(true)}
+        >
+          <Plus className="size-3.5" /> Link to issue
+        </Button>
+      </div>
+      <NoteReferences noteId={noteId} hideHeader />
+      <NoteAddReferenceDialog
+        noteId={noteId}
+        open={addOpen}
+        onOpenChange={setAddOpen}
+      />
     </div>
   );
 }
