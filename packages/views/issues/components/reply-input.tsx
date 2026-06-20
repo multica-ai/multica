@@ -183,13 +183,6 @@ function ReplyInput({
             className="mt-0.5 shrink-0 hidden sm:block"
           />
           <div className="min-w-0 flex-1">
-            <TriggerTargetBar
-              markdown={markdown}
-              triggerAgentId={triggerAgentId}
-              onTagOwner={(owner) => {
-                editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
-              }}
-            />
             <div
               {...dropZoneProps}
               // CEREBRO-PATCH(reply-input-click-to-focus): JEH-1200 — clicks
@@ -204,6 +197,18 @@ function ReplyInput({
                 "relative min-w-0 flex flex-col rounded-md bg-card min-h-20",
               )}
             >
+              {/* CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — the
+                  "replying to <agent>" bar now overlays the field's top-left
+                  instead of taking its own row above it, so the editor reclaims
+                  that vertical band. Aligned with the expand pill on the right. */}
+              <TriggerTargetBar
+                markdown={markdown}
+                triggerAgentId={triggerAgentId}
+                hasContent={!isEmpty}
+                onTagOwner={(owner) => {
+                  editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
+                }}
+              />
               {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, floats above the field on every surface. */}
               {composerHeight.showExpandToggle && (
                 <ComposerExpandToggle
@@ -218,7 +223,8 @@ function ReplyInput({
                 <div ref={measureRef}>
                   <ContentEditor
                     ref={editorRef}
-                    placeholder={placeholderText}
+                    // CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — drop the generic placeholder while the "replying to <agent>" overlay sits over the empty field, so the two don't collide on the first line.
+                    placeholder={triggerAgentId ? "" : placeholderText}
                     // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
                     defaultValue={draft.defaultValue}
                     onUpdate={(md) => {
@@ -251,6 +257,8 @@ function ReplyInput({
                       onToggle={togglePin}
                       pinLabel={t(($) => $.reply.pin_tooltip)}
                       unpinLabel={t(($) => $.reply.unpin_tooltip)}
+                      // CEREBRO-PATCH(pin-button-spacing): FIR-1625 follow-up — extra right margin so the pin clears the send button and stays visible.
+                      className="mr-1.5"
                     />
                   )}
                   <button

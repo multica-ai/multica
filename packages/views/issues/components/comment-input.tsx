@@ -146,16 +146,6 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
         </div>
       )}
       <div style={floatStyle}>
-        {/* CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — sits
-            above the editor card so the user always sees who an untagged
-            comment will trigger, matching the reply composer. */}
-        <TriggerTargetBar
-          markdown={markdown}
-          triggerAgentId={triggerAgentId}
-          onTagOwner={(owner) => {
-            editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
-          }}
-        />
         <div
           {...dropZoneProps}
           data-testid="comment-input"
@@ -176,6 +166,18 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
             isPinned && "ring-emerald-500/40 shadow-lg",
           )}
         >
+          {/* CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — the
+              "replying to <agent>" bar overlays the field's top-left instead of
+              taking its own row above it, freeing that vertical band for text.
+              Aligned horizontally with the expand pill on the right. */}
+          <TriggerTargetBar
+            markdown={markdown}
+            triggerAgentId={triggerAgentId}
+            hasContent={!isEmpty}
+            onTagOwner={(owner) => {
+              editorRef.current?.insertText(` ${memberMentionMarkdown(owner)} `);
+            }}
+          />
           {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — translucent expand pill, floats above the field on every surface. */}
           {composerHeight.showExpandToggle && (
             <ComposerExpandToggle
@@ -193,7 +195,8 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
               // for the new context (autofocus is read once at create time).
               key={issueId}
               ref={editorRef}
-              placeholder={t(($) => $.comment.leave_comment_placeholder)}
+              // CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — drop the generic placeholder while the "replying to <agent>" overlay sits over the empty field, so the two don't collide on the first line.
+              placeholder={triggerAgentId ? "" : t(($) => $.comment.leave_comment_placeholder)}
               // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
               defaultValue={draft.defaultValue}
               onUpdate={(md) => {

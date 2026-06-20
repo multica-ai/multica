@@ -11,6 +11,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, UserPlus } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { getCurrentWsId } from "@multica/core/platform";
 import { useAuthStore } from "@multica/core/auth";
@@ -42,9 +43,16 @@ interface TriggerTargetBarProps {
    * mention into the editor at the caret.
    */
   onTagOwner: (owner: MemberWithUser) => void;
+  /**
+   * CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — when the editor
+   * already has text, the bar overlays the first line, so it fades to
+   * translucent (and back to full opacity on hover) to keep the text behind
+   * it readable. `false` / empty editor keeps it fully opaque.
+   */
+  hasContent?: boolean;
 }
 
-function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner }: TriggerTargetBarProps) {
+function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner, hasContent = false }: TriggerTargetBarProps) {
   const { t } = useT("issues");
   const wsId = getCurrentWsId();
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -72,7 +80,17 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner }: TriggerTarge
   if (targetAgents.length === 0) return null;
 
   return (
-    <div className="mb-1 flex min-h-7 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+    // CEREBRO-PATCH(trigger-bar-overlay): FIR-1625 follow-up — overlay the
+    // field's top-left (clear of the expand pill on the right) instead of
+    // taking its own row above the field, so the editor reclaims that vertical
+    // band. `pointer-events-none` lets clicks fall through to the editor behind;
+    // the interactive chips re-enable pointer events. Fades when text is under it.
+    <div
+      className={cn(
+        "pointer-events-none absolute left-2 top-1 z-10 flex max-w-[68%] items-center gap-1.5 overflow-hidden text-[11px] text-muted-foreground transition-opacity",
+        hasContent ? "opacity-40 hover:opacity-100" : "opacity-100",
+      )}
+    >
       <span className="shrink-0 font-medium">{t(($) => $.reply.target_label)}</span>
       {targetAgents.map((agent) => {
         const decision = canTriggerPrivateAgentMention(agent, { userId, role: myRole });
@@ -88,7 +106,7 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner }: TriggerTarge
                 render={
                   <button
                     type="button"
-                    className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-red-500/45 bg-red-500/10 px-1.5 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-500/15 dark:text-red-300"
+                    className="pointer-events-auto inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-red-500/45 bg-red-500/10 px-1.5 py-0.5 font-medium text-red-700 transition-colors hover:bg-red-500/15 dark:text-red-300"
                     aria-label={`${agent.name} ${triggerInactiveLabel}`}
                   >
                     <AlertTriangle className="size-3 shrink-0" />
@@ -133,7 +151,7 @@ function TriggerTargetBar({ markdown, triggerAgentId, onTagOwner }: TriggerTarge
         return (
           <span
             key={agent.id}
-            className="inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300"
+            className="pointer-events-auto inline-flex min-w-0 max-w-full items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300"
           >
             <ActorAvatar actorType="agent" actorId={agent.id} size={14} />
             <span className="truncate">{agent.name}</span>
