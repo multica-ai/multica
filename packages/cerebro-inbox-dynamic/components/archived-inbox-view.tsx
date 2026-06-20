@@ -4,19 +4,11 @@
 // into the same detail panel as the live inbox.
 "use client";
 
-import { useMemo } from "react";
 import { ArrowLeft } from "lucide-react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { api } from "@multica/core/api";
-import {
-  inboxKeys,
-  ARCHIVED_INBOX_PAGE_SIZE,
-  inboxItemSortTime,
-} from "@multica/core/inbox/queries";
-import { archivedChatSessionsOptions } from "@multica/core/chat/queries";
 import { useUnarchiveInbox } from "@multica/cerebro-inbox";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import type { DynInboxEntry } from "../section-filter";
+import { useArchivedInboxEntries } from "../use-archived-entries";
 import { DynamicInboxRow } from "./dynamic-inbox-row";
 
 export interface ArchivedInboxViewProps {
@@ -31,28 +23,9 @@ function entryKey(entry: DynInboxEntry): string {
 }
 
 export function ArchivedInboxView({ wsId, selectedKey, onSelect, onBack }: ArchivedInboxViewProps) {
-  const archived = useInfiniteQuery({
-    queryKey: inboxKeys.archivedList(wsId),
-    queryFn: ({ pageParam }) =>
-      api.listInbox({ archived: true, limit: ARCHIVED_INBOX_PAGE_SIZE, offset: pageParam }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, allPages) =>
-      lastPage.length === ARCHIVED_INBOX_PAGE_SIZE ? allPages.length * ARCHIVED_INBOX_PAGE_SIZE : undefined,
-  });
-  const { data: archivedChats = [] } = useQuery(archivedChatSessionsOptions(wsId));
+  const { entries, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useArchivedInboxEntries(wsId);
   const unarchive = useUnarchiveInbox();
-
-  const items = useMemo(() => archived.data?.pages.flat() ?? [], [archived.data]);
-  const entries = useMemo<DynInboxEntry[]>(() => {
-    const out: DynInboxEntry[] = [];
-    for (const item of items) {
-      out.push({ kind: "notif", id: item.id, time: inboxItemSortTime(item), item });
-    }
-    for (const session of archivedChats) {
-      out.push({ kind: "chat", id: session.id, time: new Date(session.updated_at).getTime(), session });
-    }
-    return out.sort((a, b) => b.time - a.time);
-  }, [items, archivedChats]);
 
   const onUnarchive = (entry: DynInboxEntry) => {
     // Chats unarchive through their own row menu (CerebroChatSessionRowActions);
@@ -75,7 +48,7 @@ export function ArchivedInboxView({ wsId, selectedKey, onSelect, onBack }: Archi
         <span className="text-xs text-muted-foreground">{entries.length}</span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {archived.isLoading ? (
+        {isLoading ? (
           <p className="px-3 py-3 text-sm text-muted-foreground">Loading…</p>
         ) : entries.length === 0 ? (
           <p className="px-3 py-3 text-sm text-muted-foreground">No archived messages.</p>
@@ -94,15 +67,15 @@ export function ArchivedInboxView({ wsId, selectedKey, onSelect, onBack }: Archi
             ))}
           </div>
         )}
-        {archived.hasNextPage && (
+        {hasNextPage && (
           <div className="p-3">
             <button
               type="button"
-              onClick={() => archived.fetchNextPage()}
-              disabled={archived.isFetchingNextPage}
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
               className="w-full rounded-md border border-border py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
             >
-              {archived.isFetchingNextPage ? "Loading…" : "Load more"}
+              {isFetchingNextPage ? "Loading…" : "Load more"}
             </button>
           </div>
         )}

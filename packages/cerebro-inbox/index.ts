@@ -17,6 +17,13 @@ export {
   ReminderSheet,
 } from "./components/cerebro-inbox-row-actions";
 export { useCerebroInboxStrings } from "./strings";
+// FIR-1645 — per-row context that adds the "unarchive & mark unread" action to
+// archived rows in the dynamic inbox's Archived block.
+export {
+  ArchivedRowActionsProvider,
+  useArchivedRowActions,
+  type ArchivedRowActions,
+} from "./archived-row-actions";
 export { CerebroUnarchiveToolbarButton } from "./components/cerebro-unarchive-toolbar-button";
 // TECH-3413 — classic vs dynamic inbox mode (per-user, server-synced) + the
 // toolbar button that switches the classic inbox into the dynamic inbox.

@@ -26,4 +26,12 @@ describe("pickCerebroInboxStrings", () => {
     expect(pickCerebroInboxStrings("fr").unarchive_label).toBe("Unarchive");
     expect(pickCerebroInboxStrings(undefined).unarchive_label).toBe("Unarchive");
   });
+
+  // FIR-1645 — the Archived block's second restore action ("unarchive & mark
+  // unread") is localized in every table, never silently English-only.
+  it("localizes the unarchive-and-mark-unread label per locale", () => {
+    expect(pickCerebroInboxStrings("en").unarchive_unread_label).toBe("Unarchive & mark unread");
+    expect(pickCerebroInboxStrings("da").unarchive_unread_label).toBe("Gendan & marker som ulæst");
+    expect(pickCerebroInboxStrings("zh-Hans").unarchive_unread_label).toBe("取消归档并标为未读");
+  });
 });

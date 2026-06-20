@@ -60,7 +60,12 @@ export type SectionKind =
   | "secretary"
   // TECH-3579 — Favorites: only the conversations the user has starred. The
   // same predicate also floats favorites to the top of the "All messages" box.
-  | "favorites";
+  | "favorites"
+  // FIR-1645 — Archived: the user's archived messages as a foldable box (search,
+  // sort, group-by-type) instead of the full-screen ⋯ → "Show archived" view.
+  // Rendered by a dedicated component (ArchivedInboxBlock) over its own archived
+  // queries, like the Chat block — not a slice of the live merged feed.
+  | "archived";
 
 /** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
  *  widened to the full classic-inbox set (project / agent / type) so the "All
@@ -237,6 +242,8 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "team", label: "Chat" },
   // TECH-3557 — only surfaced when the cerebro_inbox_secretary flag is on.
   { kind: "secretary", label: "Secretary" },
+  // FIR-1645 — Archived: always available in the dynamic inbox (no extra flag).
+  { kind: "archived", label: "Archived" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {

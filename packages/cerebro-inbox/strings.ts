@@ -18,6 +18,9 @@ type StringTable = {
   archive_label: string;
   unarchive_tooltip: string;
   unarchive_label: string;
+  // FIR-1645 — second archived-row action: restore AND force the row back to
+  // unread in one step. Used by the dynamic inbox's Archived block.
+  unarchive_unread_label: string;
   swipe_unarchive: string;
   more_actions: string;
   mark_read: string;
@@ -91,6 +94,7 @@ const en: StringTable = {
   archive_label: "Archive",
   unarchive_tooltip: "Unarchive",
   unarchive_label: "Unarchive",
+  unarchive_unread_label: "Unarchive & mark unread",
   swipe_unarchive: "Unarchive",
   more_actions: "More actions",
   mark_read: "Mark as read",
@@ -138,6 +142,7 @@ const da: StringTable = {
   archive_label: "Arkivér",
   unarchive_tooltip: "Gendan",
   unarchive_label: "Gendan",
+  unarchive_unread_label: "Gendan & marker som ulæst",
   swipe_unarchive: "Gendan",
   more_actions: "Flere handlinger",
   mark_read: "Marker som læst",
@@ -189,6 +194,7 @@ const zhHans: StringTable = {
   archive_label: "归档",
   unarchive_tooltip: "取消归档",
   unarchive_label: "取消归档",
+  unarchive_unread_label: "取消归档并标为未读",
   swipe_unarchive: "取消归档",
   more_actions: "更多操作",
   mark_read: "标为已读",

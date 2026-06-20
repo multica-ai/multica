@@ -92,6 +92,9 @@ import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
 import { DynamicInboxSection } from "./dynamic-inbox-section";
 import { ArchivedInboxView } from "./archived-inbox-view";
+// FIR-1645 — Archived box: archived messages as a foldable block (its own
+// archived queries), dispatched here like the Chat block.
+import { ArchivedInboxBlock } from "./archived-inbox-block";
 import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
@@ -555,9 +558,11 @@ export function DynamicInbox() {
     const section: InboxSectionConfig = {
       id,
       kind,
-      groupBy: kind === "act_now" ? "action" : "none",
+      groupBy: kind === "act_now" ? "action" : kind === "archived" ? "type" : "none",
       sort: "newest",
       ...(kind === "project" ? { projectId: projects[0]?.id } : {}),
+      // FIR-1645 — the Archived block starts folded by default.
+      ...(kind === "archived" ? { defaultCollapsed: true } : {}),
     };
     // TECH-3502 #5 — new boxes are inserted at the TOP so they're immediately
     // visible; flash a ring around the new box and scroll the list up so the
@@ -1107,6 +1112,21 @@ export function DynamicInbox() {
                             }
                             onOpenAgentChat={handleAgentChatStarted}
                             onOpenAgentSession={handleOpenAgentSession}
+                            onRemove={() => removeSection(section.id)}
+                          />
+                        </div>
+                      ) : section.kind === "archived" ? (
+                        // FIR-1645 — archived messages as a foldable block over
+                        // their own archived queries.
+                        <div className="relative">
+                          <ArchivedInboxBlock
+                            wsId={wsId}
+                            section={section}
+                            selectedKey={selectedKey}
+                            query={query}
+                            dragHandle={handle}
+                            onSelect={onSelect}
+                            onChange={changeSection}
                             onRemove={() => removeSection(section.id)}
                           />
                         </div>

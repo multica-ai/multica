@@ -53,6 +53,7 @@ import {
   toDateTimeLocalValue,
 } from "../mute-time";
 import { useCerebroInboxStrings } from "../strings";
+import { useArchivedRowActions } from "../archived-row-actions";
 import {
   ARCHIVE_HOLD_COMMIT_MS,
   DIRECTION_DECIDE_PX,
@@ -1355,12 +1356,87 @@ export function CerebroUnarchiveAction({
   const enabled = useFeatureFlag("cerebro_inbox_row_actions");
   const isMobile = useIsMobile();
   const strings = useCerebroInboxStrings();
+  // FIR-1645 — inside the dynamic inbox's Archived block, rows carry a second
+  // restore action ("unarchive and mark unread") supplied via context. When
+  // present, the single restore button becomes a small two-action menu.
+  const archivedRowActions = useArchivedRowActions();
+
+  if (archivedRowActions) {
+    return (
+      <UnarchiveActionMenu
+        onUnarchive={onUnarchive}
+        onUnarchiveUnread={archivedRowActions.onUnarchiveUnread}
+        strings={strings}
+      />
+    );
+  }
 
   if (!enabled || !isMobile) {
     return <SimpleUnarchiveButton onUnarchive={onUnarchive} />;
   }
 
   return <SwipeUnarchiveOnly onUnarchive={onUnarchive} strings={strings} />;
+}
+
+/**
+ * FIR-1645 — the archived-row restore button as a two-action dropdown:
+ * "Unarchive" and "Unarchive & mark unread". Same hover-reveal placement as
+ * SimpleUnarchiveButton so the affordance lines up with the rest of the row.
+ * The trigger stops click propagation so opening the menu never selects/opens
+ * the row underneath.
+ */
+function UnarchiveActionMenu({
+  onUnarchive,
+  onUnarchiveUnread,
+  strings,
+}: {
+  onUnarchive: () => void;
+  onUnarchiveUnread: () => void;
+  strings: ReturnType<typeof useCerebroInboxStrings>;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <span
+            role="button"
+            tabIndex={-1}
+            title={strings.unarchive_label}
+            aria-label={strings.unarchive_label}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            // Always visible on touch (no hover); hover-revealed on desktop,
+            // and kept visible there while the menu is open.
+            className="absolute right-2 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground sm:hidden sm:group-hover:inline-flex data-[popup-open]:sm:inline-flex"
+          />
+        }
+      >
+        <ArchiveRestore className="h-3.5 w-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnarchive();
+          }}
+        >
+          <ArchiveRestore className="mr-2 h-4 w-4" />
+          {strings.unarchive_label}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onUnarchiveUnread();
+          }}
+        >
+          <MailWarning className="mr-2 h-4 w-4" />
+          {strings.unarchive_unread_label}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 function SimpleUnarchiveButton({ onUnarchive }: { onUnarchive: () => void }) {

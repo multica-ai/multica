@@ -88,6 +88,31 @@ so there is no hover dependency.
 - Gated by the `cerebro_inbox_favorites` flag (default on). The classic inbox
   has no favorite affordance.
 
+### Archived block — dynamic inbox only (FIR-1645)
+
+Archived messages have two surfaces in the dynamic inbox:
+
+- The full-screen **Archived view** reached from the ⋯ → "Show archived" menu
+  (`ArchivedInboxView`, TECH-3541 #3) — unchanged.
+- A foldable **Archived box** added from "+ Add section"
+  (`ArchivedInboxBlock`, `packages/cerebro-inbox-dynamic/components/archived-inbox-block.tsx`).
+  It is **not** part of the merged inbox feed — like the Chat block it renders
+  over its own archived queries via the shared `useArchivedInboxEntries` hook
+  (archived inbox notifications + archived chats). It **starts folded** by
+  default and offers an in-block search, sort (newest/oldest), and
+  group-by-type (Issues / Channels / Chat). It needs no extra flag — it lives
+  inside the existing `cerebro_inbox_dynamic` inbox.
+
+Unlike every other archived row (single "unarchive" via `CerebroUnarchiveAction`),
+an inbox-message row **inside the Archived block** carries a **second** restore
+action — "**unarchive & mark unread**". Rather than thread a prop through the
+upstream `InboxListItem`, the block wraps each message row in
+`ArchivedRowActionsProvider` (`packages/cerebro-inbox/archived-row-actions.tsx`)
+and `CerebroUnarchiveAction` reads that context to upgrade its single restore
+button into a two-action menu. Absent the provider (the classic archived view),
+the button stays a plain single "unarchive". Chat rows keep their own restore
+flow and get no "mark unread" affordance.
+
 ---
 
 ## Axis 2 — Notification types (what happened, on a `notif` row)
