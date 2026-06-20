@@ -70,7 +70,7 @@ describe("OnboardingPage — cerebro_disable_onboarding", () => {
   it("redirects a 0-workspace user to /workspaces/new and never renders OnboardingFlow", async () => {
     render(<OnboardingPage />);
     await waitFor(() => expect(state.replace).toHaveBeenCalled());
-    expect(state.replace.mock.calls[0][0]).toContain("/workspaces/new");
+    expect(state.replace.mock.calls[0]![0]).toContain("/workspaces/new");
     expect(screen.queryByTestId("onboarding-flow")).toBeNull();
   });
 
@@ -78,7 +78,7 @@ describe("OnboardingPage — cerebro_disable_onboarding", () => {
     state.workspaces = [{ id: "w1", slug: "firtal" }];
     render(<OnboardingPage />);
     await waitFor(() => expect(state.replace).toHaveBeenCalled());
-    expect(state.replace.mock.calls[0][0]).toContain("firtal");
+    expect(state.replace.mock.calls[0]![0]).toContain("firtal");
     expect(screen.queryByTestId("onboarding-flow")).toBeNull();
   });
 
