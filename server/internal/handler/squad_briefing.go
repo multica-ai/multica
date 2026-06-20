@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -25,6 +26,8 @@ Your responsibilities, in order:
 
 1. **Read the issue** (title, description, latest comments, acceptance
    criteria) and decide which squad member is best suited to do the work.
+   Match the task to each member's listed **skills** and role in the Squad
+   Roster below — prefer the member whose skills cover the work.
 2. **Delegate by @mention.** Post a single comment on this issue that
    @mentions the chosen member(s) and tells them what to do.
    - **Be terse.** Every Multica agent already has full context of the
@@ -178,7 +181,9 @@ func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) strin
 		if ag.ArchivedAt.Valid {
 			return ""
 		}
-		return formatRosterRow(ag.Name, "agent", role, formatMention(ag.Name, "agent", id))
+		// Agents carry skills; surfacing them lets the leader delegate by
+		// capability instead of guessing from the free-text role label.
+		return formatRosterRow(ag.Name, "agent", role, agentSkillsRosterSegment(ctx, q, m.MemberID), formatMention(ag.Name, "agent", id))
 	case "member":
 		user, err := q.GetUser(ctx, m.MemberID)
 		if err != nil {
@@ -186,14 +191,38 @@ func renderMemberRow(ctx context.Context, q *db.Queries, m db.SquadMember) strin
 		}
 		// Mention syntax for humans uses the user_id (matches the rest of
 		// the product — see util.MentionRe and frontend mention payloads).
+		// Humans have no Multica skills, so no skills segment is rendered.
 		userID := util.UUIDToString(m.MemberID)
-		return formatRosterRow(user.Name, "member (human)", role, formatMention(user.Name, "member", userID))
+		return formatRosterRow(user.Name, "member (human)", role, "", formatMention(user.Name, "member", userID))
 	default:
 		return ""
 	}
 }
 
-func formatRosterRow(name, kind, role, mention string) string {
+// agentSkillsRosterSegment returns the roster segment describing an agent
+// member's assigned skills. "skills: a, b" when the agent has skills (the
+// names are pre-sorted by ListAgentSkillSummaries), "no skills assigned" when
+// it has none so the leader knows the capability is genuinely absent, and ""
+// only when the lookup fails — a transient DB error degrades to the prior
+// name+role row rather than asserting a misleading "no skills". Builtin
+// multica-* skills are added at runtime (not in agent_skill) and are
+// deliberately omitted; the leader cares about the configured capabilities.
+func agentSkillsRosterSegment(ctx context.Context, q *db.Queries, agentID pgtype.UUID) string {
+	skills, err := q.ListAgentSkillSummaries(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	if len(skills) == 0 {
+		return "no skills assigned"
+	}
+	names := make([]string, 0, len(skills))
+	for _, s := range skills {
+		names = append(names, s.Name)
+	}
+	return "skills: " + strings.Join(names, ", ")
+}
+
+func formatRosterRow(name, kind, role, skills, mention string) string {
 	var sb strings.Builder
 	sb.WriteString("- ")
 	sb.WriteString(name)
@@ -203,6 +232,10 @@ func formatRosterRow(name, kind, role, mention string) string {
 		sb.WriteString(`, role: "`)
 		sb.WriteString(role)
 		sb.WriteString(`"`)
+	}
+	if skills != "" {
+		sb.WriteString(" — ")
+		sb.WriteString(skills)
 	}
 	sb.WriteString(" — `")
 	sb.WriteString(mention)
