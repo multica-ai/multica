@@ -6,6 +6,7 @@ import { ArrowLeft, LogOut } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Workspace } from "@multica/core/types";
 import { useConfigStore } from "@multica/core/config";
+import { useAuthStore } from "@multica/core/auth";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
 import { useT } from "../i18n";
@@ -34,6 +35,8 @@ export function NewWorkspacePage({
   const { t } = useT("workspace");
   const logout = useLogout();
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
+  // CEREBRO-PATCH(new-workspace-page-cerebro): surface signed-in email next to Log out so a wrong-account user spots it
+  const userEmail = useAuthStore((s) => s.user?.email);
 
   return (
     <div className="relative flex min-h-svh flex-col bg-background">
@@ -49,15 +52,25 @@ export function NewWorkspacePage({
           {t(($) => $.new_page.back)}
         </Button>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        className="absolute top-16 right-4 sm:right-12 text-muted-foreground hover:text-destructive"
-        onClick={logout}
-      >
-        <LogOut />
-        {t(($) => $.new_page.log_out)}
-      </Button>
+      <div className="absolute top-16 right-4 sm:right-12 flex flex-col items-end gap-0.5">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-destructive"
+          onClick={logout}
+        >
+          <LogOut />
+          {t(($) => $.new_page.log_out)}
+        </Button>
+        {userEmail && (
+          <span
+            className="max-w-[220px] truncate text-xs text-muted-foreground"
+            title={userEmail}
+          >
+            {userEmail}
+          </span>
+        )}
+      </div>
 
       <div className="flex flex-1 flex-col items-center justify-center px-6 pb-12">
         <div className="flex w-full max-w-md flex-col items-center gap-6">
