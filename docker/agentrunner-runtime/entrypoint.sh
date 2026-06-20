@@ -3,10 +3,10 @@ set -euo pipefail
 
 # ── Mandatory env ─────────────────────────────────────────────────────────────
 : "${MULTICA_PAT:?MULTICA_PAT required}"
-: "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID required}"
+: "${MULTICA_WORKSPACE_ID:?MULTICA_WORKSPACE_ID required}"
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY required}"
 : "${OPENAI_API_KEY:?OPENAI_API_KEY required}"
-: "${WORKSPACE_SLUG:?WORKSPACE_SLUG required (Downward API: metadata.namespace)}"
+: "${WORKSPACE_SLUG:?WORKSPACE_SLUG required}"
 
 # ── GitHub credential helper (Platform Bot GitHub App) ───────────────────────
 # The runner mints short-lived installation tokens from the Platform Bot app at
@@ -53,13 +53,11 @@ cat > "${config_dir}/config.json" <<JSON
   "server_url": "${MULTICA_SERVER_URL}",
   "app_url": "${MULTICA_SERVER_URL}",
   "token": "${MULTICA_PAT}",
-  "workspace_id": "${AGENTFARM_WORKSPACE_ID}"
+  "workspace_id": "${MULTICA_WORKSPACE_ID}"
 }
 JSON
 
-# Trim agentrunner- prefix: namespace is "agentrunner-<slug>", device name must match.
-SLUG="${WORKSPACE_SLUG#agentrunner-}"
-DEVICE_NAME="agentrunner-${SLUG}"
+DEVICE_NAME="agentrunner-${WORKSPACE_SLUG}"
 
 # ── Provision agents once daemon registers (waits in background) ──────────────
 /usr/local/bin/agentfarm-bootstrap.sh &

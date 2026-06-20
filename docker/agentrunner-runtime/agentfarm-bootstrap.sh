@@ -5,8 +5,7 @@
 # and the daemon is started in the foreground. Waits for the daemon to register
 # its claude runtime, then flips visibility and creates agents from templates.
 #
-# Reads from secret bag (env):   MULTICA_PAT, AGENTFARM_WORKSPACE_ID, ANTHROPIC_API_KEY, OPENAI_API_KEY
-# Reads from Downward API (env): WORKSPACE_SLUG (set from metadata.namespace)
+# Reads from secret bag (env):   MULTICA_PAT, MULTICA_WORKSPACE_ID, WORKSPACE_SLUG, ANTHROPIC_API_KEY, OPENAI_API_KEY
 # Optional from secret bag:      JIRA_EMAIL, JIRA_PAT
 #                                (both together trigger acli auth; either missing skips)
 #                                DEFAULT_GIT_REPO (comma-separated URLs; seeds workspace repos)
@@ -25,14 +24,12 @@ readonly LITELLM_BASE_URL="https://llmproxy.g2.com"
 
 # ── 0. Sanity-check required env. Fail loud over silent partial provisioning. ─
 : "${MULTICA_PAT:?MULTICA_PAT missing from secret bag}"
-: "${AGENTFARM_WORKSPACE_ID:?AGENTFARM_WORKSPACE_ID missing from secret bag}"
+: "${MULTICA_WORKSPACE_ID:?MULTICA_WORKSPACE_ID missing from secret bag}"
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY missing from secret bag}"
 : "${OPENAI_API_KEY:?OPENAI_API_KEY missing from secret bag}"
-: "${WORKSPACE_SLUG:?WORKSPACE_SLUG missing — must be injected via Downward API (fieldRef: metadata.namespace)}"
+: "${WORKSPACE_SLUG:?WORKSPACE_SLUG missing from secret bag}"
 
-# Trim agentrunner- prefix: namespace is "agentrunner-<slug>", device name must match.
-SLUG="${WORKSPACE_SLUG#agentrunner-}"
-DEVICE_NAME="agentrunner-${SLUG}"
+DEVICE_NAME="agentrunner-${WORKSPACE_SLUG}"
 
 # ── 1. Optional: acli Atlassian auth (jira). ─────────────────────────────────
 #    --token reads from stdin — keeps JIRA_PAT off argv and /proc/<pid>/cmdline.
@@ -78,7 +75,7 @@ echo "agentfarm-bootstrap: claude runtime registered: ${CLAUDE_RUNTIME_ID}"
 while IFS= read -r _rid; do
   curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/runtimes/${_rid}" \
     -H "Authorization: Bearer ${MULTICA_PAT}" \
-    -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}" \
+    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
     -H "Content-Type: application/json" \
     -d '{"visibility":"public"}'
   echo "agentfarm-bootstrap: runtime ${_rid} set to public"
@@ -170,9 +167,9 @@ else
   )"
 
   set +e
-  _get_resp="$(curl -fsS "${MULTICA_SERVER_URL}/api/workspaces/${AGENTFARM_WORKSPACE_ID}" \
+  _get_resp="$(curl -fsS "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
     -H "Authorization: Bearer ${MULTICA_PAT}" \
-    -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}")"
+    -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}")"
   _rc=$?
   set -e
 
@@ -191,9 +188,9 @@ else
       echo "agentfarm-bootstrap: repos already seeded"
     else
       set +e
-      curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/workspaces/${AGENTFARM_WORKSPACE_ID}" \
+      curl -fsS -X PATCH "${MULTICA_SERVER_URL}/api/workspaces/${MULTICA_WORKSPACE_ID}" \
         -H "Authorization: Bearer ${MULTICA_PAT}" \
-        -H "X-Workspace-ID: ${AGENTFARM_WORKSPACE_ID}" \
+        -H "X-Workspace-ID: ${MULTICA_WORKSPACE_ID}" \
         -H "Content-Type: application/json" \
         -d "{\"repos\": ${_desired_json}}"
       _rc=$?
