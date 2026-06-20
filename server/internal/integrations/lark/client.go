@@ -48,9 +48,11 @@ type APIClient interface {
 	// card (schema 2.0) with a single `tag: "markdown"` body element.
 	// This is the path the chat-reply router takes when the body
 	// contains markdown syntax (fenced code blocks, headings, lists,
-	// tables, etc.) — Lark renders the markdown into formatted text
+	// tables, etc.) — Lark renders most markdown into formatted text
 	// rather than leaving raw `**bold**` / `# heading` characters in
-	// the user's transcript. Returns the card's message_id.
+	// the user's transcript. Table blocks are downgraded before send
+	// because Feishu/Lark caps card table elements. Returns the card's
+	// message_id.
 	SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error)
 
 	// SendBindingPromptCard is the dedicated "you need to bind"
