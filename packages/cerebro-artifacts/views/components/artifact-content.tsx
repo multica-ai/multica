@@ -119,13 +119,12 @@ export function ArtifactContent({
   }
 
   if (renderedBody) {
-    return (
-      <div
-        className={cn("prose prose-sm max-w-none dark:prose-invert", className)}
-      >
-        <ArtifactBody body={renderedBody} />
-      </div>
-    );
+    // Markdown documents render through ReadonlyContent (the shared
+    // `.rich-text-editor` pipeline), which owns its own typography — so no
+    // surrounding `prose` wrapper here, otherwise the two style systems
+    // double up on margins. This matches the editable document view, which
+    // already renders through the same Tiptap-based `.rich-text-editor`.
+    return <ArtifactBody body={renderedBody} className={className} />;
   }
 
   return <p className="text-sm text-muted-foreground">No content.</p>;

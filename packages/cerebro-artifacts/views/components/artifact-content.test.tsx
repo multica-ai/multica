@@ -2,15 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Artifact } from "@multica/core/types";
 
-vi.mock("@multica/views/common/markdown", () => ({
-  Markdown: ({ children }: { children: string }) => (
-    <div data-testid="md">{children}</div>
-  ),
-}));
-
-vi.mock("./mermaid-diagram", () => ({
-  MermaidDiagram: ({ code }: { code: string }) => (
-    <div data-testid="mermaid">{code}</div>
+// Markdown documents now render through the shared ReadonlyContent renderer
+// (via ArtifactBody). Stub it so the test asserts the body passed through
+// without exercising the full markdown / mermaid / lightbox pipeline.
+vi.mock("@multica/views/editor", () => ({
+  ReadonlyContent: ({ content }: { content: string }) => (
+    <div data-testid="md">{content}</div>
   ),
 }));
 
