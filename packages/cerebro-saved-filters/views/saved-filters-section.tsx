@@ -8,6 +8,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -71,53 +72,61 @@ export function SavedFiltersMenuSection() {
 
   return (
     <>
-      <DropdownMenuLabel className="flex items-center gap-1.5 text-muted-foreground">
-        <Bookmark className="size-3.5" />
-        Saved filters
-      </DropdownMenuLabel>
+      {/*
+       * DropdownMenuLabel maps to Base UI Menu.GroupLabel, which throws
+       * "MenuGroupContext is missing" (Base UI error #31) unless it sits inside
+       * a Menu.Group. Wrap the whole section in DropdownMenuGroup — every other
+       * labelled section in the Filter menu does the same.
+       */}
+      <DropdownMenuGroup>
+        <DropdownMenuLabel className="flex items-center gap-1.5 text-muted-foreground">
+          <Bookmark className="size-3.5" />
+          Saved filters
+        </DropdownMenuLabel>
 
-      {filters.length === 0 ? (
-        <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-          No saved filters yet
-        </DropdownMenuItem>
-      ) : (
-        filters.map((f) => {
-          const active = snapshotsEqual(current, f.filterState);
-          return (
-            <DropdownMenuItem
-              key={f.id}
-              className="group flex items-center gap-2"
-              onClick={() => storeApi.setState(snapshotToState(f.filterState))}
-            >
-              <Check
-                className={active ? "size-3.5 text-primary" : "size-3.5 opacity-0"}
-              />
-              <span className="flex-1 truncate">{f.name}</span>
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-label={`Delete ${f.name}`}
-                className="ml-1 hidden rounded-sm p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:inline-flex"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  del.mutate(f.id, {
-                    onError: () => toast.error("Failed to delete filter"),
-                  });
-                }}
-                onPointerDown={(e) => e.stopPropagation()}
+        {filters.length === 0 ? (
+          <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+            No saved filters yet
+          </DropdownMenuItem>
+        ) : (
+          filters.map((f) => {
+            const active = snapshotsEqual(current, f.filterState);
+            return (
+              <DropdownMenuItem
+                key={f.id}
+                className="group flex items-center gap-2"
+                onClick={() => storeApi.setState(snapshotToState(f.filterState))}
               >
-                <Trash2 className="size-3.5" />
-              </span>
-            </DropdownMenuItem>
-          );
-        })
-      )}
+                <Check
+                  className={active ? "size-3.5 text-primary" : "size-3.5 opacity-0"}
+                />
+                <span className="flex-1 truncate">{f.name}</span>
+                <span
+                  role="button"
+                  tabIndex={-1}
+                  aria-label={`Delete ${f.name}`}
+                  className="ml-1 hidden rounded-sm p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:inline-flex"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    del.mutate(f.id, {
+                      onError: () => toast.error("Failed to delete filter"),
+                    });
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
+                  <Trash2 className="size-3.5" />
+                </span>
+              </DropdownMenuItem>
+            );
+          })
+        )}
 
-      <DropdownMenuItem onClick={onSave}>
-        <Plus className="size-3.5" />
-        <span>Save current filter…</span>
-      </DropdownMenuItem>
+        <DropdownMenuItem onClick={onSave}>
+          <Plus className="size-3.5" />
+          <span>Save current filter…</span>
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
 
       <DropdownMenuSeparator />
     </>
