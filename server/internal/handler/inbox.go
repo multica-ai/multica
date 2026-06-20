@@ -41,6 +41,7 @@ type InboxItemResponse struct {
 	Read          bool            `json:"read"`
 	Archived      bool            `json:"archived"`
 	MutedUntil    *string         `json:"muted_until"`
+	ArchivedAt    *string         `json:"archived_at"` // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686 — archive time; sort key for the cerebro archived block.
 	CreatedAt     string          `json:"created_at"`
 	IssueStatus   *string         `json:"issue_status"`
 	ActorType     *string         `json:"actor_type"`
@@ -149,6 +150,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 				Read:          item.Read,
 				Archived:      item.Archived,
 				MutedUntil:    timestampToPtr(item.MutedUntil), // CEREBRO-PATCH(cerebro-inbox-fields)
+				ArchivedAt:    timestampToPtr(item.ArchivedAt), // CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686
 				CreatedAt:     timestampToString(item.CreatedAt),
 				IssueStatus:   textToPtr(item.IssueStatus),
 				ActorType:     textToPtr(item.ActorType),

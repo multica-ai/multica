@@ -1357,6 +1357,7 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
 	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 }
 
 type Issue struct {

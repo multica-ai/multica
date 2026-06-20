@@ -152,6 +152,16 @@ describe("ArchivedInboxBlock", () => {
     expect(screen.getByText("Chat")).toBeTruthy();
   });
 
+  it("renders ungrouped (no type headers) when groupBy is none (FIR-1686)", async () => {
+    mockEntries = [notif("2", "Alpha"), chat("1", "Beta")];
+    renderBlock({ defaultCollapsed: false, groupBy: "none" });
+    // Both rows show, but the type sub-headers do not.
+    expect(screen.getByText("Alpha")).toBeTruthy();
+    expect(screen.getByText("Beta")).toBeTruthy();
+    expect(screen.queryByText("Issues")).toBeNull();
+    expect(screen.queryByText("Chat")).toBeNull();
+  });
+
   it("filters with the in-block search", async () => {
     mockEntries = [notif("2", "Alpha"), notif("1", "Gamma")];
     renderBlock({ defaultCollapsed: false });

@@ -153,7 +153,7 @@ func (q *Queries) ArchiveInboxByIssueAndType(ctx context.Context, arg ArchiveInb
 const archiveInboxItem = `-- name: ArchiveInboxItem :one
 UPDATE inbox_item SET archived = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -177,6 +177,7 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -199,7 +200,7 @@ WHERE id IN (
   LIMIT $1
   FOR UPDATE SKIP LOCKED
 )
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 // CEREBRO-PATCH(inbox-reminders-due): atomically claim reminders whose
@@ -232,6 +233,7 @@ func (q *Queries) ClaimDueReminderInboxItems(ctx context.Context, limit int32) (
 			&i.Details,
 			&i.Route,
 			&i.MutedUntil,
+			&i.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -325,7 +327,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, route
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type CreateInboxItemParams struct {
@@ -377,12 +379,13 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const getInboxItem = `-- name: GetInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at FROM inbox_item
 WHERE id = $1
 `
 
@@ -407,12 +410,13 @@ func (q *Queries) GetInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, 
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const getInboxItemInWorkspace = `-- name: GetInboxItemInWorkspace :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until FROM inbox_item
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at FROM inbox_item
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -442,12 +446,13 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const listArchivedInboxFeed = `-- name: ListArchivedInboxFeed :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -457,7 +462,7 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.archived = true
   AND i.route = 'inbox'
-ORDER BY i.created_at DESC
+ORDER BY i.archived_at DESC NULLS LAST, i.created_at DESC
 LIMIT $4 OFFSET $5
 `
 
@@ -487,6 +492,7 @@ type ListArchivedInboxFeedRow struct {
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
 	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -494,6 +500,7 @@ type ListArchivedInboxFeedRow struct {
 // Archived inbox-routed items for a user. Backs the "show archived" view in
 // the inbox kebab menu. CEREBRO-PATCH(inbox-archive-pagination): page the
 // archived view so it does not load the full archive on first render.
+// CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686 — order by archive time so the archived block defaults to most-recently-archived first.
 func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInboxFeedParams) ([]ListArchivedInboxFeedRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxFeed,
 		arg.WorkspaceID,
@@ -527,6 +534,7 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 			&i.Details,
 			&i.Route,
 			&i.MutedUntil,
+			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -541,7 +549,7 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 }
 
 const listInboxFeed = `-- name: ListInboxFeed :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -581,6 +589,7 @@ type ListInboxFeedRow struct {
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
 	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -615,6 +624,7 @@ func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([
 			&i.Details,
 			&i.Route,
 			&i.MutedUntil,
+			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -629,7 +639,7 @@ func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
@@ -664,6 +674,7 @@ type ListInboxItemsRow struct {
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
 	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 }
 
@@ -699,6 +710,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.Details,
 			&i.Route,
 			&i.MutedUntil,
+			&i.ArchivedAt,
 			&i.IssueStatus,
 		); err != nil {
 			return nil, err
@@ -712,7 +724,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 }
 
 const listNotificationsItems = `-- name: ListNotificationsItems :many
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
        iss.project_id as project_id
 FROM inbox_item i
@@ -749,6 +761,7 @@ type ListNotificationsItemsRow struct {
 	Details       []byte             `json:"details"`
 	Route         string             `json:"route"`
 	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
 	IssueStatus   pgtype.Text        `json:"issue_status"`
 	ProjectID     pgtype.UUID        `json:"project_id"`
 }
@@ -782,6 +795,7 @@ func (q *Queries) ListNotificationsItems(ctx context.Context, arg ListNotificati
 			&i.Details,
 			&i.Route,
 			&i.MutedUntil,
+			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
 		); err != nil {
@@ -836,7 +850,7 @@ func (q *Queries) MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotif
 const markInboxRead = `-- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
@@ -860,6 +874,7 @@ func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem,
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }

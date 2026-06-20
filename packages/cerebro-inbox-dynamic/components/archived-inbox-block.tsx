@@ -52,6 +52,13 @@ const SORT_OPTIONS: { value: SectionSort; label: string }[] = [
   { value: "oldest", label: "Oldest first" },
 ];
 
+// FIR-1686 — explicit grouping choices so "no grouping" is a first-class option,
+// not just un-toggling "Type".
+const GROUP_OPTIONS: { value: "none" | "type"; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "type", label: "Type" },
+];
+
 function entryKey(entry: DynInboxEntry): string {
   return entry.kind === "notif" ? entry.item.issue_id ?? entry.item.id : entry.id;
 }
@@ -192,13 +199,14 @@ export function ArchivedInboxBlock({
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
                 <DropdownMenuLabel>Group by</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onClick={() =>
-                    onChange({ ...section, groupBy: groupBy === "type" ? "none" : "type" })
-                  }
-                >
-                  Type {groupBy === "type" ? "✓" : ""}
-                </DropdownMenuItem>
+                {GROUP_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => onChange({ ...section, groupBy: opt.value })}
+                  >
+                    {opt.label} {groupBy === opt.value ? "✓" : ""}
+                  </DropdownMenuItem>
+                ))}
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>

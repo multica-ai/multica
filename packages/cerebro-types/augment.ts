@@ -290,4 +290,14 @@ declare module "@multica/core/types/chat" {
   }
 }
 
+// FIR-1686 — when an inbox item was archived. The server stamps it via a DB
+// trigger (migration 9092) and returns it on the archived feed; the cerebro
+// "Archived" block sorts by it so the most recently archived item is on top.
+// Null/absent for non-archived items and on older servers.
+declare module "@multica/core/types/inbox" {
+  interface InboxItem {
+    archived_at?: string | null;
+  }
+}
+
 export {};

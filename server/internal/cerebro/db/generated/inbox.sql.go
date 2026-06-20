@@ -24,7 +24,7 @@ SET read = false,
             '{resets_at}', to_jsonb($5::text)),
         '{circuit_open}', to_jsonb($6::text))
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type BumpRuntimePauseInboxCardParams struct {
@@ -68,6 +68,7 @@ func (q *Queries) BumpRuntimePauseInboxCard(ctx context.Context, arg BumpRuntime
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -76,7 +77,7 @@ const clearInboxMute = `-- name: ClearInboxMute :one
 UPDATE inbox_item
 SET muted_until = NULL
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 // Un-mute an inbox item by clearing the muted_until column.
@@ -101,6 +102,7 @@ func (q *Queries) ClearInboxMute(ctx context.Context, id pgtype.UUID) (InboxItem
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -138,7 +140,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title,
     actor_type, actor_id, route
 ) VALUES ($1, 'member', $2, 'manually_added', 'info', $3, $4, 'member', $2, 'inbox')
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type CreateManualInboxItemParams struct {
@@ -176,6 +178,7 @@ func (q *Queries) CreateManualInboxItem(ctx context.Context, arg CreateManualInb
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -186,7 +189,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, route
 ) VALUES ($1, 'member', $2, 'private_agent_run_request', 'action_required', $3, $4, $5, 'member', $6, $7, 'inbox')
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type CreatePrivateAgentRunRequestParams struct {
@@ -231,6 +234,7 @@ func (q *Queries) CreatePrivateAgentRunRequest(ctx context.Context, arg CreatePr
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -241,7 +245,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, route, muted_until
 ) VALUES ($1, 'member', $2, 'reminder', 'action_required', $3, $4, $5, $6, $7, $8, 'inbox', $9)
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type CreateReminderInboxItemParams struct {
@@ -290,6 +294,7 @@ func (q *Queries) CreateReminderInboxItem(ctx context.Context, arg CreateReminde
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -300,7 +305,7 @@ INSERT INTO inbox_item (
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, route
 ) VALUES ($1, 'member', $2, 'runtime_auto_paused', $3, NULL, $4, $5, 'system', NULL, $6, 'inbox')
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type CreateRuntimePauseInboxCardParams struct {
@@ -343,12 +348,13 @@ func (q *Queries) CreateRuntimePauseInboxCard(ctx context.Context, arg CreateRun
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const findManualInboxItem = `-- name: FindManualInboxItem :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 FROM inbox_item
 WHERE workspace_id = $1
   AND recipient_type = 'member'
@@ -390,12 +396,13 @@ func (q *Queries) FindManualInboxItem(ctx context.Context, arg FindManualInboxIt
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const findPendingReminder = `-- name: FindPendingReminder :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 FROM inbox_item
 WHERE workspace_id = $1
   AND recipient_type = 'member'
@@ -451,12 +458,13 @@ func (q *Queries) FindPendingReminder(ctx context.Context, arg FindPendingRemind
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const findPrivateAgentRunRequest = `-- name: FindPrivateAgentRunRequest :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 FROM inbox_item
 WHERE workspace_id = $1
   AND recipient_type = 'member'
@@ -505,12 +513,13 @@ func (q *Queries) FindPrivateAgentRunRequest(ctx context.Context, arg FindPrivat
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const findRuntimePauseInboxCard = `-- name: FindRuntimePauseInboxCard :one
-SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 FROM inbox_item
 WHERE workspace_id = $1
   AND recipient_type = 'member'
@@ -559,6 +568,7 @@ func (q *Queries) FindRuntimePauseInboxCard(ctx context.Context, arg FindRuntime
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -569,7 +579,7 @@ UPDATE inbox_item
 SET muted_until = $2,
     read = false
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type SetInboxMutedUntilParams struct {
@@ -606,6 +616,7 @@ func (q *Queries) SetInboxMutedUntil(ctx context.Context, arg SetInboxMutedUntil
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -646,7 +657,7 @@ const setInboxUnread = `-- name: SetInboxUnread :one
 UPDATE inbox_item
 SET read = false
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 // Force an inbox item back to unread state. Used by the "Marker ulæst" action;
@@ -672,6 +683,7 @@ func (q *Queries) SetInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -709,7 +721,7 @@ const unarchiveInboxItem = `-- name: UnarchiveInboxItem :one
 UPDATE inbox_item
 SET archived = false
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 // Restore an archived inbox item to the active inbox. Mirror of upstream
@@ -736,6 +748,7 @@ func (q *Queries) UnarchiveInboxItem(ctx context.Context, id pgtype.UUID) (Inbox
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -746,7 +759,7 @@ SET muted_until = $2,
     read = false,
     details = $3
 WHERE id = $1
-RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 `
 
 type UpdateReminderInboxItemParams struct {
@@ -777,6 +790,7 @@ func (q *Queries) UpdateReminderInboxItem(ctx context.Context, arg UpdateReminde
 		&i.Details,
 		&i.Route,
 		&i.MutedUntil,
+		&i.ArchivedAt,
 	)
 	return i, err
 }

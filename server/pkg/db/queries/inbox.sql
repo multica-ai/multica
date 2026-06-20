@@ -47,7 +47,8 @@ WHERE i.workspace_id = $1
   AND i.recipient_id = $3
   AND i.archived = true
   AND i.route = 'inbox'
-ORDER BY i.created_at DESC
+-- CEREBRO-PATCH(inbox-archived-at-sort): FIR-1686 — order by archive time so the archived block defaults to most-recently-archived first.
+ORDER BY i.archived_at DESC NULLS LAST, i.created_at DESC
 LIMIT $4 OFFSET $5;
 
 -- name: ListNotificationsItems :many

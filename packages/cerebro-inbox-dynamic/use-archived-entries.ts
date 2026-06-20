@@ -14,7 +14,17 @@ import {
   inboxItemSortTime,
 } from "@multica/core/inbox/queries";
 import { archivedChatSessionsOptions } from "@multica/core/chat/queries";
+import type { InboxItem } from "@multica/core/types";
 import type { DynInboxEntry } from "./section-filter";
+
+// FIR-1686 — the sort time for an archived inbox notification: WHEN it was
+// archived (archived_at, stamped server-side), so the archived surfaces default
+// to most-recently-archived first. Falls back to the item's activity time on
+// older servers (or rows archived before the column existed) that omit it.
+export function archivedNotifSortTime(item: InboxItem): number {
+  const archivedAt = item.archived_at ? Date.parse(item.archived_at) : NaN;
+  return Number.isFinite(archivedAt) ? archivedAt : inboxItemSortTime(item);
+}
 
 export interface UseArchivedInboxEntriesResult {
   entries: DynInboxEntry[];
@@ -41,7 +51,7 @@ export function useArchivedInboxEntries(wsId: string): UseArchivedInboxEntriesRe
   const entries = useMemo<DynInboxEntry[]>(() => {
     const out: DynInboxEntry[] = [];
     for (const item of items) {
-      out.push({ kind: "notif", id: item.id, time: inboxItemSortTime(item), item });
+      out.push({ kind: "notif", id: item.id, time: archivedNotifSortTime(item), item });
     }
     for (const session of archivedChats) {
       out.push({
