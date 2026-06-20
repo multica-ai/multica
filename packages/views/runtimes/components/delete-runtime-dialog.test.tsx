@@ -334,6 +334,41 @@ describe("DeleteRuntimeDialog", () => {
     ).toBeInTheDocument();
   });
 
+  it("explains that deleting a profile-backed runtime only removes the current instance", () => {
+    renderDialog({
+      runtime: makeRuntime({
+        runtime_mode: "local",
+        status: "online",
+        profile_id: "profile-1",
+      }),
+      cachedAgents: [],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/delete the custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/managed by a running local daemon/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows the profile-backed runtime explanation in cascade mode", () => {
+    renderDialog({
+      runtime: makeRuntime({ profile_id: "profile-1" }),
+      cachedAgents: [makeAgent("a-1", { name: "Alpha" })],
+    });
+
+    expect(
+      screen.getByText(/registered from a custom runtime profile/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Archive 1 agent and delete this Runtime/),
+    ).toBeInTheDocument();
+  });
+
   it("renders the self-heal banner in cascade mode for an online local runtime with bound agents", () => {
     renderDialog({
       runtime: makeRuntime({ runtime_mode: "local", status: "online" }),
