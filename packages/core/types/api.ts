@@ -67,6 +67,9 @@ export interface ListIssuesParams {
    * `<object>:<ref_id>`, for example `github_pr:firtal-group/firtal-cerebro#525`.
    */
   reference?: string;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }
@@ -107,6 +110,9 @@ export interface ListGroupedIssuesParams {
   reference?: string;
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
+  date_field?: "created_at" | "updated_at";
+  date_start?: string;
+  date_end?: string;
   sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
   sort_direction?: "asc" | "desc";
 }

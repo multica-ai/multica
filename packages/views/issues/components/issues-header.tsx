@@ -6,6 +6,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
+  CalendarDays,
   Check,
   ChevronDown,
   CircleDot,
@@ -45,6 +46,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
+import { Calendar } from "@multica/ui/components/ui/calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
   ALL_STATUSES,
@@ -68,9 +70,15 @@ import {
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
   type ActorFilterValue,
+  type IssueDateField,
+  type IssueDateFilter,
+  type SortField,
+  type IssueGrouping,
+  type SwimlaneGrouping,
+  type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import type { SortField, IssueGrouping, SwimlaneGrouping, ViewMode } from "@multica/core/issues/stores/view-store";
+import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly } from "@multica/core/issues/date";
 import {
   useIssuesScopeStore,
   type IssuesScope,
@@ -99,6 +107,11 @@ function HoverCheck({ checked }: { checked: boolean }) {
   );
 }
 
+type LocalDateRange = {
+  from: Date | undefined;
+  to?: Date;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -114,6 +127,7 @@ function getActiveFilterCount(state: {
   labelFilters: string[];
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 count on-behalf-of filter.
   onBehalfOfFilters: string[];
+  dateFilter?: IssueDateFilter | null;
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
@@ -123,8 +137,22 @@ function getActiveFilterCount(state: {
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
   if ((state.onBehalfOfFilters ?? []).length > 0) count++;
+  if (state.dateFilter) count++;
   return count;
 }
+
+function shortDateLabel(dateOnly: string) {
+  return formatDateOnly(dateOnly, { month: "short", day: "numeric" }) || dateOnly;
+}
+
+function normalizeDateRange(from: Date, to: Date) {
+  return from <= to ? [from, to] as const : [to, from] as const;
+}
+
+const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_field_updated"> = {
+  created_at: "date_field_created",
+  updated_at: "date_field_updated",
+};
 
 function useIssueCounts(allIssues: Issue[]) {
   return useMemo(() => {
@@ -503,6 +531,119 @@ function LabelSubContent({
 }
 
 // ---------------------------------------------------------------------------
+// Date sub-menu content
+// ---------------------------------------------------------------------------
+
+function DateSubContent({
+  value,
+  onChange,
+}: {
+  value: IssueDateFilter | null;
+  onChange: (filter: IssueDateFilter | null) => void;
+}) {
+  const { t } = useT("issues");
+  const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
+  const [range, setRange] = useState<LocalDateRange | undefined>(() => {
+    if (!value) return undefined;
+    const from = dateOnlyToLocalDate(value.from);
+    if (!from) return undefined;
+    return { from, to: dateOnlyToLocalDate(value.to) };
+  });
+
+  const setFieldValue = (next: IssueDateField) => {
+    setField(next);
+    if (value) onChange({ ...value, field: next });
+  };
+
+  const applyPreset = (days: 1 | 3 | 7) => {
+    onChange({
+      field,
+      from: addDaysDateOnly(1 - days),
+      to: todayDateOnly(),
+    });
+  };
+
+  const applyCustom = () => {
+    if (!range?.from) return;
+    const [from, to] = normalizeDateRange(range.from, range.to ?? range.from);
+    onChange({
+      field,
+      from: toDateOnly(from),
+      to: toDateOnly(to),
+    });
+  };
+
+  return (
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
+          {(["created_at", "updated_at"] as const).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option}>
+              {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuGroup>
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem onClick={() => applyPreset(1)}>
+        {t(($) => $.filters.date_today)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => applyPreset(3)}>
+        {t(($) => $.filters.date_last_3_days)}
+      </DropdownMenuItem>
+      <DropdownMenuItem onClick={() => applyPreset(7)}>
+        {t(($) => $.filters.date_last_7_days)}
+      </DropdownMenuItem>
+
+      <div className="px-1.5 py-1">
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-full justify-start px-0 text-sm font-normal"
+              >
+                {t(($) => $.filters.date_custom_range)}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
+            <Calendar
+              mode="range"
+              selected={range}
+              onSelect={(next) => setRange(next)}
+              captionLayout="dropdown"
+            />
+            <div className="flex justify-end border-t p-2">
+              <Button size="sm" onClick={applyCustom} disabled={!range?.from}>
+                {t(($) => $.filters.date_apply)}
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      {value && (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => {
+              setRange(undefined);
+              onChange(null);
+            }}
+          >
+            {t(($) => $.filters.date_clear)}
+          </DropdownMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // IssuesHeader
 // ---------------------------------------------------------------------------
 
@@ -510,11 +651,15 @@ export function IssuesHeader({
   scopedIssues,
   referenceFilterControl,
   allowGantt = false,
+  dateFilter = null,
+  onDateFilterChange,
 }: {
   scopedIssues: Issue[];
   referenceFilterControl?: ReactNode;
   /** Whether the Gantt view option is offered (project surface only). */
   allowGantt?: boolean;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -613,7 +758,12 @@ export function IssuesHeader({
             onToggle={toggleAgentRunningFilter}
             scopedIssueIds={scopedIssueIds}
           />
-          <IssueDisplayControls scopedIssues={scopedIssues} allowGantt={allowGantt} />
+          <IssueDisplayControls
+            scopedIssues={scopedIssues}
+            allowGantt={allowGantt}
+            dateFilter={dateFilter}
+            onDateFilterChange={onDateFilterChange}
+          />
         </div>
       </div>
     </div>
@@ -624,11 +774,18 @@ export function IssueDisplayControls({
   scopedIssues,
   hideViewToggle = false,
   allowGantt = false,
+  dateFilter = null,
+  onDateFilterChange,
 }: {
   scopedIssues: Issue[];
   /** Hide the board/list/swimlane/gantt view toggle entirely. */
   hideViewToggle?: boolean;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   /** Whether the Gantt view option is offered (project surface only). */
+  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
+  // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
+  // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
 }) {
   const { t } = useT("issues");
@@ -652,6 +809,7 @@ export function IssueDisplayControls({
   const act = useViewStoreApi().getState();
 
   const counts = useIssueCounts(scopedIssues);
+  const showDateFilter = !!onDateFilterChange;
 
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
@@ -663,6 +821,7 @@ export function IssueDisplayControls({
     includeNoProject,
     labelFilters,
     onBehalfOfFilters,
+    dateFilter: showDateFilter ? dateFilter : null,
   });
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -693,6 +852,13 @@ export function IssueDisplayControls({
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
+  const dateFilterLabel = showDateFilter && dateFilter
+    ? `${t(($) => $.filters[DATE_FIELD_LABEL_KEY[dateFilter.field]])}: ${
+        dateFilter.from === dateFilter.to
+          ? shortDateLabel(dateFilter.from)
+          : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
+      }`
+    : null;
   const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
   const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
@@ -730,7 +896,12 @@ export function IssueDisplayControls({
                           role="button"
                           tabIndex={-1}
                           className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); act.clearFilters(); }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            act.clearFilters();
+                            onDateFilterChange?.(null);
+                          }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
                           <X className="size-3" />
@@ -815,6 +986,26 @@ export function IssueDisplayControls({
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
+
+            {showDateFilter && onDateFilterChange && (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CalendarDays className="size-3.5" />
+                  <span className="flex-1">{t(($) => $.filters.section_date)}</span>
+                  {dateFilterLabel && (
+                    <span className="max-w-36 truncate text-xs text-primary font-medium">
+                      {dateFilterLabel}
+                    </span>
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-56">
+                  <DateSubContent
+                    value={dateFilter}
+                    onChange={onDateFilterChange}
+                  />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            )}
 
             {/* Assignee */}
             <DropdownMenuSub>
@@ -911,7 +1102,12 @@ export function IssueDisplayControls({
             {hasActiveFilters && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={act.clearFilters}>
+                <DropdownMenuItem
+                  onClick={() => {
+                    act.clearFilters();
+                    onDateFilterChange?.(null);
+                  }}
+                >
                   {t(($) => $.filters.reset)}
                 </DropdownMenuItem>
               </>
