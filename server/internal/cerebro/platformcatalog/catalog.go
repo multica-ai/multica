@@ -194,16 +194,6 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_share_tokens",
-		Title:       "Share issue externally",
-		Category:    CategoryIssues,
-		Description: "Create or revoke a public share-token link that exposes an issue outside the workspace.",
-		Ops: []string{
-			"POST /api/cerebro/issues/{id}/share-tokens",
-			"DELETE /api/cerebro/share-tokens/{tokenId}",
-		},
-	},
-	{
 		Key:         "manage_issue_recurrence",
 		Title:       "Manage issue recurrence",
 		Category:    CategoryIssues,
@@ -453,7 +443,6 @@ var catalog = []Capability{
 			"POST /api/runtimes/{runtimeId}/archive-agents-and-delete",
 			"PATCH /api/runtimes/{runtimeId}/sandbox",
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
-			"PATCH /api/runtimes/{runtimeId}/persona-sandbox",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
 			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
 			"PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
@@ -954,6 +943,17 @@ var excluded = map[string]string{
 	"POST /api/cerebro/focus-list/{id}/snooze": "self_only — caller's own focus list",
 	"POST /api/cerebro/focus-list/reorder":     "self_only — caller's own focus list",
 
+	// cerebro saved-filters — personal saved issue filters, caller's own only;
+	// loadOwned enforces owner identity so a member can never touch another
+	// member's filter (FIR-1659).
+	"POST /api/cerebro/saved-filters/":       "self_only — caller's own saved filters (FIR-1659)",
+	"PATCH /api/cerebro/saved-filters/{id}":  "self_only — caller's own saved filters (FIR-1659)",
+	"DELETE /api/cerebro/saved-filters/{id}": "self_only — caller's own saved filters (FIR-1659)",
+
+	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
+	// workspace token, persists no governable state, no agent tool equivalent.
+	"POST /api/workspaces/{id}/cerebro/dictation/transcribe": "transcription-proxy — stateless audio→text, self-authenticates via workspace token, persists no governable state (FIR-1637)",
+
 	// cerebro interactive terminal — human watch/take-over of a live agent
 	// session. Workspace-member gated UI action, not an agent-governable
 	// capability; there is no agent tool that opens or closes a PTY session.
@@ -966,17 +966,15 @@ var excluded = map[string]string{
 	// not by gating this route; the route is workspace-member + own-agent scoped.
 	"POST /api/agents/{id}/tools/{name}/invoke": "tool-execution — per-tool authorization is enforced by the executor grant cascade (TECH-3226), not by gating the invoke route; route is workspace-member + own-agent scoped",
 
-	"POST /api/invitations/{id}/accept":        "self_only — caller accepting their own invitation",
-	"POST /api/invitations/{id}/decline":       "self_only — caller declining their own invitation",
-	"POST /api/persona/approvals/{id}/approve": "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/persona/approvals/{id}/deny":    "self_only — handler sets subject_actor_id to the CALLER's own persona actor (persona_approvals.go:138); no admin-acts-for-others path",
-	"POST /api/channels/{id}/read":             "self_only — caller marking a channel read",
-	"POST /api/channels/{id}/unread":           "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
-	"POST /api/channels/{id}/mute":             "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
-	"DELETE /api/channels/{id}/mute":           "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
-	"POST /api/cerebro/channels/{id}/typing":   "self_only — caller broadcasting their own typing indicator to a channel (TECH-3422); no capability gate needed",
-	"POST /api/cerebro/presence/ping":          "self_only — caller pinging their own presence heartbeat (TECH-3422); no capability gate needed",
-	"POST /api/lark/binding/redeem":            "self_only — caller binding their own Lark open_id to their Multica account",
+	"POST /api/invitations/{id}/accept":      "self_only — caller accepting their own invitation",
+	"POST /api/invitations/{id}/decline":     "self_only — caller declining their own invitation",
+	"POST /api/channels/{id}/read":           "self_only — caller marking a channel read",
+	"POST /api/channels/{id}/unread":         "self_only — caller marking a channel unread in their own inbox (TECH-3352)",
+	"POST /api/channels/{id}/mute":           "self_only — caller snoozing a channel in their own inbox (TECH-3352)",
+	"DELETE /api/channels/{id}/mute":         "self_only — caller un-snoozing a channel in their own inbox (TECH-3352)",
+	"POST /api/cerebro/channels/{id}/typing": "self_only — caller broadcasting their own typing indicator to a channel (TECH-3422); no capability gate needed",
+	"POST /api/cerebro/presence/ping":        "self_only — caller pinging their own presence heartbeat (TECH-3422); no capability gate needed",
+	"POST /api/lark/binding/redeem":          "self_only — caller binding their own Lark open_id to their Multica account",
 
 	// chat sessions — the caller's own AI chat, not an admin-governed action.
 	"POST /api/chat/sessions/":                             "personal-chat — caller's own AI chat session",

@@ -5,6 +5,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
+import { TextareaDictationMic } from "@multica/cerebro-dictation";
 import {
   Sheet,
   SheetContent,
@@ -48,6 +49,7 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
   const [body, setBody] = React.useState(
     KIND_TEMPLATES[props.defaultKind ?? "report"],
   );
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
   // Track whether the user has hand-edited the body. We only auto-fill the
   // template when switching kind on a fresh body — overwriting user content
   // would be hostile.
@@ -137,13 +139,17 @@ export function CreateArtifactSheet(props: CreateArtifactSheetProps) {
 
           <div className="flex flex-1 flex-col gap-1">
             <Label htmlFor="artifact-body">Body (markdown)</Label>
-            <Textarea
-              id="artifact-body"
-              value={body}
-              onChange={(e) => handleBodyChange(e.target.value)}
-              placeholder="Markdown content"
-              className="min-h-[300px] flex-1 font-mono text-sm"
-            />
+            <div className="relative flex flex-1 flex-col">
+              <Textarea
+                ref={bodyRef}
+                id="artifact-body"
+                value={body}
+                onChange={(e) => handleBodyChange(e.target.value)}
+                placeholder="Markdown content"
+                className="min-h-[300px] flex-1 font-mono text-sm"
+              />
+              <TextareaDictationMic textareaRef={bodyRef} />
+            </div>
           </div>
         </div>
 

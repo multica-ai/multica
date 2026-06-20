@@ -201,19 +201,23 @@ This **supersedes** the prior "keep persona as a separate service" plans, now ar
 
 "Persona" is **four different things** with different fates. Do not delete them as one blob.
 
-### 5.1 Delete now — the external Persona service + SDK (clean, zero prod-behavior risk)
-Persona is gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, which are **unset in prod**,
-so `newCredentialsPolicy` already runs owner-check + the grant resolver only
-(`cerebro_credentials_policy.go:260-262`). Deleting the service changes no live behavior:
-- SDK package `packages/cerebro-persona-sdk/` + `server/go.mod:7` (`replace`) + `:24` (`require`).
-- `cerebro-persona-hook` binary (`server/cmd/cerebro-persona-hook/`).
-- persona-mask (`server/cmd/server/cerebro_persona_mask.go`, `internal/cerebro/persona/mask/`).
-- persona handlers + routes (`handler/persona.go`, `persona_approvals.go`; router `:630,634,827,989,995-997,1634`).
-- sharetoken persona client (`sharetoken/handler.go:50-99,305`).
-- daemon spawn persona path (`daemon/persona.go`, `config.go:436-438`).
-- `CutoverPolicyChecker` / `NewPersonaPolicyChecker` / `personaBackend`
-  (`credentials/policy.go:139-204`, `cerebro_credentials_policy.go:74-111,269-277`) and the
-  `MULTICA_PERMISSION_ENGINE` env switch. The `multicaCredentialPolicy` survives as the only checker.
+### 5.1 Delete now — the external Persona service + SDK — ✅ DONE (FIR-1609 Phase 8, branch `feat/fir-1609-permission-engine`)
+Persona was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **unset in prod** (verified
+across all Infisical folders), so removal was zero prod-behavior risk. All of the following are
+removed; `go build ./...` + `go vet` green and no `.go` source imports the persona SDK:
+- [x] `CutoverPolicyChecker` / `NewPersonaPolicyChecker` / `PersonaChecker` / `personaBackend` and the
+  `MULTICA_PERMISSION_ENGINE` / `_PARALLEL_SAMPLE` switch — `newCredentialsPolicy` now returns
+  `ChainPolicyChecker(owner, multica)` unconditionally; `multicaCredentialPolicy` is the sole checker.
+- [x] `cerebro-persona-hook` binary + the dev-only `multica agent e2e-spawn` command.
+- [x] persona-mask (`cerebro_persona_mask.go`, `internal/cerebro/persona/mask/`, the 10 `handler/persona_mask_*` files + tests, migration 9021).
+- [x] daemon spawn persona path (`daemon/persona.go`, `persona_http.go`, config persona fields).
+- [x] share-token feature (`internal/cerebro/sharetoken/`) — Persona was its only auth; public-share retired (Jesper: "bruger vi ikke").
+- [x] persona handlers + routes (`handler/persona.go`, `persona_approvals.go`, `ListWorkspacePersonaAgents`, `UpdateAgentRuntimePersonaSandbox` + all `/api/persona/*` + `/persona-sandbox` route mounts).
+- [x] SDK package `packages/cerebro-persona-sdk/` + `server/go.mod` `replace`/`require` (`go mod tidy`) + persona dev scripts.
+
+Remaining (tracked separately, see §5.2 + the persona-sandbox DB columns): drop the now-inert DB
+artefacts (`agent.persona_sandbox`, `agent_runtime.persona_sandbox` columns; `cerebro_persona_mask_audit`,
+`cerebro_share_token` tables) via rename→verify→drop, and the frontend persona remnants.
 
 ### 5.2 Migrate before dropping — the grant table `cerebro_workspace_grant`
 It is **"dead for now" in intent but live in code**: it is the backing store of the **new**

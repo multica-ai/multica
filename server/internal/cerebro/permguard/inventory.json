@@ -73,7 +73,19 @@
       "gate": "self_only"
     },
     {
-      "id": "DELETE /api/cerebro/share-tokens/{tokenId}",
+      "id": "DELETE /api/cerebro/saved-filters/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PATCH /api/cerebro/saved-filters/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/saved-filters/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/workspaces/{id}/cerebro/dictation/transcribe",
       "gate": "workspace_member"
     },
     {
@@ -381,10 +393,6 @@
       "gate": "cerebro_runtime_access"
     },
     {
-      "id": "PATCH /api/runtimes/{runtimeId}/persona-sandbox",
-      "gate": "cerebro_runtime_access"
-    },
-    {
       "id": "PATCH /api/runtimes/{runtimeId}/sandbox",
       "gate": "cerebro_runtime_access"
     },
@@ -550,10 +558,6 @@
     },
     {
       "id": "POST /api/cerebro/issues/check-similar/event",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/issues/{id}/share-tokens",
       "gate": "workspace_member"
     },
     {
@@ -1039,14 +1043,6 @@
     {
       "id": "POST /api/notes/{id}/versions/{versionId}/restore",
       "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/persona/approvals/{id}/approve",
-      "gate": "self_only"
-    },
-    {
-      "id": "POST /api/persona/approvals/{id}/deny",
-      "gate": "self_only"
     },
     {
       "id": "POST /api/pins/",
@@ -1903,10 +1899,6 @@
     {
       "id": "agent create",
       "gate": "via:POST /api/agents/"
-    },
-    {
-      "id": "agent e2e-spawn",
-      "exempt": "developer-tool \u2014 local spawn against own daemon, no server mutation"
     },
     {
       "id": "agent env get",

@@ -18,6 +18,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
+import { TextareaDictationMic } from "@multica/cerebro-dictation";
 
 export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const wsId = useWorkspaceId();
@@ -37,6 +38,7 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const [hydrated, setHydrated] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
   const editorRef = React.useRef<ContentEditorRef>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     if (artifact && !hydrated) {
@@ -174,13 +176,17 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
           ) : (
             <div className="flex flex-col gap-1">
               <Label htmlFor="doc-body">Body (HTML)</Label>
-              <Textarea
-                id="doc-body"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder="<p>HTML</p>"
-                className="min-h-[60vh] font-mono text-sm"
-              />
+              <div className="relative">
+                <Textarea
+                  ref={bodyRef}
+                  id="doc-body"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder="<p>HTML</p>"
+                  className="min-h-[60vh] font-mono text-sm"
+                />
+                <TextareaDictationMic textareaRef={bodyRef} />
+              </div>
             </div>
           )}
         </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { type RefObject, useEffect, useRef, useState } from "react"
 
 /**
  * Inbox → issue auto-scroll for a specific comment.
@@ -8,10 +8,15 @@ import { useEffect, useRef, useState } from "react"
  * the notification. This hook owns three concerns:
  *
  * 1. **Scroll**: once the corresponding `#comment-<id>` element is in the DOM,
- *    `scrollIntoView({ block: "start" })` anchors its top to the top of the
- *    nearest scroll container. We use `block: "start"` (not `center`) because
- *    on mobile, centering a comment leaves visible whitespace above and the
- *    landing position feels imprecise (JEH-1002).
+ *    we scroll the passed `scrollContainerRef` (the issue body's own scroll
+ *    region) so the comment's top aligns with the container's top. We must NOT
+ *    use `el.scrollIntoView()` here: it bubbles to every scrollable ancestor,
+ *    including the dashboard's `overflow:hidden` SidebarInset, which it scrolls
+ *    too — dragging the whole detail pane (title bar included) up under the top
+ *    edge with no way to scroll it back (FIR-1652). Scrolling only the known
+ *    container keeps the header in place. We anchor to the top (not center)
+ *    because on mobile, centering a comment leaves visible whitespace above and
+ *    the landing position feels imprecise (JEH-1002).
  *
  * 2. **Retry**: re-tapping the same inbox item is the failure mode that broke
  *    the original implementation. Issue + timeline data are cached from the
@@ -33,6 +38,7 @@ import { useEffect, useRef, useState } from "react"
  */
 export function useHighlightCommentScroll(
   highlightCommentId: string | undefined,
+  scrollContainerRef: RefObject<HTMLElement | null>,
   pulseMs = 2000,
   retryBudgetMs = 3000,
 ): string | null {
@@ -50,9 +56,14 @@ export function useHighlightCommentScroll(
       if (cancelled) return
       if (didHighlightRef.current === highlightCommentId) return
       const el = document.getElementById(`comment-${highlightCommentId}`)
-      if (el) {
+      const container = scrollContainerRef.current
+      if (el && container) {
         didHighlightRef.current = highlightCommentId
-        el.scrollIntoView({ behavior: "instant", block: "start" })
+        // Scroll ONLY this container — never el.scrollIntoView(), which also
+        // scrolls overflow:hidden ancestors and hides the pane header (FIR-1652).
+        const delta =
+          el.getBoundingClientRect().top - container.getBoundingClientRect().top
+        container.scrollTop += delta
         setHighlightedId(highlightCommentId)
         pulseTimer = setTimeout(() => setHighlightedId(null), pulseMs)
         return

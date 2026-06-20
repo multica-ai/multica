@@ -57,7 +57,8 @@ function connRow(
     category: "Connections",
     source: "connection",
     managed_externally: false,
-    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
+    conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
     effective: { setting, decided_by: "", capped_by: "", reason: "", ...over },
     capped_by_groups: [],
   };
@@ -71,7 +72,8 @@ function toolRow(name: string): ToolPolicyRow {
     category: "Customer Service",
     source: "connection-tool",
     managed_externally: false,
-    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
+    conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
     effective: { setting: "deny", decided_by: "", capped_by: "", reason: "" },
     capped_by_groups: [],
   };

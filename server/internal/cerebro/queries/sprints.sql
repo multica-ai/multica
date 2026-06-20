@@ -12,7 +12,8 @@ SELECT project_id, workspace_id, enabled,
        name_template,
        auto_create_enabled, auto_create_lead_days,
        move_incomplete_enabled, move_incomplete_target_status, timezone,
-       created_at, updated_at
+       created_at, updated_at,
+       accepts_external_issues
 FROM cerebro_sprint_settings
 WHERE project_id = $1;
 
@@ -22,7 +23,8 @@ SELECT project_id, workspace_id, enabled,
        name_template,
        auto_create_enabled, auto_create_lead_days,
        move_incomplete_enabled, move_incomplete_target_status, timezone,
-       created_at, updated_at
+       created_at, updated_at,
+       accepts_external_issues
 FROM cerebro_sprint_settings
 WHERE workspace_id = $1;
 
@@ -32,9 +34,10 @@ INSERT INTO cerebro_sprint_settings (
     duration_unit, duration_count, start_weekday,
     name_template,
     auto_create_enabled, auto_create_lead_days,
-    move_incomplete_enabled, move_incomplete_target_status, timezone
+    move_incomplete_enabled, move_incomplete_target_status, timezone,
+    accepts_external_issues
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (project_id) DO UPDATE
 SET enabled                 = EXCLUDED.enabled,
     duration_unit           = EXCLUDED.duration_unit,
@@ -46,13 +49,15 @@ SET enabled                 = EXCLUDED.enabled,
     move_incomplete_enabled = EXCLUDED.move_incomplete_enabled,
     move_incomplete_target_status = EXCLUDED.move_incomplete_target_status,
     timezone                = EXCLUDED.timezone,
+    accepts_external_issues = EXCLUDED.accepts_external_issues,
     updated_at              = now()
 RETURNING project_id, workspace_id, enabled,
           duration_unit, duration_count, start_weekday,
           name_template,
           auto_create_enabled, auto_create_lead_days,
           move_incomplete_enabled, move_incomplete_target_status, timezone,
-          created_at, updated_at;
+          created_at, updated_at,
+          accepts_external_issues;
 
 -- name: DeleteCerebroSprintSettings :exec
 DELETE FROM cerebro_sprint_settings WHERE project_id = $1;
@@ -96,6 +101,32 @@ SELECT id, workspace_id, project_id, name, sequence_no, status,
 FROM cerebro_sprint
 WHERE project_id = $1
 ORDER BY sequence_no DESC;
+
+-- name: ListSelectableCerebroSprintsForIssue :many
+-- FIR-1657: the sprints an issue may be assigned to. Always the issue's own
+-- project sprints, PLUS sprints of any other project in the same workspace
+-- whose settings opted in (enabled AND accepts_external_issues). Each row
+-- carries the owning project's title so the picker can group by project, and
+-- a flag marking the issue's home project. $1 = workspace_id, $2 = the
+-- issue's project_id (may be NULL for an issue with no project).
+SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
+       s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
+       p.title AS project_title,
+       (s.project_id = $2) AS is_own_project
+FROM cerebro_sprint s
+JOIN project p ON p.id = s.project_id
+LEFT JOIN cerebro_sprint_settings st ON st.project_id = s.project_id
+WHERE s.workspace_id = $1
+  AND (
+        s.project_id = $2
+        OR (st.enabled = TRUE AND st.accepts_external_issues = TRUE)
+      )
+ORDER BY (s.project_id = $2) DESC, p.title ASC, s.sequence_no DESC;
+
+-- name: GetCerebroIssueProjectID :one
+-- The project a given issue belongs to. Used to scope sprint selection and
+-- validate cross-project assignment. project_id is nullable upstream.
+SELECT project_id FROM issue WHERE id = $1;
 
 -- name: GetActiveCerebroSprintByProject :one
 SELECT id, workspace_id, project_id, name, sequence_no, status,

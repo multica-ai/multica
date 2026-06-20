@@ -242,3 +242,57 @@ func TestToolPolicyDecision(t *testing.T) {
 		t.Errorf("reason not carried through, got %q", got.Reason)
 	}
 }
+
+// --- env knobs (the rollout wiring, FIR-1609 item 6) ------------------------
+
+// TestApprovalGateEnvEnabled pins the CEREBRO_APPROVAL_GATE_ENABLED parser: only
+// the explicit truthy spellings turn the gate on, everything else (incl. unset)
+// keeps production unchanged.
+func TestApprovalGateEnvEnabled(t *testing.T) {
+	on := []string{"1", "true", "TRUE", "yes", "on", " On "}
+	off := []string{"", "0", "false", "no", "off", "toolpolicy", "garbage"}
+	for _, v := range on {
+		t.Setenv(envApprovalGateEnabled, v)
+		if !approvalGateEnvEnabled() {
+			t.Errorf("CEREBRO_APPROVAL_GATE_ENABLED=%q should enable the gate", v)
+		}
+	}
+	for _, v := range off {
+		t.Setenv(envApprovalGateEnabled, v)
+		if approvalGateEnvEnabled() {
+			t.Errorf("CEREBRO_APPROVAL_GATE_ENABLED=%q must NOT enable the gate", v)
+		}
+	}
+}
+
+// TestApprovalGateModeToolPolicy pins the CEREBRO_APPROVAL_GATE_MODE parser: the
+// three accepted spellings select the FIR-2230 per-tool chain; anything else
+// (incl. unset) stays on the legacy capability resolver, so prod is unchanged
+// until an operator opts in.
+func TestApprovalGateModeToolPolicy(t *testing.T) {
+	policy := []string{"toolpolicy", "tool-policy", "tool_policy", "ToolPolicy", " toolpolicy "}
+	capability := []string{"", "capability", "caps", "true", "1", "anything-else"}
+	for _, v := range policy {
+		t.Setenv(envApprovalGateMode, v)
+		if !approvalGateModeToolPolicy() {
+			t.Errorf("CEREBRO_APPROVAL_GATE_MODE=%q should select the tool-policy chain", v)
+		}
+	}
+	for _, v := range capability {
+		t.Setenv(envApprovalGateMode, v)
+		if approvalGateModeToolPolicy() {
+			t.Errorf("CEREBRO_APPROVAL_GATE_MODE=%q must stay on the capability resolver", v)
+		}
+	}
+}
+
+// TestBuildApprovalGate_DisabledReturnsNil proves the master switch: with
+// CEREBRO_APPROVAL_GATE_ENABLED off, BuildApprovalGate returns nil before it
+// touches any dependency, so every caller keeps its prior behaviour (the nil
+// deps here are never dereferenced precisely because the env gate is off).
+func TestBuildApprovalGate_DisabledReturnsNil(t *testing.T) {
+	t.Setenv(envApprovalGateEnabled, "")
+	if gate := BuildApprovalGate(nil, nil, nil); gate != nil {
+		t.Fatal("BuildApprovalGate must return nil when the env flag is off")
+	}
+}

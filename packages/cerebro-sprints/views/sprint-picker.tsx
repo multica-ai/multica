@@ -13,7 +13,7 @@ import { toast } from "sonner";
 
 import {
   issueSprintAssignmentOptions,
-  projectSprintsOptions,
+  selectableSprintsOptions,
   useAssignIssueToSprint,
 } from "../core/queries";
 import {
@@ -36,17 +36,26 @@ interface Props {
 // assigning an issue to a sprint records the membership in the
 // cerebro_sprint_issue join and NEVER touches the issue's project_id, so the
 // issue stays in its home project AND shows on the sprint board. Selecting
-// "No sprint" clears the membership. Stays visible (muted) when the project has
-// no real sprints yet, so the row never disappears.
+// "No sprint" clears the membership. Stays visible (muted) when there are no
+// selectable sprints yet, so the row never disappears.
+//
+// FIR-1657: the option list is no longer limited to the issue's own project.
+// It now reads /selectable-sprints, which adds sprints from any OTHER project
+// in the workspace that opted in (accepts_external_issues). The list is split
+// into "This project" and "Other projects" groups, the latter labeled with
+// each sprint's owning project so the user knows where it lives.
 export function SprintPicker({ workspaceId, projectId, issueId, className }: Props) {
   const [open, setOpen] = useState(false);
-  const sprintsQuery = useQuery(projectSprintsOptions(workspaceId, projectId ?? ""));
+  const sprintsQuery = useQuery(selectableSprintsOptions(workspaceId, issueId));
   const assignmentQuery = useQuery(issueSprintAssignmentOptions(workspaceId, issueId));
   const assign = useAssignIssueToSprint(workspaceId);
 
   const sprints = sprintsQuery.data?.sprints ?? [];
   const currentSprintId = assignmentQuery.data?.sprint_id ?? "";
   const currentSprint = sprints.find((s) => s.id === currentSprintId);
+
+  const ownSprints = sprints.filter((s) => s.is_own_project);
+  const otherSprints = sprints.filter((s) => !s.is_own_project);
 
   if (!projectId) return null;
 
@@ -82,6 +91,26 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
     setOpen(false);
   };
 
+  const renderRow = (s: (typeof sprints)[number], showProject: boolean) => (
+    <button
+      key={s.id}
+      type="button"
+      onClick={() => select(s.id)}
+      className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
+    >
+      <CalendarRange className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">{s.name}</span>
+        {showProject && (
+          <span className="truncate text-xs text-muted-foreground">{s.project_title}</span>
+        )}
+      </span>
+      {s.id === currentSprintId && (
+        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      )}
+    </button>
+  );
+
   return (
     <div className={className}>
       <Popover open={open} onOpenChange={setOpen}>
@@ -91,18 +120,25 @@ export function SprintPicker({ workspaceId, projectId, issueId, className }: Pro
         </PopoverTrigger>
         <PopoverContent align="start" className="w-56 gap-0 p-1">
           <div className="max-h-72 overflow-y-auto">
-            {sprints.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => select(s.id)}
-                className="flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent"
-              >
-                <CalendarRange className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{s.name}</span>
-                {s.id === currentSprintId && <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
-              </button>
-            ))}
+            {ownSprints.length > 0 && (
+              <>
+                {otherSprints.length > 0 && (
+                  <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                    This project
+                  </div>
+                )}
+                {ownSprints.map((s) => renderRow(s, false))}
+              </>
+            )}
+            {otherSprints.length > 0 && (
+              <>
+                {ownSprints.length > 0 && <div className="my-1 border-t" />}
+                <div className="px-2 py-1 text-xs font-medium text-muted-foreground">
+                  Other projects
+                </div>
+                {otherSprints.map((s) => renderRow(s, true))}
+              </>
+            )}
           </div>
           {currentSprintId && (
             <>

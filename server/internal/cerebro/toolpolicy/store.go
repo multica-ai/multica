@@ -11,6 +11,7 @@ package toolpolicy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -49,10 +50,11 @@ var (
 	ErrUnknownSetting = errors.New("toolpolicy: unknown setting")
 )
 
-// validLayer reports whether l is one of the five chain layers.
+// validLayer reports whether l is one of the chain layers (the five plus the
+// System mandate peer of User, FIR-1609).
 func validLayer(l Layer) bool {
 	switch l {
-	case LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser:
+	case LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerSystem:
 		return true
 	default:
 		return false
@@ -84,9 +86,36 @@ type Query struct {
 	AgentID         pgtype.UUID
 	UserID          pgtype.UUID
 	GroupIDs        []pgtype.UUID
+	// SystemID is the subject of the System layer — the mandate-actor ceiling for
+	// a human-less run (FIR-1609). The subject identity of a System actor is the
+	// autopilot that drives it (the autopilot is the human-less actor, born from
+	// its owner). Zero (Valid=false) when the run has a human behind it, so the
+	// System layer is then absent and treated as Inherit. The owner's User ceiling
+	// loads regardless; System only ever tightens on top of it.
+	SystemID pgtype.UUID
 	// Base is the workspace/system default applied when even the runtime layer
 	// inherits. Empty defaults to Allow (see Resolve).
 	Base Setting
+	// IsSystem marks a run with no human behind it (autopilot / system-triggered).
+	// Such a run has no one to answer an approval prompt, so any Ask it resolves to
+	// becomes Deny — fail-safe (FIR-1609). The caller sets this from the run's
+	// origin (an empty trigger user means no human). The owner's User ceiling is
+	// still loaded and still caps the result; IsSystem only adds the Ask→Deny
+	// fail-safe on top, so a system run can never be looser than a human one.
+	IsSystem bool
+	// RequestContext carries the request attributes (host, action) the WHEN layer
+	// (a row's Conditions) is matched against during resolution (FIR-1609). The
+	// zero value matches any condition that constrains nothing; a row that
+	// constrains host/action against an empty context simply does not apply and
+	// is dropped. Callers that do not yet thread request attributes leave this
+	// zero — unconditioned rows (every row written before conditions existed)
+	// resolve identically regardless, so wiring this in is behaviour-preserving.
+	RequestContext RequestContext
+	// Eval evaluates a CEL expression carried on a Condition. nil is valid: a row
+	// with a non-empty Expr and no evaluator is undecidable and fails closed by
+	// effect (see ConditionedSetting). Structured conditions (host/action) need
+	// no evaluator.
+	Eval ExprEvaluator
 }
 
 // Resolve loads the explicit per-layer settings for the query and folds them
@@ -116,16 +145,27 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		AgentID:         in.AgentID,
 		UserID:          in.UserID,
 		GroupIds:        groupIDs,
+		SystemID:        in.SystemID,
 	})
 	if err != nil {
 		return Input{}, fmt.Errorf("toolpolicy: load context settings: %w", err)
 	}
 
-	input := Input{Settings: map[Layer]Setting{}, Base: in.Base}
+	input := Input{Settings: map[Layer]Setting{}, Base: in.Base, IsSystem: in.IsSystem}
 	var groupSettings []Setting
 	for _, r := range rows {
 		layer := Layer(r.Layer)
 		setting := Setting(r.Setting)
+		cond, err := decodeCondition(r.Conditions)
+		if err != nil {
+			return Input{}, fmt.Errorf("toolpolicy: decode conditions for layer %q: %w", layer, err)
+		}
+		setting, applies := ConditionedSetting(setting, cond, in.RequestContext, in.Eval)
+		if !applies {
+			// The WHEN layer's terms are not met (or the row fails closed): the
+			// row drops out, so this layer inherits as if the row were absent.
+			continue
+		}
 		if layer == LayerGroup {
 			groupSettings = append(groupSettings, setting)
 			continue
@@ -178,7 +218,10 @@ type SetParams struct {
 	SubjectID       pgtype.UUID
 	ResourcePattern string
 	Setting         Setting
-	UpdatedBy       pgtype.UUID // optional; the zero value leaves the column NULL
+	// Conditions is the optional WHEN layer on this rule (FIR-1609). nil — or a
+	// zero-value Condition — stores NULL, meaning "no condition, always applies".
+	Conditions *Condition
+	UpdatedBy  pgtype.UUID // optional; the zero value leaves the column NULL
 }
 
 // Set upserts one layer's explicit choice for one (tool, resource_pattern).
@@ -192,6 +235,10 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 	if !validSetting(p.Setting) {
 		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("%w: %q", ErrUnknownSetting, p.Setting)
 	}
+	conditions, err := encodeCondition(p.Conditions)
+	if err != nil {
+		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("toolpolicy: set: %w", err)
+	}
 	row, err := s.q.UpsertCerebroToolPolicy(ctx, cerebrodb.UpsertCerebroToolPolicyParams{
 		WorkspaceID:     p.WorkspaceID,
 		ToolKey:         p.ToolKey,
@@ -199,6 +246,7 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 		SubjectID:       p.SubjectID,
 		ResourcePattern: p.ResourcePattern,
 		Setting:         string(p.Setting),
+		Conditions:      conditions,
 		UpdatedBy:       p.UpdatedBy,
 	})
 	if err != nil {
@@ -233,6 +281,7 @@ type SubjectSetting struct {
 	ToolKey         string
 	ResourcePattern string
 	Setting         Setting
+	Conditions      *Condition // optional WHEN layer; nil when the row has none.
 	UpdatedBy       pgtype.UUID
 	UpdatedAt       pgtype.Timestamptz
 }
@@ -253,13 +302,47 @@ func (s *Store) ListForSubject(ctx context.Context, workspaceID pgtype.UUID, lay
 	}
 	out := make([]SubjectSetting, 0, len(rows))
 	for _, r := range rows {
+		cond, err := decodeCondition(r.Conditions)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: list for subject: decode conditions for %q: %w", r.ToolKey, err)
+		}
 		out = append(out, SubjectSetting{
 			ToolKey:         r.ToolKey,
 			ResourcePattern: r.ResourcePattern,
 			Setting:         Setting(r.Setting),
+			Conditions:      cond,
 			UpdatedBy:       r.UpdatedBy,
 			UpdatedAt:       r.UpdatedAt,
 		})
 	}
 	return out, nil
+}
+
+// encodeCondition marshals an optional Condition for the conditions JSONB
+// column. A nil or zero-value Condition encodes to NULL (no constraint).
+func encodeCondition(c *Condition) ([]byte, error) {
+	if c == nil || c.IsZero() {
+		return nil, nil
+	}
+	b, err := json.Marshal(c)
+	if err != nil {
+		return nil, fmt.Errorf("marshal conditions: %w", err)
+	}
+	return b, nil
+}
+
+// decodeCondition unmarshals a stored conditions JSONB blob. NULL / empty / a
+// zero-value Condition all decode to nil (no constraint).
+func decodeCondition(raw []byte) (*Condition, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var c Condition
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return nil, fmt.Errorf("unmarshal conditions: %w", err)
+	}
+	if c.IsZero() {
+		return nil, nil
+	}
+	return &c, nil
 }

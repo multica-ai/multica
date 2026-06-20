@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -86,8 +88,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/cloudtoolscan"
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler import
 	cerebrotasks "github.com/multica-ai/multica/server/internal/cerebro/tasks"
-	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler import
-	cerebrosharetoken "github.com/multica-ai/multica/server/internal/cerebro/sharetoken"
 	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler import
 	cerebroterminal "github.com/multica-ai/multica/server/internal/cerebro/terminal"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
@@ -100,6 +100,8 @@ import (
 	cerebroissuedatetime "github.com/multica-ai/multica/server/internal/cerebro/issuedatetime"
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler import
 	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
+	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler import
+	cerebrosavedfilters "github.com/multica-ai/multica/server/internal/cerebro/savedfilters"
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	// CEREBRO-PATCH(cerebro-entity-folders-routes): FIR-1412 skill/autopilot folder handler import
@@ -590,6 +592,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentVaultHandler := cerebroagentvault.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-tool-policy-routes): FIR-2230 unified per-tool policy table handler (data layer the permission screen reads from).
 	cerebroToolPolicyHandler := cerebrotoolpolicy.NewHandler(cerebrotoolpolicy.NewStore(pool))
+	// CEREBRO-PATCH(cerebro-tool-policy-registry-fold-in): FIR-1609 Phase 5 — inject
+	// the firtal_registry data-source lister + per-agent grant so the table appends
+	// one per-data-source row under firtal_registry. Keeps toolpolicy.Table pure.
+	cerebroToolPolicyHandler.RegistryRows = h.ToolPolicyRegistryRows
+	// CEREBRO-PATCH(cerebro-tool-policy-system-cap): FIR-1609 Phase 2 — resolve the
+	// owner a System (autopilot) subject is capped on, so a System rule looser than
+	// its owner is rejected at authoring time. Prefer the explicit owner_user_id;
+	// fall back to the creating member. An agent-created autopilot has no human
+	// owner here, so the cap is skipped (ok=false) and resolution still caps it.
+	cerebroToolPolicyHandler.SystemOwner = func(ctx context.Context, workspaceID, autopilotID pgtype.UUID) (pgtype.UUID, bool, error) {
+		ap, err := queries.GetAutopilot(ctx, autopilotID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, false, nil
+			}
+			return pgtype.UUID{}, false, err
+		}
+		if ap.OwnerUserID.Valid {
+			return ap.OwnerUserID, true, nil
+		}
+		if ap.CreatedByType == "member" && ap.CreatedByID.Valid {
+			return ap.CreatedByID, true, nil
+		}
+		return pgtype.UUID{}, false, nil
+	}
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler.
 	cerebroSandboxProfileHandler := cerebrosandboxprofile.NewHandler()
 	// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox handler — materialises permission-engine needs_approval verdicts into a human inbox.
@@ -616,7 +643,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(router-semantic-search): FIR-2604 wire semantic provider + worker.
 	semanticCfg := cerebrosemantic.LoadConfig()
 	h.SemanticSearch = handler.NewSemanticSearch(pool, semanticCfg.BuildProvider(), semanticCfg)
-	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (Persona/Multica cut-over controlled by MULTICA_PERMISSION_ENGINE).
+	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196/1197 credential registry handler — cipher loaded from MULTICA_CREDENTIALS_KEY, governance policy wired via newCredentialsPolicy (unified Multica permission engine; FIR-1609 Phase 8 removed the legacy Persona cut-over).
 	cerebroCredentialsCipher := cerebrocredentials.MustNewCipherFromEnv()
 	cerebroCredentialsHandler := cerebrocredentials.New(cerebroQueries, cerebroCredentialsCipher, bus).WithPolicy(newCredentialsPolicy(cerebroQueries, queries, sharedApprovalGate))
 	// CEREBRO-PATCH(router-infisical-provisioner): FIR-2192 scoped-per-user
@@ -641,14 +668,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// registration so RecordRuntimeAccount in runtime_account_cerebro.go can
 	// delegate to the cerebro service via the RuntimeAccountInvoker seam.
 	h.RuntimeAccount = cerebroruntime.NewAccountService(cerebroQueries, cerebroAccountHandler.Service, bus)
-	// CEREBRO-PATCH(router-persona-mask): JEH-1079 mount the field-level
-	// redaction service. Falls through to no-op when persona env is
-	// unset — handlers behave as before for non-persona deployments.
-	h.PersonaMask = newPersonaMaskInvoker()
-	// CEREBRO-PATCH(router-persona-mask-audit): JEH-1173 mount the
-	// redaction-audit writer. Always wired (independent of persona env)
-	// so a future persona enablement starts logging from the first read.
-	h.PersonaMaskAudit = newPersonaMaskAuditWriter(cerebroQueries)
 	// CEREBRO-PATCH(router-tool-meta): JEH-1353 — wire tool display metadata so
 	// the admin API can return names + descriptions for every registered tool.
 	{
@@ -687,8 +706,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, runtimeToolsSvc, callableCloudToolMeta()))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
-	// CEREBRO-PATCH(sharetoken-routes): JEH-1076 public-link share-token handler
-	cerebroShareTokenHandler := cerebrosharetoken.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler instance
 	cerebroTerminalBroker := cerebroterminal.NewBroker()
 	cerebroTerminalHandler := cerebroterminal.New(cerebroTerminalBroker, pool)
@@ -711,6 +728,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIssueDateTimeHandler := cerebroissuedatetime.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
+	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
 	cerebroNoteTypesHandler := cerebronotetypes.NewHandler(cerebroQueries, pool)
 	// CEREBRO-PATCH(cerebro-entity-folders-routes): FIR-1412 skill/autopilot folder handler instance
@@ -788,6 +807,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 	// CEREBRO-PATCH(cerebro-dictation-ws-auth): browsers cannot attach Authorization headers to WebSocket upgrades.
 	r.Get("/api/workspaces/{id}/cerebro/dictation/stream", cerebroDictationHandler.Stream)
+	// CEREBRO-PATCH(cerebro-dictation-routes): FIR-1637 — one-shot HTTP transcribe (record → POST → text); self-authenticates like Stream.
+	r.Post("/api/workspaces/{id}/cerebro/dictation/transcribe", cerebroDictationHandler.Transcribe)
 	// CEREBRO-PATCH(terminal-ws-auth): terminal session WS handles its own auth (cookie or
 	// first-message) and must be outside all auth middleware so browsers can upgrade.
 	r.Get("/api/cerebro/terminal/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
@@ -830,9 +851,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(runtime-setup-routes): public token-gated runtime setup
 	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
 	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
-	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
 	// CEREBRO-PATCH(cerebro-workflows-webhook-ingress): JEH-1108 PR 2 public inbound webhook endpoint. Token-in-URL is the auth surface; HMAC + timestamp window are layered defenses. Mounted OUTSIDE the auth-required groups by design. When opts.WorkflowService is nil (tests), the route returns 503.
-	// CEREBRO-PATCH(sharetoken-public-route): JEH-1076 anonymous public-link
 	// GitHub App webhook (no Multica auth — requests are authenticated via
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
@@ -856,7 +875,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces/{workspaceId}/repo/check/{approvalId}", h.PollDaemonRepoApproval)                // CEREBRO-PATCH(daemon-repo-approval-gate): FIR-2586 poll a repo-checkout approval
 		r.Post("/workspaces/{workspaceId}/tool-policy/resolve", h.ResolveDaemonToolPolicy)                  // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 per-tool resolve for local CLI runtimes
 		r.Get("/workspaces/{workspaceId}/tool-policy/resolve/{approvalId}", h.PollDaemonToolPolicyApproval) // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 poll a local-runtime tool approval
-		r.Get("/workspaces/{workspaceId}/agents/persona", h.ListWorkspacePersonaAgents)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		r.Get("/runtimes/{runtimeId}/trace-config", h.GetTraceConfig) // CEREBRO-PATCH(trace-config-route): TECH-3621 fleet trace-upload config for daemons (runtime-scoped, same guard as siblings)
@@ -1016,19 +1034,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.With(middleware.RequireWorkspaceMember(queries)).Post("/api/runtime-setup/tokens", h.CreateRuntimeSetupToken)
 		// /api/upload-file is registered in the task-allowlist group above
 		// so agents can upload attachments while running a task.
-
-		// Persona pass-through for the agent settings UI. Returns []
-		// when persona is not configured server-side so the dropdown
-		// silently hides.
-		r.Get("/api/persona/sandboxes", h.ListPersonaSandboxes)
-
-		// CEREBRO-PATCH(persona-approvals): JEH-1078 approval inbox +
-		// approve/deny proxy. List returns the calling Multica user's
-		// "kræver din godkendelse" pool-matched requests; approve/deny
-		// resolve on behalf of the user against persona.
-		r.Get("/api/persona/approvals", h.ListPersonaApprovals)
-		r.Post("/api/persona/approvals/{id}/approve", h.ApprovePersonaApproval)
-		r.Post("/api/persona/approvals/{id}/deny", h.DenyPersonaApproval)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -1667,7 +1672,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
 					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
-					r.Patch("/persona-sandbox", h.UpdateAgentRuntimePersonaSandbox)
 					// CEREBRO-PATCH(router-runtime-tools-config): runtime-level MCP defaults (9031).
 					r.Patch("/tools-config", h.UpdateAgentRuntimeToolsConfig)
 					// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified
@@ -1878,11 +1882,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Patch("/{refId}", cerebroReferencesHandler.Update)
 				r.Delete("/{refId}", cerebroReferencesHandler.Delete)
 			})
-			// CEREBRO-PATCH(sharetoken-routes): JEH-1076 mint + revoke a
-			// public share-token for an issue. Public GET is mounted on the
-			// unauth tree above.
-			r.Post("/api/cerebro/issues/{id}/share-tokens", cerebroShareTokenHandler.Create)
-			r.Delete("/api/cerebro/share-tokens/{tokenId}", cerebroShareTokenHandler.Revoke)
 			// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 cross-agent tasks list endpoint
 			r.Get("/api/cerebro/tasks", cerebroTasksHandler.List)
 			// CEREBRO-PATCH(cerebro-focus-list-routes): FIR-2947 personal focus list for inbox.
@@ -1982,6 +1981,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroSprintsHandler.GetIssueAssignment)
 				r.Put("/", cerebroSprintsHandler.AssignIssue)
 			})
+			r.Get("/api/cerebro/issues/{issueID}/selectable-sprints", cerebroSprintsHandler.ListSelectableSprints) // CEREBRO-PATCH(cerebro-sprints-selectable): FIR-1657 cross-project sprint picker.
 			// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 optional start/due time-of-day per issue.
 			r.Route("/api/cerebro/issues/{issueID}/date-times", func(r chi.Router) {
 				r.Get("/", cerebroIssueDateTimeHandler.Get)
@@ -1994,6 +1994,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/", cerebroRecurringIssueHandler.Delete)
 			})
 			r.Post("/api/cerebro/issue-recurrences/{id}/run", cerebroRecurringIssueHandler.RunNow)
+			// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters REST surface.
+			r.Route("/api/cerebro/saved-filters", func(r chi.Router) {
+				r.Get("/", cerebroSavedFiltersHandler.List)
+				r.Post("/", cerebroSavedFiltersHandler.Create)
+				r.Patch("/{id}", cerebroSavedFiltersHandler.Update)
+				r.Delete("/{id}", cerebroSavedFiltersHandler.Delete)
+			})
 			// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model REST surface.
 			r.Route("/api/cerebro/status-models", func(r chi.Router) {
 				// Read-only: any workspace member (the board needs to resolve labels).

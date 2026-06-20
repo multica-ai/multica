@@ -14,13 +14,12 @@ import {
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Button } from "@multica/ui/components/ui/button";
-import { MicButton } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): mount push-to-talk dictation button (JEH-729).
+import { EditorDictationMic } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): one-shot dictation mic in the composer action row (FIR-1637).
 // CEREBRO-PATCH(composer-height-cap): TECH-3536 — unify chat expand with the comment/channel/DM composer (shared pill + height behavior).
 import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 import { Square } from "lucide-react";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { useWorkspaceId } from "@multica/core/hooks"; // CEREBRO-PATCH(chat-input-dictation-streaming): workspace-scoped dictation stream URL (JEH-729).
 import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
 import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
@@ -75,7 +74,6 @@ export function ChatInput({
   const { t } = useT("chat");
   const editorRef = useRef<ContentEditorRef>(null);
   const submitOnEnter = useSubmitOnEnter();
-  const workspaceId = useWorkspaceId();
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Scope the new-chat draft by agent:
@@ -140,16 +138,10 @@ export function ChatInput({
     setIsEmpty(true);
   };
 
-  const handleDictationPartial = useCallback((text: string) => {
-    editorRef.current?.replaceDictationPreview(text);
-  }, []);
-
+  // CEREBRO-PATCH(chat-input-dictation): FIR-1637 — one-shot dictation inserts
+  // the finished transcript at the caret.
   const handleDictationFinal = useCallback((text: string) => {
-    editorRef.current?.commitDictationPreview(text);
-  }, []);
-
-  const handleDictationError = useCallback(() => {
-    editorRef.current?.clearDictationPreview();
+    editorRef.current?.insertText(text);
   }, []);
 
   const placeholder = noAgent
@@ -229,6 +221,9 @@ export function ChatInput({
             //   true  → Enter sends, Shift+Enter inserts newline
             //   false → Cmd/Ctrl+Enter sends, Enter inserts newline
             submitOnEnter={submitOnEnter}
+            // CEREBRO-PATCH(chat-input-dictation): FIR-1637 — chat mounts its own
+            // mic in the action row; suppress ContentEditor's corner mic here.
+            hideDictationMic
             // CEREBRO-PATCH(input-autofocus): JEH-756 — gated here so
             // archived sessions and no-agent surfaces don't pull focus into
             // a non-functional editor.
@@ -252,12 +247,9 @@ export function ChatInput({
             onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
             onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
           />
-          <MicButton
+          <EditorDictationMic
             disabled={!!disabled || !!noAgent}
-            streamUrl={`/api/workspaces/${workspaceId}/cerebro/dictation/stream`}
-            onPartialTranscribed={handleDictationPartial}
             onTranscribed={handleDictationFinal}
-            onError={handleDictationError}
           />
           {rightAdornment}
           {isRunning && onStop && (

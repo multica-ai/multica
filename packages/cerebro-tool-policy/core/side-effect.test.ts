@@ -13,7 +13,8 @@ function row(
     category: opts.category ?? "",
     source: "scan",
     managed_externally: false,
-    layers: { workspace: null, runtime: null, agent: null, group: null, user: null },
+    layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
+    conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
     effective: {
       setting: opts.effective ?? "allow",
       decided_by: "",

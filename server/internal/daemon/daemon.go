@@ -614,7 +614,6 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 }
 
 // refreshAgentVersions re-runs DetectVersion for every configured agent
-// CEREBRO-PATCH(daemon): persona integration additions.
 // and returns a copy of the resulting provider→version map. Logs (info)
 // when a version changed since the last refresh — operators can see CLI
 // upgrades surface in the daemon log even before the server picks them
@@ -1384,17 +1383,6 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		// detected login identity instead of a nil Account field.
 		for _, rt := range resp.Runtimes {
 			d.refreshHeartbeatAccount(rt.ID)
-		}
-
-		// E3 part 3 ("fornyes ved hver start"): refresh persona actor
-		// attributes for every persona-gated agent in this workspace. Without
-		// this, persona's UI keeps showing whatever attrs were written at the
-		// last spawn — stale tool lists if the daemon was upgraded with new
-		// capabilities, or no attrs at all for agents that haven't spawned
-		// since the actor was created. Best-effort and async: a missing
-		// PERSONA_URL or a 404 from persona shouldn't block daemon startup.
-		if d.personaEnabled() {
-			go d.refreshPersonaActorAttrs(ctx, id)
 		}
 
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
@@ -3089,49 +3077,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	for k, v := range infisicalEnv {
 		agentEnv[k] = v
-	}
-	// Persona integration (D3): when the agent has persona_sandbox set AND
-	// the daemon is configured for persona, prepare actor + settings.json
-	// before spawn. Adds env vars and a Claude-Code --settings file that
-	// wires the PreToolUse hook. No-op when either side is absent.
-	//
-	// JEH-1080: forward the spawning user + group memberships the server
-	// resolved at claim time. An empty subject is fine — the hook just
-	// won't carry group facts and any group-grant evaluates to no-match.
-	personaSubject := spawnPersonaSubject{
-		UserID:   task.PersonaSpawnUserID,
-		GroupIDs: task.PersonaSpawnGroupIDs,
-	}
-	personaSpawn, perr := d.preparePersonaSpawn(ctx, task.Agent, personaSubject, task.RuntimePersonaSandbox, provider, env.WorkDir, taskLog)
-	if perr != nil {
-		return TaskResult{}, fmt.Errorf("persona prep: %w", perr)
-	}
-	if personaSpawn != nil {
-		for k, v := range personaSpawn.Env {
-			agentEnv[k] = v
-		}
-		// Claude Code reads --settings as a CLI flag; passing the path here
-		// keeps the daemon's handling of provider-specific args local. Each
-		// provider that wants persona integration can opt in similarly.
-		if provider == "claude" && personaSpawn.SettingsPath != "" {
-			extraArgs := []string{"--settings", personaSpawn.SettingsPath}
-			if existing, ok := agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"]; ok && existing != "" {
-				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = existing + " --settings " + personaSpawn.SettingsPath
-			} else {
-				agentEnv["MULTICA_CLAUDE_EXTRA_ARGS"] = extraArgs[0] + " " + extraArgs[1]
-			}
-		}
-		// Clear the per-spawn workdir from the actor's attributes when the
-		// task ends, regardless of outcome. Prevents persona's UI from
-		// showing a stale "currently working in /tmp/xyz" between spawns.
-		// Uses a fresh context so the call survives task-cancellation.
-		if personaSpawn.finishHook != nil {
-			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				personaSpawn.finishHook(cleanupCtx)
-			}()
-		}
 	}
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
 	// PreToolUse hook to the local tool-policy resolve IPC when the workspace

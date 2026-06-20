@@ -20,6 +20,9 @@ export const sprintSettingsSchema = z.object({
   move_incomplete_enabled: z.boolean(),
   move_incomplete_target_status: z.string().default("todo"),
   timezone: z.string(),
+  // FIR-1657: older backends won't send this — default false so the toggle
+  // reads as "closed" rather than crashing the settings form.
+  accepts_external_issues: z.boolean().default(false),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -40,6 +43,28 @@ export const sprintSchema = z.object({
 
 export const sprintsListSchema = z.object({
   sprints: z.array(sprintSchema),
+});
+
+// FIR-1657: one sprint option in an issue's picker, with the owning project's
+// title and a flag for the issue's own project.
+export const selectableSprintSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  project_id: z.string(),
+  project_title: z.string().default(""),
+  name: z.string(),
+  sequence_no: z.number().int(),
+  status: sprintStatus,
+  start_date: z.string(),
+  end_date: z.string(),
+  goal: z.string().optional(),
+  is_own_project: z.boolean().default(false),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const selectableSprintsListSchema = z.object({
+  sprints: z.array(selectableSprintSchema),
 });
 
 export const sprintIssueLinkSchema = z.object({
@@ -74,5 +99,6 @@ export const recurringTasksListSchema = z.object({
 });
 
 export const EMPTY_SPRINTS_LIST = { sprints: [] };
+export const EMPTY_SELECTABLE_SPRINTS_LIST = { sprints: [] };
 export const EMPTY_SPRINT_ISSUES_LIST = { issues: [] };
 export const EMPTY_RECURRING_TASKS_LIST = { recurring_tasks: [] };

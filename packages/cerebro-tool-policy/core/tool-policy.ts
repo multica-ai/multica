@@ -18,8 +18,12 @@ import { z } from "zod";
 
 /** The per-layer authoring choice for one tool. `inherit` follows the layer below. */
 export type ToolSetting = "inherit" | "allow" | "ask" | "deny";
-/** A rung of the Workspace › Runtime › Agent › Group › User chain. */
-export type ToolLayer = "workspace" | "runtime" | "agent" | "group" | "user";
+/**
+ * A rung of the chain. The ceiling slot is filled by exactly one of `user` (a
+ * human run) or `system` (a human-less autopilot run, FIR-1609) per resolution —
+ * never both — so `system` is a peer of `user`, not a sixth stacked layer.
+ */
+export type ToolLayer = "workspace" | "runtime" | "agent" | "group" | "user" | "system";
 /** The resolved verdict is always concrete — never `inherit`. */
 export type ToolEffectiveSetting = "allow" | "ask" | "deny";
 
@@ -51,6 +55,40 @@ export interface ToolPolicyLayers {
   agent: ToolSetting | null;
   group: ToolSetting | null;
   user: ToolSetting | null;
+  /**
+   * The mandate-actor ceiling for a human-less (autopilot) run, FIR-1609. null on
+   * the human-context views; populated only when the table is scoped to one
+   * autopilot (ToolPolicyContext.autopilotId → system_id).
+   */
+  system: ToolSetting | null;
+}
+
+/**
+ * The optional WHEN layer (FIR-1609) on a rule: it refines whether the rule
+ * applies to a request, it NEVER decides Allow/Ask/Deny — that stays the
+ * Decision's job. `host_allowlist` restricts the target host (the web_fetch
+ * host policy folded into the rule); `actions` restricts the verb (read/checkout
+ * /push, reveal, rotate …); `expr` is the CEL escape hatch for genuine dynamics.
+ * An all-empty condition means "always applies".
+ */
+export interface ToolCondition {
+  host_allowlist: string[];
+  actions: string[];
+  expr: string;
+}
+
+/**
+ * The per-layer Condition for one tool, each field null when that layer's rule
+ * carries no condition. Mirrors ToolPolicyLayers; Group is omitted because the
+ * group layer is a combined value across several group rules, for which a single
+ * condition is undefined (group conditions are edited per group, not here).
+ */
+export interface ToolPolicyConditions {
+  workspace: ToolCondition | null;
+  runtime: ToolCondition | null;
+  agent: ToolCondition | null;
+  user: ToolCondition | null;
+  system: ToolCondition | null;
 }
 
 /** One tool's full row for the admin table. */
@@ -72,6 +110,12 @@ export interface ToolPolicyRow {
    */
   managed_externally: boolean;
   layers: ToolPolicyLayers;
+  /**
+   * The optional WHEN layer per single-subject layer (FIR-1609). A null field
+   * means that layer's rule has no condition. Group is intentionally absent (see
+   * ToolPolicyConditions).
+   */
+  conditions: ToolPolicyConditions;
   effective: ToolPolicyEffective;
   /**
    * The group(s) behind a group-layer cap on this row, each with its owner.
@@ -90,6 +134,12 @@ export interface ToolPolicyContext {
   agentId?: string | null;
   userId?: string | null;
   groupIds?: string[];
+  /**
+   * The autopilot whose System (mandate-actor) rules to view/author, FIR-1609.
+   * Sent as system_id; omitted on the human-context views, where the System
+   * column stays empty.
+   */
+  autopilotId?: string | null;
   /** Workspace/system default below the runtime; defaults to allow server-side. */
   base?: ToolSetting | null;
 }
@@ -101,6 +151,11 @@ export interface SetToolPolicyRequest {
   setting: ToolSetting;
   /** Per-resource scope (e.g. a repo URL); omit/empty for a capability-wide write. */
   resource_pattern?: string;
+  /**
+   * The optional WHEN layer (FIR-1609). Omit or send null to store no condition;
+   * an all-empty condition is also treated as "no condition" server-side.
+   */
+  condition?: ToolCondition | null;
 }
 
 export interface ClearToolPolicyRequest {
@@ -147,6 +202,25 @@ const effectiveSettingSchema = z.preprocess(
   z.enum(["allow", "ask", "deny"]),
 );
 
+// A condition is descriptive metadata, not a verdict, so an odd/missing value
+// drifts to null ("no condition") rather than failing the whole table parse —
+// it never widens access on its own (the Decision still gates). Non-string
+// entries in the lists are dropped instead of crashing.
+const stringListSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((xs) => xs.filter((x): x is string => typeof x === "string"));
+
+const conditionSchema = z
+  .object({
+    host_allowlist: stringListSchema.default([]),
+    actions: stringListSchema.default([]),
+    expr: z.string().catch("").default(""),
+  })
+  .nullable()
+  .catch(null)
+  .default(null);
+
 const toolPolicyRowSchema = z.object({
   tool_key: z.string(),
   resource_pattern: z.string().default(""),
@@ -164,8 +238,22 @@ const toolPolicyRowSchema = z.object({
       agent: layerSettingSchema.default(null),
       group: layerSettingSchema.default(null),
       user: layerSettingSchema.default(null),
+      system: layerSettingSchema.default(null),
     })
-    .default({ workspace: null, runtime: null, agent: null, group: null, user: null }),
+    .default({ workspace: null, runtime: null, agent: null, group: null, user: null, system: null }),
+  // The optional WHEN layer per single-subject layer (FIR-1609). A missing or
+  // malformed condition drifts to null ("always applies") — a condition is never
+  // a privilege grant, so failing soft here is safe (see conditionSchema).
+  conditions: z
+    .object({
+      workspace: conditionSchema,
+      runtime: conditionSchema,
+      agent: conditionSchema,
+      user: conditionSchema,
+      system: conditionSchema,
+    })
+    .catch({ workspace: null, runtime: null, agent: null, user: null, system: null })
+    .default({ workspace: null, runtime: null, agent: null, user: null, system: null }),
   effective: z
     .object({
       setting: effectiveSettingSchema,
@@ -203,6 +291,7 @@ export async function fetchToolPolicyTable(
   if (ctx.agentId) params.set("agent_id", ctx.agentId);
   if (ctx.userId) params.set("user_id", ctx.userId);
   for (const g of ctx.groupIds ?? []) params.append("group_id", g);
+  if (ctx.autopilotId) params.set("system_id", ctx.autopilotId);
   if (ctx.base) params.set("base", ctx.base);
   const qs = params.toString();
 
@@ -257,6 +346,7 @@ export const toolPolicyKeys = {
       ctx.agentId ?? null,
       ctx.userId ?? null,
       (ctx.groupIds ?? []).join(","),
+      ctx.autopilotId ?? null,
       ctx.base ?? null,
     ] as const,
 };

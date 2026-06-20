@@ -131,6 +131,26 @@ func Load(ctx context.Context, cerebro *cerebrodb.Queries, workspaceID pgtype.UU
 	return fromRow(row), nil
 }
 
+// LoadConfigured is Load but also reports whether the workspace has an explicit
+// stored policy (configured=true) versus falling back to Default()
+// (configured=false). The FIR-1609 fold-in read model (toolpolicy.Table) uses
+// this so it only surfaces a web_fetch Condition for workspaces that actually
+// configured one — a never-configured workspace keeps its row unchanged rather
+// than sprouting a surprise "Override on Workspace" from the seeded default.
+func LoadConfigured(ctx context.Context, cerebro *cerebrodb.Queries, workspaceID pgtype.UUID) (Policy, bool, error) {
+	if cerebro == nil || !workspaceID.Valid {
+		return Default(), false, nil
+	}
+	row, err := cerebro.GetCerebroWebFetchPolicy(ctx, workspaceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Default(), false, nil
+	}
+	if err != nil {
+		return Default(), false, err
+	}
+	return fromRow(row), true, nil
+}
+
 // FeatureEnabled reports whether the per-workspace policy feature is active for
 // a workspace. The flag default is ON (registry.ts); a missing override row or
 // any lookup failure resolves to enabled so the feature is not silently dropped.

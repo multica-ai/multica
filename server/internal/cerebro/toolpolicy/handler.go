@@ -19,8 +19,10 @@ package toolpolicy
 // frontend from data it already holds (members, agents, runtimes, groups).
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -33,9 +35,44 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// RegistryProjection carries everything the firtal_registry per-data-source
+// fold-in (FIR-1609 Phase 5) needs to project: the workspace's data-source
+// catalog and the agent's grant. The handler owns the FDR lister + the
+// agent_tool_grant read and hands these in, so this package keeps no registry-API
+// or grant dependency and toolpolicy.Table (the pure builder) stays pure.
+type RegistryProjection struct {
+	DataSources []RegistryDataSource
+	Grant       RegistryGrant
+}
+
+// RegistryRowsFunc lists the registry projection for one (workspace, agent). It
+// returns ok=false when the fold-in does not apply (no agent in the query, the
+// registry is not configured for the workspace, or there are no data sources), in
+// which case the table is unchanged. A non-nil error is logged but never fails
+// the whole table — the registry fold-in is best-effort, like the web_fetch one.
+type RegistryRowsFunc func(ctx context.Context, workspaceID, agentID pgtype.UUID) (RegistryProjection, bool, error)
+
+// SystemOwnerFunc resolves the human a System actor is capped on at authoring
+// time (FIR-1609): a System-layer subject is an autopilot, and an autopilot is
+// born from — and capped at — its owner. ok=false means the subject is not a
+// known autopilot with a resolvable human owner (e.g. an agent-created
+// autopilot), in which case the cap check is skipped rather than blocking the
+// write. The handler injects this so the toolpolicy package keeps no autopilot /
+// main-db dependency.
+type SystemOwnerFunc func(ctx context.Context, workspaceID, autopilotID pgtype.UUID) (ownerID pgtype.UUID, ok bool, err error)
+
 // Handler wires the tool-policy Store to chi routes.
 type Handler struct {
 	Store *Store
+	// RegistryRows, when set, supplies the firtal_registry per-data-source
+	// projection appended to the table for an agent-scoped query (Phase 5). Left
+	// nil (e.g. in tests) the table degrades to the pure builder's rows.
+	RegistryRows RegistryRowsFunc
+	// SystemOwner, when set, resolves the owner a System-layer (autopilot) subject
+	// is capped on, so a System rule that would be looser than its owner's own
+	// ceiling is rejected at authoring time. Left nil the cap check is skipped (the
+	// resolution-time owner ceiling still caps every run regardless).
+	SystemOwner SystemOwnerFunc
 }
 
 // NewHandler constructs a Handler over the given Store.
@@ -52,6 +89,31 @@ type layerSettings struct {
 	Agent     *string `json:"agent"`
 	Group     *string `json:"group"`
 	User      *string `json:"user"`
+	// System is the per-autopilot mandate-actor layer (FIR-1609), populated only
+	// when the view is scoped to an autopilot (system_id query param). null on the
+	// human-context views that pass no autopilot.
+	System *string `json:"system"`
+}
+
+// conditionResponse mirrors toolpolicy.Condition over the wire — the optional
+// WHEN layer (FIR-1609) on a rule. All fields omitempty so a row with no
+// condition serializes to null, not an empty object.
+type conditionResponse struct {
+	HostAllowlist []string `json:"host_allowlist,omitempty"`
+	Actions       []string `json:"actions,omitempty"`
+	Expr          string   `json:"expr,omitempty"`
+}
+
+// layerConditions carries the per-layer Condition for one tool, each field nil
+// when that layer's rule has no condition ("always applies"). Mirrors
+// layerSettings; Group is omitted because the group layer is a combined value
+// for which a single condition is undefined (see TableRow.Conditions).
+type layerConditions struct {
+	Workspace *conditionResponse `json:"workspace"`
+	Runtime   *conditionResponse `json:"runtime"`
+	Agent     *conditionResponse `json:"agent"`
+	User      *conditionResponse `json:"user"`
+	System    *conditionResponse `json:"system"`
 }
 
 type effectiveResponse struct {
@@ -77,6 +139,7 @@ type toolPolicyRow struct {
 	Source            string                     `json:"source"`
 	ManagedExternally bool                       `json:"managed_externally"`
 	Layers            layerSettings              `json:"layers"`
+	Conditions        layerConditions            `json:"conditions"`
 	Effective         effectiveResponse          `json:"effective"`
 	CappedByGroups    []groupAttributionResponse `json:"capped_by_groups"`
 }
@@ -89,6 +152,34 @@ type setRequest struct {
 	SubjectID       string `json:"subject_id"`
 	ResourcePattern string `json:"resource_pattern"`
 	Setting         string `json:"setting"`
+	// Condition is the optional WHEN layer (FIR-1609). Omit or send null to store
+	// no condition; a zero-value condition is also treated as "no condition".
+	Condition *conditionRequest `json:"condition"`
+}
+
+// conditionRequest is the wire form of a Condition on a write. It mirrors
+// conditionResponse; an absent or all-empty condition stores NULL.
+type conditionRequest struct {
+	HostAllowlist []string `json:"host_allowlist"`
+	Actions       []string `json:"actions"`
+	Expr          string   `json:"expr"`
+}
+
+// toCondition converts the request form to the domain Condition, or nil when the
+// request carries no constraint (so the store writes NULL).
+func (c *conditionRequest) toCondition() *Condition {
+	if c == nil {
+		return nil
+	}
+	cond := &Condition{
+		HostAllowlist: c.HostAllowlist,
+		Actions:       c.Actions,
+		Expr:          c.Expr,
+	}
+	if cond.IsZero() {
+		return nil
+	}
+	return cond
 }
 
 // --- handlers ---------------------------------------------------------------
@@ -122,6 +213,13 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid group_id")
 		return
 	}
+	// system_id scopes the System layer to one autopilot (FIR-1609). Absent on the
+	// human-context views; present when an admin views an autopilot's System rules.
+	systemID, err := uuidParam(q.Get("system_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid system_id")
+		return
+	}
 
 	base := Setting(q.Get("base"))
 	if base != "" && !validSetting(base) {
@@ -135,12 +233,28 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		AgentID:         agentID,
 		UserID:          userID,
 		GroupIDs:        groupIDs,
+		SystemID:        systemID,
 		Base:            base,
 		IncludePlatform: h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 	})
 	if err != nil {
 		h.serverError(w, r, "list tool policy table", err)
 		return
+	}
+
+	// FIR-1609 Phase 5 fold-in: append the firtal_registry per-data-source rows
+	// for an agent-scoped query. The data-source list comes from the FDR proxy and
+	// the grant from agent_tool_grant — both owned by the handler layer (injected
+	// via RegistryRows), so toolpolicy.Table stays pure. Like the web_fetch fold-in
+	// it is read-side only (agent_tool_grant stays the enforced source until the
+	// gate reads the chain in Phase 6), and an admin's explicit row for a data
+	// source always wins, so we never project over an authored rule.
+	if h.RegistryRows != nil && agentID.Valid {
+		if proj, ok, perr := h.RegistryRows(r.Context(), workspaceID, agentID); perr != nil {
+			slog.Warn("tool-policy registry fold-in skipped", append(logger.RequestAttrs(r), "error", perr)...)
+		} else if ok {
+			rows = AppendRegistryProjection(rows, proj, LayerAgent, base)
+		}
 	}
 
 	resp := make([]toolPolicyRow, len(rows))
@@ -181,6 +295,23 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// FIR-1609: a System actor is born from a User and may never be authored
+	// looser than that owner's own ceiling. Reject a System rule that would loosen
+	// access beyond what the owning human holds for the same tool/resource. The
+	// resolution-time owner ceiling caps every run anyway; this guard keeps the
+	// admin table honest (no "Allow" row that is silently capped to Deny).
+	if Layer(req.Layer) == LayerSystem {
+		msg, capErr := h.systemCapViolation(r.Context(), workspaceID, subjectID, req.ToolKey, req.ResourcePattern, Setting(req.Setting))
+		if capErr != nil {
+			h.serverError(w, r, "validate system cap", capErr)
+			return
+		}
+		if msg != "" {
+			writeError(w, http.StatusUnprocessableEntity, msg)
+			return
+		}
+	}
+
 	if _, err := h.Store.Set(r.Context(), SetParams{
 		WorkspaceID:     workspaceID,
 		ToolKey:         req.ToolKey,
@@ -188,6 +319,7 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		SubjectID:       subjectID,
 		ResourcePattern: req.ResourcePattern,
 		Setting:         Setting(req.Setting),
+		Conditions:      req.Condition.toCondition(),
 		UpdatedBy:       member.UserID,
 	}); err != nil {
 		if errors.Is(err, ErrUnknownLayer) || errors.Is(err, ErrUnknownSetting) {
@@ -198,6 +330,66 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// systemCapViolation checks that a proposed System-layer setting is not looser
+// than the owner the System actor is capped on (FIR-1609). It returns a non-empty
+// message when the write must be rejected (HTTP 422), an error for an internal
+// failure, or ("", nil) when the write is allowed.
+//
+// The cap is skipped — allowed — when: no SystemOwner resolver is wired; the
+// subject is not a known autopilot with a human owner; or the proposed setting is
+// Inherit/Deny (Inherit grants nothing; Deny is the tightest and can never exceed
+// any owner). Only a concrete Allow/Ask can over-reach, so only those resolve the
+// owner's ceiling and compare restrictiveness.
+func (h *Handler) systemCapViolation(ctx context.Context, workspaceID, autopilotID pgtype.UUID, toolKey, resourcePattern string, proposed Setting) (string, error) {
+	if h.SystemOwner == nil {
+		return "", nil
+	}
+	if !capCanExceed(proposed) {
+		return "", nil // Inherit or Deny can never be looser than any owner.
+	}
+	ownerID, ok, err := h.SystemOwner(ctx, workspaceID, autopilotID)
+	if err != nil {
+		return "", err
+	}
+	if !ok || !ownerID.Valid {
+		return "", nil // No human owner to cap against — leave it to resolution.
+	}
+	// The owner's own ceiling for this tool/resource — resolve the owner as a human
+	// (their User layer + auto-expanded groups, workspace base). No System actor in
+	// this query, so it is purely the owner's reach.
+	ownerEff, err := h.Store.Resolve(ctx, Query{
+		WorkspaceID:     workspaceID,
+		ToolKey:         toolKey,
+		ResourcePattern: resourcePattern,
+		UserID:          ownerID,
+	})
+	if err != nil {
+		return "", err
+	}
+	if looserThanOwner(proposed, ownerEff.Setting) {
+		return fmt.Sprintf(
+			"a System rule may not be more permissive than its owner — owner allows %q here, so System cannot be set to %q",
+			ownerEff.Setting, proposed,
+		), nil
+	}
+	return "", nil
+}
+
+// capCanExceed reports whether a proposed System setting is even capable of
+// exceeding an owner ceiling. Only a concrete Allow/Ask can over-reach; Inherit
+// grants nothing and Deny is the tightest, so neither is ever looser than any
+// owner — they skip the owner lookup entirely.
+func capCanExceed(proposed Setting) bool {
+	return rank(proposed) >= 0 && proposed != SettingDeny
+}
+
+// looserThanOwner reports whether a proposed System setting is more permissive
+// (less restrictive) than the owner's effective ceiling — the condition that must
+// be rejected at authoring time (FIR-1609).
+func looserThanOwner(proposed, ownerEffective Setting) bool {
+	return capCanExceed(proposed) && rank(proposed) < rank(ownerEffective)
 }
 
 // Clear — DELETE /api/workspaces/{id}/tool-policy
@@ -276,6 +468,14 @@ func toRowResponse(row TableRow) toolPolicyRow {
 			Agent:     settingPtr(row.Layers, LayerAgent),
 			Group:     settingPtr(row.Layers, LayerGroup),
 			User:      settingPtr(row.Layers, LayerUser),
+			System:    settingPtr(row.Layers, LayerSystem),
+		},
+		Conditions: layerConditions{
+			Workspace: conditionPtr(row.Conditions, LayerWorkspace),
+			Runtime:   conditionPtr(row.Conditions, LayerRuntime),
+			Agent:     conditionPtr(row.Conditions, LayerAgent),
+			User:      conditionPtr(row.Conditions, LayerUser),
+			System:    conditionPtr(row.Conditions, LayerSystem),
 		},
 		Effective: effectiveResponse{
 			Setting:   string(row.Effective.Setting),
@@ -293,6 +493,20 @@ func settingPtr(layers map[Layer]Setting, l Layer) *string {
 		return &v
 	}
 	return nil
+}
+
+// conditionPtr returns the wire form of the condition stored at layer l, or nil
+// when that layer carries no condition (a nil map or absent key both yield nil).
+func conditionPtr(conditions map[Layer]*Condition, l Layer) *conditionResponse {
+	c, ok := conditions[l]
+	if !ok || c == nil || c.IsZero() {
+		return nil
+	}
+	return &conditionResponse{
+		HostAllowlist: c.HostAllowlist,
+		Actions:       c.Actions,
+		Expr:          c.Expr,
+	}
 }
 
 func parseUUIDList(raw []string) ([]pgtype.UUID, error) {

@@ -12,9 +12,7 @@ import {
   Save,
   Replace,
   MessageSquare,
-  X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -32,11 +30,7 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useDeleteArtifact,
   useUpdateArtifact,
-  countMatches,
-  replaceAll,
-  replaceFirst,
 } from "@multica/cerebro-artifacts/core";
-import { Input } from "@multica/ui/components/ui/input";
 import {
   Sheet,
   SheetContent,
@@ -54,8 +48,9 @@ import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { ContentEditor } from "@multica/views/editor";
 import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
-import { MoveScopeMenu } from "../components/move-scope-menu";
 import { DocumentToolsSidebar } from "../components/document-tools-sidebar";
+import { EditableTitle } from "../components/editable-title";
+import { FindReplaceBar } from "../components/find-replace-bar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Artifact } from "@multica/core/types";
 
@@ -353,103 +348,6 @@ function MarkdownDocumentEditor({
   );
 }
 
-/**
- * Inline find & replace bar for the open note. It works directly on the note's
- * content (the document is inline-edited, so there is no separate edit field):
- * the parent passes the current body, this bar computes matches and hands back
- * the replaced body, which the parent writes into the inline editor + autosaves.
- */
-function FindReplaceBar({
-  body,
-  onReplaceAll,
-  onReplaceFirst,
-  onClose,
-}: {
-  body: string;
-  onReplaceAll: (newBody: string) => void;
-  onReplaceFirst: (newBody: string) => void;
-  onClose: () => void;
-}) {
-  const [find, setFind] = React.useState("");
-  const [replacement, setReplacement] = React.useState("");
-  const matches = React.useMemo(() => countMatches(body, find), [body, find]);
-
-  const doReplaceAll = () => {
-    if (!find) return;
-    const { body: next, count } = replaceAll(body, find, replacement);
-    if (count === 0) {
-      toast.info("No matches to replace.");
-      return;
-    }
-    onReplaceAll(next);
-    toast.success(`Replaced ${count} ${count === 1 ? "match" : "matches"}.`);
-  };
-
-  const doReplaceFirst = () => {
-    if (!find) return;
-    const { body: next, replaced } = replaceFirst(body, find, replacement);
-    if (!replaced) {
-      toast.info("No matches to replace.");
-      return;
-    }
-    onReplaceFirst(next);
-  };
-
-  return (
-    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
-      <div className="flex items-center gap-1.5">
-        <Input
-          autoFocus
-          value={find}
-          onChange={(e) => setFind(e.target.value)}
-          placeholder="Search…"
-          className="h-8 w-40"
-          onKeyDown={(e) => {
-            if (e.key === "Escape") onClose();
-          }}
-        />
-        <span className="min-w-14 text-xs text-muted-foreground">
-          {find ? `${matches} found` : ""}
-        </span>
-      </div>
-      <Input
-        value={replacement}
-        onChange={(e) => setReplacement(e.target.value)}
-        placeholder="Replace with…"
-        className="h-8 w-40"
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onClose();
-        }}
-      />
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={doReplaceFirst}
-        disabled={matches === 0}
-      >
-        Replace
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={doReplaceAll}
-        disabled={matches === 0}
-      >
-        Replace all
-      </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="ml-auto"
-        title="Close"
-        onClick={onClose}
-      >
-        <X className="size-4" />
-      </Button>
-    </div>
-  );
-}
-
 export function DocumentViewPage({
   artifactId,
   renderComments,
@@ -469,8 +367,6 @@ export function DocumentViewPage({
   const remove = useDeleteArtifact();
   const update = useUpdateArtifact();
   const [confirmDelete, setConfirmDelete] = React.useState(false);
-  const [renaming, setRenaming] = React.useState(false);
-  const [titleDraft, setTitleDraft] = React.useState("");
   // Body driving the outline, word count and find&replace. Seeded from the
   // loaded doc and kept live by the editor's onBodyChange; only re-seeded when
   // the doc changes (id), so autosave refetches never clobber what's being typed.
@@ -581,24 +477,6 @@ export function DocumentViewPage({
     router.push(wsPaths.documents());
   };
 
-  const startRename = () => {
-    setTitleDraft(artifact.title);
-    setRenaming(true);
-  };
-  const commitRename = async () => {
-    const next = titleDraft.trim();
-    if (!next || next === artifact.title) {
-      setRenaming(false);
-      return;
-    }
-    await update.mutateAsync({ id: artifact.id, data: { title: next } });
-    setRenaming(false);
-  };
-  const cancelRename = () => {
-    setRenaming(false);
-    setTitleDraft(artifact.title);
-  };
-
   const handleDownload = () => {
     const slug = slugifyForFilename(artifact.title);
     if (artifact.format === "pdf") {
@@ -699,16 +577,6 @@ export function DocumentViewPage({
                     <span className="hidden sm:inline">Find &amp; replace</span>
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="max-sm:px-2"
-                  title="Rename"
-                  onClick={startRename}
-                >
-                  <Pencil className="size-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Rename</span>
-                </Button>
                 {artifact.format !== "md" && (
                   <Button
                     variant="ghost"
@@ -723,7 +591,6 @@ export function DocumentViewPage({
                     <span className="hidden sm:inline">Edit body</span>
                   </Button>
                 )}
-                <MoveScopeMenu artifact={artifact} />
                 <Button
                   variant="ghost"
                   size="sm"
@@ -757,37 +624,15 @@ export function DocumentViewPage({
           )}
         </div>
 
-        {renaming ? (
-          <Input
-            autoFocus
-            value={titleDraft}
-            onChange={(e) => setTitleDraft(e.target.value)}
-            onBlur={commitRename}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                commitRename();
-              } else if (e.key === "Escape") {
-                e.preventDefault();
-                cancelRename();
-              }
-            }}
-            className="h-auto py-1 text-2xl font-semibold leading-tight"
-          />
-        ) : (
-          <h1
-            className={
-              "text-2xl font-semibold leading-tight" +
-              (canEdit
-                ? " cursor-text rounded px-1 -mx-1 hover:bg-accent/30"
-                : "")
-            }
-            onClick={canEdit ? startRename : undefined}
-            title={canEdit ? "Click to rename" : undefined}
-          >
-            {artifact.title}
-          </h1>
-        )}
+        <EditableTitle
+          value={artifact.title}
+          onSave={(next) =>
+            update.mutate({ id: artifact.id, data: { title: next } })
+          }
+          readOnly={!canEdit}
+          allowEmpty={false}
+          className="font-semibold"
+        />
         <ConnectionRow artifact={artifact} />
         <p className="mt-1 text-xs text-muted-foreground">
           Updated {formatDateTime(artifact.updated_at)}

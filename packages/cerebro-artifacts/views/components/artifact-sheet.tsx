@@ -7,6 +7,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { TextareaDictationMic } from "@multica/cerebro-dictation";
 import {
   Sheet,
   SheetContent,
@@ -37,7 +38,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { ArtifactContent } from "./artifact-content";
 import { KindIcon, KIND_LABELS } from "./kind-icon";
-import { MoveScopeMenu } from "./move-scope-menu";
 
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
@@ -82,6 +82,7 @@ export function ArtifactSheet({
   const isResizing = React.useRef(false);
   const resizeStartX = React.useRef(0);
   const resizeStartWidth = React.useRef(0);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   const handleResizeMouseDown = React.useCallback(
     (e: React.MouseEvent) => {
@@ -215,12 +216,16 @@ export function ArtifactSheet({
 
             <div className="flex-1 overflow-y-auto px-4 pb-4">
               {editing ? (
-                <Textarea
-                  value={draftBody}
-                  onChange={(e) => setDraftBody(e.target.value)}
-                  placeholder="Markdown body"
-                  className="min-h-[400px] font-mono text-sm"
-                />
+                <div className="relative">
+                  <Textarea
+                    ref={bodyRef}
+                    value={draftBody}
+                    onChange={(e) => setDraftBody(e.target.value)}
+                    placeholder="Markdown body"
+                    className="min-h-[400px] font-mono text-sm"
+                  />
+                  <TextareaDictationMic textareaRef={bodyRef} />
+                </div>
               ) : (
                 <ArtifactContent
                   artifact={artifact}
@@ -240,7 +245,6 @@ export function ArtifactSheet({
                     >
                       <Pencil className="mr-1 size-4" /> Edit
                     </Button>
-                    <MoveScopeMenu artifact={artifact} />
                     <Button
                       variant="ghost"
                       size="sm"

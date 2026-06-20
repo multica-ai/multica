@@ -73,6 +73,7 @@ const DEFAULT_FORM: Required<SprintSettingsWriteInput> = {
   move_incomplete_enabled: true,
   move_incomplete_target_status: "todo",
   timezone: "UTC",
+  accepts_external_issues: false,
 };
 
 export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
@@ -95,6 +96,7 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
         move_incomplete_enabled: settingsQuery.data.move_incomplete_enabled,
         move_incomplete_target_status: settingsQuery.data.move_incomplete_target_status,
         timezone: settingsQuery.data.timezone,
+        accepts_external_issues: settingsQuery.data.accepts_external_issues ?? false,
       });
     }
   }, [settingsQuery.data]);
@@ -288,6 +290,24 @@ export function SprintSettingsPanel({ workspaceId, projectId }: Props) {
             </Select>
           </div>
         )}
+      </div>
+
+      <div className="border-t pt-4 flex flex-col gap-4">
+        <h4 className="text-sm font-medium">Issues from other projects</h4>
+        <div className="flex items-center justify-between gap-4">
+          <Label htmlFor="accepts-external-issues" className="text-sm font-normal">
+            Allow issues from other projects to be added to this project&apos;s sprints
+          </Label>
+          <Switch
+            id="accepts-external-issues"
+            checked={form.accepts_external_issues}
+            onCheckedChange={(v) => setForm({ ...form, accepts_external_issues: v })}
+          />
+        </div>
+        <span className="text-xs text-muted-foreground">
+          When on, anyone can pick this project&apos;s sprints from an issue that lives in a
+          different project. Off keeps the sprints private to this project.
+        </span>
       </div>
 
       <div className="flex items-center gap-2">

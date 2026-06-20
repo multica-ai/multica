@@ -55,6 +55,7 @@ type settingsRequest struct {
 	MoveIncompleteEnabled      *bool   `json:"move_incomplete_enabled,omitempty"`
 	MoveIncompleteTargetStatus *string `json:"move_incomplete_target_status,omitempty"`
 	Timezone                   *string `json:"timezone,omitempty"`
+	AcceptsExternalIssues      *bool   `json:"accepts_external_issues,omitempty"`
 }
 
 // GetSettings returns the sprint settings for a project. 404 when none
@@ -154,6 +155,7 @@ func (h *Handler) UpsertSettings(w http.ResponseWriter, r *http.Request) {
 		MoveIncompleteEnabled:      merged.MoveIncompleteEnabled,
 		MoveIncompleteTargetStatus: merged.MoveIncompleteTargetStatus,
 		Timezone:                   merged.Timezone,
+		AcceptsExternalIssues:      merged.AcceptsExternalIssues,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "save settings failed")
@@ -512,6 +514,31 @@ func (h *Handler) AssignIssue(w http.ResponseWriter, r *http.Request) {
 	if !ensureWorkspaceMatch(w, r, sprint.WorkspaceID) {
 		return
 	}
+	// FIR-1657: a sprint in a different project than the issue is only allowed
+	// when that sprint's project has explicitly opted in
+	// (enabled AND accepts_external_issues). The issue's own project is always
+	// allowed. This is the authoritative gate — the picker filters client-side,
+	// but the rule lives here so a direct call cannot bypass it.
+	issueProjectID, err := h.Cerebro.GetCerebroIssueProjectID(r.Context(), issueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load issue failed")
+		return
+	}
+	if !uuidEqual(sprint.ProjectID, issueProjectID) {
+		settings, err := h.Cerebro.GetCerebroSprintSettings(r.Context(), sprint.ProjectID)
+		if err != nil || !settings.Enabled || !settings.AcceptsExternalIssues {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusInternalServerError, "load sprint settings failed")
+				return
+			}
+			writeError(w, http.StatusForbidden, "sprint's project does not accept issues from other projects")
+			return
+		}
+	}
 	if err := h.Cerebro.AssignIssueToCerebroSprint(r.Context(), cerebrodb.AssignIssueToCerebroSprintParams{
 		IssueID:  issueID,
 		SprintID: sprintUUID,
@@ -520,6 +547,46 @@ func (h *Handler) AssignIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListSelectableSprints returns the sprints an issue may be assigned to: its
+// own project's sprints plus any opted-in project's sprints in the same
+// workspace (FIR-1657). Each row is labeled with the owning project's title
+// and an is_own_project flag so the picker can group them.
+func (h *Handler) ListSelectableSprints(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	issueID, ok := parseUUIDParam(w, r, "issueID")
+	if !ok {
+		return
+	}
+	wsUUID, ok := workspaceFromContext(w, r)
+	if !ok {
+		return
+	}
+	issueProjectID, err := h.Cerebro.GetCerebroIssueProjectID(r.Context(), issueID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load issue failed")
+		return
+	}
+	rows, err := h.Cerebro.ListSelectableCerebroSprintsForIssue(r.Context(), cerebrodb.ListSelectableCerebroSprintsForIssueParams{
+		WorkspaceID: wsUUID,
+		ProjectID:   issueProjectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list selectable sprints failed")
+		return
+	}
+	out := make([]SelectableSprintResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, selectableSprintToResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sprints": out})
 }
 
 // GetIssueAssignment returns the sprint an issue is in, or 404 when none.
@@ -760,6 +827,7 @@ type mergedSettings struct {
 	MoveIncompleteEnabled      bool
 	MoveIncompleteTargetStatus string
 	Timezone                   string
+	AcceptsExternalIssues      bool
 }
 
 func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting, hasExisting bool) mergedSettings {
@@ -778,6 +846,7 @@ func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting,
 			MoveIncompleteEnabled:      existing.MoveIncompleteEnabled,
 			MoveIncompleteTargetStatus: existing.MoveIncompleteTargetStatus,
 			Timezone:                   existing.Timezone,
+			AcceptsExternalIssues:      existing.AcceptsExternalIssues,
 		}
 	}
 	if req.Enabled != nil {
@@ -810,6 +879,9 @@ func mergeSettings(req settingsRequest, existing cerebrodb.CerebroSprintSetting,
 	if req.Timezone != nil {
 		merged.Timezone = *req.Timezone
 	}
+	if req.AcceptsExternalIssues != nil {
+		merged.AcceptsExternalIssues = *req.AcceptsExternalIssues
+	}
 	return merged
 }
 
@@ -825,6 +897,7 @@ func defaultsForUpsert() mergedSettings {
 		MoveIncompleteEnabled:      true,
 		MoveIncompleteTargetStatus: "todo",
 		Timezone:                   "UTC",
+		AcceptsExternalIssues:      false,
 	}
 }
 

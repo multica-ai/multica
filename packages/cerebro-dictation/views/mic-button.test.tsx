@@ -46,14 +46,19 @@ describe("MicButton", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("does not render when Cerebro Voice is disabled", () => {
+  it("renders on the dictation flag alone, regardless of Cerebro Voice output", () => {
+    // Dictation (speech → text) gates only on cerebro_voice_dictation_enabled.
+    // The read-aloud flag (cerebro_voice_output_enabled) is a separate TTS
+    // feature and must not hide the mic.
     mocks.useFeatureFlag.mockImplementation(
       (key: string) => key === "cerebro_voice_dictation_enabled",
     );
 
     render(<MicButton onTranscribed={vi.fn()} />);
 
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Start dictation" }),
+    ).toBeInTheDocument();
   });
 
   it("starts on pointer down and stops on pointer up", () => {

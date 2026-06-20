@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "lucide-react": "catalog:"
   },

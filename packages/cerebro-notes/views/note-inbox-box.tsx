@@ -15,6 +15,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { TextareaDictationMic } from "@multica/cerebro-dictation";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -237,6 +238,7 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
   // and the Textarea component doesn't forward refs, so reach the node through
   // the wrapper. Verified on WebKit/iOS: without this the size stays 16px.
   const wrapRef = React.useRef<HTMLDivElement>(null);
+  const taRef = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => {
     wrapRef.current
       ?.querySelector("textarea")
@@ -255,14 +257,16 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
   }, [note.id]);
 
   return (
-    <div ref={wrapRef} className="p-2">
+    <div ref={wrapRef} className="relative p-2">
       <Textarea
+        ref={taRef}
         value={body}
         onChange={(e) => onChange(e.target.value)}
         onBlur={flush}
         placeholder="Write a note… (the first line becomes the title)"
         className="min-h-28 resize-y border-0 bg-transparent shadow-none focus-visible:ring-0"
       />
+      <TextareaDictationMic textareaRef={taRef} className="absolute bottom-3 right-3 z-10" />
     </div>
   );
 }

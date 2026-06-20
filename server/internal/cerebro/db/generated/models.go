@@ -836,22 +836,6 @@ type CerebroNoteVersion struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
-type CerebroPersonaMaskAudit struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ActorType      string             `json:"actor_type"`
-	ActorID        string             `json:"actor_id"`
-	Action         string             `json:"action"`
-	ResourceKind   string             `json:"resource_kind"`
-	ResourceID     string             `json:"resource_id"`
-	Classification string             `json:"classification"`
-	Decision       string             `json:"decision"`
-	MaskedFields   []byte             `json:"masked_fields"`
-	DecisionID     string             `json:"decision_id"`
-	Reason         string             `json:"reason"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
 type CerebroProjectGroupMember struct {
 	ProjectID pgtype.UUID        `json:"project_id"`
 	GroupID   pgtype.UUID        `json:"group_id"`
@@ -932,6 +916,18 @@ type CerebroRuntimeToolUserGrant struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroSavedFilter struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Name        string             `json:"name"`
+	Surface     string             `json:"surface"`
+	FilterState []byte             `json:"filter_state"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroSearchEmbeddingQueue struct {
 	ID          int64              `json:"id"`
 	TargetType  string             `json:"target_type"`
@@ -1007,6 +1003,7 @@ type CerebroSprintSetting struct {
 	Timezone                   string             `json:"timezone"`
 	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+	AcceptsExternalIssues      bool               `json:"accepts_external_issues"`
 }
 
 type CerebroStatusModel struct {
@@ -1033,6 +1030,7 @@ type CerebroToolPolicy struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ResourcePattern string             `json:"resource_pattern"`
+	Conditions      []byte             `json:"conditions"`
 }
 
 type CerebroUserInfisicalFolder struct {

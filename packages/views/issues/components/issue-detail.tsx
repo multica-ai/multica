@@ -789,7 +789,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const tabsRef = useRef<HTMLDivElement>(null);
   const { scrollPercent, isInTabsArea, scrollToPageTop, scrollToTop, scrollToTabs } = useNavScrollState(scrollContainerRef, tabsRef); // CEREBRO-PATCH(issue-detail-page-top-button): JEH-1558 — add scrollToPageTop for page-top nav button.
   // CEREBRO-PATCH(issue-detail-highlight-scroll-hook): see import above (JEH-1002).
-  const highlightedId = useHighlightCommentScroll(highlightCommentId);
+  const highlightedId = useHighlightCommentScroll(highlightCommentId, scrollContainerRef); // CEREBRO-PATCH(issue-detail-highlight-scroll-container): FIR-1652 — scroll only the body, not ancestors
 
   // Per-issue, per-session set of optional properties currently visible in
   // the sidebar Properties section. Seeded on issue switch with whichever

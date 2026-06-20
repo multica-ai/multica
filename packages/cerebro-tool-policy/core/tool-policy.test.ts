@@ -52,6 +52,34 @@ describe("fetchToolPolicyTable", () => {
     expect(row.effective.capped_by).toBe("user");
   });
 
+  it("surfaces the per-layer WHEN condition, and a malformed one drifts to null (FIR-1609)", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "web_fetch",
+          title: "Fetch a URL",
+          category: "Web",
+          source: "builtin",
+          layers: { agent: "allow" },
+          // agent carries a real host-allowlist condition; user is malformed and
+          // must fail soft to null (a condition never widens access on its own).
+          conditions: {
+            agent: { host_allowlist: ["firtal.com"], actions: [], expr: "" },
+            user: "not-an-object",
+          },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+
+    const rows = await fetchToolPolicyTable("ws1", { agentId: "a1", userId: "u1" });
+    const row = rows[0]!;
+    expect(row.conditions.agent?.host_allowlist).toEqual(["firtal.com"]);
+    expect(row.conditions.user).toBeNull();
+    // A row that omits conditions entirely parses to all-null, never undefined.
+    expect(row.conditions.workspace).toBeNull();
+  });
+
   it("builds the query string from the context (groups repeat, base passed)", async () => {
     mockCerebroRequest.mockResolvedValue({ tools: [] });
     await fetchToolPolicyTable("ws1", {
@@ -120,6 +148,23 @@ describe("setToolPolicy / clearToolPolicy", () => {
       layer: "agent",
       subject_id: "a1",
       setting: "ask",
+    });
+  });
+
+  it("PUTs the optional WHEN condition alongside the choice (FIR-1609)", async () => {
+    mockCerebroRequest.mockResolvedValue(undefined);
+    await setToolPolicy("ws1", {
+      tool_key: "web_fetch",
+      layer: "agent",
+      subject_id: "a1",
+      setting: "allow",
+      condition: { host_allowlist: ["firtal.com", "*.firtal.com"], actions: [], expr: "" },
+    });
+    const [, init] = mockCerebroRequest.mock.calls[0]!;
+    expect(JSON.parse(init.body).condition).toEqual({
+      host_allowlist: ["firtal.com", "*.firtal.com"],
+      actions: [],
+      expr: "",
     });
   });
 

@@ -63,6 +63,8 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter submenu.
 import { OnBehalfOfFilterSub } from "./cerebro-on-behalf-of-filter";
+// CEREBRO-PATCH(saved-filters-menu): FIR-1659 personal saved-filters section + save dialog host.
+import { SavedFiltersMenuSection, SaveFilterDialogHost } from "@multica/cerebro-saved-filters/views";
 import { LabelChip } from "../../labels/label-chip";
 import {
   SORT_OPTIONS,
@@ -960,6 +962,8 @@ export function IssueDisplayControls({
             <TooltipContent side="bottom">{t(($) => $.filters.tooltip)}</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
+            {/* CEREBRO-PATCH(saved-filters-menu): FIR-1659 saved filters at top of the filter menu. */}
+            <SavedFiltersMenuSection />
             {/* Status */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
@@ -1160,6 +1164,8 @@ export function IssueDisplayControls({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        {/* CEREBRO-PATCH(saved-filters-menu): FIR-1659 naming dialog lives outside the dropdown so it survives the menu closing. */}
+        <SaveFilterDialogHost />
 
         {/* Display settings */}
         <Popover>

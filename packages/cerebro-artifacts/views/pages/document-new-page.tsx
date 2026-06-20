@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
+import { TextareaDictationMic } from "@multica/cerebro-dictation";
 import {
   useCreateArtifact,
   useUploadArtifactFile,
@@ -54,6 +55,7 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
   const [fileUrl, setFileUrl] = React.useState<string | null>(null);
   const [fileSize, setFileSize] = React.useState<number | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
+  const bodyRef = React.useRef<HTMLTextAreaElement>(null);
 
   const handleKindChange = (next: ArtifactKind) => {
     setKind(next);
@@ -207,15 +209,19 @@ export function DocumentNewPage(props: DocumentNewPageProps) {
             <Label htmlFor="doc-body">
               Body ({format === "html" ? "HTML" : "Markdown"})
             </Label>
-            <Textarea
-              id="doc-body"
-              value={body}
-              onChange={(e) => handleBodyChange(e.target.value)}
-              placeholder={
-                format === "html" ? "<p>HTML</p>" : "Markdown content"
-              }
-              className="min-h-[50vh] font-mono text-sm"
-            />
+            <div className="relative">
+              <Textarea
+                ref={bodyRef}
+                id="doc-body"
+                value={body}
+                onChange={(e) => handleBodyChange(e.target.value)}
+                placeholder={
+                  format === "html" ? "<p>HTML</p>" : "Markdown content"
+                }
+                className="min-h-[50vh] font-mono text-sm"
+              />
+              <TextareaDictationMic textareaRef={bodyRef} />
+            </div>
           </div>
         )}
       </div>

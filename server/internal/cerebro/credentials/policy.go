@@ -3,13 +3,9 @@ package credentials
 import (
 	"context"
 	"errors"
-	"hash/fnv"
-	"log/slog"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Permission names the five governance actions a credential supports
@@ -90,14 +86,14 @@ type PolicyRequest struct {
 // credential. Implementations:
 //
 //   - OwnerPolicyChecker: workspace owners/admins always allow.
-//   - PersonaPolicyChecker: defers to the persona service.
 //   - ChainPolicyChecker: composes checkers left-to-right; first allow
 //     wins, otherwise the last decision is returned.
 //
-// The Service is wired with a ChainPolicyChecker(owner, persona) in
-// production. When persona is unconfigured the chain still works — only
-// the owner check fires, giving the deny-by-default behaviour described
-// in JEH-1197.
+// The Service is wired with a ChainPolicyChecker(owner, multica) in
+// production, where the multica layer is the unified permission engine
+// (deny-by-default grant floor + tighten-only tool-policy caps). When the
+// multica layer is unconfigured the chain still works — only the owner
+// check fires, giving the deny-by-default behaviour described in JEH-1197.
 type PolicyChecker interface {
 	Check(ctx context.Context, req PolicyRequest) PolicyDecision
 }
@@ -121,145 +117,6 @@ var DenyAllChecker PolicyChecker = PolicyCheckerFunc(func(_ context.Context, _ P
 var AllowAllChecker PolicyChecker = PolicyCheckerFunc(func(_ context.Context, _ PolicyRequest) PolicyDecision {
 	return Allow("allow-all (test)")
 })
-
-// PermissionEngineMode selects which policy engine's answer is enforced.
-//
-//   - persona: rollback/default path; Persona answers.
-//   - parallel: Persona answers, Multica also runs and mismatches are logged.
-//   - multica: cut-over path; Multica answers. Persona can still be sampled
-//     for comparison when CompareSamplePercent is > 0.
-type PermissionEngineMode string
-
-const (
-	PermissionEnginePersona  PermissionEngineMode = "persona"
-	PermissionEngineParallel PermissionEngineMode = "parallel"
-	PermissionEngineMultica  PermissionEngineMode = "multica"
-)
-
-// CutoverPolicyChecker is the cut-over switch between the legacy Persona
-// policy source and Multica's own permission engine. It is intentionally
-// generic so credential governance can use it without importing server/cmd.
-type CutoverPolicyChecker struct {
-	Persona              PolicyChecker
-	Multica              PolicyChecker
-	Mode                 PermissionEngineMode
-	CompareSamplePercent int
-	Log                  *slog.Logger
-}
-
-func NewCutoverPolicyChecker(persona, multica PolicyChecker, mode PermissionEngineMode, samplePercent int, log *slog.Logger) *CutoverPolicyChecker {
-	return &CutoverPolicyChecker{
-		Persona:              persona,
-		Multica:              multica,
-		Mode:                 normalizePermissionEngineMode(mode),
-		CompareSamplePercent: normalizeSamplePercent(samplePercent),
-		Log:                  log,
-	}
-}
-
-func (c *CutoverPolicyChecker) Check(ctx context.Context, req PolicyRequest) PolicyDecision {
-	if c == nil {
-		return DenyAllChecker.Check(ctx, req)
-	}
-	mode := normalizePermissionEngineMode(c.Mode)
-	switch mode {
-	case PermissionEngineParallel:
-		persona := c.checkPersona(ctx, req)
-		if c.shouldCompare(req) {
-			multica := c.checkMultica(ctx, req)
-			c.logComparison(req, persona, multica, PermissionEnginePersona)
-		}
-		return persona
-	case PermissionEngineMultica:
-		multica := c.checkMultica(ctx, req)
-		if c.shouldCompare(req) {
-			persona := c.checkPersona(ctx, req)
-			c.logComparison(req, persona, multica, PermissionEngineMultica)
-		}
-		return multica
-	default:
-		return c.checkPersona(ctx, req)
-	}
-}
-
-func (c *CutoverPolicyChecker) checkPersona(ctx context.Context, req PolicyRequest) PolicyDecision {
-	if c.Persona == nil {
-		return Deny("persona engine not configured")
-	}
-	return c.Persona.Check(ctx, req)
-}
-
-func (c *CutoverPolicyChecker) checkMultica(ctx context.Context, req PolicyRequest) PolicyDecision {
-	if c.Multica == nil {
-		return Deny("multica permission engine not configured")
-	}
-	return c.Multica.Check(ctx, req)
-}
-
-func (c *CutoverPolicyChecker) shouldCompare(req PolicyRequest) bool {
-	sample := normalizeSamplePercent(c.CompareSamplePercent)
-	if sample <= 0 {
-		return false
-	}
-	if sample >= 100 {
-		return true
-	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(util.UUIDToString(req.WorkspaceID)))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(util.UUIDToString(req.ActorID)))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(util.UUIDToString(req.CredentialID)))
-	_, _ = h.Write([]byte("|"))
-	_, _ = h.Write([]byte(req.Permission))
-	return int(h.Sum32()%100) < sample
-}
-
-func (c *CutoverPolicyChecker) logComparison(req PolicyRequest, persona, multica PolicyDecision, answering PermissionEngineMode) {
-	log := c.Log
-	if log == nil {
-		log = slog.Default()
-	}
-	attrs := []any{
-		"workspace_id", util.UUIDToString(req.WorkspaceID),
-		"actor_type", req.ActorType,
-		"actor_id", util.UUIDToString(req.ActorID),
-		"credential_id", util.UUIDToString(req.CredentialID),
-		"credential_type", string(req.CredentialType),
-		"permission", string(req.Permission),
-		"answering_engine", string(answering),
-		"persona_allowed", persona.Allowed,
-		"persona_reason", persona.Reason,
-		"multica_allowed", multica.Allowed,
-		"multica_reason", multica.Reason,
-	}
-	if persona.Allowed != multica.Allowed {
-		log.Warn("permission engine mismatch", attrs...)
-		return
-	}
-	log.Info("permission engine comparison matched", attrs...)
-}
-
-func normalizePermissionEngineMode(mode PermissionEngineMode) PermissionEngineMode {
-	switch PermissionEngineMode(strings.ToLower(strings.TrimSpace(string(mode)))) {
-	case PermissionEngineParallel:
-		return PermissionEngineParallel
-	case PermissionEngineMultica:
-		return PermissionEngineMultica
-	default:
-		return PermissionEnginePersona
-	}
-}
-
-func normalizeSamplePercent(n int) int {
-	if n < 0 {
-		return 0
-	}
-	if n > 100 {
-		return 100
-	}
-	return n
-}
 
 // ChainPolicyChecker evaluates a list of checkers in order. The first
 // Allowed=true decision is returned immediately. If all deny, the LAST
@@ -310,7 +167,7 @@ type MemberLookup interface {
 //
 // Only fires for member actors — agent tokens are not owners/admins
 // regardless of who spawned them, so they fall through to the next
-// checker (persona) to get a structured grant.
+// checker (the multica permission engine) to get a structured grant.
 type OwnerPolicyChecker struct {
 	Members MemberLookup
 	// AdminRoles is the set of roles that count as "workspace owner"
@@ -350,58 +207,4 @@ func (o *OwnerPolicyChecker) Check(ctx context.Context, req PolicyRequest) Polic
 		}
 	}
 	return Deny("member role " + role + " is not owner/admin")
-}
-
-// PersonaChecker is the persona-backed implementation. The actual
-// persona SDK wiring lives in the cmd/server package (cerebro_credentials_policy.go)
-// so this package keeps zero dependencies on the SDK. The checker here
-// is an interface adapter — production code constructs it with the SDK
-// adapter, tests use a stub.
-type PersonaChecker interface {
-	// CheckCredential asks "may actor act on resource". resource is the
-	// canonical persona resource string — implementations should expect
-	// at least the two forms used here:
-	//
-	//   cerebro-credential:<credential-uuid>
-	//   cerebro-credential-type:<credential-type>
-	//
-	// On error (transport, decode, etc.) the implementation must return
-	// Allowed=false with a non-empty Reason so the chain can still log
-	// the deny.
-	CheckCredential(ctx context.Context, action, resource, actorID string) PolicyDecision
-}
-
-// PersonaPolicyChecker is a PolicyChecker backed by a PersonaChecker.
-// It performs the id-scoped lookup first, then falls back to the type
-// scope if the id-scoped check denied. This matches the issue's
-// "per credential-id OG pr. credential-type (type-level fallback)"
-// requirement.
-type PersonaPolicyChecker struct {
-	Backend PersonaChecker
-}
-
-// NewPersonaPolicyChecker wraps a PersonaChecker.
-func NewPersonaPolicyChecker(backend PersonaChecker) *PersonaPolicyChecker {
-	return &PersonaPolicyChecker{Backend: backend}
-}
-
-func (p *PersonaPolicyChecker) Check(ctx context.Context, req PolicyRequest) PolicyDecision {
-	if p == nil || p.Backend == nil {
-		return Deny("persona checker not configured")
-	}
-	actor := util.UUIDToString(req.ActorID)
-	action := "credential." + string(req.Permission)
-
-	idResource := "cerebro-credential:" + util.UUIDToString(req.CredentialID)
-	if dec := p.Backend.CheckCredential(ctx, action, idResource, actor); dec.Allowed {
-		return dec
-	}
-	if req.CredentialType == "" {
-		return Deny("no id-scoped grant; no type fallback")
-	}
-	typeResource := "cerebro-credential-type:" + string(req.CredentialType)
-	if dec := p.Backend.CheckCredential(ctx, action, typeResource, actor); dec.Allowed {
-		return dec
-	}
-	return Deny("no matching credential grant (id or type)")
 }

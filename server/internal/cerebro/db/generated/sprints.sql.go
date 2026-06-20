@@ -211,6 +211,19 @@ func (q *Queries) GetActiveCerebroSprintByProject(ctx context.Context, projectID
 	return i, err
 }
 
+const getCerebroIssueProjectID = `-- name: GetCerebroIssueProjectID :one
+SELECT project_id FROM issue WHERE id = $1
+`
+
+// The project a given issue belongs to. Used to scope sprint selection and
+// validate cross-project assignment. project_id is nullable upstream.
+func (q *Queries) GetCerebroIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getCerebroIssueProjectID, id)
+	var project_id pgtype.UUID
+	err := row.Scan(&project_id)
+	return project_id, err
+}
+
 const getCerebroSprint = `-- name: GetCerebroSprint :one
 SELECT id, workspace_id, project_id, name, sequence_no, status,
        start_date, end_date, goal, created_at, updated_at
@@ -310,7 +323,8 @@ SELECT project_id, workspace_id, enabled,
        name_template,
        auto_create_enabled, auto_create_lead_days,
        move_incomplete_enabled, move_incomplete_target_status, timezone,
-       created_at, updated_at
+       created_at, updated_at,
+       accepts_external_issues
 FROM cerebro_sprint_settings
 WHERE project_id = $1
 `
@@ -339,6 +353,7 @@ func (q *Queries) GetCerebroSprintSettings(ctx context.Context, projectID pgtype
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AcceptsExternalIssues,
 	)
 	return i, err
 }
@@ -531,7 +546,8 @@ SELECT project_id, workspace_id, enabled,
        name_template,
        auto_create_enabled, auto_create_lead_days,
        move_incomplete_enabled, move_incomplete_target_status, timezone,
-       created_at, updated_at
+       created_at, updated_at,
+       accepts_external_issues
 FROM cerebro_sprint_settings
 WHERE workspace_id = $1
 `
@@ -560,6 +576,7 @@ func (q *Queries) ListCerebroSprintSettingsByWorkspace(ctx context.Context, work
 			&i.Timezone,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AcceptsExternalIssues,
 		); err != nil {
 			return nil, err
 		}
@@ -739,6 +756,83 @@ func (q *Queries) ListIncompleteIssuesInCerebroSprint(ctx context.Context, sprin
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSelectableCerebroSprintsForIssue = `-- name: ListSelectableCerebroSprintsForIssue :many
+SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
+       s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
+       p.title AS project_title,
+       (s.project_id = $2) AS is_own_project
+FROM cerebro_sprint s
+JOIN project p ON p.id = s.project_id
+LEFT JOIN cerebro_sprint_settings st ON st.project_id = s.project_id
+WHERE s.workspace_id = $1
+  AND (
+        s.project_id = $2
+        OR (st.enabled = TRUE AND st.accepts_external_issues = TRUE)
+      )
+ORDER BY (s.project_id = $2) DESC, p.title ASC, s.sequence_no DESC
+`
+
+type ListSelectableCerebroSprintsForIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+type ListSelectableCerebroSprintsForIssueRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Name         string             `json:"name"`
+	SequenceNo   int32              `json:"sequence_no"`
+	Status       string             `json:"status"`
+	StartDate    pgtype.Date        `json:"start_date"`
+	EndDate      pgtype.Date        `json:"end_date"`
+	Goal         pgtype.Text        `json:"goal"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ProjectTitle string             `json:"project_title"`
+	IsOwnProject bool               `json:"is_own_project"`
+}
+
+// FIR-1657: the sprints an issue may be assigned to. Always the issue's own
+// project sprints, PLUS sprints of any other project in the same workspace
+// whose settings opted in (enabled AND accepts_external_issues). Each row
+// carries the owning project's title so the picker can group by project, and
+// a flag marking the issue's home project. $1 = workspace_id, $2 = the
+// issue's project_id (may be NULL for an issue with no project).
+func (q *Queries) ListSelectableCerebroSprintsForIssue(ctx context.Context, arg ListSelectableCerebroSprintsForIssueParams) ([]ListSelectableCerebroSprintsForIssueRow, error) {
+	rows, err := q.db.Query(ctx, listSelectableCerebroSprintsForIssue, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSelectableCerebroSprintsForIssueRow{}
+	for rows.Next() {
+		var i ListSelectableCerebroSprintsForIssueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Name,
+			&i.SequenceNo,
+			&i.Status,
+			&i.StartDate,
+			&i.EndDate,
+			&i.Goal,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProjectTitle,
+			&i.IsOwnProject,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -928,9 +1022,10 @@ INSERT INTO cerebro_sprint_settings (
     duration_unit, duration_count, start_weekday,
     name_template,
     auto_create_enabled, auto_create_lead_days,
-    move_incomplete_enabled, move_incomplete_target_status, timezone
+    move_incomplete_enabled, move_incomplete_target_status, timezone,
+    accepts_external_issues
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 ON CONFLICT (project_id) DO UPDATE
 SET enabled                 = EXCLUDED.enabled,
     duration_unit           = EXCLUDED.duration_unit,
@@ -942,13 +1037,15 @@ SET enabled                 = EXCLUDED.enabled,
     move_incomplete_enabled = EXCLUDED.move_incomplete_enabled,
     move_incomplete_target_status = EXCLUDED.move_incomplete_target_status,
     timezone                = EXCLUDED.timezone,
+    accepts_external_issues = EXCLUDED.accepts_external_issues,
     updated_at              = now()
 RETURNING project_id, workspace_id, enabled,
           duration_unit, duration_count, start_weekday,
           name_template,
           auto_create_enabled, auto_create_lead_days,
           move_incomplete_enabled, move_incomplete_target_status, timezone,
-          created_at, updated_at
+          created_at, updated_at,
+          accepts_external_issues
 `
 
 type UpsertCerebroSprintSettingsParams struct {
@@ -964,6 +1061,7 @@ type UpsertCerebroSprintSettingsParams struct {
 	MoveIncompleteEnabled      bool        `json:"move_incomplete_enabled"`
 	MoveIncompleteTargetStatus string      `json:"move_incomplete_target_status"`
 	Timezone                   string      `json:"timezone"`
+	AcceptsExternalIssues      bool        `json:"accepts_external_issues"`
 }
 
 func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCerebroSprintSettingsParams) (CerebroSprintSetting, error) {
@@ -980,6 +1078,7 @@ func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCer
 		arg.MoveIncompleteEnabled,
 		arg.MoveIncompleteTargetStatus,
 		arg.Timezone,
+		arg.AcceptsExternalIssues,
 	)
 	var i CerebroSprintSetting
 	err := row.Scan(
@@ -997,6 +1096,7 @@ func (q *Queries) UpsertCerebroSprintSettings(ctx context.Context, arg UpsertCer
 		&i.Timezone,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AcceptsExternalIssues,
 	)
 	return i, err
 }
