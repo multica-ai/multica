@@ -16,6 +16,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
 }));
 
+// The editor mounts the cerebro dictation mic, which resolves workspace context
+// (useWorkspaceId → useQuery). Autofocus behavior is independent of dictation,
+// so stub the mic to null instead of standing up the whole query/workspace stack.
+vi.mock("@multica/cerebro-dictation", () => ({
+  EditorDictationMic: () => null,
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspaceSlug: () => "test-ws",
 }));
