@@ -70,6 +70,18 @@ describe("pending custom runtime rows", () => {
     expect(pendingRuntimeCommandName(pending)).toBe("team-codex");
   });
 
+  it("includes fixed args in pending runtime command text", () => {
+    const pending = pendingRuntimeFromProfile({
+      profile: profile({
+        command_name: "agent",
+        fixed_args: ["--model", "composer-2.5"],
+      }),
+      createdAt: Date.parse("2026-01-01T00:00:00Z"),
+    });
+
+    expect(pendingRuntimeCommandName(pending)).toBe("agent --model composer-2.5");
+  });
+
   it("drops the pending row once a real runtime registers for the profile", () => {
     const createdAt = Date.parse("2026-01-01T00:00:00Z");
     const prof = profile();

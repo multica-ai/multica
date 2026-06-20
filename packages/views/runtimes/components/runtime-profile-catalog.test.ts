@@ -1,12 +1,17 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeProfile } from "@multica/core/types";
-import { buildRuntimeCatalog, PROTOCOL_FAMILIES } from "./runtime-profile-catalog";
+import {
+  buildRuntimeCatalog,
+  formatRuntimeProfileCommand,
+  PROTOCOL_FAMILIES,
+} from "./runtime-profile-catalog";
 
 function profile(
   id: string,
   displayName: string,
   updatedAt: string,
   enabled = true,
+  overrides: Partial<RuntimeProfile> = {},
 ): RuntimeProfile {
   return {
     id,
@@ -21,6 +26,7 @@ function profile(
     enabled,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: updatedAt,
+    ...overrides,
   };
 }
 
@@ -58,5 +64,18 @@ describe("buildRuntimeCatalog", () => {
       "enabled-old",
       "disabled-new",
     ]);
+  });
+});
+
+describe("formatRuntimeProfileCommand", () => {
+  it("renders command_name together with fixed_args for edit/display surfaces", () => {
+    expect(
+      formatRuntimeProfileCommand(
+        profile("prof-args", "Args", "2026-01-02T00:00:00Z", true, {
+          command_name: "agent",
+          fixed_args: ["--model", "composer-2.5", "--label", "two words"],
+        }),
+      ),
+    ).toBe("agent --model composer-2.5 --label 'two words'");
   });
 });

@@ -1,4 +1,5 @@
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
+import { formatRuntimeProfileCommand } from "./runtime-profile-catalog";
 
 export const PENDING_RUNTIME_WARNING_MS = 45_000;
 
@@ -64,7 +65,7 @@ export function pendingRuntimeFromProfile({
   const metadata: PendingRuntimeMetadata = {
     pending_custom_runtime: true,
     runtime_profile_id: profile.id,
-    command_name: profile.command_name,
+    command_name: formatRuntimeProfileCommand(profile),
     pending_since: pendingSince,
   };
 

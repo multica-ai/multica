@@ -155,8 +155,9 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if gotBody["protocol_family"] != "codex" || gotBody["command_name"] != "company-codex" || gotBody["display_name"] != "Company Codex" {
 		t.Errorf("unexpected body: %#v", gotBody)
 	}
-	// fixed_args is intentionally NOT exposed by the CLI in v1 (the daemon does
-	// not yet wire it into the launch command), so it must never be sent.
+	// fixed_args is intentionally not exposed as a separate CLI flag yet. The
+	// server may derive it from command_name, but the CLI should not send a
+	// second explicit field.
 	if _, present := gotBody["fixed_args"]; present {
 		t.Errorf("fixed_args must not be sent by the CLI, got %#v", gotBody["fixed_args"])
 	}

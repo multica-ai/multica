@@ -91,20 +91,19 @@ func init() {
 
 	// create
 	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Supported backend the profile routes to (required)")
-	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
+	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable, optionally followed by fixed launch args (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
-	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
+	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New executable, optionally followed by fixed launch args")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
-	// NOTE: a --fixed-arg flag is intentionally NOT exposed in v1. The server
-	// carries the fixed_args column, but the daemon does not yet pass these
-	// args to the agent launch command, so a CLI flag would promise admins a
-	// no-op. Re-add once it's wired end-to-end (TODO(MUL-3284), see
-	// server/internal/daemon/daemon.go).
+	// NOTE: a repeated --fixed-arg flag is intentionally not exposed yet.
+	// Admins can include stable launch args in --command-name and the server
+	// normalizes them into fixed_args; a separate flag can be added once the UI
+	// also has explicit fixed-args editing.
 	runtimeProfileUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the profile")
 	runtimeProfileUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 

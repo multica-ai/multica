@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -97,6 +98,89 @@ func marshalFixedArgs(args []string) ([]byte, error) {
 	return json.Marshal(clean)
 }
 
+func splitRuntimeProfileCommandLine(raw string) (string, []string, error) {
+	input := strings.TrimSpace(raw)
+	if input == "" {
+		return "", nil, errors.New("command_name is required")
+	}
+
+	var tokens []string
+	var b strings.Builder
+	var quote rune
+	escaped := false
+	tokenStarted := false
+
+	flush := func() {
+		tokens = append(tokens, b.String())
+		b.Reset()
+		tokenStarted = false
+	}
+
+	for _, r := range input {
+		if escaped {
+			b.WriteRune(r)
+			tokenStarted = true
+			escaped = false
+			continue
+		}
+		if quote != '\'' && r == '\\' {
+			escaped = true
+			tokenStarted = true
+			continue
+		}
+		if quote != 0 {
+			if r == quote {
+				quote = 0
+				tokenStarted = true
+				continue
+			}
+			b.WriteRune(r)
+			tokenStarted = true
+			continue
+		}
+		if r == '\'' || r == '"' {
+			quote = r
+			tokenStarted = true
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if tokenStarted {
+				flush()
+			}
+			continue
+		}
+		b.WriteRune(r)
+		tokenStarted = true
+	}
+	if escaped {
+		return "", nil, errors.New("command_name has a trailing escape")
+	}
+	if quote != 0 {
+		return "", nil, errors.New("command_name has an unclosed quote")
+	}
+	if tokenStarted {
+		flush()
+	}
+	if len(tokens) == 0 || strings.TrimSpace(tokens[0]) == "" {
+		return "", nil, errors.New("command_name is required")
+	}
+	return tokens[0], tokens[1:], nil
+}
+
+func normalizeRuntimeProfileCommand(commandName string, fixedArgs []string) (string, []string, error) {
+	cmd, inlineArgs, err := splitRuntimeProfileCommandLine(commandName)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(inlineArgs) == 0 {
+		return cmd, fixedArgs, nil
+	}
+	merged := make([]string, 0, len(inlineArgs)+len(fixedArgs))
+	merged = append(merged, inlineArgs...)
+	merged = append(merged, fixedArgs...)
+	return cmd, merged, nil
+}
+
 type createRuntimeProfileRequest struct {
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
@@ -137,11 +221,13 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unsupported protocol_family: must be one of "+strings.Join(agent.SupportedTypes, ", "))
 		return
 	}
-	if req.CommandName == "" {
-		writeError(w, http.StatusBadRequest, "command_name is required")
+	commandName, fixedArgValues, err := normalizeRuntimeProfileCommand(req.CommandName, req.FixedArgs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
+	req.CommandName = commandName
+	fixedArgs, err := marshalFixedArgs(fixedArgValues)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -278,7 +364,20 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "command_name cannot be empty")
 			return
 		}
-		params.CommandName = strToText(cmd)
+		commandName, inlineArgs, err := splitRuntimeProfileCommandLine(cmd)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.CommandName = strToText(commandName)
+		if len(inlineArgs) > 0 {
+			merged := make([]string, 0, len(inlineArgs))
+			merged = append(merged, inlineArgs...)
+			if req.FixedArgs != nil {
+				merged = append(merged, (*req.FixedArgs)...)
+			}
+			req.FixedArgs = &merged
+		}
 	}
 	if req.Description != nil {
 		params.Description = ptrToText(req.Description)

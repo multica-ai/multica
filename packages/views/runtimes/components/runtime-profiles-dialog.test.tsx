@@ -120,6 +120,20 @@ describe("RuntimeProfilesDialog", () => {
     expect(screen.getByText("claude")).toBeInTheDocument();
   });
 
+  it("shows fixed args with the profile command", () => {
+    queryState.profiles = [
+      profile({
+        command_name: "agent",
+        fixed_args: ["--model", "composer-2.5"],
+      }),
+    ];
+
+    renderDialog();
+    fireEvent.click(screen.getByRole("option", { name: /Team Codex/i }));
+
+    expect(screen.getByText("agent --model composer-2.5")).toBeInTheDocument();
+  });
+
   it("clears built-in detail when the built-in reference section collapses", () => {
     queryState.profiles = [profile()];
 

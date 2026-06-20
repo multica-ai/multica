@@ -152,11 +152,14 @@ type Daemon struct {
 	// profileCommandPaths maps a custom runtime profile_id -> the absolute
 	// executable path resolved on PATH for that profile's command_name
 	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
-	// command resolves; read by runTask via customCommandPathForRuntime to
+	// command resolves; read by runTask via customRuntimeLaunchForRuntime to
 	// launch the custom command for a claimed task. Guarded by mu.
 	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	// profileFixedArgs maps a custom runtime profile_id -> the launch args
+	// every agent bound to that runtime inherits. Guarded by mu.
+	profileFixedArgs map[string][]string
+	reloading        sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet       *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -237,6 +240,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
 		profileCommandPaths:       make(map[string]string),
+		profileFixedArgs:          make(map[string][]string),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
@@ -848,11 +852,16 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 	return nil
 }
 
-// recordProfileCommandPath remembers the absolute executable path resolved
-// for a custom runtime profile's command_name. Called from
-// registerRuntimesForWorkspace. Lazily initializes the map so test fixtures
-// that build a Daemon literal without seeding every map don't panic.
-func (d *Daemon) recordProfileCommandPath(profileID, path string) {
+type customRuntimeLaunch struct {
+	Path      string
+	FixedArgs []string
+}
+
+// recordProfileLaunch remembers the absolute executable path and inherited
+// fixed args resolved for a custom runtime profile. Called from
+// registerRuntimesForWorkspace. Lazily initializes maps so test fixtures that
+// build a Daemon literal without seeding every map don't panic.
+func (d *Daemon) recordProfileLaunch(profileID, path string, fixedArgs []string) {
 	if profileID == "" || path == "" {
 		return
 	}
@@ -861,7 +870,17 @@ func (d *Daemon) recordProfileCommandPath(profileID, path string) {
 	if d.profileCommandPaths == nil {
 		d.profileCommandPaths = make(map[string]string)
 	}
+	if d.profileFixedArgs == nil {
+		d.profileFixedArgs = make(map[string][]string)
+	}
 	d.profileCommandPaths[profileID] = path
+	d.profileFixedArgs[profileID] = append([]string(nil), fixedArgs...)
+}
+
+// recordProfileCommandPath preserves the older helper used by focused tests
+// and by any future call sites that only need to refresh the executable path.
+func (d *Daemon) recordProfileCommandPath(profileID, path string) {
+	d.recordProfileLaunch(profileID, path, nil)
 }
 
 // customCommandPathForRuntime returns the resolved custom executable path for
@@ -871,20 +890,38 @@ func (d *Daemon) recordProfileCommandPath(profileID, path string) {
 // uses this to override the launch path so a custom runtime can run even when
 // the host has no built-in agent of the same provider installed.
 func (d *Daemon) customCommandPathForRuntime(runtimeID string) (string, bool) {
+	launch, ok := d.customRuntimeLaunchForRuntime(runtimeID)
+	return launch.Path, ok
+}
+
+func (d *Daemon) customRuntimeLaunchForRuntime(runtimeID string) (customRuntimeLaunch, bool) {
 	if runtimeID == "" {
-		return "", false
+		return customRuntimeLaunch{}, false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	rt, ok := d.runtimeIndex[runtimeID]
 	if !ok || rt.ProfileID == "" {
-		return "", false
+		return customRuntimeLaunch{}, false
 	}
 	path, ok := d.profileCommandPaths[rt.ProfileID]
 	if !ok || path == "" {
-		return "", false
+		return customRuntimeLaunch{}, false
 	}
-	return path, true
+	return customRuntimeLaunch{
+		Path:      path,
+		FixedArgs: append([]string(nil), d.profileFixedArgs[rt.ProfileID]...),
+	}, true
+}
+
+func mergeProfileFixedArgs(profileArgs, agentArgs []string) []string {
+	if len(profileArgs) == 0 {
+		return append([]string(nil), agentArgs...)
+	}
+	merged := make([]string, 0, len(profileArgs)+len(agentArgs))
+	merged = append(merged, profileArgs...)
+	merged = append(merged, agentArgs...)
+	return merged
 }
 
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
@@ -1047,15 +1084,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
-		d.recordProfileCommandPath(profile.ID, resolved)
+		d.recordProfileLaunch(profile.ID, resolved, profile.FixedArgs)
 		d.logger.Info("registering custom runtime profile",
 			"workspace_id", workspaceID, "profile_id", profile.ID,
 			"protocol_family", profile.ProtocolFamily, "command_path", resolved)
-		// NOTE: profile.FixedArgs are launch args every agent on this runtime
-		// inherits. Wiring them into the spawned command is intentionally not
-		// done here — it's an optional, best-effort enhancement (see MUL-3284
-		// PR2 task notes). TODO(MUL-3284): plumb FixedArgs into the agent
-		// launch command if/when the agent backend exposes a hook for it.
 		*runtimes = append(*runtimes, map[string]string{
 			"name":       displayName,
 			"type":       profile.ProtocolFamily,
@@ -3127,12 +3159,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Critically, a custom runtime can live on a host that has NO built-in
 	// agent of the same provider installed, so when the runtime is custom we
 	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
-	if customPath, isCustom := d.customCommandPathForRuntime(task.RuntimeID); isCustom {
-		entry.Path = customPath
+	var customLaunch customRuntimeLaunch
+	if launch, isCustom := d.customRuntimeLaunchForRuntime(task.RuntimeID); isCustom {
+		customLaunch = launch
+		entry.Path = launch.Path
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
-			"provider", provider, "command_path", customPath)
+			"provider", provider, "command_path", launch.Path,
+			"fixed_args", len(launch.FixedArgs))
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -3442,8 +3477,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
-		customArgs = task.Agent.CustomArgs
+		customArgs = mergeProfileFixedArgs(customLaunch.FixedArgs, task.Agent.CustomArgs)
 		mcpConfig = task.Agent.McpConfig
+	} else {
+		customArgs = mergeProfileFixedArgs(customLaunch.FixedArgs, nil)
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If

@@ -48,6 +48,32 @@ func insertProfileRuntimeFixture(t *testing.T, ctx context.Context, profileID, n
 	return runtimeID
 }
 
+func TestSplitRuntimeProfileCommandLine(t *testing.T) {
+	cmd, args, err := splitRuntimeProfileCommandLine(`agent --model composer-2.5 --flag="quoted value"`)
+	if err != nil {
+		t.Fatalf("split command line: %v", err)
+	}
+	if cmd != "agent" {
+		t.Fatalf("command = %q, want agent", cmd)
+	}
+	want := []string{"--model", "composer-2.5", "--flag=quoted value"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %#v, want %#v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Fatalf("args = %#v, want %#v", args, want)
+		}
+	}
+}
+
+func TestSplitRuntimeProfileCommandLineRejectsUnclosedQuote(t *testing.T) {
+	_, _, err := splitRuntimeProfileCommandLine(`agent --model "composer`)
+	if err == nil {
+		t.Fatal("expected unclosed quote error")
+	}
+}
+
 // TestDeleteRuntimeProfile_ArchivedAgentCascade is the regression guard for the
 // FK-RESTRICT 500: a profile whose only remaining agent is ARCHIVED must still
 // delete cleanly. agent.runtime_id is ON DELETE RESTRICT, so without the
@@ -137,7 +163,6 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 }
 
-
 // TestCreateRuntimeProfile_ForcesWorkspaceVisibility is the regression guard
 // for the visibility leak: visibility=private is not user-settable in v1
 // because the read paths don't enforce it. A client that POSTs
@@ -181,5 +206,71 @@ func TestCreateRuntimeProfile_ForcesWorkspaceVisibility(t *testing.T) {
 	}
 	if dbVis != "workspace" {
 		t.Fatalf("stored visibility = %q, want workspace", dbVis)
+	}
+}
+
+// TestCreateRuntimeProfile_SplitsInlineCommandArgs covers the field symptom in
+// #4351: users naturally paste the command they run in a terminal, e.g.
+// "agent --model composer-2.5". The server should persist the executable as
+// command_name so the daemon can resolve it on PATH, and persist the remaining
+// tokens as fixed_args so the runtime launches with the same mode.
+func TestCreateRuntimeProfile_SplitsInlineCommandArgs(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Cursor Composer Profile",
+		"protocol_family": "cursor",
+		"command_name":    "agent --model composer-2.5",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateRuntimeProfile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RuntimeProfileResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+	})
+
+	if resp.CommandName != "agent" {
+		t.Fatalf("response command_name = %q, want agent", resp.CommandName)
+	}
+	wantArgs := []string{"--model", "composer-2.5"}
+	if len(resp.FixedArgs) != len(wantArgs) {
+		t.Fatalf("response fixed_args = %#v, want %#v", resp.FixedArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if resp.FixedArgs[i] != wantArgs[i] {
+			t.Fatalf("response fixed_args = %#v, want %#v", resp.FixedArgs, wantArgs)
+		}
+	}
+
+	var dbCommand string
+	var dbArgs []byte
+	if err := testPool.QueryRow(ctx, `SELECT command_name, fixed_args FROM runtime_profile WHERE id = $1`, resp.ID).Scan(&dbCommand, &dbArgs); err != nil {
+		t.Fatalf("read stored profile: %v", err)
+	}
+	if dbCommand != "agent" {
+		t.Fatalf("stored command_name = %q, want agent", dbCommand)
+	}
+	var fixedArgs []string
+	if err := json.Unmarshal(dbArgs, &fixedArgs); err != nil {
+		t.Fatalf("decode stored fixed_args: %v", err)
+	}
+	if len(fixedArgs) != len(wantArgs) {
+		t.Fatalf("stored fixed_args = %#v, want %#v", fixedArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if fixedArgs[i] != wantArgs[i] {
+			t.Fatalf("stored fixed_args = %#v, want %#v", fixedArgs, wantArgs)
+		}
 	}
 }

@@ -161,6 +161,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 		DisplayName:    "Company Codex",
 		ProtocolFamily: "codex",
 		CommandName:    "company-codex",
+		FixedArgs:      []string{"--model", "composer-2.5"},
 		Visibility:     "workspace",
 		Enabled:        true,
 	}}
@@ -192,6 +193,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// The resolved command path must be recorded keyed by profile_id.
 	if got := d.profileCommandPaths["prof-1"]; got != "/opt/bin/company-codex" {
 		t.Errorf("profileCommandPaths[prof-1] = %q, want /opt/bin/company-codex", got)
+	}
+	if got, want := strings.Join(d.profileFixedArgs["prof-1"], "\x00"), "--model\x00composer-2.5"; got != want {
+		t.Errorf("profile fixed args = %#v, want [--model composer-2.5]", d.profileFixedArgs["prof-1"])
 	}
 
 	// The response runtime carries the profile_id back.
@@ -331,6 +335,7 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 	profilePathExecutable = func(path string) bool { return executable[path] }
 	t.Cleanup(func() { profilePathExecutable = orig })
 }
+
 // bookkeeping that runTask relies on to override the launch path.
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
@@ -355,5 +360,49 @@ func TestCustomCommandPathForRuntime(t *testing.T) {
 	d.runtimeIndex["rt-unresolved"] = Runtime{ID: "rt-unresolved", Provider: "codex", ProfileID: "prof-missing"}
 	if path, ok := d.customCommandPathForRuntime("rt-unresolved"); ok || path != "" {
 		t.Errorf("unresolved profile: got (%q, %v), want (\"\", false)", path, ok)
+	}
+}
+
+func TestCustomRuntimeLaunchForRuntimeIncludesFixedArgs(t *testing.T) {
+	d := freshDaemon("")
+	d.profileCommandPaths = map[string]string{"prof-1": "/opt/bin/agent"}
+	d.profileFixedArgs = map[string][]string{"prof-1": {"--model", "composer-2.5"}}
+	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "cursor", ProfileID: "prof-1"}
+
+	launch, ok := d.customRuntimeLaunchForRuntime("rt-custom")
+	if !ok {
+		t.Fatal("custom runtime launch not found")
+	}
+	if launch.Path != "/opt/bin/agent" {
+		t.Fatalf("launch path = %q, want /opt/bin/agent", launch.Path)
+	}
+	if got, want := strings.Join(launch.FixedArgs, "\x00"), "--model\x00composer-2.5"; got != want {
+		t.Fatalf("launch fixed args = %#v, want [--model composer-2.5]", launch.FixedArgs)
+	}
+
+	launch.FixedArgs[0] = "--mutated"
+	again, ok := d.customRuntimeLaunchForRuntime("rt-custom")
+	if !ok {
+		t.Fatal("custom runtime launch not found on second lookup")
+	}
+	if again.FixedArgs[0] != "--model" {
+		t.Fatalf("fixed args lookup leaked mutable slice: %#v", again.FixedArgs)
+	}
+}
+
+func TestMergeProfileFixedArgsBeforeAgentCustomArgs(t *testing.T) {
+	got := mergeProfileFixedArgs(
+		[]string{"--model", "composer-2.5"},
+		[]string{"--extra", "value"},
+	)
+	want := []string{"--model", "composer-2.5", "--extra", "value"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("merged args = %#v, want %#v", got, want)
+	}
+
+	got[0] = "--mutated"
+	got = mergeProfileFixedArgs([]string{"--model"}, []string{"sonnet"})
+	if strings.Join(got, "\x00") != "--model\x00sonnet" {
+		t.Fatalf("merge should return a fresh slice, got %#v", got)
 	}
 }

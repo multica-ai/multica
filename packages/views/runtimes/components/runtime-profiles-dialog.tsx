@@ -42,6 +42,7 @@ import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import {
   PROTOCOL_FAMILIES,
   buildRuntimeCatalog,
+  formatRuntimeProfileCommand,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -499,7 +500,9 @@ function DetailPanel({
             <span className="capitalize">{profile.protocol_family}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-xs">{profile.command_name}</span>
+            <span className="font-mono text-xs">
+              {formatRuntimeProfileCommand(profile)}
+            </span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
@@ -673,7 +676,7 @@ function ProfileDetailsForm({
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
-    commandName: profile?.command_name ?? "",
+    commandName: profile ? formatRuntimeProfileCommand(profile) : "",
     description: profile?.description ?? "",
   });
   const [errors, setErrors] = useState<ProfileFormErrorField[]>([]);
@@ -703,6 +706,7 @@ function ProfileDetailsForm({
           display_name: values.displayName.trim(),
           protocol_family: family,
           command_name: values.commandName.trim(),
+          fixed_args: [],
           ...(description ? { description } : {}),
         });
         toast.success(t(($) => $.profiles.form.toast_created));
@@ -713,6 +717,7 @@ function ProfileDetailsForm({
           patch: {
             display_name: values.displayName.trim(),
             command_name: values.commandName.trim(),
+            fixed_args: [],
             description: description ? description : null,
           },
         });
@@ -841,11 +846,10 @@ function ProfileDetailsForm({
           />
         </div>
 
-        {/* NOTE: a `fixed_args` input is intentionally omitted in v1 — the
-            daemon does not yet pass these args to the agent launch command, so
-            exposing the field would promise admins a no-op. Re-add only once
-            it's wired end-to-end. See TODO(MUL-3284) in
-            server/internal/daemon/daemon.go. */}
+        {/* NOTE: a separate `fixed_args` input is intentionally omitted in v1.
+            Admins can type stable launch args in the command field; the server
+            normalizes those tokens into fixed_args. Add explicit fixed-args
+            editing once the detail/edit UI has a clear affordance for it. */}
 
         {/* NOTE: a visibility control is intentionally omitted in v1. The
             server forces every profile to 'workspace' because the read paths

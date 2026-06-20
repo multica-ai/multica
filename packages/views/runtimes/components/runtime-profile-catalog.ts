@@ -63,12 +63,23 @@ export function buildRuntimeCatalog(
   return { customs, builtins };
 }
 
-// NOTE: `fixed_args` is intentionally NOT exposed in the v1 UI. The server
-// still carries the column, but the daemon does not yet splice these args into
-// the agent launch command, so surfacing an input/display here would promise
-// admins a behavior that does not exist. Re-introduce the parse/format helpers
-// and the form field only once the daemon actually passes them to the backend
-// (proven by a test). See TODO(MUL-3284) in server/internal/daemon/daemon.go.
+// NOTE: `fixed_args` is still not exposed as a separate v1 UI field. Admins can
+// type stable launch args in the command field and the server normalizes those
+// tokens into fixed_args; explicit fixed-args editing can be added once the
+// detail/edit UI has a clear affordance for it.
+function quoteRuntimeCommandToken(token: string): string {
+  if (!token) return "''";
+  if (!/[\s'"\\]/.test(token)) return token;
+  return `'${token.replace(/'/g, `'\\''`)}'`;
+}
+
+export function formatRuntimeProfileCommand(
+  profile: Pick<RuntimeProfile, "command_name" | "fixed_args">,
+): string {
+  return [profile.command_name, ...(profile.fixed_args ?? [])]
+    .map(quoteRuntimeCommandToken)
+    .join(" ");
+}
 
 export interface ProfileFormValues {
   displayName: string;
