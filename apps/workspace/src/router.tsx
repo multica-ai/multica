@@ -38,7 +38,6 @@ import { MyTimePage } from "@/features/time-tracking/pages/MyTimePage";
 import { MyTimeCalendarPage } from "@/features/time-tracking/pages/MyTimeCalendarPage";
 import { TeamTimePage } from "@/features/time-tracking/pages/TeamTimePage";
 import { FocusPage } from "@/features/time-tracking/pages/FocusPage";
-import { PlanPage } from "@/features/plan";
 import { IssueCalendarPage } from "@/features/issues/components/IssueCalendarPage";
 import { InvitePage } from "@/features/invite";
 
@@ -319,12 +318,6 @@ const focusRoute = createRoute({
   component: FocusPage,
 });
 
-const planRoute = createRoute({
-  getParentRoute: () => protectedRoute,
-  path: "plan",
-  component: PlanPage,
-});
-
 const issueCalendarRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "calendar",
@@ -369,7 +362,6 @@ const routeTree = rootRoute.addChildren([
     myTimeRoute,
     myTimeCalendarRoute,
 	    teamTimeRoute,
-	    planRoute,
 	    focusRoute,
     pomodoroRoute,
     issueCalendarRoute,

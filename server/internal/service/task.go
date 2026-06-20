@@ -123,6 +123,8 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
+	s.deleteTaskTokens(ctx, task.ID)
+
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -238,6 +240,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 
+	s.deleteTaskTokens(ctx, task.ID)
+
 	// Post agent output as a comment, but only for assignment-triggered tasks.
 	// Comment-triggered tasks: the agent replies via CLI with --parent, so
 	// posting here would create a duplicate.
@@ -285,6 +289,8 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg)
 
+	s.deleteTaskTokens(ctx, task.ID)
+
 	if errMsg != "" {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
@@ -295,6 +301,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg s
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
 
 	return &task, nil
+}
+
+func (s *TaskService) deleteTaskTokens(ctx context.Context, taskID pgtype.UUID) {
+	if err := s.Queries.DeleteTaskTokensByTask(ctx, taskID); err != nil {
+		slog.Warn("delete task tokens failed", "task_id", util.UUIDToString(taskID), "error", err)
+	}
 }
 
 // ReportProgress broadcasts a progress update via the event bus.

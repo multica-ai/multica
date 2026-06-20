@@ -73,7 +73,7 @@ func (q *Queries) CreateFocusEvent(ctx context.Context, arg CreateFocusEventPara
 }
 
 const getFocusSession = `-- name: GetFocusSession :one
-SELECT id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at, plan_item_id FROM focus_sessions
+SELECT id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at FROM focus_sessions
 WHERE user_id = $1 AND workspace_id = $2
 `
 
@@ -105,7 +105,6 @@ func (q *Queries) GetFocusSession(ctx context.Context, arg GetFocusSessionParams
 		&i.ReasonNote,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PlanItemID,
 	)
 	return i, err
 }
@@ -214,22 +213,21 @@ SET
     phase = $2,
 	    preset = $3,
 	    issue_id = $4,
-	    plan_item_id = $5,
-	    description = $6,
-    commitment_text = $7,
-    label_ids = $8,
-    first_started_at = $9,
-    started_at = $10,
-    paused_at = $11,
-    elapsed_focus_seconds = $12,
-    suggested_break_seconds = $13,
-    status_reason = $14,
-    reason_note = $15,
+	    description = $5,
+    commitment_text = $6,
+    label_ids = $7,
+    first_started_at = $8,
+    started_at = $9,
+    paused_at = $10,
+    elapsed_focus_seconds = $11,
+    suggested_break_seconds = $12,
+    status_reason = $13,
+    reason_note = $14,
     updated_at = NOW()
-WHERE id = $16
-  AND user_id = $17
-  AND workspace_id = $18
-RETURNING id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at, plan_item_id
+WHERE id = $15
+  AND user_id = $16
+  AND workspace_id = $17
+RETURNING id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at
 `
 
 type UpdateFocusSessionParams struct {
@@ -237,7 +235,6 @@ type UpdateFocusSessionParams struct {
 	Phase                 string             `json:"phase"`
 	Preset                pgtype.Text        `json:"preset"`
 	IssueID               pgtype.UUID        `json:"issue_id"`
-	PlanItemID            pgtype.UUID        `json:"plan_item_id"`
 	Description           pgtype.Text        `json:"description"`
 	CommitmentText        pgtype.Text        `json:"commitment_text"`
 	LabelIds              []byte             `json:"label_ids"`
@@ -259,7 +256,6 @@ func (q *Queries) UpdateFocusSession(ctx context.Context, arg UpdateFocusSession
 		arg.Phase,
 		arg.Preset,
 		arg.IssueID,
-		arg.PlanItemID,
 		arg.Description,
 		arg.CommitmentText,
 		arg.LabelIds,
@@ -295,7 +291,6 @@ func (q *Queries) UpdateFocusSession(ctx context.Context, arg UpdateFocusSession
 		&i.ReasonNote,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PlanItemID,
 	)
 	return i, err
 }
@@ -308,7 +303,6 @@ INSERT INTO focus_sessions (
     phase,
 	    preset,
 	    issue_id,
-	    plan_item_id,
 	    description,
     commitment_text,
     label_ids,
@@ -328,16 +322,15 @@ INSERT INTO focus_sessions (
 	    $4,
 	    $5,
 	    $6,
-	    $7,
+    $7,
     $8,
-    $9,
     NOW(),
     NOW(),
     NULL,
     0,
     NULL,
+    $9,
     $10,
-    $11,
     NOW()
 )
 ON CONFLICT (user_id, workspace_id) DO UPDATE SET
@@ -345,7 +338,6 @@ ON CONFLICT (user_id, workspace_id) DO UPDATE SET
     phase = EXCLUDED.phase,
 	    preset = EXCLUDED.preset,
 	    issue_id = EXCLUDED.issue_id,
-	    plan_item_id = EXCLUDED.plan_item_id,
 	    description = EXCLUDED.description,
     commitment_text = EXCLUDED.commitment_text,
     label_ids = EXCLUDED.label_ids,
@@ -357,7 +349,7 @@ ON CONFLICT (user_id, workspace_id) DO UPDATE SET
     status_reason = EXCLUDED.status_reason,
     reason_note = EXCLUDED.reason_note,
     updated_at = NOW()
-RETURNING id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at, plan_item_id
+RETURNING id, workspace_id, user_id, mode, phase, preset, issue_id, description, commitment_text, label_ids, first_started_at, started_at, paused_at, elapsed_focus_seconds, suggested_break_seconds, status_reason, reason_note, created_at, updated_at
 `
 
 type UpsertFocusStartParams struct {
@@ -366,7 +358,6 @@ type UpsertFocusStartParams struct {
 	Mode           string      `json:"mode"`
 	Preset         pgtype.Text `json:"preset"`
 	IssueID        pgtype.UUID `json:"issue_id"`
-	PlanItemID     pgtype.UUID `json:"plan_item_id"`
 	Description    pgtype.Text `json:"description"`
 	CommitmentText pgtype.Text `json:"commitment_text"`
 	LabelIds       []byte      `json:"label_ids"`
@@ -381,7 +372,6 @@ func (q *Queries) UpsertFocusStart(ctx context.Context, arg UpsertFocusStartPara
 		arg.Mode,
 		arg.Preset,
 		arg.IssueID,
-		arg.PlanItemID,
 		arg.Description,
 		arg.CommitmentText,
 		arg.LabelIds,
@@ -409,7 +399,6 @@ func (q *Queries) UpsertFocusStart(ctx context.Context, arg UpsertFocusStartPara
 		&i.ReasonNote,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.PlanItemID,
 	)
 	return i, err
 }

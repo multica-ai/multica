@@ -296,12 +296,16 @@ export class TestApiClient {
     stop_time: string;
     description?: string;
     issue_id?: string;
+    confirm_overlap?: boolean;
   }): Promise<Record<string, unknown>> {
     const res = await this.authedFetch("/api/time-entries", {
       method: "POST",
-      body: JSON.stringify(opts),
+      body: JSON.stringify({ confirm_overlap: true, ...opts }),
     });
     const entry = await res.json();
+    if (!res.ok) {
+      throw new Error(`create time entry failed: ${res.status} ${JSON.stringify(entry)}`);
+    }
     this.createdTimeEntryIds.push(entry.id);
     return entry;
   }

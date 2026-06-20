@@ -421,19 +421,6 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) (chi.Rout
 				r.Post("/{id}/confirm", planHandler.ConfirmPlan)
 			})
 
-			r.Route("/api/plans", func(r chi.Router) {
-				r.Get("/", h.GetPlan)
-				r.Post("/", h.UpsertPlan)
-				r.Get("/candidates", h.ListPlanCandidates)
-				r.Post("/{id}/items", h.CreatePlanItem)
-			})
-
-			r.Route("/api/plan-items", func(r chi.Router) {
-				r.Patch("/{id}", h.UpdatePlanItem)
-				r.Delete("/{id}", h.DeletePlanItem)
-				r.Post("/{id}/start-focus", h.StartPlanItemFocus)
-			})
-
 			// Automation templates and rules
 			r.Route("/api/automation", func(r chi.Router) {
 				r.Get("/templates", automationHandler.ListTemplates)

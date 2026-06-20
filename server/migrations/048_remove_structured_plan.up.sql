@@ -16,9 +16,3 @@ ALTER TABLE daily_plan
     DROP COLUMN IF EXISTS recovery_need,
     DROP COLUMN IF EXISTS energy_note,
     DROP COLUMN IF EXISTS energy_level;
-
-DROP INDEX IF EXISTS idx_issue_workspace_type;
-ALTER TABLE issue DROP COLUMN IF EXISTS issue_type_id;
-
-DROP INDEX IF EXISTS idx_issue_type_workspace_active;
-DROP TABLE IF EXISTS issue_type;

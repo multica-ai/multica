@@ -149,22 +149,17 @@ type DaemonToken struct {
 }
 
 type DailyPlan struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	UserID          pgtype.UUID        `json:"user_id"`
-	PlanDate        pgtype.Date        `json:"plan_date"`
-	DraftContent    string             `json:"draft_content"`
-	TopIssueIds     []pgtype.UUID      `json:"top_issue_ids"`
-	Status          string             `json:"status"`
-	ConfirmedAt     pgtype.Timestamptz `json:"confirmed_at"`
-	GeneratedBy     string             `json:"generated_by"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-	EnergyLevel     pgtype.Int4        `json:"energy_level"`
-	EnergyNote      pgtype.Text        `json:"energy_note"`
-	RecoveryNeed    bool               `json:"recovery_need"`
-	CapacityMinutes pgtype.Int4        `json:"capacity_minutes"`
-	CapacityNote    pgtype.Text        `json:"capacity_note"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	UserID       pgtype.UUID        `json:"user_id"`
+	PlanDate     pgtype.Date        `json:"plan_date"`
+	DraftContent string             `json:"draft_content"`
+	TopIssueIds  []pgtype.UUID      `json:"top_issue_ids"`
+	Status       string             `json:"status"`
+	ConfirmedAt  pgtype.Timestamptz `json:"confirmed_at"`
+	GeneratedBy  string             `json:"generated_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type DailyReview struct {
@@ -216,7 +211,6 @@ type FocusSession struct {
 	ReasonNote            pgtype.Text        `json:"reason_note"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
-	PlanItemID            pgtype.UUID        `json:"plan_item_id"`
 }
 
 type InboxItem struct {
@@ -352,26 +346,6 @@ type PersonalAccessToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type PlanItem struct {
-	ID                   pgtype.UUID        `json:"id"`
-	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
-	UserID               pgtype.UUID        `json:"user_id"`
-	PlanID               pgtype.UUID        `json:"plan_id"`
-	IssueID              pgtype.UUID        `json:"issue_id"`
-	SuggestedIssueTypeID pgtype.UUID        `json:"suggested_issue_type_id"`
-	TitleSnapshot        string             `json:"title_snapshot"`
-	Note                 string             `json:"note"`
-	Position             int32              `json:"position"`
-	EstimatedMinutes     pgtype.Int4        `json:"estimated_minutes"`
-	Status               string             `json:"status"`
-	StatusReason         pgtype.Text        `json:"status_reason"`
-	Source               string             `json:"source"`
-	CompletedAt          pgtype.Timestamptz `json:"completed_at"`
-	SkippedAt            pgtype.Timestamptz `json:"skipped_at"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-}
-
 type PomodoroSession struct {
 	ID                   pgtype.UUID        `json:"id"`
 	UserID               pgtype.UUID        `json:"user_id"`
@@ -452,6 +426,17 @@ type TaskMessage struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type TaskToken struct {
+	ID          pgtype.UUID        `json:"id"`
+	TokenHash   string             `json:"token_hash"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type TimeEntry struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
@@ -464,7 +449,6 @@ type TimeEntry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	Type            string             `json:"type"`
-	PlanItemID      pgtype.UUID        `json:"plan_item_id"`
 }
 
 type TimeEntryLabel struct {

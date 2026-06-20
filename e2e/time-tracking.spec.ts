@@ -15,6 +15,15 @@ function formatLocalTime(date: Date): string {
   });
 }
 
+function getLocalWeekStart(date = new Date()): Date {
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() + diff);
+  monday.setHours(0, 0, 0, 0);
+  return monday;
+}
+
 async function setDateTimePicker(page: Page, triggerName: string, date: Date) {
   await page.getByRole("button", { name: triggerName }).click();
   const timeInput = page.getByPlaceholder("HH:mm:ss");
@@ -55,8 +64,8 @@ test.describe("Time tracking", () => {
     const issue = await api.createIssue(`E2E Team Time Issue ${Date.now()}`, {
       project_id: project.id,
     });
-    const stop = new Date();
-    const start = new Date(stop.getTime() - 45 * 60 * 1000);
+    const start = new Date(getLocalWeekStart().getTime() + 60 * 60 * 1000);
+    const stop = new Date(start.getTime() + 45 * 60 * 1000);
     await api.createTimeEntry({
       start_time: start.toISOString(),
       stop_time: stop.toISOString(),

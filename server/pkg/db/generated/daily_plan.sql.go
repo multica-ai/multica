@@ -15,7 +15,7 @@ const confirmDailyPlan = `-- name: ConfirmDailyPlan :one
 UPDATE daily_plan
 SET status = 'confirmed', confirmed_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need, capacity_minutes, capacity_note
+RETURNING id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at
 `
 
 type ConfirmDailyPlanParams struct {
@@ -38,17 +38,12 @@ func (q *Queries) ConfirmDailyPlan(ctx context.Context, arg ConfirmDailyPlanPara
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.EnergyLevel,
-		&i.EnergyNote,
-		&i.RecoveryNeed,
-		&i.CapacityMinutes,
-		&i.CapacityNote,
 	)
 	return i, err
 }
 
 const getDailyPlanByDate = `-- name: GetDailyPlanByDate :one
-SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need, capacity_minutes, capacity_note FROM daily_plan
+SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at FROM daily_plan
 WHERE workspace_id = $1 AND user_id = $2 AND plan_date = $3
 `
 
@@ -73,17 +68,12 @@ func (q *Queries) GetDailyPlanByDate(ctx context.Context, arg GetDailyPlanByDate
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.EnergyLevel,
-		&i.EnergyNote,
-		&i.RecoveryNeed,
-		&i.CapacityMinutes,
-		&i.CapacityNote,
 	)
 	return i, err
 }
 
 const getDailyPlanByID = `-- name: GetDailyPlanByID :one
-SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need, capacity_minutes, capacity_note FROM daily_plan
+SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at FROM daily_plan
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -107,17 +97,12 @@ func (q *Queries) GetDailyPlanByID(ctx context.Context, arg GetDailyPlanByIDPara
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.EnergyLevel,
-		&i.EnergyNote,
-		&i.RecoveryNeed,
-		&i.CapacityMinutes,
-		&i.CapacityNote,
 	)
 	return i, err
 }
 
 const listDailyPlans = `-- name: ListDailyPlans :many
-SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need, capacity_minutes, capacity_note FROM daily_plan
+SELECT id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at FROM daily_plan
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY plan_date DESC
 LIMIT $3
@@ -150,11 +135,6 @@ func (q *Queries) ListDailyPlans(ctx context.Context, arg ListDailyPlansParams) 
 			&i.GeneratedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.EnergyLevel,
-			&i.EnergyNote,
-			&i.RecoveryNeed,
-			&i.CapacityMinutes,
-			&i.CapacityNote,
 		); err != nil {
 			return nil, err
 		}
@@ -177,7 +157,7 @@ DO UPDATE SET
     status = 'draft',
     confirmed_at = NULL,
     updated_at = now()
-RETURNING id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at, energy_level, energy_note, recovery_need, capacity_minutes, capacity_note
+RETURNING id, workspace_id, user_id, plan_date, draft_content, top_issue_ids, status, confirmed_at, generated_by, created_at, updated_at
 `
 
 type UpsertDailyPlanParams struct {
@@ -211,11 +191,6 @@ func (q *Queries) UpsertDailyPlan(ctx context.Context, arg UpsertDailyPlanParams
 		&i.GeneratedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.EnergyLevel,
-		&i.EnergyNote,
-		&i.RecoveryNeed,
-		&i.CapacityMinutes,
-		&i.CapacityNote,
 	)
 	return i, err
 }

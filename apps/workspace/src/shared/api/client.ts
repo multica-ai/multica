@@ -57,17 +57,11 @@ import type {
   TimeEntryOverlapConflict,
   TimeEntryOverlapErrorPayload,
   TeamTimeStats,
-	  DailyReview,
-	  ConfirmDailyReviewRequest,
-	  DailyPlan,
-	  IssueType,
-	  Plan,
-	  PlanItem,
-	  UpsertPlanRequest,
-	  CreatePlanItemRequest,
-	  UpdatePlanItemRequest,
-	  PlanCandidatesResponse,
-	  AutomationTemplate,
+  DailyReview,
+  ConfirmDailyReviewRequest,
+  DailyPlan,
+  IssueType,
+  AutomationTemplate,
   StandupSummaryResult,
   PomodoroSession,
   CompletePomodoroBody,
@@ -1249,54 +1243,9 @@ export class ApiClient {
   }
 
   /** Confirm (sign off) a specific daily plan. */
-	  async confirmDailyPlan(planId: string): Promise<DailyPlan> {
-	    return this.fetch(`/api/daily-plans/${planId}/confirm`, { method: "POST" });
-	  }
-
-	  // Plans
-
-	  async getPlan(date = "today"): Promise<Plan> {
-	    const search = new URLSearchParams({ date });
-	    return this.fetch(`/api/plans?${search}`);
-	  }
-
-	  async upsertPlan(body: UpsertPlanRequest): Promise<Plan> {
-	    return this.fetch("/api/plans", {
-	      method: "POST",
-	      body: JSON.stringify(body),
-	    });
-	  }
-
-	  async listPlanCandidates(date: string, issueTypeId?: string): Promise<PlanCandidatesResponse> {
-	    const search = new URLSearchParams({ date });
-	    if (issueTypeId) search.set("issue_type_id", issueTypeId);
-	    return this.fetch(`/api/plans/candidates?${search}`);
-	  }
-
-	  async createPlanItem(planId: string, body: CreatePlanItemRequest): Promise<PlanItem> {
-	    return this.fetch(`/api/plans/${planId}/items`, {
-	      method: "POST",
-	      body: JSON.stringify(body),
-	    });
-	  }
-
-	  async updatePlanItem(itemId: string, body: UpdatePlanItemRequest): Promise<PlanItem> {
-	    return this.fetch(`/api/plan-items/${itemId}`, {
-	      method: "PATCH",
-	      body: JSON.stringify(body),
-	    });
-	  }
-
-	  async deletePlanItem(itemId: string): Promise<void> {
-	    await this.fetch(`/api/plan-items/${itemId}`, { method: "DELETE" });
-	  }
-
-	  async startPlanItemFocus(itemId: string, body: Partial<StartFocusRequest>): Promise<FocusMutationResponse> {
-	    return this.fetch(`/api/plan-items/${itemId}/start-focus`, {
-	      method: "POST",
-	      body: JSON.stringify(body),
-	    });
-	  }
+  async confirmDailyPlan(planId: string): Promise<DailyPlan> {
+    return this.fetch(`/api/daily-plans/${planId}/confirm`, { method: "POST" });
+  }
 
   // Automation Templates
 

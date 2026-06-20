@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -276,6 +278,35 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.PriorWorkDir = prior.WorkDir.String
 		}
 	}
+
+	userID := requestUserID(r)
+	if userID == "" {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return
+	}
+	if resp.WorkspaceID == "" {
+		writeError(w, http.StatusInternalServerError, "task workspace not resolved")
+		return
+	}
+	tokenStr, err := auth.GenerateAgentTaskToken()
+	if err != nil {
+		slog.Error("task claim: failed to generate agent task token", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to mint task token")
+		return
+	}
+	if _, err := h.Queries.CreateTaskToken(r.Context(), db.CreateTaskTokenParams{
+		TokenHash:   auth.HashToken(tokenStr),
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+		UserID:      parseUUID(userID),
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}); err != nil {
+		slog.Error("task claim: failed to persist agent task token", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task token")
+		return
+	}
+	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	writeJSON(w, http.StatusOK, map[string]any{"task": resp})

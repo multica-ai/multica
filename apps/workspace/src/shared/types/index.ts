@@ -48,14 +48,7 @@ export type { DailyReview, ConfirmDailyReviewRequest, DailyPlan } from "./daily"
 export type {
   IssueType,
   IssueTypeLoadProfile,
-  Plan,
-  PlanItem,
-  PlanItemStatus,
-  UpsertPlanRequest,
-  CreatePlanItemRequest,
-  UpdatePlanItemRequest,
-  PlanCandidatesResponse,
-} from "./plan";
+} from "./issue-type";
 export type { AutomationTemplate, StandupSummaryResult } from "./automation";
 export type { PomodoroPhase, PomodoroStatus, PomodoroSession, CompletePomodoroBody, CompletePomodoroResponse } from "./pomodoro";
 export type {

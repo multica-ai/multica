@@ -23,7 +23,6 @@ type TimeEntryResponse struct {
 	WorkspaceID     string                   `json:"workspace_id"`
 	UserID          string                   `json:"user_id"`
 	IssueID         *string                  `json:"issue_id"`
-	PlanItemID      *string                  `json:"plan_item_id,omitempty"`
 	Description     *string                  `json:"description"`
 	StartTime       string                   `json:"start_time"`
 	StopTime        *string                  `json:"stop_time"`
@@ -93,7 +92,6 @@ func timeEntryToResponse(e db.TimeEntry) TimeEntryResponse {
 		WorkspaceID:     uuidToString(e.WorkspaceID),
 		UserID:          uuidToString(e.UserID),
 		IssueID:         uuidToPtr(e.IssueID),
-		PlanItemID:      uuidToPtr(e.PlanItemID),
 		Description:     textToPtr(e.Description),
 		StartTime:       timestampToString(e.StartTime),
 		StopTime:        timestampToPtr(e.StopTime),
@@ -258,7 +256,6 @@ func (h *Handler) CreateTimeEntry(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID:     parseUUID(workspaceID),
 			UserID:          parseUUID(userID),
 			IssueID:         parseOptionalUUID(req.IssueID),
-			PlanItemID:      pgtype.UUID{},
 			Description:     ptrToText(req.Description),
 			StartTime:       pgTimestamp(startTime),
 			StopTime:        pgTimestamp(stopTime),

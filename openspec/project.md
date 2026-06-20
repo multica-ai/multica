@@ -24,7 +24,8 @@ Important product assumptions:
 - Keep agent assignment and execution visible in product flows; this is a core differentiator.
 - Preserve the distinction between member assignees and agent assignees.
 - Treat inbox/notifications separately from work planning unless a change explicitly redefines that behavior.
-- Prefer evolving the existing issue model over introducing parallel work-item models unless there is strong evidence the current model is insufficient.
+- `issue` is the only executable work object by default. Prefer evolving the existing issue model over introducing parallel work-item models unless there is strong evidence the current model is insufficient.
+- Daily plan and review surfaces may summarize, suggest, or reflect execution, but must not introduce independent executable items without a new product and technical spec.
 
 ## Repository Structure
 
@@ -282,10 +283,12 @@ Before opening a PR, prefer running `make check` or the relevant targeted subset
 When writing OpenSpec artifacts for this project:
 
 - Treat `issue` as the current canonical work item unless the change explicitly replaces that model.
+- Include a runtime object matrix for workflow changes. The matrix must identify first-class runtime objects, which objects can drive execution state, and which fields or models are forbidden from carrying parallel semantics.
 - Preserve agent execution and assignment semantics in any workflow-related proposal.
 - Treat notifications/inbox and work planning as distinct concerns unless the change intentionally merges them.
 - Keep `apps/workspace` as the primary product shell unless there is a clear reason to move product behavior elsewhere.
 - Avoid bundling unrelated infra rewrites into product-facing changes.
+- Split stable core model changes from experimental surfaces into separate migrations and commits. For example, issue model extensions should not be bundled with speculative Plan or scheduling tables.
 
 ## What to Preserve When Making Changes
 

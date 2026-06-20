@@ -101,7 +101,6 @@ func (s *TimeEntryService) StartTimer(
 		WorkspaceID:     util.ParseUUID(workspaceID),
 		UserID:          util.ParseUUID(userID),
 		IssueID:         optionalUUID(issueID),
-		PlanItemID:      pgtype.UUID{},
 		Description:     util.PtrToText(description),
 		StartTime:       pgtype.Timestamptz{Time: startTime, Valid: true},
 		StopTime:        pgtype.Timestamptz{}, // NULL: timer is running
@@ -379,7 +378,6 @@ func (s *TimeEntryService) UpdateTimeEntry(
 		WorkspaceID:     util.ParseUUID(workspaceID),
 		Description:     util.PtrToText(description),
 		IssueID:         optionalUUID(resolvedIssueID),
-		PlanItemID:      entry.PlanItemID,
 		StartTime:       pgStart,
 		StopTime:        pgStop,
 		DurationSeconds: newDuration,
@@ -520,7 +518,6 @@ func (s *TimeEntryService) SwitchTimer(
 		WorkspaceID:     util.ParseUUID(workspaceID),
 		UserID:          util.ParseUUID(userID),
 		IssueID:         optionalUUID(issueID),
-		PlanItemID:      pgtype.UUID{},
 		Description:     util.PtrToText(description),
 		StartTime:       pgtype.Timestamptz{Time: startTime, Valid: true},
 		StopTime:        pgtype.Timestamptz{}, // NULL: timer is running

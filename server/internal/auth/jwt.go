@@ -46,6 +46,15 @@ func GenerateDaemonToken() (string, error) {
 	return "mdt_" + hex.EncodeToString(b), nil
 }
 
+// GenerateAgentTaskToken creates a task-scoped agent token.
+func GenerateAgentTaskToken() (string, error) {
+	b := make([]byte, 20) // 20 bytes = 40 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate agent task token: %w", err)
+	}
+	return "mat_" + hex.EncodeToString(b), nil
+}
+
 // HashToken returns the hex-encoded SHA-256 hash of a token string.
 func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))

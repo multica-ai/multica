@@ -21,16 +21,15 @@ func (q *Queries) ClearRunningTimerByUser(ctx context.Context, userID pgtype.UUI
 }
 
 const createTimeEntry = `-- name: CreateTimeEntry :one
-INSERT INTO time_entry (workspace_id, user_id, issue_id, plan_item_id, description, start_time, stop_time, duration_seconds, type)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id
+INSERT INTO time_entry (workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type CreateTimeEntryParams struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	UserID          pgtype.UUID        `json:"user_id"`
 	IssueID         pgtype.UUID        `json:"issue_id"`
-	PlanItemID      pgtype.UUID        `json:"plan_item_id"`
 	Description     pgtype.Text        `json:"description"`
 	StartTime       pgtype.Timestamptz `json:"start_time"`
 	StopTime        pgtype.Timestamptz `json:"stop_time"`
@@ -43,7 +42,6 @@ func (q *Queries) CreateTimeEntry(ctx context.Context, arg CreateTimeEntryParams
 		arg.WorkspaceID,
 		arg.UserID,
 		arg.IssueID,
-		arg.PlanItemID,
 		arg.Description,
 		arg.StartTime,
 		arg.StopTime,
@@ -63,7 +61,6 @@ func (q *Queries) CreateTimeEntry(ctx context.Context, arg CreateTimeEntryParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Type,
-		&i.PlanItemID,
 	)
 	return i, err
 }
@@ -84,7 +81,7 @@ func (q *Queries) DeleteTimeEntry(ctx context.Context, arg DeleteTimeEntryParams
 }
 
 const getRunningTimerByUser = `-- name: GetRunningTimerByUser :one
-SELECT te.id, te.workspace_id, te.user_id, te.issue_id, te.description, te.start_time, te.stop_time, te.duration_seconds, te.created_at, te.updated_at, te.type, te.plan_item_id
+SELECT te.id, te.workspace_id, te.user_id, te.issue_id, te.description, te.start_time, te.stop_time, te.duration_seconds, te.created_at, te.updated_at, te.type
 FROM running_timer rt
 JOIN time_entry te ON te.id = rt.time_entry_id
 WHERE rt.user_id = $1 AND te.workspace_id = $2
@@ -110,13 +107,12 @@ func (q *Queries) GetRunningTimerByUser(ctx context.Context, arg GetRunningTimer
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Type,
-		&i.PlanItemID,
 	)
 	return i, err
 }
 
 const getTimeEntryByID = `-- name: GetTimeEntryByID :one
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -140,13 +136,12 @@ func (q *Queries) GetTimeEntryByID(ctx context.Context, arg GetTimeEntryByIDPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Type,
-		&i.PlanItemID,
 	)
 	return i, err
 }
 
 const listOverlappingStoppedTimeEntries = `-- name: ListOverlappingStoppedTimeEntries :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 FROM time_entry
 WHERE workspace_id = $1
   AND user_id = $2
@@ -194,7 +189,6 @@ func (q *Queries) ListOverlappingStoppedTimeEntries(ctx context.Context, arg Lis
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Type,
-			&i.PlanItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -207,7 +201,7 @@ func (q *Queries) ListOverlappingStoppedTimeEntries(ctx context.Context, arg Lis
 }
 
 const listTimeEntriesByIssue = `-- name: ListTimeEntriesByIssue :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY start_time DESC
 `
@@ -238,7 +232,6 @@ func (q *Queries) ListTimeEntriesByIssue(ctx context.Context, arg ListTimeEntrie
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Type,
-			&i.PlanItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -251,7 +244,7 @@ func (q *Queries) ListTimeEntriesByIssue(ctx context.Context, arg ListTimeEntrie
 }
 
 const listTimeEntriesByUser = `-- name: ListTimeEntriesByUser :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE workspace_id = $1 AND user_id = $2
 ORDER BY start_time DESC
 LIMIT $3 OFFSET $4
@@ -290,7 +283,6 @@ func (q *Queries) ListTimeEntriesByUser(ctx context.Context, arg ListTimeEntries
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Type,
-			&i.PlanItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +295,7 @@ func (q *Queries) ListTimeEntriesByUser(ctx context.Context, arg ListTimeEntries
 }
 
 const listTimeEntriesByUserRange = `-- name: ListTimeEntriesByUserRange :many
-SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id FROM time_entry
+SELECT id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type FROM time_entry
 WHERE workspace_id = $1
   AND user_id = $2
   AND start_time >= $3
@@ -345,7 +337,6 @@ func (q *Queries) ListTimeEntriesByUserRange(ctx context.Context, arg ListTimeEn
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Type,
-			&i.PlanItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -381,7 +372,7 @@ SET stop_time = $3,
     duration_seconds = $4,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type StopTimeEntryParams struct {
@@ -411,7 +402,6 @@ func (q *Queries) StopTimeEntry(ctx context.Context, arg StopTimeEntryParams) (T
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Type,
-		&i.PlanItemID,
 	)
 	return i, err
 }
@@ -531,13 +521,12 @@ const updateTimeEntry = `-- name: UpdateTimeEntry :one
 UPDATE time_entry
 SET description      = COALESCE($3, description),
     issue_id         = $4,
-    plan_item_id     = $5,
-    start_time       = COALESCE($6, start_time),
-    stop_time        = COALESCE($7, stop_time),
-    duration_seconds = COALESCE($8, duration_seconds),
+    start_time       = COALESCE($5, start_time),
+    stop_time        = COALESCE($6, stop_time),
+    duration_seconds = COALESCE($7, duration_seconds),
     updated_at       = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type, plan_item_id
+RETURNING id, workspace_id, user_id, issue_id, description, start_time, stop_time, duration_seconds, created_at, updated_at, type
 `
 
 type UpdateTimeEntryParams struct {
@@ -545,7 +534,6 @@ type UpdateTimeEntryParams struct {
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
 	Description     pgtype.Text        `json:"description"`
 	IssueID         pgtype.UUID        `json:"issue_id"`
-	PlanItemID      pgtype.UUID        `json:"plan_item_id"`
 	StartTime       pgtype.Timestamptz `json:"start_time"`
 	StopTime        pgtype.Timestamptz `json:"stop_time"`
 	DurationSeconds int64              `json:"duration_seconds"`
@@ -557,7 +545,6 @@ func (q *Queries) UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams
 		arg.WorkspaceID,
 		arg.Description,
 		arg.IssueID,
-		arg.PlanItemID,
 		arg.StartTime,
 		arg.StopTime,
 		arg.DurationSeconds,
@@ -575,7 +562,6 @@ func (q *Queries) UpdateTimeEntry(ctx context.Context, arg UpdateTimeEntryParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Type,
-		&i.PlanItemID,
 	)
 	return i, err
 }

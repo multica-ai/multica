@@ -7,7 +7,6 @@ import {
   Inbox,
 	  CalendarDays,
 	  CalendarRange,
-	  ClipboardList,
   ListTodo,
   FolderKanban,
   Settings,
@@ -41,9 +40,8 @@ export const navigationGroups: WorkspaceNavGroup[] = [
   {
     label: "Planning",
     items: [
-      { href: "/projects", label: "Projects", icon: FolderKanban },
+	      { href: "/projects", label: "Projects", icon: FolderKanban },
 	      { href: "/board", label: "Board", icon: Columns3 },
-	      { href: "/plan", label: "Plan", icon: ClipboardList },
 	      { href: "/backlog", label: "Backlog", icon: ListTodo },
       { href: "/today", label: "Today", icon: CalendarDays },
       { href: "/upcoming", label: "Upcoming", icon: CalendarRange },

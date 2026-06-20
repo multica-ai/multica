@@ -47,7 +47,6 @@ type focusSessionResponse struct {
 	Phase                 string   `json:"phase"`
 	Preset                *string  `json:"preset,omitempty"`
 	IssueID               *string  `json:"issue_id,omitempty"`
-	PlanItemID            *string  `json:"plan_item_id,omitempty"`
 	Description           *string  `json:"description,omitempty"`
 	CommitmentText        *string  `json:"commitment_text,omitempty"`
 	LabelIDs              []string `json:"label_ids"`
@@ -79,7 +78,6 @@ type focusStartRequest struct {
 	Mode                string   `json:"mode"`
 	Preset              *string  `json:"preset"`
 	IssueID             *string  `json:"issue_id"`
-	PlanItemID          *string  `json:"plan_item_id"`
 	Description         *string  `json:"description"`
 	CommitmentText      *string  `json:"commitment_text"`
 	LabelIDs            []string `json:"label_ids"`
@@ -101,9 +99,8 @@ type focusReasonRequest struct {
 }
 
 type focusCompleteRequest struct {
-	Note                        *string `json:"note"`
-	EndReason                   *string `json:"end_reason"`
-	PlanItemStatusAfterComplete *string `json:"plan_item_status_after_complete"`
+	Note      *string `json:"note"`
+	EndReason *string `json:"end_reason"`
 }
 
 func defaultFocusSessionResponse(workspaceID, userID string) focusSessionResponse {
@@ -186,7 +183,6 @@ func focusSessionToResponse(session db.FocusSession) focusSessionResponse {
 		Phase:                 session.Phase,
 		Preset:                textToPtr(session.Preset),
 		IssueID:               uuidToPtr(session.IssueID),
-		PlanItemID:            uuidToPtr(session.PlanItemID),
 		Description:           textToPtr(session.Description),
 		CommitmentText:        textToPtr(session.CommitmentText),
 		LabelIDs:              decodeLabelIDs(session.LabelIds),
@@ -271,7 +267,6 @@ func focusSessionUpdateParams(session db.FocusSession) db.UpdateFocusSessionPara
 		Phase:                 session.Phase,
 		Preset:                session.Preset,
 		IssueID:               session.IssueID,
-		PlanItemID:            session.PlanItemID,
 		Description:           session.Description,
 		CommitmentText:        session.CommitmentText,
 		LabelIds:              session.LabelIds,
@@ -342,7 +337,6 @@ func (h *Handler) StartFocus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_focus_reason")
 		return
 	}
-	planItemID := parseOptionalUUID(req.PlanItemID)
 	issueID := parseOptionalUUID(req.IssueID)
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -353,30 +347,6 @@ func (h *Handler) StartFocus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-	if planItemID.Valid {
-		planItem, err := qtx.GetPlanItem(r.Context(), db.GetPlanItemParams{
-			ID:          planItemID,
-			WorkspaceID: parseUUID(workspaceID),
-			UserID:      parseUUID(userID),
-		})
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_plan_item_id")
-			return
-		}
-		if planItem.IssueID.Valid {
-			issueID = planItem.IssueID
-		}
-		if _, err := qtx.UpdatePlanItemStatus(r.Context(), db.UpdatePlanItemStatusParams{
-			ID:           planItem.ID,
-			WorkspaceID:  planItem.WorkspaceID,
-			UserID:       planItem.UserID,
-			Status:       "in_progress",
-			StatusReason: pgtype.Text{},
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start focus")
-			return
-		}
-	}
 
 	existingTimer, timerErr := qtx.GetRunningTimerByUser(r.Context(), db.GetRunningTimerByUserParams{
 		UserID:      parseUUID(userID),
@@ -424,7 +394,6 @@ func (h *Handler) StartFocus(w http.ResponseWriter, r *http.Request) {
 		Mode:           req.Mode,
 		Preset:         ptrToText(req.Preset),
 		IssueID:        issueID,
-		PlanItemID:     planItemID,
 		Description:    ptrToText(req.Description),
 		CommitmentText: ptrToText(req.CommitmentText),
 		LabelIds:       encodeLabelIDs(req.LabelIDs),
@@ -443,7 +412,7 @@ func (h *Handler) StartFocus(w http.ResponseWriter, r *http.Request) {
 		EventType:      focusEventStarted,
 		Reason:         ptrToText(req.ResistanceReason),
 		Note:           ptrToText(req.ResistanceNote),
-		Metadata:       encodeMetadata(map[string]any{"mode": req.Mode, "preset": req.Preset, "plan_item_id": req.PlanItemID}),
+		Metadata:       encodeMetadata(map[string]any{"mode": req.Mode, "preset": req.Preset}),
 	})
 	if err != nil {
 		slog.Warn("create focus started event failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -694,7 +663,6 @@ func (h *Handler) CompleteFocus(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID:     parseUUID(workspaceID),
 		UserID:          parseUUID(userID),
 		IssueID:         session.IssueID,
-		PlanItemID:      session.PlanItemID,
 		Description:     ptrToText(description),
 		StartTime:       firstStarted,
 		StopTime:        pgTimestamp(now),
@@ -737,22 +705,6 @@ func (h *Handler) CompleteFocus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to complete focus")
 		return
-	}
-	if session.PlanItemID.Valid {
-		nextStatus := "progressed"
-		if req.PlanItemStatusAfterComplete != nil && *req.PlanItemStatusAfterComplete == "done" {
-			nextStatus = "done"
-		}
-		if _, err := qtx.UpdatePlanItemStatus(r.Context(), db.UpdatePlanItemStatusParams{
-			ID:           session.PlanItemID,
-			WorkspaceID:  parseUUID(workspaceID),
-			UserID:       parseUUID(userID),
-			Status:       nextStatus,
-			StatusReason: ptrToText(req.Note),
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to complete focus")
-			return
-		}
 	}
 	if _, err := qtx.CreateFocusEvent(r.Context(), db.CreateFocusEventParams{
 		WorkspaceID:     parseUUID(workspaceID),

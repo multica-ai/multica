@@ -29,7 +29,6 @@ export interface FocusSession {
   phase: FocusPhase;
   preset?: string;
 	  issue_id?: string | null;
-	  plan_item_id?: string | null;
 	  description?: string | null;
   commitment_text?: string | null;
   label_ids: string[];
@@ -78,7 +77,6 @@ export interface StartFocusRequest {
   mode: FocusMode;
   preset?: string;
 	  issue_id?: string | null;
-	  plan_item_id?: string | null;
 	  description?: string;
   commitment_text?: string;
   label_ids?: string[];
@@ -102,5 +100,4 @@ export interface FocusReasonRequest {
 export interface CompleteFocusRequest {
 	  note?: string;
 	  end_reason?: "completed" | "stopped_early";
-	  plan_item_status_after_complete?: "progressed" | "done";
 	}

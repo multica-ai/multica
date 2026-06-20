@@ -34,6 +34,29 @@ func Auth(queries *db.Queries) func(http.Handler) http.Handler {
 				return
 			}
 
+			// Task token: scoped to one agent task and used by spawned agent CLIs.
+			if strings.HasPrefix(tokenString, "mat_") {
+				if queries == nil {
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				hash := auth.HashToken(tokenString)
+				taskToken, err := queries.GetTaskTokenByHash(r.Context(), hash)
+				if err != nil {
+					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+
+				r.Header.Set("X-User-ID", uuidToString(taskToken.UserID))
+				r.Header.Set("X-Agent-ID", uuidToString(taskToken.AgentID))
+				r.Header.Set("X-Task-ID", uuidToString(taskToken.TaskID))
+				r.Header.Set("X-Workspace-ID", uuidToString(taskToken.WorkspaceID))
+
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// PAT: tokens starting with "mul_"
 			if strings.HasPrefix(tokenString, "mul_") {
 				if queries == nil {
