@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -228,6 +230,30 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+func writeMaybeCompressedJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
+	if !requestAcceptsGzip(r) {
+		writeJSON(w, status, v)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Add("Vary", "Accept-Encoding")
+	w.WriteHeader(status)
+	gz := gzip.NewWriter(w)
+	defer gz.Close()
+	json.NewEncoder(gz).Encode(v)
+}
+
+func requestAcceptsGzip(r *http.Request) bool {
+	for _, part := range strings.Split(r.Header.Get("Accept-Encoding"), ",") {
+		coding := strings.TrimSpace(strings.SplitN(part, ";", 2)[0])
+		if strings.EqualFold(coding, "gzip") {
+			return true
+		}
+	}
+	return false
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {

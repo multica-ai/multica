@@ -1194,7 +1194,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	if task == nil {
 		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		writeJSON(w, http.StatusOK, map[string]any{"task": nil})
+		writeMaybeCompressedJSON(w, r, http.StatusOK, map[string]any{"task": nil})
 		outcome = "no_task"
 		return
 	}
@@ -1800,7 +1800,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp.AuthToken = tokenStr
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	writeJSON(w, http.StatusOK, map[string]any{"task": resp})
+	writeMaybeCompressedJSON(w, r, http.StatusOK, map[string]any{"task": resp})
 }
 
 // trailingUserMessages returns the run of user messages after the last

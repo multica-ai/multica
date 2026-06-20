@@ -92,6 +92,11 @@ type Client struct {
 	token   string
 	client  *http.Client
 
+	// Claim responses can include agent instructions, skills, repos, and task
+	// context. Keep their body-read budget separate from the normal daemon API
+	// calls so large issue payloads do not time out at the generic 30s cap.
+	claimClient *http.Client
+
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
 	platform string
@@ -99,13 +104,19 @@ type Client struct {
 	os       string
 }
 
+const (
+	defaultHTTPTimeout      = 30 * time.Second
+	defaultClaimTaskTimeout = 75 * time.Second
+)
+
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:  baseURL,
-		client:   &http.Client{Timeout: 30 * time.Second},
-		platform: "daemon",
-		os:       normalizeGOOS(runtime.GOOS),
+		baseURL:     baseURL,
+		client:      &http.Client{Timeout: defaultHTTPTimeout},
+		claimClient: &http.Client{Timeout: defaultClaimTaskTimeout},
+		platform:    "daemon",
+		os:          normalizeGOOS(runtime.GOOS),
 	}
 }
 
@@ -157,7 +168,7 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 	var resp struct {
 		Task *Task `json:"task"`
 	}
-	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/claim", runtimeID), map[string]any{}, &resp); err != nil {
+	if err := c.postJSONWithClient(ctx, c.claimHTTPClient(), fmt.Sprintf("/api/daemon/runtimes/%s/tasks/claim", runtimeID), map[string]any{}, &resp); err != nil {
 		return nil, err
 	}
 	return resp.Task, nil
@@ -293,8 +304,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -599,6 +610,17 @@ func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
+	return c.postJSONWithClient(ctx, c.client, path, reqBody, respBody)
+}
+
+func (c *Client) claimHTTPClient() *http.Client {
+	if c.claimClient != nil {
+		return c.claimClient
+	}
+	return c.client
+}
+
+func (c *Client) postJSONWithClient(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -618,7 +640,7 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := c.client.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

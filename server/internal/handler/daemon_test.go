@@ -199,7 +199,7 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Stale dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Stale dispatch reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "180 seconds", false)
 
 	task, body := claimTaskByRuntimeForTest(t, runtimeID)
 	if task == nil {
@@ -230,7 +230,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Fresh dispatch reclaim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Fresh dispatch reclaim agent")
-	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "75 seconds", false)
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "100 seconds", false)
 
 	task, body := claimTaskByRuntimeForTest(t, runtimeID)
 	if task != nil {
@@ -239,7 +239,7 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 
 	var stillFresh bool
 	if err := testPool.QueryRow(ctx, `
-		SELECT dispatched_at < now() - interval '70 seconds'
+		SELECT dispatched_at < now() - interval '95 seconds'
 		FROM agent_task_queue
 		WHERE id = $1
 	`, taskID).Scan(&stillFresh); err != nil {

@@ -155,8 +155,8 @@ type Daemon struct {
 	// command resolves; read by runTask via customCommandPathForRuntime to
 	// launch the custom command for a claimed task. Guarded by mu.
 	profileCommandPaths map[string]string
-	reloading    sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet   *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	reloading           sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet          *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -2352,9 +2352,9 @@ func (d *Daemon) triggerRestart() {
 // pollLoop supervises one runtimePoller goroutine per registered runtime,
 // fans wake-up signals out to all of them, and waits for in-flight tasks to
 // drain on shutdown. Per-runtime workers replace the previous round-robin
-// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
-// longer delays claims on every other runtime — that was the cross-workspace
-// stall mode reported in MUL-1744.
+// loop so that a slow ClaimTask call for one runtime no longer delays claims
+// on every other runtime — that was the cross-workspace stall mode reported in
+// MUL-1744.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
 	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
@@ -2461,9 +2461,9 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 // recreating it under load.
 //
 // Slot-before-claim does mean a slow claim holds a slot during its HTTP
-// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
-// below the 300s dispatch timeout, so other runtimes' tasks stay in
-// server-side `queued` state (which has no timeout) rather than entering
+// roundtrip; the upper bound is the daemon client's dedicated claim timeout,
+// still below the server-side dispatch timeout, so other runtimes' tasks stay
+// in server-side `queued` state (which has no timeout) rather than entering
 // `dispatched` and racing the sweeper.
 //
 // pollerCtx is cancelled when this runtime is removed from the watched set
