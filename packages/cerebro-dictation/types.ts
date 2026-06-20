@@ -108,6 +108,11 @@ export interface UseDictationReturn {
   lastTranscript: string | null;
   /** Whether the runtime supports MediaRecorder + getUserMedia at all. */
   isSupported: boolean;
+  /**
+   * The live microphone stream while recording, exposed so the UI can render
+   * a real-time waveform from it. `null` whenever we are not recording.
+   */
+  mediaStream: MediaStream | null;
   /** Begin recording. No-op when already recording / transcribing. */
   start: () => Promise<void>;
   /** Stop recording and run the transcriber on what was captured. */

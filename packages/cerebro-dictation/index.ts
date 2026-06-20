@@ -18,6 +18,7 @@ export { createWebSocketStreamingTranscriber } from "./streaming-transcriber";
 export { createHttpTranscriber } from "./http-transcriber";
 export { insertAtCaret } from "./insert-at-caret";
 export { MicButton, type MicButtonProps } from "./views/mic-button";
+export { Waveform, type WaveformProps } from "./views/waveform";
 export {
   EditorDictationMic,
   type EditorDictationMicProps,

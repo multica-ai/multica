@@ -49,6 +49,10 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
   const [status, setStatus] = useState<DictationStatus>("idle");
   const [error, setError] = useState<DictationError | null>(null);
   const [lastTranscript, setLastTranscript] = useState<string | null>(null);
+  // Surfaced to the UI so a waveform can read the live mic input. Kept as
+  // state (not just the ref below) so consumers re-render when it appears
+  // and disappears.
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
 
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -119,6 +123,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
       }
       streamRef.current = null;
     }
+    setMediaStream(null);
     chunksRef.current = [];
     streamingSessionRef.current = null;
     streamingFinalRef.current = null;
@@ -200,6 +205,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     }
 
     streamRef.current = stream;
+    setMediaStream(stream);
     chunksRef.current = [];
 
     const chosenMime = pickMimeType(mimeType);
@@ -417,6 +423,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     error,
     lastTranscript,
     isSupported,
+    mediaStream,
     start,
     stop,
     cancel,

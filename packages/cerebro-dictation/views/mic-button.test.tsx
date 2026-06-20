@@ -33,6 +33,7 @@ describe("MicButton", () => {
       stop: vi.fn(),
       cancel: vi.fn(),
       lastTranscript: null,
+      mediaStream: null,
     });
   });
 
@@ -61,7 +62,7 @@ describe("MicButton", () => {
     ).toBeInTheDocument();
   });
 
-  it("starts on pointer down and stops on pointer up", () => {
+  it("starts recording on the first tap", () => {
     const start = vi.fn();
     const stop = vi.fn();
     mocks.useDictation.mockReturnValue({
@@ -72,17 +73,58 @@ describe("MicButton", () => {
       stop,
       cancel: vi.fn(),
       lastTranscript: null,
+      mediaStream: null,
     });
 
     render(<MicButton onTranscribed={vi.fn()} />);
 
-    const button = screen.getByRole("button", { name: "Start dictation" });
-    fireEvent.pointerDown(button);
-    fireEvent.pointerUp(button);
-    fireEvent.click(button);
+    fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
 
     expect(start).toHaveBeenCalledTimes(1);
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("stops recording on the next tap (tap-to-toggle, not press-and-hold)", () => {
+    const start = vi.fn();
+    const stop = vi.fn();
+    mocks.useDictation.mockReturnValue({
+      status: "recording",
+      error: null,
+      isSupported: true,
+      start,
+      stop,
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+
     expect(stop).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stop button enabled while recording", () => {
+    // The button must stay clickable mid-recording so the user can stop;
+    // `disabled` only applies to the idle/busy states.
+    mocks.useDictation.mockReturnValue({
+      status: "recording",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(
+      screen.getByRole("button", { name: "Stop dictation" }),
+    ).toBeEnabled();
   });
 
   it("starts on click for keyboard-style activation", () => {
@@ -95,6 +137,7 @@ describe("MicButton", () => {
       stop: vi.fn(),
       cancel: vi.fn(),
       lastTranscript: null,
+      mediaStream: null,
     });
 
     render(<MicButton onTranscribed={vi.fn()} />);
@@ -113,6 +156,7 @@ describe("MicButton", () => {
       stop: vi.fn(),
       cancel: vi.fn(),
       lastTranscript: null,
+      mediaStream: null,
     });
 
     render(<MicButton onTranscribed={vi.fn()} />);
