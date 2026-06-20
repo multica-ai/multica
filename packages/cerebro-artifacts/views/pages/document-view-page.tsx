@@ -50,6 +50,7 @@ import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { DocumentToolsSidebar } from "../components/document-tools-sidebar";
 import { EditableTitle } from "../components/editable-title";
+import { EditorActionsMenu } from "../components/editor-actions-menu";
 import { FindReplaceBar } from "../components/find-replace-bar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Artifact } from "@multica/core/types";
@@ -524,86 +525,57 @@ export function DocumentViewPage({
               <span className="hidden sm:inline">Documents</span>
             </Button>
           </div>
-          <div className="flex items-center gap-0.5 sm:gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="max-sm:px-2"
-              title="Open in new window"
-              onClick={() =>
-                window.open(window.location.href, "_blank", "noreferrer")
-              }
-            >
-              <ExternalLink className="size-4 sm:mr-1" />
-              <span className="hidden sm:inline">Open in new window</span>
-            </Button>
-            {canDownload && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="max-sm:px-2"
-                title="Download"
-                onClick={handleDownload}
-              >
-                <Download className="size-4 sm:mr-1" />
-                <span className="hidden sm:inline">Download</span>
-              </Button>
-            )}
-            {commentsEnabled && renderComments && (
-              <Button
-                variant={showComments ? "secondary" : "ghost"}
-                size="sm"
-                className="max-sm:px-2"
-                title="Comments"
-                onClick={() =>
-                  showComments ? closeComments() : setShowComments(true)
-                }
-              >
-                <MessageSquare className="size-4 sm:mr-1" />
-                <span className="hidden sm:inline">Comments</span>
-              </Button>
-            )}
-            {canEdit && (
-              <>
-                {artifact.format === "md" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="max-sm:px-2"
-                    title="Find & replace"
-                    onClick={() => setFindOpen((v) => !v)}
-                  >
-                    <Replace className="size-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Find &amp; replace</span>
-                  </Button>
-                )}
-                {artifact.format !== "md" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="max-sm:px-2"
-                    title="Edit body"
-                    onClick={() =>
-                      router.push(wsPaths.documentEdit(artifact.id))
-                    }
-                  >
-                    <Pencil className="size-4 sm:mr-1" />
-                    <span className="hidden sm:inline">Edit body</span>
-                  </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="max-sm:px-2 text-destructive hover:text-destructive"
-                  title="Delete"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  <Trash2 className="size-4 sm:mr-1" />
-                  <span className="hidden sm:inline">Delete</span>
-                </Button>
-              </>
-            )}
-          </div>
+          {/* All actions live behind one shared "⋯" menu — the same component
+              the Notes view uses, so documents and notes look identical
+              (FIR-1647, request 5). */}
+          <EditorActionsMenu
+            triggerLabel="Document actions"
+            items={[
+              {
+                key: "open-new-window",
+                label: "Open in new window",
+                icon: ExternalLink,
+                onSelect: () =>
+                  window.open(window.location.href, "_blank", "noreferrer"),
+              },
+              canDownload && {
+                key: "download",
+                label: "Download",
+                icon: Download,
+                onSelect: handleDownload,
+              },
+              commentsEnabled &&
+                renderComments && {
+                  key: "comments",
+                  label: "Comments",
+                  icon: MessageSquare,
+                  onSelect: () =>
+                    showComments ? closeComments() : setShowComments(true),
+                },
+              canEdit &&
+                artifact.format === "md" && {
+                  key: "find-replace",
+                  label: "Find & replace",
+                  icon: Replace,
+                  onSelect: () => setFindOpen((v) => !v),
+                },
+              canEdit &&
+                artifact.format !== "md" && {
+                  key: "edit-body",
+                  label: "Edit body",
+                  icon: Pencil,
+                  onSelect: () => router.push(wsPaths.documentEdit(artifact.id)),
+                },
+              canEdit && {
+                key: "delete",
+                label: "Delete",
+                icon: Trash2,
+                destructive: true,
+                separatorBefore: true,
+                onSelect: () => setConfirmDelete(true),
+              },
+            ]}
+          />
         </div>
 
         <div className="mb-4 flex items-center gap-2">

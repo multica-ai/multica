@@ -17,7 +17,6 @@ import {
   Repeat,
   Folder,
   FolderPlus,
-  MoreHorizontal,
   Link2,
   ListPlus,
   ExternalLink,
@@ -39,6 +38,7 @@ import {
   NoteTypesPanel,
   DocumentToolsSidebar,
   EditableTitle,
+  EditorActionsMenu,
   FindReplaceBar,
   FolderAccessControl,
 } from "@multica/cerebro-artifacts/views/components";
@@ -1001,87 +1001,68 @@ export function NoteEditor({
           </Badge>
         )}
 
-        {/* Everything else lives behind one "⋯" menu (request 5 + 6). */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                className="ml-auto shrink-0"
-                aria-label="Note actions"
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end" className="w-52">
-            {/* Pin is an owner-only action on the backend (FIR-1460, request 2). */}
-            {isOwner && (
-              <DropdownMenuItem
-                onClick={() =>
-                  setPin.mutate({ id: note.id, pinned: !note.pinned })
-                }
-              >
-                <Pin className="size-4" />
-                {note.pinned ? "Unpin" : "Pin"}
-              </DropdownMenuItem>
-            )}
-            {commentsEnabled && (
-              <DropdownMenuItem
-                onClick={() =>
-                  showComments ? closeComments() : setShowComments(true)
-                }
-              >
-                <MessageSquare className="size-4" />
-                Comments
-              </DropdownMenuItem>
-            )}
-            {versionsEnabled && (
-              <DropdownMenuItem onClick={() => setShowHistory(true)}>
-                <History className="size-4" />
-                History
-              </DropdownMenuItem>
-            )}
-            {!readOnly && (
-              <DropdownMenuItem onClick={() => setFindOpen(true)}>
-                <Replace className="size-4" />
-                Find & replace
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={() => setAddRefOpen(true)}>
-              <Link2 className="size-4" />
-              Add reference
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setCreatingIssue(true)}>
-              <ListPlus className="size-4" />
-              Create issue
-            </DropdownMenuItem>
-            {/* Delete is owner-only (the backend rejects others with 403). Show
-                it solely to the owner so the action never silently fails
-                (FIR-1460, request 2). */}
-            {isOwner && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() =>
-                    // Navigate back to the overview once the note is gone.
-                    // Without this we only invalidate the list cache and leave
-                    // selectedId pointing at the deleted note — on mobile that
-                    // hides both the list rail and the (now empty) editor,
-                    // leaving a blank screen instead of the note list
-                    // (TECH-3770).
-                    deleteNote.mutate(note.id, { onSuccess: () => onBack() })
-                  }
-                >
-                  <Trash2 className="size-4" />
-                  Delete
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {/* Everything else lives behind one shared "⋯" menu — the same
+            component the Documents view uses (FIR-1647, request 5 + 6). */}
+        <EditorActionsMenu
+          triggerLabel="Note actions"
+          className="ml-auto"
+          items={[
+            // Pin is an owner-only action on the backend (FIR-1460, request 2).
+            isOwner && {
+              key: "pin",
+              label: note.pinned ? "Unpin" : "Pin",
+              icon: Pin,
+              onSelect: () =>
+                setPin.mutate({ id: note.id, pinned: !note.pinned }),
+            },
+            commentsEnabled && {
+              key: "comments",
+              label: "Comments",
+              icon: MessageSquare,
+              onSelect: () =>
+                showComments ? closeComments() : setShowComments(true),
+            },
+            versionsEnabled && {
+              key: "history",
+              label: "History",
+              icon: History,
+              onSelect: () => setShowHistory(true),
+            },
+            !readOnly && {
+              key: "find-replace",
+              label: "Find & replace",
+              icon: Replace,
+              onSelect: () => setFindOpen(true),
+            },
+            {
+              key: "add-reference",
+              label: "Add reference",
+              icon: Link2,
+              onSelect: () => setAddRefOpen(true),
+            },
+            {
+              key: "create-issue",
+              label: "Create issue",
+              icon: ListPlus,
+              onSelect: () => setCreatingIssue(true),
+            },
+            // Delete is owner-only (the backend rejects others with 403). Show
+            // it solely to the owner so the action never silently fails
+            // (FIR-1460, request 2). The onSuccess navigates back to the
+            // overview once the note is gone — without it selectedId still
+            // points at the deleted note, which on mobile leaves a blank
+            // screen instead of the note list (TECH-3770).
+            isOwner && {
+              key: "delete",
+              label: "Delete",
+              icon: Trash2,
+              destructive: true,
+              separatorBefore: true,
+              onSelect: () =>
+                deleteNote.mutate(note.id, { onSuccess: () => onBack() }),
+            },
+          ]}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1">
