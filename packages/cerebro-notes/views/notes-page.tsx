@@ -39,6 +39,7 @@ import {
   DocumentToolsSidebar,
   EditableTitle,
   EditorActionsMenu,
+  EntityMetaHeader,
   FindReplaceBar,
   FolderAccessControl,
 } from "@multica/cerebro-artifacts/views/components";
@@ -1075,6 +1076,17 @@ export function NoteEditor({
             onSave={(next) => updateNote.mutate({ id: note.id, title: next })}
             readOnly={readOnly}
             placeholder="Title (optional — first line becomes the title)"
+          />
+
+          {/* Shared metadata header (FIR-1647, request 8): the same owner +
+              "Updated <date>" strip the Documents view shows. A note's owner_id
+              is a member id, so it maps onto the member author slot; notes have
+              no inline issue/project columns (they link through references
+              below), so those props are left off. */}
+          <EntityMetaHeader
+            authorType="member"
+            authorId={note.owner_id}
+            updatedAt={note.updated_at}
           />
 
           <NoteReferences noteId={note.id} />

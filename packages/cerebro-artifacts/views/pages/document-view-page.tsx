@@ -26,7 +26,6 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { artifactDetailOptions } from "@multica/cerebro-artifacts/core";
-import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useDeleteArtifact,
   useUpdateArtifact,
@@ -40,17 +39,16 @@ import {
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
-import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { ActorAvatar } from "@multica/views/common/actor-avatar";
 import { ContentEditor } from "@multica/views/editor";
 import { ArtifactContent } from "../components/artifact-content";
 import { KindIcon, KIND_LABELS } from "../components/kind-icon";
 import { DocumentToolsSidebar } from "../components/document-tools-sidebar";
 import { EditableTitle } from "../components/editable-title";
 import { EditorActionsMenu } from "../components/editor-actions-menu";
+import { EntityMetaHeader } from "../components/entity-meta-header";
 import { FindReplaceBar } from "../components/find-replace-bar";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Artifact } from "@multica/core/types";
@@ -94,18 +92,6 @@ export type DocumentReferencesSlot = (opts: {
   artifactId: string;
 }) => React.ReactNode;
 
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function slugifyForFilename(title: string): string {
   return (
     title
@@ -135,103 +121,6 @@ function canEditArtifact(
 ): boolean {
   if (role === "owner" || role === "admin") return true;
   return artifact.author_type === "member" && artifact.author_id === userId;
-}
-
-/**
- * The "people + things" line under the title — author and the issues / project
- * the document is connected to. Each is clickable: agent goes to the agent
- * profile (placeholder for now via /agents), members are non-link, issues and
- * projects deep-link.
- */
-function ConnectionRow({
-  artifact,
-}: {
-  artifact: import("@multica/core/types").Artifact;
-}) {
-  const wsId = useWorkspaceId();
-  const wsPaths = useWorkspacePaths();
-  const { getActorName, getMemberName } = useActorName();
-  // Resolve the issue title / identifier when the doc has any issue link.
-  const linkedIssueId = artifact.issue_id ?? artifact.origin_issue_id;
-  const { data: linkedIssue } = useQuery({
-    ...issueDetailOptions(wsId, linkedIssueId ?? ""),
-    enabled: Boolean(wsId && linkedIssueId),
-  });
-  const showOriginSeparately =
-    artifact.origin_issue_id && artifact.origin_issue_id !== artifact.issue_id;
-  const showRequesterSeparately =
-    artifact.requester_user_id &&
-    !(
-      artifact.author_type === "member" &&
-      artifact.author_id === artifact.requester_user_id
-    );
-
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-      <span className="flex items-center gap-1.5">
-        <ActorAvatar
-          actorType={artifact.author_type}
-          actorId={artifact.author_id}
-          size={18}
-        />
-        <span className="font-medium">
-          {getActorName(artifact.author_type, artifact.author_id)}
-        </span>
-        {artifact.author_type === "agent" && (
-          <Badge variant="outline" className="text-[10px]">
-            agent
-          </Badge>
-        )}
-      </span>
-      {showRequesterSeparately && artifact.requester_user_id && (
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          for{" "}
-          <ActorAvatar
-            actorType="member"
-            actorId={artifact.requester_user_id}
-            size={16}
-          />
-          <span className="font-medium text-foreground">
-            {getMemberName(artifact.requester_user_id)}
-          </span>
-        </span>
-      )}
-      {artifact.issue_id && (
-        <span className="flex items-center gap-1 text-muted-foreground">
-          on{" "}
-          <a
-            href={wsPaths.issueDetail(artifact.issue_id)}
-            className="underline hover:text-foreground"
-          >
-            {linkedIssue?.identifier ?? "issue"}
-            {linkedIssue?.title ? ` — ${linkedIssue.title}` : ""}
-          </a>
-        </span>
-      )}
-      {artifact.project_id && (
-        <span className="flex items-center gap-1 text-muted-foreground">
-          on{" "}
-          <a
-            href={wsPaths.projectDetail(artifact.project_id)}
-            className="underline hover:text-foreground"
-          >
-            project
-          </a>
-        </span>
-      )}
-      {showOriginSeparately && artifact.origin_issue_id && (
-        <span className="flex items-center gap-1 text-muted-foreground">
-          from{" "}
-          <a
-            href={wsPaths.issueDetail(artifact.origin_issue_id)}
-            className="underline hover:text-foreground"
-          >
-            {linkedIssue?.identifier ?? "issue"}
-          </a>
-        </span>
-      )}
-    </div>
-  );
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
@@ -605,10 +494,15 @@ export function DocumentViewPage({
           allowEmpty={false}
           className="font-semibold"
         />
-        <ConnectionRow artifact={artifact} />
-        <p className="mt-1 text-xs text-muted-foreground">
-          Updated {formatDateTime(artifact.updated_at)}
-        </p>
+        <EntityMetaHeader
+          authorType={artifact.author_type}
+          authorId={artifact.author_id}
+          updatedAt={artifact.updated_at}
+          requesterUserId={artifact.requester_user_id}
+          issueId={artifact.issue_id}
+          projectId={artifact.project_id}
+          originIssueId={artifact.origin_issue_id}
+        />
 
         {/* FIR-1621 (2.1) — couple this document/PDF/file to an issue or chat,
             so its comments can be sent to that destination's agent. Same picker

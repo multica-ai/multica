@@ -14,6 +14,11 @@ export {
   EditorActionsMenu,
   type EditorActionItem,
 } from "./editor-actions-menu";
+export {
+  EntityMetaHeader,
+  formatDateTime,
+  type EntityMetaHeaderProps,
+} from "./entity-meta-header";
 export { FindReplaceBar } from "./find-replace-bar";
 export { FolderAccessControl } from "./folder-access-control";
 export { KindIcon, KIND_LABELS } from "./kind-icon";
