@@ -7,6 +7,14 @@ import { z } from "zod";
 const frequency = z.enum(["daily", "weekly", "monthly", "yearly", "days_after", "custom", "every_weekday"]);
 const anchor = z.enum(["completion", "due_date"]);
 
+// FIR-1639 fields. Older backends omit them and newer backends may add enum
+// values; both must degrade rather than fail the whole object
+// (CLAUDE.md → Enum drift downgrades, not crashes). .default() covers a
+// missing key, .catch() covers an unknown value.
+const triggerType = z.enum(["completion", "schedule"]).catch("completion").default("completion");
+const staleHandling = z.enum(["leave_open", "auto_close"]).catch("leave_open").default("leave_open");
+const dateFormat = z.enum(["iso", "dk"]).catch("iso").default("iso");
+
 export const issueRecurrenceSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -26,6 +34,11 @@ export const issueRecurrenceSchema = z.object({
   occurrence_count: z.number().int(),
   armed: z.boolean(),
   enabled: z.boolean(),
+  trigger_type: triggerType,
+  stale_handling: staleHandling,
+  stale_status: z.string().catch("cancelled").default("cancelled"),
+  date_format: dateFormat,
+  next_run_at: z.string().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });

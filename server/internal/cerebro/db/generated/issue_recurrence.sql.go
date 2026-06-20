@@ -17,21 +17,24 @@ SET source_issue_id  = $2,
     occurrence_count = $3,
     armed            = $4,
     enabled          = $5,
+    next_run_at      = $6,
     updated_at       = now()
 WHERE id = $1
 `
 
 type AdvanceCerebroIssueRecurrenceAfterFireParams struct {
-	ID              pgtype.UUID `json:"id"`
-	SourceIssueID   pgtype.UUID `json:"source_issue_id"`
-	OccurrenceCount int32       `json:"occurrence_count"`
-	Armed           bool        `json:"armed"`
-	Enabled         bool        `json:"enabled"`
+	ID              pgtype.UUID        `json:"id"`
+	SourceIssueID   pgtype.UUID        `json:"source_issue_id"`
+	OccurrenceCount int32              `json:"occurrence_count"`
+	Armed           bool               `json:"armed"`
+	Enabled         bool               `json:"enabled"`
+	NextRunAt       pgtype.Timestamptz `json:"next_run_at"`
 }
 
 // Applied after a successful spawn: repoint to the (possibly new) source
-// issue, disarm until it re-opens, bump the occurrence counter, and carry
-// the enabled flag (set FALSE when a stop condition was reached).
+// issue, disarm until it re-opens, bump the occurrence counter, carry the
+// enabled flag (set FALSE when a stop condition was reached), and advance the
+// schedule clock (NULL for completion rules, which leave next_run_at unused).
 func (q *Queries) AdvanceCerebroIssueRecurrenceAfterFire(ctx context.Context, arg AdvanceCerebroIssueRecurrenceAfterFireParams) error {
 	_, err := q.db.Exec(ctx, advanceCerebroIssueRecurrenceAfterFire,
 		arg.ID,
@@ -39,7 +42,27 @@ func (q *Queries) AdvanceCerebroIssueRecurrenceAfterFire(ctx context.Context, ar
 		arg.OccurrenceCount,
 		arg.Armed,
 		arg.Enabled,
+		arg.NextRunAt,
 	)
+	return err
+}
+
+const closeCerebroRecurringIssueStatus = `-- name: CloseCerebroRecurringIssueStatus :exec
+UPDATE issue
+SET status     = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type CloseCerebroRecurringIssueStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// Schedule-based auto_close: move a still-open previous occurrence into the
+// configured stale_status (e.g. 'cancelled') without touching its due date.
+func (q *Queries) CloseCerebroRecurringIssueStatus(ctx context.Context, arg CloseCerebroRecurringIssueStatusParams) error {
+	_, err := q.db.Exec(ctx, closeCerebroRecurringIssueStatus, arg.ID, arg.Status)
 	return err
 }
 
@@ -93,9 +116,11 @@ INSERT INTO cerebro_issue_recurrence (
     create_new_issue, new_status,
     recur_forever, end_date, max_occurrences,
     armed, enabled,
+    trigger_type, stale_handling, stale_status, date_format, next_run_at,
     created_by_type, created_by_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21, $22, $23)
 RETURNING id, workspace_id, project_id, source_issue_id,
           frequency, interval_count, weekdays, days_after,
           trigger_status, anchor,
@@ -103,28 +128,34 @@ RETURNING id, workspace_id, project_id, source_issue_id,
           recur_forever, end_date, max_occurrences, occurrence_count,
           armed, enabled,
           created_by_type, created_by_id,
-          created_at, updated_at
+          created_at, updated_at,
+          trigger_type, stale_handling, stale_status, date_format, next_run_at
 `
 
 type CreateCerebroIssueRecurrenceParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	ProjectID      pgtype.UUID `json:"project_id"`
-	SourceIssueID  pgtype.UUID `json:"source_issue_id"`
-	Frequency      string      `json:"frequency"`
-	IntervalCount  int32       `json:"interval_count"`
-	Weekdays       []int16     `json:"weekdays"`
-	DaysAfter      int32       `json:"days_after"`
-	TriggerStatus  string      `json:"trigger_status"`
-	Anchor         string      `json:"anchor"`
-	CreateNewIssue bool        `json:"create_new_issue"`
-	NewStatus      string      `json:"new_status"`
-	RecurForever   bool        `json:"recur_forever"`
-	EndDate        pgtype.Date `json:"end_date"`
-	MaxOccurrences pgtype.Int4 `json:"max_occurrences"`
-	Armed          bool        `json:"armed"`
-	Enabled        bool        `json:"enabled"`
-	CreatedByType  pgtype.Text `json:"created_by_type"`
-	CreatedByID    pgtype.UUID `json:"created_by_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	SourceIssueID  pgtype.UUID        `json:"source_issue_id"`
+	Frequency      string             `json:"frequency"`
+	IntervalCount  int32              `json:"interval_count"`
+	Weekdays       []int16            `json:"weekdays"`
+	DaysAfter      int32              `json:"days_after"`
+	TriggerStatus  string             `json:"trigger_status"`
+	Anchor         string             `json:"anchor"`
+	CreateNewIssue bool               `json:"create_new_issue"`
+	NewStatus      string             `json:"new_status"`
+	RecurForever   bool               `json:"recur_forever"`
+	EndDate        pgtype.Date        `json:"end_date"`
+	MaxOccurrences pgtype.Int4        `json:"max_occurrences"`
+	Armed          bool               `json:"armed"`
+	Enabled        bool               `json:"enabled"`
+	TriggerType    string             `json:"trigger_type"`
+	StaleHandling  string             `json:"stale_handling"`
+	StaleStatus    string             `json:"stale_status"`
+	DateFormat     string             `json:"date_format"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	CreatedByType  pgtype.Text        `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
 }
 
 // TECH-3064 / FIR-334: recurring issues. All queries live in the cerebro
@@ -153,6 +184,11 @@ func (q *Queries) CreateCerebroIssueRecurrence(ctx context.Context, arg CreateCe
 		arg.MaxOccurrences,
 		arg.Armed,
 		arg.Enabled,
+		arg.TriggerType,
+		arg.StaleHandling,
+		arg.StaleStatus,
+		arg.DateFormat,
+		arg.NextRunAt,
 		arg.CreatedByType,
 		arg.CreatedByID,
 	)
@@ -180,6 +216,11 @@ func (q *Queries) CreateCerebroIssueRecurrence(ctx context.Context, arg CreateCe
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TriggerType,
+		&i.StaleHandling,
+		&i.StaleStatus,
+		&i.DateFormat,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -201,7 +242,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE id = $1
 `
@@ -232,6 +274,11 @@ func (q *Queries) GetCerebroIssueRecurrence(ctx context.Context, id pgtype.UUID)
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TriggerType,
+		&i.StaleHandling,
+		&i.StaleStatus,
+		&i.DateFormat,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -244,7 +291,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE source_issue_id = $1
 `
@@ -275,6 +323,11 @@ func (q *Queries) GetCerebroIssueRecurrenceBySourceIssue(ctx context.Context, so
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TriggerType,
+		&i.StaleHandling,
+		&i.StaleStatus,
+		&i.DateFormat,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -297,6 +350,24 @@ func (q *Queries) GetCerebroRecurringIssuesFlagForWorkspace(ctx context.Context,
 	var enabled bool
 	err := row.Scan(&enabled)
 	return enabled, err
+}
+
+const getLatestSpawnedIssueForRecurrence = `-- name: GetLatestSpawnedIssueForRecurrence :one
+SELECT spawned_issue_id
+FROM cerebro_issue_recurrence_log
+WHERE recurrence_id = $1 AND spawned_issue_id IS NOT NULL
+ORDER BY occurrence_number DESC
+LIMIT 1
+`
+
+// Most recently spawned occurrence for a rule, used by schedule-based
+// auto_close to find the previous issue to close. Skips reopen rows
+// (spawned_issue_id IS NULL).
+func (q *Queries) GetLatestSpawnedIssueForRecurrence(ctx context.Context, recurrenceID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getLatestSpawnedIssueForRecurrence, recurrenceID)
+	var spawned_issue_id pgtype.UUID
+	err := row.Scan(&spawned_issue_id)
+	return spawned_issue_id, err
 }
 
 const insertCerebroIssueRecurrenceLog = `-- name: InsertCerebroIssueRecurrenceLog :exec
@@ -331,7 +402,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE enabled = TRUE
 `
@@ -371,6 +443,11 @@ func (q *Queries) ListEnabledCerebroIssueRecurrences(ctx context.Context) ([]Cer
 			&i.CreatedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TriggerType,
+			&i.StaleHandling,
+			&i.StaleStatus,
+			&i.DateFormat,
+			&i.NextRunAt,
 		); err != nil {
 			return nil, err
 		}
@@ -433,6 +510,11 @@ SET frequency        = $2,
     end_date         = $11,
     max_occurrences  = $12,
     enabled          = $13,
+    trigger_type     = $14,
+    stale_handling   = $15,
+    stale_status     = $16,
+    date_format      = $17,
+    next_run_at      = $18,
     updated_at       = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id, source_issue_id,
@@ -442,23 +524,29 @@ RETURNING id, workspace_id, project_id, source_issue_id,
           recur_forever, end_date, max_occurrences, occurrence_count,
           armed, enabled,
           created_by_type, created_by_id,
-          created_at, updated_at
+          created_at, updated_at,
+          trigger_type, stale_handling, stale_status, date_format, next_run_at
 `
 
 type UpdateCerebroIssueRecurrenceParams struct {
-	ID             pgtype.UUID `json:"id"`
-	Frequency      string      `json:"frequency"`
-	IntervalCount  int32       `json:"interval_count"`
-	Weekdays       []int16     `json:"weekdays"`
-	DaysAfter      int32       `json:"days_after"`
-	TriggerStatus  string      `json:"trigger_status"`
-	Anchor         string      `json:"anchor"`
-	CreateNewIssue bool        `json:"create_new_issue"`
-	NewStatus      string      `json:"new_status"`
-	RecurForever   bool        `json:"recur_forever"`
-	EndDate        pgtype.Date `json:"end_date"`
-	MaxOccurrences pgtype.Int4 `json:"max_occurrences"`
-	Enabled        bool        `json:"enabled"`
+	ID             pgtype.UUID        `json:"id"`
+	Frequency      string             `json:"frequency"`
+	IntervalCount  int32              `json:"interval_count"`
+	Weekdays       []int16            `json:"weekdays"`
+	DaysAfter      int32              `json:"days_after"`
+	TriggerStatus  string             `json:"trigger_status"`
+	Anchor         string             `json:"anchor"`
+	CreateNewIssue bool               `json:"create_new_issue"`
+	NewStatus      string             `json:"new_status"`
+	RecurForever   bool               `json:"recur_forever"`
+	EndDate        pgtype.Date        `json:"end_date"`
+	MaxOccurrences pgtype.Int4        `json:"max_occurrences"`
+	Enabled        bool               `json:"enabled"`
+	TriggerType    string             `json:"trigger_type"`
+	StaleHandling  string             `json:"stale_handling"`
+	StaleStatus    string             `json:"stale_status"`
+	DateFormat     string             `json:"date_format"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
 }
 
 // Full config update from the issue-side panel.
@@ -477,6 +565,11 @@ func (q *Queries) UpdateCerebroIssueRecurrence(ctx context.Context, arg UpdateCe
 		arg.EndDate,
 		arg.MaxOccurrences,
 		arg.Enabled,
+		arg.TriggerType,
+		arg.StaleHandling,
+		arg.StaleStatus,
+		arg.DateFormat,
+		arg.NextRunAt,
 	)
 	var i CerebroIssueRecurrence
 	err := row.Scan(
@@ -502,6 +595,11 @@ func (q *Queries) UpdateCerebroIssueRecurrence(ctx context.Context, arg UpdateCe
 		&i.CreatedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TriggerType,
+		&i.StaleHandling,
+		&i.StaleStatus,
+		&i.DateFormat,
+		&i.NextRunAt,
 	)
 	return i, err
 }

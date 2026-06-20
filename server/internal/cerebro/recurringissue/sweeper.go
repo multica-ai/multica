@@ -140,6 +140,11 @@ func (s *Sweeper) processRule(ctx context.Context, r cerebrodb.CerebroIssueRecur
 		}
 		return false, fmt.Errorf("load source issue: %w", err)
 	}
+
+	if r.TriggerType == TriggerSchedule {
+		return s.processScheduleRule(ctx, r, issue)
+	}
+
 	isTrigger := issue.Status == r.TriggerStatus
 
 	if !r.Armed {
@@ -161,35 +166,96 @@ func (s *Sweeper) processRule(ctx context.Context, r cerebrodb.CerebroIssueRecur
 	return s.fire(ctx, r, issue)
 }
 
-func (s *Sweeper) fire(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, issue db.Issue) (bool, error) {
-	// Base date: previous due date when syncing to due date, else completion
-	// day (now).
-	base := s.nowFunc()
-	if r.Anchor == AnchorDueDate && issue.DueDate.Valid {
-		base = issue.DueDate.Time
+// processScheduleRule fires a schedule-based rule when its clock is due,
+// independently of the source issue's status. The source issue is the template
+// the occurrences are cloned from; it is never repointed, so the {{date}}
+// placeholder survives for every occurrence.
+func (s *Sweeper) processScheduleRule(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, issue db.Issue) (bool, error) {
+	if !r.NextRunAt.Valid {
+		return false, nil // no clock set — nothing to fire.
 	}
-	nextDue := NextDueDate(base, r.Frequency, int(r.IntervalCount), int16sToInts(r.Weekdays), int(r.DaysAfter))
+	if r.NextRunAt.Time.After(s.nowFunc()) {
+		return false, nil // not due yet.
+	}
+	return s.fire(ctx, r, issue)
+}
+
+func (s *Sweeper) fire(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, issue db.Issue) (bool, error) {
+	isSchedule := r.TriggerType == TriggerSchedule
+
+	// occurrenceDate is the day this fire represents; nextDue is the due date
+	// stamped on the spawned/reopened issue; advanceNextRun is the schedule
+	// clock carried forward (NULL for completion rules).
+	var occurrenceDate, nextDue time.Time
+	advanceNextRun := r.NextRunAt
+	if isSchedule {
+		occurrenceDate = truncateDay(r.NextRunAt.Time)
+		nextDue = occurrenceDate
+		newRun := NextDueDate(occurrenceDate, r.Frequency, int(r.IntervalCount), int16sToInts(r.Weekdays), int(r.DaysAfter))
+		advanceNextRun = pgtype.Timestamptz{Time: startOfDayUTC(newRun), Valid: true}
+	} else {
+		// Base date: previous due date when syncing to due date, else
+		// completion day (now).
+		base := s.nowFunc()
+		if r.Anchor == AnchorDueDate && issue.DueDate.Valid {
+			base = issue.DueDate.Time
+		}
+		nextDue = NextDueDate(base, r.Frequency, int(r.IntervalCount), int16sToInts(r.Weekdays), int(r.DaysAfter))
+	}
 	newCount := r.OccurrenceCount + 1
 
-	// Stop conditions (only when not recurring forever).
+	// Stop conditions (only when not recurring forever). Schedule rules gate on
+	// the next clock tick; completion rules on the next due date.
+	stopProbe := nextDue
+	if isSchedule {
+		stopProbe = advanceNextRun.Time
+	}
 	if !r.RecurForever {
 		if r.MaxOccurrences.Valid && r.OccurrenceCount >= r.MaxOccurrences.Int32 {
 			return false, s.disable(ctx, r)
 		}
-		if r.EndDate.Valid && nextDue.After(r.EndDate.Time) {
+		if r.EndDate.Valid && stopProbe.After(r.EndDate.Time) {
 			return false, s.disable(ctx, r)
 		}
 	}
 
-	armedAfter := r.NewStatus != r.TriggerStatus
+	// Schedule rules never repoint the source (it is the template) and ignore
+	// the arm flag; completion rules repoint and re-arm as before.
+	armedAfter := r.Armed
+	if !isSchedule {
+		armedAfter = r.NewStatus != r.TriggerStatus
+	}
 	enabledAfter := true
 	if !r.RecurForever && r.MaxOccurrences.Valid && newCount >= r.MaxOccurrences.Int32 {
 		enabledAfter = false
 	}
 
+	title := issue.Title
+	if isSchedule {
+		title = SubstituteTitleDate(issue.Title, occurrenceDate, r.DateFormat)
+	}
+
 	err := s.runInTx(ctx, func(tx pgx.Tx) error {
 		cqtx := s.Cerebro.WithTx(tx)
 		dqtx := s.Upstream.WithTx(tx)
+
+		// Schedule auto_close: move the previous still-open occurrence to the
+		// configured stale_status BEFORE this fire's log row is inserted, so
+		// "latest spawned" resolves to the prior occurrence, not this one.
+		if isSchedule && r.StaleHandling == StaleAutoClose {
+			prev, err := cqtx.GetLatestSpawnedIssueForRecurrence(ctx, r.ID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("load previous occurrence: %w", err)
+			}
+			if err == nil && prev.Valid {
+				if err := cqtx.CloseCerebroRecurringIssueStatus(ctx, cerebrodb.CloseCerebroRecurringIssueStatusParams{
+					ID:     prev,
+					Status: r.StaleStatus,
+				}); err != nil {
+					return fmt.Errorf("auto-close previous occurrence: %w", err)
+				}
+			}
+		}
 
 		newSource := r.SourceIssueID
 		var spawnedID pgtype.UUID
@@ -205,7 +271,7 @@ func (s *Sweeper) fire(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, 
 			}
 			created, err := dqtx.CreateIssue(ctx, db.CreateIssueParams{
 				WorkspaceID:   r.WorkspaceID,
-				Title:         issue.Title,
+				Title:         title,
 				Description:   issue.Description,
 				Status:        r.NewStatus,
 				Priority:      issue.Priority,
@@ -233,7 +299,11 @@ func (s *Sweeper) fire(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, 
 			}); err != nil {
 				return fmt.Errorf("copy attachments: %w", err)
 			}
-			newSource = created.ID
+			// Completion rules chain onto the new issue; schedule rules stay on
+			// the template.
+			if !isSchedule {
+				newSource = created.ID
+			}
 			spawnedID = created.ID
 		} else {
 			// Reopen the same issue into new_status with a bumped due date.
@@ -261,6 +331,7 @@ func (s *Sweeper) fire(ctx context.Context, r cerebrodb.CerebroIssueRecurrence, 
 			OccurrenceCount: newCount,
 			Armed:           armedAfter,
 			Enabled:         enabledAfter,
+			NextRunAt:       advanceNextRun,
 		}); err != nil {
 			return fmt.Errorf("advance recurrence: %w", err)
 		}
@@ -280,6 +351,7 @@ func (s *Sweeper) disable(ctx context.Context, r cerebrodb.CerebroIssueRecurrenc
 		OccurrenceCount: r.OccurrenceCount,
 		Armed:           false,
 		Enabled:         false,
+		NextRunAt:       r.NextRunAt,
 	})
 }
 

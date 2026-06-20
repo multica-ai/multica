@@ -16,9 +16,11 @@ INSERT INTO cerebro_issue_recurrence (
     create_new_issue, new_status,
     recur_forever, end_date, max_occurrences,
     armed, enabled,
+    trigger_type, stale_handling, stale_status, date_format, next_run_at,
     created_by_type, created_by_id
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, $19, $20, $21, $22, $23)
 RETURNING id, workspace_id, project_id, source_issue_id,
           frequency, interval_count, weekdays, days_after,
           trigger_status, anchor,
@@ -26,7 +28,8 @@ RETURNING id, workspace_id, project_id, source_issue_id,
           recur_forever, end_date, max_occurrences, occurrence_count,
           armed, enabled,
           created_by_type, created_by_id,
-          created_at, updated_at;
+          created_at, updated_at,
+          trigger_type, stale_handling, stale_status, date_format, next_run_at;
 
 -- name: GetCerebroIssueRecurrence :one
 SELECT id, workspace_id, project_id, source_issue_id,
@@ -36,7 +39,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE id = $1;
 
@@ -48,7 +52,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE source_issue_id = $1;
 
@@ -63,7 +68,8 @@ SELECT id, workspace_id, project_id, source_issue_id,
        recur_forever, end_date, max_occurrences, occurrence_count,
        armed, enabled,
        created_by_type, created_by_id,
-       created_at, updated_at
+       created_at, updated_at,
+       trigger_type, stale_handling, stale_status, date_format, next_run_at
 FROM cerebro_issue_recurrence
 WHERE enabled = TRUE;
 
@@ -82,6 +88,11 @@ SET frequency        = $2,
     end_date         = $11,
     max_occurrences  = $12,
     enabled          = $13,
+    trigger_type     = $14,
+    stale_handling   = $15,
+    stale_status     = $16,
+    date_format      = $17,
+    next_run_at      = $18,
     updated_at       = now()
 WHERE id = $1
 RETURNING id, workspace_id, project_id, source_issue_id,
@@ -91,7 +102,8 @@ RETURNING id, workspace_id, project_id, source_issue_id,
           recur_forever, end_date, max_occurrences, occurrence_count,
           armed, enabled,
           created_by_type, created_by_id,
-          created_at, updated_at;
+          created_at, updated_at,
+          trigger_type, stale_handling, stale_status, date_format, next_run_at;
 
 -- name: SetCerebroIssueRecurrenceArmed :exec
 UPDATE cerebro_issue_recurrence
@@ -100,15 +112,27 @@ WHERE id = $1;
 
 -- name: AdvanceCerebroIssueRecurrenceAfterFire :exec
 -- Applied after a successful spawn: repoint to the (possibly new) source
--- issue, disarm until it re-opens, bump the occurrence counter, and carry
--- the enabled flag (set FALSE when a stop condition was reached).
+-- issue, disarm until it re-opens, bump the occurrence counter, carry the
+-- enabled flag (set FALSE when a stop condition was reached), and advance the
+-- schedule clock (NULL for completion rules, which leave next_run_at unused).
 UPDATE cerebro_issue_recurrence
 SET source_issue_id  = $2,
     occurrence_count = $3,
     armed            = $4,
     enabled          = $5,
+    next_run_at      = $6,
     updated_at       = now()
 WHERE id = $1;
+
+-- name: GetLatestSpawnedIssueForRecurrence :one
+-- Most recently spawned occurrence for a rule, used by schedule-based
+-- auto_close to find the previous issue to close. Skips reopen rows
+-- (spawned_issue_id IS NULL).
+SELECT spawned_issue_id
+FROM cerebro_issue_recurrence_log
+WHERE recurrence_id = $1 AND spawned_issue_id IS NOT NULL
+ORDER BY occurrence_number DESC
+LIMIT 1;
 
 -- name: DeleteCerebroIssueRecurrence :exec
 DELETE FROM cerebro_issue_recurrence WHERE id = $1;
@@ -137,6 +161,14 @@ WHERE workspace_id = $1
 UPDATE issue
 SET status     = $2,
     due_date   = $3,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: CloseCerebroRecurringIssueStatus :exec
+-- Schedule-based auto_close: move a still-open previous occurrence into the
+-- configured stale_status (e.g. 'cancelled') without touching its due date.
+UPDATE issue
+SET status     = $2,
     updated_at = now()
 WHERE id = $1;
 

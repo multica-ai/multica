@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -46,6 +47,10 @@ type recurrenceRequest struct {
 	EndDate        *string `json:"end_date,omitempty"`
 	MaxOccurrences *int32  `json:"max_occurrences,omitempty"`
 	Enabled        *bool   `json:"enabled,omitempty"`
+	TriggerType    *string `json:"trigger_type,omitempty"`
+	StaleHandling  *string `json:"stale_handling,omitempty"`
+	StaleStatus    *string `json:"stale_status,omitempty"`
+	DateFormat     *string `json:"date_format,omitempty"`
 }
 
 // GetByIssue returns the recurrence rule for an issue, or 404 when none —
@@ -125,6 +130,8 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	nextRun := scheduleNextRun(merged, issue, existing, hasExisting)
+
 	if hasExisting {
 		out, err := h.Cerebro.UpdateCerebroIssueRecurrence(r.Context(), cerebrodb.UpdateCerebroIssueRecurrenceParams{
 			ID:             existing.ID,
@@ -140,6 +147,11 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 			EndDate:        endDate,
 			MaxOccurrences: pgInt4(merged.maxOccurrences),
 			Enabled:        merged.enabled,
+			TriggerType:    merged.triggerType,
+			StaleHandling:  merged.staleHandling,
+			StaleStatus:    merged.staleStatus,
+			DateFormat:     merged.dateFormat,
+			NextRunAt:      nextRun,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "update recurrence failed")
@@ -170,6 +182,11 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 		MaxOccurrences: pgInt4(merged.maxOccurrences),
 		Armed:          armed,
 		Enabled:        merged.enabled,
+		TriggerType:    merged.triggerType,
+		StaleHandling:  merged.staleHandling,
+		StaleStatus:    merged.staleStatus,
+		DateFormat:     merged.dateFormat,
+		NextRunAt:      nextRun,
 		CreatedByType:  pgtype.Text{String: "member", Valid: true},
 		CreatedByID:    parseUUIDOrZero(userID),
 	})
@@ -256,6 +273,10 @@ type mergedConfig struct {
 	endDate        string
 	maxOccurrences *int32
 	enabled        bool
+	triggerType    string
+	staleHandling  string
+	staleStatus    string
+	dateFormat     string
 }
 
 func mergeRequest(req recurrenceRequest, existing cerebrodb.CerebroIssueRecurrence, hasExisting bool) mergedConfig {
@@ -273,6 +294,10 @@ func mergeRequest(req recurrenceRequest, existing cerebrodb.CerebroIssueRecurren
 		endDate:        "",
 		maxOccurrences: nil,
 		enabled:        true,
+		triggerType:    TriggerCompletion,
+		staleHandling:  StaleLeaveOpen,
+		staleStatus:    "cancelled",
+		dateFormat:     DateFormatISO,
 	}
 	if hasExisting {
 		m.frequency = existing.Frequency
@@ -292,6 +317,10 @@ func mergeRequest(req recurrenceRequest, existing cerebrodb.CerebroIssueRecurren
 			m.maxOccurrences = &v
 		}
 		m.enabled = existing.Enabled
+		m.triggerType = existing.TriggerType
+		m.staleHandling = existing.StaleHandling
+		m.staleStatus = existing.StaleStatus
+		m.dateFormat = existing.DateFormat
 	}
 	if req.Frequency != nil {
 		m.frequency = *req.Frequency
@@ -330,7 +359,47 @@ func mergeRequest(req recurrenceRequest, existing cerebrodb.CerebroIssueRecurren
 	if req.Enabled != nil {
 		m.enabled = *req.Enabled
 	}
+	if req.TriggerType != nil {
+		m.triggerType = strings.TrimSpace(*req.TriggerType)
+	}
+	if req.StaleHandling != nil {
+		m.staleHandling = strings.TrimSpace(*req.StaleHandling)
+	}
+	if req.StaleStatus != nil {
+		m.staleStatus = strings.TrimSpace(*req.StaleStatus)
+	}
+	if req.DateFormat != nil {
+		m.dateFormat = strings.TrimSpace(*req.DateFormat)
+	}
+	// Schedule-based occurrences are always independent new issues; the reopen
+	// path makes no sense without a completion edge. Force it so the rest of
+	// the pipeline (and the sweeper) never sees a schedule reopen rule.
+	if m.triggerType == TriggerSchedule {
+		m.createNewIssue = true
+	}
 	return m
+}
+
+// scheduleNextRun derives next_run_at for the rule. Completion rules leave it
+// NULL. A schedule rule that is already running keeps its existing clock so an
+// unrelated save does not reset the schedule; a freshly-scheduled rule seeds
+// from the issue's due date (start of that day) or, lacking one, one interval
+// from now.
+func scheduleNextRun(m mergedConfig, issue db.Issue, existing cerebrodb.CerebroIssueRecurrence, hasExisting bool) pgtype.Timestamptz {
+	if m.triggerType != TriggerSchedule {
+		return pgtype.Timestamptz{}
+	}
+	if hasExisting && existing.TriggerType == TriggerSchedule && existing.NextRunAt.Valid {
+		return existing.NextRunAt
+	}
+	var first time.Time
+	if issue.DueDate.Valid {
+		first = startOfDayUTC(issue.DueDate.Time)
+	} else {
+		next := NextDueDate(time.Now(), m.frequency, int(m.intervalCount), m.weekdays, int(m.daysAfter))
+		first = startOfDayUTC(next)
+	}
+	return pgtype.Timestamptz{Time: first, Valid: true}
 }
 
 func validate(m mergedConfig) string {
@@ -359,6 +428,26 @@ func validate(m mergedConfig) string {
 	}
 	if m.maxOccurrences != nil && *m.maxOccurrences <= 0 {
 		return "max_occurrences must be > 0"
+	}
+	if err := ValidateTriggerType(m.triggerType); err != nil {
+		return err.Error()
+	}
+	if err := ValidateStaleHandling(m.staleHandling); err != nil {
+		return err.Error()
+	}
+	if err := ValidateDateFormat(m.dateFormat); err != nil {
+		return err.Error()
+	}
+	if m.triggerType == TriggerSchedule {
+		// days_after is completion-relative ("N days after it was closed") and
+		// has no meaning without a close event, so it is not offered for
+		// schedule rules.
+		if m.frequency == FreqDaysAfter {
+			return "days_after frequency is not supported for schedule-based recurrence"
+		}
+		if m.staleHandling == StaleAutoClose && strings.TrimSpace(m.staleStatus) == "" {
+			return "stale_status is required when stale_handling is auto_close"
+		}
 	}
 	return ""
 }

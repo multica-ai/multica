@@ -24,13 +24,18 @@ import {
   useUpsertIssueRecurrence,
 } from "../core/queries";
 import {
+  DATE_FORMATS,
+  DATE_PLACEHOLDER,
   FREQUENCIES,
   ISSUE_STATUSES,
   WEEKDAYS,
   type Anchor,
+  type DateFormat,
   type Frequency,
   type IssueRecurrence,
   type RecurrenceWriteInput,
+  type StaleHandling,
+  type TriggerType,
 } from "../core/types";
 
 interface Props {
@@ -60,6 +65,10 @@ function defaultForm(): RecurrenceWriteInput {
     new_status: "todo",
     recur_forever: true,
     enabled: true,
+    trigger_type: "completion",
+    stale_handling: "leave_open",
+    stale_status: "cancelled",
+    date_format: "iso",
   };
 }
 
@@ -77,13 +86,28 @@ function formFromExisting(r: IssueRecurrence): RecurrenceWriteInput {
     end_date: r.end_date,
     max_occurrences: r.max_occurrences,
     enabled: r.enabled,
+    trigger_type: r.trigger_type,
+    stale_handling: r.stale_handling,
+    stale_status: r.stale_status,
+    date_format: r.date_format,
   };
 }
 
+const TRIGGER_TYPE_LABELS: Record<TriggerType, string> = {
+  completion: "Completion-based",
+  schedule: "Schedule-based",
+};
+
+const STALE_HANDLING_LABELS: Record<StaleHandling, string> = {
+  leave_open: "Leave it open",
+  auto_close: "Close the previous one automatically",
+};
+
 function summarize(r: IssueRecurrence): string {
   const base = FREQUENCY_LABELS[r.frequency] ?? r.frequency;
-  if (!r.enabled) return `${base} (paused)`;
-  return base;
+  const label = r.trigger_type === "schedule" ? `${base} (scheduled)` : base;
+  if (!r.enabled) return `${label} (paused)`;
+  return label;
 }
 
 /**
@@ -108,9 +132,26 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
     if (open) setForm(existing ? formFromExisting(existing) : defaultForm());
   }, [open, existing]);
 
+  const isSchedule = form.trigger_type === "schedule";
+  // days_after is completion-relative ("N days after it was closed"), so it is
+  // not offered for schedule rules.
+  const frequencyOptions = isSchedule
+    ? FREQUENCIES.filter((f) => f !== "days_after")
+    : FREQUENCIES;
   const showWeekdays = form.frequency === "weekly" || form.frequency === "custom";
-  const showDaysAfter = form.frequency === "days_after";
+  const showDaysAfter = !isSchedule && form.frequency === "days_after";
   const showInterval = form.frequency !== "every_weekday";
+
+  function selectTriggerType(v: TriggerType) {
+    setForm((f) => ({
+      ...f,
+      trigger_type: v,
+      // Schedule rules always spawn an independent new issue and cannot use the
+      // completion-only days_after frequency.
+      create_new_issue: v === "schedule" ? true : f.create_new_issue,
+      frequency: v === "schedule" && f.frequency === "days_after" ? "weekly" : f.frequency,
+    }));
+  }
 
   function toggleWeekday(day: number) {
     const set = new Set(form.weekdays ?? []);
@@ -151,6 +192,30 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
         <div className="grid gap-3">
           <div className="text-sm font-medium">Recurring</div>
 
+          {/* Recurrence type */}
+          <div className="grid gap-1.5">
+            <Label htmlFor="rec-type" className="text-xs">Recurrence type</Label>
+            <Select
+              value={form.trigger_type ?? "completion"}
+              onValueChange={(v) => selectTriggerType((v ?? "completion") as TriggerType)}
+            >
+              <SelectTrigger id="rec-type">
+                <SelectValue>
+                  {() => TRIGGER_TYPE_LABELS[form.trigger_type ?? "completion"]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="completion">{TRIGGER_TYPE_LABELS.completion}</SelectItem>
+                <SelectItem value="schedule">{TRIGGER_TYPE_LABELS.schedule}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {isSchedule
+                ? "Creates a new task at each point in the schedule, regardless of whether the previous one is done."
+                : "Creates the next task when this one reaches its trigger status."}
+            </p>
+          </div>
+
           {/* Frequency + interval */}
           <div className={showInterval ? "grid grid-cols-2 gap-2" : "grid gap-2"}>
             <div className="grid gap-1.5">
@@ -169,7 +234,7 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {FREQUENCIES.map((f) => (
+                  {frequencyOptions.map((f) => (
                     <SelectItem key={f} value={f}>
                       {FREQUENCY_LABELS[f]}
                     </SelectItem>
@@ -229,25 +294,98 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
             </div>
           )}
 
-          {/* Trigger status */}
-          <div className="grid gap-1.5">
-            <Label htmlFor="rec-trigger" className="text-xs">On status change to</Label>
-            <Select
-              value={form.trigger_status}
-              onValueChange={(v) => setForm({ ...form, trigger_status: v ?? "" })}
-            >
-              <SelectTrigger id="rec-trigger">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ISSUE_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Trigger status (completion-based only) */}
+          {!isSchedule && (
+            <div className="grid gap-1.5">
+              <Label htmlFor="rec-trigger" className="text-xs">On status change to</Label>
+              <Select
+                value={form.trigger_status}
+                onValueChange={(v) => setForm({ ...form, trigger_status: v ?? "" })}
+              >
+                <SelectTrigger id="rec-trigger">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ISSUE_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Stale handling + date format (schedule-based only) */}
+          {isSchedule && (
+            <>
+              <div className="grid gap-1.5">
+                <Label htmlFor="rec-stale" className="text-xs">
+                  When it fires and the previous task is still open
+                </Label>
+                <Select
+                  value={form.stale_handling ?? "leave_open"}
+                  onValueChange={(v) =>
+                    setForm({ ...form, stale_handling: (v ?? "leave_open") as StaleHandling })
+                  }
+                >
+                  <SelectTrigger id="rec-stale">
+                    <SelectValue>
+                      {() => STALE_HANDLING_LABELS[form.stale_handling ?? "leave_open"]}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="leave_open">{STALE_HANDLING_LABELS.leave_open}</SelectItem>
+                    <SelectItem value="auto_close">{STALE_HANDLING_LABELS.auto_close}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {form.stale_handling === "auto_close" && (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="rec-stale-status" className="text-xs">Close the previous task to</Label>
+                  <Select
+                    value={form.stale_status ?? "cancelled"}
+                    onValueChange={(v) => setForm({ ...form, stale_status: v ?? "" })}
+                  >
+                    <SelectTrigger id="rec-stale-status">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {ISSUE_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <div className="grid gap-1.5">
+                <Label htmlFor="rec-date-format" className="text-xs">Date format in title</Label>
+                <Select
+                  value={form.date_format ?? "iso"}
+                  onValueChange={(v) => setForm({ ...form, date_format: (v ?? "iso") as DateFormat })}
+                >
+                  <SelectTrigger id="rec-date-format">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DATE_FORMATS.map((d) => (
+                      <SelectItem key={d.value} value={d.value}>
+                        {d.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="rounded-md border border-border bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+                  Put <code>{DATE_PLACEHOLDER}</code> in the task title to date-stamp each
+                  occurrence — it is replaced with the occurrence date in the format above.
+                </p>
+              </div>
+            </>
+          )}
 
           {/* Update status to */}
           <div className="grid gap-1.5">
@@ -270,19 +408,25 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
           </div>
 
           {/* Toggles */}
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={form.create_new_issue ?? true}
-              onCheckedChange={(c) => setForm({ ...form, create_new_issue: c === true })}
-            />
-            Create new task
-          </label>
-          {(form.create_new_issue ?? true) && (
-            <p className="rounded-md border border-border bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
-              Each new task copies the title, description, priority, assignee,
-              labels and files from the most recent occurrence — not from the
-              original. Comments and links to other tasks are not copied.
-            </p>
+          {/* Schedule rules always spawn an independent new task, so the
+              "Create new task" toggle is hidden and locked on. */}
+          {!isSchedule && (
+            <>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={form.create_new_issue ?? true}
+                  onCheckedChange={(c) => setForm({ ...form, create_new_issue: c === true })}
+                />
+                Create new task
+              </label>
+              {(form.create_new_issue ?? true) && (
+                <p className="rounded-md border border-border bg-muted/50 px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
+                  Each new task copies the title, description, priority, assignee,
+                  labels and files from the most recent occurrence — not from the
+                  original. Comments and links to other tasks are not copied.
+                </p>
+              )}
+            </>
           )}
           <label className="flex items-center gap-2 text-sm">
             <Checkbox
@@ -291,15 +435,17 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
             />
             Recur forever
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={form.anchor === "due_date"}
-              onCheckedChange={(c) =>
-                setForm({ ...form, anchor: (c === true ? "due_date" : "completion") as Anchor })
-              }
-            />
-            Sync recurrence to due date
-          </label>
+          {!isSchedule && (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={form.anchor === "due_date"}
+                onCheckedChange={(c) =>
+                  setForm({ ...form, anchor: (c === true ? "due_date" : "completion") as Anchor })
+                }
+              />
+              Sync recurrence to due date
+            </label>
+          )}
 
           <div className="flex items-center justify-between pt-1">
             {existing ? (

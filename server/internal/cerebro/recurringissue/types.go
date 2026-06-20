@@ -32,6 +32,11 @@ type RecurrenceResponse struct {
 	OccurrenceCount int32  `json:"occurrence_count"`
 	Armed           bool   `json:"armed"`
 	Enabled         bool   `json:"enabled"`
+	TriggerType     string `json:"trigger_type"`
+	StaleHandling   string `json:"stale_handling"`
+	StaleStatus     string `json:"stale_status"`
+	DateFormat      string `json:"date_format"`
+	NextRunAt       string `json:"next_run_at,omitempty"`
 	CreatedAt       string `json:"created_at"`
 	UpdatedAt       string `json:"updated_at"`
 }
@@ -53,6 +58,11 @@ func toResponse(r cerebrodb.CerebroIssueRecurrence) RecurrenceResponse {
 		OccurrenceCount: r.OccurrenceCount,
 		Armed:           r.Armed,
 		Enabled:         r.Enabled,
+		TriggerType:     r.TriggerType,
+		StaleHandling:   r.StaleHandling,
+		StaleStatus:     r.StaleStatus,
+		DateFormat:      r.DateFormat,
+		NextRunAt:       tsString(r.NextRunAt),
 		CreatedAt:       tsString(r.CreatedAt),
 		UpdatedAt:       tsString(r.UpdatedAt),
 	}

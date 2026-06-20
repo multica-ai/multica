@@ -144,6 +144,7 @@ type SetProjectNestingPositionParams struct {
 	Position        int32       `json:"position"`
 }
 
+// CEREBRO-PATCH(project-reorder-query): FIR-1614 sibling-order setter.
 // FIR-1614: set a project's sibling order. Inserts a default nesting row (with
 // the supplied parent/depth) when the project has none yet, else updates only
 // the position so a reorder never disturbs parent/depth.

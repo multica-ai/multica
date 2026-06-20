@@ -701,6 +701,11 @@ type CerebroIssueRecurrence struct {
 	CreatedByID     pgtype.UUID        `json:"created_by_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	TriggerType     string             `json:"trigger_type"`
+	StaleHandling   string             `json:"stale_handling"`
+	StaleStatus     string             `json:"stale_status"`
+	DateFormat      string             `json:"date_format"`
+	NextRunAt       pgtype.Timestamptz `json:"next_run_at"`
 }
 
 type CerebroIssueRecurrenceLog struct {

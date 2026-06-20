@@ -24,6 +24,85 @@ const (
 	AnchorDueDate    = "due_date"   // from the previous due date ("sync to due date")
 )
 
+// Trigger types — what makes the rule fire (FIR-1639).
+const (
+	TriggerCompletion = "completion" // fire when the source issue reaches trigger_status (today's behaviour)
+	TriggerSchedule   = "schedule"   // fire at each point in the schedule, independent of status
+)
+
+// Stale handling — for schedule rules, what happens to a still-open previous
+// occurrence when the schedule fires again.
+const (
+	StaleLeaveOpen = "leave_open" // leave the previous occurrence open
+	StaleAutoClose = "auto_close" // move the previous occurrence to stale_status
+)
+
+// Date formats for the {{date}} title placeholder on schedule occurrences.
+const (
+	DateFormatISO = "iso" // 2006-01-02
+	DateFormatDK  = "dk"  // 02-01-2006
+)
+
+// DatePlaceholder is the literal token replaced in a schedule occurrence's
+// title with the occurrence date. Kept simple and literal on purpose.
+const DatePlaceholder = "{{date}}"
+
+// ValidTriggerTypes / ValidStaleHandling / ValidDateFormats mirror the CHECK
+// constraints + Go-side validation; exported so the handler can echo allowed
+// values in its 400 response.
+var (
+	ValidTriggerTypes  = []string{TriggerCompletion, TriggerSchedule}
+	ValidStaleHandling = []string{StaleLeaveOpen, StaleAutoClose}
+	ValidDateFormats   = []string{DateFormatISO, DateFormatDK}
+)
+
+// ValidateTriggerType returns nil when t is supported.
+func ValidateTriggerType(t string) error {
+	for _, v := range ValidTriggerTypes {
+		if v == t {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid trigger_type %q, expected one of: %s", t, strings.Join(ValidTriggerTypes, ", "))
+}
+
+// ValidateStaleHandling returns nil when h is supported.
+func ValidateStaleHandling(h string) error {
+	for _, v := range ValidStaleHandling {
+		if v == h {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid stale_handling %q, expected one of: %s", h, strings.Join(ValidStaleHandling, ", "))
+}
+
+// ValidateDateFormat returns nil when f is supported.
+func ValidateDateFormat(f string) error {
+	for _, v := range ValidDateFormats {
+		if v == f {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid date_format %q, expected one of: %s", f, strings.Join(ValidDateFormats, ", "))
+}
+
+// FormatOccurrenceDate renders d in the configured title-placeholder format.
+func FormatOccurrenceDate(d time.Time, format string) string {
+	switch format {
+	case DateFormatDK:
+		return d.Format("02-01-2006")
+	default:
+		return d.Format("2006-01-02")
+	}
+}
+
+// SubstituteTitleDate replaces every DatePlaceholder in title with d formatted
+// per format. Titles without the placeholder are returned unchanged, so a
+// schedule series without {{date}} just repeats the literal title.
+func SubstituteTitleDate(title string, d time.Time, format string) string {
+	return strings.ReplaceAll(title, DatePlaceholder, FormatOccurrenceDate(d, format))
+}
+
 // ValidFrequencies is the source-of-truth list used by validators; exported
 // so the handler can echo allowed values in its 400 response.
 var ValidFrequencies = []string{FreqDaily, FreqWeekly, FreqMonthly, FreqYearly, FreqDaysAfter, FreqCustom, FreqEveryWeekday}
@@ -140,6 +219,12 @@ func containsInt(xs []int, v int) bool {
 
 func truncateDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+// startOfDayUTC returns midnight UTC on t's calendar day. Schedule rules store
+// next_run_at as start-of-day so the sweeper fires once the day begins.
+func startOfDayUTC(t time.Time) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 func isoWeekday(t time.Time) int {
