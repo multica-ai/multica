@@ -25,6 +25,7 @@ import (
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
+// Dirge:       skills → {workDir}/.dirge/skills/{name}/SKILL.md  (native discovery)
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
 // manifest, when non-nil, is populated with every file we created and every
@@ -218,6 +219,10 @@ func skillsDirPath(workDir, provider string) string {
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
 		return filepath.Join(workDir, ".agents", "skills")
+	case "dirge":
+		// Dirge auto-discovers project-level skills from .dirge/skills/ in
+		// the workdir.
+		return filepath.Join(workDir, ".dirge", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

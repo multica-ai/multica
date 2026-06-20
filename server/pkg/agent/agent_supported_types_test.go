@@ -9,7 +9,7 @@ import (
 // in SupportedTypes must be constructable by New, and New must reject anything
 // not in SupportedTypes. This is the single source of truth the custom runtime
 // profile protocol_family validation (handler) and the runtime_profile
-// protocol_family CHECK (migration 120) are aligned to. If a backend is added
+// protocol_family CHECK migrations are aligned to. If a backend is added
 // to New, it must be added here too — and to the migration CHECK.
 func TestSupportedTypesLockstepWithNew(t *testing.T) {
 	cfg := Config{Logger: slog.Default()}
@@ -34,19 +34,20 @@ func TestSupportedTypesLockstepWithNew(t *testing.T) {
 }
 
 // TestSupportedTypesMatchesMigrationWhitelist pins the exact set so a drift
-// from the runtime_profile.protocol_family CHECK in migration 120 fails loudly.
+// from the runtime_profile.protocol_family CHECK migrations fails loudly.
 func TestSupportedTypesMatchesMigrationWhitelist(t *testing.T) {
 	want := map[string]bool{
 		"claude": true, "codebuddy": true, "codex": true, "copilot": true,
 		"opencode": true, "openclaw": true, "hermes": true, "gemini": true,
 		"pi": true, "cursor": true, "kimi": true, "kiro": true, "antigravity": true,
+		"dirge": true,
 	}
 	if len(SupportedTypes) != len(want) {
 		t.Fatalf("SupportedTypes has %d entries, migration whitelist has %d; keep them in lockstep", len(SupportedTypes), len(want))
 	}
 	for _, typ := range SupportedTypes {
 		if !want[typ] {
-			t.Errorf("SupportedTypes contains %q which is not in the migration 120 protocol_family CHECK", typ)
+			t.Errorf("SupportedTypes contains %q which is not in the runtime_profile protocol_family CHECK", typ)
 		}
 	}
 }

@@ -160,6 +160,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Kimi:        writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Kiro:        writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
 // For Antigravity: writes {workDir}/AGENTS.md  (agy CLI reads AGENTS.md natively; skills discovered natively from .agents/skills/ — see https://antigravity.google/docs/gcli-migration)
+// For Dirge:       writes {workDir}/AGENTS.md  (Dirge reads AGENTS.md natively; skills discovered natively from .dirge/skills/)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
 	path := runtimeConfigPath(workDir, provider)
@@ -179,7 +180,7 @@ func runtimeConfigPath(workDir, provider string) string {
 	switch provider {
 	case "claude", "codebuddy":
 		return filepath.Join(workDir, "CLAUDE.md")
-	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity":
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "dirge":
 		return filepath.Join(workDir, "AGENTS.md")
 	case "gemini":
 		return filepath.Join(workDir, "GEMINI.md")
@@ -717,9 +718,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude", "codebuddy":
 			// Claude/CodeBuddy discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity":
-			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and
-			// Antigravity discover skills natively from their respective paths.
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity", "dirge":
+			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro,
+			// Antigravity, and Dirge discover skills natively from their
+			// respective paths.
 			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
 			// (exported via OPENCLAW_CONFIG_PATH) that pins agents.defaults.workspace
 			// to the task workdir so the CLI's scanner picks up {workDir}/skills/.

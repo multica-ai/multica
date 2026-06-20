@@ -8,7 +8,7 @@ import {
 
 describe("providerSupportsMcpConfig", () => {
   it("is true for native MCP providers", () => {
-    for (const p of ["claude", "codex", "hermes", "kimi", "kiro", "opencode", "openclaw"]) {
+    for (const p of ["claude", "codex", "dirge", "hermes", "kimi", "kiro", "opencode", "openclaw"]) {
       expect(providerSupportsMcpConfig(p)).toBe(true);
     }
   });
@@ -25,6 +25,7 @@ describe("providerSupportsMcpConfig", () => {
 describe("mcpSupportKind", () => {
   it("classifies native providers", () => {
     expect(mcpSupportKind("claude")).toBe("native");
+    expect(mcpSupportKind("dirge")).toBe("native");
     expect(mcpSupportKind("openclaw")).toBe("native");
   });
 

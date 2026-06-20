@@ -273,6 +273,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kimi", want: true},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
+		{provider: "dirge", want: false},
 	}
 
 	for _, tc := range cases {

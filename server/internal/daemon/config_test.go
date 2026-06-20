@@ -593,6 +593,7 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
 		"MULTICA_KIRO_PATH",
+		"MULTICA_DIRGE_PATH",
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}

@@ -118,6 +118,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCopilotModels(ctx, executablePath)
 		})
+	case "dirge":
+		return []Model{}, nil
 	case "hermes":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverHermesModels(ctx, executablePath)
@@ -164,7 +166,7 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 // any effect for the given provider. Every built-in provider now honours
 // `opts.Model` end-to-end — Hermes routes it through the ACP
 // `session/set_model` RPC before each prompt; Claude / Codex / Cursor /
-// Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity
+// Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity / Dirge
 // pass it via flag or session config (Antigravity gained `--model` in agy
 // 1.0.6 — MUL-3125).
 //
@@ -1522,13 +1524,13 @@ func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, err
 // sections: "Canonical models" and "Provider models". Each section is a
 // table with its own column layout:
 //
-//   Canonical models:
-//     canonical     selected               variants  context  max-out
-//     claude-sonnet anthropic/claude-sonnet  2      200000   32000
+//	Canonical models:
+//	  canonical     selected               variants  context  max-out
+//	  claude-sonnet anthropic/claude-sonnet  2      200000   32000
 //
-//   Provider models:
-//     provider  model         context  max-out  thinking  images
-//     anthropic claude-sonnet  200000   32000   low,high  yes
+//	Provider models:
+//	  provider  model         context  max-out  thinking  images
+//	  anthropic claude-sonnet  200000   32000   low,high  yes
 //
 // For the Canonical section we use fields[1] (selected) as the canonical ID.
 // For the Provider section we join fields[0] + "/" + fields[1] as the ID.

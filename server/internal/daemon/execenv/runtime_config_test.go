@@ -681,6 +681,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"kimi", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
+		{"dirge", "AGENTS.md"},
 		{"gemini", "GEMINI.md"},
 	}
 	for _, tc := range cases {

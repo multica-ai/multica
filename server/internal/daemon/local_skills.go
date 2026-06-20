@@ -92,6 +92,7 @@ const (
 //   - Kiro: project and user-level .kiro/skills directories discovered by Kiro CLI
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
+//   - Dirge: ~/.dirge/skills user-level skill root
 //
 // The universal ~/.agents/skills root is documented as a cross-tool skill
 // location by Codex (https://developers.openai.com/codex/skills) and Gemini
@@ -132,6 +133,8 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").
 		providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+	case "dirge":
+		providerRoot = filepath.Join(home, ".dirge", "skills")
 	default:
 		return nil, false, nil
 	}

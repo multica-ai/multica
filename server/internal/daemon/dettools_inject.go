@@ -29,12 +29,14 @@ const dettoolsServerName = "multica-tools"
 // stdio command server:
 //   - claude:        temp file via --mcp-config
 //   - codex:         daemon-managed [mcp_servers.*] block in config.toml
+//   - dirge:         daemon-managed mcp_servers block in config.json
 //   - opencode:      translated into OPENCODE_CONFIG_CONTENT (type:"local")
 //   - hermes/kimi/kiro: translated into the ACP session mcpServers array
 //     (stdio entries always pass the runtime's transport-capability filter)
 var dettoolsExecOptionsProviders = map[string]bool{
 	"claude":   true,
 	"codex":    true,
+	"dirge":    true,
 	"opencode": true,
 	"hermes":   true,
 	"kimi":     true,

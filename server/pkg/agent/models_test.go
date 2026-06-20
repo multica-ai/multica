@@ -967,6 +967,21 @@ func TestAntigravityModelSelectionSupported(t *testing.T) {
 	}
 }
 
+func TestDirgeModelCatalogEmptyButSupported(t *testing.T) {
+	t.Parallel()
+
+	models, err := ListModels(context.Background(), "dirge", "")
+	if err != nil {
+		t.Fatalf("ListModels(dirge): %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("ListModels(dirge) = %#v, want empty catalog", models)
+	}
+	if !ModelSelectionSupported("dirge") {
+		t.Fatal("dirge should accept model selection through --model")
+	}
+}
+
 // TestParseAntigravityModels covers the `agy models` line-per-name format:
 // each non-blank line becomes a Model whose ID and Label are the verbatim
 // display string `--model` expects, duplicates collapse, and blanks drop.

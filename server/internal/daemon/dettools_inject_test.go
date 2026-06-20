@@ -202,7 +202,7 @@ func TestInjectExecOptionsTools_Gating(t *testing.T) {
 	}
 
 	// Every ExecOptions MCP provider gets the server injected.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "kimi", "kiro"} {
+	for _, provider := range []string{"claude", "codex", "dirge", "opencode", "hermes", "kimi", "kiro"} {
 		got := dEnabled.injectExecOptionsTools(orig, provider, "/w", nil, nil, logger)
 		if _, ok := parseServers(t, got)[dettoolsServerName]; !ok {
 			t.Errorf("%s: deterministic server not injected", provider)

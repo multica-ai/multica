@@ -78,7 +78,7 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
 	for _, host := range []string{"linux", "darwin"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "dirge", "gemini"} {
 			name := provider + "/" + host
 			t.Run(name, func(t *testing.T) {
 				runtimeGOOS = host
@@ -133,7 +133,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 	issueID := "11111111-1111-1111-1111-111111111111"
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
-	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "dirge", "gemini"} {
 		t.Run(provider+"/windows", func(t *testing.T) {
 			got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
@@ -163,7 +163,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 func TestBuildCommentReplyInstructionsEmptyWhenNoTrigger(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"codex", "claude", "opencode"} {
+	for _, provider := range []string{"codex", "claude", "opencode", "dirge"} {
 		if got := BuildCommentReplyInstructions(provider, "issue-id", ""); got != "" {
 			t.Fatalf("expected empty string when triggerCommentID is empty for %s, got %q", provider, got)
 		}
@@ -227,7 +227,7 @@ func TestInjectRuntimeConfigWindowsCommentTriggerHasNoStdin(t *testing.T) {
 		TriggerCommentID: triggerID,
 	}
 
-	for _, provider := range []string{"claude", "codex", "opencode"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "dirge"} {
 		t.Run(provider, func(t *testing.T) {
 			dir := t.TempDir()
 			if _, err := InjectRuntimeConfig(dir, provider, ctx); err != nil {
@@ -292,7 +292,7 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 	// Assignment-triggered: IssueID set, no TriggerCommentID.
 	ctx := TaskContextForEnv{IssueID: "issue-1"}
 
-	for _, provider := range []string{"claude", "codex", "opencode"} {
+	for _, provider := range []string{"claude", "codex", "opencode", "dirge"} {
 		t.Run(provider, func(t *testing.T) {
 			dir := t.TempDir()
 			if _, err := InjectRuntimeConfig(dir, provider, ctx); err != nil {

@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 12 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 13 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 12 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 13 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 12 supported tools
+## The 13 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 12.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 13.
 
 ### Claude Code (Anthropic)
 
@@ -65,6 +65,17 @@ The CLI counterpart to the Cursor editor. **Session resumption works** with curr
 | Daemon looks for | `cursor-agent` |
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
+
+### Dirge
+
+Headless Dirge tasks use `dirge --print --output-format json`. Session resumption works through `--session <id>`, MCP config is written to a per-task `DIRGE_CONFIG_DIR/config.json`, and skills live under `.dirge/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `dirge` |
+| Install | Follow the official guide at [dirge-code.github.io](https://dirge-code.github.io/). |
+| Authentication | Configure Dirge through its own login or provider setup flow before starting the Multica daemon. |
+| Notes | Set `MULTICA_DIRGE_PATH` to pin a non-standard binary path, and `MULTICA_DIRGE_MODEL` to seed the default model passed via `--model`. |
 
 ### GitHub Copilot
 
@@ -160,7 +171,7 @@ Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and ru
 
 ## After installing
 
-1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`, `which agy`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
+1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`, `which agy`, `which dirge`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
 2. **Restart the daemon.** `multica daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
 3. **Check the Runtimes page.** In the Multica UI, the **Runtimes** page should now list one row per `(workspace × tool)` combination. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
 4. **Go back to onboarding.** The "Connect a runtime" step polls and will pick up the new runtime within a few seconds — no need to refresh.

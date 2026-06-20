@@ -172,6 +172,19 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
+function DirgeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#101014" />
+      <path
+        d="M7 5h5.5c3.5 0 6 2.6 6 7s-2.5 7-6 7H7V5zm3 2.8v8.4h2.3c1.9 0 3.1-1.5 3.1-4.2s-1.2-4.2-3.1-4.2H10z"
+        fill="#F4F2EA"
+      />
+      <path d="M4.8 12h3.7" stroke="#A7F3D0" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // Gemini (Google) — official "Google Gemini" mark from Simple Icons
 // (simpleicons.org/icons/googlegemini.svg, CC0 1.0). Rendered in the
 // Simple Icons brand color (#8E75B2), matching the pattern used by the
@@ -264,6 +277,8 @@ export function ProviderLogo({
       return <CopilotLogo className={className} />;
     case "cursor":
       return <CursorLogo className={className} />;
+    case "dirge":
+      return <DirgeLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
     case "kiro":

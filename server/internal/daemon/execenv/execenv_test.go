@@ -813,6 +813,7 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 		{"opencode", "AGENTS.md"},
 		{"gemini", "GEMINI.md"},
 		{"hermes", "AGENTS.md"},
+		{"dirge", "AGENTS.md"},
 	}
 
 	for _, tc := range providers {
@@ -1369,6 +1370,39 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	}
 }
 
+func TestInjectRuntimeConfigDirge(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "dirge", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "Coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Dirge should advertise native skill discovery")
+	}
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Dirge must not reference the .agent_context/skills/ fallback")
+	}
+}
+
 // TestWriteContextFilesAntigravityNativeSkills pins that skills for the
 // antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
 // CLI's native workspace discovery path (Gemini CLI lineage).
@@ -1398,6 +1432,33 @@ func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
 	// .agents/skills/, not .agent_context/skills/.
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
 		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
+	}
+}
+
+func TestWriteContextFilesDirgeNativeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID: "dirge-skill-test",
+		AgentSkills: []SkillContextForEnv{
+			{Name: "Go Conventions", Content: "Follow Go conventions."},
+		},
+	}
+
+	if err := writeContextFiles(dir, "dirge", ctx, nil); err != nil {
+		t.Fatalf("writeContextFiles failed: %v", err)
+	}
+
+	skillMd, err := os.ReadFile(filepath.Join(dir, ".dirge", "skills", "go-conventions", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("failed to read .dirge/skills/go-conventions/SKILL.md: %v", err)
+	}
+	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
+		t.Error("SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Error(".agent_context/skills/ MUST NOT be written for dirge")
 	}
 }
 
@@ -1530,7 +1591,7 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 
 	for _, host := range []string{"linux", "darwin", "windows"} {
-		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "gemini"} {
+		for _, provider := range []string{"claude", "opencode", "openclaw", "hermes", "kimi", "kiro", "cursor", "dirge", "gemini"} {
 			t.Run(provider+"/"+host, func(t *testing.T) {
 				runtimeGOOS = host
 				dir := t.TempDir()
@@ -1608,7 +1669,7 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 	t.Cleanup(func() { runtimeGOOS = saved })
 	runtimeGOOS = "linux"
 
-	for _, provider := range []string{"codex", "claude", "opencode"} {
+	for _, provider := range []string{"codex", "claude", "opencode", "dirge"} {
 		t.Run(provider, func(t *testing.T) {
 			dir := t.TempDir()
 			if _, err := InjectRuntimeConfig(dir, provider, TaskContextForEnv{

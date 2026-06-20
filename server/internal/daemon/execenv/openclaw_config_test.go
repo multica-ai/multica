@@ -1071,6 +1071,7 @@ func TestPrepareEnvironmentNonOpenclawSkipsConfig(t *testing.T) {
 		"opencode": "bbbbbbbb-1111-2222-3333-444444444444",
 		"hermes":   "cccccccc-1111-2222-3333-444444444444",
 		"kiro":     "dddddddd-1111-2222-3333-444444444444",
+		"dirge":    "eeeeeeee-1111-2222-3333-444444444444",
 	}
 	for provider, taskID := range taskIDs {
 		t.Run(provider, func(t *testing.T) {
