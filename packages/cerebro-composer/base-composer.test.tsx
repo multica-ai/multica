@@ -66,6 +66,13 @@ vi.mock("@multica/cerebro-ui", () => ({
   useComposerHeight: () => ({ showExpandToggle: false, containerStyle: undefined }),
 }));
 vi.mock("@multica/cerebro-comment-drafts", () => ({ DraftSavedHint: () => null }));
+// The dictation mic resolves a workspace-scoped transcribe endpoint (needs a
+// QueryClient + workspace provider) — out of scope for the composer's
+// submit-enable/layout tests. Stub it to inert nodes.
+vi.mock("@multica/cerebro-dictation", () => ({
+  EditorDictationMic: () => null,
+  TranscribingSkeleton: () => null,
+}));
 vi.mock("@multica/views/common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
   FileUploadButton: () => null,

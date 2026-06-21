@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Mic, Square } from "lucide-react";
+import { CircleCheck, Loader2, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
@@ -105,11 +105,25 @@ export function MicButton({
     () => (streamUrl ? createWebSocketStreamingTranscriber(streamUrl) : undefined),
     [streamUrl],
   );
+
+  // Brief green "Inserted" confirmation next to the mic the moment the
+  // transcript lands in the field (Jesper, FIR-1637). Without it the recording
+  // → transcribing → (silently done) flow gave no closing signal, so it wasn't
+  // obvious the text had actually been inserted. Auto-clears after a beat.
+  const [showInserted, setShowInserted] = useState(false);
+  const handleTranscribed = useCallback(
+    (text: string) => {
+      onTranscribed(text);
+      setShowInserted(true);
+    },
+    [onTranscribed],
+  );
+
   const { status, error, isSupported, mediaStream, start, stop } = useDictation({
     transcribe: transcribe ?? backendNotDeployedTranscriber,
     streamTranscribe: streamTranscribe ?? defaultStreamTranscribe,
     onPartial: onPartialTranscribed,
-    onTranscribed,
+    onTranscribed: handleTranscribed,
     onError,
   });
 
@@ -147,6 +161,21 @@ export function MicButton({
       toast.error(errorToastMessage(error));
     }
   }, [error]);
+
+  // Hold the "Inserted" confirmation for a beat, then fade it. Starting a new
+  // recording clears it immediately so the live meter isn't crowded by a stale
+  // success label.
+  useEffect(() => {
+    if (status === "recording" || status === "transcribing") {
+      setShowInserted(false);
+      return;
+    }
+  }, [status]);
+  useEffect(() => {
+    if (!showInserted) return;
+    const id = setTimeout(() => setShowInserted(false), 2500);
+    return () => clearTimeout(id);
+  }, [showInserted]);
 
   // The gap the user feels: from releasing the mic until the text lands
   // (the model transcribes for ~2-4s). Without a visible signal the button
@@ -217,6 +246,17 @@ export function MicButton({
         >
           <Loader2 className="size-3 animate-spin" aria-hidden="true" />
           Transcribing…
+        </span>
+      )}
+      {/* Green "Inserted" confirmation, sitting to the LEFT of the mic so it
+          reads as a result of the dictation just finished (Jesper, FIR-1637). */}
+      {showInserted && !isRecording && !isTranscribing && (
+        <span
+          className="flex items-center gap-1 text-xs font-semibold text-green-600"
+          aria-live="polite"
+        >
+          <CircleCheck className="size-3.5" aria-hidden="true" />
+          Inserted
         </span>
       )}
       <Tooltip>

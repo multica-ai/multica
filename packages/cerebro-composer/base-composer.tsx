@@ -38,6 +38,11 @@ import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 import { PinButton, useFloatPosition, useInputPin } from "@multica/cerebro-pin-input";
 import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 import { DraftSavedHint } from "@multica/cerebro-comment-drafts";
+import {
+  EditorDictationMic,
+  TranscribingSkeleton,
+  type DictationStatus,
+} from "@multica/cerebro-dictation";
 
 /**
  * Draft persistence handle injected by the preset. Comment/channel surfaces
@@ -218,6 +223,17 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   const [submitting, setSubmitting] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
+  // Dictation now lives in the bottom-LEFT cluster next to the attach button on
+  // every text surface (FIR-1637, Jesper) — chat, thread replies and comments
+  // all share the one pattern. When a preset doesn't supply its own dictation
+  // wiring (chat does, for its skeleton), the composer mounts a default mic that
+  // inserts the transcript at the editor caret. `internalTranscribing` drives
+  // the transcribing skeleton for those default-mic surfaces.
+  const [internalTranscribing, setInternalTranscribing] = useState(false);
+  const handleInternalDictationStatus = useCallback((s: DictationStatus) => {
+    setInternalTranscribing(s === "transcribing");
+  }, []);
+
   // ContentEditor remounts on editorKey change (session / thread switch) and
   // re-seeds from the new draft, but BaseComposer itself does not unmount — so
   // re-sync the derived submit-enable/markdown to the new draft on key change,
@@ -358,7 +374,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       mentionContextItems={mentionContextItems}
       enableSlashCommands={enableSlashCommands}
       showBubbleMenu={showBubbleMenu}
-      hideDictationMic={dictation !== "corner"}
+      hideDictationMic
     />
   );
 
@@ -377,9 +393,22 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
     />
   );
 
+  // The dictation mic sits next to the attach button. Chat supplies its own
+  // `dictationRow` (wired to its skeleton + ref); every other surface gets the
+  // default mic that writes the transcript straight into this editor.
+  const dictationMic =
+    dictation === "off"
+      ? null
+      : (dictationRow ?? (
+          <EditorDictationMic
+            disabled={disabled}
+            onTranscribed={(text) => editorRef.current?.insertText(text)}
+            onStatusChange={handleInternalDictationStatus}
+          />
+        ));
+
   const actionRow = (
     <>
-      {dictationRow}
       {rightAdornment}
       <DraftSavedHint show={draft.saved} className="mr-1" />
       {pinEnabled && (
@@ -446,7 +475,8 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
               aria-disabled={noAgent || undefined}
             >
               {topSlot}
-              {transcribingSlot}
+              {transcribingSlot ??
+                (internalTranscribing ? <TranscribingSkeleton /> : null)}
               {renderTopOverlay?.({
                 markdown,
                 faded: scrolled,
@@ -474,6 +504,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
               </div>
               <div className="absolute bottom-1 left-1.5 flex items-center gap-1">
                 {attachButton}
+                {dictationMic}
                 {leftAdornment}
               </div>
               <div className="absolute bottom-1 right-1.5 flex items-center gap-2 sm:gap-1">
