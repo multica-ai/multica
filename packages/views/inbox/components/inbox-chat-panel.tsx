@@ -18,6 +18,9 @@ import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { canAssignAgent } from "@multica/views/issues/components";
 import { ChatMessageList, ChatMessageSkeleton } from "@multica/views/chat";
+// CEREBRO-PATCH(chat-selector-align): FIR-1789 — share the chat-window agent
+// avatar so both "Talking to" selectors match in height/size.
+import { ActorAvatar } from "../../common/actor-avatar";
 // CEREBRO-PATCH(chat-composer-unify): FIR-1748 — Chat uses the shared ChatComposer preset.
 import { ChatComposer } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(chat-recent-list): FIR-recent-chats — recent sessions + resume
@@ -302,12 +305,15 @@ function AgentPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-        <Avatar className="size-5">
-          {activeAgent.avatar_url && <AvatarImage src={activeAgent.avatar_url} />}
-          <AvatarFallback className="bg-purple-100 text-purple-700 text-[10px]">
-            <Bot className="size-3" />
-          </AvatarFallback>
-        </Avatar>
+        {/* CEREBRO-PATCH(chat-selector-align): FIR-1789 — 24px ActorAvatar
+            with status dot, identical to chat-window AgentDropdown. */}
+        <ActorAvatar
+          actorType="agent"
+          actorId={activeAgent.id}
+          size={24}
+          enableHoverCard
+          showStatusDot
+        />
         <span className="text-xs font-medium max-w-28 truncate">{activeAgent.name}</span>
         <ChevronDown className="size-3 text-muted-foreground shrink-0" />
       </DropdownMenuTrigger>
