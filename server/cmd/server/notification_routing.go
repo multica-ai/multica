@@ -84,6 +84,12 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_agent_tag":  true,
 		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
 		"system_notification": true,
+		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill change-request /
+		// fork / agent-assigned notifications. Inbox on by default to preserve
+		// the pre-existing inbox-only delivery; push channels stay opt-in below.
+		"skill_change_request": true,
+		"skill_fork":           true,
+		"skill_agent_assigned": true,
 	},
 	channelNotifications: {
 		"issue_assigned": false,
@@ -112,6 +118,12 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_agent_tag":  true,
 		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
 		"system_notification": false,
+		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — keep the lightweight
+		// notifications feed quiet for skill events by default (parity with the
+		// prior inbox-only behavior); the user can switch them on here.
+		"skill_change_request": false,
+		"skill_fork":           false,
+		"skill_agent_assigned": false,
 	},
 	channelMobile: {
 		"issue_assigned": true,
@@ -140,6 +152,12 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_agent_tag":  false,
 		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
 		"system_notification": false,
+		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill push to phone is
+		// opt-in; off by default so enabling the feature doesn't start paging
+		// owners on their phones.
+		"skill_change_request": false,
+		"skill_fork":           false,
+		"skill_agent_assigned": false,
 	},
 	channelDesktop: {
 		"issue_assigned": true,
@@ -168,6 +186,11 @@ var defaultChannelChoices = map[string]map[string]bool{
 		"agent_comment_agent_tag":  false,
 		// CEREBRO-PATCH(system-notification-routing): route platform-authored notifications through the channel matrix.
 		"system_notification": false,
+		// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill push to the
+		// computer browser is opt-in; off by default.
+		"skill_change_request": false,
+		"skill_fork":           false,
+		"skill_agent_assigned": false,
 	},
 	// Mail is forward-compatible; no events fire by default until the
 	// transport is built.
@@ -344,10 +367,25 @@ var splitTypes = map[string]bool{
 	"start_date_changed": true,
 }
 
+// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — skill inbox_item.Type values
+// keep their distinct strings (the inbox UI deep-links on them), but several
+// collapse onto one user-facing routing key so a single Settings → Notifications
+// toggle controls the whole stream. "created" and "reviewed" both ride the
+// change-request row.
+var skillRoutingKey = map[string]string{
+	"skill_change_request_created":  "skill_change_request",
+	"skill_change_request_reviewed": "skill_change_request",
+	"skill_forked":                  "skill_fork",
+	"skill_agent_assigned":          "skill_agent_assigned",
+}
+
 // routeKey resolves the lookup key for a (notifType, isAssignee) pair.
 // For non-split types the key is simply the notification type.
 // For split types the key carries an .assignee or .follower suffix.
 func routeKey(notifType string, isAssignee bool) string {
+	if rk, ok := skillRoutingKey[notifType]; ok {
+		return rk
+	}
 	if !splitTypes[notifType] {
 		return notifType
 	}

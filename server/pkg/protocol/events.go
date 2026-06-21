@@ -42,6 +42,13 @@ const (
 	EventTaskMessage                 = "task:message"
 	EventTaskCancelled               = "task:cancelled"                 // * → cancelled
 
+	// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — a skill notification
+	// (change request / fork / agent-assigned) ready to be routed through the
+	// per-user channel matrix. Published by the skill handler after the
+	// per-skill notify_* gate; consumed by registerCerebroSkillNotificationListener
+	// in package main, which fans it out via dispatchToMember.
+	EventSkillNotify = "skill:notify"
+
 	// Inbox events
 	EventInboxNew           = "inbox:new"
 	EventInboxRead          = "inbox:read"

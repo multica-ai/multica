@@ -72,6 +72,49 @@ func TestMain(m *testing.M) {
 	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	// CEREBRO-PATCH(handler-test-pushsvc): pushSvc=nil for tests.
+
+	// CEREBRO-PATCH(skill-notif-channels-test-shim): FIR-1587 — in production the
+	// skill handler publishes EventSkillNotify and a package-main listener
+	// (registerCerebroSkillNotificationListener) turns it into routed inbox rows
+	// via dispatchToMember. That listener lives in package main and cannot be
+	// imported here, so this shim reproduces the default inbox-route delivery
+	// (skill events are inbox-on by default) for the handler-level notification
+	// gating tests. The real per-channel routing is covered by the package-main
+	// test cerebro_skill_notifications_test.go.
+	bus.Subscribe(protocol.EventSkillNotify, func(e events.Event) {
+		p, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		recipientID, _ := p["recipient_id"].(string)
+		notifType, _ := p["notif_type"].(string)
+		if recipientID == "" || notifType == "" {
+			return
+		}
+		severity, _ := p["severity"].(string)
+		title, _ := p["title"].(string)
+		body, _ := p["body"].(string)
+		detailsStr, _ := p["details"].(string)
+		actorID := pgtype.UUID{}
+		if e.ActorID != "" {
+			actorID = parseUUID(e.ActorID)
+		}
+		_, _ = queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID:   parseUUID(e.WorkspaceID),
+			RecipientType: "member",
+			RecipientID:   parseUUID(recipientID),
+			Type:          notifType,
+			Severity:      severity,
+			IssueID:       pgtype.UUID{},
+			Title:         title,
+			Body:          pgtype.Text{String: body, Valid: body != ""},
+			ActorType:     pgtype.Text{String: e.ActorType, Valid: e.ActorType != ""},
+			ActorID:       actorID,
+			Details:       []byte(detailsStr),
+			Route:         "inbox",
+		})
+	})
+
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
