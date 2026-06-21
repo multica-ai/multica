@@ -88,6 +88,7 @@ func init() {
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	f.StringSlice("workspace-allowlist", nil, "Only register runtimes in these workspaces (slug or ID; comma-separated or repeatable). Empty = all accessible workspaces (env: MULTICA_DAEMON_WORKSPACE_ALLOWLIST)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -107,6 +108,7 @@ func init() {
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
+	rf.StringSlice("workspace-allowlist", nil, "Only register runtimes in these workspaces (slug or ID; comma-separated or repeatable). Empty = all accessible workspaces (env: MULTICA_DAEMON_WORKSPACE_ALLOWLIST)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -320,6 +322,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
 		args = append(args, "--auto-update-interval", d.String())
 	}
+	if v, _ := cmd.Flags().GetStringSlice("workspace-allowlist"); len(v) > 0 {
+		args = append(args, "--workspace-allowlist", strings.Join(v, ","))
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -343,13 +348,15 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			serverURL = c.ServerURL
 		}
 	}
+	allowlist, _ := cmd.Flags().GetStringSlice("workspace-allowlist")
 	overrides := daemon.Overrides{
-		ServerURL:   serverURL,
-		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  flagString(cmd, "device-name"),
-		RuntimeName: flagString(cmd, "runtime-name"),
-		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ServerURL:          serverURL,
+		DaemonID:           flagString(cmd, "daemon-id"),
+		DeviceName:         flagString(cmd, "device-name"),
+		RuntimeName:        flagString(cmd, "runtime-name"),
+		Profile:            profile,
+		HealthPort:         healthPortForProfile(profile),
+		WorkspaceAllowlist: allowlist,
 	}
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		overrides.PollInterval = d

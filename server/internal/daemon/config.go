@@ -82,6 +82,7 @@ type Config struct {
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, gemini, pi, cursor, kimi, kiro, antigravity
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
+	WorkspaceAllowlist             []string              // when non-empty, only register runtimes in workspaces whose slug or ID matches (case-insensitive); empty = all accessible workspaces
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
@@ -115,10 +116,14 @@ type Config struct {
 // Overrides allows CLI flags to override environment variables and defaults.
 // Zero values are ignored and the env/default value is used instead.
 type Overrides struct {
-	ServerURL         string
-	WorkspacesRoot    string
-	PollInterval      time.Duration
-	HeartbeatInterval time.Duration
+	ServerURL      string
+	WorkspacesRoot string
+	// WorkspaceAllowlist, when non-empty, restricts the daemon to workspaces
+	// whose slug or ID matches one of these entries. Empty = use env/default
+	// (no restriction).
+	WorkspaceAllowlist []string
+	PollInterval       time.Duration
+	HeartbeatInterval  time.Duration
 	// AgentTimeout is a pointer so an explicit `--agent-timeout 0` (no cap) is
 	// distinguishable from "flag not passed". nil = use env/default.
 	AgentTimeout                   *time.Duration
@@ -433,6 +438,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	// Workspace allowlist: override > env > default (empty = no restriction).
+	// A non-empty CLI override fully replaces the env value, mirroring the
+	// string-override precedence used for WorkspacesRoot above.
+	workspaceAllowlist := listFromEnv("MULTICA_DAEMON_WORKSPACE_ALLOWLIST")
+	if len(overrides.WorkspaceAllowlist) > 0 {
+		workspaceAllowlist = overrides.WorkspaceAllowlist
+	}
+
 	// Health port: override > default
 	healthPort := DefaultHealthPort
 	if overrides.HealthPort > 0 {
@@ -503,6 +516,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Profile:                        profile,
 		Agents:                         agents,
 		WorkspacesRoot:                 workspacesRoot,
+		WorkspaceAllowlist:             workspaceAllowlist,
 		KeepEnvAfterTask:               keepEnv,
 		GCEnabled:                      gcEnabled,
 		GCInterval:                     gcInterval,
@@ -627,6 +641,29 @@ func patternsFromEnv(name string, defaults []string) []string {
 			continue
 		}
 		out = append(out, p)
+	}
+	return out
+}
+
+// listFromEnv reads a comma-separated list from env, trimming whitespace and
+// dropping empty entries. Unlike patternsFromEnv it keeps entries containing
+// path separators — the workspace allowlist matches slugs and UUIDs, neither of
+// which is path-shaped, and silently dropping such an entry would be a footgun.
+// Returns nil when the env var is unset or yields no usable entries.
+func listFromEnv(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

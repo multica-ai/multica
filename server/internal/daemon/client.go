@@ -325,6 +325,10 @@ func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, re
 type WorkspaceInfo struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Slug is the human-readable workspace identifier used in URLs (e.g.
+	// "eskyfun"). Surfaced so the daemon's --workspace-allowlist can match on
+	// it; the server already includes it in the /api/workspaces response.
+	Slug string `json:"slug"`
 }
 
 // RenewTokenResponse mirrors handler.RenewPATResponse — kept loose (string +

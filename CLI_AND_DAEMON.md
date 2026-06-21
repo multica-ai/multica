@@ -174,6 +174,7 @@ Daemon behavior is configured via flags or environment variables:
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
+| Workspace allowlist | `--workspace-allowlist` | `MULTICA_DAEMON_WORKSPACE_ALLOWLIST` | empty (all workspaces) |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `1h` |
@@ -181,6 +182,23 @@ Daemon behavior is configured via flags or environment variables:
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+
+#### Workspace allowlist
+
+By default the daemon registers a runtime in **every** workspace your login token can reach. On a shared self-hosted instance you may want a given machine to be visible only to specific workspaces — for example, a company build server that should appear in `eskyfun` but not `funtimes`. Pass `--workspace-allowlist` (or set `MULTICA_DAEMON_WORKSPACE_ALLOWLIST`) to restrict it:
+
+```bash
+# Only register in the eskyfun and funtimes workspaces
+multica daemon start --workspace-allowlist eskyfun,funtimes
+
+# Repeatable form works too
+multica daemon start --workspace-allowlist eskyfun --workspace-allowlist funtimes
+
+# Env var equivalent
+MULTICA_DAEMON_WORKSPACE_ALLOWLIST=eskyfun,funtimes multica daemon start
+```
+
+Each entry matches a workspace **slug** (the identifier in its URL, e.g. `eskyfun`) or its **ID**, case-insensitively. When the allowlist is empty (the default), every accessible workspace is registered. Workspaces outside the allowlist are never registered; if a machine previously registered in one, the daemon stops heartbeating it and the server marks that runtime offline shortly after.
 
 #### Workspace garbage collection
 
