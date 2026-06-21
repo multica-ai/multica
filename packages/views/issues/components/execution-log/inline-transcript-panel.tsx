@@ -2,11 +2,12 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, AlertCircle, RotateCcw } from "lucide-react";
+import { ChevronRight, Loader2, AlertCircle, RotateCcw, ExternalLink } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { api } from "@multica/core/api";
 import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { isEmbeddedInCostrict, postCostrictNavigateToSession } from "@multica/core/platform";
 import type { AgentTask } from "@multica/core/types/agent";
 import { TaskTranscriptTimeline, buildTimeline } from "../../../common/task-transcript";
 import { useT } from "../../../i18n";
@@ -21,6 +22,12 @@ export function InlineTranscriptPanel({ task, isLive, defaultOpen = false }: Inl
   const { t } = useT("issues");
   const [open, setOpen] = useState(defaultOpen);
   const [showThinking, setShowThinking] = useState(true);
+  // Embed detection reads `window`, so gate it behind an effect to avoid an
+  // SSR/CSR hydration mismatch on web.
+  const [embedded, setEmbedded] = useState(false);
+  useEffect(() => {
+    setEmbedded(isEmbeddedInCostrict());
+  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const wasNearBottomRef = useRef(true);
 
@@ -53,22 +60,42 @@ export function InlineTranscriptPanel({ task, isLive, defaultOpen = false }: Inl
 
   const isRunning = isLive && task.status === "running";
 
+  const canViewInCostrict = embedded && !!task.session_id && !!task.work_dir;
+
   return (
     <div className="mt-1">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ChevronRight className={cn("!size-3 shrink-0 stroke-[2.5] transition-transform", open && "rotate-90")} />
-        {open ? t(($) => $.execution_log.hide_transcript) : t(($) => $.execution_log.show_transcript)}
-        {isRunning && (
-          <span className="ml-1 inline-flex items-center gap-1 text-info">
-            <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
-            {t(($) => $.execution_log.live_indicator)}
-          </span>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <ChevronRight className={cn("!size-3 shrink-0 stroke-[2.5] transition-transform", open && "rotate-90")} />
+          {open ? t(($) => $.execution_log.hide_transcript) : t(($) => $.execution_log.show_transcript)}
+          {isRunning && (
+            <span className="ml-1 inline-flex items-center gap-1 text-info">
+              <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
+              {t(($) => $.execution_log.live_indicator)}
+            </span>
+          )}
+        </button>
+
+        {canViewInCostrict && (
+          <button
+            type="button"
+            onClick={() =>
+              postCostrictNavigateToSession({
+                sessionId: task.session_id as string,
+                workDir: task.work_dir as string,
+              })
+            }
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ExternalLink className="!size-3 shrink-0" />
+            {t(($) => $.execution_log.view_in_costrict)}
+          </button>
         )}
-      </button>
+      </div>
 
       {open && (
         <div className="mt-1 rounded-md border bg-muted/20">

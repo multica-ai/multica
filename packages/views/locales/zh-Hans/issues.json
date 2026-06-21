@@ -343,6 +343,7 @@
     "transcript_tooltip": "查看记录",
     "show_transcript": "查看对话流",
     "hide_transcript": "隐藏对话流",
+    "view_in_costrict": "在 CoStrict 中查看",
     "live_indicator": "实时",
     "no_events_yet": "暂无事件",
     "waiting_events": "等待事件中...",
