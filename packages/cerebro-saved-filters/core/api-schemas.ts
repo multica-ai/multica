@@ -13,11 +13,25 @@ export const EMPTY_SNAPSHOT: FilterSnapshot = {
   labelFilters: [],
   onBehalfOfFilters: [],
   agentRunningFilter: false,
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — saved date conditions.
+  dateFilters: [],
 };
 
 const actorSchema = z.object({
   type: z.enum(["member", "agent", "squad"]),
   id: z.string(),
+});
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — a single stacked date
+// condition, captured in a saved filter preset.
+const dateFilterSchema = z.object({
+  field: z.enum(["created_at", "updated_at", "due_date"]),
+  from: z.string(),
+  to: z.string(),
+  mode: z.enum(["range", "none"]).optional(),
+  preset: z
+    .enum(["today", "last_3_days", "last_7_days", "overdue", "this_week", "none", "custom"])
+    .optional(),
 });
 
 // Every field defaults so a partial / drifted snapshot from an older client
@@ -34,6 +48,8 @@ const filterSnapshotSchema = z
     labelFilters: z.array(z.string()).default([]),
     onBehalfOfFilters: z.array(z.string()).default([]),
     agentRunningFilter: z.boolean().default(false),
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions.
+    dateFilters: z.array(dateFilterSchema).default([]),
   })
   .transform((s) => s as FilterSnapshot);
 

@@ -50,8 +50,8 @@ export function MyIssuesPage() {
   const includeNoAssignee = useStore(myIssuesViewStore, (s) => s.includeNoAssignee);
   const creatorFilters = useStore(myIssuesViewStore, (s) => s.creatorFilters);
   const labelFilters = useStore(myIssuesViewStore, (s) => s.labelFilters);
-  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — due-date/date filter applied client-side.
-  const dateFilter = useStore(myIssuesViewStore, (s) => s.dateFilter);
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions applied client-side.
+  const dateFilters = useStore(myIssuesViewStore, (s) => s.dateFilters);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
   const sort = useMemo(
@@ -162,9 +162,9 @@ export function MyIssuesPage() {
         labelFilters,
         agentRunningFilter,
         runningIssueIds,
-        dateFilter,
+        dateFilters,
       }),
-    [myIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilter],
+    [myIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   // Status-unfiltered companion for Swimlane.
@@ -181,9 +181,9 @@ export function MyIssuesPage() {
         labelFilters,
         agentRunningFilter,
         runningIssueIds,
-        dateFilter,
+        dateFilters,
       }),
-    [myIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilter],
+    [myIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilters],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));

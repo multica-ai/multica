@@ -18,6 +18,8 @@ export function extractFilterSnapshot(state: IssueViewState): FilterSnapshot {
     labelFilters: [...state.labelFilters],
     onBehalfOfFilters: [...state.onBehalfOfFilters],
     agentRunningFilter: state.agentRunningFilter,
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — capture stacked dates.
+    dateFilters: state.dateFilters.map((d) => ({ ...d })),
   };
 }
 
@@ -38,6 +40,8 @@ export function snapshotToState(snapshot: FilterSnapshot): Partial<IssueViewStat
     labelFilters: [...snapshot.labelFilters],
     onBehalfOfFilters: [...snapshot.onBehalfOfFilters],
     agentRunningFilter: snapshot.agentRunningFilter,
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — restore stacked dates.
+    dateFilters: (snapshot.dateFilters ?? []).map((d) => ({ ...d })),
   };
 }
 
@@ -53,7 +57,9 @@ export function snapshotFilterCount(s: FilterSnapshot): number {
     (s.includeNoProject ? 1 : 0) +
     s.labelFilters.length +
     s.onBehalfOfFilters.length +
-    (s.agentRunningFilter ? 1 : 0)
+    (s.agentRunningFilter ? 1 : 0) +
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — each date condition counts.
+    (s.dateFilters?.length ?? 0)
   );
 }
 
@@ -83,6 +89,12 @@ export function snapshotsEqual(a: FilterSnapshot, b: FilterSnapshot): boolean {
     a.includeNoProject === b.includeNoProject &&
     setEq(a.labelFilters, b.labelFilters) &&
     setEq(a.onBehalfOfFilters, b.onBehalfOfFilters) &&
-    a.agentRunningFilter === b.agentRunningFilter
+    a.agentRunningFilter === b.agentRunningFilter &&
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — compare stacked dates
+    // (order-insensitive on the field+from+to+mode signature).
+    setEq(
+      (a.dateFilters ?? []).map((d) => `${d.field}:${d.from}:${d.to}:${d.mode ?? "range"}`),
+      (b.dateFilters ?? []).map((d) => `${d.field}:${d.from}:${d.to}:${d.mode ?? "range"}`),
+    )
   );
 }

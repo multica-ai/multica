@@ -300,3 +300,49 @@ describe("filterIssues", () => {
     expect(result).toHaveLength(0);
   });
 });
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions.
+describe("filterIssues dateFilters (stacked, AND)", () => {
+  // created_at carries a time-of-day; the matcher reduces it to a calendar day,
+  // so a same-day window keeps the issue (regression guard for the bug where
+  // created/updated relative filters returned nothing).
+  const stackIssues: Issue[] = [
+    makeIssue({ id: "S1", created_at: "2026-06-20T14:30:00Z", due_date: "2026-06-22" }),
+    makeIssue({ id: "S2", created_at: "2026-06-20T01:00:00Z", due_date: "2026-07-30" }),
+    makeIssue({ id: "S3", created_at: "2026-01-01T00:00:00Z", due_date: "2026-06-22" }),
+    makeIssue({ id: "S4", created_at: "2026-06-20T23:59:00Z", due_date: null }),
+  ];
+
+  it("matches a created_at window despite the timestamp's time-of-day", () => {
+    const result = filterIssues(stackIssues, {
+      ...NO_FILTER,
+      dateFilters: [{ field: "created_at", from: "2026-06-20", to: "2026-06-20" }],
+    });
+    expect(result.map((i) => i.id)).toEqual(["S1", "S2", "S4"]);
+  });
+
+  it("AND-combines conditions: created on 2026-06-20 AND due that week", () => {
+    const result = filterIssues(stackIssues, {
+      ...NO_FILTER,
+      dateFilters: [
+        { field: "created_at", from: "2026-06-20", to: "2026-06-20" },
+        { field: "due_date", from: "2026-06-20", to: "2026-06-26" },
+      ],
+    });
+    // S1 created 06-20 + due 06-22 ✓; S2 due 07-30 ✗; S4 no due date ✗.
+    expect(result.map((i) => i.id)).toEqual(["S1"]);
+  });
+
+  it("treats an empty dateFilters array as a no-op", () => {
+    const result = filterIssues(stackIssues, { ...NO_FILTER, dateFilters: [] });
+    expect(result).toHaveLength(stackIssues.length);
+  });
+
+  it("supports the 'no due date' mode as one of the stacked conditions", () => {
+    const result = filterIssues(stackIssues, {
+      ...NO_FILTER,
+      dateFilters: [{ field: "due_date", from: "x", to: "x", mode: "none" }],
+    });
+    expect(result.map((i) => i.id)).toEqual(["S4"]);
+  });
+});

@@ -31,7 +31,24 @@ export interface IssueDateFilter {
   // client-side My Issues filter sets "none"; the server-backed /issues page
   // never produces it (its picker offers ranges only).
   mode?: "range" | "none";
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — display hint for the My
+  // Issues filter builder so a condition renders its preset name ("Last 7
+  // days", "This week", …) without reverse-engineering the from/to range.
+  // Purely cosmetic: matching and the server ignore it. Absent → "Custom".
+  preset?: IssueDatePreset;
 }
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — preset identifiers for the
+// stacked date-condition builder. "custom" (or undefined) means an explicit
+// from..to range chosen from the calendar.
+export type IssueDatePreset =
+  | "today"
+  | "last_3_days"
+  | "last_7_days"
+  | "overdue"
+  | "this_week"
+  | "none"
+  | "custom";
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
 
@@ -90,6 +107,12 @@ export interface IssueViewState {
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 selected on-behalf-of member user UUIDs.
   onBehalfOfFilters: string[];
   dateFilter: IssueDateFilter | null;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — multiple stacked date
+  // conditions, AND-combined, for the client-side My Issues filter builder
+  // (e.g. "Created in the last 7 days" AND "Due date this week"). The
+  // server-backed /issues page keeps using the single `dateFilter` above; this
+  // array is matched client-side only (see filter.ts matchesDateFilters).
+  dateFilters: IssueDateFilter[];
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -127,6 +150,9 @@ export interface IssueViewState {
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 toggle one on-behalf-of member.
   toggleOnBehalfOfFilter: (userId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — replace the whole stacked
+  // date-condition list for the My Issues builder.
+  setDateFilters: (filters: IssueDateFilter[]) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
@@ -158,6 +184,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 default empty.
   onBehalfOfFilters: [],
   dateFilter: null,
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 default empty.
+  dateFilters: [],
   agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
@@ -246,6 +274,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         : [...state.onBehalfOfFilters, userId],
     })),
   setDateFilter: (filter) => set({ dateFilter: filter }),
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658
+  setDateFilters: (filters) => set({ dateFilters: filters }),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
@@ -277,6 +307,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 reset on clear.
       onBehalfOfFilters: [],
       dateFilter: null,
+      // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 reset on clear.
+      dateFilters: [],
       agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
@@ -322,8 +354,10 @@ export const viewStorePersistOptions = (name: string) => ({
     // state changes second-to-second, and a stored toggle would let users
     // return to an unexplained empty list. Keep it ephemeral. See the
     // field comment on IssueViewState.
-    // `dateFilter` is also intentionally not persisted: relative presets such
-    // as Today would otherwise become stale after a calendar-day rollover.
+    // `dateFilter` / `dateFilters` are also intentionally not persisted:
+    // relative presets such as Today would otherwise become stale after a
+    // calendar-day rollover. Saved filter presets re-derive their date ranges
+    // on apply instead.
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,

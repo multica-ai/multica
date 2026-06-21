@@ -23,12 +23,22 @@ export interface IssueFilters {
   // IssueDateFilter server-side; My Issues fetches by scope and filters in the
   // client, so the range (or the "no due date" mode) is matched here.
   dateFilter?: IssueDateFilter | null;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions
+  // for the My Issues filter builder, combined with AND. Each entry is matched
+  // independently against its own field; an empty/omitted array is a no-op.
+  dateFilters?: IssueDateFilter[];
 }
 
 // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — match an issue against
 // an IssueDateFilter. `mode: "none"` keeps only issues with no due date;
 // otherwise the chosen field's calendar day must fall within [from, to]
 // inclusive (server uses >= from AND < to+1day — the same closed range).
+//
+// Note on created_at/updated_at: those carry a full ISO timestamp, while
+// due_date is a bare "YYYY-MM-DD". dateOnlyToUTCDate() reads the leading
+// calendar day from either form (see date.ts parseParts), so all three fields
+// reduce to a UTC-midnight calendar day before the range compare — no
+// time-of-day drift, and no field is silently excluded.
 function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
   if (filter.mode === "none") return !issue.due_date;
   const raw =
@@ -45,6 +55,12 @@ function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
   return day.getTime() >= from.getTime() && day.getTime() <= to.getTime();
 }
 
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — every stacked condition
+// must match (AND). An empty list is a no-op (keeps the issue).
+function matchesDateFilters(issue: Issue, filters: IssueDateFilter[]): boolean {
+  return filters.every((f) => matchesDateFilter(issue, f));
+}
+
 /**
  * Filter issues using positive selection model.
  * Empty arrays = no filter (show all). Non-empty = show only matching.
@@ -55,7 +71,7 @@ function matchesDateFilter(issue: Issue, filter: IssueDateFilter): boolean {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilter } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds, dateFilter, dateFilters } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -118,6 +134,10 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
 
     // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — date / due-date filter.
     if (dateFilter && !matchesDateFilter(issue, dateFilter)) return false;
+
+    // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions (AND).
+    if (dateFilters && dateFilters.length > 0 && !matchesDateFilters(issue, dateFilters))
+      return false;
 
     return true;
   });

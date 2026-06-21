@@ -1,4 +1,4 @@
-import type { ActorFilterValue } from "@multica/core/issues/stores/view-store";
+import type { ActorFilterValue, IssueDateFilter } from "@multica/core/issues/stores/view-store";
 import type { IssueStatus, IssuePriority } from "@multica/core/types";
 
 /**
@@ -18,6 +18,9 @@ export interface FilterSnapshot {
   labelFilters: string[];
   onBehalfOfFilters: string[];
   agentRunningFilter: boolean;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date conditions
+  // (My Issues). Optional for backward-compat with presets saved before this.
+  dateFilters?: IssueDateFilter[];
 }
 
 /**

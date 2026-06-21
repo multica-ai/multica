@@ -29,8 +29,8 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
   ];
   const scope = useStore(myIssuesViewStore, (s) => s.scope);
   const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
-  // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — expose the date/due-date filter on My Issues.
-  const dateFilter = useStore(myIssuesViewStore, (s) => s.dateFilter);
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date-condition builder on My Issues.
+  const dateFilters = useStore(myIssuesViewStore, (s) => s.dateFilters);
   const act = myIssuesViewStore.getState();
   const scopedIssueIds = useMemo(
     () => new Set(allIssues.map((i) => i.id)),
@@ -105,9 +105,8 @@ export function MyIssuesHeader({ allIssues }: { allIssues: Issue[] }) {
           />
           <IssueDisplayControls
             scopedIssues={allIssues}
-            dateFilter={dateFilter}
-            onDateFilterChange={act.setDateFilter}
-            dueDatePresets
+            dateFilters={dateFilters}
+            onDateFiltersChange={act.setDateFilters}
           />
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(issues-header-cerebro): cerebro modification of upstream file
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -15,6 +15,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  Plus,
   SignalHigh,
   SlidersHorizontal,
   X,
@@ -74,6 +75,7 @@ import {
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
+  type IssueDatePreset,
   type SortField,
   type IssueGrouping,
   type SwimlaneGrouping,
@@ -130,6 +132,8 @@ function getActiveFilterCount(state: {
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 count on-behalf-of filter.
   onBehalfOfFilters: string[];
   dateFilter?: IssueDateFilter | null;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — each stacked date condition counts.
+  dateFilters?: IssueDateFilter[];
 }) {
   let count = 0;
   if (state.statusFilters.length > 0) count++;
@@ -140,6 +144,7 @@ function getActiveFilterCount(state: {
   if (state.labelFilters.length > 0) count++;
   if ((state.onBehalfOfFilters ?? []).length > 0) count++;
   if (state.dateFilter) count++;
+  count += (state.dateFilters ?? []).length;
   return count;
 }
 
@@ -538,6 +543,232 @@ function LabelSubContent({
 // Date sub-menu content
 // ---------------------------------------------------------------------------
 
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date-condition
+// builder for My Issues. Maps each preset id to an existing i18n label key.
+const DATE_PRESET_LABEL_KEY: Record<
+  Exclude<IssueDatePreset, "custom">,
+  | "date_today"
+  | "date_last_3_days"
+  | "date_last_7_days"
+  | "date_due_overdue"
+  | "date_due_this_week"
+  | "date_due_none"
+> = {
+  today: "date_today",
+  last_3_days: "date_last_3_days",
+  last_7_days: "date_last_7_days",
+  overdue: "date_due_overdue",
+  this_week: "date_due_this_week",
+  none: "date_due_none",
+};
+
+const RELATIVE_PRESETS = ["today", "last_3_days", "last_7_days"] as const;
+const DUE_PRESETS = ["overdue", "this_week", "none"] as const;
+
+// Build a concrete IssueDateFilter for a preset. Due-date presets pin
+// field=due_date by construction; relative presets honour the chosen field.
+function buildDatePreset(
+  field: IssueDateField,
+  preset: IssueDatePreset,
+): IssueDateFilter {
+  switch (preset) {
+    case "today":
+      return { field, from: todayDateOnly(), to: todayDateOnly(), preset };
+    case "last_3_days":
+      return { field, from: addDaysDateOnly(-2), to: todayDateOnly(), preset };
+    case "last_7_days":
+      return { field, from: addDaysDateOnly(-6), to: todayDateOnly(), preset };
+    case "overdue":
+      return { field: "due_date", from: "1970-01-01", to: addDaysDateOnly(-1), preset };
+    case "this_week":
+      return { field: "due_date", from: todayDateOnly(), to: addDaysDateOnly(6), preset };
+    case "none":
+      return { field: "due_date", from: todayDateOnly(), to: todayDateOnly(), mode: "none", preset };
+    default:
+      return { field, from: todayDateOnly(), to: todayDateOnly(), preset: "custom" };
+  }
+}
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — editor for ONE stacked date
+// condition (field + value). onChange replaces the condition; onRemove drops it.
+function DateConditionEditor({
+  value,
+  onChange,
+  onRemove,
+}: {
+  value: IssueDateFilter;
+  onChange: (next: IssueDateFilter) => void;
+  onRemove: () => void;
+}) {
+  const { t } = useT("issues");
+  const [range, setRange] = useState<LocalDateRange | undefined>(() => {
+    const from = dateOnlyToLocalDate(value.from);
+    if (!from) return undefined;
+    return { from, to: dateOnlyToLocalDate(value.to) };
+  });
+
+  const changeField = (nextField: IssueDateField) => {
+    if (nextField === value.field) return;
+    if (nextField === "due_date") {
+      // Relative ranges don't translate to due-date semantics — default to This week.
+      onChange(buildDatePreset("due_date", "this_week"));
+    } else if (value.field === "due_date") {
+      // Leaving due_date drops any due-specific preset — default to Last 7 days.
+      onChange(buildDatePreset(nextField, "last_7_days"));
+    } else {
+      // created_at <-> updated_at: keep the same relative range, just swap field.
+      onChange({ ...value, field: nextField });
+    }
+  };
+
+  const applyCustom = () => {
+    if (!range?.from) return;
+    const [from, to] = normalizeDateRange(range.from, range.to ?? range.from);
+    onChange({ field: value.field, from: toDateOnly(from), to: toDateOnly(to), preset: "custom" });
+  };
+
+  const valueOptions = value.field === "due_date" ? DUE_PRESETS : RELATIVE_PRESETS;
+
+  return (
+    <>
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={value.field}
+          onValueChange={(next) => changeField(next as IssueDateField)}
+        >
+          {(["created_at", "updated_at", "due_date"] as const).map((option) => (
+            <DropdownMenuRadioItem key={option} value={option} closeOnClick={false}>
+              {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuGroup>
+
+      <DropdownMenuSeparator />
+      <DropdownMenuRadioGroup
+        value={value.preset && value.preset !== "custom" ? value.preset : ""}
+        onValueChange={(preset) => onChange(buildDatePreset(value.field, preset as IssueDatePreset))}
+      >
+        {valueOptions.map((preset) => (
+          <DropdownMenuRadioItem key={preset} value={preset} closeOnClick={false}>
+            {t(($) => $.filters[DATE_PRESET_LABEL_KEY[preset]])}
+          </DropdownMenuRadioItem>
+        ))}
+      </DropdownMenuRadioGroup>
+
+      <div className="px-1.5 py-1">
+        <Popover>
+          <PopoverTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-full justify-start px-1.5 text-sm font-normal aria-expanded:bg-accent"
+              >
+                {t(($) => $.filters.date_custom_range)}
+              </Button>
+            }
+          />
+          <PopoverContent align="start" side="right" className="w-auto gap-0 p-0">
+            <Calendar
+              mode="range"
+              selected={range}
+              onSelect={(next) => setRange(next)}
+              captionLayout="dropdown"
+            />
+            <div className="flex justify-end border-t p-2">
+              <Button size="sm" onClick={applyCustom} disabled={!range?.from}>
+                {t(($) => $.filters.date_apply)}
+              </Button>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem closeOnClick={false} onClick={onRemove} className="text-destructive">
+        <X className="size-3.5" />
+        Remove
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+// CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — the stacked builder: a list
+// of date conditions (AND), each editable in its own submenu, plus add/clear.
+function DateBuilderSubContent({
+  value,
+  onChange,
+}: {
+  value: IssueDateFilter[];
+  onChange: (next: IssueDateFilter[]) => void;
+}) {
+  const { t } = useT("issues");
+
+  const valueLabel = (c: IssueDateFilter): string => {
+    if (c.preset && c.preset !== "custom") return t(($) => $.filters[DATE_PRESET_LABEL_KEY[c.preset as Exclude<IssueDatePreset, "custom">]]);
+    if (c.mode === "none") return t(($) => $.filters.date_due_none);
+    const from = formatDateOnly(c.from);
+    const to = formatDateOnly(c.to);
+    return from === to ? from : `${from} – ${to}`;
+  };
+
+  const updateAt = (i: number, next: IssueDateFilter) =>
+    onChange(value.map((c, idx) => (idx === i ? next : c)));
+  const removeAt = (i: number) => onChange(value.filter((_, idx) => idx !== i));
+  const add = () => onChange([...value, buildDatePreset("created_at", "last_7_days")]);
+
+  return (
+    <>
+      {value.length === 0 && (
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
+          No date filters yet
+        </DropdownMenuLabel>
+      )}
+      {value.map((c, i) => (
+        <Fragment key={i}>
+          {i > 0 && (
+            <div className="px-1.5 py-0.5 text-[0.7rem] font-medium tracking-wide text-muted-foreground">
+              AND
+            </div>
+          )}
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <CalendarDays className="size-3.5" />
+              <span className="flex-1 truncate">
+                {t(($) => $.filters[DATE_FIELD_LABEL_KEY[c.field]])}
+              </span>
+              <span className="max-w-28 truncate text-xs font-medium text-primary">
+                {valueLabel(c)}
+              </span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-56">
+              <DateConditionEditor
+                value={c}
+                onChange={(next) => updateAt(i, next)}
+                onRemove={() => removeAt(i)}
+              />
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </Fragment>
+      ))}
+
+      <DropdownMenuSeparator />
+      <DropdownMenuItem closeOnClick={false} onClick={add}>
+        <Plus className="size-3.5" />
+        Add date filter
+      </DropdownMenuItem>
+      {value.length > 0 && (
+        <DropdownMenuItem closeOnClick={false} onClick={() => onChange([])} className="text-muted-foreground">
+          <X className="size-3.5" />
+          Clear all dates
+        </DropdownMenuItem>
+      )}
+    </>
+  );
+}
+
 function DateSubContent({
   value,
   onChange,
@@ -826,6 +1057,9 @@ export function IssueDisplayControls({
   dateFilter = null,
   onDateFilterChange,
   dueDatePresets = false,
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — stacked date builder.
+  dateFilters,
+  onDateFiltersChange,
 }: {
   scopedIssues: Issue[];
   /** Hide the board/list/swimlane/gantt view toggle entirely. */
@@ -835,6 +1069,11 @@ export function IssueDisplayControls({
   // CEREBRO-PATCH(my-issues-due-date-presets): FIR-1658 — show Overdue/This week/No
   // due date quick presets in the date submenu (client-side My Issues filter only).
   dueDatePresets?: boolean;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — when provided (My Issues),
+  // the Date submenu renders the stacked multi-condition builder instead of the
+  // single-range picker. The server-backed /issues page keeps onDateFilterChange.
+  dateFilters?: IssueDateFilter[];
+  onDateFiltersChange?: (filters: IssueDateFilter[]) => void;
   /** Whether the Gantt view option is offered (project surface only). */
   // Only Project Detail renders <GanttView>; other surfaces (global /issues,
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
@@ -863,6 +1102,10 @@ export function IssueDisplayControls({
 
   const counts = useIssueCounts(scopedIssues);
   const showDateFilter = !!onDateFilterChange;
+  // CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — My Issues passes the
+  // stacked builder handler; the global page passes the single-range handler.
+  const showDateBuilder = !!onDateFiltersChange;
+  const activeDateFilters = dateFilters ?? [];
 
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
@@ -875,6 +1118,7 @@ export function IssueDisplayControls({
     labelFilters,
     onBehalfOfFilters,
     dateFilter: showDateFilter ? dateFilter : null,
+    dateFilters: showDateBuilder ? activeDateFilters : [],
   });
   const hasActiveFilters = activeFilterCount > 0;
 
@@ -957,6 +1201,7 @@ export function IssueDisplayControls({
                             e.stopPropagation();
                             act.clearFilters();
                             onDateFilterChange?.(null);
+                            onDateFiltersChange?.([]);
                           }}
                           onPointerDown={(e) => e.stopPropagation()}
                         >
@@ -1045,7 +1290,28 @@ export function IssueDisplayControls({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {showDateFilter && onDateFilterChange && (
+            {/* CEREBRO-PATCH(my-issues-date-builder): FIR-1658 — My Issues gets the
+                stacked multi-condition builder; the server-backed /issues page
+                keeps the single-range picker. */}
+            {showDateBuilder && onDateFiltersChange ? (
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger>
+                  <CalendarDays className="size-3.5" />
+                  <span className="flex-1">{t(($) => $.filters.section_date)}</span>
+                  {activeDateFilters.length > 0 && (
+                    <span className="text-xs font-medium text-primary">
+                      {activeDateFilters.length}
+                    </span>
+                  )}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className="w-64">
+                  <DateBuilderSubContent
+                    value={activeDateFilters}
+                    onChange={onDateFiltersChange}
+                  />
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ) : showDateFilter && onDateFilterChange ? (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger>
                   <CalendarDays className="size-3.5" />
@@ -1064,7 +1330,7 @@ export function IssueDisplayControls({
                   />
                 </DropdownMenuSubContent>
               </DropdownMenuSub>
-            )}
+            ) : null}
 
             {/* Assignee */}
             <DropdownMenuSub>
@@ -1165,6 +1431,7 @@ export function IssueDisplayControls({
                   onClick={() => {
                     act.clearFilters();
                     onDateFilterChange?.(null);
+                    onDateFiltersChange?.([]);
                   }}
                 >
                   {t(($) => $.filters.reset)}
