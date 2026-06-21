@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createChapter, listChapters, startFresh, updateChapter } from "./api";
-import type { ChapterHandoffInput } from "./types";
+import type { ChapterStartFreshInput } from "./types";
 
 const key = (issueId: string) => ["cerebro-chapters", issueId] as const;
 
@@ -16,7 +16,7 @@ export function useChapters(issueId: string) {
 export function useStartFresh(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: ChapterHandoffInput) => startFresh(issueId, input),
+    mutationFn: (input: ChapterStartFreshInput) => startFresh(issueId, input),
     onSuccess: () => qc.invalidateQueries({ queryKey: key(issueId) }),
   });
 }

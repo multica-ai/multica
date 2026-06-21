@@ -20,3 +20,12 @@ export interface ChapterHandoffInput {
   remaining: string[];
   plan_ref?: string | null;
 }
+
+// When starting a fresh chapter, the new session either carries the previous
+// chapter's handoff forward ("handoff") or opens empty ("blank"). The closing
+// chapter always keeps its handoff either way.
+export type ChapterStartMode = "handoff" | "blank";
+
+export interface ChapterStartFreshInput extends ChapterHandoffInput {
+  mode: ChapterStartMode;
+}

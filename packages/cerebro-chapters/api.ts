@@ -1,5 +1,5 @@
 import { api } from "@multica/core/api";
-import type { Chapter, ChapterHandoffInput, ChapterStatus } from "./types";
+import type { Chapter, ChapterHandoffInput, ChapterStartFreshInput, ChapterStatus } from "./types";
 
 const base = (issueId: string) => `/api/cerebro/issues/${issueId}/chapters`;
 
@@ -30,7 +30,7 @@ export function updateChapter(issueId: string, chapterId: string, input: {
   });
 }
 
-export function startFresh(issueId: string, input: ChapterHandoffInput): Promise<Chapter> {
+export function startFresh(issueId: string, input: ChapterStartFreshInput): Promise<Chapter> {
   return api.cerebroRequest<Chapter>(`${base(issueId)}/start-fresh`, {
     method: "POST",
     body: JSON.stringify(input),

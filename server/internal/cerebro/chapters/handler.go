@@ -60,6 +60,35 @@ type updateRequest struct {
 	Handoff  *handoffRequest `json:"handoff"`
 }
 
+// startFreshRequest closes the open chapter with a handoff and opens the next
+// one. Mode decides whether the next chapter carries the handoff forward
+// ("handoff", the default) or starts as a blank session with no context
+// ("blank"). The handoff is always recorded on the chapter being closed, so a
+// blank start never loses the finished session's summary.
+type startFreshRequest struct {
+	handoffRequest
+	Mode string `json:"mode"`
+}
+
+const (
+	startModeHandoff = "handoff"
+	startModeBlank   = "blank"
+)
+
+// resolveStartMode normalizes the requested start mode. An empty mode defaults
+// to carrying the handoff forward. It returns ok=false for any unknown value so
+// the handler can reject it with a 400 instead of silently picking a behavior.
+func resolveStartMode(mode string) (string, bool) {
+	switch mode {
+	case "", startModeHandoff:
+		return startModeHandoff, true
+	case startModeBlank:
+		return startModeBlank, true
+	default:
+		return "", false
+	}
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssue(w, r)
 	if !ok {
@@ -191,9 +220,14 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req handoffRequest
+	var req startFreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	mode, ok := resolveStartMode(req.Mode)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid mode")
 		return
 	}
 	tx, err := h.pool.Begin(r.Context())
@@ -213,7 +247,7 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load open chapter")
 		return
 	}
-	handoff := normalizeHandoff(&req)
+	handoff := normalizeHandoff(&req.handoffRequest)
 	if openID.Valid {
 		if err := updateHandoff(r.Context(), tx, issue.ID, openID, handoff); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to write handoff")
@@ -224,7 +258,14 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	next, err := createChapterTx(r.Context(), tx, issue.ID, "", "in_progress", handoff)
+	// The closing chapter always keeps the handoff (above). The NEW chapter only
+	// inherits it when the user chose to carry it forward; a blank start opens an
+	// empty session with no context.
+	nextHandoff := handoff
+	if mode == startModeBlank {
+		nextHandoff = handoffRequest{Done: []string{}, Remaining: []string{}}
+	}
+	next, err := createChapterTx(r.Context(), tx, issue.ID, "", "in_progress", nextHandoff)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create next chapter")
 		return
