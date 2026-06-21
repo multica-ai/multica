@@ -61,8 +61,8 @@ type IssueCreateParams struct {
 	CreatorID      pgtype.UUID
 	ParentIssueID  pgtype.UUID
 	ProjectID      pgtype.UUID
-	StartDate      pgtype.Date
-	DueDate        pgtype.Date
+	StartDate      pgtype.Timestamptz
+	DueDate        pgtype.Timestamptz
 	OriginType     pgtype.Text
 	OriginID       pgtype.UUID
 	AttachmentIDs  []pgtype.UUID
@@ -145,7 +145,7 @@ type IssueCreateResult struct {
 //  8. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
 //  9. Capture the IssueCreated analytics event.
 //  10. Enqueue an agent task or trigger the squad leader when the issue is
-//      assigned and not in `backlog`.
+//     assigned and not in `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so

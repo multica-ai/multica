@@ -381,7 +381,7 @@ type Issue struct {
 	AcceptanceCriteria []byte             `json:"acceptance_criteria"`
 	ContextRefs        []byte             `json:"context_refs"`
 	Position           float64            `json:"position"`
-	DueDate            pgtype.Date        `json:"due_date"`
+	DueDate            pgtype.Timestamptz `json:"due_date"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
@@ -389,7 +389,7 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
-	StartDate          pgtype.Date        `json:"start_date"`
+	StartDate          pgtype.Timestamptz `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 }
 
