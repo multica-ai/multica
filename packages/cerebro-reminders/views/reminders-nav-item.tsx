@@ -15,10 +15,10 @@ interface RemindersNavItemProps {
 }
 
 // RemindersNavItem renders the "Reminders" entry in the left sidebar. Gated by
-// the cerebro_reminders flag so the overview is invisible until enabled per
-// workspace (FIR-394).
+// the cerebro_reminders_page flag (FIR-394, Jesper) so the standalone page can be
+// shown or hidden independently of the reminder system's "remind me" actions.
 export function RemindersNavItem({ workspaceSlug, onClick }: RemindersNavItemProps) {
-  const enabled = useFeatureFlag("cerebro_reminders");
+  const enabled = useFeatureFlag("cerebro_reminders_page");
   const { pathname } = useNavigation();
 
   if (!enabled || !workspaceSlug) return null;

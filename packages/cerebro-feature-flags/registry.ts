@@ -139,10 +139,15 @@ export type CerebroFlagKey =
   | "cerebro_image_reload"
   // FIR-2641: "Remind me" on a specific comment — reuses the personal reminder engine.
   | "cerebro_comment_reminders"
-  // FIR-394: reminder overview page — reminders as their own entity (linked back
-  // to the source message), with the opened reminder card. Gates the nav entry +
-  // /reminders route. OFF until QA'd on staging.
+  // FIR-394: the unified reminder system — reminders as their own entity plus the
+  // per-surface "remind me" entries (chat message, etc.). The backend entity +
+  // sweeper are always live; this gates the in-app remind-me actions. The
+  // standalone reminder page has its own toggle (cerebro_reminders_page).
   | "cerebro_reminders"
+  // FIR-394 (Jesper): show or hide the standalone reminder page (the "Reminders"
+  // sidebar entry + the /reminders overview). Separate from the reminder system
+  // itself so the page can be hidden without losing the "remind me" actions.
+  | "cerebro_reminders_page"
   // FIR-394 (Jesper): hide reminder rows from the inbox "All messages" box so a
   // fired reminder only lives in its own Reminders box, not in two places.
   // Opt-in per user; OFF by default (reminders show in All messages).
@@ -411,9 +416,14 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // the server rejects comment-referencing reminders.
   cerebro_comment_reminders: true,
   // FIR-394: ON by default — the unified reminder is the product's reminder
-  // system. Gates the nav entry + /reminders route + the per-surface "remind me"
-  // entries; the backend entity + sweeper are always live.
+  // system. Gates the per-surface "remind me" entries; the backend entity +
+  // sweeper are always live. The standalone page is gated separately by
+  // cerebro_reminders_page.
   cerebro_reminders: true,
+  // FIR-394 (Jesper): OFF by default — hide the standalone reminder page. The
+  // "remind me" actions keep working; only the dedicated "Reminders" sidebar
+  // entry + /reminders overview are hidden. Turn on to show the page again.
+  cerebro_reminders_page: false,
   // FIR-394 (Jesper): OFF by default — reminders show in "All messages". Turn on
   // to hide reminder rows from "All messages" so they only appear in the
   // standalone Reminders box (no duplicate across two boxes).
@@ -754,6 +764,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Star a conversation in the dynamic inbox to make it a favorite and float it to the top of the \"All messages\" box, in its own Favorites section. Each row's avatar turns into a star on hover so you can toggle it in place. The top Favorites section can be switched off per box (favorites then stay in their normal position but can still be starred), and a standalone Favorites block can be added from the \"Add section\" menu. Favorites are saved per user and follow you across devices. Requires the Dynamic inbox.",
+  },
+  {
+    key: "cerebro_reminders_page",
+    label: "Reminders page",
+    group: "inbox",
+    description:
+      "Show the standalone Reminders page — the \"Reminders\" entry in the left sidebar and the /reminders overview that lists every reminder on its own. Off (default) hides the page; the \"Remind me\" actions on messages, comments and issues keep working regardless. Turn on if you want the dedicated reminder overview back.",
   },
   {
     key: "cerebro_inbox_hide_reminders",

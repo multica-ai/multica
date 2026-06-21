@@ -8,6 +8,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 import { useTranslation } from "react-i18next";
 
@@ -25,6 +26,10 @@ import { CreateReminderSheet } from "./create-reminder-sheet";
  */
 export function ReminderOverview() {
   const wsId = useWorkspaceId();
+  // FIR-394 (Jesper) — the standalone reminder page is toggleable. When the page
+  // flag is off, hitting /reminders directly renders nothing (the nav entry is
+  // already hidden); the "remind me" actions are unaffected.
+  const pageEnabled = useFeatureFlag("cerebro_reminders_page");
   const s = useCerebroReminderStrings();
   const { i18n } = useTranslation();
   const { data: reminders = [], isLoading } = useQuery(remindersListOptions(wsId));
@@ -49,6 +54,8 @@ export function ReminderOverview() {
     () => reminders.find((r) => r.id === selectedId) ?? null,
     [reminders, selectedId],
   );
+
+  if (!pageEnabled) return null;
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-7 p-6 md:flex-row md:items-start">
