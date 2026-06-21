@@ -438,8 +438,10 @@ type notificationItemResponse struct {
 	Type          string          `json:"type"`
 	Severity      string          `json:"severity"`
 	Route         string          `json:"route"`
-	IssueID       *string         `json:"issue_id"`
-	ProjectID     *string         `json:"project_id"`
+	IssueID          *string      `json:"issue_id"`
+	ProjectID        *string      `json:"project_id"`
+	ParentIssueID    *string      `json:"parent_issue_id"`
+	ParentIssueTitle *string      `json:"parent_issue_title"`
 	Title         string          `json:"title"`
 	Body          *string         `json:"body"`
 	Read          bool            `json:"read"`
@@ -461,8 +463,10 @@ func notificationsRowToResponse(r db.ListNotificationsItemsRow) notificationItem
 		Type:          r.Type,
 		Severity:      r.Severity,
 		Route:         r.Route,
-		IssueID:       uuidPtr(r.IssueID),
-		ProjectID:     uuidPtr(r.ProjectID),
+		IssueID:          uuidPtr(r.IssueID),
+		ProjectID:        uuidPtr(r.ProjectID),
+		ParentIssueID:    uuidPtr(r.ParentIssueID),
+		ParentIssueTitle: textPtr(r.ParentIssueTitle),
 		Title:         r.Title,
 		Body:          textPtr(r.Body),
 		Read:          r.Read,

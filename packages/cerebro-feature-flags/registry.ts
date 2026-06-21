@@ -30,6 +30,7 @@ export type CerebroFlagKey =
   | "cerebro_typing_indicators"
   | "cerebro_chat_row_actions"
   | "cerebro_inbox_action_grouping"
+  | "cerebro_inbox_parent_grouping"
   | "cerebro_inbox_wakeup_running"
   | "cerebro_inbox_pinned_filter"
   // TECH-3535: after archiving the open message, return to the inbox list
@@ -280,6 +281,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_typing_indicators: true,
   cerebro_chat_row_actions: true,
   cerebro_inbox_action_grouping: true,
+  cerebro_inbox_parent_grouping: true,
   cerebro_inbox_wakeup_running: true,
   cerebro_inbox_pinned_filter: true,
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
@@ -745,6 +747,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Add a \"Group by → Action\" option to the inbox that buckets items by what to do next (Act now / Watching / Waiting / Calm) instead of by status. Default grouping for new users; switch it off or pick another grouping from the inbox's Group by menu.",
+  },
+  {
+    key: "cerebro_inbox_parent_grouping",
+    label: "Inbox group by parent issue",
+    group: "inbox",
+    description:
+      "Add a \"Group by → Parent issue\" option to the inbox that clusters every message about sub-issues of the same parent into one group, so related items are seen together. Items with no parent land in a \"No parent issue\" group. Works as a primary or secondary grouping from the inbox's Group by menu.",
   },
   {
     key: "cerebro_inbox_dynamic",

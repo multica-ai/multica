@@ -454,9 +454,12 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 const listArchivedInboxFeed = `-- name: ListArchivedInboxFeed :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
@@ -475,26 +478,28 @@ type ListArchivedInboxFeedParams struct {
 }
 
 type ListArchivedInboxFeedRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	RecipientType string             `json:"recipient_type"`
-	RecipientID   pgtype.UUID        `json:"recipient_id"`
-	Type          string             `json:"type"`
-	Severity      string             `json:"severity"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	Title         string             `json:"title"`
-	Body          pgtype.Text        `json:"body"`
-	Read          bool               `json:"read"`
-	Archived      bool               `json:"archived"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ActorType     pgtype.Text        `json:"actor_type"`
-	ActorID       pgtype.UUID        `json:"actor_id"`
-	Details       []byte             `json:"details"`
-	Route         string             `json:"route"`
-	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
-	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
-	IssueStatus   pgtype.Text        `json:"issue_status"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RecipientType    string             `json:"recipient_type"`
+	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	Type             string             `json:"type"`
+	Severity         string             `json:"severity"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Title            string             `json:"title"`
+	Body             pgtype.Text        `json:"body"`
+	Read             bool               `json:"read"`
+	Archived         bool               `json:"archived"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ActorType        pgtype.Text        `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Details          []byte             `json:"details"`
+	Route            string             `json:"route"`
+	MutedUntil       pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt       pgtype.Timestamptz `json:"archived_at"`
+	IssueStatus      pgtype.Text        `json:"issue_status"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ParentIssueID    pgtype.UUID        `json:"parent_issue_id"`
+	ParentIssueTitle pgtype.Text        `json:"parent_issue_title"`
 }
 
 // Archived inbox-routed items for a user. Backs the "show archived" view in
@@ -537,6 +542,8 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
+			&i.ParentIssueID,
+			&i.ParentIssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -551,9 +558,12 @@ func (q *Queries) ListArchivedInboxFeed(ctx context.Context, arg ListArchivedInb
 const listInboxFeed = `-- name: ListInboxFeed :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
@@ -572,26 +582,28 @@ type ListInboxFeedParams struct {
 }
 
 type ListInboxFeedRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	RecipientType string             `json:"recipient_type"`
-	RecipientID   pgtype.UUID        `json:"recipient_id"`
-	Type          string             `json:"type"`
-	Severity      string             `json:"severity"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	Title         string             `json:"title"`
-	Body          pgtype.Text        `json:"body"`
-	Read          bool               `json:"read"`
-	Archived      bool               `json:"archived"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ActorType     pgtype.Text        `json:"actor_type"`
-	ActorID       pgtype.UUID        `json:"actor_id"`
-	Details       []byte             `json:"details"`
-	Route         string             `json:"route"`
-	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
-	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
-	IssueStatus   pgtype.Text        `json:"issue_status"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RecipientType    string             `json:"recipient_type"`
+	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	Type             string             `json:"type"`
+	Severity         string             `json:"severity"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Title            string             `json:"title"`
+	Body             pgtype.Text        `json:"body"`
+	Read             bool               `json:"read"`
+	Archived         bool               `json:"archived"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ActorType        pgtype.Text        `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Details          []byte             `json:"details"`
+	Route            string             `json:"route"`
+	MutedUntil       pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt       pgtype.Timestamptz `json:"archived_at"`
+	IssueStatus      pgtype.Text        `json:"issue_status"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ParentIssueID    pgtype.UUID        `json:"parent_issue_id"`
+	ParentIssueTitle pgtype.Text        `json:"parent_issue_title"`
 }
 
 // Inbox-routed items (route='inbox') for a user, not archived. Backs the
@@ -627,6 +639,8 @@ func (q *Queries) ListInboxFeed(ctx context.Context, arg ListInboxFeedParams) ([
 			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
+			&i.ParentIssueID,
+			&i.ParentIssueTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -726,9 +740,12 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 const listNotificationsItems = `-- name: ListNotificationsItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.route, i.muted_until, i.archived_at,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
@@ -744,26 +761,28 @@ type ListNotificationsItemsParams struct {
 }
 
 type ListNotificationsItemsRow struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	RecipientType string             `json:"recipient_type"`
-	RecipientID   pgtype.UUID        `json:"recipient_id"`
-	Type          string             `json:"type"`
-	Severity      string             `json:"severity"`
-	IssueID       pgtype.UUID        `json:"issue_id"`
-	Title         string             `json:"title"`
-	Body          pgtype.Text        `json:"body"`
-	Read          bool               `json:"read"`
-	Archived      bool               `json:"archived"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ActorType     pgtype.Text        `json:"actor_type"`
-	ActorID       pgtype.UUID        `json:"actor_id"`
-	Details       []byte             `json:"details"`
-	Route         string             `json:"route"`
-	MutedUntil    pgtype.Timestamptz `json:"muted_until"`
-	ArchivedAt    pgtype.Timestamptz `json:"archived_at"`
-	IssueStatus   pgtype.Text        `json:"issue_status"`
-	ProjectID     pgtype.UUID        `json:"project_id"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	RecipientType    string             `json:"recipient_type"`
+	RecipientID      pgtype.UUID        `json:"recipient_id"`
+	Type             string             `json:"type"`
+	Severity         string             `json:"severity"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Title            string             `json:"title"`
+	Body             pgtype.Text        `json:"body"`
+	Read             bool               `json:"read"`
+	Archived         bool               `json:"archived"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ActorType        pgtype.Text        `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Details          []byte             `json:"details"`
+	Route            string             `json:"route"`
+	MutedUntil       pgtype.Timestamptz `json:"muted_until"`
+	ArchivedAt       pgtype.Timestamptz `json:"archived_at"`
+	IssueStatus      pgtype.Text        `json:"issue_status"`
+	ProjectID        pgtype.UUID        `json:"project_id"`
+	ParentIssueID    pgtype.UUID        `json:"parent_issue_id"`
+	ParentIssueTitle pgtype.Text        `json:"parent_issue_title"`
 }
 
 // Notifications-routed items (route='notifications') that are not archived.
@@ -798,6 +817,8 @@ func (q *Queries) ListNotificationsItems(ctx context.Context, arg ListNotificati
 			&i.ArchivedAt,
 			&i.IssueStatus,
 			&i.ProjectID,
+			&i.ParentIssueID,
+			&i.ParentIssueTitle,
 		); err != nil {
 			return nil, err
 		}

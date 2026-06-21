@@ -19,9 +19,12 @@ END DESC;
 -- default inbox view.
 SELECT i.*,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
@@ -39,9 +42,12 @@ END DESC;
 -- archived view so it does not load the full archive on first render.
 SELECT i.*,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3
@@ -56,9 +62,12 @@ LIMIT $4 OFFSET $5;
 -- Mirrors ListInboxFeed but for the lighter-weight notifications page.
 SELECT i.*,
        iss.status as issue_status,
-       iss.project_id as project_id
+       iss.project_id as project_id,
+       iss.parent_issue_id as parent_issue_id, -- CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+       parent.title as parent_issue_title -- CEREBRO-PATCH(inbox-parent-grouping)
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
+LEFT JOIN issue parent ON parent.id = iss.parent_issue_id -- CEREBRO-PATCH(inbox-parent-grouping)
 WHERE i.workspace_id = $1
   AND i.recipient_type = $2
   AND i.recipient_id = $3

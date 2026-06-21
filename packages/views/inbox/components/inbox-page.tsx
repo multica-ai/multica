@@ -38,6 +38,8 @@ import {
   // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — "Group by → Action" buckets live in cerebro-inbox
   INBOX_ACTION_GROUP_BY_OPTION,
   bucketizeInboxAction,
+  INBOX_PARENT_GROUP_BY_OPTION, // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — "Group by → Parent issue"
+  bucketizeInboxParent, // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717
   useInboxActionGroupLabels,
   useInboxWakeupStates, // CEREBRO-PATCH(inbox-wakeup-running): TECH-3322 — pending wakeups → Running group + clock pip
   // CEREBRO-PATCH(inbox-pin-selected): FIR-2474 — anchor the open row until closed
@@ -129,7 +131,8 @@ import { InboxChatPanel } from "./inbox-chat-panel";
 type ViewMode = { kind: "inbox" } | { kind: "archived" };
 
 // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — "action" mode added by cerebro
-type GroupByMode = "none" | "project" | "agent" | "type" | "action";
+// CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — add "parent" group-by mode
+type GroupByMode = "none" | "project" | "agent" | "type" | "action" | "parent";
 
 const GROUP_BY_OPTIONS: { value: GroupByMode; label: string }[] = [
   { value: "none", label: "None" },
@@ -139,8 +142,8 @@ const GROUP_BY_OPTIONS: { value: GroupByMode; label: string }[] = [
 ];
 
 function isGroupByMode(s: string | null): s is GroupByMode {
-  // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — accept "action"
-  return s === "none" || s === "project" || s === "agent" || s === "type" || s === "action";
+  // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — accept "action" + "parent"
+  return s === "none" || s === "project" || s === "agent" || s === "type" || s === "action" || s === "parent";
 }
 
 export function InboxPage() {
@@ -268,6 +271,7 @@ export function InboxPage() {
   const { getActorName } = useActorName();
   // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — flag gate + bucket-header labels
   const actionGroupingEnabled = useFeatureFlag("cerebro_inbox_action_grouping");
+  const parentGroupingEnabled = useFeatureFlag("cerebro_inbox_parent_grouping"); // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717
   const actionGroupLabels = useInboxActionGroupLabels();
   // CEREBRO-PATCH(inbox-action-grouping-v2): TECH-3001 — reset old "none" preferences so action grouping becomes the default
   const groupByStorageKey = `multica_inbox_groupby_v2_${wsId}_${userId}`;
@@ -296,8 +300,14 @@ export function InboxPage() {
   // CEREBRO-PATCH(inbox-focus-list-visibility): TECH-2947 — per-user show/hide for the priorities panel
   const [focusListVisible, setFocusListVisible] = useFocusListVisibility(wsId, userId);
   // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — prepend flag-gated Action option
-  const groupByOptions = actionGroupingEnabled
+  // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — append flag-gated Parent issue option
+  const groupByOptions = (actionGroupingEnabled
     ? [INBOX_ACTION_GROUP_BY_OPTION, ...GROUP_BY_OPTIONS]
+    : GROUP_BY_OPTIONS
+  ).concat(parentGroupingEnabled ? [INBOX_PARENT_GROUP_BY_OPTION] : []);
+  // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — secondary list mirrors primary minus the action-only entry
+  const secondaryOptions = parentGroupingEnabled
+    ? [...GROUP_BY_OPTIONS, INBOX_PARENT_GROUP_BY_OPTION]
     : GROUP_BY_OPTIONS;
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const toggleGroup = useCallback((key: string) => {
@@ -734,8 +744,8 @@ export function InboxPage() {
                     // Drop secondary when it would equal new primary, or when primary
                     // is a single-level mode (none / action) that takes no sub-grouping.
                     secondary:
-                      // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action is primary-only
-                      opt.value === "none" || opt.value === "action" || g.secondary === opt.value
+                      // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — only "none" takes no sub-grouping; action may now nest
+                      opt.value === "none" || g.secondary === opt.value
                         ? "none"
                         : g.secondary,
                   }))
@@ -747,12 +757,12 @@ export function InboxPage() {
                 {opt.label}
               </DropdownMenuItem>
             ))}
-            {/* CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action is primary-only, no "Then by" */}
-            {groupBy.primary !== "none" && groupBy.primary !== "action" && (
+            {/* CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — allow a second level under any primary incl. Action */}
+            {groupBy.primary !== "none" && (
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem disabled>Then by</DropdownMenuItem>
-                {GROUP_BY_OPTIONS.filter((opt) => opt.value !== groupBy.primary).map((opt) => (
+                {secondaryOptions.filter((opt) => opt.value !== groupBy.primary).map((opt) => (
                   <DropdownMenuItem
                     key={`s-${opt.value}`}
                     onClick={() =>
@@ -1037,6 +1047,8 @@ export function InboxPage() {
       // CEREBRO-PATCH(inbox-action-grouping): FIR-2115 — action buckets live in cerebro-inbox
       if (mode === "action")
         return bucketizeInboxAction(entry, { userId, issueRunStates, subIssueRunStates, chatRunStates, mentionedChannels, wakeupIssueIds }, actionGroupLabels);
+      // CEREBRO-PATCH(inbox-parent-grouping): FIR-1717 — parent buckets live in cerebro-inbox
+      if (mode === "parent") return bucketizeInboxParent(entry);
       if (mode === "project") {
         if (entry.kind === "notif" && entry.item.project_id) {
           const proj = projectMap.get(entry.item.project_id);

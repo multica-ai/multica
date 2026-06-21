@@ -297,6 +297,9 @@ declare module "@multica/core/types/chat" {
 declare module "@multica/core/types/inbox" {
   interface InboxItem {
     archived_at?: string | null;
+    // Parent of the item's issue — drives the inbox "Parent issue" grouping.
+    parent_issue_id?: string | null;
+    parent_issue_title?: string | null;
   }
 }
 

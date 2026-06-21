@@ -91,6 +91,12 @@ export {
   type InboxActionContext,
   type InboxActionEntry,
 } from "./action-groups";
+// FIR-1717 — "Group by → Parent issue" inbox grouping.
+export {
+  INBOX_PARENT_GROUP_BY_OPTION,
+  bucketizeInboxParent,
+  type InboxParentEntry,
+} from "./parent-grouping";
 export { useInboxActionGroupLabels } from "./strings";
 // TECH-3322 — pending wakeups feed the "Running" action group + the clock pip.
 export {

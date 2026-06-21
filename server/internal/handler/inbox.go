@@ -36,6 +36,8 @@ type InboxItemResponse struct {
 	Route         string          `json:"route"`
 	IssueID       *string         `json:"issue_id"`
 	ProjectID     *string         `json:"project_id"`
+	ParentIssueID    *string      `json:"parent_issue_id"`    // CEREBRO-PATCH(inbox-parent-grouping): backs the "Parent issue" group-by
+	ParentIssueTitle *string      `json:"parent_issue_title"` // CEREBRO-PATCH(inbox-parent-grouping)
 	Title         string          `json:"title"`
 	Body          *string         `json:"body"`
 	Read          bool            `json:"read"`
@@ -145,6 +147,8 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 				Route:         item.Route,
 				IssueID:       uuidToPtr(item.IssueID),
 				ProjectID:     uuidToPtr(item.ProjectID),
+				ParentIssueID:    uuidToPtr(item.ParentIssueID),  // CEREBRO-PATCH(inbox-parent-grouping)
+				ParentIssueTitle: textToPtr(item.ParentIssueTitle), // CEREBRO-PATCH(inbox-parent-grouping)
 				Title:         item.Title,
 				Body:          textToPtr(item.Body),
 				Read:          item.Read,
@@ -184,6 +188,8 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 			Route:         item.Route,
 			IssueID:       uuidToPtr(item.IssueID),
 			ProjectID:     uuidToPtr(item.ProjectID),
+			ParentIssueID:    uuidToPtr(item.ParentIssueID),  // CEREBRO-PATCH(inbox-parent-grouping)
+			ParentIssueTitle: textToPtr(item.ParentIssueTitle), // CEREBRO-PATCH(inbox-parent-grouping)
 			Title:         item.Title,
 			Body:          textToPtr(item.Body),
 			Read:          item.Read,
