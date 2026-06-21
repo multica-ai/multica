@@ -198,7 +198,8 @@ func (h *Handler) UpdateArtifactFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID) // CEREBRO-PATCH(folder-action-guard): FIR-1590 — capture role for the action guard
+	if !ok {
 		return
 	}
 
@@ -208,6 +209,10 @@ func (h *Handler) UpdateArtifactFolder(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "folder not found")
+		return
+	}
+
+	if !h.requireFolderActionAllowed(w, r, existing, userID, member) { // CEREBRO-PATCH(folder-action-guard): FIR-1590 — guard rename/move
 		return
 	}
 
@@ -282,7 +287,8 @@ func (h *Handler) DeleteArtifactFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+	member, ok := h.workspaceMember(w, r, workspaceID) // CEREBRO-PATCH(folder-action-guard): FIR-1590 — capture role for the action guard
+	if !ok {
 		return
 	}
 
@@ -292,6 +298,10 @@ func (h *Handler) DeleteArtifactFolder(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "folder not found")
+		return
+	}
+
+	if !h.requireFolderActionAllowed(w, r, existing, userID, member) { // CEREBRO-PATCH(folder-action-guard): FIR-1590 — guard delete
 		return
 	}
 

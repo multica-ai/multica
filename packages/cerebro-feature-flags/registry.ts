@@ -40,6 +40,10 @@ export type CerebroFlagKey =
   // FIR-1590: per-folder access control — "Only you / Selected colleagues /
   // Whole team" on note + document folders. Gates the folder and its contents.
   | "cerebro_folder_access"
+  // FIR-1590 (follow-up): folder ACTION permissions. When a folder owner has
+  // this on, only they + workspace admins may delete/rename/move folders they
+  // own. Resolved per folder OWNER so it can roll out to one user first.
+  | "cerebro_folder_action_guard"
   // TECH-3556 (Wave 3): the heavy Google-Docs note features, each independently
   // flagged so they can ship + be QA'd one at a time on staging.
   //   - comments + suggestions on a span of a note (margin comments, replies,
@@ -290,6 +294,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // enforcement is always correct (folders default to "Whole team"); this flag
   // only gates the UI that lets a user restrict a folder.
   cerebro_folder_access: false,
+  // FIR-1590 (follow-up): OFF by default. When a folder owner turns this on,
+  // only they + workspace owners/admins may delete/rename/move folders they
+  // own; everyone else's folders are unaffected. Server enforces by resolving
+  // the flag for the folder's OWNER, so it can roll out to one user at a time.
+  cerebro_folder_action_guard: false,
   // TECH-3556 (Wave 3): comments + suggestions on notes/documents. ON (FIR-1647):
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
@@ -617,6 +626,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Let folder owners set who can see a note or document folder — Only you, Selected colleagues, or Whole team. The choice locks the whole folder and its contents.",
+  },
+  {
+    key: "cerebro_folder_action_guard",
+    label: "Protect my folders",
+    group: "permissions",
+    description:
+      "When on, only you and workspace admins can delete, rename, or move folders you own. Other people's folders are unaffected until they turn this on too.",
   },
   {
     key: "cerebro_members_admin",
