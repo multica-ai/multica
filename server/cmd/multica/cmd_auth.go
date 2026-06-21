@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -61,6 +62,8 @@ var authLogoutCmd = &cobra.Command{
 // cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
 // auto-detected LAN IP isn't the one the browser can reach.
 const callbackHostFlag = "callback-host"
+
+const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
 
 func init() {
 	authCmd.AddCommand(authStatusCmd)
@@ -229,7 +232,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	serverURL := resolveServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
-	flagHost, _ := cmd.Flags().GetString(callbackHostFlag)
+	flagHost := callbackHostFlagValue(cmd)
 	callbackHost, bindAddr := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
 
 	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
@@ -288,7 +291,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if err := openBrowser(loginURL); err != nil {
 		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
 	}
-	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n\nWaiting for authentication...\n", loginURL)
+	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, runningInSSHSession()))
 
 	// Wait for the JWT from the callback (timeout 5 minutes).
 	var jwtToken string
@@ -348,6 +351,56 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	fmt.Fprintf(os.Stderr, "Authenticated as %s (%s)\nToken saved to config.\n", me.Name, me.Email)
 	return nil
+}
+
+func runningInSSHSession() bool {
+	for _, key := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func callbackHostFlagValue(cmd *cobra.Command) string {
+	for c := cmd; c != nil; c = c.Parent() {
+		if value := nonEmptyFlagValue(c.Flags(), callbackHostFlag); value != "" {
+			return value
+		}
+		if value := nonEmptyFlagValue(c.PersistentFlags(), callbackHostFlag); value != "" {
+			return value
+		}
+		if value := nonEmptyFlagValue(c.InheritedFlags(), callbackHostFlag); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nonEmptyFlagValue(flags *pflag.FlagSet, name string) string {
+	if flag := flags.Lookup(name); flag != nil {
+		return strings.TrimSpace(flag.Value.String())
+	}
+	return ""
+}
+
+func callbackHostIsLoopback(host string) bool {
+	h := strings.Trim(strings.TrimSpace(host), "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func browserLoginInstructions(loginURL, callbackHost string, port int, remoteSSH bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "If the browser didn't open, visit:\n  %s\n", loginURL)
+	if remoteSSH && callbackHostIsLoopback(callbackHost) {
+		fmt.Fprintf(&b, "\nRemote SSH session detected. Before opening that URL on your local computer, forward the callback port in another terminal:\n  ssh -L %d:127.0.0.1:%d <user>@<remote-host>\nThen open the URL above in your local browser.\n", port, port)
+	}
+	fmt.Fprintln(&b, "\nWaiting for authentication...")
+	return b.String()
 }
 
 func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
