@@ -143,9 +143,10 @@ vi.mock("./thread-side-panel", () => ({
     open ? <div data-testid="thread-side-panel" /> : null,
 }));
 
-vi.mock("../../issues/components/comment-input", () => ({
-  CommentInput: ({ issueId }: { issueId: string }) => (
-    <div data-testid="comment-input" data-issue={issueId} />
+// FIR-1748: channels now compose via the shared MessageComposer (tiptap-backed); stub it.
+vi.mock("@multica/cerebro-composer", () => ({
+  MessageComposer: ({ conversationId }: { conversationId: string }) => (
+    <div data-testid="comment-input" data-issue={conversationId} />
   ),
 }));
 

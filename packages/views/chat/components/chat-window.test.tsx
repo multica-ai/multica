@@ -20,8 +20,9 @@ vi.mock("./chat-message-list", () => ({
   ChatMessageSkeleton: () => <div data-testid="chat-message-skeleton" />,
 }));
 
-vi.mock("./chat-input", () => ({
-  ChatInput: ({ agentName }: { agentName?: string }) => (
+// FIR-1748: Chat composes via the shared ChatComposer; stub it.
+vi.mock("@multica/cerebro-composer", () => ({
+  ChatComposer: ({ agentName }: { agentName?: string }) => (
     <div data-testid="chat-input">{agentName}</div>
   ),
 }));

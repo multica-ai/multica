@@ -39,7 +39,8 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay 
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
-import { ReplyInput } from "./reply-input";
+// CEREBRO-PATCH(issue-composer-unify): FIR-1748 — issue thread replies use the shared CommentComposer (reply variant).
+import { CommentComposer } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(comment-edit-attachment-binding): FIR-2394 — pure binding helpers extracted for robustness + unit coverage.
 import { attachmentReferencedInContent, collectActiveAttachmentIds } from "./comment-attachment-binding";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
@@ -1011,13 +1012,14 @@ function CommentCardImpl({
             </div>
           ) : (
             <div className="border-t border-border/50 px-3 sm:px-4 py-2.5">
-              <ReplyInput
+              {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer, reply variant. */}
+              <CommentComposer
                 issueId={issueId}
-                rootCommentId={entry.id} // CEREBRO-PATCH(comment-drafts): TECH-3491 — scope the reply draft to this thread.
+                variant="reply"
+                rootCommentId={entry.id}
                 placeholder={t(($) => $.reply.placeholder)}
                 size="sm"
-                avatarType="member"
-                avatarId={currentUserId ?? ""}
+                avatar={{ type: "member", id: currentUserId ?? "" }}
                 // CEREBRO-PATCH(reply-target-indicator): FIR-2392 show the agent the trigger logic will actually wake (issue assignee / squad leader), not the replied-to comment author.
                 triggerAgentId={triggerAgentId}
                 onSubmit={(content, attachmentIds) => onReply(entry.id, content, attachmentIds)}

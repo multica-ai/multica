@@ -42,8 +42,9 @@ vi.mock("./chat-message-list", () => ({
   ChatMessageSkeleton: () => <div data-testid="chat-message-skeleton" />,
 }));
 
-vi.mock("./chat-input", () => ({
-  ChatInput: ({ onSend }: { onSend: (content: string) => void }) => (
+// FIR-1748: Chat composes via the shared ChatComposer; stub it.
+vi.mock("@multica/cerebro-composer", () => ({
+  ChatComposer: ({ onSend }: { onSend: (content: string) => void }) => (
     <button type="button" data-testid="send" onClick={() => onSend("msg-2")}>
       send
     </button>

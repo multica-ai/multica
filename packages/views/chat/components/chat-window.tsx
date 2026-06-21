@@ -55,7 +55,8 @@ import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatStatusLine, ChatSessionHeader } from "@multica/cerebro-chat/views";
 // CEREBRO-PATCH(chat-upload-attachment-ids): TECH-3657 link uploaded files to the chat message.
 import { extractChatUploadAttachmentIds } from "@multica/cerebro-chat";
-import { ChatInput } from "./chat-input";
+// CEREBRO-PATCH(chat-composer-unify): FIR-1748 — Chat uses the shared ChatComposer preset (over MessageComposer/BaseComposer).
+import { ChatComposer } from "@multica/cerebro-composer";
 import {
   ContextAnchorButton,
   ContextAnchorCard,
@@ -556,7 +557,7 @@ export function ChatWindow() {
 
       {/* Input — disabled for legacy archived sessions; locked out entirely
        *  when there's no agent (the EmptyState above carries the CTA). */}
-      <ChatInput
+      <ChatComposer
         onSend={handleSend}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
