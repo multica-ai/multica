@@ -129,6 +129,8 @@ export type CerebroFlagKey =
   | "cerebro_sprints"
   // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
   | "cerebro_recurring_issues"
+  // FIR-1704: comment chapters/sessions UI. OFF — phase 1 model was unsound (comments never linked to a session); rebuilding as threads=sessions (FIR-1741).
+  | "cerebro_comment_chapters"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
   | "cerebro_issue_date_times"
   // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
@@ -406,6 +408,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
   // the recurring-issue sweeper.
   cerebro_recurring_issues: false,
+  // FIR-1704: OFF. Phase-1 chapters model was unsound (comments never linked to
+  // a session -> empty sessions, dead buttons). Hidden while rebuilt as
+  // threads=sessions (FIR-1741). Off renders the flat comment timeline.
+  cerebro_comment_chapters: false,
   // FIR-1597: OFF by default. Hides the time-of-day control next to the
   // start/due date pickers. The sweeper still treats a no-time date as before.
   cerebro_issue_date_times: false,
@@ -1118,6 +1124,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_comment_chapters",
+    label: "Comment chapters / sessions",
+    group: "workspace",
+    description:
+      "Wrap an issue's comment timeline in named work sessions (chapters) with a status chip, a Start fresh action, and a Handoff brief. OFF — the phase-1 model was unsound: comments were never linked to a session, so sessions rendered empty and the actions did nothing. Being rebuilt around threads=sessions (FIR-1741). Off renders the plain flat comment timeline. FIR-1704.",
   },
   {
     key: "cerebro_recurring_issues",

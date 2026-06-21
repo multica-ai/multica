@@ -1200,6 +1200,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
+  // CEREBRO-PATCH(comment-chapters-flag): FIR-1741 gate chapters UI; off renders the flat timeline.
+  const chaptersEnabled = useFeatureFlag("cerebro_comment_chapters");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2531,9 +2533,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               <TimelineSkeleton />
             ) : (
             <>
+            {/* CEREBRO-PATCH(comment-chapters-flag): FIR-1741 hide Start fresh when chapters off. */}
+            {chaptersEnabled && (
             <div className="mt-4 flex justify-end">
               <StartFresh issueId={id} />
             </div>
+            )}
             <div className="mt-4 flex flex-col gap-3">
               {(() => {
                 let previousChapterId: string | null = null;
@@ -2544,7 +2549,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 const showChapterHeader = chapterId !== previousChapterId;
                 previousChapterId = chapterId;
                 const chapterOpen = chapterId === openChapterId;
-                const chapterShell = (children: ReactNode) => (
+                const chapterShell = (children: ReactNode) =>
+                  // CEREBRO-PATCH(comment-chapters-flag): FIR-1741 flat render when chapters off.
+                  !chaptersEnabled ? (
+                    <Fragment key={`flat-${firstEntry.id}`}>{children}</Fragment>
+                  ) : (
                   <Fragment key={`${chapterId}-${firstEntry.id}`}>
                     {showChapterHeader && (
                       <>
