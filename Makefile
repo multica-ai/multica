@@ -1,4 +1,4 @@
-.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check worktree-env init-worktree-env list-worktree-resources destroy-worktree remove-worktree setup-main start-main start-air-main stop-main check-main setup-worktree guard-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
+.PHONY: dev daemon cli multica build release-build release-build-multi release-package release-package-multi test migrate-up migrate-down sqlc seed clean setup start start-air stop check doctor-agent-loop worktree-env init-worktree-env list-worktree-resources destroy-worktree remove-worktree setup-main start-main start-air-main stop-main check-main setup-worktree guard-worktree start-worktree start-air-worktree stop-worktree check-worktree db-up db-down
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -91,6 +91,12 @@ check:
 	$(REQUIRE_ENV)
 	$(REQUIRE_WORKTREE_READY_IF_NEEDED)
 	@ENV_FILE="$(ENV_FILE)" bash scripts/check.sh
+
+# Agent runtime loop smoke check: schema + runtime + claim + task token + revoke
+doctor-agent-loop:
+	$(REQUIRE_ENV)
+	$(REQUIRE_WORKTREE_READY_IF_NEEDED)
+	@ENV_FILE="$(ENV_FILE)" bash scripts/doctor-agent-loop.sh
 
 db-up:
 	@$(COMPOSE) up -d postgres

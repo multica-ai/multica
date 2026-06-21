@@ -114,6 +114,11 @@ func init() {
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
+	agentCreateCmd.Flags().String("model", "", "Agent model override")
+	agentCreateCmd.Flags().String("thinking-level", "", "Agent thinking/reasoning level")
+	agentCreateCmd.Flags().StringSlice("custom-args", nil, "Custom CLI args to pass to the agent runtime")
+	agentCreateCmd.Flags().StringToString("custom-env", nil, "Custom environment variables (KEY=value)")
+	agentCreateCmd.Flags().String("mcp-config", "", "MCP config as JSON string")
 	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -124,6 +129,11 @@ func init() {
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
+	agentUpdateCmd.Flags().String("model", "", "New agent model override; pass an empty value to clear")
+	agentUpdateCmd.Flags().String("thinking-level", "", "New thinking/reasoning level; pass an empty value to clear")
+	agentUpdateCmd.Flags().StringSlice("custom-args", nil, "New custom CLI args to pass to the agent runtime")
+	agentUpdateCmd.Flags().StringToString("custom-env", nil, "Replace custom environment variables (KEY=value)")
+	agentUpdateCmd.Flags().String("mcp-config", "", "New MCP config as JSON string; pass null to clear")
 	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
@@ -324,6 +334,30 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["runtime_config"] = rc
 	}
+	if cmd.Flags().Changed("model") {
+		v, _ := cmd.Flags().GetString("model")
+		body["model"] = v
+	}
+	if cmd.Flags().Changed("thinking-level") {
+		v, _ := cmd.Flags().GetString("thinking-level")
+		body["thinking_level"] = v
+	}
+	if cmd.Flags().Changed("custom-args") {
+		v, _ := cmd.Flags().GetStringSlice("custom-args")
+		body["custom_args"] = v
+	}
+	if cmd.Flags().Changed("custom-env") {
+		v, _ := cmd.Flags().GetStringToString("custom-env")
+		body["custom_env"] = v
+	}
+	if cmd.Flags().Changed("mcp-config") {
+		v, _ := cmd.Flags().GetString("mcp-config")
+		mcpConfig, err := parseJSONFlag("--mcp-config", v)
+		if err != nil {
+			return err
+		}
+		body["mcp_config"] = mcpConfig
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -381,6 +415,30 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["runtime_config"] = rc
 	}
+	if cmd.Flags().Changed("model") {
+		v, _ := cmd.Flags().GetString("model")
+		body["model"] = v
+	}
+	if cmd.Flags().Changed("thinking-level") {
+		v, _ := cmd.Flags().GetString("thinking-level")
+		body["thinking_level"] = v
+	}
+	if cmd.Flags().Changed("custom-args") {
+		v, _ := cmd.Flags().GetStringSlice("custom-args")
+		body["custom_args"] = v
+	}
+	var customEnv map[string]string
+	if cmd.Flags().Changed("custom-env") {
+		customEnv, _ = cmd.Flags().GetStringToString("custom-env")
+	}
+	if cmd.Flags().Changed("mcp-config") {
+		v, _ := cmd.Flags().GetString("mcp-config")
+		mcpConfig, err := parseJSONFlag("--mcp-config", v)
+		if err != nil {
+			return err
+		}
+		body["mcp_config"] = mcpConfig
+	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -394,16 +452,27 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		body["max_concurrent_tasks"] = v
 	}
 
-	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --visibility, --status, or --max-concurrent-tasks")
+	if len(body) == 0 && !cmd.Flags().Changed("custom-env") {
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --runtime-id, --runtime-config, --model, --thinking-level, --custom-args, --custom-env, --mcp-config, --visibility, --status, or --max-concurrent-tasks")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	var result map[string]any
-	if err := client.PutJSON(ctx, "/api/agents/"+args[0], body, &result); err != nil {
-		return fmt.Errorf("update agent: %w", err)
+	if len(body) > 0 {
+		if err := client.PutJSON(ctx, "/api/agents/"+args[0], body, &result); err != nil {
+			return fmt.Errorf("update agent: %w", err)
+		}
+	}
+	if cmd.Flags().Changed("custom-env") {
+		var envResult map[string]any
+		if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/env", map[string]any{"custom_env": customEnv}, &envResult); err != nil {
+			return fmt.Errorf("update agent env: %w", err)
+		}
+		if agent, ok := envResult["agent"].(map[string]any); ok {
+			result = agent
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -582,4 +651,12 @@ func strVal(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func parseJSONFlag(name string, value string) (any, error) {
+	var parsed any
+	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
+		return nil, fmt.Errorf("%s must be valid JSON: %w", name, err)
+	}
+	return parsed, nil
 }

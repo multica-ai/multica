@@ -13,6 +13,8 @@ export type {
   CreateRuntimeRequest,
   CreateAgentRequest,
   UpdateAgentRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvResponse,
   Skill,
   SkillFile,
   CreateSkillRequest,

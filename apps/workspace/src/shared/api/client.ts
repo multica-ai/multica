@@ -10,6 +10,8 @@ import type {
   Agent,
   CreateAgentRequest,
   UpdateAgentRequest,
+  AgentEnvResponse,
+  UpdateAgentEnvResponse,
   AgentTask,
   AgentRuntime,
   CreateRuntimeRequest,
@@ -599,6 +601,20 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async getAgentEnv(id: string): Promise<AgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`);
+  }
+
+  async updateAgentEnv(
+    id: string,
+    customEnv: Record<string, string>,
+  ): Promise<UpdateAgentEnvResponse> {
+    return this.fetch(`/api/agents/${id}/env`, {
+      method: "PUT",
+      body: JSON.stringify({ custom_env: customEnv }),
     });
   }
 

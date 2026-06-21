@@ -17,6 +17,10 @@ type codexBackend struct {
 	cfg Config
 }
 
+var codexBlockedArgs = map[string]blockedArgMode{
+	"--listen": blockedWithValue,
+}
+
 func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -32,7 +36,21 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 
-	cmd := exec.CommandContext(runCtx, execPath, "app-server", "--listen", "stdio://")
+	if hasManagedCodexMcpConfig(opts.McpConfig) {
+		codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+		if codexHome == "" {
+			cancel()
+			return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME is not configured")
+		}
+		if err := ensureCodexMcpConfig(codexHome, opts.McpConfig); err != nil {
+			cancel()
+			return nil, fmt.Errorf("apply codex mcp_config: %w", err)
+		}
+	}
+
+	args := []string{"app-server", "--listen", "stdio://"}
+	args = append(args, filterCustomArgs(opts.CustomArgs, codexBlockedArgs, b.cfg.Logger)...)
+	cmd := exec.CommandContext(runCtx, execPath, args...)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -48,7 +66,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("codex stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[codex:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codex:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -134,31 +153,33 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		})
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex initialize failed: %v", err)
+			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), stderrBuf)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
 		c.notify("initialized")
 
 		// 2. Start thread
-		threadResult, err := c.request(runCtx, "thread/start", map[string]any{
-			"model":                    nilIfEmpty(opts.Model),
-			"modelProvider":            nil,
-			"profile":                  nil,
-			"cwd":                      opts.Cwd,
-			"approvalPolicy":           nil,
-			"sandbox":                  "workspace-write",
-			"config":                   nil,
-			"baseInstructions":         nil,
-			"developerInstructions":    nilIfEmpty(opts.SystemPrompt),
-			"compactPrompt":            nil,
-			"includeApplyPatchTool":    nil,
-			"experimentalRawEvents":    false,
-			"persistExtendedHistory":   true,
-		})
+		threadParams := map[string]any{
+			"model":                  nilIfEmpty(opts.Model),
+			"modelProvider":          nil,
+			"profile":                nil,
+			"cwd":                    opts.Cwd,
+			"approvalPolicy":         nil,
+			"sandbox":                "workspace-write",
+			"config":                 nil,
+			"baseInstructions":       nil,
+			"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+			"compactPrompt":          nil,
+			"includeApplyPatchTool":  nil,
+			"experimentalRawEvents":  false,
+			"persistExtendedHistory": true,
+		}
+		applyCodexReasoningEffort(threadParams, opts.ThinkingLevel)
+		threadResult, err := c.request(runCtx, "thread/start", threadParams)
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex thread/start failed: %v", err)
+			finalError = withAgentStderr(fmt.Sprintf("codex thread/start failed: %v", err), stderrBuf)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -174,15 +195,17 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 
 		// 3. Send turn and wait for completion
-		_, err = c.request(runCtx, "turn/start", map[string]any{
+		turnParams := map[string]any{
 			"threadId": threadID,
 			"input": []map[string]any{
 				{"type": "text", "text": prompt},
 			},
-		})
+		}
+		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("codex turn/start failed: %v", err)
+			finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), stderrBuf)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -234,14 +257,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg       Config
-	stdin     interface{ Write([]byte) (int, error) }
-	mu        sync.Mutex
-	nextID    int
-	pending   map[int]*pendingRPC
-	threadID  string
-	turnID    string
-	onMessage func(Message)
+	cfg        Config
+	stdin      interface{ Write([]byte) (int, error) }
+	mu         sync.Mutex
+	nextID     int
+	pending    map[int]*pendingRPC
+	threadID   string
+	turnID     string
+	onMessage  func(Message)
 	onTurnDone func(aborted bool)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
@@ -650,4 +673,20 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+func applyCodexReasoningEffort(params map[string]any, level string) {
+	if params == nil || level == "" {
+		return
+	}
+	if _, isTurnStart := params["input"]; isTurnStart {
+		params["effort"] = level
+		return
+	}
+	cfg, _ := params["config"].(map[string]any)
+	if cfg == nil {
+		cfg = map[string]any{}
+	}
+	cfg["model_reasoning_effort"] = level
+	params["config"] = cfg
 }

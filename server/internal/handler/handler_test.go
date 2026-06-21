@@ -1757,6 +1757,62 @@ func TestAgentCRUD(t *testing.T) {
 	if updated.Name != agents[0].Name {
 		t.Fatalf("UpdateAgent: name should be preserved, got '%s'", updated.Name)
 	}
+
+	// Update runtime preferences without exposing secret-bearing env values
+	// in the regular agent response.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+		"model":          "claude-sonnet-test",
+		"thinking_level": "high",
+		"custom_args":    []string{"--foo", "bar"},
+		"mcp_config":     map[string]any{"mcpServers": map[string]any{}},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgent runtime preferences: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	json.NewDecoder(w.Body).Decode(&updated)
+	if updated.Model != "claude-sonnet-test" {
+		t.Fatalf("UpdateAgent: model = %q", updated.Model)
+	}
+	if updated.ThinkingLevel != "high" {
+		t.Fatalf("UpdateAgent: thinking_level = %q", updated.ThinkingLevel)
+	}
+	if len(updated.CustomArgs) != 2 || updated.CustomArgs[0] != "--foo" {
+		t.Fatalf("UpdateAgent: custom_args = %#v", updated.CustomArgs)
+	}
+	if !updated.McpConfigRedacted {
+		t.Fatal("UpdateAgent: expected mcp_config_redacted")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/agents/"+agentID+"/env", map[string]any{
+		"custom_env": map[string]string{"ANTHROPIC_AUTH_TOKEN": "secret"},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.UpdateAgentEnv(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateAgentEnv: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var envUpdate struct {
+		Agent AgentResponse `json:"agent"`
+	}
+	json.NewDecoder(w.Body).Decode(&envUpdate)
+	if !envUpdate.Agent.HasCustomEnv || envUpdate.Agent.CustomEnvKeyCount != 1 {
+		t.Fatalf("UpdateAgentEnv: expected redacted env metadata, got has=%v count=%d", envUpdate.Agent.HasCustomEnv, envUpdate.Agent.CustomEnvKeyCount)
+	}
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/agents/"+agentID, nil)
+	req = withURLParam(req, "id", agentID)
+	testHandler.GetAgent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent after env update: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "secret") {
+		t.Fatal("GetAgent: regular response leaked custom env value")
+	}
 }
 
 func TestWorkspaceCRUD(t *testing.T) {

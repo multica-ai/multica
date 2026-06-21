@@ -5,6 +5,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -26,6 +27,9 @@ type ExecOptions struct {
 	MaxTurns        int
 	Timeout         time.Duration
 	ResumeSessionID string // if non-empty, resume a previous agent session
+	CustomArgs      []string
+	McpConfig       json.RawMessage
+	ThinkingLevel   string
 }
 
 // Session represents a running agent execution.

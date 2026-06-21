@@ -553,6 +553,20 @@ func agentToMap(a db.Agent) map[string]any {
 	if a.Triggers != nil {
 		json.Unmarshal(a.Triggers, &triggers)
 	}
+	var customArgs []string
+	if len(a.CustomArgs) > 0 {
+		_ = json.Unmarshal(a.CustomArgs, &customArgs)
+	}
+	if customArgs == nil {
+		customArgs = []string{}
+	}
+	customEnvKeyCount := 0
+	if len(a.CustomEnv) > 0 {
+		var customEnv map[string]string
+		if json.Unmarshal(a.CustomEnv, &customEnv) == nil {
+			customEnvKeyCount = len(customEnv)
+		}
+	}
 	return map[string]any{
 		"id":                   util.UUIDToString(a.ID),
 		"workspace_id":         util.UUIDToString(a.WorkspaceID),
@@ -562,6 +576,12 @@ func agentToMap(a db.Agent) map[string]any {
 		"avatar_url":           util.TextToPtr(a.AvatarUrl),
 		"runtime_mode":         a.RuntimeMode,
 		"runtime_config":       rc,
+		"model":                a.Model.String,
+		"thinking_level":       a.ThinkingLevel.String,
+		"custom_args":          customArgs,
+		"has_custom_env":       customEnvKeyCount > 0,
+		"custom_env_key_count": customEnvKeyCount,
+		"mcp_config_redacted":  len(a.McpConfig) > 0,
 		"visibility":           a.Visibility,
 		"status":               a.Status,
 		"max_concurrent_tasks": a.MaxConcurrentTasks,

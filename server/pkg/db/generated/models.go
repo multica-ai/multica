@@ -39,6 +39,11 @@ type Agent struct {
 	Instructions       string             `json:"instructions"`
 	ArchivedAt         pgtype.Timestamptz `json:"archived_at"`
 	ArchivedBy         pgtype.UUID        `json:"archived_by"`
+	Model              pgtype.Text        `json:"model"`
+	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
+	CustomArgs         []byte             `json:"custom_args"`
+	CustomEnv          []byte             `json:"custom_env"`
+	McpConfig          []byte             `json:"mcp_config"`
 }
 
 type AgentRuntime struct {

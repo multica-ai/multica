@@ -70,6 +70,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/features/auth";
@@ -1189,15 +1190,57 @@ function SettingsTab({
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
-  onSave: (updates: Partial<Agent>) => Promise<void>;
+  onSave: (updates: UpdateAgentRequest) => Promise<void>;
 }) {
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
   const [visibility, setVisibility] = useState<AgentVisibility>(agent.visibility);
   const [maxTasks, setMaxTasks] = useState(agent.max_concurrent_tasks);
+  const [model, setModel] = useState(agent.model ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState(agent.thinking_level ?? "");
+  const [customArgsText, setCustomArgsText] = useState(JSON.stringify(agent.custom_args ?? [], null, 2));
+  const [customEnvText, setCustomEnvText] = useState("{}");
+  const [customEnvOriginalText, setCustomEnvOriginalText] = useState("{}");
+  const [customEnvLoaded, setCustomEnvLoaded] = useState(false);
+  const [mcpConfigText, setMcpConfigText] = useState("");
   const [saving, setSaving] = useState(false);
   const { upload, uploading } = useFileUpload();
+  const updateAgentInStore = useWorkspaceStore((s) => s.updateAgent);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setName(agent.name);
+    setDescription(agent.description ?? "");
+    setVisibility(agent.visibility);
+    setMaxTasks(agent.max_concurrent_tasks);
+    setModel(agent.model ?? "");
+    setThinkingLevel(agent.thinking_level ?? "");
+    setCustomArgsText(JSON.stringify(agent.custom_args ?? [], null, 2));
+    setMcpConfigText("");
+    setCustomEnvLoaded(false);
+    setCustomEnvText("{}");
+    setCustomEnvOriginalText("{}");
+  }, [agent]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getAgentEnv(agent.id)
+      .then((resp) => {
+        if (cancelled) return;
+        const next = JSON.stringify(resp.custom_env, null, 2);
+        setCustomEnvText(next);
+        setCustomEnvOriginalText(next);
+        setCustomEnvLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCustomEnvLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1217,16 +1260,65 @@ function SettingsTab({
     name !== agent.name ||
     description !== (agent.description ?? "") ||
     visibility !== agent.visibility ||
-    maxTasks !== agent.max_concurrent_tasks;
+    maxTasks !== agent.max_concurrent_tasks ||
+    model !== (agent.model ?? "") ||
+    thinkingLevel !== (agent.thinking_level ?? "") ||
+    customArgsText !== JSON.stringify(agent.custom_args ?? [], null, 2) ||
+    (customEnvLoaded && customEnvText !== customEnvOriginalText) ||
+    mcpConfigText.trim() !== "";
 
   const handleSave = async () => {
     if (!name.trim()) {
       toast.error("Name is required");
       return;
     }
+    let customArgs: string[];
+    let customEnv: Record<string, string> | null = null;
+    let mcpConfig: unknown | undefined;
+    try {
+      const parsedArgs = JSON.parse(customArgsText || "[]") as unknown;
+      if (!Array.isArray(parsedArgs) || parsedArgs.some((arg) => typeof arg !== "string")) {
+        throw new Error("Custom args must be a JSON string array");
+      }
+      customArgs = parsedArgs;
+      if (customEnvLoaded && customEnvText !== customEnvOriginalText) {
+        const parsedEnv = JSON.parse(customEnvText || "{}") as unknown;
+        if (!parsedEnv || typeof parsedEnv !== "object" || Array.isArray(parsedEnv)) {
+          throw new Error("Custom env must be a JSON object");
+        }
+        customEnv = parsedEnv as Record<string, string>;
+        if (Object.values(customEnv).some((value) => typeof value !== "string")) {
+          throw new Error("Custom env values must be strings");
+        }
+      }
+      if (mcpConfigText.trim()) {
+        mcpConfig = JSON.parse(mcpConfigText) as unknown;
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Invalid runtime configuration");
+      return;
+    }
     setSaving(true);
     try {
-      await onSave({ name: name.trim(), description, visibility, max_concurrent_tasks: maxTasks });
+      const updates: UpdateAgentRequest = {
+        name: name.trim(),
+        description,
+        visibility,
+        max_concurrent_tasks: maxTasks,
+        model,
+        thinking_level: thinkingLevel,
+        custom_args: customArgs,
+      };
+      if (mcpConfigText.trim()) {
+        updates.mcp_config = mcpConfig;
+      }
+      await onSave(updates);
+      if (customEnv) {
+        const envResult = await api.updateAgentEnv(agent.id, customEnv);
+        updateAgentInStore(agent.id, envResult.agent);
+        setCustomEnvOriginalText(JSON.stringify(customEnv, null, 2));
+      }
+      setMcpConfigText("");
       toast.success("Settings saved");
     } catch {
       toast.error("Failed to save settings");
@@ -1349,6 +1441,64 @@ function SettingsTab({
         </div>
       </div>
 
+      <div className="space-y-4 border-t pt-5">
+        <div>
+          <Label className="text-xs text-muted-foreground">Model</Label>
+          <Input
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="Use runtime default"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Thinking Level</Label>
+          <Input
+            value={thinkingLevel}
+            onChange={(e) => setThinkingLevel(e.target.value)}
+            placeholder="Use runtime default"
+            className="mt-1"
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">Custom Args</Label>
+          <Textarea
+            value={customArgsText}
+            onChange={(e) => setCustomArgsText(e.target.value)}
+            className="mt-1 min-h-24 font-mono text-xs"
+            spellCheck={false}
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">
+            Custom Env {agent.has_custom_env ? `(${agent.custom_env_key_count} keys)` : ""}
+          </Label>
+          <Textarea
+            value={customEnvText}
+            onChange={(e) => setCustomEnvText(e.target.value)}
+            className="mt-1 min-h-24 font-mono text-xs"
+            disabled={!customEnvLoaded}
+            spellCheck={false}
+          />
+        </div>
+
+        <div>
+          <Label className="text-xs text-muted-foreground">
+            MCP Config {agent.mcp_config_redacted ? "(configured)" : ""}
+          </Label>
+          <Textarea
+            value={mcpConfigText}
+            onChange={(e) => setMcpConfigText(e.target.value)}
+            placeholder={agent.mcp_config_redacted ? "Enter new JSON or null to clear" : "Optional JSON config"}
+            className="mt-1 min-h-24 font-mono text-xs"
+            spellCheck={false}
+          />
+        </div>
+      </div>
+
       <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
         {saving ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
         Save Changes
@@ -1381,7 +1531,7 @@ function AgentDetail({
 }: {
   agent: Agent;
   runtimes: RuntimeDevice[];
-  onUpdate: (id: string, data: Partial<Agent>) => Promise<void>;
+  onUpdate: (id: string, data: UpdateAgentRequest) => Promise<void>;
   onArchive: (id: string) => Promise<void>;
   onRestore: (id: string) => Promise<void>;
 }) {
@@ -1614,9 +1764,9 @@ export default function AgentsPage({
     selectAgent(agent.id);
   };
 
-  const handleUpdate = async (id: string, data: Record<string, unknown>) => {
+  const handleUpdate = async (id: string, data: UpdateAgentRequest) => {
     try {
-      await updateAgent(id, data as UpdateAgentRequest);
+      await updateAgent(id, data);
       toast.success("Agent updated");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to update agent");

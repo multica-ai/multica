@@ -38,8 +38,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		"--verbose",
 		"--permission-mode", "bypassPermissions",
 	}
+	var mcpConfigPath string
+	if len(opts.McpConfig) > 0 {
+		path, err := writeMcpConfigToTemp(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, err
+		}
+		mcpConfigPath = path
+		args = append(args, "--mcp-config", mcpConfigPath)
+	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
+	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--effort", opts.ThinkingLevel)
 	}
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
@@ -50,6 +63,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, b.cfg.Logger)...)
 	args = append(args, "-p", prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
@@ -68,7 +82,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[claude:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -85,6 +100,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		defer stdin.Close()
+		if mcpConfigPath != "" {
+			defer os.Remove(mcpConfigPath)
+		}
 
 		startTime := time.Now()
 		var output strings.Builder
@@ -151,7 +169,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			finalError = "execution cancelled"
 		} else if exitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+			finalError = withAgentStderr(fmt.Sprintf("claude exited with error: %v", exitErr), stderrBuf)
 		}
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -287,7 +305,7 @@ type claudeLogEntry struct {
 }
 
 type claudeMessageContent struct {
-	Role    string             `json:"role"`
+	Role    string               `json:"role"`
 	Content []claudeContentBlock `json:"content"`
 }
 
@@ -309,6 +327,14 @@ type claudeControlRequestPayload struct {
 
 // ── Shared helpers ──
 
+var claudeBlockedArgs = map[string]blockedArgMode{
+	"-p":                blockedStandalone,
+	"--output-format":   blockedWithValue,
+	"--permission-mode": blockedWithValue,
+	"--mcp-config":      blockedWithValue,
+	"--effort":          blockedWithValue,
+}
+
 func trySend(ch chan<- Message, msg Message) {
 	select {
 	case ch <- msg:
@@ -324,6 +350,23 @@ func buildEnv(extra map[string]string) []string {
 		env = append(env, k+"="+v)
 	}
 	return env
+}
+
+func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
+	f, err := os.CreateTemp("", "multica-mcp-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create mcp config temp file: %w", err)
+	}
+	if _, err := f.Write(raw); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write mcp config temp file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("close mcp config temp file: %w", err)
+	}
+	return f.Name(), nil
 }
 
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {

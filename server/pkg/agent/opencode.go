@@ -17,6 +17,14 @@ type opencodeBackend struct {
 	cfg Config
 }
 
+var opencodeBlockedArgs = map[string]blockedArgMode{
+	"--model":   blockedWithValue,
+	"--prompt":  blockedWithValue,
+	"--session": blockedWithValue,
+	"--variant": blockedWithValue,
+	"--format":  blockedWithValue,
+}
+
 func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -36,6 +44,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
+	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
 	}
@@ -45,6 +56,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--session", opts.ResumeSessionID)
 	}
+	args = append(args, filterCustomArgs(opts.CustomArgs, opencodeBlockedArgs, b.cfg.Logger)...)
 	args = append(args, prompt)
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
@@ -62,7 +74,8 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
+	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[opencode:stderr] "), agentStderrTailBytes)
+	cmd.Stderr = stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		cancel()
@@ -94,7 +107,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			scanResult.errMsg = "execution cancelled"
 		} else if exitErr != nil && scanResult.status == "completed" {
 			scanResult.status = "failed"
-			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
+			scanResult.errMsg = withAgentStderr(fmt.Sprintf("opencode exited with error: %v", exitErr), stderrBuf)
 		}
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())

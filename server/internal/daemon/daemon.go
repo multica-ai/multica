@@ -112,6 +112,22 @@ func (d *Daemon) RestartBinary() string {
 	return d.restartBinary
 }
 
+func isBlockedAgentEnvKey(key string) bool {
+	blocked := map[string]struct{}{
+		"MULTICA_TOKEN":        {},
+		"MULTICA_SERVER_URL":   {},
+		"MULTICA_DAEMON_PORT":  {},
+		"MULTICA_WORKSPACE_ID": {},
+		"MULTICA_AGENT_NAME":   {},
+		"MULTICA_AGENT_ID":     {},
+		"MULTICA_TASK_ID":      {},
+		"CODEX_HOME":           {},
+		"PATH":                 {},
+	}
+	_, ok := blocked[strings.ToUpper(key)]
+	return ok
+}
+
 // deregisterRuntimes notifies the server that all runtimes are going offline.
 func (d *Daemon) deregisterRuntimes() {
 	runtimeIDs := d.allRuntimeIDs()
@@ -862,10 +878,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	agentName := "agent"
 	var skills []SkillData
 	var instructions string
+	var model string
+	var thinkingLevel string
+	var customArgs []string
+	var customEnv map[string]string
+	var mcpConfig []byte
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 		skills = task.Agent.Skills
 		instructions = task.Agent.Instructions
+		model = task.Agent.Model
+		thinkingLevel = task.Agent.ThinkingLevel
+		customArgs = task.Agent.CustomArgs
+		customEnv = task.Agent.CustomEnv
+		mcpConfig = task.Agent.McpConfig
+	}
+	if model == "" {
+		model = entry.Model
 	}
 
 	// Prepare isolated execution environment.
@@ -911,10 +940,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	prompt := BuildPrompt(task)
 
-	// Pass the daemon's auth credentials and context so the spawned agent CLI
+	if task.AuthToken == "" {
+		return TaskResult{}, fmt.Errorf("claimed task did not include an agent task token")
+	}
+
+	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
 	agentEnv := map[string]string{
-		"MULTICA_TOKEN":        d.client.Token(),
+		"MULTICA_TOKEN":        task.AuthToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
 		"MULTICA_DAEMON_PORT":  fmt.Sprintf("%d", d.cfg.HealthPort),
 		"MULTICA_WORKSPACE_ID": task.WorkspaceID,
@@ -926,6 +959,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
+	}
+	for key, value := range customEnv {
+		if isBlockedAgentEnvKey(key) {
+			taskLog.Warn("ignoring blocked custom agent env key", "key", key)
+			continue
+		}
+		agentEnv[key] = value
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
@@ -940,7 +980,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", entry.Model,
+		"model", model,
+		"thinking_level", thinkingLevel,
+		"custom_args", len(customArgs),
+		"mcp_config", len(mcpConfig) > 0,
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -951,7 +994,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, taskLo
 
 	session, err := backend.Execute(ctx, prompt, agent.ExecOptions{
 		Cwd:             env.WorkDir,
-		Model:           entry.Model,
+		Model:           model,
+		ThinkingLevel:   thinkingLevel,
+		CustomArgs:      customArgs,
+		McpConfig:       mcpConfig,
 		Timeout:         d.cfg.AgentTimeout,
 		ResumeSessionID: task.PriorSessionID,
 	})

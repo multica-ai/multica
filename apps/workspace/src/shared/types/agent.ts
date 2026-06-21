@@ -69,6 +69,12 @@ export interface Agent {
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
+  model: string;
+  thinking_level: string;
+  custom_args: string[];
+  has_custom_env: boolean;
+  custom_env_key_count: number;
+  mcp_config_redacted: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -89,6 +95,11 @@ export interface CreateAgentRequest {
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
+  model?: string;
+  thinking_level?: string;
+  custom_args?: string[];
+  custom_env?: Record<string, string>;
+  mcp_config?: unknown;
   visibility?: AgentVisibility;
   max_concurrent_tasks?: number;
   tools?: AgentTool[];
@@ -102,6 +113,10 @@ export interface UpdateAgentRequest {
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;
+  model?: string;
+  thinking_level?: string;
+  custom_args?: string[];
+  mcp_config?: unknown;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;
@@ -151,6 +166,15 @@ export interface UpdateSkillRequest {
 
 export interface SetAgentSkillsRequest {
   skill_ids: string[];
+}
+
+export interface AgentEnvResponse {
+  custom_env: Record<string, string>;
+}
+
+export interface UpdateAgentEnvResponse {
+  custom_env: Record<string, string>;
+  agent: Agent;
 }
 
 export type RuntimePingStatus = "pending" | "running" | "completed" | "failed" | "timeout";

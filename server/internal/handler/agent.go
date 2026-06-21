@@ -23,6 +23,12 @@ type AgentResponse struct {
 	AvatarURL          *string         `json:"avatar_url"`
 	RuntimeMode        string          `json:"runtime_mode"`
 	RuntimeConfig      any             `json:"runtime_config"`
+	Model              string          `json:"model"`
+	ThinkingLevel      string          `json:"thinking_level"`
+	CustomArgs         []string        `json:"custom_args"`
+	HasCustomEnv       bool            `json:"has_custom_env"`
+	CustomEnvKeyCount  int             `json:"custom_env_key_count"`
+	McpConfigRedacted  bool            `json:"mcp_config_redacted"`
 	Visibility         string          `json:"visibility"`
 	Status             string          `json:"status"`
 	MaxConcurrentTasks int32           `json:"max_concurrent_tasks"`
@@ -61,6 +67,22 @@ func agentToResponse(a db.Agent) AgentResponse {
 		triggers = []any{}
 	}
 
+	var customArgs []string
+	if len(a.CustomArgs) > 0 {
+		_ = json.Unmarshal(a.CustomArgs, &customArgs)
+	}
+	if customArgs == nil {
+		customArgs = []string{}
+	}
+
+	customEnvKeyCount := 0
+	if len(a.CustomEnv) > 0 {
+		var customEnv map[string]string
+		if json.Unmarshal(a.CustomEnv, &customEnv) == nil {
+			customEnvKeyCount = len(customEnv)
+		}
+	}
+
 	return AgentResponse{
 		ID:                 uuidToString(a.ID),
 		WorkspaceID:        uuidToString(a.WorkspaceID),
@@ -71,6 +93,12 @@ func agentToResponse(a db.Agent) AgentResponse {
 		AvatarURL:          textToPtr(a.AvatarUrl),
 		RuntimeMode:        a.RuntimeMode,
 		RuntimeConfig:      rc,
+		Model:              a.Model.String,
+		ThinkingLevel:      a.ThinkingLevel.String,
+		CustomArgs:         customArgs,
+		HasCustomEnv:       customEnvKeyCount > 0,
+		CustomEnvKeyCount:  customEnvKeyCount,
+		McpConfigRedacted:  len(a.McpConfig) > 0,
 		Visibility:         a.Visibility,
 		Status:             a.Status,
 		MaxConcurrentTasks: a.MaxConcurrentTasks,
@@ -120,10 +148,16 @@ type AgentTaskResponse struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, skill files, instructions).
 type TaskAgentData struct {
-	ID           string                   `json:"id"`
-	Name         string                   `json:"name"`
-	Instructions string                   `json:"instructions"`
-	Skills       []service.AgentSkillData `json:"skills,omitempty"`
+	ID            string                   `json:"id"`
+	Name          string                   `json:"name"`
+	Instructions  string                   `json:"instructions"`
+	Skills        []service.AgentSkillData `json:"skills,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	ThinkingLevel string                   `json:"thinking_level,omitempty"`
+	CustomArgs    []string                 `json:"custom_args,omitempty"`
+	CustomEnv     map[string]string        `json:"custom_env,omitempty"`
+	McpConfig     json.RawMessage          `json:"mcp_config,omitempty"`
+	RuntimeConfig json.RawMessage          `json:"runtime_config,omitempty"`
 }
 
 func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
@@ -217,16 +251,21 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name               string  `json:"name"`
-	Description        string  `json:"description"`
-	Instructions       string  `json:"instructions"`
-	AvatarURL          *string `json:"avatar_url"`
-	RuntimeID          string  `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
-	Visibility         string  `json:"visibility"`
-	MaxConcurrentTasks int32   `json:"max_concurrent_tasks"`
-	Tools              any     `json:"tools"`
-	Triggers           any     `json:"triggers"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Instructions       string            `json:"instructions"`
+	AvatarURL          *string           `json:"avatar_url"`
+	RuntimeID          string            `json:"runtime_id"`
+	RuntimeConfig      any               `json:"runtime_config"`
+	Model              string            `json:"model"`
+	ThinkingLevel      string            `json:"thinking_level"`
+	CustomArgs         []string          `json:"custom_args"`
+	CustomEnv          map[string]string `json:"custom_env"`
+	McpConfig          json.RawMessage   `json:"mcp_config"`
+	Visibility         string            `json:"visibility"`
+	MaxConcurrentTasks int32             `json:"max_concurrent_tasks"`
+	Tools              any               `json:"tools"`
+	Triggers           any               `json:"triggers"`
 }
 
 func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +321,21 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		triggers = defaultAgentTriggers()
 	}
 
+	customEnv, _ := json.Marshal(req.CustomEnv)
+	if req.CustomEnv == nil {
+		customEnv = []byte("{}")
+	}
+
+	customArgs, _ := json.Marshal(req.CustomArgs)
+	if req.CustomArgs == nil {
+		customArgs = []byte("[]")
+	}
+
+	var mcpConfig []byte
+	if len(req.McpConfig) > 0 && string(req.McpConfig) != "null" {
+		mcpConfig = req.McpConfig
+	}
+
 	agent, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        parseUUID(workspaceID),
 		Name:               req.Name,
@@ -290,6 +344,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		AvatarUrl:          ptrToText(req.AvatarURL),
 		RuntimeMode:        runtime.RuntimeMode,
 		RuntimeConfig:      rc,
+		Model:              pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:      pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		CustomArgs:         customArgs,
+		CustomEnv:          customEnv,
+		McpConfig:          mcpConfig,
 		RuntimeID:          runtime.ID,
 		Visibility:         req.Visibility,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
@@ -316,17 +375,21 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name               *string `json:"name"`
-	Description        *string `json:"description"`
-	Instructions       *string `json:"instructions"`
-	AvatarURL          *string `json:"avatar_url"`
-	RuntimeID          *string `json:"runtime_id"`
-	RuntimeConfig      any     `json:"runtime_config"`
-	Visibility         *string `json:"visibility"`
-	Status             *string `json:"status"`
-	MaxConcurrentTasks *int32  `json:"max_concurrent_tasks"`
-	Tools              any     `json:"tools"`
-	Triggers           any     `json:"triggers"`
+	Name               *string          `json:"name"`
+	Description        *string          `json:"description"`
+	Instructions       *string          `json:"instructions"`
+	AvatarURL          *string          `json:"avatar_url"`
+	RuntimeID          *string          `json:"runtime_id"`
+	RuntimeConfig      any              `json:"runtime_config"`
+	Model              *string          `json:"model"`
+	ThinkingLevel      *string          `json:"thinking_level"`
+	CustomArgs         *[]string        `json:"custom_args"`
+	McpConfig          *json.RawMessage `json:"mcp_config"`
+	Visibility         *string          `json:"visibility"`
+	Status             *string          `json:"status"`
+	MaxConcurrentTasks *int32           `json:"max_concurrent_tasks"`
+	Tools              any              `json:"tools"`
+	Triggers           any              `json:"triggers"`
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -357,8 +420,19 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var rawFields map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&rawFields); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if _, ok := rawFields["custom_env"]; ok {
+		writeError(w, http.StatusBadRequest, "custom_env must be updated via the agent env endpoint")
+		return
+	}
+	rawBody, _ := json.Marshal(rawFields)
+
 	var req UpdateAgentRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(rawBody, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -381,6 +455,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.RuntimeConfig != nil {
 		rc, _ := json.Marshal(req.RuntimeConfig)
 		params.RuntimeConfig = rc
+	}
+	if req.Model != nil {
+		params.Model = pgtype.Text{String: *req.Model, Valid: *req.Model != ""}
+	}
+	if rawThinkingLevel, ok := rawFields["thinking_level"]; ok {
+		if string(rawThinkingLevel) != "null" && req.ThinkingLevel != nil && *req.ThinkingLevel != "" {
+			params.ThinkingLevel = pgtype.Text{String: *req.ThinkingLevel, Valid: true}
+		}
 	}
 	if req.RuntimeID != nil {
 		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
@@ -411,12 +493,35 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		triggers, _ := json.Marshal(req.Triggers)
 		params.Triggers = triggers
 	}
+	if req.CustomArgs != nil {
+		customArgs, _ := json.Marshal(*req.CustomArgs)
+		params.CustomArgs = customArgs
+	}
+	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && string(rawMcpConfig) != "null" && req.McpConfig != nil {
+		params.McpConfig = []byte(*req.McpConfig)
+	}
 
 	agent, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
+	}
+	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && string(rawMcpConfig) == "null" {
+		agent, err = h.Queries.ClearAgentMcpConfig(r.Context(), parseUUID(id))
+		if err != nil {
+			slog.Warn("clear agent mcp config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear agent mcp config")
+			return
+		}
+	}
+	if rawThinkingLevel, ok := rawFields["thinking_level"]; ok && (string(rawThinkingLevel) == "null" || req.ThinkingLevel == nil || *req.ThinkingLevel == "") {
+		agent, err = h.Queries.ClearAgentThinkingLevel(r.Context(), parseUUID(id))
+		if err != nil {
+			slog.Warn("clear agent thinking level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear agent thinking level")
+			return
+		}
 	}
 
 	resp := agentToResponse(agent)
@@ -425,6 +530,77 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
 	writeJSON(w, http.StatusOK, resp)
+}
+
+type agentEnvResponse struct {
+	CustomEnv map[string]string `json:"custom_env"`
+}
+
+type updateAgentEnvRequest struct {
+	CustomEnv map[string]string `json:"custom_env"`
+}
+
+func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+
+	customEnv := map[string]string{}
+	if len(agent.CustomEnv) > 0 {
+		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decode agent env")
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, agentEnvResponse{CustomEnv: customEnv})
+}
+
+func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	agent, ok := h.loadAgentForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageAgent(w, r, agent) {
+		return
+	}
+
+	var req updateAgentEnvRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.CustomEnv == nil {
+		req.CustomEnv = map[string]string{}
+	}
+	for key := range req.CustomEnv {
+		if key == "" {
+			writeError(w, http.StatusBadRequest, "custom_env contains an empty key")
+			return
+		}
+	}
+
+	customEnv, _ := json.Marshal(req.CustomEnv)
+	updated, err := h.Queries.UpdateAgentCustomEnv(r.Context(), db.UpdateAgentCustomEnvParams{
+		ID:        parseUUID(id),
+		CustomEnv: customEnv,
+	})
+	if err != nil {
+		slog.Warn("update agent env failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to update agent env")
+		return
+	}
+
+	resp := agentToResponse(updated)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
+	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": resp})
+	writeJSON(w, http.StatusOK, map[string]any{"custom_env": req.CustomEnv, "agent": resp})
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
