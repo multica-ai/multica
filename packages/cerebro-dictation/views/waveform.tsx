@@ -28,6 +28,15 @@ const MIN_BAR = 2;
  *
  * Purely presentational: it neither owns the stream nor controls recording —
  * the MicButton drives both and hands the stream down only while recording.
+ *
+ * iOS/WebKit caveat (FIR-1637): on iPhone, routing the *recording* MediaStream
+ * into a Web Audio AudioContext starves the MediaRecorder reading the same
+ * stream — the meter animates but the recorder captures an EMPTY clip, so the
+ * transcribe fails with "Recording failed" (Safari + Chrome, both WebKit).
+ * Desktop tolerates two consumers; iOS does not. So we tap a *cloned* audio
+ * track here and leave the original stream exclusively to the recorder. The
+ * clone shares the same hardware source, so the meter is identical, but the
+ * recorder keeps an uncontended capture path.
  */
 export function Waveform({ stream, className }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -42,8 +51,13 @@ export function Waveform({ stream, className }: WaveformProps) {
       (globalThis as WebkitAudioWindow).webkitAudioContext;
     if (!AudioContextCtor) return;
 
+    // Tap a clone so the recorder keeps the original stream to itself (see the
+    // iOS/WebKit note above). Fall back to the original if cloning is missing.
+    const meterStream =
+      typeof stream.clone === "function" ? stream.clone() : stream;
+
     const ctx = new AudioContextCtor();
-    const source = ctx.createMediaStreamSource(stream);
+    const source = ctx.createMediaStreamSource(meterStream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.7;
@@ -102,6 +116,11 @@ export function Waveform({ stream, className }: WaveformProps) {
         source.disconnect();
       } catch {
         // already disconnected — safe to ignore
+      }
+      // Stop the cloned track so the clone never outlives the meter. Never
+      // touch the original — the recorder still owns it.
+      if (meterStream !== stream) {
+        for (const track of meterStream.getTracks()) track.stop();
       }
       void ctx.close?.();
     };

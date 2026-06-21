@@ -377,9 +377,12 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     teardown();
 
     if (audio.size === 0) {
+      // Carry the format + chunk count so an empty capture on a device we
+      // can't reproduce (e.g. iPhone) is diagnosable from the toast alone.
+      const fmt = chunks[0]?.type || recorder.mimeType || "unknown";
       reportError({
         kind: "recording-failed",
-        message: "Recording produced no audio.",
+        message: `no audio captured (${fmt}, ${chunks.length} chunk(s))`,
       });
       return;
     }
