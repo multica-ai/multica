@@ -219,6 +219,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
   memberListOptions: () => ({ queryKey: ["members"] }),
+  // CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 dialog host (rendered in the sidebar) calls agentListOptions; mock it so the sidebar renders.
+  agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
