@@ -1142,8 +1142,21 @@ WITH victims AS (
           WHERE rt.id = atq.runtime_id
             AND rt.paused_at IS NOT NULL
       )
+      -- CEREBRO-PATCH(offline-parked-queued-grace): FIR-1722 — spare a parked queued
+      -- task on a runtime that is only temporarily offline (the runtime row still
+      -- exists, so it is expected to reconnect and claim it on the same runtime_id)
+      -- until a longer grace window passes, instead of deleting it at the generic 2h
+      -- TTL. Without this a comment-wake queued while the machine was off (e.g.
+      -- overnight) is expired before the daemon returns and never runs. The grace is
+      -- bounded, so a genuinely dead runtime's backlog still drains, just later.
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime rt
+          WHERE rt.id = atq.runtime_id
+            AND rt.status = 'offline'
+            AND atq.created_at >= now() - make_interval(secs => $2::double precision)
+      )
     ORDER BY atq.created_at ASC
-    LIMIT $2::int
+    LIMIT $3::int
     FOR UPDATE SKIP LOCKED
 )
 UPDATE agent_task_queue t
@@ -1160,12 +1173,22 @@ WHERE t.id = v.id
       WHERE rt.id = t.runtime_id
         AND rt.paused_at IS NOT NULL
   )
+  -- CEREBRO-PATCH(offline-parked-queued-grace): mirror the CTE offline-grace exemption
+  -- in the apply-time re-check so a runtime that went offline between selection and
+  -- update still has its parked task spared (FIR-1722).
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime rt
+      WHERE rt.id = t.runtime_id
+        AND rt.status = 'offline'
+        AND t.created_at >= now() - make_interval(secs => $2::double precision)
+  )
 RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.original_user_id, t.delegating_agent_id, t.source_task_id, t.delegation_source, t.wait_reason, t.title, t.model_override
 `
 
 type ExpireStaleQueuedTasksParams struct {
-	TtlSecs    float64 `json:"ttl_secs"`
-	MaxPerTick int32   `json:"max_per_tick"`
+	TtlSecs          float64 `json:"ttl_secs"`
+	OfflineGraceSecs float64 `json:"offline_grace_secs"`
+	MaxPerTick       int32   `json:"max_per_tick"`
 }
 
 // Fails tasks that have been sitting in 'queued' for longer than the TTL,
@@ -1196,7 +1219,7 @@ type ExpireStaleQueuedTasksParams struct {
 // the DB when the backlog is large — the sweeper drains the rest on
 // subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.OfflineGraceSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}

@@ -539,6 +539,19 @@ WITH victims AS (
           WHERE rt.id = atq.runtime_id
             AND rt.paused_at IS NOT NULL
       )
+      -- CEREBRO-PATCH(offline-parked-queued-grace): FIR-1722 — spare a parked queued
+      -- task on a runtime that is only temporarily offline (the runtime row still
+      -- exists, so it is expected to reconnect and claim it on the same runtime_id)
+      -- until a longer grace window passes, instead of deleting it at the generic 2h
+      -- TTL. Without this a comment-wake queued while the machine was off (e.g.
+      -- overnight) is expired before the daemon returns and never runs. The grace is
+      -- bounded, so a genuinely dead runtime's backlog still drains, just later.
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime rt
+          WHERE rt.id = atq.runtime_id
+            AND rt.status = 'offline'
+            AND atq.created_at >= now() - make_interval(secs => @offline_grace_secs::double precision)
+      )
     ORDER BY atq.created_at ASC
     LIMIT @max_per_tick::int
     FOR UPDATE SKIP LOCKED
@@ -556,6 +569,15 @@ WHERE t.id = v.id
       SELECT 1 FROM agent_runtime rt
       WHERE rt.id = t.runtime_id
         AND rt.paused_at IS NOT NULL
+  )
+  -- CEREBRO-PATCH(offline-parked-queued-grace): mirror the CTE offline-grace exemption
+  -- in the apply-time re-check so a runtime that went offline between selection and
+  -- update still has its parked task spared (FIR-1722).
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime rt
+      WHERE rt.id = t.runtime_id
+        AND rt.status = 'offline'
+        AND t.created_at >= now() - make_interval(secs => @offline_grace_secs::double precision)
   )
 RETURNING t.*;
 

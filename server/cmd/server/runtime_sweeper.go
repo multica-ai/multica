@@ -54,6 +54,13 @@ const (
 	// don't expire legitimately-pending work, while still draining the historical
 	// 87k autopilot backlog within ~24h once enabled.
 	queuedTTLSeconds = 2 * 3600.0
+	// CEREBRO-PATCH(offline-parked-queued-grace): FIR-1722 — queued tasks on a
+	// runtime that is merely temporarily offline (the runtime row still exists, so
+	// it is expected to reconnect and claim them on the same runtime_id) survive
+	// this longer grace instead of the generic 2h TTL, so a comment-wake queued
+	// while the machine was off (e.g. overnight) still runs when the daemon returns.
+	// Bounded so a genuinely dead runtime's backlog still drains, just a day later.
+	queuedOfflineGraceSeconds = 24 * 3600.0
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
 	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
@@ -269,8 +276,10 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 // big backlog can't monopolise the DB.
 func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
 	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTLSeconds,
-		MaxPerTick: queuedExpireBatchSize,
+		TtlSecs: queuedTTLSeconds,
+		// CEREBRO-PATCH(offline-parked-queued-grace): longer grace for temporarily-offline runtimes (FIR-1722).
+		OfflineGraceSecs: queuedOfflineGraceSeconds,
+		MaxPerTick:       queuedExpireBatchSize,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)

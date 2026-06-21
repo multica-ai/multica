@@ -724,6 +724,114 @@ func TestExpireStaleQueuedTasksSkipsPausedRuntime(t *testing.T) {
 	}
 }
 
+// TestExpireStaleQueuedTasksGracesOfflineRuntime verifies the
+// CEREBRO-PATCH(offline-parked-queued-grace-test) for FIR-1722: a queued task
+// on a runtime that is merely temporarily offline survives the generic TTL up
+// to the longer offline grace window (so it still runs when the daemon
+// reconnects), while a task older than the grace still drains.
+func TestExpireStaleQueuedTasksGracesOfflineRuntime(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID, userID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT m.user_id FROM member m
+		JOIN "user" u ON u.id = m.user_id
+		WHERE u.email = $1
+		LIMIT 1
+	`, integrationTestEmail).Scan(&userID); err != nil {
+		t.Fatalf("failed to find test user: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, owner_id)
+		VALUES ($1, 'offline-grace-test-daemon', 'offline-grace-test-runtime', 'local', 'claude', 'offline', '', $2)
+		RETURNING id
+	`, testWorkspaceID, userID).Scan(&runtimeID); err != nil {
+		t.Fatalf("failed to create test runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		VALUES ($1, 'offline-grace-test-agent', 'local', $2)
+		RETURNING id
+	`, testWorkspaceID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("failed to create test agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	// Two issues: the DB enforces one pending task per (issue, agent), so the two
+	// queued tasks must live on separate issues (same offline runtime + agent).
+	makeIssue := func(title string) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			WITH bumped AS (
+				UPDATE workspace SET issue_counter = issue_counter + 1
+				WHERE id = $1 RETURNING issue_counter
+			)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, assignee_type, assignee_id, number)
+			SELECT $1, $3, 'todo', 'none', 'member', m.user_id, 'agent', $2, (SELECT issue_counter FROM bumped)
+			FROM member m WHERE m.workspace_id = $1 LIMIT 1
+			RETURNING id
+		`, testWorkspaceID, agentID, title).Scan(&id); err != nil {
+			t.Fatalf("failed to create issue: %v", err)
+		}
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, id)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, id)
+		})
+		return id
+	}
+	withinIssueID := makeIssue("Offline grace within-window test")
+	beyondIssueID := makeIssue("Offline grace beyond-window test")
+
+	// Both tasks are older than the 1h TTL. withinGrace is 2h old (inside the
+	// 24h offline grace → spared); beyondGrace is 48h old (outside the grace →
+	// expired even though the runtime is offline).
+	var withinGraceID, beyondGraceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '2 hours')
+		RETURNING id
+	`, agentID, runtimeID, withinIssueID).Scan(&withinGraceID); err != nil {
+		t.Fatalf("failed to insert within-grace task: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'queued', 0, now() - interval '48 hours')
+		RETURNING id
+	`, agentID, runtimeID, beyondIssueID).Scan(&beyondGraceID); err != nil {
+		t.Fatalf("failed to insert beyond-grace task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	if _, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+		TtlSecs:          3600.0,
+		OfflineGraceSecs: 24 * 3600.0,
+		MaxPerTick:       10000,
+	}); err != nil {
+		t.Fatalf("ExpireStaleQueuedTasks failed: %v", err)
+	}
+
+	var withinStatus, beyondStatus, beyondReason string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, withinGraceID).Scan(&withinStatus); err != nil {
+		t.Fatalf("failed to read within-grace task: %v", err)
+	}
+	if withinStatus != "queued" {
+		t.Fatalf("within-grace task on offline runtime: expected status=queued, got %q", withinStatus)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, beyondGraceID).Scan(&beyondStatus, &beyondReason); err != nil {
+		t.Fatalf("failed to read beyond-grace task: %v", err)
+	}
+	if beyondStatus != "failed" || beyondReason != "queued_expired" {
+		t.Fatalf("beyond-grace task: expected failed/queued_expired, got %q/%q", beyondStatus, beyondReason)
+	}
+}
+
 // TestExpireStaleQueuedTasksRespectsBatchLimit verifies the per-tick cap so
 // that a large historical backlog cannot monopolise a single sweep.
 func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
