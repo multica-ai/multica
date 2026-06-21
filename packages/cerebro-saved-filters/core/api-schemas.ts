@@ -37,6 +37,19 @@ const filterSnapshotSchema = z
   })
   .transform((s) => s as FilterSnapshot);
 
+// Visibility drift downgrades to "private" rather than throwing — a never-seen
+// value from a newer backend must not white-screen the dropdown.
+const visibilitySchema = z
+  .enum(["private", "shared", "workspace"])
+  .catch("private");
+
+const shareTargetSchema = z
+  .object({
+    target_type: z.enum(["group", "member"]),
+    target_id: z.string(),
+  })
+  .transform((s) => ({ targetType: s.target_type, targetId: s.target_id }));
+
 export const savedFilterSchema = z
   .object({
     id: z.string(),
@@ -44,6 +57,11 @@ export const savedFilterSchema = z
     surface: z.string().default("issues"),
     filter_state: filterSnapshotSchema.catch(EMPTY_SNAPSHOT),
     position: z.number().default(0),
+    visibility: visibilitySchema.default("private"),
+    owner_id: z.string().default(""),
+    owner_name: z.string().default(""),
+    is_owner: z.boolean().default(true),
+    shares: z.array(shareTargetSchema).optional(),
     created_at: z.string().default(""),
     updated_at: z.string().default(""),
   })
@@ -54,9 +72,21 @@ export const savedFilterSchema = z
       surface: row.surface,
       filterState: row.filter_state,
       position: row.position,
+      visibility: row.visibility,
+      ownerId: row.owner_id,
+      ownerName: row.owner_name || undefined,
+      isOwner: row.is_owner,
+      shares: row.shares,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }),
   );
 
 export const savedFilterListSchema = z.array(savedFilterSchema);
+
+// The can-share gate response. Defaults to false so a drifted/empty body never
+// accidentally exposes the share controls.
+export const canShareSchema = z
+  .object({ can_share: z.boolean().default(false) })
+  .transform((r) => r.can_share)
+  .catch(false);

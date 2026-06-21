@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-groups": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",

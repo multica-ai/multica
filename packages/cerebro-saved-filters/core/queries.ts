@@ -6,8 +6,10 @@ import {
 } from "@tanstack/react-query";
 
 import {
+  canShareFilters,
   createSavedFilter,
   deleteSavedFilter,
+  getSavedFilter,
   listSavedFilters,
   updateSavedFilter,
 } from "./api";
@@ -20,6 +22,9 @@ export const savedFiltersKeys = {
   all: (wsId: string) => ["cerebro", "saved-filters", wsId] as const,
   list: (wsId: string, surface?: string) =>
     [...savedFiltersKeys.all(wsId), surface ?? "*"] as const,
+  detail: (wsId: string, id: string) =>
+    [...savedFiltersKeys.all(wsId), "detail", id] as const,
+  canShare: (wsId: string) => [...savedFiltersKeys.all(wsId), "can-share"] as const,
 };
 
 export function savedFiltersOptions(wsId: string, surface?: string) {
@@ -33,6 +38,29 @@ export function savedFiltersOptions(wsId: string, surface?: string) {
 
 export function useSavedFilters(wsId: string, surface?: string) {
   return useQuery(savedFiltersOptions(wsId, surface));
+}
+
+// useSavedFilter fetches a single filter with its share targets — used by the
+// share dialog. Disabled until an id is supplied so opening the dialog drives
+// the fetch.
+export function useSavedFilter(wsId: string, id: string | null) {
+  return useQuery({
+    queryKey: savedFiltersKeys.detail(wsId, id ?? ""),
+    queryFn: () => getSavedFilter(id as string),
+    enabled: !!wsId && !!id,
+    staleTime: 10 * 1000,
+  });
+}
+
+// useCanShareFilters resolves the Fase 4 gate once per workspace and caches it
+// for the session — the answer rarely changes mid-session.
+export function useCanShareFilters(wsId: string) {
+  return useQuery({
+    queryKey: savedFiltersKeys.canShare(wsId),
+    queryFn: () => canShareFilters(),
+    enabled: !!wsId,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useCreateSavedFilter(wsId: string) {

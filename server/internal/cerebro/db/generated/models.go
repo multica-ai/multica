@@ -932,6 +932,16 @@ type CerebroSavedFilter struct {
 	Position    int32              `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Visibility  string             `json:"visibility"`
+}
+
+type CerebroSavedFilterShare struct {
+	ID            pgtype.UUID        `json:"id"`
+	SavedFilterID pgtype.UUID        `json:"saved_filter_id"`
+	TargetType    string             `json:"target_type"`
+	TargetID      pgtype.UUID        `json:"target_id"`
+	CreatedBy     pgtype.UUID        `json:"created_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroSearchEmbeddingQueue struct {

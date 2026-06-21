@@ -20,12 +20,36 @@ export interface FilterSnapshot {
   agentRunningFilter: boolean;
 }
 
+/**
+ * Who may USE a saved filter (FIR-1659 Fase 3), mirroring the folder sharing
+ * model the app already uses:
+ *   private    — only the owner.
+ *   shared     — the owner plus the explicit member/group `shares` targets.
+ *   workspace  — every member of the workspace.
+ */
+export type SavedFilterVisibility = "private" | "shared" | "workspace";
+
+/** One group or member a `shared` filter is shared with. */
+export interface SavedFilterShareTarget {
+  targetType: "group" | "member";
+  targetId: string;
+}
+
 export interface SavedFilter {
   id: string;
   name: string;
   surface: string;
   filterState: FilterSnapshot;
   position: number;
+  visibility: SavedFilterVisibility;
+  /** The member who created the filter (their user id). */
+  ownerId: string;
+  /** Display name of the owner — present on filters shared by someone else. */
+  ownerName?: string;
+  /** True when the calling member owns the filter (may rename/share/delete). */
+  isOwner: boolean;
+  /** Share targets — only returned on the single-filter GET (owner-only). */
+  shares?: SavedFilterShareTarget[];
   createdAt: string;
   updatedAt: string;
 }
@@ -35,10 +59,14 @@ export interface CreateSavedFilterInput {
   surface?: string;
   filterState: FilterSnapshot;
   position?: number;
+  visibility?: SavedFilterVisibility;
+  shares?: SavedFilterShareTarget[];
 }
 
 export interface UpdateSavedFilterInput {
   name?: string;
   filterState?: FilterSnapshot;
   position?: number;
+  visibility?: SavedFilterVisibility;
+  shares?: SavedFilterShareTarget[];
 }

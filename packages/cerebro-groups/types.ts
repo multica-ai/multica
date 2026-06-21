@@ -63,7 +63,10 @@ export const cerebroGroupMemberListSchema = z.array(cerebroGroupMemberSchema);
 // response shapes. All non-key fields are nullable so an older or newer backend
 // can drift without white-screening.
 
-export type CerebroGroupCapability = "create_runtime" | "create_agent";
+export type CerebroGroupCapability =
+  | "create_runtime"
+  | "create_agent"
+  | "create_shared_filters";
 
 export interface CerebroGroupCapabilityRow {
   group_id: string;

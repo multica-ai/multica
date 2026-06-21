@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { EMPTY_SNAPSHOT, savedFilterListSchema, savedFilterSchema } from "./api-schemas";
+import {
+  EMPTY_SNAPSHOT,
+  canShareSchema,
+  savedFilterListSchema,
+  savedFilterSchema,
+} from "./api-schemas";
 import { snapshotsEqual } from "./filter-snapshot";
 
 describe("savedFilterSchema", () => {
@@ -38,6 +43,36 @@ describe("savedFilterSchema", () => {
     ]);
     expect(parsed).toHaveLength(1);
     expect(parsed[0]!.position).toBe(0);
+    // Fase 3 fields default safely when an older backend omits them.
+    expect(parsed[0]!.visibility).toBe("private");
+    expect(parsed[0]!.isOwner).toBe(true);
+  });
+
+  it("maps Fase 3 sharing fields and tolerates unknown visibility", () => {
+    const parsed = savedFilterSchema.parse({
+      id: "f3",
+      name: "Team filter",
+      filter_state: {},
+      visibility: "from-the-future",
+      owner_id: "u1",
+      owner_name: "Jesper",
+      is_owner: false,
+      shares: [{ target_type: "group", target_id: "g1" }],
+    });
+    // Unknown visibility downgrades to private rather than throwing.
+    expect(parsed.visibility).toBe("private");
+    expect(parsed.ownerId).toBe("u1");
+    expect(parsed.ownerName).toBe("Jesper");
+    expect(parsed.isOwner).toBe(false);
+    expect(parsed.shares).toEqual([{ targetType: "group", targetId: "g1" }]);
+  });
+});
+
+describe("canShareSchema", () => {
+  it("reads the gate and defaults to false on a malformed body", () => {
+    expect(canShareSchema.parse({ can_share: true })).toBe(true);
+    expect(canShareSchema.parse({})).toBe(false);
+    expect(canShareSchema.parse(null)).toBe(false);
   });
 });
 

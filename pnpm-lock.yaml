@@ -3126,6 +3126,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-groups':
+        specifier: workspace:*
+        version: link:../cerebro-groups
       '@multica/core':
         specifier: workspace:*
         version: link:../core

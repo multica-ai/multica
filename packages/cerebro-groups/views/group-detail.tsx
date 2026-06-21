@@ -1121,6 +1121,14 @@ function CapabilitiesSection({
           onChange={(next) => onToggle("create_agent", next)}
           testId="capability-create-agent"
         />
+        <CapabilityRow
+          label="Create shared filters"
+          tooltip="Members of this group can save issue filters and share them with colleagues, groups or the whole team. Everyone can always create personal filters; this only controls sharing."
+          checked={has("create_shared_filters")}
+          disabled={!isAdmin || grant.isPending || revoke.isPending}
+          onChange={(next) => onToggle("create_shared_filters", next)}
+          testId="capability-create-shared-filters"
+        />
       </div>
     </section>
   );

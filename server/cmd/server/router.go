@@ -1997,7 +1997,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters REST surface.
 			r.Route("/api/cerebro/saved-filters", func(r chi.Router) {
 				r.Get("/", cerebroSavedFiltersHandler.List)
+				// CEREBRO-PATCH(cerebro-saved-filters-share-routes): FIR-1659 Fase 3/4 share gate + single-filter GET.
+				r.Get("/can-share", cerebroSavedFiltersHandler.CanShare)
 				r.Post("/", cerebroSavedFiltersHandler.Create)
+				r.Get("/{id}", cerebroSavedFiltersHandler.Get)
 				r.Patch("/{id}", cerebroSavedFiltersHandler.Update)
 				r.Delete("/{id}", cerebroSavedFiltersHandler.Delete)
 			})
