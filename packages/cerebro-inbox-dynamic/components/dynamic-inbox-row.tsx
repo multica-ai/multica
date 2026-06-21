@@ -103,15 +103,10 @@ export function DynamicInboxRow({
   }
 
   // FIR-1702 — every row carries a stable key so the scroll anchor
-  // (useInboxScrollAnchor) can hold the viewport still while the list re-sorts,
-  // and the "agent is working" loader can sit on the right row. The key shape
-  // mirrors entryKey() / selectedKey.
+  // (useInboxScrollAnchor) can hold the viewport still while the list re-sorts.
+  // The key shape mirrors entryKey() / selectedKey.
   const entryDataKey =
     entry.kind === "notif" ? entry.item.issue_id ?? entry.item.id : entry.id;
-  // FIR-1702 — a small loader on the row whose agent is actively running, so
-  // "the message you just started" shows immediate, in-place progress instead
-  // of silently jumping to the top of the list.
-  const showRunLoader = agentRunState === "active" && !isArchivedView;
 
   // TECH-3579 — the favorite toggle. Rather than touch the shared upstream row
   // components, it sits as an overlay over the leading avatar (all three row
@@ -121,15 +116,6 @@ export function DynamicInboxRow({
   return (
     <div className="relative" data-inbox-entry-key={entryDataKey}>
       {row}
-      {showRunLoader && (
-        <span
-          className="pointer-events-none absolute inset-x-2 bottom-0 h-0.5 overflow-hidden rounded-full bg-blue-500/15"
-          title="Agent is working"
-          aria-hidden
-        >
-          <span className="block h-full w-full animate-pulse rounded-full bg-blue-500" />
-        </span>
-      )}
       {favoritesEnabled && !isArchivedView && (
         <FavoriteStar active={!!isFavorite} onToggle={() => onToggleFavorite?.(entry)} />
       )}

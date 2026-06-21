@@ -134,7 +134,7 @@ describe("DynamicInboxRow read-on-select (TECH-3709)", () => {
   });
 });
 
-describe("DynamicInboxRow scroll anchor + run loader (FIR-1702)", () => {
+describe("DynamicInboxRow scroll anchor (FIR-1702)", () => {
   it("tags a notif row with its issue-id anchor key (matches selectedKey)", () => {
     const { container } = render(
       <DynamicInboxRow entry={notifEntry(false)} isSelected={false} onSelect={noop} onArchive={noop} />,
@@ -150,29 +150,12 @@ describe("DynamicInboxRow scroll anchor + run loader (FIR-1702)", () => {
     expect(container.querySelector('[data-inbox-entry-key="c1"]')).not.toBeNull();
   });
 
-  it("shows the working loader only while the agent is actively running", () => {
-    const { container, rerender } = render(
-      <DynamicInboxRow entry={notifEntry(false)} isSelected={false} onSelect={noop} onArchive={noop} />,
-    );
-    expect(container.querySelector('[title="Agent is working"]')).toBeNull();
-    rerender(
-      <DynamicInboxRow
-        entry={notifEntry(false)}
-        isSelected={false}
-        agentRunState="active"
-        onSelect={noop}
-        onArchive={noop}
-      />,
-    );
-    expect(container.querySelector('[title="Agent is working"]')).not.toBeNull();
-  });
-
-  it("does not show the loader for a merely queued run", () => {
+  it("never renders the working-loader bar, even while an agent is active", () => {
     const { container } = render(
       <DynamicInboxRow
         entry={notifEntry(false)}
         isSelected={false}
-        agentRunState="queued"
+        agentRunState="active"
         onSelect={noop}
         onArchive={noop}
       />,
