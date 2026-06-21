@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { MicButton } from "./mic-button";
-import { createHttpTranscriber } from "../http-transcriber";
+import { createHttpTranscriber, createWarmup } from "../http-transcriber";
 import type { DictationStatus } from "../types";
 
 export interface EditorDictationMicProps {
@@ -45,6 +45,13 @@ export function EditorDictationMic({
         : undefined,
     [workspaceId],
   );
+  const warmup = useMemo(
+    () =>
+      workspaceId
+        ? createWarmup(`/api/workspaces/${workspaceId}/cerebro/dictation/warmup`)
+        : undefined,
+    [workspaceId],
+  );
 
   if (!workspaceId || !transcribe) return null;
 
@@ -53,6 +60,7 @@ export function EditorDictationMic({
       <MicButton
         disabled={disabled}
         transcribe={transcribe}
+        warmup={warmup}
         onTranscribed={onTranscribed}
         onStatusChange={onStatusChange}
       />

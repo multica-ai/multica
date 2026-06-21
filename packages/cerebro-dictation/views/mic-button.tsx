@@ -62,6 +62,12 @@ export interface MicButtonProps {
   transcribe?: Transcriber;
   streamTranscribe?: StreamingTranscriber;
   streamUrl?: string;
+  /**
+   * Fired the instant the user presses the mic, before recording starts, to
+   * pre-boot the speech engine while they speak (Jesper, FIR-1637). Best-effort
+   * and side-effect-free for the UI — see `createWarmup`.
+   */
+  warmup?: () => void;
   onPartialTranscribed?: (text: string) => void;
   onTranscribed: (text: string) => void;
   onError?: (error: DictationError) => void;
@@ -79,6 +85,7 @@ export function MicButton({
   transcribe,
   streamTranscribe,
   streamUrl,
+  warmup,
   onPartialTranscribed,
   onTranscribed,
   onError,
@@ -156,8 +163,11 @@ export function MicButton({
       return;
     }
     if (isDisabled) return;
+    // Pre-boot the engine the moment the user commits to recording, so a cold
+    // start overlaps their speech instead of stalling the transcribe (FIR-1637).
+    warmup?.();
     void start();
-  }, [isBusy, isDisabled, isRecording, start, stop]);
+  }, [isBusy, isDisabled, isRecording, start, stop, warmup]);
 
   if (!enabled) {
     return null;

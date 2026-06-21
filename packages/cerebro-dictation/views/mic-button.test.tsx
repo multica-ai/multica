@@ -90,6 +90,48 @@ describe("MicButton", () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it("pre-warms the engine on the press that starts recording (FIR-1637, Jesper)", () => {
+    // The cold engine should boot while the user speaks, not after they stop —
+    // so warmup fires on the start tap, before start().
+    const start = vi.fn();
+    const warmup = vi.fn();
+    mocks.useDictation.mockReturnValue({
+      status: "idle",
+      error: null,
+      isSupported: true,
+      start,
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} warmup={warmup} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
+
+    expect(warmup).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not pre-warm on the tap that stops recording (no wasted boot)", () => {
+    const warmup = vi.fn();
+    mocks.useDictation.mockReturnValue({
+      status: "recording",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} warmup={warmup} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictation" }));
+
+    expect(warmup).not.toHaveBeenCalled();
+  });
+
   it("stops recording on the next tap (tap-to-toggle, not press-and-hold)", () => {
     const start = vi.fn();
     const stop = vi.fn();
