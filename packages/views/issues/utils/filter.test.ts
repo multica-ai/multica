@@ -207,6 +207,38 @@ describe("filterIssues", () => {
     expect(result.map((i) => i.id)).not.toContain("L5");
   });
 
+  // --- Parent issues only ---
+  it("keeps only issues without a parent when parentOnlyFilter is on", () => {
+    const hierarchyIssues = [
+      makeIssue({ id: "parent-1", parent_issue_id: null }),
+      makeIssue({ id: "child-1", parent_issue_id: "parent-1" }),
+      makeIssue({ id: "parent-2", parent_issue_id: null }),
+    ];
+
+    const result = filterIssues(hierarchyIssues, {
+      ...NO_FILTER,
+      parentOnlyFilter: true,
+    });
+
+    expect(result.map((i) => i.id)).toEqual(["parent-1", "parent-2"]);
+  });
+
+  it("composes parentOnlyFilter with other filters (AND semantics)", () => {
+    const hierarchyIssues = [
+      makeIssue({ id: "parent-todo", status: "todo", parent_issue_id: null }),
+      makeIssue({ id: "child-todo", status: "todo", parent_issue_id: "parent-todo" }),
+      makeIssue({ id: "parent-done", status: "done", parent_issue_id: null }),
+    ];
+
+    const result = filterIssues(hierarchyIssues, {
+      ...NO_FILTER,
+      statusFilters: ["todo"],
+      parentOnlyFilter: true,
+    });
+
+    expect(result.map((i) => i.id)).toEqual(["parent-todo"]);
+  });
+
   // --- Agent running quick filter ---
   it("keeps only running issues when agentRunningFilter is on", () => {
     const result = filterIssues(issues, {

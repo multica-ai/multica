@@ -53,6 +53,7 @@ export function ActorIssuesPanel({
   const projectFilters = useStore(actorIssuesViewStore, (s) => s.projectFilters);
   const includeNoProject = useStore(actorIssuesViewStore, (s) => s.includeNoProject);
   const labelFilters = useStore(actorIssuesViewStore, (s) => s.labelFilters);
+  const parentOnlyFilter = useStore(actorIssuesViewStore, (s) => s.parentOnlyFilter);
 
   const [search, setSearch] = useState("");
 
@@ -105,6 +106,7 @@ export function ActorIssuesPanel({
         projectFilters,
         includeNoProject,
         labelFilters,
+        parentOnlyFilter,
       }),
     [
       actorIssues,
@@ -116,6 +118,7 @@ export function ActorIssuesPanel({
       projectFilters,
       includeNoProject,
       labelFilters,
+      parentOnlyFilter,
     ],
   );
 

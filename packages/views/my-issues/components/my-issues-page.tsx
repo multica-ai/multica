@@ -16,6 +16,7 @@ import { BoardView } from "../../issues/components/board-view";
 import { ListView } from "../../issues/components/list-view";
 import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
+import { filterAssigneeGroups } from "../../issues/utils/assignee-groups";
 import { useClearFiltersOnWorkspaceChange } from "@multica/core/issues/stores/view-store";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { myIssueAssigneeGroupsOptions, myIssueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type MyIssuesFilter } from "@multica/core/issues/queries";
@@ -37,6 +38,7 @@ export function MyIssuesPage() {
   const grouping = useStore(myIssuesViewStore, (s) => s.grouping);
   const sortBy = useStore(myIssuesViewStore, (s) => s.sortBy);
   const sortDirection = useStore(myIssuesViewStore, (s) => s.sortDirection);
+  const parentOnlyFilter = useStore(myIssuesViewStore, (s) => s.parentOnlyFilter);
   const agentRunningFilter = useStore(myIssuesViewStore, (s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
 
@@ -115,13 +117,35 @@ export function MyIssuesPage() {
     ...assigneeGroupsOptions,
     enabled: usesAssigneeBoard,
   });
+  const rawAssigneeIssues = useMemo(
+    () => assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [],
+    [assigneeGroupsQuery.data],
+  );
+  const issueFilters = useMemo(() => ({
+    statusFilters,
+    priorityFilters,
+    assigneeFilters: [],
+    includeNoAssignee: false,
+    creatorFilters: [],
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters: [],
+    parentOnlyFilter,
+    agentRunningFilter,
+    runningIssueIds,
+  }), [statusFilters, priorityFilters, parentOnlyFilter, agentRunningFilter, runningIssueIds]);
+  const filteredAssigneeGroups = useMemo(
+    () => filterAssigneeGroups(assigneeGroupsQuery.data?.groups, issueFilters),
+    [assigneeGroupsQuery.data?.groups, issueFilters],
+  );
   const myIssues = useMemo(
     () =>
       usesAssigneeBoard
-        ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
+        ? (filteredAssigneeGroups?.flatMap((group) => group.issues) ?? [])
         : (statusIssuesQuery.data ?? []),
-    [assigneeGroupsQuery.data, statusIssuesQuery.data, usesAssigneeBoard],
+    [filteredAssigneeGroups, statusIssuesQuery.data, usesAssigneeBoard],
   );
+  const headerIssues = usesAssigneeBoard ? rawAssigneeIssues : myIssues;
   const loading = usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
@@ -129,37 +153,15 @@ export function MyIssuesPage() {
   // Apply status/priority/agent-running filters from view store
   const issues = useMemo(
     () =>
-      filterIssues(myIssues, {
-        statusFilters,
-        priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
-        agentRunningFilter,
-        runningIssueIds,
-      }),
-    [myIssues, statusFilters, priorityFilters, agentRunningFilter, runningIssueIds],
+      filterIssues(myIssues, issueFilters),
+    [myIssues, issueFilters],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
     () =>
-      filterIssues(myIssues, {
-        statusFilters: [],
-        priorityFilters,
-        assigneeFilters: [],
-        includeNoAssignee: false,
-        creatorFilters: [],
-        projectFilters: [],
-        includeNoProject: false,
-        labelFilters: [],
-        agentRunningFilter,
-        runningIssueIds,
-      }),
-    [myIssues, priorityFilters, agentRunningFilter, runningIssueIds],
+      filterIssues(myIssues, { ...issueFilters, statusFilters: [] }),
+    [myIssues, issueFilters],
   );
 
   const activeFilters = useMemo(() => ({
@@ -170,8 +172,9 @@ export function MyIssuesPage() {
     projectFilters: [],
     includeNoProject: false,
     labelFilters: [],
+    parentOnlyFilter,
     agentRunningFilter,
-  }), [priorityFilters, agentRunningFilter]);
+  }), [priorityFilters, parentOnlyFilter, agentRunningFilter]);
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));
 
@@ -253,8 +256,8 @@ export function MyIssuesPage() {
 
       <ViewStoreProvider store={myIssuesViewStore}>
         {/* Header: scope tabs (left) + controls (right) */}
-        <MyIssuesHeader allIssues={myIssues} />
-        {myIssues.length === 0 ? (
+        <MyIssuesHeader allIssues={headerIssues} />
+        {headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.page.empty_title)}</p>
@@ -265,7 +268,7 @@ export function MyIssuesPage() {
             {viewMode === "board" ? (
               <BoardView
                 issues={usesAssigneeBoard ? myIssues : issues}
-                assigneeGroups={usesAssigneeBoard ? assigneeGroupsQuery.data?.groups : undefined}
+                assigneeGroups={usesAssigneeBoard ? filteredAssigneeGroups : undefined}
                 assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
                 assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
                 visibleStatuses={visibleStatuses}

@@ -10,6 +10,7 @@ export interface IssueFilters {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  parentOnlyFilter?: boolean;
   // When `agentRunningFilter` is true, only keep issues whose id is in
   // `runningIssueIds`. The set is derived by the caller from
   // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
@@ -28,7 +29,7 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, parentOnlyFilter, agentRunningFilter, runningIssueIds } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
@@ -37,6 +38,8 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
   const applyAgentRunning = agentRunningFilter === true;
 
   return issues.filter((issue) => {
+    if (parentOnlyFilter === true && issue.parent_issue_id) return false;
+
     if (applyAgentRunning && !(runningIssueIds?.has(issue.id) ?? false))
       return false;
 

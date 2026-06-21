@@ -36,7 +36,7 @@ import { createIssueViewStore } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider, useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { filterIssues } from "../../issues/utils/filter";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
-import { filterRunningAssigneeGroups } from "./project-issue-filters";
+import { filterAssigneeGroups } from "../../issues/utils/assignee-groups";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
@@ -149,6 +149,7 @@ function ProjectIssuesContent({
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const parentOnlyFilter = useViewStore((s) => s.parentOnlyFilter);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
@@ -160,15 +161,39 @@ function ProjectIssuesContent({
     return ids;
   }, [snapshot]);
 
+  const issueFilters = useMemo(() => ({
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters,
+    parentOnlyFilter,
+    agentRunningFilter,
+    runningIssueIds,
+  }), [
+    statusFilters,
+    priorityFilters,
+    assigneeFilters,
+    includeNoAssignee,
+    creatorFilters,
+    labelFilters,
+    parentOnlyFilter,
+    agentRunningFilter,
+    runningIssueIds,
+  ]);
+
   const issues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, issueFilters),
+    [projectIssues, issueFilters],
   );
 
   // Status-unfiltered companion for Swimlane.
   const swimlaneIssues = useMemo(
-    () => filterIssues(projectIssues, { statusFilters: [], priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [projectIssues, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(projectIssues, { ...issueFilters, statusFilters: [] }),
+    [projectIssues, issueFilters],
   );
 
   const activeFilters = useMemo(() => ({
@@ -179,6 +204,7 @@ function ProjectIssuesContent({
     projectFilters: [],
     includeNoProject: false,
     labelFilters,
+    parentOnlyFilter,
     agentRunningFilter,
   }), [
     priorityFilters,
@@ -186,6 +212,7 @@ function ProjectIssuesContent({
     includeNoAssignee,
     creatorFilters,
     labelFilters,
+    parentOnlyFilter,
     agentRunningFilter,
   ]);
 
@@ -193,13 +220,13 @@ function ProjectIssuesContent({
   // to wait for every status bucket to paginate in. View-store filters still
   // apply so toggling priority / assignee / label hides the same bars.
   const filteredGanttIssues = useMemo(
-    () => filterIssues(ganttIssues, { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters: [], includeNoProject: false, labelFilters, agentRunningFilter, runningIssueIds }),
-    [ganttIssues, statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, labelFilters, agentRunningFilter, runningIssueIds],
+    () => filterIssues(ganttIssues, issueFilters),
+    [ganttIssues, issueFilters],
   );
 
   const filteredAssigneeGroups = useMemo(
-    () => filterRunningAssigneeGroups(assigneeGroups, agentRunningFilter, runningIssueIds),
-    [assigneeGroups, agentRunningFilter, runningIssueIds],
+    () => filterAssigneeGroups(assigneeGroups, issueFilters),
+    [assigneeGroups, issueFilters],
   );
 
   const { data: childProgressMap = new Map() } = useQuery(childIssueProgressOptions(wsId));

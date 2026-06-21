@@ -37,6 +37,7 @@
     "no_labels": "还没有标签",
     "no_assignee": "无负责人",
     "no_project": "无项目",
+    "parent_only": "仅显示父级 issue",
     "section_status": "状态",
     "section_priority": "优先级",
     "section_assignee": "负责人",

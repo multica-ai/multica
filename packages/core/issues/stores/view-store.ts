@@ -78,6 +78,7 @@ export interface IssueViewState {
   includeNoProject: boolean;
   labelFilters: string[];
   dateFilter: IssueDateFilter | null;
+  parentOnlyFilter: boolean;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
   // quick filter chip in the issues header. Not persisted across reloads —
@@ -112,6 +113,7 @@ export interface IssueViewState {
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
+  toggleParentOnlyFilter: () => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
   showStatus: (status: IssueStatus) => void;
@@ -139,6 +141,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   includeNoProject: false,
   labelFilters: [],
   dateFilter: null,
+  parentOnlyFilter: false,
   agentRunningFilter: false,
   sortBy: "position",
   sortDirection: "asc",
@@ -219,6 +222,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         : [...state.labelFilters, labelId],
     })),
   setDateFilter: (filter) => set({ dateFilter: filter }),
+  toggleParentOnlyFilter: () =>
+    set((state) => ({ parentOnlyFilter: !state.parentOnlyFilter })),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
   hideStatus: (status) =>
@@ -248,6 +253,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       includeNoProject: false,
       labelFilters: [],
       dateFilter: null,
+      parentOnlyFilter: false,
       agentRunningFilter: false,
     }),
   setSortBy: (field) => set({ sortBy: field }),
@@ -303,6 +309,7 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    parentOnlyFilter: state.parentOnlyFilter,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,

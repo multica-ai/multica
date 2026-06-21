@@ -37,6 +37,7 @@
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
     "no_project": "No project",
+    "parent_only": "Parent issues only",
     "section_status": "Status",
     "section_priority": "Priority",
     "section_assignee": "Assignee",

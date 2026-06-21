@@ -37,6 +37,7 @@
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
     "no_project": "プロジェクトなし",
+    "parent_only": "親イシューのみ",
     "section_status": "ステータス",
     "section_priority": "優先度",
     "section_assignee": "担当者",
