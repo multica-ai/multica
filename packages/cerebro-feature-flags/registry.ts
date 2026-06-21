@@ -945,6 +945,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Surface ownership, approvers, version history, change-request review (approve/reject with diff), and forking on the skill detail page. Owner / approvers / workspace admins can manage; everyone else can open a change request. Off hides the governance panel and the fork action. JEH-216.",
   },
   {
+    key: "cerebro_skill_learning",
+    label: "Skill self-learning",
+    group: "permissions",
+    description:
+      "Let agent runs record observations and have a background sweeper (every 6h) turn repeated patterns (>=10 runs, >=70% consistency) into additive skill change requests automatically. Proposals only add suggestions — never rewrite — and wait as pending change requests for the skill owner to approve or reject via the normal governance flow. Off keeps observation recording and the proposal engine inert for this workspace. TECH-3077.",
+  },
+  {
     key: "cerebro_references",
     label: "Issue references",
     group: "issues",
