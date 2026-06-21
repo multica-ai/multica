@@ -32,3 +32,20 @@ export interface SessionStartFreshInput {
   // closing session.
   handoff?: HandoffBrief | null;
 }
+
+// The truthful context-window measurement for a session's active context, read
+// from real per-run token usage (task_usage) — across runtimes and models, not
+// a char-count guess. has_data is false until a run with recorded usage has
+// happened in the active session. max_context_tokens is the active run's model
+// window, so used_percent stays meaningful when the model changes between runs.
+export interface ContextUsage {
+  session_id: string;
+  has_data: boolean;
+  model: string;
+  input_tokens: number;
+  cache_read_tokens: number;
+  output_tokens: number;
+  max_context_tokens: number;
+  used_percent: number;
+  cache_share_percent: number;
+}

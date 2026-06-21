@@ -6,5 +6,6 @@ export * from "./session-header";
 export * from "./session-handoff";
 export * from "./session-activity";
 export * from "./context-hairline";
+export * from "./active-context-hairline";
 export * from "./start-fresh";
 export * from "./use-sessions";

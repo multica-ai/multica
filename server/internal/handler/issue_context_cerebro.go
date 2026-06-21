@@ -125,6 +125,17 @@ func (h *Handler) buildIssueContextComments(r *http.Request, issue db.Issue) []C
 	}
 	comments := issueContextAgentComments(result.Comments)
 
+	// CEREBRO-PATCH(session-scoped-context): FIR-1741 Model B engine. When the
+	// flag is on and this task's triggering comment sits inside a session, scope
+	// the bundled context to that session's slice so a run in a new session gets
+	// a fresh context window instead of the whole issue history. No-op for human
+	// callers and for issues without session markers (see sessionScopeForContext).
+	if h.cerebroCommentChaptersEnabled(r.Context(), issue.WorkspaceID, "") {
+		if window, ok := h.sessionScopeForContext(r.Context(), issue); ok {
+			comments = scopeContextComments(comments, window)
+		}
+	}
+
 	commentIDs := make([]pgtype.UUID, len(comments))
 	for i, c := range comments {
 		commentIDs[i] = c.ID

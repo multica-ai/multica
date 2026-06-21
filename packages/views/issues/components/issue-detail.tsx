@@ -121,7 +121,7 @@ import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
-import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, SessionContextHairline, groupTimelineBySession, partitionSessionGroups, countActivityEntries, estimateSessionContextFraction, useSessions } from "@multica/cerebro-sessions";
+import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, ActiveSessionContextHairline, groupTimelineBySession, partitionSessionGroups, countActivityEntries, useSessions } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -2636,9 +2636,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         open={open}
                         onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
                       />
-                      {/* CEREBRO-PATCH(session-activity-context): FIR-1769 P3 — context hairline on active session. */}
+                      {/* CEREBRO-PATCH(session-context-usage): FIR-1709 P3 hairline fed by real cross-runtime/model context measurement. */}
                       {sessionContextHairlineEnabled && sg.session.id === activeSessionId ? (
-                        <SessionContextHairline fraction={estimateSessionContextFraction(sg.groups)} />
+                        <ActiveSessionContextHairline issueId={id} groups={sg.groups} />
                       ) : null}
                       {open ? (
                         <SessionHandoff session={sg.session} />

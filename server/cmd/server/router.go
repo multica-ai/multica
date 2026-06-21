@@ -2008,6 +2008,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions REST surface.
 			r.Route("/api/cerebro/issues/{issueId}/sessions", func(r chi.Router) {
 				r.Get("/", cerebroSessionsHandler.List)
+				r.Get("/context-usage", cerebroSessionsHandler.ContextUsage) // CEREBRO-PATCH(cerebro-session-context-usage): FIR-1709 active-session context-window measurement.
 				r.Post("/start-fresh", cerebroSessionsHandler.StartFresh)
 				r.Patch("/{sessionId}", cerebroSessionsHandler.Update)
 			})
