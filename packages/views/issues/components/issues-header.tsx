@@ -696,6 +696,8 @@ export function IssuesHeader({
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
+  // CEREBRO-PATCH(boards-date-filter): FIR-1724 forward due-date presets so boards match My Issues.
+  dueDatePresets = false,
 }: {
   scopedIssues: Issue[];
   referenceFilterControl?: ReactNode;
@@ -703,6 +705,8 @@ export function IssuesHeader({
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  // CEREBRO-PATCH(boards-date-filter): FIR-1724 offer the My-Issues due-date presets on boards.
+  dueDatePresets?: boolean;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -806,6 +810,8 @@ export function IssuesHeader({
             allowGantt={allowGantt}
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
+            // CEREBRO-PATCH(boards-date-filter): FIR-1724 pass presets through to the date filter control.
+            dueDatePresets={dueDatePresets}
           />
         </div>
       </div>

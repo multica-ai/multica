@@ -284,6 +284,8 @@ export function IssuesPage({
           referenceFilterControl={referenceFilterControl}
           dateFilter={dateFilter}
           onDateFilterChange={setDateFilter}
+          // CEREBRO-PATCH(boards-date-filter): FIR-1724 due-date presets so the global board matches My Issues.
+          dueDatePresets
         />
 
         {loading ? contentSkeleton : headerIssues.length === 0 ? (
