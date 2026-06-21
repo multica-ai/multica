@@ -121,8 +121,18 @@ func (h *Handler) ListNotesForReference(w http.ResponseWriter, r *http.Request) 
 // optional: when empty, every unsent comment on the note is sent ("send all");
 // when present, only those comments are sent ("send selected"). Already-sent ids
 // in the list are ignored (the operation only ever sends drafts).
+//
+// FIR-1753 — DestinationObject/DestinationRefID are an optional disambiguator:
+// a note may be linked to more than one issue/chat (References lets you link
+// several issues for context), but a send needs exactly one destination. When
+// the note has multiple couplings the client passes the chosen one here; the
+// server validates it is actually one of the note's couplings before using it.
+// Empty (the common single-coupling case) keeps the old "resolve the one
+// coupling" behaviour.
 type sendCommentsRequest struct {
-	CommentIDs []string `json:"comment_ids"`
+	CommentIDs        []string `json:"comment_ids"`
+	DestinationObject string   `json:"destination_object"`
+	DestinationRefID  string   `json:"destination_ref_id"`
 }
 
 // sendCommentsResponse echoes the result so the client can update its view
@@ -168,15 +178,15 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	object, refID, ok := h.resolveCoupling(w, r, noteID)
-	if !ok {
-		return
-	}
-
 	var req sendCommentsRequest
 	// An empty body is valid (means "send all unsent"); decodeJSON tolerates it.
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	object, refID, ok := h.resolveCoupling(w, r, noteID, req.DestinationObject, req.DestinationRefID)
+	if !ok {
 		return
 	}
 
@@ -242,11 +252,22 @@ func (h *Handler) SendComments(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// resolveCoupling reads the note's references and returns the single issue or
-// chat destination it is coupled to. Writes the error + returns ok=false when
-// there is no coupling, or when the note is coupled to more than one such
-// destination (ambiguous — the caller would not know where comments went).
-func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID pgtype.UUID) (object, refID string, ok bool) {
+// resolveCoupling reads the note's references and returns the issue or chat
+// destination the comments should go to. Writes the error + returns ok=false
+// when there is no coupling at all.
+//
+// FIR-1753 — a note may legitimately be linked to more than one issue/chat
+// (References supports several issue links for context). The destination is
+// resolved as:
+//
+//   - hintObject/hintRefID given → it must match one of the note's couplings;
+//     send there. This is how the client disambiguates when the note has
+//     multiple couplings (the user picked one in the panel).
+//   - no hint + exactly one coupling → send there (the common case).
+//   - no hint + multiple couplings → 409 telling the caller to choose. A
+//     current client always passes the hint in this case, so this only fires
+//     for an older client that cannot.
+func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID pgtype.UUID, hintObject, hintRefID string) (object, refID string, ok bool) {
 	refs, err := h.Cerebro.ListNoteReferencesByNote(r.Context(), noteID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load note references")
@@ -262,8 +283,19 @@ func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID
 		writeError(w, http.StatusConflict, "note is not coupled to an issue or chat — couple it first")
 		return "", "", false
 	}
+	hintRefID = strings.TrimSpace(hintRefID)
+	if hintRefID != "" {
+		hintObject = strings.TrimSpace(hintObject)
+		for _, ref := range found {
+			if ref.RefID == hintRefID && (hintObject == "" || ref.Object == hintObject) {
+				return ref.Object, ref.RefID, true
+			}
+		}
+		writeError(w, http.StatusConflict, "the chosen destination is not linked to this note")
+		return "", "", false
+	}
 	if len(found) > 1 {
-		writeError(w, http.StatusConflict, "note is coupled to more than one destination; remove the extra coupling first")
+		writeError(w, http.StatusConflict, "this note is linked to more than one task or chat — choose which one to send to")
 		return "", "", false
 	}
 	return found[0].Object, found[0].RefID, true

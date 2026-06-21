@@ -200,6 +200,71 @@ func TestSendCommentsToIssue(t *testing.T) {
 	}
 }
 
+// FIR-1753 — a note linked to two issues used to make "Send all" 409 because
+// resolveCoupling refused the ambiguity while the client only ever read the
+// first coupling. Now: with no hint, multiple couplings still 409 (so an old
+// client gets a clear message), but passing the chosen destination_ref_id sends
+// to exactly that issue.
+func TestSendCommentsMultipleCouplings(t *testing.T) {
+	if w3Pool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	issueA := makeIssue(t, ctx, "Destination A")
+	issueB := makeIssue(t, ctx, "Destination B")
+	noteID := makeNote(t, ctx, "Linked to two issues", "body")
+	addIssueRef(t, ctx, noteID, issueA)
+	addIssueRef(t, ctx, noteID, issueB)
+
+	agentMention := "please [@bot](mention://agent/" + uuidStr(w3UserB) + ") look"
+	if _, err := w3H.Cerebro.CreateNoteComment(ctx, cerebrodb.CreateNoteCommentParams{
+		NoteID: noteID, Kind: "comment", Body: agentMention, AuthorType: "member", AuthorID: w3UserA,
+	}); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+
+	h := &Handler{Upstream: w3H.Upstream, Cerebro: w3H.Cerebro, Tasks: &fakeDispatcher{}}
+
+	// No hint + two couplings → 409, not a generic failure.
+	wAmb := sendRequest(t, h, noteID, "{}")
+	if wAmb.Code != http.StatusConflict {
+		t.Fatalf("ambiguous send: status %d, want 409; body %s", wAmb.Code, wAmb.Body.String())
+	}
+
+	// A hint that is not one of the note's couplings → 409.
+	otherIssue := makeIssue(t, ctx, "Not linked")
+	wBad := sendRequest(t, h, noteID,
+		`{"destination_object":"issue","destination_ref_id":"`+uuidStr(otherIssue)+`"}`)
+	if wBad.Code != http.StatusConflict {
+		t.Fatalf("bad-hint send: status %d, want 409; body %s", wBad.Code, wBad.Body.String())
+	}
+
+	// Hint pointing at issueB → sends there.
+	wOK := sendRequest(t, h, noteID,
+		`{"destination_object":"issue","destination_ref_id":"`+uuidStr(issueB)+`"}`)
+	if wOK.Code != http.StatusOK {
+		t.Fatalf("hinted send: status %d, want 200; body %s", wOK.Code, wOK.Body.String())
+	}
+	var resp sendCommentsResponse
+	if err := json.Unmarshal(wOK.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode resp: %v", err)
+	}
+	if resp.DestinationRefID != uuidStr(issueB) {
+		t.Fatalf("sent to %s, want issueB %s", resp.DestinationRefID, uuidStr(issueB))
+	}
+	// The comment landed on issueB, not issueA.
+	var onB, onA int
+	if err := w3Pool.QueryRow(ctx, `SELECT COUNT(*) FROM comment WHERE issue_id = $1`, issueB).Scan(&onB); err != nil {
+		t.Fatalf("count B: %v", err)
+	}
+	if err := w3Pool.QueryRow(ctx, `SELECT COUNT(*) FROM comment WHERE issue_id = $1`, issueA).Scan(&onA); err != nil {
+		t.Fatalf("count A: %v", err)
+	}
+	if onB != 1 || onA != 0 {
+		t.Fatalf("comment routing wrong: onB=%d onA=%d, want onB=1 onA=0", onB, onA)
+	}
+}
+
 func TestSendCommentsNotCoupled(t *testing.T) {
 	if w3Pool == nil {
 		t.Skip("no test DB")

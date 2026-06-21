@@ -87,7 +87,9 @@ export function NoteCoupleAndSend({
     url: string;
   }) {
     await addReference.mutateAsync({ object: "issue", ...refInput });
-    const res = await send.mutateAsync(undefined);
+    // The note had no coupling before this (NoteCoupleAndSend only renders when
+    // uncoupled), so it now has exactly one — no destination hint needed.
+    const res = await send.mutateAsync({});
     const n = res.sent.length;
     toast.success(
       n === 1

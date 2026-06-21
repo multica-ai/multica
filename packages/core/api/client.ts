@@ -4438,7 +4438,13 @@ export class ApiClient {
   }
   async sendNoteComments<T = unknown>(
     noteId: string,
-    payload: { comment_ids?: string[] },
+    // CEREBRO-PATCH(cerebro-notes-send-destination): FIR-1753 — optional
+    // destination hint to disambiguate when a note is linked to >1 issue/chat.
+    payload: {
+      comment_ids?: string[];
+      destination_object?: string;
+      destination_ref_id?: string;
+    },
   ): Promise<T> {
     return this.fetch<T>(`/api/notes/${noteId}/comments/send`, {
       method: "POST",

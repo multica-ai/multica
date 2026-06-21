@@ -16,6 +16,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
+import { ApiError } from "@multica/core/api";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   useNoteComments,
@@ -26,8 +27,10 @@ import {
   useSendNoteComments,
   useNoteReferences,
   isUnsentToAgent,
+  parseIssueMentions,
   buildThreads,
   noteKeys,
+  type IssueMention,
   type NoteComment,
   type NoteThread,
 } from "../core";
@@ -35,6 +38,7 @@ import type { Editor } from "@tiptap/react";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
 import { NoteCoupleAndSend } from "./note-couple-and-send";
+import { NoteSuggestIssueReference } from "./note-suggest-issue-reference";
 
 // FIR-1621 — the reference `object` kinds a note can be coupled to as a send
 // destination. Mirrors couplingIssue/couplingChat in the Go send handler.
@@ -123,13 +127,51 @@ export function NoteCommentsPanel({
   const { data: references = [] } = useNoteReferences(
     collabEnabled ? noteId : undefined,
   );
-  const coupling = React.useMemo(
+  // FIR-1753 — a note can be linked to more than one issue/chat (References
+  // allows several issue links for context). The whole list of couplings is the
+  // set of valid send destinations; `coupling` is the first, kept for the
+  // single-coupling label + the per-comment select affordance.
+  const couplings = React.useMemo(
     () =>
-      references.find(
+      references.filter(
         (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
-      ) ?? null,
+      ),
     [references],
   );
+  const coupling = couplings[0] ?? null;
+  const multiCoupled = couplings.length > 1;
+
+  // Which coupling "Send all"/"Send selected" target when the note has more than
+  // one. Defaults to the first; kept valid as the coupling list changes.
+  const [destRefId, setDestRefId] = React.useState<string>("");
+  React.useEffect(() => {
+    if (!couplings.some((c) => c.ref_id === destRefId)) {
+      setDestRefId(couplings[0]?.ref_id ?? "");
+    }
+  }, [couplings, destRefId]);
+  const selectedCoupling =
+    couplings.find((c) => c.ref_id === destRefId) ?? coupling;
+  const hasIssueCoupling = couplings.some((c) => c.object === COUPLE_ISSUE);
+
+  // FIR-1753 (point 3) — issues @-tagged inside the note's comments that are not
+  // yet linked to the note. When the note has no issue coupling, we offer to add
+  // the mentioned issue as a reference (which couples it). Already-linked issues
+  // (by ref_id) are filtered out so a linked issue never reappears as a suggestion.
+  const suggestedIssues = React.useMemo<IssueMention[]>(() => {
+    if (!collabEnabled || hasIssueCoupling) return [];
+    const linked = new Set(references.map((r) => r.ref_id));
+    const seen = new Set<string>();
+    const out: IssueMention[] = [];
+    for (const c of comments) {
+      for (const m of parseIssueMentions(c.body)) {
+        if (linked.has(m.id) || seen.has(m.id)) continue;
+        seen.add(m.id);
+        out.push(m);
+      }
+    }
+    return out;
+  }, [collabEnabled, hasIssueCoupling, references, comments]);
+
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
 
   const [mode, setMode] = React.useState<"comment" | "suggestion">("comment");
@@ -170,26 +212,46 @@ export function NoteCommentsPanel({
   }
 
   function doSend(ids?: string[]) {
-    send.mutate(ids, {
-      onSuccess: (res) => {
-        setSelected(new Set());
-        const n = res.sent.length;
-        const where =
-          res.destination_kind === COUPLE_CHAT ? "the chat" : "the task";
-        toast.success(
-          n === 1
-            ? `Sent 1 comment to ${where}`
-            : `Sent ${n} comments to ${where}`,
-        );
+    send.mutate(
+      {
+        commentIds: ids,
+        // Only pin a destination when the choice is ambiguous; a single-coupling
+        // note resolves server-side without a hint.
+        destination:
+          multiCoupled && selectedCoupling
+            ? {
+                object: selectedCoupling.object,
+                refId: selectedCoupling.ref_id,
+              }
+            : undefined,
       },
-      onError: () => {
-        toast.error(
-          coupling
-            ? "Couldn't send the comments. Try again."
-            : "Link this note to a task or chat before sending.",
-        );
+      {
+        onSuccess: (res) => {
+          setSelected(new Set());
+          const n = res.sent.length;
+          const where =
+            res.destination_kind === COUPLE_CHAT ? "the chat" : "the task";
+          toast.success(
+            n === 1
+              ? `Sent 1 comment to ${where}`
+              : `Sent ${n} comments to ${where}`,
+          );
+        },
+        onError: (err) => {
+          // FIR-1753 — show the actual server reason (e.g. "linked to more than
+          // one task — choose which one") instead of a generic failure, so the
+          // user knows what to do. Fall back only when there is no message.
+          const serverMsg =
+            err instanceof ApiError && err.message ? err.message : "";
+          toast.error(
+            serverMsg ||
+              (coupling
+                ? "Couldn't send the comments. Try again."
+                : "Link this note to a task or chat before sending."),
+          );
+        },
       },
-    });
+    );
   }
 
   function nameFor(id: string) {
@@ -236,6 +298,13 @@ export function NoteCommentsPanel({
         </Button>
       </div>
 
+      {/* FIR-1753 (point 3) — a comment @-tags an issue the note isn't linked to
+          yet: offer to add it as a reference (which couples the note). The memo
+          already gates on collabEnabled + no existing issue coupling. */}
+      {suggestedIssues.length > 0 && (
+        <NoteSuggestIssueReference noteId={noteId} issues={suggestedIssues} />
+      )}
+
       {/* FIR-1621 — unsent-comments notice + send controls. */}
       {collabEnabled && unsent.length > 0 && (
         <div className="flex flex-col gap-2 border-b border-amber-400/40 bg-amber-400/10 px-3 py-2">
@@ -248,27 +317,52 @@ export function NoteCommentsPanel({
             </span>
           </div>
           {coupling ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="sm"
-                onClick={() => doSend()}
-                disabled={send.isPending}
-              >
-                <Send className="size-3.5" /> Send all
-              </Button>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => doSend(selectedUnsent)}
-                disabled={send.isPending || selectedUnsent.length === 0}
-              >
-                Send selected
-                {selectedUnsent.length > 0 ? ` (${selectedUnsent.length})` : ""}
-              </Button>
-              <span className="text-[11px] text-muted-foreground">
-                → {coupling.object === COUPLE_CHAT ? "chat" : "task"}
-                {coupling.label ? ` ${coupling.label}` : ""}
-              </span>
+            <div className="flex flex-col gap-2">
+              {/* FIR-1753 — when the note is linked to more than one task/chat,
+                  let the user choose where the comments go instead of failing. */}
+              {multiCoupled && (
+                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  Send to
+                  <select
+                    value={destRefId}
+                    onChange={(e) => setDestRefId(e.target.value)}
+                    className="min-w-0 flex-1 rounded border bg-background px-1.5 py-1 text-xs text-foreground"
+                  >
+                    {couplings.map((c) => (
+                      <option key={c.id} value={c.ref_id}>
+                        {(c.object === COUPLE_CHAT ? "chat" : "task") +
+                          (c.label ? ` · ${c.label}` : "")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => doSend()}
+                  disabled={send.isPending}
+                >
+                  <Send className="size-3.5" /> Send all
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => doSend(selectedUnsent)}
+                  disabled={send.isPending || selectedUnsent.length === 0}
+                >
+                  Send selected
+                  {selectedUnsent.length > 0
+                    ? ` (${selectedUnsent.length})`
+                    : ""}
+                </Button>
+                {!multiCoupled && (
+                  <span className="text-[11px] text-muted-foreground">
+                    → {coupling.object === COUPLE_CHAT ? "chat" : "task"}
+                    {coupling.label ? ` ${coupling.label}` : ""}
+                  </span>
+                )}
+              </div>
             </div>
           ) : (
             <NoteCoupleAndSend

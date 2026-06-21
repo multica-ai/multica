@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isUnsentToAgent,
   hasAgentMention,
+  parseIssueMentions,
   safeParseSendResult,
   safeParseNoteComments,
   type NoteComment,
@@ -49,6 +50,25 @@ describe("hasAgentMention", () => {
     expect(
       hasAgentMention("[@Jo](mention://member/00000000-0000-0000-0000-0000000000aa)"),
     ).toBe(false);
+  });
+});
+
+describe("parseIssueMentions", () => {
+  const A = "00000000-0000-0000-0000-0000000000a1";
+  const B = "00000000-0000-0000-0000-0000000000b2";
+  it("extracts distinct issue mentions with their label, first-seen order", () => {
+    const body =
+      `see [FIR-1](mention://issue/${A}) and [FIR-2](mention://issue/${B}) ` +
+      `and again [FIR-1](mention://issue/${A})`;
+    const got = parseIssueMentions(body);
+    expect(got).toEqual([
+      { id: A, label: "FIR-1" },
+      { id: B, label: "FIR-2" },
+    ]);
+  });
+  it("ignores agent and member mentions, returns [] when none", () => {
+    expect(parseIssueMentions(AGENT_TAG)).toEqual([]);
+    expect(parseIssueMentions("just a plain note")).toEqual([]);
   });
 });
 

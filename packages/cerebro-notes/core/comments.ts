@@ -44,6 +44,34 @@ export function hasAgentMention(body: string): boolean {
   return /\]\(mention:\/\/agent\//.test(body);
 }
 
+// IssueMention — an issue @-tagged inside a comment body. `label` is the
+// display text (the issue identifier, e.g. "FIR-123"); `id` is the issue UUID.
+export interface IssueMention {
+  id: string;
+  label: string;
+}
+
+// Mirrors the server mention scheme `[FIR-123](mention://issue/<uuid>)`
+// (server/internal/util/mention.go). The capture is non-greedy on the label so
+// a bracketed label still resolves to the trailing `](mention://issue/` anchor.
+const ISSUE_MENTION_RE = /\[(.+?)\]\(mention:\/\/issue\/([0-9a-fA-F-]+)\)/g;
+
+// parseIssueMentions — distinct issues @-tagged in a comment body, first-seen
+// order. FIR-1753 — drives the "this comment mentions an issue, link it as a
+// reference?" suggestion when the note has no issue coupling yet.
+export function parseIssueMentions(body: string): IssueMention[] {
+  const seen = new Set<string>();
+  const out: IssueMention[] = [];
+  for (const m of body.matchAll(ISSUE_MENTION_RE)) {
+    const id = m[2];
+    const label = m[1];
+    if (!id || !label || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, label });
+  }
+  return out;
+}
+
 // isUnsentToAgent — a member-authored comment that @-tags an agent and has not
 // yet been dispatched to the coupled destination. A comment that does not tag
 // an agent is local note discussion, never sent — so it is not "unsent". Agent
@@ -187,16 +215,30 @@ export function safeParseSendResult(raw: unknown): SendNoteCommentsResult {
   return SendNoteCommentsResultSchema.parse({});
 }
 
+// SendNoteCommentsInput drives a send. `commentIds` selects which drafts to
+// send (omitted/empty = all unsent). FIR-1753 — `destination` names which
+// coupling to send to when the note is linked to more than one issue/chat; it
+// is omitted in the common single-coupling case.
+export interface SendNoteCommentsInput {
+  commentIds?: string[];
+  destination?: { object: string; refId: string };
+}
+
 // useSendNoteComments dispatches the selected unsent comments (or all unsent,
 // when commentIds is omitted/empty) to the note's coupled issue/chat. Sending
 // is always an explicit user action — never auto-fired on @-mention.
 export function useSendNoteComments(noteId: string) {
   const invalidate = useNoteCommentInvalidate(noteId);
   return useMutation({
-    mutationFn: async (commentIds?: string[]) =>
+    mutationFn: async (input?: SendNoteCommentsInput) =>
       safeParseSendResult(
         await api.sendNoteComments(noteId, {
-          comment_ids: commentIds && commentIds.length ? commentIds : undefined,
+          comment_ids:
+            input?.commentIds && input.commentIds.length
+              ? input.commentIds
+              : undefined,
+          destination_object: input?.destination?.object || undefined,
+          destination_ref_id: input?.destination?.refId || undefined,
         }),
       ),
     onSettled: invalidate,
