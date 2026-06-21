@@ -1116,10 +1116,25 @@ export function DynamicInbox() {
                           onSetNoteId={(id) =>
                             changeSection({ ...section, noteId: id ?? undefined })
                           }
+                          onSetTitle={(t) =>
+                            changeSection({ ...section, title: t ?? undefined })
+                          }
                           onRemove={() => removeSection(section.id)}
                           fontSize={section.noteFontSize}
                           onSetFontSize={(size) =>
                             changeSection({ ...section, noteFontSize: size })
+                          }
+                          visibleLines={section.noteVisibleLines}
+                          onSetVisibleLines={(n) =>
+                            changeSection({ ...section, noteVisibleLines: n })
+                          }
+                          collapsible={section.collapsible}
+                          defaultCollapsed={section.defaultCollapsed}
+                          onSetCollapsible={(v) =>
+                            changeSection({ ...section, collapsible: v })
+                          }
+                          onSetDefaultCollapsed={(v) =>
+                            changeSection({ ...section, defaultCollapsed: v })
                           }
                         />
                       ) : section.kind === "team" ? (

@@ -10,7 +10,16 @@
 import * as React from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { NotebookPen, ExternalLink, Plus, Settings2, X } from "lucide-react";
+import {
+  NotebookPen,
+  ExternalLink,
+  Plus,
+  Settings2,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+} from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
@@ -60,12 +69,18 @@ const FONT_SIZE_LABELS: Record<NoteFontSize, string> = {
   lg: "Large",
 };
 
+/** FIR-1791 — how many editor lines stay visible before the box scrolls. */
+const VISIBLE_LINES_OPTIONS = [4, 6, 8, 12, 20];
+const DEFAULT_VISIBLE_LINES = 6;
+
 export interface NoteInboxBoxProps {
   title?: string;
   /** The note embedded in this block. undefined = nothing picked yet. */
   noteId?: string;
   /** Persist the picked/created/detached note id into the section config. */
   onSetNoteId: (id: string | null) => void;
+  /** FIR-1791 — rename the block. null / empty clears the custom name. */
+  onSetTitle?: (title: string | null) => void;
   onRemove: () => void;
   /** Drag handle injected by the dynamic inbox's sortable wrapper. */
   dragHandle?: ReactNode;
@@ -73,16 +88,35 @@ export interface NoteInboxBoxProps {
   fontSize?: NoteFontSize;
   /** FIR-1487 — persist the font size choice into the section config. */
   onSetFontSize?: (size: NoteFontSize) => void;
+  /** FIR-1791 — visible editor lines before the box scrolls. Default 6. */
+  visibleLines?: number;
+  /** FIR-1791 — persist the visible-lines choice into the section config. */
+  onSetVisibleLines?: (lines: number) => void;
+  /** FIR-1791 — can the block be folded open/closed? Default true. */
+  collapsible?: boolean;
+  /** FIR-1791 — does the block start folded closed? Default false (open). */
+  defaultCollapsed?: boolean;
+  /** FIR-1791 — persist the foldable choice into the section config. */
+  onSetCollapsible?: (value: boolean) => void;
+  /** FIR-1791 — persist the start-collapsed choice into the section config. */
+  onSetDefaultCollapsed?: (value: boolean) => void;
 }
 
 export function NoteInboxBox({
   title,
   noteId,
   onSetNoteId,
+  onSetTitle,
   onRemove,
   dragHandle,
   fontSize,
   onSetFontSize,
+  visibleLines,
+  onSetVisibleLines,
+  collapsible: collapsibleProp,
+  defaultCollapsed,
+  onSetCollapsible,
+  onSetDefaultCollapsed,
 }: NoteInboxBoxProps) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -94,6 +128,23 @@ export function NoteInboxBox({
     enabled: Boolean(wsId && noteId),
   });
 
+  // FIR-1791 #2 — foldable block. Collapsible unless explicitly turned off; the
+  // initial fold state comes from defaultCollapsed, the live toggle is
+  // ephemeral UI state (mirrors DynamicInboxSection).
+  const collapsible = collapsibleProp !== false;
+  const [collapsed, setCollapsed] = React.useState<boolean>(
+    defaultCollapsed === true,
+  );
+  const isCollapsed = collapsible && collapsed;
+
+  // FIR-1791 #3 — inline rename of the block name.
+  const [editing, setEditing] = React.useState(false);
+  const commitRename = (value: string) => {
+    const trimmed = value.trim();
+    onSetTitle?.(trimmed ? trimmed : null);
+    setEditing(false);
+  };
+
   const handleCreate = async () => {
     const created = await createNote.mutateAsync({ visibility: "private" });
     if (created) onSetNoteId(created.id);
@@ -104,13 +155,50 @@ export function NoteInboxBox({
     else push(paths.notes());
   };
 
+  const displayName = title?.trim() || (note ? firstLineTitle(note) : "Quick note");
+
   const header = (
     <header className="flex items-center gap-2 border-b border-border px-3 py-2">
       {dragHandle}
-      <NotebookPen className="size-3.5 text-muted-foreground" />
-      <span className="truncate text-xs font-bold uppercase tracking-wide text-muted-foreground">
-        {title?.trim() || (note ? firstLineTitle(note) : "Quick note")}
-      </span>
+      {collapsible && (
+        <button
+          type="button"
+          className="-ml-1 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          onClick={() => setCollapsed((c) => !c)}
+          title={isCollapsed ? "Expand" : "Collapse"}
+          aria-label={isCollapsed ? "Expand" : "Collapse"}
+        >
+          {isCollapsed ? (
+            <ChevronRight className="size-3.5" />
+          ) : (
+            <ChevronDown className="size-3.5" />
+          )}
+        </button>
+      )}
+      <NotebookPen className="size-3.5 shrink-0 text-muted-foreground" />
+      {editing && onSetTitle ? (
+        <input
+          autoFocus
+          defaultValue={title ?? ""}
+          placeholder={note ? firstLineTitle(note) : "Quick note"}
+          onBlur={(e) => commitRename(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commitRename(e.currentTarget.value);
+            else if (e.key === "Escape") setEditing(false);
+          }}
+          className="w-40 rounded border border-primary bg-transparent px-1 py-0.5 text-xs font-bold uppercase tracking-wide text-foreground outline-none"
+          aria-label="Block name"
+        />
+      ) : (
+        <button
+          type="button"
+          onDoubleClick={() => onSetTitle && setEditing(true)}
+          title={onSetTitle ? "Double-click to rename" : undefined}
+          className="truncate text-left text-xs font-bold uppercase tracking-wide text-muted-foreground hover:text-foreground"
+        >
+          {displayName}
+        </button>
+      )}
       <div className="ml-auto flex items-center gap-0.5 text-muted-foreground">
         {noteId && (
           <button
@@ -130,6 +218,14 @@ export function NoteInboxBox({
           onCreate={handleCreate}
           fontSize={fontSize}
           onSetFontSize={onSetFontSize}
+          onRename={onSetTitle ? () => setEditing(true) : undefined}
+          onResetName={onSetTitle && title ? () => onSetTitle(null) : undefined}
+          visibleLines={visibleLines}
+          onSetVisibleLines={onSetVisibleLines}
+          collapsible={collapsibleProp}
+          defaultCollapsed={defaultCollapsed}
+          onSetCollapsible={onSetCollapsible}
+          onSetDefaultCollapsed={onSetDefaultCollapsed}
         />
         <button
           type="button"
@@ -183,19 +279,29 @@ export function NoteInboxBox({
       </div>
     );
   } else {
-    bodySlot = <NoteEditor note={note} fontSize={fontSize} />;
+    bodySlot = (
+      <NoteEditor note={note} fontSize={fontSize} visibleLines={visibleLines} />
+    );
   }
 
   return (
     <section className="overflow-hidden rounded-xl border border-border bg-card">
       {header}
-      {bodySlot}
+      {!isCollapsed && bodySlot}
     </section>
   );
 }
 
 /** Inline, debounced-autosave body editor for the embedded note. */
-function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize }) {
+function NoteEditor({
+  note,
+  fontSize,
+  visibleLines,
+}: {
+  note: Note;
+  fontSize?: NoteFontSize;
+  visibleLines?: number;
+}) {
   const updateNote = useUpdateNote();
   const [body, setBody] = React.useState(note.body);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -256,15 +362,22 @@ function NoteEditor({ note, fontSize }: { note: Note; fontSize?: NoteFontSize })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id]);
 
+  // FIR-1791 — render a fixed number of visible lines and scroll past it.
+  // `field-sizing-fixed` overrides the Textarea's default `field-sizing-content`
+  // (which auto-grows with content); `rows` then sets the visible height in
+  // lines, and overflow scrolls. `min-h-0` drops the base `min-h-16` floor so
+  // small line counts aren't forced taller.
+  const rows = Math.max(1, visibleLines ?? DEFAULT_VISIBLE_LINES);
   return (
     <div ref={wrapRef} className="relative p-2">
       <Textarea
         ref={taRef}
+        rows={rows}
         value={body}
         onChange={(e) => onChange(e.target.value)}
         onBlur={flush}
         placeholder="Write a note… (the first line becomes the title)"
-        className="min-h-28 resize-y border-0 bg-transparent shadow-none focus-visible:ring-0"
+        className="field-sizing-fixed min-h-0 resize-none overflow-y-auto border-0 bg-transparent shadow-none focus-visible:ring-0"
       />
       <TextareaDictationMic textareaRef={taRef} className="absolute bottom-3 right-3 z-10" />
     </div>
@@ -283,6 +396,14 @@ function NotePicker({
   onCreate,
   fontSize,
   onSetFontSize,
+  onRename,
+  onResetName,
+  visibleLines,
+  onSetVisibleLines,
+  collapsible,
+  defaultCollapsed,
+  onSetCollapsible,
+  onSetDefaultCollapsed,
 }: {
   wsId: string;
   activeId?: string;
@@ -291,9 +412,18 @@ function NotePicker({
   onCreate: () => void;
   fontSize?: NoteFontSize;
   onSetFontSize?: (size: NoteFontSize) => void;
+  onRename?: () => void;
+  onResetName?: () => void;
+  visibleLines?: number;
+  onSetVisibleLines?: (lines: number) => void;
+  collapsible?: boolean;
+  defaultCollapsed?: boolean;
+  onSetCollapsible?: (value: boolean) => void;
+  onSetDefaultCollapsed?: (value: boolean) => void;
 }) {
   const { data: notes = [] } = useQuery(notesListOptions(wsId, { limit: 20 }));
   const activeFontSize = fontSize ?? "sm";
+  const activeVisibleLines = visibleLines ?? DEFAULT_VISIBLE_LINES;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -316,6 +446,64 @@ function NotePicker({
             <DropdownMenuItem onClick={onDetach}>Detach note</DropdownMenuItem>
           )}
         </DropdownMenuGroup>
+        {onRename && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem onClick={onRename}>
+                <Pencil className="size-3.5" /> Rename block
+              </DropdownMenuItem>
+              {onResetName && (
+                <DropdownMenuItem onClick={onResetName}>
+                  Reset name
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </>
+        )}
+        {(onSetCollapsible || onSetDefaultCollapsed) && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Folding</DropdownMenuLabel>
+              {onSetCollapsible && (
+                <DropdownMenuItem
+                  onClick={() => onSetCollapsible(collapsible === false)}
+                >
+                  Foldable {collapsible !== false ? "✓" : ""}
+                </DropdownMenuItem>
+              )}
+              {onSetDefaultCollapsed && (
+                <DropdownMenuItem
+                  onClick={() => onSetDefaultCollapsed(!defaultCollapsed)}
+                >
+                  Start closed {defaultCollapsed ? "✓" : ""}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </>
+        )}
+        {onSetVisibleLines && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Visible lines</DropdownMenuLabel>
+              {VISIBLE_LINES_OPTIONS.map((lines) => (
+                <DropdownMenuItem
+                  key={lines}
+                  onClick={() => onSetVisibleLines(lines)}
+                >
+                  <span className="flex w-full items-center justify-between">
+                    <span>{lines} lines</span>
+                    {lines === activeVisibleLines && (
+                      <span className="text-muted-foreground">✓</span>
+                    )}
+                  </span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </>
+        )}
         {onSetFontSize && (
           <>
             <DropdownMenuSeparator />

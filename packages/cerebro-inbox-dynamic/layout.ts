@@ -186,6 +186,9 @@ export interface InboxSectionConfig {
   // FIR-1487 — Quick-note box: user-controlled font size for the inline editor.
   /** Quick-note box: editor font size. Default "sm" (matches inbox text). */
   noteFontSize?: "xs" | "sm" | "base" | "lg";
+  // FIR-1791 — Quick-note box: how many editor lines stay visible before the
+  /** Quick-note box: visible editor lines before it scrolls. Default 6. */
+  noteVisibleLines?: number;
 }
 
 /** TECH-3690 — how the Notes box sorts. Mirrors NotesBoxSort in cerebro-notes;
