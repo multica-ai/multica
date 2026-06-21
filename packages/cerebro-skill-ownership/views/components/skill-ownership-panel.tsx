@@ -149,12 +149,12 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
       </div>
 
       <Dialog open={editOpen} onOpenChange={(v) => !mutation.isPending && setEditOpen(v)}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="max-h-[85vh] sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Edit ownership</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="max-h-[60vh] min-h-0 space-y-4 overflow-y-auto pr-1">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
                 Owner
@@ -166,7 +166,22 @@ export function SkillOwnershipPanel({ skill, wsId, members, canManage }: Props) 
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="No owner" />
+                  {/* Render the member's display name for the selected id —
+                      Base UI's Value otherwise shows the raw user_id. */}
+                  <SelectValue placeholder="No owner">
+                    {(value: unknown) => {
+                      const id = value as string | null;
+                      if (!id || id === "__none__") {
+                        return (
+                          <span className="italic text-muted-foreground">
+                            No owner
+                          </span>
+                        );
+                      }
+                      const m = members.find((mm) => mm.user_id === id);
+                      return <span>{m?.name ?? "No owner"}</span>;
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">

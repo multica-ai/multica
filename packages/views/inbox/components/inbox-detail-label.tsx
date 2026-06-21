@@ -139,6 +139,12 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{item.body || typeLabels[item.type]}</span>;
     case "agent_capability_drift": // CEREBRO-PATCH(inbox-capability-drift-label): TECH-3738 Bid C — show the drift summary line.
       return <span>{item.body || typeLabels[item.type]}</span>;
+    // CEREBRO-PATCH(inbox-skill-notify-bodies): FIR-1587 — surface the who/what/why body (proposer name + reason + session hint) instead of the generic label.
+    case "skill_change_request_created":
+    case "skill_change_request_reviewed":
+    case "skill_forked":
+    case "skill_agent_assigned":
+      return <span>{item.body || typeLabels[item.type]}</span>;
     default:
       return <span>{typeLabels[item.type] ?? item.type}</span>;
   }

@@ -761,8 +761,9 @@ func (h *Handler) notifySkillChangeRequestCreated(ctx context.Context, skill db.
 		return
 	}
 	details := h.buildSkillChangeRequestDetails(ctx, skill, cr)
-	body := fmt.Sprintf("%s proposed %s → %s on %s",
-		shortUUID(cr.ProposedBy), cr.BaseVersion, cr.ProposedVersion, skill.Name)
+	// CEREBRO-PATCH(skill-notify-bodies): FIR-1587 — who/what/why with the proposer's name, reason, and session link.
+	body := skillChangeRequestBody(h.skillActorName(ctx, cr.ProposedBy), skill.Name,
+		cr.BaseVersion, cr.ProposedVersion, cr.Description, cr.WorkSessionID.Valid)
 	title := fmt.Sprintf("Change request on %s", skill.Name)
 	for _, rid := range recipients {
 		h.writeSkillInboxItem(ctx, skill.WorkspaceID, rid, inboxTypeSkillChangeRequestCreated,
@@ -810,7 +811,8 @@ func (h *Handler) notifySkillForked(ctx context.Context, parent db.Skill, forked
 		return
 	}
 	title := fmt.Sprintf("%s was forked", parent.Name)
-	body := fmt.Sprintf("%s forked %s into %s", shortUUID(forkedBy), parent.Name, forked.Name)
+	// CEREBRO-PATCH(skill-notify-bodies): FIR-1587 — name the forker instead of a short UUID.
+	body := skillForkedBody(h.skillActorName(ctx, forkedBy), parent.Name, forked.Name)
 	details := map[string]any{
 		"parent_skill_id": uuidToString(parent.ID),
 		"parent_name":     parent.Name,
@@ -840,7 +842,8 @@ func (h *Handler) notifySkillsAgentAssigned(ctx context.Context, skillIDs []pgty
 			continue
 		}
 		title := fmt.Sprintf("%s assigned to an agent", skill.Name)
-		body := fmt.Sprintf("%s assigned %s to agent %s", shortUUID(assignedBy), skill.Name, agent.Name)
+		// CEREBRO-PATCH(skill-notify-bodies): FIR-1587 — name the assigner instead of a short UUID.
+		body := skillAgentAssignedBody(h.skillActorName(ctx, assignedBy), skill.Name, agent.Name)
 		details := map[string]any{
 			"skill_id":    uuidToString(skill.ID),
 			"skill_name":  skill.Name,
@@ -973,21 +976,6 @@ func (h *Handler) writeSkillInboxItem(
 			"details":        json.RawMessage(item.Details),
 		}},
 	})
-}
-
-// shortUUID returns the first 8 hex chars of a UUID for use in inbox titles
-// when we don't have the user's display name on hand. The frontend resolves
-// the full name from proposer_id in details; the body is the push / terminal
-// fallback only.
-func shortUUID(u pgtype.UUID) string {
-	if !u.Valid {
-		return "someone"
-	}
-	s := uuidToString(u)
-	if len(s) >= 8 {
-		return s[:8]
-	}
-	return s
 }
 
 // computeUnifiedDiff produces a small unified-diff-style string for SKILL.md
