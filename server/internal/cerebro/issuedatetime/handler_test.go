@@ -47,6 +47,65 @@ func TestParseTime(t *testing.T) {
 	}
 }
 
+func TestParseKind(t *testing.T) {
+	tests := []struct {
+		name      string
+		in        *string
+		wantValid bool
+		wantVal   string
+		wantErr   bool
+	}{
+		{"nil inherits", nil, false, "", false},
+		{"empty inherits", ptr(""), false, "", false},
+		{"whitespace inherits", ptr("  "), false, "", false},
+		{"none", ptr("none"), true, "none", false},
+		{"start", ptr("start"), true, "start", false},
+		{"due", ptr("due"), true, "due", false},
+		{"garbage", ptr("sometimes"), false, "", true},
+		{"wrong case", ptr("Start"), false, "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseKind(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got none (value=%+v)", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Valid != tc.wantValid {
+				t.Fatalf("valid = %v, want %v", got.Valid, tc.wantValid)
+			}
+			if got.Valid && got.String != tc.wantVal {
+				t.Fatalf("value = %q, want %q", got.String, tc.wantVal)
+			}
+			if out := kindToString(got); tc.wantValid {
+				if out == nil || *out != tc.wantVal {
+					t.Fatalf("kindToString round-trip: got %v, want %q", out, tc.wantVal)
+				}
+			} else if out != nil {
+				t.Fatalf("kindToString of unset should be nil, got %q", *out)
+			}
+		})
+	}
+}
+
+func TestValidKind(t *testing.T) {
+	for _, k := range []string{"none", "start", "due"} {
+		if !validKind(k) {
+			t.Fatalf("validKind(%q) = false, want true", k)
+		}
+	}
+	for _, k := range []string{"", "None", "stop", "duedate"} {
+		if validKind(k) {
+			t.Fatalf("validKind(%q) = true, want false", k)
+		}
+	}
+}
+
 func TestTimeToStringRoundTrip(t *testing.T) {
 	for _, in := range []string{"00:00", "08:00", "16:30", "23:59"} {
 		pt, err := parseTime(&in)

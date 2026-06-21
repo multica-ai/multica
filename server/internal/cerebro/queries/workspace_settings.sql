@@ -3,7 +3,7 @@
 -- default (USD + the wakeup-limit defaults), so callers treat pgx.ErrNoRows as
 -- "use default", not an error.
 SELECT workspace_id, display_currency, wakeup_max_self_per_issue,
-       wakeup_min_interval_minutes, updated_at, updated_by
+       wakeup_min_interval_minutes, default_agent_start_kind, updated_at, updated_by
 FROM cerebro_workspace_settings
 WHERE workspace_id = $1;
 
@@ -19,6 +19,19 @@ VALUES ($1, $2, $3, now(), $4)
 ON CONFLICT (workspace_id) DO UPDATE
 SET wakeup_max_self_per_issue = EXCLUDED.wakeup_max_self_per_issue,
     wakeup_min_interval_minutes = EXCLUDED.wakeup_min_interval_minutes,
+    updated_at = now(),
+    updated_by = EXCLUDED.updated_by;
+
+-- name: UpsertCerebroWorkspaceDefaultAgentStartKind :exec
+-- FIR-1597: set (or change) the workspace-wide default for whether a newly
+-- scheduled issue auto-starts its assigned agent on the start or due date.
+-- Only this column is touched on conflict so other settings are preserved.
+INSERT INTO cerebro_workspace_settings (
+    workspace_id, default_agent_start_kind, updated_at, updated_by
+)
+VALUES ($1, $2, now(), $3)
+ON CONFLICT (workspace_id) DO UPDATE
+SET default_agent_start_kind = EXCLUDED.default_agent_start_kind,
     updated_at = now(),
     updated_by = EXCLUDED.updated_by;
 

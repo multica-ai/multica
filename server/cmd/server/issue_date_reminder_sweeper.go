@@ -49,10 +49,12 @@ func tickIssueDateReminders(ctx context.Context, queries *db.Queries, bus *event
 		return
 	}
 	for _, row := range rows {
-		// CEREBRO-PATCH(issue-date-times): an agent-assigned issue whose scheduled
-		// start time has arrived auto-starts its agent — same path as a fresh
-		// assignment — instead of ringing a human reminder.
-		if row.AssigneeType.String == "agent" && row.Kind == "start" {
+		// CEREBRO-PATCH(issue-date-times): an agent-assigned issue that opted in to
+		// auto-start (FIR-1597) and whose scheduled start- or due-time has arrived
+		// starts its agent — same path as a fresh assignment — instead of ringing a
+		// human reminder. The claim query only returns agent rows that opted in, so
+		// any agent-assigned claim here (start or due) is an auto-start.
+		if row.AssigneeType.String == "agent" {
 			issue, err := queries.GetIssue(ctx, row.IssueID)
 			if err != nil {
 				slog.Warn("issue date reminder sweeper: load issue for agent start failed", "error", err, "issue_id", util.UUIDToString(row.IssueID))

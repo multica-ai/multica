@@ -1988,6 +1988,9 @@ importers:
 
   packages/cerebro-feature-flags:
     dependencies:
+      '@multica/cerebro-issue-datetime':
+        specifier: workspace:*
+        version: link:../cerebro-issue-datetime
       '@multica/cerebro-wakeup':
         specifier: workspace:*
         version: link:../cerebro-wakeup

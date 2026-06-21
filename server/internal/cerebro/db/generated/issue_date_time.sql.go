@@ -23,50 +23,76 @@ func (q *Queries) DeleteCerebroIssueDateTime(ctx context.Context, issueID pgtype
 
 const getCerebroIssueDateTime = `-- name: GetCerebroIssueDateTime :one
 
-SELECT issue_id, start_time, due_time, updated_at
+SELECT issue_id, start_time, due_time, agent_start_kind, updated_at
 FROM cerebro_issue_date_time
 WHERE issue_id = $1
 `
 
-// Optional time-of-day for an issue's start_date / due_date. See migration
-// 9087_cerebro_issue_date_time. Read/written through the cerebro issuedatetime
+type GetCerebroIssueDateTimeRow struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	StartTime      pgtype.Time        `json:"start_time"`
+	DueTime        pgtype.Time        `json:"due_time"`
+	AgentStartKind pgtype.Text        `json:"agent_start_kind"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Optional time-of-day for an issue's start_date / due_date, plus the per-issue
+// agent auto-start choice. See migrations 9087_cerebro_issue_date_time and
+// 9095_cerebro_agent_start_kind. Read/written through the cerebro issuedatetime
 // handler; the date-reminder sweeper joins the table directly in its own claim
 // query (pkg/db/queries/issue_date_reminder.sql).
-func (q *Queries) GetCerebroIssueDateTime(ctx context.Context, issueID pgtype.UUID) (CerebroIssueDateTime, error) {
+func (q *Queries) GetCerebroIssueDateTime(ctx context.Context, issueID pgtype.UUID) (GetCerebroIssueDateTimeRow, error) {
 	row := q.db.QueryRow(ctx, getCerebroIssueDateTime, issueID)
-	var i CerebroIssueDateTime
+	var i GetCerebroIssueDateTimeRow
 	err := row.Scan(
 		&i.IssueID,
 		&i.StartTime,
 		&i.DueTime,
+		&i.AgentStartKind,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const upsertCerebroIssueDateTime = `-- name: UpsertCerebroIssueDateTime :one
-INSERT INTO cerebro_issue_date_time (issue_id, start_time, due_time, updated_at)
-VALUES ($1, $2, $3, now())
+INSERT INTO cerebro_issue_date_time (issue_id, start_time, due_time, agent_start_kind, updated_at)
+VALUES ($1, $2, $3, $4, now())
 ON CONFLICT (issue_id) DO UPDATE
-SET start_time = EXCLUDED.start_time,
-    due_time   = EXCLUDED.due_time,
-    updated_at = now()
-RETURNING issue_id, start_time, due_time, updated_at
+SET start_time       = EXCLUDED.start_time,
+    due_time         = EXCLUDED.due_time,
+    agent_start_kind = EXCLUDED.agent_start_kind,
+    updated_at       = now()
+RETURNING issue_id, start_time, due_time, agent_start_kind, updated_at
 `
 
 type UpsertCerebroIssueDateTimeParams struct {
-	IssueID   pgtype.UUID `json:"issue_id"`
-	StartTime pgtype.Time `json:"start_time"`
-	DueTime   pgtype.Time `json:"due_time"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	StartTime      pgtype.Time `json:"start_time"`
+	DueTime        pgtype.Time `json:"due_time"`
+	AgentStartKind pgtype.Text `json:"agent_start_kind"`
 }
 
-func (q *Queries) UpsertCerebroIssueDateTime(ctx context.Context, arg UpsertCerebroIssueDateTimeParams) (CerebroIssueDateTime, error) {
-	row := q.db.QueryRow(ctx, upsertCerebroIssueDateTime, arg.IssueID, arg.StartTime, arg.DueTime)
-	var i CerebroIssueDateTime
+type UpsertCerebroIssueDateTimeRow struct {
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	StartTime      pgtype.Time        `json:"start_time"`
+	DueTime        pgtype.Time        `json:"due_time"`
+	AgentStartKind pgtype.Text        `json:"agent_start_kind"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertCerebroIssueDateTime(ctx context.Context, arg UpsertCerebroIssueDateTimeParams) (UpsertCerebroIssueDateTimeRow, error) {
+	row := q.db.QueryRow(ctx, upsertCerebroIssueDateTime,
+		arg.IssueID,
+		arg.StartTime,
+		arg.DueTime,
+		arg.AgentStartKind,
+	)
+	var i UpsertCerebroIssueDateTimeRow
 	err := row.Scan(
 		&i.IssueID,
 		&i.StartTime,
 		&i.DueTime,
+		&i.AgentStartKind,
 		&i.UpdatedAt,
 	)
 	return i, err

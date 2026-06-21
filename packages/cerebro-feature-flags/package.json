@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@multica/cerebro-issue-datetime": "workspace:*",
     "@multica/cerebro-wakeup": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

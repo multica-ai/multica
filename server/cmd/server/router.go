@@ -726,6 +726,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 issue start/due time-of-day handler instance
 	cerebroIssueDateTimeHandler := cerebroissuedatetime.NewHandler(cerebroQueries, queries)
+	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 workspace default agent-start handler instance
+	cerebroIssueDateTimeSettingsHandler := cerebroissuedatetime.NewSettingsHandler(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
@@ -1071,6 +1073,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/display-currency", displayCurrencyHandler.Get)
 					// CEREBRO-PATCH(cerebro-wakeup-settings-routes): TECH-3298 self-wakeup limits read (any member).
 					r.Get("/wakeup-settings", cerebroWakeupHandler.GetSettings)
+					// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 workspace default agent-start read (any member).
+					r.Get("/issue-start-settings", cerebroIssueDateTimeSettingsHandler.GetSettings)
 					// CEREBRO-PATCH(cerebro-groups-routes): workspace group list (member-level).
 					r.Get("/groups", cerebroGroupsHandler.List)
 					// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 workspace role list (member-level).
@@ -1163,6 +1167,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/display-currency", displayCurrencyHandler.SetCurrency)
 					// CEREBRO-PATCH(cerebro-wakeup-settings-routes): TECH-3298 set self-wakeup limits (admin/owner only).
 					r.Put("/wakeup-settings", cerebroWakeupHandler.SetSettings)
+					// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 set workspace default agent-start (admin/owner only).
+					r.Put("/issue-start-settings", cerebroIssueDateTimeSettingsHandler.SetSettings)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval decisions + intake seam (admin/owner only).
 					r.Post("/approvals/intake", cerebroApprovalsHandler.Intake)
 					r.Post("/approvals/{approvalId}/approve", cerebroApprovalsHandler.Approve)

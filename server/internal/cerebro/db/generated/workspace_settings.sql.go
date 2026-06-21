@@ -13,7 +13,7 @@ import (
 
 const getCerebroWorkspaceSettings = `-- name: GetCerebroWorkspaceSettings :one
 SELECT workspace_id, display_currency, wakeup_max_self_per_issue,
-       wakeup_min_interval_minutes, updated_at, updated_by
+       wakeup_min_interval_minutes, default_agent_start_kind, updated_at, updated_by
 FROM cerebro_workspace_settings
 WHERE workspace_id = $1
 `
@@ -23,6 +23,7 @@ type GetCerebroWorkspaceSettingsRow struct {
 	DisplayCurrency          string             `json:"display_currency"`
 	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
 	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
+	DefaultAgentStartKind    string             `json:"default_agent_start_kind"`
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 	UpdatedBy                pgtype.UUID        `json:"updated_by"`
 }
@@ -38,10 +39,36 @@ func (q *Queries) GetCerebroWorkspaceSettings(ctx context.Context, workspaceID p
 		&i.DisplayCurrency,
 		&i.WakeupMaxSelfPerIssue,
 		&i.WakeupMinIntervalMinutes,
+		&i.DefaultAgentStartKind,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
 	)
 	return i, err
+}
+
+const upsertCerebroWorkspaceDefaultAgentStartKind = `-- name: UpsertCerebroWorkspaceDefaultAgentStartKind :exec
+INSERT INTO cerebro_workspace_settings (
+    workspace_id, default_agent_start_kind, updated_at, updated_by
+)
+VALUES ($1, $2, now(), $3)
+ON CONFLICT (workspace_id) DO UPDATE
+SET default_agent_start_kind = EXCLUDED.default_agent_start_kind,
+    updated_at = now(),
+    updated_by = EXCLUDED.updated_by
+`
+
+type UpsertCerebroWorkspaceDefaultAgentStartKindParams struct {
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+	DefaultAgentStartKind string      `json:"default_agent_start_kind"`
+	UpdatedBy             pgtype.UUID `json:"updated_by"`
+}
+
+// FIR-1597: set (or change) the workspace-wide default for whether a newly
+// scheduled issue auto-starts its assigned agent on the start or due date.
+// Only this column is touched on conflict so other settings are preserved.
+func (q *Queries) UpsertCerebroWorkspaceDefaultAgentStartKind(ctx context.Context, arg UpsertCerebroWorkspaceDefaultAgentStartKindParams) error {
+	_, err := q.db.Exec(ctx, upsertCerebroWorkspaceDefaultAgentStartKind, arg.WorkspaceID, arg.DefaultAgentStartKind, arg.UpdatedBy)
+	return err
 }
 
 const upsertCerebroWorkspaceDisplayCurrency = `-- name: UpsertCerebroWorkspaceDisplayCurrency :exec

@@ -1109,7 +1109,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Start/due time of day",
     group: "workspace",
     description:
-      "Add an optional time-of-day next to an issue's Start date and Due date. A start time auto-starts an agent-assigned issue at that exact moment (same as a fresh assignment); a due time makes the due reminder fire at that moment instead of at the start of the day. Leaving a time empty keeps the date behaving exactly as before. Off hides the time control. FIR-1597.",
+      "Add an optional time-of-day next to an issue's Start date and Due date, plus an opt-in switch to auto-start the assigned agent on that date+time. Auto-start is off by default and requires a time chosen in the same control; a workspace default (below) sets the starting point for new issues. A due time with auto-start off still fires the due reminder at that moment. Leaving a time empty keeps the date behaving exactly as before. Off hides the controls. FIR-1597.",
   },
   {
     key: "cerebro_saved_filters",

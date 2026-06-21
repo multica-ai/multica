@@ -663,10 +663,11 @@ type CerebroIssueDateReminder struct {
 }
 
 type CerebroIssueDateTime struct {
-	IssueID   pgtype.UUID        `json:"issue_id"`
-	StartTime pgtype.Time        `json:"start_time"`
-	DueTime   pgtype.Time        `json:"due_time"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	StartTime      pgtype.Time        `json:"start_time"`
+	DueTime        pgtype.Time        `json:"due_time"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	AgentStartKind pgtype.Text        `json:"agent_start_kind"`
 }
 
 type CerebroIssueDueTime struct {
@@ -1198,6 +1199,7 @@ type CerebroWorkspaceSetting struct {
 	UpdatedBy                pgtype.UUID        `json:"updated_by"`
 	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
 	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
+	DefaultAgentStartKind    string             `json:"default_agent_start_kind"`
 }
 
 type ChatMessage struct {

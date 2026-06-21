@@ -45,14 +45,18 @@ func NewHandler(cerebro *cerebrodb.Queries, upstream *db.Queries) *Handler {
 }
 
 // response is the wire shape: optional "HH:MM" strings, null when unset.
+// AgentStartKind is the per-issue auto-start choice ("none" | "start" | "due"),
+// null when the issue inherits the workspace default.
 type response struct {
-	StartTime *string `json:"start_time"`
-	DueTime   *string `json:"due_time"`
+	StartTime      *string `json:"start_time"`
+	DueTime        *string `json:"due_time"`
+	AgentStartKind *string `json:"agent_start_kind"`
 }
 
 type request struct {
-	StartTime *string `json:"start_time"`
-	DueTime   *string `json:"due_time"`
+	StartTime      *string `json:"start_time"`
+	DueTime        *string `json:"due_time"`
+	AgentStartKind *string `json:"agent_start_kind"`
 }
 
 // Get returns the optional start/due times for an issue. Both null when none
@@ -75,13 +79,16 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, response{
-		StartTime: timeToString(row.StartTime),
-		DueTime:   timeToString(row.DueTime),
+		StartTime:      timeToString(row.StartTime),
+		DueTime:        timeToString(row.DueTime),
+		AgentStartKind: kindToString(row.AgentStartKind),
 	})
 }
 
-// Put sets (or clears) the optional start/due times for an issue. A null field
-// clears that time; when both end up null the row is deleted.
+// Put sets (or clears) the optional start/due times and the agent auto-start
+// choice for an issue. A null time field clears that time; opting in to
+// auto-start on a date requires that date's time to be set in the same request
+// (FIR-1597). When all three end up empty the row is deleted.
 func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 	if _, ok := requireUserID(w, r); !ok {
 		return
@@ -106,8 +113,25 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid due_time")
 		return
 	}
+	kind, err := parseKind(req.AgentStartKind)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid agent_start_kind")
+		return
+	}
 
-	if !start.Valid && !due.Valid {
+	// Opting in to auto-start requires the matching date's time to be set in the
+	// same request, so a scheduled run always fires at a deliberate wall-clock
+	// moment (FIR-1597).
+	if kind.Valid && kind.String == "start" && !start.Valid {
+		writeError(w, http.StatusBadRequest, "start_time is required to auto-start on the start date")
+		return
+	}
+	if kind.Valid && kind.String == "due" && !due.Valid {
+		writeError(w, http.StatusBadRequest, "due_time is required to auto-start on the due date")
+		return
+	}
+
+	if !start.Valid && !due.Valid && !kind.Valid {
 		if err := h.Cerebro.DeleteCerebroIssueDateTime(r.Context(), issue.ID); err != nil {
 			writeError(w, http.StatusInternalServerError, "clear failed")
 			return
@@ -117,17 +141,19 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row, err := h.Cerebro.UpsertCerebroIssueDateTime(r.Context(), cerebrodb.UpsertCerebroIssueDateTimeParams{
-		IssueID:   issue.ID,
-		StartTime: start,
-		DueTime:   due,
+		IssueID:        issue.ID,
+		StartTime:      start,
+		DueTime:        due,
+		AgentStartKind: kind,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "save failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, response{
-		StartTime: timeToString(row.StartTime),
-		DueTime:   timeToString(row.DueTime),
+		StartTime:      timeToString(row.StartTime),
+		DueTime:        timeToString(row.DueTime),
+		AgentStartKind: kindToString(row.AgentStartKind),
 	})
 }
 
@@ -193,6 +219,35 @@ func timeToString(t pgtype.Time) *string {
 	hh := totalSeconds / 3600
 	mm := (totalSeconds % 3600) / 60
 	s := fmt.Sprintf("%02d:%02d", hh, mm)
+	return &s
+}
+
+// parseKind validates the optional agent auto-start choice. A nil or empty
+// pointer yields an invalid (NULL) value meaning "inherit the workspace
+// default". Accepts "none" | "start" | "due".
+func parseKind(s *string) (pgtype.Text, error) {
+	if s == nil {
+		return pgtype.Text{}, nil
+	}
+	v := strings.TrimSpace(*s)
+	if v == "" {
+		return pgtype.Text{}, nil
+	}
+	switch v {
+	case "none", "start", "due":
+		return pgtype.Text{String: v, Valid: true}, nil
+	default:
+		return pgtype.Text{}, fmt.Errorf("expected none|start|due, got %q", v)
+	}
+}
+
+// kindToString renders the stored agent auto-start choice, or nil when unset
+// (the issue inherits the workspace default).
+func kindToString(t pgtype.Text) *string {
+	if !t.Valid {
+		return nil
+	}
+	s := t.String
 	return &s
 }
 
