@@ -35,3 +35,4 @@ export {
   type ConnectionConfigSheetProps,
 } from "./connection-config-sheet";
 export { ConnectionRowConfigure } from "./connection-row-configure";
+export { AutopilotPermissionsSection } from "./autopilot-permissions-section";

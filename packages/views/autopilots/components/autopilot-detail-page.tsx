@@ -54,6 +54,8 @@ import { TranscriptButton } from "../../common/task-transcript";
 // CEREBRO-PATCH(autopilot-detail-nav-import): edit dialog removed, uses navigation to /edit page (JEH-1766)
 // CEREBRO-PATCH(autopilot-private-badge-import): owner-only autopilot badge (JEH-1750).
 import { PrivateBadge } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(autopilot-detail-permissions-import): System actor permissions page (FIR-1692).
+import { AutopilotPermissionsSection } from "@multica/cerebro-tool-policy/views";
 import { useT } from "../../i18n";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 
@@ -615,6 +617,9 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               )}
             </div>
           </section>
+
+          {/* CEREBRO-PATCH(autopilot-detail-permissions-section): System actor permissions page (FIR-1692). */}
+          <AutopilotPermissionsSection autopilotId={autopilotId} heading="Permissions" description="What this autopilot may do on its human-less (System) runs. These rules can never be looser than the autopilot owner's own ceiling." />
 
           {/* Triggers */}
           <section className="space-y-3">

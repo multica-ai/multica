@@ -928,6 +928,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `autopilot-detail-nav-state` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove `editDialogOpen` state; edit button navigates to full-page edit. |
 | `autopilot-detail-nav-edit-button` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — Edit button navigates to `/autopilots/:id/edit` instead of opening dialog. |
 | `autopilot-detail-nav-no-dialog` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | JEH-1766 — remove edit dialog render block from detail page. |
+| `autopilot-detail-permissions-import` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | FIR-1692 — import `AutopilotPermissionsSection` so System (the autopilot's human-less run mandate) is a first-class actor with its own permissions page. |
+| `autopilot-detail-permissions-section` | packages/views/autopilots/components/autopilot-detail-page.tsx | 1 | FIR-1692 — render the System actor permissions page on the autopilot detail page (replaces the old System-layer picker on agent/member tables). |
 | `comment-create-transaction` | server/internal/handler/comment.go | 1 | FIR-1914 follow-up: comment creation keeps the existing transaction shape after durable notification rows were removed. |
 | `issue-update-transaction` | server/internal/handler/issue.go | 1 | FIR-1914 follow-up: issue updates keep the existing transaction shape after durable notification rows were removed. |
 | `agent-avatar-generate` | server/internal/cerebro/agent_avatar/handler.go | 174 | JEH-1563/FIR-2049 — fork file: POST /api/agents/generate-avatar calls the Firtal Data Registry AI Gateway, uploads PNG to storage, returns URL. |

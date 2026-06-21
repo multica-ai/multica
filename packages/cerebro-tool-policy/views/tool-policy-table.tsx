@@ -23,10 +23,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { autopilotListOptions } from "@multica/core/autopilots";
-import type { Autopilot } from "@multica/core/types";
 import {
-  Bot,
   ChevronDown,
   ChevronRight,
   FolderGit2,
@@ -103,17 +100,23 @@ import { ConnectionRowConfigure } from "./connection-row-configure";
 import { FirtalRegistryDataSourceConfigure } from "./firtal-registry-data-source-sheet";
 
 /**
- * The five surfaces (FIR-2284 Bid 5). Each page renders the same catalog but
- * authors a different rung of the Workspace › Runtime › Agent › Group › User
- * chain. `view` decides the editable layer; `subjectId` is the id that layer's
- * rows key on for this page.
+ * The actor surfaces. Each page renders the same catalog but authors a different
+ * rung of the Workspace › Runtime › Agent › Group › User chain, OR the System
+ * mandate of one autopilot. `view` decides the editable layer; `subjectId` is the
+ * id that layer's rows key on for this page.
+ *
+ * `system` is an ACTOR on par with agents and members (FIR-1692): the autopilot's
+ * own permissions page authors the System layer for that autopilot's human-less
+ * runs. It is NOT a stacked layer hanging on the agent/member pages — those pages
+ * only author their own rung.
  */
 export type ToolPolicyView =
   | "workspace"
   | "runtime"
   | "agent"
   | "group"
-  | "member";
+  | "member"
+  | "system";
 
 /** Restricts the rows shown to a specific category of tools. */
 export type ToolPolicyTabFilter = "repos" | "connections" | "runtime" | "multica";
@@ -147,12 +150,15 @@ export type ToolPolicyTabsProps = Omit<ToolPolicyTableProps, "tabFilter">;
 
 // VIEW_EDIT_LAYER maps each surface to the chain layer it authors. The member
 // page edits the User (ceiling) layer — "member" is the page, "user" is the rung.
+// The system page edits the System layer — "system" is the page (an autopilot's
+// own permissions page), "system" is the rung it authors.
 const VIEW_EDIT_LAYER: Record<ToolPolicyView, ToolLayer> = {
   workspace: "workspace",
   runtime: "runtime",
   agent: "agent",
   group: "group",
   member: "user",
+  system: "system",
 };
 
 // Repo rows carry a non-empty resource_pattern (the repo URL) and render as
@@ -203,54 +209,30 @@ export function ToolPolicyTable({
   groupIds,
   tabFilter,
 }: ToolPolicyTableProps) {
-  // The autopilot whose System (mandate-actor) ceiling we view/author, FIR-1609.
-  // null = the human-context table (System column hidden); set = the table is
-  // scoped to one autopilot → ctx.autopilotId → system_id, and the System column
-  // appears with its own editable Decision + When controls.
-  const [autopilotId, setAutopilotId] = useState<string | null>(null);
-
   // Each surface assembles only the chain context it authors. The workspace
   // root layer is always loaded server-side from wsId, so the workspace view
   // passes no extra subject and still resolves its own layer's Effective column.
-  // The System scope (autopilotId) is orthogonal to the page's own layer — it is
-  // keyed on the chosen autopilot, not the page subject — so it is folded into
-  // every view's context when an autopilot is picked.
+  // The System view is the autopilot's own permissions page: it authors the
+  // System layer keyed on that autopilot (ctx.autopilotId → system_id), so the
+  // backend resolves the chain with the autopilot's mandate as the ceiling.
   const ctx = useMemo(() => {
-    const sys = autopilotId ? { autopilotId } : {};
     switch (view) {
       case "agent":
-        return { agentId: subjectId, runtimeId, userId, groupIds, ...sys };
+        return { agentId: subjectId, runtimeId, userId, groupIds };
       case "runtime":
-        return { runtimeId: subjectId, ...sys };
+        return { runtimeId: subjectId };
       case "group":
-        return { groupIds: [subjectId], ...sys };
+        return { groupIds: [subjectId] };
       case "member":
-        return { userId: subjectId, ...sys };
+        return { userId: subjectId };
+      case "system":
+        return { autopilotId: subjectId };
       case "workspace":
-        return { ...sys };
+        return {};
     }
-  }, [view, subjectId, runtimeId, userId, groupIds, autopilotId]);
+  }, [view, subjectId, runtimeId, userId, groupIds]);
 
   const query = useQuery(toolPolicyTableOptions(wsId, ctx));
-  // The autopilots offered in the System-layer picker. Archived ones are dropped
-  // — you can't author a ceiling for an autopilot that can no longer run.
-  const autopilotsQuery = useQuery({
-    ...autopilotListOptions(wsId),
-    enabled: !!wsId,
-  });
-  const autopilots = useMemo(
-    () => (autopilotsQuery.data ?? []).filter((a) => a.status !== "archived"),
-    [autopilotsQuery.data],
-  );
-  // A picked autopilot that has since disappeared (archived/deleted) leaves a
-  // dangling System scope — fall back to no scope so the column never authors a
-  // ghost subject.
-  const activeAutopilot = useMemo(
-    () => autopilots.find((a) => a.id === autopilotId) ?? null,
-    [autopilots, autopilotId],
-  );
-  // The System column is shown only when a live autopilot is scoped.
-  const systemScoped = !!activeAutopilot;
   const setPolicy = useSetToolPolicy();
   const clearPolicy = useClearToolPolicy();
 
@@ -368,40 +350,6 @@ export function ToolPolicyTable({
     });
   }
 
-  // Write (or clear) the System-layer Decision for the scoped autopilot. The
-  // System layer is keyed on the autopilot id, not the page subject, so these
-  // writes always target layer="system" with the chosen autopilot as the
-  // subject — independent of whichever layer the page's own Decision column
-  // authors. The server rejects (422) a System rule looser than the autopilot
-  // owner's own ceiling, so the UI just surfaces that error via the mutation.
-  function applySystemSetting(toolKey: string, setting: ToolSetting, resourcePattern?: string) {
-    if (!activeAutopilot) return;
-    const scope = resourcePattern ? { resource_pattern: resourcePattern } : {};
-    if (setting === "inherit") {
-      clearPolicy.mutate({ tool_key: toolKey, layer: "system", subject_id: activeAutopilot.id, ...scope });
-      return;
-    }
-    setPolicy.mutate({ tool_key: toolKey, layer: "system", subject_id: activeAutopilot.id, setting, ...scope });
-  }
-
-  // Attach/clear the When condition on the autopilot's own System rule. Like the
-  // page-layer applyCondition, it only refines a CONCRETE system rule already
-  // authored (allow/ask/deny) and never moves the Decision.
-  function applySystemCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
-    if (!activeAutopilot) return;
-    const setting = row.layers.system;
-    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
-    const scope = row.resource_pattern ? { resource_pattern: row.resource_pattern } : {};
-    setPolicy.mutate({
-      tool_key: row.tool_key,
-      layer: "system",
-      subject_id: activeAutopilot.id,
-      setting,
-      condition,
-      ...scope,
-    });
-  }
-
   // Cascade one choice onto every capability of a repo (the group header
   // control): "set the repo to Allow and every row under it follows."
   function applyRepoGroup(group: RepoGroupData, setting: ToolSetting) {
@@ -443,15 +391,6 @@ export function ToolPolicyTable({
         editLayerLabel={LAYER_LABEL[editLayer]!}
       />
 
-      {autopilots.length > 0 && (
-        <SystemLayerBar
-          autopilots={autopilots}
-          value={autopilotId}
-          onChange={setAutopilotId}
-          scopedTitle={activeAutopilot?.title ?? null}
-        />
-      )}
-
       {query.isLoading ? (
         <p className="text-sm text-muted-foreground">Loading tools…</p>
       ) : repoGroups.length === 0 && filtered.length === 0 ? (
@@ -484,14 +423,6 @@ export function ToolPolicyTable({
                   <TableHead>Class</TableHead>
                   <TableHead>Side effect</TableHead>
                   <TableHead>Decision</TableHead>
-                  {systemScoped && (
-                    <TableHead>
-                      <span className="inline-flex items-center gap-1.5">
-                        <Bot className="size-3.5 text-muted-foreground" />
-                        System
-                      </span>
-                    </TableHead>
-                  )}
                   <TableHead>Origin</TableHead>
                 </TableRow>
               </TableHeader>
@@ -557,27 +488,6 @@ export function ToolPolicyTable({
                         />
                       </div>
                     </TableCell>
-                    {systemScoped && (
-                      <TableCell>
-                        <div
-                          className="flex items-center gap-2"
-                          data-testid={`system-cell-${row.tool_key}`}
-                        >
-                          <DecisionControl
-                            row={row}
-                            editLayer="system"
-                            disabled={busy}
-                            onChange={(s) => applySystemSetting(row.tool_key, s)}
-                          />
-                          <ConditionControl
-                            row={row}
-                            editLayer="system"
-                            disabled={busy}
-                            onChange={(c) => applySystemCondition(row, c)}
-                          />
-                        </div>
-                      </TableCell>
-                    )}
                     <TableCell>
                       <OriginTag row={row} editLayer={editLayer} />
                     </TableCell>
@@ -651,28 +561,6 @@ export function ToolPolicyTable({
                     onChange={(c) => applyCondition(row, c)}
                   />
                 </div>
-                {systemScoped && (
-                  <div
-                    className="mt-2 flex flex-wrap items-center gap-1.5 border-t pt-2"
-                    data-testid={`system-card-${row.tool_key}`}
-                  >
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      <Bot className="size-3.5" /> System
-                    </span>
-                    <DecisionControl
-                      row={row}
-                      editLayer="system"
-                      disabled={busy}
-                      onChange={(s) => applySystemSetting(row.tool_key, s)}
-                    />
-                    <ConditionControl
-                      row={row}
-                      editLayer="system"
-                      disabled={busy}
-                      onChange={(c) => applySystemCondition(row, c)}
-                    />
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -906,73 +794,6 @@ function FilterBar({
           <span className="text-xs">(off = only {editLayerLabel} overrides)</span>
         </label>
       </div>
-    </div>
-  );
-}
-
-// --- system-layer picker (FIR-1609) -----------------------------------------
-
-// The sentinel the Select uses for "no autopilot scoped" — the base UI Select
-// can't carry an empty-string value, mirroring the class filter's "__all__".
-const SYSTEM_NONE = "__none__";
-
-// SystemLayerBar scopes the table to one autopilot's System (mandate-actor)
-// ceiling. The System layer governs human-less autopilot runs — the run has no
-// human at the top of the chain, so the autopilot itself supplies the ceiling
-// (FIR-1609). Picking an autopilot here sets ctx.autopilotId → system_id, which
-// makes the backend resolve + return the System rules and reveals the System
-// column. Picking "No autopilot" hides the column and returns to the human view.
-function SystemLayerBar({
-  autopilots,
-  value,
-  onChange,
-  scopedTitle,
-}: {
-  autopilots: Autopilot[];
-  value: string | null;
-  onChange: (id: string | null) => void;
-  scopedTitle: string | null;
-}) {
-  return (
-    <div
-      className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between"
-      data-testid="system-layer-bar"
-    >
-      <div className="flex items-start gap-2">
-        <Bot className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-        <div className="flex flex-col">
-          <span className="text-sm font-medium">System layer (autopilot ceiling)</span>
-          <span className="max-w-xl text-xs text-muted-foreground">
-            {scopedTitle
-              ? `Editing the System ceiling for “${scopedTitle}”. These rules cap what the autopilot may do on a human-less run — they can never be looser than the autopilot owner.`
-              : "Pick an autopilot to view and edit the ceiling that governs its human-less runs."}
-          </span>
-        </div>
-      </div>
-      <Select
-        value={value ?? SYSTEM_NONE}
-        onValueChange={(v) => {
-          if (!v) return;
-          onChange(v === SYSTEM_NONE ? null : v);
-        }}
-      >
-        <SelectTrigger
-          className="h-9 w-full sm:w-64"
-          aria-label="Scope the System layer to an autopilot"
-        >
-          <span data-slot="select-value" className="flex flex-1 text-left">
-            {scopedTitle ?? "No autopilot"}
-          </span>
-        </SelectTrigger>
-        <SelectContent align="end">
-          <SelectItem value={SYSTEM_NONE}>No autopilot</SelectItem>
-          {autopilots.map((a) => (
-            <SelectItem key={a.id} value={a.id}>
-              {a.title}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
     </div>
   );
 }

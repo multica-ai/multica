@@ -154,9 +154,8 @@ function findPutCalls() {
 beforeEach(() => {
   mockCerebroRequest.mockReset();
   mockCerebroRequest.mockResolvedValue(TABLE);
-  // Default: no autopilots → the System-layer picker stays hidden, so every
-  // existing test renders the human-context table unchanged. The System suite
-  // below overrides this to surface the picker.
+  // The table no longer lists autopilots (System is its own actor page, not a
+  // picker); the mock stays defined so the api shape is complete.
   mockListAutopilots.mockReset();
   mockListAutopilots.mockResolvedValue({ autopilots: [] });
 });
@@ -746,11 +745,12 @@ describe("ToolPolicyTable (firtal_registry data sources — FIR-1609 Phase 5)", 
   });
 });
 
-// FIR-1609 Phase 2 — the System layer governs human-less autopilot runs. Picking
-// an autopilot in the System-layer bar scopes the table to system_id, reveals a
-// System column, and authors layer="system" keyed on the autopilot — a peer of
-// the User ceiling, independent of the page's own layer.
-describe("ToolPolicyTable (System layer — FIR-1609)", () => {
+// FIR-1692 — System is a first-class ACTOR, not a stacked layer. The autopilot's
+// own permissions page renders the table with view="system", subjectId=<autopilot
+// id>: it sends that id as system_id, authors layer="system" keyed on the
+// autopilot through the page's OWN Decision/When columns, and there is no picker
+// bar or extra System column hanging off the agent/member pages anymore.
+describe("ToolPolicyTable (System actor — FIR-1692)", () => {
   const SYS_TABLE = {
     tools: [
       {
@@ -775,86 +775,41 @@ describe("ToolPolicyTable (System layer — FIR-1609)", () => {
     mockCerebroRequest.mockReset();
     mockCerebroRequest.mockResolvedValue(SYS_TABLE);
     mockListAutopilots.mockReset();
-    mockListAutopilots.mockResolvedValue({
-      autopilots: [
-        {
-          id: "ap-1",
-          workspace_id: "ws-1",
-          title: "Nightly sync",
-          status: "active",
-          assignee_type: "agent",
-          assignee_id: "agent-9",
-          execution_mode: "run_only",
-          created_by_type: "member",
-          created_by_id: "user-1",
-          is_private: false,
-        },
-        {
-          id: "ap-archived",
-          workspace_id: "ws-1",
-          title: "Retired pilot",
-          status: "archived",
-          assignee_type: "agent",
-          assignee_id: "agent-8",
-          execution_mode: "run_only",
-          created_by_type: "member",
-          created_by_id: "user-1",
-          is_private: false,
-        },
-      ],
-    });
+    mockListAutopilots.mockResolvedValue({ autopilots: [] });
   });
 
-  function renderSysTable(view: "workspace" | "agent" = "workspace", subjectId = "ws-1") {
+  function renderSystemActor(autopilotId = "ap-1") {
     const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
       <QueryClientProvider client={qc}>
-        <ToolPolicyTable wsId="ws-1" view={view} subjectId={subjectId} runtimeId="rt-1" userId="user-1" />
+        <ToolPolicyTable wsId="ws-1" view="system" subjectId={autopilotId} />
       </QueryClientProvider>,
     );
   }
 
-  async function scopeToAutopilot(user: ReturnType<typeof userEvent.setup>) {
-    const picker = await screen.findByLabelText("Scope the System layer to an autopilot");
-    await user.click(picker);
-    // Archived autopilots are not offered…
-    expect(screen.queryByRole("option", { name: "Retired pilot" })).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("option", { name: "Nightly sync" }));
-  }
-
-  it("hides the System column until an autopilot is scoped", async () => {
-    renderSysTable();
-    // The picker is present (an autopilot exists) but no System cell yet.
-    expect(await screen.findByTestId("system-layer-bar")).toBeInTheDocument();
-    expect(screen.queryByTestId("system-cell-web_fetch")).not.toBeInTheDocument();
-  });
-
-  it("scoping to an autopilot sends system_id and reveals the System column", async () => {
-    const user = userEvent.setup();
-    renderSysTable();
-    await screen.findByTestId("system-layer-bar");
-    await scopeToAutopilot(user);
-
-    // The table refetch carries the chosen autopilot as system_id.
+  it("the System actor page sends the autopilot id as system_id", async () => {
+    renderSystemActor("ap-1");
     await waitFor(() => {
       const get = mockCerebroRequest.mock.calls.find(
         (c) => (c[1] as RequestInit | undefined)?.method === undefined && String(c[0]).includes("system_id=ap-1"),
       );
       expect(get).toBeTruthy();
     });
-    // The System cell now renders for the row.
-    expect(await screen.findByTestId("system-cell-web_fetch")).toBeInTheDocument();
   });
 
-  it("the System Decision writes layer=system keyed on the autopilot, not the page subject", async () => {
-    const user = userEvent.setup();
-    renderSysTable("workspace", "ws-1");
-    await screen.findByTestId("system-layer-bar");
-    await scopeToAutopilot(user);
+  it("never renders the old System-layer picker bar (it is gone from every page)", async () => {
+    renderSystemActor("ap-1");
+    await screen.findByRole("table");
+    expect(screen.queryByTestId("system-layer-bar")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Scope the System layer to an autopilot")).not.toBeInTheDocument();
+  });
 
-    const sysCell = within(await screen.findByTestId("system-cell-web_fetch"));
-    await user.click(sysCell.getByLabelText(/^Decision:/));
-    await user.click(sysCell.getByRole("menuitem", { name: "Deny" }));
+  it("the page's Decision column writes layer=system keyed on the autopilot", async () => {
+    const user = userEvent.setup();
+    renderSystemActor("ap-1");
+    const body = within(await screen.findByRole("table"));
+    await user.click(body.getByLabelText(/^Decision:/));
+    await user.click(body.getByRole("menuitem", { name: "Deny" }));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
@@ -868,25 +823,22 @@ describe("ToolPolicyTable (System layer — FIR-1609)", () => {
     });
   });
 
-  it("the System When editor refines the system rule, writing layer=system with the condition", async () => {
+  it("the When editor refines the system rule, writing layer=system with the condition", async () => {
     const user = userEvent.setup();
-    renderSysTable("workspace", "ws-1");
-    await screen.findByTestId("system-layer-bar");
-    await scopeToAutopilot(user);
-
-    const sysCell = within(await screen.findByTestId("system-cell-web_fetch"));
+    renderSystemActor("ap-1");
+    const body = within(await screen.findByRole("table"));
     // The persisted system condition is summarised on the trigger.
-    expect(sysCell.getByTestId("condition-control-web_fetch")).toHaveTextContent("firtal.com");
-    await user.click(sysCell.getByTestId("condition-control-web_fetch"));
+    expect(body.getByTestId("condition-control-web_fetch")).toHaveTextContent("firtal.com");
+    await user.click(body.getByTestId("condition-control-web_fetch"));
     const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
     await user.type(editor.getByLabelText("Add host"), "docs.anthropic.com{Enter}");
     await user.click(editor.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       const put = findPutCalls().at(-1);
-      const body = JSON.parse((put![1] as RequestInit).body as string);
-      expect(body).toMatchObject({ tool_key: "web_fetch", layer: "system", subject_id: "ap-1", setting: "allow" });
-      expect(body.condition.host_allowlist).toEqual(["firtal.com", "docs.anthropic.com"]);
+      const reqBody = JSON.parse((put![1] as RequestInit).body as string);
+      expect(reqBody).toMatchObject({ tool_key: "web_fetch", layer: "system", subject_id: "ap-1", setting: "allow" });
+      expect(reqBody.condition.host_allowlist).toEqual(["firtal.com", "docs.anthropic.com"]);
     });
   });
 });
