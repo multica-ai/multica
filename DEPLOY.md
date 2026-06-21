@@ -85,3 +85,12 @@ bash ~/code/firtal-cerebro/.deploy/deploy.sh
 ```
 
 Det henter `origin/main` (staging) og kører hele deploy-flowet manuelt.
+
+## Changelog
+
+Deploy-logbogen for dette repo ligger i **Multica**, ikke i denne fil:
+**Changelogs → firtal-cerebro → "Changelog — firtal-cerebro"**.
+
+Log ALDRIG en udrulning som en commit i `DEPLOY.md` — en doc-only commit
+udløser et helt deploy-review for ingenting (FIR-1773). Efter hver udrulning
+tilføjes én linje i Multica-dokumentet i stedet (se `deploy`-skillen, trin 2.4a).
