@@ -57,6 +57,9 @@ export function CommentComposer({
       draft={draft}
       onSubmit={onSubmit}
       trackAttachmentIds
+      // FIR-1790: issue comment fields render without the boxed chrome.
+      // Channels/DMs/Chat keep the box (MessageComposer leaves frame=true).
+      frame={false}
       placeholder={placeholder}
       autoFocus={autoFocus}
       size={size}

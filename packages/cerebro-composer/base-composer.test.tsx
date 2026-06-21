@@ -136,3 +136,21 @@ describe("BaseComposer draft parity", () => {
     expect(submit()).toBeEnabled();
   });
 });
+
+describe("BaseComposer framing (FIR-1790)", () => {
+  it("draws the boxed chrome by default (Channels/DMs/Chat keep the box)", () => {
+    render(<BaseComposer draft={makeDraft("")} onSubmit={vi.fn()} editorKey="s1" />);
+    const field = screen.getByTestId("composer-input");
+    expect(field.className).toContain("ring-border");
+    expect(field.className).toContain("bg-card");
+  });
+
+  it("drops the box when frame=false (issue comment fields)", () => {
+    render(
+      <BaseComposer draft={makeDraft("")} onSubmit={vi.fn()} editorKey="s1" frame={false} />,
+    );
+    const field = screen.getByTestId("composer-input");
+    expect(field.className).not.toContain("ring-border");
+    expect(field.className).not.toContain("bg-card");
+  });
+});

@@ -143,6 +143,12 @@ export interface BaseComposerProps {
   /** Blur the editor after a successful send (chat — avoids a stale caret
    *  blinking under the streaming reply). */
   blurOnSubmit?: boolean;
+  /** Draw the boxed field chrome (card surface + border ring). Default true
+   *  (Channels, DMs, Chat). CommentComposer passes false so issue comment
+   *  fields render without a box (FIR-1790). When the field floats while
+   *  pinned, the box is restored regardless so it stays readable over the
+   *  scrolling content behind it. */
+  frame?: boolean;
   className?: string;
 }
 
@@ -187,6 +193,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   dictationRow,
   transcribingSlot,
   blurOnSubmit = false,
+  frame = true,
   className,
 }: BaseComposerProps, forwardedRef) {
   const editorRef = useRef<ContentEditorRef>(null);
@@ -239,6 +246,12 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
     pin === "sticky-bottom" ? { mode: "sticky-bottom" } : undefined,
   );
   const isFloating = floatRect !== null;
+
+  // The visible box (card surface + border ring) is dropped for the unframed
+  // comment composer (FIR-1790); Channels/DMs/Chat keep it via frame=true. A
+  // fixed-pinned field floats over content, so restore the box while floating
+  // regardless of the frame prop, otherwise it would be unreadable.
+  const showFrame = frame || (isFloating && pin === "fixed");
 
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
@@ -425,7 +438,8 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
                 editorRef.current?.focus();
               }}
               className={cn(
-                "relative flex flex-col rounded-lg bg-card pb-8 ring-1 ring-border min-h-20",
+                "relative flex flex-col pb-8 min-h-20",
+                showFrame && "rounded-lg bg-card ring-1 ring-border",
                 noAgent && "pointer-events-none opacity-60",
                 isPinned && pin === "fixed" && "ring-emerald-500/40 shadow-lg",
               )}
