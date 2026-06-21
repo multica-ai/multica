@@ -929,55 +929,39 @@ func (h *Handler) writeSkillInboxItem(
 	actorID pgtype.UUID,
 	details map[string]any,
 ) {
+	if h.Bus == nil {
+		return
+	}
 	payload, err := json.Marshal(details)
 	if err != nil {
 		slog.Warn("skill change request: failed to encode inbox details",
 			"workspace_id", uuidToString(workspaceID), "recipient_id", uuidToString(recipientID), "error", err)
 		return
 	}
-	item, err := h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   workspaceID,
-		RecipientType: "member",
-		RecipientID:   recipientID,
-		Type:          itemType,
-		Severity:      severity,
-		IssueID:       pgtype.UUID{},
-		Title:         title,
-		Body:          pgtype.Text{String: body, Valid: body != ""},
-		ActorType:     pgtype.Text{String: actorType, Valid: actorType != ""},
-		ActorID:       actorID,
-		Details:       payload,
-		Route:         "inbox",
-	})
-	if err != nil {
-		slog.Warn("skill change request: inbox write failed",
-			"workspace_id", uuidToString(workspaceID), "recipient_id", uuidToString(recipientID), "error", err)
-		return
-	}
-	if h.Bus == nil {
-		return
-	}
+	// CEREBRO-PATCH(skill-notif-channels): FIR-1587 — route skill notifications
+	// through the same per-user channel matrix (inbox / notifications / mobile /
+	// desktop) as issue notifications, instead of writing a hardcoded
+	// inbox-only row. The per-skill notify_change_requests / notify_forks /
+	// notify_agent_assigned toggle still gates *whether* a notification is
+	// emitted (upstream in the notify* helpers); this channel routing only
+	// decides *where* a delivered notification lands. A listener in package
+	// main (registerCerebroSkillNotificationListener) consumes this event and
+	// fans it out via dispatchToMember, which preserves today's inbox delivery
+	// by default while letting the user opt skill events into phone/browser
+	// push from Settings → Notifications.
 	h.Bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
+		Type:        protocol.EventSkillNotify,
 		WorkspaceID: uuidToString(workspaceID),
 		ActorType:   actorType,
 		ActorID:     uuidToString(actorID),
-		Payload: map[string]any{"item": map[string]any{
-			"id":             uuidToString(item.ID),
-			"workspace_id":   uuidToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType,
-			"recipient_id":   uuidToString(item.RecipientID),
-			"type":           item.Type,
-			"severity":       item.Severity,
-			"title":          item.Title,
-			"body":           textToPtr(item.Body),
-			"read":           item.Read,
-			"archived":       item.Archived,
-			"created_at":     timestampToString(item.CreatedAt),
-			"actor_type":     textToPtr(item.ActorType),
-			"actor_id":       uuidToPtr(item.ActorID),
-			"details":        json.RawMessage(item.Details),
-		}},
+		Payload: map[string]any{
+			"recipient_id": uuidToString(recipientID),
+			"notif_type":   itemType,
+			"severity":     severity,
+			"title":        title,
+			"body":         body,
+			"details":      string(payload),
+		},
 	})
 }
 

@@ -155,3 +155,44 @@ func TestAgentAssignmentNotifiesSkillOwner(t *testing.T) {
 		t.Fatalf("expected 1 agent-assigned inbox item for owner, got %d", got)
 	}
 }
+
+// TestSkillNotificationCreatedUnread verifies a skill change-request
+// notification lands in the owner's inbox UNREAD (read=false). Opening a
+// notification is what marks it read; arrival must never pre-read it. Locks
+// Jesper's requirement on FIR-1587 so neither the channel-routing path nor a
+// future change can regress skill notifications to arriving pre-read.
+func TestSkillNotificationCreatedUnread(t *testing.T) {
+	ctx := context.Background()
+	f := setupOwnershipFixture(t)
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(f.proposerID, "POST", "/api/skills/"+f.skillID+"/change-requests", map[string]any{
+		"title":            "unread check",
+		"proposed_version": "1.1.0",
+		"proposed_content": "line one changed\nline two\nline three\n",
+	})
+	req = withURLParam(req, "id", f.skillID)
+	testHandler.CreateSkillChangeRequest(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateSkillChangeRequest: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var cr SkillChangeRequestResponse
+	_ = json.NewDecoder(w.Body).Decode(&cr)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM skill_change_request WHERE id = $1`, cr.ID) })
+
+	var n int
+	var anyRead bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(bool_or(read), false) FROM inbox_item
+		WHERE workspace_id = $1 AND type = 'skill_change_request_created'
+		  AND recipient_id = $2 AND (details->>'skill_id') = $3
+	`, testWorkspaceID, f.ownerID, f.skillID).Scan(&n, &anyRead); err != nil {
+		t.Fatalf("query inbox read state: %v", err)
+	}
+	if n == 0 {
+		t.Fatal("expected a change-request inbox item for the owner, got none")
+	}
+	if anyRead {
+		t.Fatal("skill change-request notification must arrive UNREAD (read=false), got read=true")
+	}
+}

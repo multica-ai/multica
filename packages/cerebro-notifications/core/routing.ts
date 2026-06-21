@@ -80,7 +80,14 @@ export type RoutingKey =
   | "agent_comment_no_tag"
   | "agent_comment_member_tag"
   | "agent_comment_agent_tag"
-  | "system_notification";
+  | "system_notification"
+  // FIR-1587: skill notifications (change request created/reviewed, fork,
+  // agent-assigned) route through the channel matrix like everything else.
+  // "created" and "reviewed" share the skill_change_request key. Keep in sync
+  // with `skillRoutingKey` in server/cmd/server/notification_routing.go.
+  | "skill_change_request"
+  | "skill_fork"
+  | "skill_agent_assigned";
 
 // Per-channel default when the user has no override for a given key. Mirrors
 // `defaultChannelChoices` on the server — keep in sync.
@@ -109,6 +116,11 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "on",
     system_notification: "on",
+    // FIR-1587: skill events land in the inbox by default (prior behavior);
+    // push stays opt-in below.
+    skill_change_request: "on",
+    skill_fork: "on",
+    skill_agent_assigned: "on",
   },
   notifications: {
     issue_assigned: "off",
@@ -131,6 +143,11 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "on",
     system_notification: "off",
+    // FIR-1587: keep the lightweight notifications feed quiet for skill events
+    // by default (parity with the prior inbox-only behavior).
+    skill_change_request: "off",
+    skill_fork: "off",
+    skill_agent_assigned: "off",
   },
   mobile: {
     issue_assigned: "on",
@@ -153,6 +170,10 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "off",
     system_notification: "off",
+    // FIR-1587: skill push to phone is opt-in.
+    skill_change_request: "off",
+    skill_fork: "off",
+    skill_agent_assigned: "off",
   },
   desktop: {
     issue_assigned: "on",
@@ -175,6 +196,10 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_member_tag: "on",
     agent_comment_agent_tag: "off",
     system_notification: "off",
+    // FIR-1587: skill push to the computer browser is opt-in.
+    skill_change_request: "off",
+    skill_fork: "off",
+    skill_agent_assigned: "off",
   },
   // Mail is forward-compatible; no events fire by default until the
   // transport is built.
@@ -199,6 +224,10 @@ export const DEFAULT_CHANNEL_CHOICES: Record<
     agent_comment_member_tag: "off",
     agent_comment_agent_tag: "off",
     system_notification: "off",
+    // FIR-1587: mail transport not built yet.
+    skill_change_request: "off",
+    skill_fork: "off",
+    skill_agent_assigned: "off",
   },
 };
 

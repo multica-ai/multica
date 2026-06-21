@@ -158,6 +158,30 @@ const ROW_GROUPS: RowGroup[] = [
     ],
   },
   {
+    // FIR-1587: skill notifications. The per-skill on/off switches on each
+    // skill page still decide *whether* an event fires; these rows decide
+    // *where* it lands once it does — inbox by default, phone/browser push
+    // opt-in.
+    title: "Skills you own",
+    rows: [
+      {
+        routingKey: "skill_change_request",
+        label: "Change request",
+        hint: "Someone proposed a change to one of your skills, or your own proposal was approved or rejected.",
+      },
+      {
+        routingKey: "skill_fork",
+        label: "Skill forked",
+        hint: "Someone forked one of your skills into a copy of their own.",
+      },
+      {
+        routingKey: "skill_agent_assigned",
+        label: "Skill assigned to an agent",
+        hint: "One of your skills was assigned to an agent.",
+      },
+    ],
+  },
+  {
     title: "System",
     rows: [
       {
