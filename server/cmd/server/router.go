@@ -100,8 +100,8 @@ import (
 	cerebroissuedatetime "github.com/multica-ai/multica/server/internal/cerebro/issuedatetime"
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler import
 	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
-	// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters handler import.
-	cerebrochapters "github.com/multica-ai/multica/server/internal/cerebro/chapters"
+	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler import.
+	cerebrosessions "github.com/multica-ai/multica/server/internal/cerebro/sessions"
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler import
 	cerebrosavedfilters "github.com/multica-ai/multica/server/internal/cerebro/savedfilters"
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
@@ -732,8 +732,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIssueDateTimeSettingsHandler := cerebroissuedatetime.NewSettingsHandler(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
-	// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters handler instance.
-	cerebroChaptersHandler := cerebrochapters.NewHandler(pool, queries)
+	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler instance.
+	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries)
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
 	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
@@ -2005,12 +2005,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroRecurringIssueHandler.Upsert)
 				r.Delete("/", cerebroRecurringIssueHandler.Delete)
 			})
-			// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters REST surface.
-			r.Route("/api/cerebro/issues/{issueID}/chapters", func(r chi.Router) {
-				r.Get("/", cerebroChaptersHandler.List)
-				r.Post("/", cerebroChaptersHandler.Create)
-				r.Post("/start-fresh", cerebroChaptersHandler.StartFresh)
-				r.Patch("/{chapterId}", cerebroChaptersHandler.Update)
+			// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions REST surface.
+			r.Route("/api/cerebro/issues/{issueId}/sessions", func(r chi.Router) {
+				r.Get("/", cerebroSessionsHandler.List)
+				r.Post("/start-fresh", cerebroSessionsHandler.StartFresh)
+				r.Patch("/{sessionId}", cerebroSessionsHandler.Update)
 			})
 			r.Post("/api/cerebro/issue-recurrences/{id}/run", cerebroRecurringIssueHandler.RunNow)
 			// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters REST surface.

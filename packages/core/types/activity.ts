@@ -19,8 +19,6 @@ export interface TimelineEntry {
   // Comment fields
   content?: string;
   parent_id?: string | null;
-  // CEREBRO-PATCH(comment-chapters-types): FIR-1704 carries optional chapter grouping for root comments.
-  chapter_id?: string | null;
   updated_at?: string;
   comment_type?: string;
   reactions?: Reaction[];

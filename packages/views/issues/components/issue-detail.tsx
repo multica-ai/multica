@@ -119,8 +119,8 @@ import { SprintPicker } from "@multica/cerebro-sprints/views";
 import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
-// CEREBRO-PATCH(comment-chapters-ui): FIR-1704 wraps existing comment threads in lightweight chapters.
-import { ChapterHeader, HandoffBrief, StartFresh, defaultChapter, useChapters } from "@multica/cerebro-chapters";
+// CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
+import { SessionHeader, SessionHandoff, StartFresh, groupTimelineBySession, useSessions } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1077,26 +1077,21 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     return null;
   }, [timelineView.groups]);
 
-  // CEREBRO-PATCH(comment-chapters-ui): FIR-1704 chapter metadata wraps the existing thread groups.
-  const chaptersQuery = useChapters(id);
-  const fallbackChapter = useMemo(() => defaultChapter(id), [id]);
-  const chaptersById = useMemo(() => {
-    const map = new Map((chaptersQuery.data ?? []).map((chapter) => [chapter.id, chapter]));
-    map.set("default", fallbackChapter);
-    return map;
-  }, [chaptersQuery.data, fallbackChapter]);
-  const activeChapterId = useMemo(() => {
-    const chapters = chaptersQuery.data ?? [];
+  // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 session membership is derived
+  // from timeline order against the session start markers — no per-comment field.
+  const sessionsQuery = useSessions(id);
+  const activeSessionId = useMemo(() => {
+    const sessions = sessionsQuery.data ?? [];
     return (
-      chapters.find((chapter) => chapter.status !== "done")?.id ??
-      chapters[chapters.length - 1]?.id ??
+      sessions.find((session) => session.status !== "done")?.id ??
+      sessions[sessions.length - 1]?.id ??
       "default"
     );
-  }, [chaptersQuery.data]);
-  const [openChapterId, setOpenChapterId] = useState<string>("default");
+  }, [sessionsQuery.data]);
+  const [openSessionId, setOpenSessionId] = useState<string>("default");
   useEffect(() => {
-    setOpenChapterId(activeChapterId);
-  }, [activeChapterId]);
+    setOpenSessionId(activeSessionId);
+  }, [activeSessionId]);
 
   const {
     reactions: issueReactions,
@@ -1200,8 +1195,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
-  // CEREBRO-PATCH(comment-chapters-flag): FIR-1741 gate chapters UI; off renders the flat timeline.
-  const chaptersEnabled = useFeatureFlag("cerebro_comment_chapters");
+  // CEREBRO-PATCH(comment-sessions-flag): FIR-1741 gate sessions UI; off renders the flat timeline.
+  const sessionsEnabled = useFeatureFlag("cerebro_comment_chapters");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2533,115 +2528,113 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               <TimelineSkeleton />
             ) : (
             <>
-            {/* CEREBRO-PATCH(comment-chapters-flag): FIR-1741 hide Start fresh when chapters off. */}
-            {chaptersEnabled && (
+            {/* CEREBRO-PATCH(comment-sessions-flag): FIR-1741 hide Start fresh when sessions off. */}
+            {sessionsEnabled && (
             <div className="mt-4 flex justify-end">
               <StartFresh issueId={id} />
             </div>
             )}
             <div className="mt-4 flex flex-col gap-3">
               {(() => {
-                let previousChapterId: string | null = null;
-                return timelineView.groups.map((group) => {
-                const firstEntry = group.entries[0]!;
-                const chapterId = group.type === "comment" ? (firstEntry.chapter_id ?? "default") : "default";
-                const chapter = chaptersById.get(chapterId) ?? fallbackChapter;
-                const showChapterHeader = chapterId !== previousChapterId;
-                previousChapterId = chapterId;
-                const chapterOpen = chapterId === openChapterId;
-                const chapterShell = (children: ReactNode) =>
-                  // CEREBRO-PATCH(comment-chapters-flag): FIR-1741 flat render when chapters off.
-                  !chaptersEnabled ? (
-                    <Fragment key={`flat-${firstEntry.id}`}>{children}</Fragment>
-                  ) : (
-                  <Fragment key={`${chapterId}-${firstEntry.id}`}>
-                    {showChapterHeader && (
-                      <>
-                        <ChapterHeader
-                          chapter={chapter}
-                          open={chapterOpen}
-                          onToggle={() => setOpenChapterId(chapterOpen ? "" : chapterId)}
-                        />
-                        {chapterOpen ? (
-                          <HandoffBrief chapter={chapter} />
-                        ) : chapter.handoff_summary ? (
-                          <div className="px-4 text-xs text-muted-foreground">{chapter.handoff_summary}</div>
-                        ) : null}
-                      </>
-                    )}
-                    {chapterOpen ? children : null}
-                  </Fragment>
-                );
-                if (group.type === "comment") {
-                  const entry = group.entries[0]!;
-                  // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
-                  // agent wakeup as a collapsible action note, not a comment card.
-                  if (isWakeupEntry(entry)) {
-                    return chapterShell(
+                // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 render one timeline
+                // group (a comment thread or a coalesced activity block).
+                const renderGroup = (group: typeof timelineView.groups[number]) => {
+                  if (group.type === "comment") {
+                    const entry = group.entries[0]!;
+                    // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
+                    // agent wakeup as a collapsible action note, not a comment card.
+                    if (isWakeupEntry(entry)) {
+                      return (
+                        <div key={entry.id} id={`comment-${entry.id}`}>
+                          <WakeupNote entry={entry} timeAgo={timeAgo} />
+                        </div>
+                      );
+                    }
+                    const isResolved = !!entry.resolved_at;
+                    const isExpanded = expandedResolved.has(entry.id);
+                    if (isResolved && !isExpanded) {
+                      return (
+                        <div key={entry.id} id={`comment-${entry.id}`}>
+                          <ResolvedThreadBar
+                            entry={entry}
+                            replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
+                            onExpand={() => toggleResolvedExpand(entry.id, true)}
+                          />
+                        </div>
+                      );
+                    }
+                    return (
                       <div key={entry.id} id={`comment-${entry.id}`}>
-                        <WakeupNote entry={entry} timeAgo={timeAgo} />
-                      </div>,
-                    );
-                  }
-                  const isResolved = !!entry.resolved_at;
-                  const isExpanded = expandedResolved.has(entry.id);
-                  if (isResolved && !isExpanded) {
-                    return chapterShell(
-                      <div key={entry.id} id={`comment-${entry.id}`}>
-                        <ResolvedThreadBar
+                        <CommentCard
+                          issueId={id}
                           entry={entry}
                           replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
-                          onExpand={() => toggleResolvedExpand(entry.id, true)}
+                          currentUserId={user?.id}
+                          canModerate={canModerateComments}
+                          onReply={submitReply}
+                          onEdit={editComment}
+                          onDelete={deleteComment}
+                          onToggleReaction={handleToggleReaction}
+                          onResolveToggle={handleResolveToggle}
+                          canMoveToSubIssue={moveCommentToSubIssueEnabled && issue?.status !== "cancelled"}
+                          onMoveToSubIssue={handleMoveCommentToSubIssue}
+                          canMoveToNewThread={moveCommentToThreadEnabled && issue?.status !== "cancelled"}
+                          onMoveToNewThread={handleMoveCommentsToNewThread}
+                          onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
+                          highlightedCommentId={highlightedId}
+                          triggerAgentId={triggerAgentId}
                         />
-                      </div>,
+                      </div>
                     );
                   }
-                  return chapterShell(
-                    <div key={entry.id} id={`comment-${entry.id}`}>
-                      <CommentCard
-                        issueId={id}
-                        entry={entry}
-                        replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
-                        currentUserId={user?.id}
-                        canModerate={canModerateComments}
-                        onReply={submitReply}
-                        onEdit={editComment}
-                        onDelete={deleteComment}
-                        onToggleReaction={handleToggleReaction}
-                        onResolveToggle={handleResolveToggle}
-                        canMoveToSubIssue={moveCommentToSubIssueEnabled && issue?.status !== "cancelled"}
-                        onMoveToSubIssue={handleMoveCommentToSubIssue}
-                        canMoveToNewThread={moveCommentToThreadEnabled && issue?.status !== "cancelled"}
-                        onMoveToNewThread={handleMoveCommentsToNewThread}
-                        onCollapseResolved={isResolved ? () => toggleResolvedExpand(entry.id, false) : undefined}
-                        highlightedCommentId={highlightedId}
-                        triggerAgentId={triggerAgentId}
-                      />
-                    </div>,
+
+                  const activityId = group.entries[0]!.id;
+                  const expanded = expandedActivityIds.has(activityId)
+                    ? true
+                    : collapsedActivityIds.has(activityId)
+                      ? false
+                      : activityId === lastActivityGroupId;
+                  return (
+                    <ActivityBlock
+                      key={activityId}
+                      entries={group.entries}
+                      expanded={expanded}
+                      onToggle={() => toggleActivityBlock(activityId, expanded)}
+                      truncateOlder={activityId === lastActivityGroupId}
+                      showOlder={showOlderActivityIds.has(activityId)}
+                      onToggleShowOlder={() => showOlderActivities(activityId)}
+                      getActorName={getActorName}
+                      t={t}
+                      timeAgo={timeAgo}
+                    />
                   );
+                };
+
+                // CEREBRO-PATCH(comment-sessions-flag): FIR-1741 flat render when sessions off.
+                if (!sessionsEnabled) {
+                  return timelineView.groups.map(renderGroup);
                 }
 
-                const activityId = group.entries[0]!.id;
-                const expanded = expandedActivityIds.has(activityId)
-                  ? true
-                  : collapsedActivityIds.has(activityId)
-                    ? false
-                    : activityId === lastActivityGroupId;
-                return chapterShell(
-                  <ActivityBlock
-                    key={activityId}
-                    entries={group.entries}
-                    expanded={expanded}
-                    onToggle={() => toggleActivityBlock(activityId, expanded)}
-                    truncateOlder={activityId === lastActivityGroupId}
-                    showOlder={showOlderActivityIds.has(activityId)}
-                    onToggleShowOlder={() => showOlderActivities(activityId)}
-                    getActorName={getActorName}
-                    t={t}
-                    timeAgo={timeAgo}
-                  />,
-                );
-              });
+                // Sessions on: group the timeline by session start markers and
+                // render each session collapsed except the open one.
+                return groupTimelineBySession(id, sessionsQuery.data, timelineView.groups).map((sg) => {
+                  const open = sg.session.id === openSessionId;
+                  return (
+                    <Fragment key={sg.session.id}>
+                      <SessionHeader
+                        session={sg.session}
+                        open={open}
+                        onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
+                      />
+                      {open ? (
+                        <SessionHandoff session={sg.session} />
+                      ) : sg.session.handoff?.summary ? (
+                        <div className="px-4 text-xs text-muted-foreground">{sg.session.handoff.summary}</div>
+                      ) : null}
+                      {open ? sg.groups.map(renderGroup) : null}
+                    </Fragment>
+                  );
+                });
               })()}
             </div>
             </>

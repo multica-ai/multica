@@ -48,8 +48,6 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     actor_id: c.author_id,
     content: c.content,
     parent_id: c.parent_id,
-    // CEREBRO-PATCH(comment-chapters-timeline): FIR-1704 forwards chapter grouping from comment API into timeline entries.
-    chapter_id: c.chapter_id ?? null,
     created_at: c.created_at,
     updated_at: c.updated_at,
     comment_type: c.type,

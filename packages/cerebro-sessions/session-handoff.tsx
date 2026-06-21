@@ -3,16 +3,18 @@
 import { useState } from "react";
 import { ChevronRight, ExternalLink } from "lucide-react";
 import { Card } from "@multica/ui/components/ui/card";
-import type { Chapter } from "./types";
+import type { Session } from "./types";
 
-export function HandoffBrief({ chapter }: { chapter: Chapter }) {
+export function SessionHandoff({ session }: { session: Session }) {
   const [open, setOpen] = useState(true);
+  const handoff = session.handoff;
   const hasBrief =
-    chapter.handoff_summary.trim() ||
-    chapter.handoff_done.length > 0 ||
-    chapter.handoff_remaining.length > 0 ||
-    chapter.plan_ref;
-  if (!hasBrief) return null;
+    !!handoff &&
+    (handoff.summary.trim() ||
+      handoff.done.length > 0 ||
+      handoff.remaining.length > 0 ||
+      handoff.plan_ref);
+  if (!handoff || !hasBrief) return null;
 
   return (
     <Card className="!py-0 !gap-0 overflow-hidden border-dashed">
@@ -26,25 +28,25 @@ export function HandoffBrief({ chapter }: { chapter: Chapter }) {
       </button>
       {open && (
         <div className="space-y-3 px-4 pb-4 text-sm">
-          {chapter.handoff_summary && <p className="text-muted-foreground">{chapter.handoff_summary}</p>}
-          {chapter.handoff_done.length > 0 && (
+          {handoff.summary && <p className="text-muted-foreground">{handoff.summary}</p>}
+          {handoff.done.length > 0 && (
             <div>
               <div className="mb-1 text-xs font-medium text-muted-foreground">Done</div>
               <ul className="list-disc space-y-1 pl-5">
-                {chapter.handoff_done.map((item) => <li key={item}>{item}</li>)}
+                {handoff.done.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
           )}
-          {chapter.handoff_remaining.length > 0 && (
+          {handoff.remaining.length > 0 && (
             <div>
               <div className="mb-1 text-xs font-medium text-muted-foreground">Remaining</div>
               <ul className="list-disc space-y-1 pl-5">
-                {chapter.handoff_remaining.map((item) => <li key={item}>{item}</li>)}
+                {handoff.remaining.map((item) => <li key={item}>{item}</li>)}
               </ul>
             </div>
           )}
-          {chapter.plan_ref && (
-            <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={chapter.plan_ref}>
+          {handoff.plan_ref && (
+            <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={handoff.plan_ref}>
               Plan <ExternalLink className="h-3 w-3" />
             </a>
           )}

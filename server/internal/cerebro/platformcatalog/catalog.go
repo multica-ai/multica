@@ -232,14 +232,13 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:         "manage_chapters",
-		Title:       "Manage chapters",
+		Key:         "manage_sessions",
+		Title:       "Manage sessions",
 		Category:    CategoryComments,
-		Description: "Create a chapter, edit a chapter, or start a fresh chapter (with or without handoff) in an issue's comment thread.",
+		Description: "Edit a session, or start a fresh session (with or without handoff) in an issue's comment thread.",
 		Ops: []string{
-			"POST /api/cerebro/issues/{issueID}/chapters/",
-			"PATCH /api/cerebro/issues/{issueID}/chapters/{chapterId}",
-			"POST /api/cerebro/issues/{issueID}/chapters/start-fresh",
+			"PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}",
+			"POST /api/cerebro/issues/{issueId}/sessions/start-fresh",
 		},
 	},
 
@@ -965,6 +964,7 @@ var excluded = map[string]string{
 	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
 	// workspace token, persists no governable state, no agent tool equivalent.
 	"POST /api/workspaces/{id}/cerebro/dictation/transcribe": "transcription-proxy — stateless audio→text, self-authenticates via workspace token, persists no governable state (FIR-1637)",
+	"POST /api/workspaces/{id}/cerebro/dictation/warmup":     "transcription-proxy — stateless warm-up of the audio→text backend, self-authenticates via workspace token, persists no governable state (FIR-1637)",
 
 	// cerebro interactive terminal — human watch/take-over of a live agent
 	// session. Workspace-member gated UI action, not an agent-governable

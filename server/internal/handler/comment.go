@@ -37,7 +37,6 @@ type CommentResponse struct {
 	Content        *string              `json:"content"`
 	Type           string               `json:"type"`
 	ParentID       *string              `json:"parent_id"`
-	ChapterID      *string              `json:"chapter_id,omitempty"` // CEREBRO-PATCH(comment-chapters-response): FIR-1704 exposes root thread chapter grouping.
 	CreatedAt      string               `json:"created_at"`
 	UpdatedAt      string               `json:"updated_at"`
 	ResolvedAt     *string              `json:"resolved_at"`
@@ -87,7 +86,6 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		Content:        &content,
 		Type:           c.Type,
 		ParentID:       uuidToPtr(c.ParentID),
-		ChapterID:      uuidToPtr(c.ChapterID), // CEREBRO-PATCH(comment-chapters-response): FIR-1704 exposes root thread chapter grouping.
 		CreatedAt:      timestampToString(c.CreatedAt),
 		UpdatedAt:      timestampToString(c.UpdatedAt),
 		ResolvedAt:     timestampToPtr(c.ResolvedAt),

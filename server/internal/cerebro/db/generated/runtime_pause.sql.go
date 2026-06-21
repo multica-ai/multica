@@ -31,7 +31,7 @@ INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, ty
 SELECT i.id, i.workspace_id, 'agent', $1, $2, 'comment'
 FROM issue i
 WHERE i.id = $3
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification, chapter_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, classification
 `
 
 type CreateAutoPauseAlertCommentParams struct {
@@ -63,7 +63,6 @@ func (q *Queries) CreateAutoPauseAlertComment(ctx context.Context, arg CreateAut
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.Classification,
-		&i.ChapterID,
 	)
 	return i, err
 }

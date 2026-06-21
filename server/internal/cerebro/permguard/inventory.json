@@ -81,7 +81,7 @@
       "gate": "workspace_member"
     },
     {
-      "id": "PATCH /api/cerebro/issues/{issueID}/chapters/{chapterId}",
+      "id": "PATCH /api/cerebro/issues/{issueId}/sessions/{sessionId}",
       "gate": "workspace_member"
     },
     {
@@ -569,11 +569,7 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/cerebro/issues/{issueID}/chapters/",
-      "gate": "workspace_member"
-    },
-    {
-      "id": "POST /api/cerebro/issues/{issueID}/chapters/start-fresh",
+      "id": "POST /api/cerebro/issues/{issueId}/sessions/start-fresh",
       "gate": "workspace_member"
     },
     {
