@@ -132,16 +132,21 @@ type groupAttributionResponse struct {
 }
 
 type toolPolicyRow struct {
-	ToolKey           string                     `json:"tool_key"`
-	ResourcePattern   string                     `json:"resource_pattern"`
-	Title             string                     `json:"title"`
-	Category          string                     `json:"category"`
-	Source            string                     `json:"source"`
-	ManagedExternally bool                       `json:"managed_externally"`
-	Layers            layerSettings              `json:"layers"`
-	Conditions        layerConditions            `json:"conditions"`
-	Effective         effectiveResponse          `json:"effective"`
-	CappedByGroups    []groupAttributionResponse `json:"capped_by_groups"`
+	ToolKey           string          `json:"tool_key"`
+	ResourcePattern   string          `json:"resource_pattern"`
+	Title             string          `json:"title"`
+	Category          string          `json:"category"`
+	Source            string          `json:"source"`
+	ManagedExternally bool            `json:"managed_externally"`
+	Layers            layerSettings   `json:"layers"`
+	Conditions        layerConditions `json:"conditions"`
+	// EnforcedConditions names the WHEN condition kinds (action/host/cel) that
+	// actually bite for this capability, so the editor renders only those
+	// (FIR-1708 C). Derived server-side from the gate facts; see
+	// EnforcedConditionKinds.
+	EnforcedConditions []string                   `json:"enforced_conditions"`
+	Effective          effectiveResponse          `json:"effective"`
+	CappedByGroups     []groupAttributionResponse `json:"capped_by_groups"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -455,13 +460,19 @@ func toRowResponse(row TableRow) toolPolicyRow {
 	for i, g := range row.CappedByGroups {
 		groups[i] = groupAttributionResponse{Name: g.Name, Owner: g.Owner}
 	}
+	enforced := EnforcedConditionKinds(row.ToolKey, row.Source, row.ManagedExternally)
+	enforcedStrs := make([]string, len(enforced))
+	for i, k := range enforced {
+		enforcedStrs[i] = string(k)
+	}
 	return toolPolicyRow{
-		ToolKey:           row.ToolKey,
-		ResourcePattern:   row.ResourcePattern,
-		Title:             row.Title,
-		Category:          row.Category,
-		Source:            row.Source,
-		ManagedExternally: row.ManagedExternally,
+		ToolKey:            row.ToolKey,
+		ResourcePattern:    row.ResourcePattern,
+		Title:              row.Title,
+		Category:           row.Category,
+		Source:             row.Source,
+		ManagedExternally:  row.ManagedExternally,
+		EnforcedConditions: enforcedStrs,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),
 			Runtime:   settingPtr(row.Layers, LayerRuntime),

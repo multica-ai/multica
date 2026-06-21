@@ -143,10 +143,14 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 				Category:        conn.displayName,
 				Source:          source,
 				Layers:          map[Layer]Setting{},
+				Conditions:      map[Layer]*Condition{},
 			}
 			if cell, ok := settings[repoPolicyKey{toolKey, t.Name}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
+				}
+				for l, cond := range cell.conditions {
+					row.Conditions[l] = cond
 				}
 				if len(cell.groups) > 0 {
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
@@ -409,7 +413,7 @@ func mcpToolToken(connectionName, tool string) string {
 // that layer stays Inherit.
 func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[repoPolicyKey]*repoPolicyLayers, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting
+		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
 		FROM cerebro_tool_policy p
 		WHERE p.workspace_id = $1
 		  AND p.resource_pattern <> ''
@@ -430,13 +434,14 @@ func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery,
 	out := map[repoPolicyKey]*repoPolicyLayers{}
 	for rows.Next() {
 		var toolKey, resourcePattern, layer, setting string
-		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting); err != nil {
+		var conditions []byte
+		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan connection policy setting: %w", err)
 		}
 		key := repoPolicyKey{toolKey, resourcePattern}
 		cell, ok := out[key]
 		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}}
+			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
 			out[key] = cell
 		}
 		l := Layer(layer)
@@ -445,6 +450,15 @@ func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery,
 			cell.groups = append(cell.groups, set)
 		} else {
 			cell.layers[l] = set
+			// Surface the rule's WHEN layer for single-subject layers only,
+			// mirroring table_repo.go and the capability-wide decode (FIR-1708 D).
+			cond, err := decodeCondition(conditions)
+			if err != nil {
+				return nil, fmt.Errorf("toolpolicy: decode connection conditions for %q at %s: %w", toolKey, l, err)
+			}
+			if cond != nil {
+				cell.conditions[l] = cond
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {

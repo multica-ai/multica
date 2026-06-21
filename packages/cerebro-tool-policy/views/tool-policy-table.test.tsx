@@ -606,13 +606,70 @@ describe("ToolPolicyTable (Condition editor)", () => {
     );
   });
 
-  it("hides the When control entirely on a non-meaningful tool with no condition", async () => {
-    // list_issues is a plain read tool: no host facet, no action facet, and no
-    // condition already set → the control is contextual and must not render at
-    // all (no stray "When" affordance where a condition makes no sense).
+  it("shows the When control on a generic gated tool (CEL is available everywhere)", async () => {
+    // FIR-1708 C: WHEN must be available everywhere (no trimming). list_issues has
+    // no host/action facet, but it is chain-gated, so the CEL escape hatch applies
+    // and the control must render. The fallback heuristic (no enforced_conditions
+    // on the mock) keeps CEL on, matching an older backend.
     renderCondTable();
     const row = await screen.findByTestId("tool-row-list_issues");
-    expect(within(row).queryByTestId("condition-control-list_issues")).not.toBeInTheDocument();
+    expect(within(row).getByTestId("condition-control-list_issues")).toBeInTheDocument();
+  });
+
+  it("hides the When control when the server reports no enforced condition kinds", async () => {
+    // A capability the chain does not gate (managed-externally) reports
+    // enforced_conditions: [] — no WHEN kind can bite, so the control is hidden.
+    mockCerebroRequest.mockResolvedValueOnce({
+      tools: [
+        {
+          tool_key: "manage_runtime",
+          title: "Manage runtime",
+          category: "Runtimes",
+          source: "platform",
+          managed_externally: true,
+          enforced_conditions: [],
+          layers: { runtime: null, agent: null, group: null, user: null },
+          effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+        },
+      ],
+    });
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-manage_runtime");
+    expect(within(row).queryByTestId("condition-control-manage_runtime")).not.toBeInTheDocument();
+  });
+
+  it("renders only the server-reported condition kinds (action hidden, CEL shown)", async () => {
+    // web_fetch reports host + cel but NOT action → the host section and the CEL
+    // escape hatch render, but no action chips, even though the row is host-bound.
+    const user = userEvent.setup();
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "web_fetch",
+          title: "Fetch a URL",
+          category: "Built-in tools",
+          source: "builtin",
+          enforced_conditions: ["host", "cel"],
+          layers: { runtime: null, agent: "allow", group: null, user: null },
+          conditions: {
+            workspace: null,
+            runtime: null,
+            agent: { host_allowlist: ["firtal.com"], actions: [], expr: "" },
+            user: null,
+          },
+          effective: { setting: "allow", decided_by: "agent", capped_by: "", reason: "" },
+        },
+      ],
+    });
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    await user.click(within(row).getByTestId("condition-control-web_fetch"));
+    const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
+    // host kind reported → host input present; cel reported → Advanced (CEL) shown.
+    expect(editor.getByLabelText("Add host")).toBeInTheDocument();
+    expect(editor.getByText("Advanced (CEL)")).toBeInTheDocument();
+    // action kind NOT reported → no preset action chips.
+    expect(editor.queryByLabelText(/^Action /)).not.toBeInTheDocument();
   });
 
   it("shows the Host allow-list section only on a host-bound tool (web_fetch)", async () => {
@@ -840,5 +897,73 @@ describe("ToolPolicyTable (System actor — FIR-1692)", () => {
       expect(reqBody).toMatchObject({ tool_key: "web_fetch", layer: "system", subject_id: "ap-1", setting: "allow" });
       expect(reqBody.condition.host_allowlist).toEqual(["firtal.com", "docs.anthropic.com"]);
     });
+  });
+});
+
+describe("ToolPolicyTable runtime/multica tab split (FIR-1708 D(a))", () => {
+  const SPLIT = {
+    tools: [
+      {
+        tool_key: "tools:Bash",
+        title: "Bash",
+        category: "Built-in tools",
+        source: "runtime_report",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
+      {
+        tool_key: "manage_runtime",
+        title: "Manage runtime",
+        category: "Runtimes",
+        source: "platform",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
+      {
+        tool_key: "add_comment",
+        title: "Add comment",
+        category: "Issues",
+        source: "builtin",
+        layers: { runtime: null, agent: null, group: null, user: null },
+        effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+      },
+    ],
+  };
+
+  function renderTab(tabFilter: "runtime" | "multica") {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable
+          wsId="ws-1"
+          view="workspace"
+          subjectId="ws-1"
+          runtimeId="rt-1"
+          userId="user-1"
+          tabFilter={tabFilter}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("Runtime tab shows runtime-reported tools, not only runtime-admin actions", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("runtime");
+    const table = await tableBody();
+    // The regression fix: a runtime-reported tool now appears on the Runtime tab.
+    expect(table.getByText("Bash")).toBeInTheDocument();
+    // Runtime-admin platform actions stay on the Runtime tab too.
+    expect(table.getByText("Manage runtime")).toBeInTheDocument();
+    // A generic platform tool belongs to the Multica tab, not here.
+    expect(table.queryByText("Add comment")).not.toBeInTheDocument();
+  });
+
+  it("Multica tab excludes runtime-reported tools and runtime-admin actions", async () => {
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    renderTab("multica");
+    const table = await tableBody();
+    expect(table.getByText("Add comment")).toBeInTheDocument();
+    expect(table.queryByText("Bash")).not.toBeInTheDocument();
+    expect(table.queryByText("Manage runtime")).not.toBeInTheDocument();
   });
 });

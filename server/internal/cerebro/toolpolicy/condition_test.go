@@ -251,3 +251,54 @@ func TestHostOf_FeedsHostAllowlist(t *testing.T) {
 		t.Fatal("host outside the allowlist must not match")
 	}
 }
+
+// TestEnforcedConditionKinds pins which WHEN kinds each permission type surfaces
+// (FIR-1708 C). The set must track what the gates actually thread into
+// RequestContext, so the editor never offers a structured term that can't bite.
+func TestEnforcedConditionKinds(t *testing.T) {
+	has := func(ks []ConditionKind, want ConditionKind) bool {
+		for _, k := range ks {
+			if k == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	cases := []struct {
+		name              string
+		toolKey           string
+		source            string
+		managedExternally bool
+		wantAction        bool
+		wantHost          bool
+		wantCEL           bool
+	}{
+		{"repo checkout → action + cel", "repo.checkout", "repo", false, true, false, true},
+		{"credential reveal → action + cel", "credential.reveal", "credential", false, true, false, true},
+		{"registry tool → action + cel", RegistryToolKey, "builtin", false, true, false, true},
+		{"registry data source row → action + cel", "firtal_registry", "registry-data-source", false, true, false, true},
+		{"web_fetch → host + cel", "web_fetch", "builtin", false, false, true, true},
+		{"generic builtin → cel only", "tools:Bash", "runtime_report", false, false, false, true},
+		{"mcp tool → cel only", "mcp__slack__post", "scan", false, false, false, true},
+		{"connection tool → cel only", "connection:customer-service", "connection", false, false, false, true},
+		{"managed-externally → nothing", "manage_runtime", "platform", true, false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ks := EnforcedConditionKinds(tc.toolKey, tc.source, tc.managedExternally)
+			if got := has(ks, ConditionKindAction); got != tc.wantAction {
+				t.Errorf("action = %v, want %v (kinds=%v)", got, tc.wantAction, ks)
+			}
+			if got := has(ks, ConditionKindHost); got != tc.wantHost {
+				t.Errorf("host = %v, want %v (kinds=%v)", got, tc.wantHost, ks)
+			}
+			if got := has(ks, ConditionKindCEL); got != tc.wantCEL {
+				t.Errorf("cel = %v, want %v (kinds=%v)", got, tc.wantCEL, ks)
+			}
+			if tc.managedExternally && len(ks) != 0 {
+				t.Errorf("managed-externally must surface no kinds, got %v", ks)
+			}
+		})
+	}
+}

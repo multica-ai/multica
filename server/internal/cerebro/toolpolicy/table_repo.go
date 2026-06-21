@@ -65,9 +65,15 @@ type repoPolicyKey struct {
 // repoPolicyLayers holds the explicit per-layer settings authored for one (tool,
 // repo) cell. group settings are accumulated separately and combined with
 // CombineGroups, mirroring how table.go folds the capability-wide rows.
+// conditions carries the optional WHEN layer (FIR-1609) authored on each
+// single-subject layer's rule, so a repo's action condition (repo.checkout /
+// repo.push) surfaces on its row exactly like the capability-wide path does
+// (FIR-1708 D). The group layer is deliberately excluded — see
+// TableRow.Conditions.
 type repoPolicyLayers struct {
-	layers map[Layer]Setting
-	groups []Setting
+	layers     map[Layer]Setting
+	groups     []Setting
+	conditions map[Layer]*Condition
 }
 
 // appendRepoRows discovers the workspace's repos and appends, for each repo, one
@@ -103,10 +109,14 @@ func (s *Store) appendRepoRows(ctx context.Context, in TableQuery, groupIDs []pg
 				Category:        repoCategory,
 				Source:          repoSource,
 				Layers:          map[Layer]Setting{},
+				Conditions:      map[Layer]*Condition{},
 			}
 			if cell, ok := settings[repoPolicyKey{c.key, repoURL}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
+				}
+				for l, cond := range cell.conditions {
+					row.Conditions[l] = cond
 				}
 				if len(cell.groups) > 0 {
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
@@ -192,7 +202,7 @@ func (s *Store) loadRepoPolicySettings(ctx context.Context, in TableQuery, group
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting
+		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
 		FROM cerebro_tool_policy p
 		WHERE p.workspace_id = $1
 		  AND p.resource_pattern <> ''
@@ -213,13 +223,14 @@ func (s *Store) loadRepoPolicySettings(ctx context.Context, in TableQuery, group
 	out := map[repoPolicyKey]*repoPolicyLayers{}
 	for rows.Next() {
 		var toolKey, resourcePattern, layer, setting string
-		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting); err != nil {
+		var conditions []byte
+		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan repo policy setting: %w", err)
 		}
 		key := repoPolicyKey{toolKey, resourcePattern}
 		cell, ok := out[key]
 		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}}
+			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
 			out[key] = cell
 		}
 		l := Layer(layer)
@@ -228,6 +239,15 @@ func (s *Store) loadRepoPolicySettings(ctx context.Context, in TableQuery, group
 			cell.groups = append(cell.groups, set)
 		} else {
 			cell.layers[l] = set
+			// Surface the rule's WHEN layer for single-subject layers only,
+			// mirroring the capability-wide decode in table.go (FIR-1708 D).
+			cond, err := decodeCondition(conditions)
+			if err != nil {
+				return nil, fmt.Errorf("toolpolicy: decode repo conditions for %q at %s: %w", toolKey, l, err)
+			}
+			if cond != nil {
+				cell.conditions[l] = cond
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {

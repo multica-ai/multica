@@ -196,3 +196,54 @@ func TestTable_RepoRowsAbsentWithoutRepos(t *testing.T) {
 		t.Fatalf("got %d rows, want 1 (only the capability-wide row)", len(rows))
 	}
 }
+
+// TestTable_RepoRowsSurfaceConditions proves a WHEN condition authored on a repo
+// cell is read back onto its row (FIR-1708 D). Before the fix the repo loader
+// never selected the conditions column, so an action condition saved on a repo
+// rule was invisible in the admin table even though repo gating is one of the
+// few places an action condition is actually enforced.
+func TestTable_RepoRowsSurfaceConditions(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	clearRepos(t, s)
+	defer clearRepos(t, s)
+	ctx := context.Background()
+
+	const repoA = "github.com/firtal-group/repo-a"
+	setWorkspaceRepos(t, s, `[{"url":"`+repoA+`"}]`)
+
+	agent := uuidByte(2)
+	// repo.checkout on repoA: agent Allow, but only for the checkout action —
+	// the action condition repo gating actually evaluates.
+	cond := &Condition{Actions: []string{"checkout"}}
+	if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: capRepoCheckout, Layer: LayerAgent, SubjectID: agent, ResourcePattern: repoA, Setting: SettingAllow, Conditions: cond}); err != nil {
+		t.Fatalf("set agent checkout repoA with condition: %v", err)
+	}
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent})
+	if err != nil {
+		t.Fatalf("table: %v", err)
+	}
+
+	checkoutA, ok := findRepoRow(rows, capRepoCheckout, repoA)
+	if !ok {
+		t.Fatalf("repo.checkout row for %s missing", repoA)
+	}
+	got := checkoutA.Conditions[LayerAgent]
+	if got == nil {
+		t.Fatalf("repo.checkout agent condition missing; want action [checkout], conditions=%v", checkoutA.Conditions)
+	}
+	if len(got.Actions) != 1 || got.Actions[0] != "checkout" {
+		t.Fatalf("repo.checkout action condition = %v, want [checkout]", got.Actions)
+	}
+
+	// A repo cell with no condition leaves the row's condition nil.
+	pushA, ok := findRepoRow(rows, capRepoPush, repoA)
+	if !ok {
+		t.Fatalf("repo.push row for %s missing", repoA)
+	}
+	if c := pushA.Conditions[LayerAgent]; c != nil {
+		t.Fatalf("repo.push should carry no condition, got %v", c)
+	}
+}

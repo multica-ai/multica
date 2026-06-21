@@ -26,6 +26,13 @@ export type ToolSetting = "inherit" | "allow" | "ask" | "deny";
 export type ToolLayer = "workspace" | "runtime" | "agent" | "group" | "user" | "system";
 /** The resolved verdict is always concrete — never `inherit`. */
 export type ToolEffectiveSetting = "allow" | "ask" | "deny";
+/**
+ * A WHEN condition kind a capability may surface (FIR-1708 C): `action` (verb
+ * list), `host` (host allow-list), `cel` (expression escape hatch). The server
+ * lists only the kinds whose request attribute its gate threads, so the editor
+ * never offers a structured term that can't match.
+ */
+export type ConditionKind = "action" | "host" | "cel";
 
 export interface ToolPolicyEffective {
   setting: ToolEffectiveSetting;
@@ -109,6 +116,15 @@ export interface ToolPolicyRow {
    * The row is shown for visibility but its Allow/Ask/Deny choice is advisory.
    */
   managed_externally: boolean;
+  /**
+   * Which WHEN condition kinds actually bite for this capability (FIR-1708 C),
+   * computed server-side from the gate facts so the editor renders only the
+   * kinds that can match. `undefined` means the server predates the field — the
+   * editor then falls back to its client-side heuristic (no regression on an
+   * older backend), per the API-compat rule "don't pin a UI affordance to a
+   * single backend field".
+   */
+  enforced_conditions?: ConditionKind[];
   layers: ToolPolicyLayers;
   /**
    * The optional WHEN layer per single-subject layer (FIR-1609). A null field
@@ -231,6 +247,14 @@ const toolPolicyRowSchema = z.object({
   // tool-policy gate (membership ACL, daemon token, …). Defaults false so older
   // backends that omit the field render as a normal, gated row.
   managed_externally: z.boolean().default(false),
+  // FIR-1708 C: the WHEN kinds the gate actually evaluates for this capability.
+  // Left optional (not defaulted to []) so the editor can tell "older backend
+  // omitted it" (undefined → heuristic fallback) from "no kind bites" ([]).
+  // Unknown values are dropped and a malformed field folds to undefined.
+  enforced_conditions: z
+    .array(z.enum(["action", "host", "cel"]))
+    .optional()
+    .catch(undefined),
   layers: z
     .object({
       workspace: layerSettingSchema.default(null),

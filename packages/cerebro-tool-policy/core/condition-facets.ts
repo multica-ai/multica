@@ -28,16 +28,35 @@ import { classifySideEffect } from "./side-effect";
 export interface ConditionFacets {
   host: boolean;
   actions: string[];
+  /**
+   * Whether the CEL escape hatch is meaningful here. CEL is evaluable at every
+   * chain gate, so it is true on any chain-gated row — but FIR-1708 C lets the
+   * server withhold it on rows the chain does not gate (managed-externally).
+   */
+  cel: boolean;
 }
 
 /**
- * conditionFacets decides the meaningful WHEN facets for a row. The action
- * presets are literal verb lists keyed off the tool's resource model; host is a
- * boolean keyed off whether the tool egresses to a host. Both are deliberately
- * conservative — when nothing matches, the editor shows no structured section.
+ * conditionFacets decides the meaningful WHEN facets for a row.
+ *
+ * FIR-1708 C: when the server sends `enforced_conditions` (the kinds whose
+ * request attribute its gate actually threads), that is authoritative — the
+ * editor shows exactly those. When it is absent (an older backend), we fall back
+ * to the pure client-side heuristic below so there is no regression: host keyed
+ * off egress, action presets off the tool's resource model, and CEL always on
+ * (its historic behaviour). The action *labels* always come from the resource
+ * model, since the server reports only that the action kind bites, not its verbs.
  */
 export function conditionFacets(row: ToolPolicyRow): ConditionFacets {
-  return { host: hasHostFacet(row), actions: actionPreset(row) };
+  const enforced = row.enforced_conditions;
+  if (enforced) {
+    return {
+      host: enforced.includes("host"),
+      actions: enforced.includes("action") ? actionPreset(row) : [],
+      cel: enforced.includes("cel"),
+    };
+  }
+  return { host: hasHostFacet(row), actions: actionPreset(row), cel: true };
 }
 
 // actionPreset returns the literal verb list for a tool whose resource model has

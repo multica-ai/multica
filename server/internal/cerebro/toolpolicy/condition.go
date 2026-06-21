@@ -213,6 +213,58 @@ func ActionOf(toolKey string) string {
 	return verb
 }
 
+// ConditionKind names a WHEN condition kind a rule may carry. A capability only
+// surfaces the kinds whose request attribute its gate actually threads, so the
+// editor never offers a structured term that would silently never match
+// (FIR-1708 C — "for each permission type, define which conditionals can be
+// used, and render only those").
+type ConditionKind string
+
+const (
+	// ConditionKindAction is the action-verb list (Condition.Actions). Bites only
+	// where the gate sets RequestContext.Action.
+	ConditionKindAction ConditionKind = "action"
+	// ConditionKindHost is the host allow-list (Condition.HostAllowlist). Bites
+	// only where the gate sets RequestContext.Host.
+	ConditionKindHost ConditionKind = "host"
+	// ConditionKindCEL is the CEL expression escape hatch (Condition.Expr). An
+	// ExprEvaluator is wired at every chain gate, so it is available on every
+	// chain-gated capability.
+	ConditionKindCEL ConditionKind = "cel"
+)
+
+// EnforcedConditionKinds reports which WHEN condition kinds actually bite for a
+// capability. It is derived from the SAME facts the gates thread into
+// RequestContext (ActionOf, HostOf, the registry/web_fetch keys), so the set the
+// editor renders can't drift from what enforcement evaluates:
+//
+//   - action: the gate sets RequestContext.Action — repo.*/credential.* keys
+//     (ActionOf) and the firtal_registry tool / its per-data-source rows (the
+//     registry gate sets the verb).
+//   - host: the gate sets RequestContext.Host — web_fetch (its URL arg; the
+//     standalone web_fetch host policy also folds into the row as a host
+//     condition).
+//   - cel: an ExprEvaluator is wired wherever the chain gates a tool call (the
+//     gateway, local-CLI, repo and registry gates), so a CEL expression is the
+//     general escape hatch on every chain-gated capability.
+//
+// A capability the chain does not gate (managedExternally — membership ACLs,
+// daemon tokens) enforces no condition at all, so it surfaces none.
+func EnforcedConditionKinds(toolKey, source string, managedExternally bool) []ConditionKind {
+	if managedExternally {
+		return nil
+	}
+	kinds := []ConditionKind{}
+	if ActionOf(toolKey) != "" || toolKey == RegistryToolKey || source == registryDataSourceSource {
+		kinds = append(kinds, ConditionKindAction)
+	}
+	if toolKey == webFetchToolKey {
+		kinds = append(kinds, ConditionKindHost)
+	}
+	kinds = append(kinds, ConditionKindCEL)
+	return kinds
+}
+
 // containsFold reports whether list contains v, ignoring case and surrounding
 // space on both sides.
 func containsFold(list []string, v string) bool {

@@ -297,12 +297,24 @@ export function ToolPolicyTable({
   // the underlying fetch, so multiple ToolPolicyTable instances on the same page
   // (e.g. tabbed workspace permissions) share a single network request.
   const capRows = useMemo(() => {
+    // A runtime-reported tool is one a runtime actually advertised — built-ins
+    // and MCP actions land with source "runtime_report" (the snapshot) or "scan"
+    // (the daemon tools/list probe). The platform "Runtimes" category is a
+    // different thing: the runtime *admin* actions (manage_runtime, create_runtime)
+    // from platformcatalog. The Runtime tab must show the reported tools (FIR-1708
+    // D(a)) — filtering on category === "Runtimes" hid them in the Multica tab.
+    const isRuntimeReported = (r: ToolPolicyRow) =>
+      r.source === "runtime_report" || r.source === "scan";
     if (tabFilter === "repos") return [];
     if (!tabFilter) return allCapRows;
     if (tabFilter === "connections") return allCapRows.filter((r) => r.source === "connection");
-    if (tabFilter === "runtime") return allCapRows.filter((r) => r.category === "Runtimes");
-    // "multica" = everything that isn't a connection or runtime tool
-    return allCapRows.filter((r) => r.source !== "connection" && r.category !== "Runtimes");
+    if (tabFilter === "runtime")
+      return allCapRows.filter((r) => isRuntimeReported(r) || r.category === "Runtimes");
+    // "multica" = everything that isn't a connection, a runtime-reported tool, or
+    // a runtime-admin action (those three have their own tabs above)
+    return allCapRows.filter(
+      (r) => r.source !== "connection" && !isRuntimeReported(r) && r.category !== "Runtimes",
+    );
   }, [tabFilter, allCapRows]);
 
   const repoRows = useMemo(() => {
@@ -1175,7 +1187,7 @@ export function ConditionControl({
   // The contextual facets: which structured sections are worth showing for this
   // tool. `meaningful` is the gate for whether the control appears at all.
   const facets = conditionFacets(row);
-  const meaningful = facets.host || facets.actions.length > 0;
+  const meaningful = facets.host || facets.actions.length > 0 || facets.cel;
 
   // Group has no single condition — show nothing there.
   if (editLayer === "group") return null;
@@ -1347,37 +1359,39 @@ export function ConditionControl({
             </div>
           )}
 
-          <div className="flex flex-col gap-1">
-            <button
-              type="button"
-              aria-expanded={advancedOpen}
-              onClick={() => setAdvancedOpen((o) => !o)}
-              className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
-            >
-              {advancedOpen ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
+          {facets.cel && (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                aria-expanded={advancedOpen}
+                onClick={() => setAdvancedOpen((o) => !o)}
+                className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+              >
+                {advancedOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+                Advanced (CEL)
+              </button>
+              {advancedOpen && (
+                <div className="mt-1 flex flex-col gap-2">
+                  <Textarea
+                    id={`cel-${row.tool_key}`}
+                    value={expr}
+                    onChange={(e) => setExpr(e.target.value)}
+                    placeholder="request.time.getHours() >= 8 && request.time.getHours() < 17"
+                    className="min-h-16 font-mono text-xs"
+                    aria-label="CEL expression"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    A CEL expression for genuine dynamics (e.g. business hours). Leave
+                    empty unless you need it.
+                  </p>
+                </div>
               )}
-              Advanced (CEL)
-            </button>
-            {advancedOpen && (
-              <div className="mt-1 flex flex-col gap-2">
-                <Textarea
-                  id={`cel-${row.tool_key}`}
-                  value={expr}
-                  onChange={(e) => setExpr(e.target.value)}
-                  placeholder="request.time.getHours() >= 8 && request.time.getHours() < 17"
-                  className="min-h-16 font-mono text-xs"
-                  aria-label="CEL expression"
-                />
-                <p className="text-xs text-muted-foreground">
-                  A CEL expression for genuine dynamics (e.g. business hours). Leave
-                  empty unless you need it.
-                </p>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-2">
             <Button
