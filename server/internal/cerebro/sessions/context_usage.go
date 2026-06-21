@@ -17,7 +17,6 @@ package sessions
 import (
 	"context"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,24 +24,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/util"
 )
-
-// modelContextWindow returns the max context-window size (in tokens) for a
-// model id. Used only to turn an absolute token count into a "% full" hairline.
-// Approximate by design — the indicator is a whisper, not an invoice. Unknown
-// models fall back to the Claude/standard 200k window.
-func modelContextWindow(model string) int64 {
-	m := strings.ToLower(model)
-	switch {
-	case strings.Contains(m, "gpt-5"), strings.Contains(m, "codex"):
-		return 272_000
-	case strings.Contains(m, "gemini"):
-		return 1_000_000
-	case strings.Contains(m, "claude"), m == "":
-		return 200_000
-	default:
-		return 200_000
-	}
-}
 
 type contextUsageResponse struct {
 	SessionID         string `json:"session_id"`
@@ -112,7 +93,7 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.InputTokens = input
 	resp.CacheReadTokens = cacheRead
 	resp.OutputTokens = output
-	resp.MaxContextTokens = modelContextWindow(model.String)
+	resp.MaxContextTokens = contextWindowForModel(model.String)
 	if resp.MaxContextTokens > 0 {
 		resp.UsedPercent = clampPercent(int(input * 100 / resp.MaxContextTokens))
 	}

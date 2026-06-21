@@ -2,23 +2,25 @@ package sessions
 
 import "testing"
 
-func TestModelContextWindow_CrossModel(t *testing.T) {
+func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 	cases := []struct {
 		model string
 		want  int64
 	}{
 		{"claude-opus-4-8", 200_000},
-		{"claude-sonnet-4-6", 200_000},
+		{"claude-sonnet-4-6", 1_000_000}, // Sonnet 4.x ships the 1M window — the case the old prefix guess got wrong
+		{"claude-sonnet-4-5", 1_000_000},
 		{"claude-haiku-4-5", 200_000},
 		{"gpt-5.5", 272_000},
-		{"codex-mini", 272_000},
+		{"gpt-5", 272_000},
 		{"gemini-2.5-pro", 1_000_000},
-		{"", 200_000}, // unknown/empty falls back to the standard window
-		{"some-future", 200_000},
+		{"Claude-Sonnet-4-5-20251101", 1_000_000}, // dated snapshot resolves to the family row
+		{"", 200_000},                             // unknown/empty falls back to the conservative default
+		{"some-future-model", 200_000},
 	}
 	for _, c := range cases {
-		if got := modelContextWindow(c.model); got != c.want {
-			t.Errorf("modelContextWindow(%q) = %d, want %d", c.model, got, c.want)
+		if got := contextWindowForModel(c.model); got != c.want {
+			t.Errorf("contextWindowForModel(%q) = %d, want %d", c.model, got, c.want)
 		}
 	}
 }
