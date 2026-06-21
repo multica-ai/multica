@@ -56,15 +56,38 @@ var modelContextWindows = map[string]int64{
 // pricing package so `claude-sonnet-4-5-20251101` resolves to the family row.
 var dateSuffix = regexp.MustCompile(`-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$`)
 
+// oneMillionMarker matches Anthropic's "[1m]" long-context beta tag, e.g.
+// `claude-opus-4-8[1m]`. The tag itself declares a 1M-token window — it is the
+// whole reason the variant exists — so it overrides the base family row, which
+// would otherwise resolve Opus to its standard 200k and understate headroom
+// ~5x. This was the live miss Jesper flagged: a `claude-opus-4-8[1m]` run
+// reported a 200k denominator, so the hairline read "fuller" than reality. The
+// gateway emits the bracketed tag verbatim in task_usage, so we match it here.
+var oneMillionMarker = regexp.MustCompile(`\[1m\]`)
+
+// capabilityTag strips a trailing bracketed capability tag (e.g. `[1m]`) so a
+// bracketed model still resolves to its base family row when the tag is not the
+// window-defining `[1m]` handled above.
+var capabilityTag = regexp.MustCompile(`\[[^\]]*\]$`)
+
 // contextWindowForModel returns the model's documented context window, or the
 // conservative default when the model is not curated. Normalization matches the
-// pricing lookup (lowercase, trim, strip a trailing date/latest tag).
+// pricing lookup (lowercase, trim, strip a trailing date/latest tag) and, on
+// top of that, recognises the `[1m]` long-context beta tag and strips other
+// bracketed capability tags before the family lookup.
 func contextWindowForModel(model string) int64 {
 	key := strings.ToLower(strings.TrimSpace(model))
+	// The [1m] long-context beta tag declares a 1M window regardless of family.
+	if oneMillionMarker.MatchString(key) {
+		return 1_000_000
+	}
 	if w, ok := modelContextWindows[key]; ok {
 		return w
 	}
-	if stripped := dateSuffix.ReplaceAllString(key, ""); stripped != key {
+	// Strip a trailing date/latest tag and any bracketed capability tag, then
+	// retry the family lookup (e.g. `claude-opus-4-8[exp]` → `claude-opus-4-8`).
+	stripped := capabilityTag.ReplaceAllString(dateSuffix.ReplaceAllString(key, ""), "")
+	if stripped != key {
 		if w, ok := modelContextWindows[stripped]; ok {
 			return w
 		}
