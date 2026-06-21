@@ -18,22 +18,21 @@ import (
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
-// Auto-pause circuit-breaker tuning (FIR-2476). The pre-FIR-2476 behaviour
-// re-paused a rate-limited runtime for a fixed 5 minutes, bounced on unpause,
-// failed the same way, and re-paused — ~288 cycles a day per runtime, burning
-// credits with no chance of success. Two mechanisms tame that:
+// Auto-pause circuit-breaker tuning (FIR-2476, FIR-1716). The pre-FIR-2476
+// behaviour re-paused a rate-limited runtime for a fixed 5 minutes, bounced on
+// unpause, failed the same way, and re-paused — ~288 cycles a day per runtime,
+// burning credits with no chance of success. Two mechanisms tame that:
 //
-//   - Growing backoff: when the provider error carries no parseable reset time,
-//     the fallback pause doubles each consecutive auto-pause (5m, 10m, 20m, 40m,
-//     80m …) up to autoPauseBackoffCap, instead of a flat 5 minutes. A parseable
-//     reset time always wins over the fallback (unchanged behaviour).
-//   - Circuit breaker: after autoPauseCircuitLimit consecutive auto-pauses with
-//     no intervening success, stop scheduling auto-resume (pause with a NULL
-//     unpause_at so the sweeper never picks it up) and post one comment so a
-//     human can intervene. CompleteTask resets the counter on the next success.
+//   - No-reset backoff: when the provider error carries no parseable reset time,
+//     retry after 2 hours, then 4 hours, then 6 hours. A parseable reset time
+//     always wins over the fallback.
+//   - Circuit breaker: after the 2h/4h/6h no-reset attempts all fail with no
+//     intervening success, stop scheduling auto-resume (pause with a NULL
+//     unpause_at so the sweeper never picks it up) and post an issue analysis
+//     that tags the runtime owner. CompleteTask resets the counter on the next
+//     success.
 const (
-	autoPauseBackoffCap   = 2 * time.Hour
-	autoPauseCircuitLimit = 6
+	autoPauseCircuitLimit = 4
 )
 
 // MaybeAutoPauseOnFailure inspects a recently-failed task and pauses the
@@ -88,10 +87,7 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 		count = 1
 	}
 
-	circuitOpen := count >= autoPauseCircuitLimit
-	if decision.manualOnly {
-		circuitOpen = true
-	}
+	circuitOpen := circuitOpenForAutoPause(count, decision)
 	unpauseAt := nextUnpauseAt(count, decision.resetAt, decision.hasReset, now)
 
 	opts := handler.RuntimePauseOptions{Reason: decision.pauseReason}
@@ -240,21 +236,30 @@ func nextUnpauseAt(count int32, resetAt time.Time, hasReset bool, now time.Time)
 	return now.Add(growingBackoff(count))
 }
 
-// growingBackoff returns the fallback pause duration for the count-th
-// consecutive auto-pause: DefaultBackoff * 2^(count-1), capped at
-// autoPauseBackoffCap. count is 1-based (the first pause is count==1).
+// growingBackoff returns the fallback pause duration for the count-th no-reset
+// auto-pause: 2h, 4h, then 6h. count is 1-based; count<1 is defensive.
 func growingBackoff(count int32) time.Duration {
 	if count < 1 {
 		count = 1
 	}
-	d := account.DefaultRateLimitBackoff
-	for i := int32(1); i < count; i++ {
-		d *= 2
-		if d >= autoPauseBackoffCap {
-			return autoPauseBackoffCap
-		}
+	switch count {
+	case 1:
+		return 2 * time.Hour
+	case 2:
+		return 4 * time.Hour
+	default:
+		return 6 * time.Hour
 	}
-	return d
+}
+
+func circuitOpenForAutoPause(count int32, decision autoPauseDecision) bool {
+	if decision.manualOnly {
+		return true
+	}
+	if decision.hasReset {
+		return false
+	}
+	return count >= autoPauseCircuitLimit
 }
 
 // notifyAutoPauseFailure posts the human-facing explanation for the failed run
@@ -266,21 +271,21 @@ func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQ
 		return
 	}
 	next := "Den genoptager automatisk " + unpauseAt.Format(time.RFC3339) + "."
+	body := ""
 	if manualOnly {
 		next = "Den genoptager ikke automatisk. Ret årsagen og genoptag runtimen manuelt."
 		if count >= autoPauseCircuitLimit && !decision.manualOnly {
-			next = fmt.Sprintf(
-				"Den genoptager ikke automatisk, fordi samme runtime er blevet pauset %d gange i træk uden en succesfuld kørsel.",
-				count,
-			)
+			body = circuitBreakerAnalysisCommentBody(task, decision, s.runtimeOwnerMention(ctx, task.RuntimeID))
 		}
 	}
-	body := fmt.Sprintf(
-		"Runtimen er sat på pause: %s.\n\n%s\n\n%s",
-		decision.title,
-		decision.detail,
-		next,
-	)
+	if body == "" {
+		body = fmt.Sprintf(
+			"Runtimen er sat på pause: %s.\n\n%s\n\n%s",
+			decision.title,
+			decision.detail,
+			next,
+		)
+	}
 	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{
 		AuthorID: task.AgentID,
 		Content:  body,
@@ -295,6 +300,49 @@ func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQ
 		return
 	}
 	s.publishCommentCreated(comment)
+}
+
+func (s *Service) runtimeOwnerMention(ctx context.Context, runtimeID pgtype.UUID) string {
+	if s == nil || s.Cerebro == nil || !runtimeID.Valid {
+		return ""
+	}
+	rt, err := s.Cerebro.GetRuntimeOwnerForInbox(ctx, runtimeID)
+	if err != nil || !rt.OwnerID.Valid {
+		return ""
+	}
+	return fmt.Sprintf("[@Runtime owner](mention://member/%s)", util.UUIDToString(rt.OwnerID))
+}
+
+func circuitBreakerAnalysisCommentBody(task db.AgentTaskQueue, decision autoPauseDecision, ownerMention string) string {
+	if ownerMention == "" {
+		ownerMention = "Runtime owner"
+	}
+	taskID := util.UUIDToString(task.ID)
+	errText := ""
+	if task.Error.Valid {
+		errText = strings.TrimSpace(redact.Text(task.Error.String))
+	}
+	if errText == "" {
+		errText = "The runtime hit a rate limit or usage limit."
+	}
+	if len([]rune(errText)) > 900 {
+		rs := []rune(errText)
+		errText = string(rs[:900]) + "..."
+	}
+	title := decision.title
+	if title == "" {
+		title = "Usage or rate limit reached"
+	}
+	return fmt.Sprintf(
+		"%s: Auto-restart has stopped for this runtime.\n\n"+
+			"Analysis: %s. The provider did not return a reset time, so Multica retried after 2 hours, 4 hours, and 6 hours. It still failed, so new auto-restarts are paused until the account, key, or spend limit is fixed.\n\n"+
+			"Last error:\n\n> %s\n\n"+
+			"Run: `%s`",
+		ownerMention,
+		title,
+		errText,
+		taskID,
+	)
 }
 
 func autoPauseCommentBody(task db.AgentTaskQueue, count int32, unpauseAt time.Time, circuitOpen bool) string {

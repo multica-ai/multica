@@ -1,11 +1,11 @@
 package runtime
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/cerebro/account"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -130,20 +130,16 @@ func TestClassifyAutoPause(t *testing.T) {
 }
 
 func TestGrowingBackoff(t *testing.T) {
-	base := account.DefaultRateLimitBackoff // 5m
 	cases := []struct {
 		count int32
 		want  time.Duration
 	}{
-		{count: 0, want: base},                // defensive: count<1 treated as 1
-		{count: 1, want: base},                // 5m
-		{count: 2, want: 2 * base},            // 10m
-		{count: 3, want: 4 * base},            // 20m
-		{count: 4, want: 8 * base},            // 40m
-		{count: 5, want: 16 * base},           // 80m
-		{count: 6, want: autoPauseBackoffCap}, // 160m → capped at 2h
-		{count: 7, want: autoPauseBackoffCap}, // stays capped
-		{count: 50, want: autoPauseBackoffCap},
+		{count: 0, want: 2 * time.Hour},  // defensive: count<1 treated as 1
+		{count: 1, want: 2 * time.Hour},  // first retry
+		{count: 2, want: 4 * time.Hour},  // second retry
+		{count: 3, want: 6 * time.Hour},  // third retry
+		{count: 4, want: 6 * time.Hour},  // circuit-open callers ignore this
+		{count: 50, want: 6 * time.Hour}, // stays capped
 	}
 	for _, tc := range cases {
 		if got := growingBackoff(tc.count); got != tc.want {
@@ -170,7 +166,7 @@ func TestNextUnpauseAt(t *testing.T) {
 // boundary so a future tuning change is a deliberate, test-visible edit.
 func TestCircuitBreakerThreshold(t *testing.T) {
 	for count := int32(1); count <= autoPauseCircuitLimit+2; count++ {
-		circuitOpen := count >= autoPauseCircuitLimit
+		circuitOpen := circuitOpenForAutoPause(count, autoPauseDecision{pauseWorthy: true, pauseReason: "rate_limit"})
 		notifyOnce := count == autoPauseCircuitLimit
 
 		switch {
@@ -193,5 +189,42 @@ func TestCircuitBreakerThreshold(t *testing.T) {
 				t.Errorf("count=%d: must not re-notify past the trip", count)
 			}
 		}
+	}
+}
+
+func TestCircuitBreakerRequiresNoResetTime(t *testing.T) {
+	for count := int32(1); count <= autoPauseCircuitLimit+2; count++ {
+		decision := autoPauseDecision{
+			pauseWorthy: true,
+			hasReset:    true,
+			resetAt:     time.Now().Add(time.Hour),
+			pauseReason: "rate_limit",
+		}
+		if circuitOpenForAutoPause(count, decision) {
+			t.Fatalf("count=%d: parseable provider reset time must keep auto-resume scheduled", count)
+		}
+	}
+}
+
+func TestCircuitBreakerCommentMentionsRuntimeOwner(t *testing.T) {
+	task := db.AgentTaskQueue{
+		ID: pgtype.UUID{
+			Bytes: [16]byte{0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+				0x90, 0xa0, 0xb0, 0xc0, 0xd0, 0xe0, 0xf0, 0x01},
+			Valid: true,
+		},
+		Error: pgtype.Text{String: "You've hit your monthly spend limit", Valid: true},
+	}
+	ownerMention := "[@Runtime owner](mention://member/11111111-1111-1111-1111-111111111111)"
+	body := circuitBreakerAnalysisCommentBody(task, autoPauseDecision{title: "Usage or rate limit reached"}, ownerMention)
+
+	if want := "mention://member/11111111-1111-1111-1111-111111111111"; !strings.Contains(body, want) {
+		t.Fatalf("comment body missing owner mention %q:\n%s", want, body)
+	}
+	if !strings.Contains(body, "2 hours, 4 hours, and 6 hours") {
+		t.Fatalf("comment body missing retry analysis:\n%s", body)
+	}
+	if !strings.Contains(body, "You've hit your monthly spend limit") {
+		t.Fatalf("comment body missing redacted last error:\n%s", body)
 	}
 }

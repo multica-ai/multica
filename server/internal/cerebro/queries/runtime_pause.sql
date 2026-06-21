@@ -28,10 +28,11 @@ RETURNING *;
 -- name: IncrementAutoPauseCount :one
 -- FIR-2476 circuit breaker: bump the consecutive auto-pause counter and return
 -- the new value. Called by MaybeAutoPauseOnFailure on every auto-pause. The
--- returned count drives the growing backoff (5m → 10m → 20m …) and, once it
--- crosses the circuit limit, the decision to stop auto-resuming and notify a
--- human. Atomic increment-and-read so a burst of concurrent failures each get
--- a distinct count (only one caller sees the exact trip value).
+-- returned count drives the no-reset backoff (2h → 4h → 6h) and, when the next
+-- no-reset attempt fails, the decision to stop auto-resuming and notify the
+-- runtime owner on the issue. Atomic increment-and-read so a burst of
+-- concurrent failures each get a distinct count (only one caller sees the exact
+-- trip value).
 UPDATE agent_runtime
 SET auto_pause_count = auto_pause_count + 1,
     updated_at       = now()
