@@ -810,18 +810,15 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Star a conversation in the dynamic inbox to make it a favorite and float it to the top of the \"All messages\" box, in its own Favorites section. Each row's avatar turns into a star on hover so you can toggle it in place. The top Favorites section can be switched off per box (favorites then stay in their normal position but can still be starred), and a standalone Favorites block can be added from the \"Add section\" menu. Favorites are saved per user and follow you across devices. Requires the Dynamic inbox.",
   },
   {
-    key: "cerebro_reminders_page",
-    label: "Reminders page",
+    // FIR-394 (Jesper): the unified Reminders feature is one flag, with its two
+    // display options (cerebro_reminders_page, cerebro_inbox_hide_reminders) as
+    // settings inside this box — see RemindersSettings (FLAG_SETTINGS). Off turns
+    // reminders off entirely.
+    key: "cerebro_reminders",
+    label: "Reminders",
     group: "inbox",
     description:
-      "Show the standalone Reminders page — the \"Reminders\" entry in the left sidebar and the /reminders overview that lists every reminder on its own. Off (default) hides the page; the \"Remind me\" actions on messages, comments and issues keep working regardless. Turn on if you want the dedicated reminder overview back.",
-  },
-  {
-    key: "cerebro_inbox_hide_reminders",
-    label: "Hide reminders from All messages",
-    group: "inbox",
-    description:
-      "Hide reminder rows (reminders, due-date and start-date reminders) from the \"All messages\" box so a fired reminder lives only in its own Reminders box, instead of showing in two places. Off (default) keeps reminders in All messages; add a Reminders box from the \"Add section\" menu to see them on their own.",
+      "The reminder system — a \"Remind me\" action on messages, comments and issues that lands in your inbox (and re-opens the source) when it fires. Off turns reminders off entirely. While on, use the settings below to show the standalone Reminders page and to keep reminders out of \"All messages\".",
   },
   {
     key: "cerebro_inbox_wakeup_running",

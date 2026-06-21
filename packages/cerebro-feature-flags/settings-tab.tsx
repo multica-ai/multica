@@ -16,6 +16,7 @@ import { WakeupLimitsSettings } from "@multica/cerebro-wakeup";
 import { AgentStartSettings } from "@multica/cerebro-issue-datetime/views";
 import { CEREBRO_FLAG_GROUPS, flagsForGroup, type CerebroFlagKey } from "./registry";
 import { SecretaryCriteriaSettings } from "./secretary-criteria-settings";
+import { RemindersSettings } from "./reminders-settings";
 import {
   useFeatureFlag,
   useFeatureFlagsQuery,
@@ -32,6 +33,7 @@ const FLAG_SETTINGS: Partial<Record<CerebroFlagKey, ComponentType>> = {
   cerebro_wakeup_time: WakeupLimitsSettings,
   cerebro_issue_date_times: AgentStartSettings,
   cerebro_inbox_secretary: SecretaryCriteriaSettings,
+  cerebro_reminders: RemindersSettings,
 };
 
 // Exported so a feature can render its own toggles in a dedicated settings tab
