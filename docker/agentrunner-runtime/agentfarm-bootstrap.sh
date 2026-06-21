@@ -50,21 +50,30 @@ else
   echo "agentfarm-bootstrap: JIRA_EMAIL or JIRA_PAT unset — skipping acli auth (acli still on PATH, just unauthenticated)"
 fi
 
-# ── 2. Wait for the claude runtime to register (≤60s). ──────────────────────
+# ── 2. Wait for the claude runtime to register. ─────────────────────────────
 #    The daemon is started in the foreground by entrypoint.sh; we just poll here.
+#    The daemon registers runtimes into every workspace the bot PAT belongs to,
+#    serially (~20s each), and our target workspace can be processed last — so the
+#    wait must outlast N-workspace registration, not a fixed 60s. Budget is a true
+#    wall-clock bound (SECONDS) and stays well under gandalf's 15-min provisioning
+#    poll. Override via BOOTSTRAP_RUNTIME_WAIT_SECS.
+readonly RUNTIME_WAIT_SECS="${BOOTSTRAP_RUNTIME_WAIT_SECS:-600}"
 CLAUDE_RUNTIME_ID=""
-for _ in $(seq 1 60); do
+deadline=$(( SECONDS + RUNTIME_WAIT_SECS ))
+while (( SECONDS < deadline )); do
+  # || true: a transient runtime-list failure over the long window must not trip
+  # set -e and abort provisioning — just retry on the next tick.
   CLAUDE_RUNTIME_ID="$(
-    multica runtime list --output json \
+    multica runtime list --output json 2>/dev/null \
       | jq -r --arg name "${DEVICE_NAME}" \
           '.[] | select(.device_info | startswith($name)) | select(.provider=="claude") | .id' \
-      | head -n1
+      | head -n1 || true
   )"
   [[ -n "${CLAUDE_RUNTIME_ID}" ]] && break
-  sleep 1
+  sleep 2
 done
 [[ -n "${CLAUDE_RUNTIME_ID}" ]] || {
-  echo "agentfarm-bootstrap: claude runtime did not register within 60s — daemon startup may have failed" >&2
+  echo "agentfarm-bootstrap: claude runtime did not register within ${RUNTIME_WAIT_SECS}s — daemon startup may have failed" >&2
   exit 1
 }
 echo "agentfarm-bootstrap: claude runtime registered: ${CLAUDE_RUNTIME_ID}"
