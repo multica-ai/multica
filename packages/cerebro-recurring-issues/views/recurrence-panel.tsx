@@ -131,7 +131,7 @@ function ChoiceCard({
       onClick={onSelect}
       aria-pressed={selected}
       className={cn(
-        "flex min-h-12 w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors",
+        "flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
         selected
           ? "border-primary bg-primary/5 ring-1 ring-primary/30"
           : "border-border bg-card hover:bg-accent/30"
@@ -231,7 +231,7 @@ function RecurrenceForm({
             value={form.frequency}
             onValueChange={(v) => setForm({ ...form, frequency: v as Frequency })}
           >
-            <SelectTrigger id="rec-freq" className="min-h-11">
+            <SelectTrigger id="rec-freq" className="w-full">
               <SelectValue>
                 {() =>
                   form.frequency ? FREQUENCY_LABELS[form.frequency] ?? form.frequency : null
@@ -254,7 +254,6 @@ function RecurrenceForm({
               id="rec-days"
               type="number"
               min={0}
-              className="min-h-11"
               value={form.days_after ?? 0}
               onChange={(e) => setForm({ ...form, days_after: Number(e.target.value) })}
             />
@@ -266,7 +265,6 @@ function RecurrenceForm({
               id="rec-interval"
               type="number"
               min={1}
-              className="min-h-11"
               value={form.interval_count ?? 1}
               onChange={(e) => setForm({ ...form, interval_count: Number(e.target.value) })}
             />
@@ -287,7 +285,7 @@ function RecurrenceForm({
                   type="button"
                   onClick={() => toggleWeekday(d.value)}
                   className={cn(
-                    "h-11 flex-1 rounded text-xs transition-colors",
+                    "h-8 flex-1 rounded text-xs transition-colors",
                     active
                       ? "bg-primary text-primary-foreground"
                       : "bg-muted text-muted-foreground hover:bg-accent"
@@ -318,7 +316,7 @@ function RecurrenceForm({
             value={form.trigger_status}
             onValueChange={(v) => setForm({ ...form, trigger_status: v ?? "" })}
           >
-            <SelectTrigger id="rec-trigger" className="min-h-11">
+            <SelectTrigger id="rec-trigger" className="w-full">
               <SelectValue>{() => statusLabel(form.trigger_status)}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -402,7 +400,7 @@ function RecurrenceForm({
                     value={form.stale_status ?? "cancelled"}
                     onValueChange={(v) => setForm({ ...form, stale_status: v ?? "" })}
                   >
-                    <SelectTrigger className="min-h-11 w-full">
+                    <SelectTrigger className="w-full">
                       <SelectValue>
                         {() => `Close it as ${statusLabel(form.stale_status ?? "cancelled")}`}
                       </SelectValue>
@@ -433,7 +431,7 @@ function RecurrenceForm({
             value={form.date_format ?? "iso"}
             onValueChange={(v) => setForm({ ...form, date_format: (v ?? "iso") as DateFormat })}
           >
-            <SelectTrigger id="rec-date-format" className="min-h-11">
+            <SelectTrigger id="rec-date-format" className="w-full">
               <SelectValue>{() => datePreview}</SelectValue>
             </SelectTrigger>
             <SelectContent>
@@ -458,7 +456,7 @@ function RecurrenceForm({
           value={form.new_status}
           onValueChange={(v) => setForm({ ...form, new_status: v ?? "" })}
         >
-          <SelectTrigger id="rec-new-status" className="min-h-11">
+          <SelectTrigger id="rec-new-status" className="w-full">
             <SelectValue>{() => statusLabel(form.new_status)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
@@ -472,7 +470,7 @@ function RecurrenceForm({
       </div>
 
       {/* Keep repeating */}
-      <label className="flex min-h-11 items-center gap-2.5 text-sm">
+      <label className="flex items-center gap-2.5 text-sm">
         <input
           type="checkbox"
           className="h-4 w-4 accent-primary"
@@ -562,8 +560,10 @@ export function RecurrencePanel({ workspaceId, issueId }: Props) {
   );
 
   if (isMobile) {
+    // modal={false} keeps vaul from setting pointer-events:none on the body,
+    // which otherwise makes the portaled Select popups untappable (FIR-1697).
     return (
-      <Drawer open={open} onOpenChange={setOpen}>
+      <Drawer open={open} onOpenChange={setOpen} modal={false}>
         <DrawerTrigger className={triggerClassName}>{triggerContent}</DrawerTrigger>
         <DrawerContent>
           <DrawerHeader className="pb-2">
