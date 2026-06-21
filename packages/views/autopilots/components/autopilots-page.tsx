@@ -237,6 +237,8 @@ export function AutopilotsPage() {
           {!isLoading && autopilots.length > 0 && (
             <span className="text-xs text-muted-foreground tabular-nums">{autopilots.length}</span>
           )}
+          {/* CEREBRO-PATCH(autopilot-folders-mobile): FIR-1772 — mobile folder drawer trigger; inline sidebar is hidden under md. */}
+          {folderView.mobileTrigger}
         </div>
         <Button size="sm" variant="outline" onClick={() => router.push(wsPaths.autopilotNew())}> {/* CEREBRO-PATCH(autopilot-list-nav-button): JEH-1766 */}
           <Plus className="h-3.5 w-3.5 mr-1" />
