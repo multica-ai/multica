@@ -70,7 +70,11 @@ vi.mock("@multica/views/issues/components", () => ({
 vi.mock("@multica/views/chat", () => ({
   ChatMessageList: () => <div data-testid="message-list" />,
   ChatMessageSkeleton: () => <div data-testid="message-skeleton" />,
-  ChatInput: ({
+}));
+
+// FIR-1748: Chat now composes via the shared ChatComposer; stub it.
+vi.mock("@multica/cerebro-composer", () => ({
+  ChatComposer: ({
     agentName,
     onSend,
   }: {

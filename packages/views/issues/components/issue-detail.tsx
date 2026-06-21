@@ -131,7 +131,8 @@ import { RestrictedRef } from "@multica/cerebro-access/views";
 import { useEnsureMentionAccessData } from "@multica/cerebro-access/views";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(wakeup-activity-line): TECH-3038 Phase 1
-import { CommentInput } from "./comment-input";
+// CEREBRO-PATCH(issue-composer-unify): FIR-1748 — issue comments use the shared CommentComposer preset.
+import { CommentComposer } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -2666,7 +2667,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   this input into the pin toggle. Channels/DMs (which also
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
-              <CommentInput issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
+              {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer (new-comment variant). */}
+              <CommentComposer issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
             </div>
               </TabsContent>
             </Tabs>

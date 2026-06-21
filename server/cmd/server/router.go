@@ -1117,6 +1117,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/agentvault/access", cerebroAgentVaultHandler.List)
 					// CEREBRO-PATCH(workspace-mcp-http): TECH-3405 workspace-scoped MCP endpoint for Connections.
 					r.Post("/mcp", h.WorkspaceMCP)
+					// CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 Test as user — resolve another user+agent's tool verdict (gated by tools:test-as-user).
+					r.Get("/cerebro/test-as-user/access", cerebroToolPolicyHandler.TestAsUserAccess)
+					r.Post("/cerebro/test-as-user", cerebroToolPolicyHandler.TestAsUser)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

@@ -36,3 +36,14 @@ export {
 } from "./connection-config-sheet";
 export { ConnectionRowConfigure } from "./connection-row-configure";
 export { AutopilotPermissionsSection } from "./autopilot-permissions-section";
+export { TestAsUserDialog } from "./test-as-user-dialog";
+export {
+  getTestAsUserAccess,
+  runTestAsUser,
+  type TestAsUserTool,
+} from "../api";
+export { useTestAsUserAccess } from "./use-test-as-user-access";
+export {
+  CerebroTestAsUserMenuItem,
+  CerebroTestAsUserDialogHost,
+} from "./cerebro-test-as-user-menu";

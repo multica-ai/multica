@@ -5,15 +5,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowLeft, ArrowUp, BellRing, Copy, Loader2, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, BellRing, Copy, MoreHorizontal, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { useAuthStore } from "@multica/core/auth";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { TimelineEntry } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,6 +34,8 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+// CEREBRO-PATCH(channel-composer-unify): FIR-1748 — shared message field for channel thread replies.
+import { MessageComposer } from "@multica/cerebro-composer";
 import {
   ContentEditor,
   type ContentEditorRef,
@@ -43,11 +43,8 @@ import {
   useFileDropZone,
   FileDropOverlay,
 } from "../../editor";
-import { useSubmitOnEnter } from "@multica/cerebro-preferences/views";
 // CEREBRO-PATCH(thread-side-panel-cost-badge-import): FIR-39 per-comment cost badge on channel thread replies.
 import { CommentCostBadge } from "@multica/cerebro-channels";
-// CEREBRO-PATCH(comment-drafts): TECH-3491 — per-device draft persistence for channel thread replies.
-import { useCommentDraft, DraftSavedHint } from "@multica/cerebro-comment-drafts";
 import { collectThreadReplies } from "../../issues/components/thread-utils";
 import { ReadonlyContent } from "../../editor";
 import { AttachmentList } from "@multica/cerebro-attachments/views";
@@ -190,9 +187,13 @@ export function ThreadSidePanel({
 
       {/* CEREBRO-PATCH(thread-composer-spacing): TECH-3720 align thread reply composer spacing with the standard chat input (match channel-detail composer). */}
       <div className="shrink-0 px-5 pb-3 pt-0">
-        <ThreadReplyInput
-          channelId={channelId}
-          parentId={parentEntry.id}
+        {/* CEREBRO-PATCH(channel-composer-unify): FIR-1748 — channel thread replies use the shared MessageComposer instead of the bespoke ThreadReplyInput. */}
+        <MessageComposer
+          conversationId={channelId}
+          uploadIssueId={channelId}
+          editorKey={parentEntry.id}
+          draftKey={`reply:${channelId}:${parentEntry.id}`}
+          avatar={currentUserId ? { type: "member", id: currentUserId } : null}
           onSubmit={(content, ids) => onSubmit(parentEntry.id, content, ids)}
         />
       </div>
@@ -495,130 +496,6 @@ function ThreadEntry({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
-  );
-}
-
-interface ThreadReplyInputProps {
-  channelId: string;
-  parentId: string;
-  onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
-}
-
-function ThreadReplyInput({ channelId, parentId, onSubmit }: ThreadReplyInputProps) {
-  const user = useAuthStore((s) => s.user);
-  const editorRef = useRef<ContentEditorRef>(null);
-  const uploadMapRef = useRef<Map<string, string>>(new Map());
-  const submitOnEnter = useSubmitOnEnter();
-  const [isEmpty, setIsEmpty] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const { uploadWithToast } = useFileUpload(api);
-  // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist this channel thread reply's unsent text.
-  const draft = useCommentDraft(`reply:${channelId}:${parentId}`);
-  const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
-  });
-
-  const handleUpload = async (file: File) => {
-    const result = await uploadWithToast(file, { issueId: channelId });
-    if (result) uploadMapRef.current.set(result.link, result.id);
-    return result;
-  };
-
-  const handleSend = async () => {
-    const content = editorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!content || submitting) return;
-    const activeIds: string[] = [];
-    for (const [url, id] of uploadMapRef.current) {
-      if (content.includes(url)) activeIds.push(id);
-    }
-    setSubmitting(true);
-    try {
-      await onSubmit(content, activeIds.length > 0 ? activeIds : undefined);
-      editorRef.current?.clearContent();
-      draft.clear(); // CEREBRO-PATCH(comment-drafts): TECH-3491 — sent, drop the stored draft.
-      setIsEmpty(true);
-      uploadMapRef.current.clear();
-    } catch {
-      toast.error("Failed to send reply");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="flex items-start gap-2.5" {...dropZoneProps}>
-      {user?.id && (
-        <ActorAvatar
-          actorType="member"
-          actorId={user.id}
-          size={28}
-          className="mt-0.5 shrink-0"
-        />
-      )}
-      <div className="relative flex min-w-0 flex-1 flex-col max-h-56">
-        <div className="flex-1 min-h-0 overflow-y-auto pr-14">
-          <ContentEditor
-            ref={editorRef}
-            placeholder="Reply…"
-            // CEREBRO-PATCH(comment-drafts): TECH-3491 — seed from the stored draft on mount.
-            defaultValue={draft.defaultValue}
-            onUpdate={(md) => {
-              setIsEmpty(!md.trim());
-              draft.save(md); // CEREBRO-PATCH(comment-drafts): TECH-3491 — persist as you type.
-            }}
-            onSubmit={handleSend}
-            onUploadFile={handleUpload}
-            debounceMs={100}
-            currentIssueId={channelId}
-            submitOnEnter={submitOnEnter}
-            // Re-key on parent change so Tiptap doesn't carry over draft text
-            // when the user opens a different thread.
-            key={parentId}
-          />
-        </div>
-        <div className="absolute bottom-0 right-0 flex items-center gap-1">
-          {/* CEREBRO-PATCH(comment-drafts): TECH-3491 — "Kladde gemt" cue. */}
-          <DraftSavedHint show={draft.saved} className="mr-1" />
-          <FileUploadButton
-            size="sm"
-            // CEREBRO-PATCH(file-upload-multiple): allow picking multiple files at once
-            multiple
-            onAttach={(files) =>
-              files.forEach((f) => editorRef.current?.uploadFile(f))
-            }
-            onEmbed={(files) =>
-              files.forEach((f) =>
-                editorRef.current?.uploadFile(f, { embedImage: true }),
-              )
-            }
-          />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  disabled={isEmpty || submitting}
-                  onClick={handleSend}
-                  aria-label="Send reply"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:pointer-events-none"
-                >
-                  {submitting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-3.5 w-3.5" />
-                  )}
-                </button>
-              }
-            />
-            <TooltipContent side="top">Send reply</TooltipContent>
-          </Tooltip>
-        </div>
-        {isDragOver && <FileDropOverlay />}
-      </div>
     </div>
   );
 }

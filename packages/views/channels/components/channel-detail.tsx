@@ -26,7 +26,8 @@ import {
 } from "@multica/cerebro-channels";
 import type { Channel, ChannelMember, InboxItem, TimelineEntry } from "@multica/core/types";
 import { useIssueTimeline } from "../../issues/hooks/use-issue-timeline";
-import { CommentInput } from "../../issues/components/comment-input";
+// CEREBRO-PATCH(channel-composer-unify): FIR-1748 — channels send via the shared MessageComposer, not the issue CommentInput.
+import { MessageComposer } from "@multica/cerebro-composer";
 import { ActorAvatar } from "../../common/actor-avatar";
 // CEREBRO-PATCH(channels-slack-message-view): JEH-1017 — Slack-style message
 // view + right slide-in thread panel replace the inline CommentCard stream
@@ -400,7 +401,8 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             {/* CEREBRO-PATCH(input-autofocus): JEH-756 — channels & DMs are
                 chat-like; entering one should land the caret in the input. */}
             {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}
-            <CommentInput issueId={channelId} onSubmit={submitComment} autoFocus onTyping={notifyTyping} />
+            {/* CEREBRO-PATCH(channel-composer-unify): FIR-1748 — shared message field (Channels/DMs/Chat), draft scoped per channel. */}
+            <MessageComposer conversationId={channelId} uploadIssueId={channelId} editorKey={channelId} draftKey={`new:${channelId}`} onSubmit={submitComment} autoFocus onTyping={notifyTyping} />
           </div>
         </div>
 

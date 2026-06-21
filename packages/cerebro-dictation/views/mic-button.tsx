@@ -49,9 +49,15 @@ function errorToastMessage(error: DictationError): string {
       return "Dictation isn't supported in this browser.";
     case "transcription-failed":
     case "streaming-failed":
-      return "Couldn't transcribe that — the speech service didn't respond. Please try again.";
+      // Append the concrete cause so a failure on a device we can't reproduce
+      // (e.g. iPhone) is self-reporting in the screenshot, not a dead end.
+      return error.message
+        ? `Couldn't transcribe that — ${error.message}`
+        : "Couldn't transcribe that — the speech service didn't respond. Please try again.";
     case "recording-failed":
-      return "Recording failed. Please try again.";
+      return error.message
+        ? `Recording failed — ${error.message}`
+        : "Recording failed. Please try again.";
     default:
       return error.message || "Dictation failed. Please try again.";
   }

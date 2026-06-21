@@ -1043,6 +1043,7 @@ var excluded = map[string]string{
 	"POST /api/agents/backfill-avatars":         "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":             "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/grants/evaluate": "read-only — dry-run evaluation of a grant decision; reads policy, changes no state",
+	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
 	"POST /api/issues/{id}/squad-evaluated":     "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 

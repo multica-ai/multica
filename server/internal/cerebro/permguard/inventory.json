@@ -1289,6 +1289,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/workspaces/{id}/cerebro/test-as-user",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/workspaces/{id}/mcp",
       "gate": "workspace_member"
     },

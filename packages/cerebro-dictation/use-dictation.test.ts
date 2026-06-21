@@ -6,7 +6,9 @@ import type { StreamingTranscriberOptions } from "./types";
 interface FakeRecorder {
   state: "inactive" | "recording" | "paused";
   mimeType: string;
-  start: () => void;
+  /** Timeslice passed to the most recent `start()` call, for assertions. */
+  lastStartTimeslice: number | undefined;
+  start: (timeslice?: number) => void;
   stop: () => void;
   addEventListener: (event: string, fn: (e: unknown) => void) => void;
   emit: (event: string, payload?: unknown) => void;
@@ -17,7 +19,9 @@ function createFakeRecorder(): FakeRecorder {
   const recorder: FakeRecorder = {
     state: "inactive",
     mimeType: "audio/webm",
-    start() {
+    lastStartTimeslice: undefined,
+    start(timeslice?: number) {
+      recorder.lastStartTimeslice = timeslice;
       recorder.state = "recording";
     },
     stop() {
@@ -144,6 +148,26 @@ describe("useDictation", () => {
     expect(result.current.lastTranscript).toBe("hej verden");
     expect(onTranscribed).toHaveBeenCalledWith("hej verden");
     expect(transcribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts the one-shot recorder with a periodic timeslice (iOS empty-blob fix)", async () => {
+    // Without a timeslice, WebKit only emits `dataavailable` at stop() and
+    // iOS Safari hands back an empty blob — recording starts but nothing is
+    // captured (FIR-1637). The one-shot path must record on an interval.
+    const recorder = createFakeRecorder();
+    installFakeMediaRecorder(recorder);
+    installGetUserMedia(() => Promise.resolve(fakeStream()));
+
+    const { result } = renderHook(() =>
+      useDictation({ transcribe: vi.fn(async () => "ok") }),
+    );
+
+    await act(async () => {
+      await result.current.start();
+    });
+
+    expect(recorder.lastStartTimeslice).toBeTypeOf("number");
+    expect(recorder.lastStartTimeslice as number).toBeGreaterThan(0);
   });
 
   it("streams chunks and surfaces partial and final transcripts", async () => {

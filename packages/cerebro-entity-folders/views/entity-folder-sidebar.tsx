@@ -96,6 +96,13 @@ interface EntityFolderSidebarProps {
   onSelect: (sel: string) => void;
   /** Human label for the items, e.g. "skills" / "autopilots". */
   itemNoun: string;
+  /**
+   * FIR-1772: rendered inside a mobile Sheet drawer instead of inline. Drops
+   * the fixed `w-56` / `border-r` desktop chrome and fills the drawer. When
+   * false (default) the root is hidden under `md` so the inline sidebar never
+   * crushes the list on phones — mobile reaches it via the Sheet trigger.
+   */
+  inSheet?: boolean;
 }
 
 export function EntityFolderSidebar({
@@ -106,6 +113,7 @@ export function EntityFolderSidebar({
   selected,
   onSelect,
   itemNoun,
+  inSheet = false,
 }: EntityFolderSidebarProps) {
   const tree = useMemo(() => buildFolderTree(folders), [folders]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -282,7 +290,15 @@ export function EntityFolderSidebar({
   };
 
   return (
-    <div className="flex w-56 shrink-0 flex-col border-r bg-muted/20">
+    // FIR-1772: inline on desktop, hidden under md (mobile uses the Sheet drawer).
+    <div
+      className={cn(
+        "flex-col bg-muted/20",
+        inSheet
+          ? "flex h-full w-full"
+          : "hidden w-56 shrink-0 border-r md:flex",
+      )}
+    >
       <div className="flex h-10 shrink-0 items-center justify-between border-b px-3">
         <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted-foreground">
           <Layers className="h-3.5 w-3.5" />

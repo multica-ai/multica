@@ -17,7 +17,9 @@ import { useCreateChatSession, useMarkChatSessionRead } from "@multica/core/chat
 import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { ChatMessageList, ChatMessageSkeleton, ChatInput } from "@multica/views/chat";
+import { ChatMessageList, ChatMessageSkeleton } from "@multica/views/chat";
+// CEREBRO-PATCH(chat-composer-unify): FIR-1748 — Chat uses the shared ChatComposer preset.
+import { ChatComposer } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(chat-recent-list): FIR-recent-chats — recent sessions + resume
 import { ChatStatusLine, SessionCostChip, RecentChatsList } from "@multica/cerebro-chat/views";
 import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
@@ -243,7 +245,7 @@ export function InboxChatPanel({
       {/* Input — fixed at bottom */}
       <div className="shrink-0 border-t pt-2">
       <ChatStatusLine pendingTaskId={pendingTaskId} />
-      <ChatInput
+      <ChatComposer
         onSend={handleSend}
         onStop={handleStop}
         isRunning={!!pendingTaskId}

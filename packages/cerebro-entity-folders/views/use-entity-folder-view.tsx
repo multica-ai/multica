@@ -6,8 +6,11 @@
 
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Layers } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { Button } from "@multica/ui/components/ui/button";
+import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { entityFolderItemsOptions, entityFoldersOptions } from "../queries";
 import {
   setEntityFolderDragData,
@@ -36,8 +39,14 @@ export interface EntityFolderView {
    * without each cell re-querying the folder tree.
    */
   folderName: (itemId: string) => string | null;
-  /** The folder sidebar, ready to render beside the list. */
+  /** The folder sidebar, ready to render beside the list. Hidden under `md`. */
   sidebar: ReactNode;
+  /**
+   * FIR-1772: mobile-only trigger button + Sheet drawer (md:hidden). Render it
+   * in the page toolbar/header; the same folder tree opens in a drawer so the
+   * list keeps full width on phones. Collapses to nothing on desktop.
+   */
+  mobileTrigger: ReactNode;
   /**
    * Props to spread on a list row so it can be dragged onto a folder in the
    * sidebar to file it. Returns no-op (non-draggable) props when the feature
@@ -122,6 +131,64 @@ export function useEntityFolderView(opts: {
     [enabled, effectiveSelected, folders, itemNoun, items, kind, membership],
   );
 
+  // FIR-1772: mobile drawer state + label for the current selection.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const selectedLabel = useMemo(() => {
+    if (effectiveSelected === SELECT_ALL) return "Folders";
+    if (effectiveSelected === SELECT_UNFILED) return "Unfiled";
+    return folders.find((f) => f.id === effectiveSelected)?.name ?? "Folders";
+  }, [effectiveSelected, folders]);
+
+  const mobileTrigger = useMemo(
+    () =>
+      enabled ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 md:hidden"
+            onClick={() => setMobileOpen(true)}
+          >
+            <Layers className="h-3.5 w-3.5" />
+            <span className="max-w-32 truncate">{selectedLabel}</span>
+          </Button>
+          <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+            <SheetContent
+              side="left"
+              showCloseButton={false}
+              className="w-[85vw] max-w-xs p-0"
+            >
+              <EntityFolderSidebar
+                kind={kind}
+                folders={folders}
+                items={items}
+                membership={membership}
+                selected={effectiveSelected}
+                onSelect={(sel) => {
+                  setSelected(sel);
+                  setMobileOpen(false);
+                }}
+                itemNoun={itemNoun}
+                inSheet
+              />
+            </SheetContent>
+          </Sheet>
+        </>
+      ) : null,
+    [
+      enabled,
+      mobileOpen,
+      selectedLabel,
+      effectiveSelected,
+      folders,
+      itemNoun,
+      items,
+      kind,
+      membership,
+    ],
+  );
+
   const getDragProps = useCallback(
     (itemId: string): EntityFolderDragProps =>
       enabled
@@ -134,7 +201,7 @@ export function useEntityFolderView(opts: {
   );
 
   return useMemo(
-    () => ({ enabled, includes, folderName, sidebar, getDragProps }),
-    [enabled, folderName, getDragProps, includes, sidebar],
+    () => ({ enabled, includes, folderName, sidebar, mobileTrigger, getDragProps }),
+    [enabled, folderName, getDragProps, includes, sidebar, mobileTrigger],
   );
 }

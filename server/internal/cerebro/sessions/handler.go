@@ -197,6 +197,19 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
+	// FIR-1741 (Codex review): serialize concurrent Start fresh on the same
+	// issue. Without this, two racing calls can both read the same open session
+	// and the same MAX(position)+1 and create duplicate sessions / multiple open
+	// sessions — the P1 failure class (empty/duplicate sessions) through a new
+	// door. The lock is transaction-scoped and auto-releases on commit/rollback;
+	// the unique index on (issue_id, position) (migration 9098) is the DB-level
+	// backstop.
+	if _, err = tx.Exec(r.Context(),
+		`SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, issue.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock issue")
+		return
+	}
+
 	// Find the currently open session (latest not-done), if any.
 	var openID pgtype.UUID
 	var openCreatedAt pgtype.Timestamptz
@@ -224,7 +237,8 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 		// the issue's creation time so every prior timeline entry windows into it.
 		histHandoff := req.Handoff
 		if histHandoff == nil {
-			histHandoff, err = h.generateHandoff(r.Context(), tx, issue.ID, issue.CreatedAt.Time)
+			// Session 1 covers the whole existing timeline; no upper bound.
+			histHandoff, err = h.generateHandoff(r.Context(), tx, issue.ID, issue.CreatedAt.Time, nil)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to summarise session")
 				return
@@ -258,7 +272,25 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	handoff := req.Handoff
 	if hasOpen {
 		if handoff == nil {
-			handoff, err = h.generateHandoff(r.Context(), tx, issue.ID, openCreatedAt.Time)
+			// Bound the window above by the next session marker, if any, so the
+			// summary never counts comments that belong to a later session. With
+			// the advisory lock the open session is normally the newest (until is
+			// nil), but this keeps generateHandoff correct for any open session.
+			var until *time.Time
+			var nextStart pgtype.Timestamptz
+			nerr := tx.QueryRow(r.Context(), `
+				SELECT created_at FROM cerebro_session
+				WHERE issue_id = $1 AND created_at > $2
+				ORDER BY created_at ASC, position ASC, id ASC
+				LIMIT 1`, issue.ID, openCreatedAt.Time).Scan(&nextStart)
+			if nerr == nil {
+				t := nextStart.Time
+				until = &t
+			} else if nerr != pgx.ErrNoRows {
+				writeError(w, http.StatusInternalServerError, "failed to load next session")
+				return
+			}
+			handoff, err = h.generateHandoff(r.Context(), tx, issue.ID, openCreatedAt.Time, until)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to summarise session")
 				return
@@ -299,11 +331,19 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, next)
 }
 
-// generateHandoff auto-summarises the closing session's window [since, now) from
-// its root comments. Deterministic, no LLM: it captures how many updates the
-// session held and a snippet of the most recent one, so a fresh runtime opening
-// the next session sees what came before even when no agent authored a brief.
-func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, since time.Time) (*handoffBrief, error) {
+// generateHandoff auto-summarises a session's window [since, until) from its
+// root comments. Deterministic, no LLM: it captures how many updates the session
+// held and a snippet of the most recent one, so a fresh runtime opening the next
+// session sees what came before even when no agent authored a brief.
+//
+// FIR-1741 (Codex review): the window is now half-open and bounded above by
+// `until` (the next session marker's created_at), matching the frontend's
+// grouping rule (`packages/cerebro-sessions/grouping.ts`: a comment belongs to
+// the marker that precedes it). A nil `until` means no upper bound — correct for
+// the newest session, whose window runs to "now". Without the upper bound, a
+// summary could count comments that belong to a later session if markers ever
+// land out of order.
+func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID, since time.Time, until *time.Time) (*handoffBrief, error) {
 	var count int
 	var latest *string
 	err := tx.QueryRow(ctx, `
@@ -313,7 +353,8 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID pgtype
 		WHERE issue_id = $1
 		  AND parent_id IS NULL
 		  AND type = 'comment'
-		  AND created_at >= $2`, issueID, since).Scan(&count, &latest)
+		  AND created_at >= $2
+		  AND ($3::timestamptz IS NULL OR created_at < $3)`, issueID, since, until).Scan(&count, &latest)
 	if err != nil {
 		return nil, err
 	}

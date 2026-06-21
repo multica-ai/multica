@@ -25,6 +25,18 @@ export const DEFAULT_MIME_TYPE_PREFERENCE: readonly string[] = [
 const DEFAULT_MAX_DURATION_MS = 60_000;
 
 /**
+ * Timeslice for the one-shot (non-streaming) recorder. Without a timeslice the
+ * browser only emits `dataavailable` at `stop()`, and iOS Safari/WebKit
+ * reliably hands back an EMPTY blob in that case — recording visibly starts
+ * (waveform + timer) but nothing is captured, so the transcribe fails with
+ * "Recording failed" (Jesper, FIR-1637, iPhone Safari + Chrome). Flushing on an
+ * interval forces WebKit to write real audio during the recording, so the blob
+ * is populated by the time the user stops. Desktop Chrome is unaffected — the
+ * streaming path already records with a 500ms timeslice without issue.
+ */
+const ONE_SHOT_TIMESLICE_MS = 1_000;
+
+/**
  * React hook wrapping the MediaRecorder lifecycle for dictation. The hook
  * is UI-agnostic: a `MicButton` (slice 2) renders state via `status` and
  * triggers `start()`/`stop()`, while consumers in arbitrary text inputs
@@ -283,7 +295,7 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     });
 
     try {
-      recorder.start(streamingSession ? 500 : undefined);
+      recorder.start(streamingSession ? 500 : ONE_SHOT_TIMESLICE_MS);
     } catch (cause) {
       streamingSession?.cancel();
       teardown();
@@ -365,9 +377,12 @@ export function useDictation(options: UseDictationOptions): UseDictationReturn {
     teardown();
 
     if (audio.size === 0) {
+      // Carry the format + chunk count so an empty capture on a device we
+      // can't reproduce (e.g. iPhone) is diagnosable from the toast alone.
+      const fmt = chunks[0]?.type || recorder.mimeType || "unknown";
       reportError({
         kind: "recording-failed",
-        message: "Recording produced no audio.",
+        message: `no audio captured (${fmt}, ${chunks.length} chunk(s))`,
       });
       return;
     }

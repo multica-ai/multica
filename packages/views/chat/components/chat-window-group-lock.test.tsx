@@ -67,8 +67,9 @@ vi.mock("./chat-message-list", () => ({
 // tests can drive the picker, and a send button that fires onSend with a
 // fixed payload so the 403 path is reachable without typing into the
 // real Tiptap editor.
-vi.mock("./chat-input", () => ({
-  ChatInput: ({
+// FIR-1748: Chat composes via the shared ChatComposer; stub it.
+vi.mock("@multica/cerebro-composer", () => ({
+  ChatComposer: ({
     leftAdornment,
     onSend,
   }: {

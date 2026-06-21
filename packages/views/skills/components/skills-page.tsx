@@ -444,6 +444,8 @@ export default function SkillsPage() {
             />
             {/* CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter row. */}
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
+              {/* CEREBRO-PATCH(skill-folders-mobile): FIR-1772 — mobile folder drawer trigger; inline sidebar is hidden under md. */}
+              {folderView.mobileTrigger}
               <SkillCategoryFilter
                 skills={skills}
                 category={categoryFilter}

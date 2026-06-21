@@ -1,0 +1,38 @@
+{
+  "name": "@multica/cerebro-composer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@multica/cerebro-access": "workspace:*",
+    "@multica/cerebro-comment-drafts": "workspace:*",
+    "@multica/cerebro-dictation": "workspace:*",
+    "@multica/cerebro-pin-input": "workspace:*",
+    "@multica/cerebro-preferences": "workspace:*",
+    "@multica/cerebro-ui": "workspace:*",
+    "@multica/core": "workspace:*",
+    "@multica/ui": "workspace:*",
+    "@multica/views": "workspace:*",
+    "lucide-react": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "catalog:"
+  },
+  "devDependencies": {
+    "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
