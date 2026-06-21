@@ -435,6 +435,8 @@
     "description": "This issue will execute repeatedly at the specified interval. The assigned agent will run each cycle automatically.",
     "interval_label": "Execution interval",
     "custom_label": "Custom interval (minutes)",
+    "start_at_label": "Start time",
+    "start_at_hint": "Leave empty to start immediately.",
     "cancel": "Cancel",
     "confirm": "Start Polling"
   },
@@ -443,6 +445,7 @@
     "interval_label": "Interval",
     "interval_minutes_one": "{{count}} minute",
     "interval_minutes_other": "{{count}} minutes",
+    "start_at_label": "Start time",
     "next_run_label": "Next run",
     "last_run_label": "Last run",
     "run_count_label": "Executions",

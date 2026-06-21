@@ -414,7 +414,12 @@ func TestUpdateIssueEnablesPollingFields(t *testing.T) {
 		t.Fatalf("UpdateIssue: expected poll_interval_minutes 30, got %#v", got)
 	}
 	if got := updated["poll_start_at"]; got != startAt.Format(time.RFC3339) {
-		t.Fatalf("UpdateIssue: expected poll_start_at %s, got %#v", startAt.Format(time.RFC3339), got)
+		// The server may return the timestamp in a different timezone offset;
+		// parse both and compare the instant.
+		gotTime, err := time.Parse(time.RFC3339, got.(string))
+		if err != nil || !gotTime.Equal(startAt) {
+			t.Fatalf("UpdateIssue: expected poll_start_at %s, got %#v", startAt.Format(time.RFC3339), got)
+		}
 	}
 	if got := updated["poll_next_run"]; got == nil || got == "" {
 		t.Fatalf("UpdateIssue: expected poll_next_run to be populated, got %#v", got)
@@ -422,7 +427,8 @@ func TestUpdateIssueEnablesPollingFields(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
-		"status": "todo",
+		"status":                "todo",
+		"poll_interval_minutes": 0,
 	})
 	req = withURLParam(req, "id", issueID)
 	testHandler.UpdateIssue(w, req)
@@ -437,12 +443,58 @@ func TestUpdateIssueEnablesPollingFields(t *testing.T) {
 	if got := updated["status"]; got != "todo" {
 		t.Fatalf("UpdateIssue stop polling: expected status todo, got %#v", got)
 	}
-	if got := updated["poll_interval_minutes"]; got != float64(30) {
-		t.Fatalf("UpdateIssue stop polling: expected config to persist, got %#v", got)
+	if got := updated["poll_interval_minutes"]; got != nil {
+		t.Fatalf("UpdateIssue stop polling: expected poll_interval_minutes cleared, got %#v", got)
 	}
 	if got := updated["poll_next_run"]; got != nil {
 		t.Fatalf("UpdateIssue stop polling: expected poll_next_run cleared, got %#v", got)
 	}
+}
+
+func TestUpdateIssueAbsorbsPollingStatusChange(t *testing.T) {
+	issueID := createTestIssue(t, "Polling protection test", "todo", "none")
+
+	startAt := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status":                "polling",
+		"poll_start_at":        startAt.Format(time.RFC3339),
+		"poll_interval_minutes": 30,
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue polling (protection test): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Agent changes status to "in_review" without clearing poll_interval_minutes.
+	// This should be absorbed back to "polling".
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+issueID, map[string]any{
+		"status": "in_review",
+	})
+	req = withURLParam(req, "id", issueID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue absorb status: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var absorbed map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&absorbed); err != nil {
+		t.Fatalf("UpdateIssue absorb status decode failed: %v", err)
+	}
+	if got := absorbed["status"]; got != "polling" {
+		t.Fatalf("UpdateIssue absorb status: expected status polling, got %#v", got)
+	}
+	if got := absorbed["poll_interval_minutes"]; got != float64(30) {
+		t.Fatalf("UpdateIssue absorb status: expected poll_interval_minutes 30, got %#v", got)
+	}
+
+	// Cleanup
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+issueID, nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.DeleteIssue(w, req)
 }
 
 // TestDeleteIssueByIdentifier guards against #1661 — DELETE /api/issues/{id}

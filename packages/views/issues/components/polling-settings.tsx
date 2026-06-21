@@ -44,16 +44,16 @@ export function PollingSettings({
 
   const interval = issue.poll_interval_minutes ?? 30;
 
-  const handleEdit = (newInterval: number) => {
+  const handleEdit = (newInterval: number, pollStartAt?: string | null) => {
     if (isPolling) {
-      onUpdate({ status: "polling", poll_interval_minutes: newInterval });
+      onUpdate({ status: "polling", poll_interval_minutes: newInterval, poll_start_at: pollStartAt });
     } else {
-      onUpdate({ poll_interval_minutes: newInterval });
+      onUpdate({ poll_interval_minutes: newInterval, poll_start_at: pollStartAt });
     }
   };
 
   const handleStop = () => {
-    onUpdate({ status: "todo" });
+    onUpdate({ status: "todo", poll_interval_minutes: 0 });
   };
 
   return (
@@ -73,6 +73,12 @@ export function PollingSettings({
           <span>{t(($) => $.polling_settings.interval_label)}</span>
           <span className="font-medium text-foreground">{formatIntervalShort(interval)}</span>
         </div>
+        {issue.poll_start_at && (
+          <div className="flex justify-between">
+            <span>{t(($) => $.polling_settings.start_at_label)}</span>
+            <span className="font-medium text-foreground">{formatTime(issue.poll_start_at)}</span>
+          </div>
+        )}
         {isPolling && issue.poll_next_run && (
           <div className="flex justify-between">
             <span>{t(($) => $.polling_settings.next_run_label)}</span>
@@ -119,6 +125,7 @@ export function PollingSettings({
         onOpenChange={setSetupOpen}
         onConfirm={handleEdit}
         defaultInterval={interval}
+        defaultStartAt={issue.poll_start_at}
       />
     </div>
   );

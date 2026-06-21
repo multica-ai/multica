@@ -44,14 +44,19 @@ export function StatusPicker({
         setOpen(false);
         setPollingDialogOpen(true);
       }
+    } else if (status === "polling") {
+      // Exiting polling mode — clear poll_interval_minutes so the backend
+      // allows the status change (otherwise it absorbs it back to "polling").
+      onUpdate({ status: s, poll_interval_minutes: 0 });
+      setOpen(false);
     } else {
       onUpdate({ status: s });
       setOpen(false);
     }
   };
 
-  const handlePollingConfirm = (intervalMinutes: number) => {
-    onUpdate({ status: "polling", poll_interval_minutes: intervalMinutes });
+  const handlePollingConfirm = (intervalMinutes: number, pollStartAt?: string | null) => {
+    onUpdate({ status: "polling", poll_interval_minutes: intervalMinutes, poll_start_at: pollStartAt });
   };
 
   return (

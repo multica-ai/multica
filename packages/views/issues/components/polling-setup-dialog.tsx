@@ -16,6 +16,11 @@ import {
 } from "@multica/ui/components/ui/select";
 import { useT } from "../../i18n";
 
+function toLocalDateTimeValue(date: Date) {
+  const offsetMs = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
+}
+
 const PRESET_INTERVALS = [
   { value: "5", label: "5 min" },
   { value: "15", label: "15 min" },
@@ -29,8 +34,9 @@ const PRESET_INTERVALS = [
 interface PollingSetupDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (pollIntervalMinutes: number) => void;
+  onConfirm: (pollIntervalMinutes: number, pollStartAt?: string | null) => void;
   defaultInterval?: number | null;
+  defaultStartAt?: string | null;
 }
 
 export function PollingSetupDialog({
@@ -38,6 +44,7 @@ export function PollingSetupDialog({
   onOpenChange,
   onConfirm,
   defaultInterval,
+  defaultStartAt,
 }: PollingSetupDialogProps) {
   const { t } = useT("issues");
 
@@ -53,6 +60,12 @@ export function PollingSetupDialog({
       ? String(defaultInterval)
       : ""
   );
+  const [startAt, setStartAt] = useState<string>(() => {
+    if (defaultStartAt) {
+      return toLocalDateTimeValue(new Date(defaultStartAt));
+    }
+    return "";
+  });
 
   const getIntervalMinutes = (): number | null => {
     if (preset === "custom") {
@@ -65,7 +78,8 @@ export function PollingSetupDialog({
   const handleConfirm = () => {
     const minutes = getIntervalMinutes();
     if (minutes && minutes > 0) {
-      onConfirm(minutes);
+      const startAtISO = startAt ? new Date(startAt).toISOString() : null;
+      onConfirm(minutes, startAtISO);
       onOpenChange(false);
     }
   };
@@ -122,6 +136,22 @@ export function PollingSetupDialog({
                 />
               </div>
             )}
+
+            <div className="grid gap-1.5">
+              <label className="text-sm font-medium">
+                {t(($) => $.polling_setup.start_at_label)}
+              </label>
+              <input
+                type="datetime-local"
+                min={toLocalDateTimeValue(new Date())}
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.polling_setup.start_at_hint)}
+              </p>
+            </div>
           </div>
         </div>
 

@@ -370,7 +370,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "5. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
 		fmt.Fprintf(&b, "6. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		fmt.Fprintf(&b, "7. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n", ctx.IssueID)
+		b.WriteString("8. If the issue is a polling issue (status was \"polling\" when you started), skip steps 3, 6, and 7 — the backend automatically preserves the polling status and advances the schedule after each run. Do NOT change the status of a polling issue.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {

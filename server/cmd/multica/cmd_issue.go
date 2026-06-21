@@ -124,8 +124,11 @@ var issueAssignCmd = &cobra.Command{
 var issueStatusCmd = &cobra.Command{
 	Use:   "status <id> <status>",
 	Short: "Change issue status",
-	Args:  exactArgs(2),
-	RunE:  runIssueStatus,
+	Long: "Change issue status. For polling issues, the backend protects the status — " +
+		"if the issue has poll_interval_minutes set, status changes are absorbed back to \"polling\" " +
+		"and the schedule advances. To intentionally stop polling, pass --poll-interval-minutes 0.",
+	Args: cobra.ExactArgs(2),
+	RunE: runIssueStatus,
 }
 
 // Comment subcommands.
@@ -931,6 +934,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		if v, _ := cmd.Flags().GetString("poll-start-at"); v != "" {
 			body["poll_start_at"] = v
 		}
+	} else if v, _ := cmd.Flags().GetInt("poll-interval-minutes"); v == 0 && cmd.Flags().Changed("poll-interval-minutes") {
+		// User explicitly passed --poll-interval-minutes 0 to stop polling.
+		body["poll_interval_minutes"] = 0
 	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {

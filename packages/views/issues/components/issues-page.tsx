@@ -150,17 +150,27 @@ export function IssuesPage() {
           return;
         }
       }
+      // When dragging a polling issue out of the polling column,
+      // clear poll_interval_minutes so the backend allows the status change.
+      if (updates.status !== "polling") {
+        const issue = headerIssues.find((i) => i.id === issueId);
+        if (issue && issue.status === "polling") {
+          doUpdateIssue(issueId, { ...updates, poll_interval_minutes: 0 });
+          return;
+        }
+      }
       doUpdateIssue(issueId, updates);
     },
     [doUpdateIssue, headerIssues],
   );
 
   const handlePollingDialogConfirm = useCallback(
-    (intervalMinutes: number) => {
+    (intervalMinutes: number, pollStartAt?: string | null) => {
       if (!pendingPollingIssue) return;
       doUpdateIssue(pendingPollingIssue.id, {
         status: "polling",
         poll_interval_minutes: intervalMinutes,
+        poll_start_at: pollStartAt,
       });
       setPendingPollingIssue(null);
     },

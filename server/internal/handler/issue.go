@@ -2101,6 +2101,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
+
+	// pollingProtected tracks when a polling issue's status change is being
+	// absorbed back to "polling" because the agent automatically changed it
+	// during execution (e.g. → in_progress → done).  To intentionally stop
+	// polling, the caller must clear poll_interval_minutes (set to 0).
+	var pollingProtected bool
+	var pollingRequestedStatus string
+	if req.Status != nil && *req.Status != "polling" && prevIssue.Status == "polling" && prevIssue.PollIntervalMinutes.Valid {
+		clearingInterval := req.PollIntervalMinutes != nil && *req.PollIntervalMinutes <= 0
+		if !clearingInterval {
+			pollingRequestedStatus = *req.Status
+			params.Status = pgtype.Text{String: "polling", Valid: true}
+			pollingProtected = true
+		}
+	}
 	if req.Priority != nil {
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
@@ -2215,7 +2230,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		newStatus = *req.Status
 	}
 
-	if newStatus == "polling" {
+	if newStatus == "polling" && !pollingProtected {
 		// Entering polling mode: poll_interval_minutes is required.
 		interval := prevIssue.PollIntervalMinutes
 		if req.PollIntervalMinutes != nil {
@@ -2250,6 +2265,29 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		now := time.Now().UTC()
 		nextRun := service.InitialPollingNextRun(pollStartAt, interval.Int32, now)
 		params.PollNextRun = pgtype.Timestamptz{Time: nextRun, Valid: true}
+	} else if pollingProtected {
+		// Polling issue whose status change was absorbed back to "polling".
+		// Preserve existing poll config; for task completion, advance the schedule.
+		params.PollIntervalMinutes = prevIssue.PollIntervalMinutes
+		params.PollStartAt = prevIssue.PollStartAt
+		if pollingRequestedStatus == "done" || pollingRequestedStatus == "todo" || pollingRequestedStatus == "in_review" {
+			now := time.Now().UTC()
+			var lastRun time.Time
+			if prevIssue.PollLastRun.Valid {
+				lastRun = prevIssue.PollLastRun.Time
+			} else {
+				lastRun = now
+			}
+			nextRun := service.AdvancePollingNextRun(lastRun, prevIssue.PollIntervalMinutes.Int32, now)
+			params.PollNextRun = pgtype.Timestamptz{Time: nextRun, Valid: true}
+			params.PollLastRun = pgtype.Timestamptz{Time: now, Valid: true}
+			params.PollRunCount = pgtype.Int4{Int32: prevIssue.PollRunCount + 1, Valid: true}
+		} else {
+			// Agent set in_progress or similar transient — keep existing schedule.
+			params.PollNextRun = prevIssue.PollNextRun
+			params.PollLastRun = prevIssue.PollLastRun
+			params.PollRunCount = pgtype.Int4{Int32: prevIssue.PollRunCount, Valid: true}
+		}
 	} else if req.Status != nil && prevIssue.Status == "polling" {
 		// Exiting polling mode: preserve poll_interval_minutes for easy re-enable,
 		// clear poll_next_run so the scheduler stops picking this issue up.
@@ -2276,9 +2314,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Always preserve last_run and run_count (not user-settable).
-	params.PollLastRun = prevIssue.PollLastRun
-	params.PollRunCount = pgtype.Int4{Int32: prevIssue.PollRunCount, Valid: true}
+	// Preserve last_run and run_count unless already set by the
+	// pollingProtected completion path above.
+	if !params.PollLastRun.Valid {
+		params.PollLastRun = prevIssue.PollLastRun
+	}
+	if params.PollRunCount.Int32 == 0 {
+		params.PollRunCount = pgtype.Int4{Int32: prevIssue.PollRunCount, Valid: true}
+	}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
