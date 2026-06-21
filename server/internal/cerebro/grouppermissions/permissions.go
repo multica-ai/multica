@@ -34,13 +34,18 @@ import (
 const (
 	CapabilityCreateRuntime = "create_runtime"
 	CapabilityCreateAgent   = "create_agent"
+	// CapabilityCreateSharedFilters gates who may create shared/workspace saved
+	// filters (FIR-1659 Fase 4). Read by the savedfilters handler via
+	// HasCerebroCapability; granted per group on the group detail page.
+	CapabilityCreateSharedFilters = "create_shared_filters"
 )
 
 // knownCapabilities mirrors the DB-side CHECK; validating in Go gives a clean
 // 400 instead of a constraint-violation 500.
 var knownCapabilities = map[string]struct{}{
-	CapabilityCreateRuntime: {},
-	CapabilityCreateAgent:   {},
+	CapabilityCreateRuntime:       {},
+	CapabilityCreateAgent:         {},
+	CapabilityCreateSharedFilters: {},
 }
 
 // IsKnownCapability returns true for the small fixed set of capability
