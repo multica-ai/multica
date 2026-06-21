@@ -120,7 +120,8 @@ import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
-import { SessionHeader, SessionHandoff, StartFresh, groupTimelineBySession, useSessions } from "@multica/cerebro-sessions";
+// CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
+import { SessionHeader, SessionHandoff, StartFresh, SessionActivity, SessionContextHairline, groupTimelineBySession, partitionSessionGroups, countActivityEntries, estimateSessionContextFraction, useSessions } from "@multica/cerebro-sessions";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -1197,6 +1198,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
   // CEREBRO-PATCH(comment-sessions-flag): FIR-1741 gate sessions UI; off renders the flat timeline.
   const sessionsEnabled = useFeatureFlag("cerebro_comment_chapters");
+  // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 gates; both no-op unless sessions on.
+  const sessionActivityFoldEnabled = useFeatureFlag("cerebro_session_activity_fold");
+  const sessionContextHairlineEnabled = useFeatureFlag("cerebro_session_context_hairline");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2617,8 +2621,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
                 // Sessions on: group the timeline by session start markers and
                 // render each session collapsed except the open one.
-                return groupTimelineBySession(id, sessionsQuery.data, timelineView.groups).map((sg) => {
+                const sessionGroups = groupTimelineBySession(id, sessionsQuery.data, timelineView.groups);
+                // CEREBRO-PATCH(session-activity-context): FIR-1769 P3 — active = latest session.
+                const activeSessionId = sessionGroups[sessionGroups.length - 1]?.session.id;
+                return sessionGroups.map((sg) => {
                   const open = sg.session.id === openSessionId;
+                  // CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — split comments from activity.
+                  const { commentGroups, activityGroups } = partitionSessionGroups(sg.groups);
+                  const bodyGroups = sessionActivityFoldEnabled ? commentGroups : sg.groups;
                   return (
                     <Fragment key={sg.session.id}>
                       <SessionHeader
@@ -2626,12 +2636,22 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         open={open}
                         onToggle={() => setOpenSessionId(open ? "" : sg.session.id)}
                       />
+                      {/* CEREBRO-PATCH(session-activity-context): FIR-1769 P3 — context hairline on active session. */}
+                      {sessionContextHairlineEnabled && sg.session.id === activeSessionId ? (
+                        <SessionContextHairline fraction={estimateSessionContextFraction(sg.groups)} />
+                      ) : null}
                       {open ? (
                         <SessionHandoff session={sg.session} />
                       ) : sg.session.handoff?.summary ? (
                         <div className="px-4 text-xs text-muted-foreground">{sg.session.handoff.summary}</div>
                       ) : null}
-                      {open ? sg.groups.map(renderGroup) : null}
+                      {open ? bodyGroups.map(renderGroup) : null}
+                      {/* CEREBRO-PATCH(session-activity-context): FIR-1769 P2 — folded activity section. */}
+                      {open && sessionActivityFoldEnabled ? (
+                        <SessionActivity count={countActivityEntries(activityGroups)}>
+                          {activityGroups.map(renderGroup)}
+                        </SessionActivity>
+                      ) : null}
                     </Fragment>
                   );
                 });

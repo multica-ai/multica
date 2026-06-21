@@ -131,6 +131,10 @@ export type CerebroFlagKey =
   | "cerebro_recurring_issues"
   // FIR-1704: comment chapters/sessions UI. OFF — phase 1 model was unsound (comments never linked to a session); rebuilding as threads=sessions (FIR-1741).
   | "cerebro_comment_chapters"
+  // FIR-1769 (P2): fold a session's activity events into one collapsed "Activity" section so comments stay prominent. Requires cerebro_comment_chapters.
+  | "cerebro_session_activity_fold"
+  // FIR-1769 (P3): whisper-subtle context-window hairline on the active session + an almost-full nudge to Start fresh. Requires cerebro_comment_chapters.
+  | "cerebro_session_context_hairline"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
   | "cerebro_issue_date_times"
   // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
@@ -412,6 +416,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // a session -> empty sessions, dead buttons). Hidden while rebuilt as
   // threads=sessions (FIR-1741). Off renders the flat comment timeline.
   cerebro_comment_chapters: false,
+  // FIR-1769 (P2/P3): OFF by default — ship dark behind the chapters rebuild,
+  // turn on per-workspace once QA'd. Both no-op unless cerebro_comment_chapters
+  // is also on.
+  cerebro_session_activity_fold: false,
+  cerebro_session_context_hairline: false,
   // FIR-1597: OFF by default. Hides the time-of-day control next to the
   // start/due date pickers. The sweeper still treats a no-time date as before.
   cerebro_issue_date_times: false,
@@ -1128,6 +1137,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Wrap an issue's comment timeline in named work sessions (chapters) with a status chip, a Start fresh action, and a Handoff brief. OFF — the phase-1 model was unsound: comments were never linked to a session, so sessions rendered empty and the actions did nothing. Being rebuilt around threads=sessions (FIR-1741). Off renders the plain flat comment timeline. FIR-1704.",
+  },
+  {
+    key: "cerebro_session_activity_fold",
+    label: "Session activity fold",
+    group: "workspace",
+    description:
+      "Within each chapter/session, collapse all activity events (status changes, task started/failed/completed, linked PRs, attachments) into a single foldable \"Activity\" section so comments stay prominent. No effect unless Comment chapters / sessions is on. FIR-1769 (P2).",
+  },
+  {
+    key: "cerebro_session_context_hairline",
+    label: "Session context hairline",
+    group: "workspace",
+    description:
+      "A whisper-subtle context-window hairline on the active chapter that warms as the chapter grows, plus a single \"almost full → Start fresh\" nudge. The fill is an approximate estimate of the chapter's content size against a 200k window — not exact per-run usage. No effect unless Comment chapters / sessions is on. FIR-1769 (P3).",
   },
   {
     key: "cerebro_recurring_issues",
