@@ -1637,3 +1637,57 @@ func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
 		})
 	}
 }
+
+// CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — the "repository CLAUDE.md is repo-only" rule must reach every agent that edits repo files (issue-bound runs) and must NOT dilute chat/quick-create/autopilot runs.
+// FIR-1585 — keep workspace/agent/process content out of repository CLAUDE.md / AGENTS.md.
+func TestClaudeMdScopeRulePresentForIssueRunsOnly(t *testing.T) {
+	t.Parallel()
+	const heading = "## Repository CLAUDE.md / AGENTS.md — repo-only, no exceptions"
+
+	for _, tc := range []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"assignment-triggered", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}},
+		{"comment-triggered", TaskContextForEnv{
+			IssueID:          "22222222-3333-4444-5555-666666666666",
+			TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+		}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if !strings.Contains(out, heading) {
+				t.Fatalf("[%s] expected the CLAUDE.md-scope section in brief", tc.name)
+			}
+			for _, want := range []string{
+				"injected into the prompt of EVERY agent",
+				"Agent identity, persona, or role instructions",
+				"is a no-go",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("[%s] CLAUDE.md-scope section missing %q", tc.name, want)
+				}
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"chat", TaskContextForEnv{ChatSessionID: "chat-1"}},
+		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "make me an issue"}},
+		{"autopilot", TaskContextForEnv{AutopilotRunID: "ap-run-1"}},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if strings.Contains(out, heading) {
+				t.Errorf("[%s] CLAUDE.md-scope section must NOT appear for non-issue runs", tc.name)
+			}
+		})
+	}
+}

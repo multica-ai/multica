@@ -542,6 +542,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
 		b.WriteString(cerebroNoBusyWaitRule())
 		b.WriteString(cerebroWakeupMandatoryRule())
+		b.WriteString(cerebroClaudeMdScopeRule()) // CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — repo CLAUDE.md/AGENTS.md is repo-only; keep workspace/agent/process content out
 	}
 
 	b.WriteString("### Workflow\n\n")
