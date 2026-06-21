@@ -28,6 +28,10 @@ export {
   type TextareaDictationMicProps,
 } from "./views/textarea-dictation-mic";
 export {
+  TranscribingSkeleton,
+  type TranscribingSkeletonProps,
+} from "./views/transcribing-skeleton";
+export {
   playPCMStream,
   type PCMStreamPlayback,
   type PlayPCMStreamOptions,

@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, type RefObject } from "react";
+import { useCallback, useState, type RefObject } from "react";
 import { EditorDictationMic } from "./editor-dictation-mic";
+import { TranscribingSkeleton } from "./transcribing-skeleton";
 import { insertAtCaret } from "../insert-at-caret";
+import type { DictationStatus } from "../types";
 
 export interface TextareaDictationMicProps {
   /**
@@ -32,6 +34,14 @@ export function TextareaDictationMic({
   disabled,
   className,
 }: TextareaDictationMicProps) {
+  // Forslag B (FIR-1637): while the clip transcribes (~2-4s) show grey skeleton
+  // lines over the field so the user sees where the text will land. The mic
+  // owns the dictation hook, so we learn the state via onStatusChange.
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const onStatusChange = useCallback((status: DictationStatus) => {
+    setIsTranscribing(status === "transcribing");
+  }, []);
+
   const onTranscribed = useCallback(
     (text: string) => {
       const el = textareaRef.current;
@@ -45,10 +55,14 @@ export function TextareaDictationMic({
   );
 
   return (
-    <EditorDictationMic
-      disabled={disabled}
-      onTranscribed={onTranscribed}
-      className={className ?? "absolute bottom-1.5 right-1.5 z-10"}
-    />
+    <>
+      {isTranscribing && <TranscribingSkeleton />}
+      <EditorDictationMic
+        disabled={disabled}
+        onTranscribed={onTranscribed}
+        onStatusChange={onStatusChange}
+        className={className ?? "absolute bottom-1.5 right-1.5 z-10"}
+      />
+    </>
   );
 }

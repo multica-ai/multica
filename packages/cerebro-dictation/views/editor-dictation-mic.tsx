@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { MicButton } from "./mic-button";
 import { createHttpTranscriber } from "../http-transcriber";
+import type { DictationStatus } from "../types";
 
 export interface EditorDictationMicProps {
   /** Insert the finished transcription into the host editor at the caret. */
@@ -11,6 +12,12 @@ export interface EditorDictationMicProps {
   disabled?: boolean;
   /** Positioning hook — host editors place the mic in a corner. */
   className?: string;
+  /**
+   * Forwarded from MicButton: every dictation status change. Hosts use it to
+   * show a destination-side cue (the transcribing skeleton, Forslag B) while
+   * the clip is in flight. Memoize the callback.
+   */
+  onStatusChange?: (status: DictationStatus) => void;
 }
 
 /**
@@ -26,6 +33,7 @@ export function EditorDictationMic({
   onTranscribed,
   disabled,
   className,
+  onStatusChange,
 }: EditorDictationMicProps) {
   const workspaceId = useWorkspaceId();
   const transcribe = useMemo(
@@ -46,6 +54,7 @@ export function EditorDictationMic({
         disabled={disabled}
         transcribe={transcribe}
         onTranscribed={onTranscribed}
+        onStatusChange={onStatusChange}
       />
     </div>
   );

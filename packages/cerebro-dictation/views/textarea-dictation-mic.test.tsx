@@ -10,14 +10,23 @@ import { TextareaDictationMic } from "./textarea-dictation-mic";
 // mic-button.test.tsx and insert-at-caret.test.ts).
 const mocks = vi.hoisted(() => ({ transcript: "dikteret tekst" }));
 vi.mock("./editor-dictation-mic", () => ({
+  // Two buttons: "mic" fires a finished transcript; "transcribe" pushes the
+  // transcribing status so the Forslag B skeleton test can toggle it.
   EditorDictationMic: ({
     onTranscribed,
+    onStatusChange,
   }: {
     onTranscribed: (text: string) => void;
+    onStatusChange?: (status: string) => void;
   }) => (
-    <button type="button" onClick={() => onTranscribed(mocks.transcript)}>
-      mic
-    </button>
+    <>
+      <button type="button" onClick={() => onTranscribed(mocks.transcript)}>
+        mic
+      </button>
+      <button type="button" onClick={() => onStatusChange?.("transcribing")}>
+        transcribe
+      </button>
+    </>
   ),
 }));
 
@@ -52,5 +61,20 @@ describe("TextareaDictationMic", () => {
     fireEvent.click(screen.getByText("mic"));
 
     expect(ta.value).toBe("Adikteret tekstB");
+  });
+
+  it("shows the transcribing skeleton (Forslag B) only while transcribing", () => {
+    // FIR-1637: grey skeleton lines appear at the destination while the clip is
+    // in flight, so the user sees where the text will land.
+    render(<Harness />);
+    expect(
+      screen.queryByTestId("dictation-transcribing-skeleton"),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByText("transcribe"));
+
+    expect(
+      screen.getByTestId("dictation-transcribing-skeleton"),
+    ).toBeInTheDocument();
   });
 });

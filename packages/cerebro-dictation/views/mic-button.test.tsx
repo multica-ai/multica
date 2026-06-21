@@ -147,6 +147,48 @@ describe("MicButton", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
+  it("shows a processing indicator while transcribing", () => {
+    // FIR-1637: the gap between releasing the mic and the transcript landing
+    // must be visible — a spinning button plus a "Transcribing…" label — so it
+    // never looks like nothing is happening.
+    mocks.useDictation.mockReturnValue({
+      status: "transcribing",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(screen.getByText("Transcribing…")).toBeInTheDocument();
+    // The button is inert while the clip is in flight.
+    expect(screen.getByRole("button")).toBeDisabled();
+  });
+
+  it("reports status changes to onStatusChange so hosts can show Forslag B", () => {
+    // FIR-1637: a wrapper renders the destination-side skeleton off this
+    // callback, so the mic must surface the transcribing state to the host.
+    mocks.useDictation.mockReturnValue({
+      status: "transcribing",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+    const onStatusChange = vi.fn();
+
+    render(<MicButton onTranscribed={vi.fn()} onStatusChange={onStatusChange} />);
+
+    expect(onStatusChange).toHaveBeenCalledWith("transcribing");
+  });
+
   it("disables the button when MediaRecorder is unavailable", () => {
     mocks.useDictation.mockReturnValue({
       status: "idle",

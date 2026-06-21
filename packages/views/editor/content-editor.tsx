@@ -39,7 +39,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react"; // CEREBRO-PATCH(content-editor-on-editor-ready): expose Editor type for onEditorReady (TECH-3637).
-import { EditorDictationMic } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — one-shot dictation mic in every editor.
+import { EditorDictationMic, TranscribingSkeleton } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — one-shot dictation mic + transcribing skeleton in every editor.
 import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
@@ -220,6 +220,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // instance. Parent re-keying (e.g. `key={draftKey}`) remounts the editor
     // and re-applies the request for session/agent/channel switches.
     const [autoFocusAtMount] = useState(() => autoFocus);
+
+    // CEREBRO-PATCH(content-editor-dictation-skeleton): FIR-1637 — Forslag B:
+    // skeleton lines over the editor while a dictation clip transcribes.
+    const [dictationTranscribing, setDictationTranscribing] = useState(false);
 
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
@@ -452,10 +456,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         onMouseDown={handleContainerMouseDown}
       >
         <EditorContent className="flex-1 min-h-full" editor={editor} />
+        {/* CEREBRO-PATCH(content-editor-dictation-skeleton): FIR-1637 — Forslag B: skeleton lines while transcribing. */}
+        {!hideDictationMic && dictationTranscribing && <TranscribingSkeleton />}
         {/* CEREBRO-PATCH(content-editor-dictation-mic): FIR-1637 — flag-gated one-shot dictation mic, in every editor except where the host mounts its own. */}
         {!hideDictationMic && (
           <EditorDictationMic
             onTranscribed={(text) => editor.chain().focus().insertContent(text).run()}
+            onStatusChange={(s) => setDictationTranscribing(s === "transcribing")} // CEREBRO-PATCH(content-editor-dictation-skeleton): FIR-1637.
             className="absolute bottom-1 right-1 z-10"
           />
         )}

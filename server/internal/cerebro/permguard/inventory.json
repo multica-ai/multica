@@ -1549,6 +1549,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/workspaces/{id}/issue-start-settings",
+      "gate": "workspace_admin"
+    },
+    {
       "id": "PUT /api/workspaces/{id}/members/{memberId}/infisical-folders",
       "gate": "workspace_admin"
     },

@@ -14,7 +14,8 @@ import {
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { Button } from "@multica/ui/components/ui/button";
-import { EditorDictationMic } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): one-shot dictation mic in the composer action row (FIR-1637).
+import { EditorDictationMic, TranscribingSkeleton } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation): one-shot dictation mic + transcribing skeleton in the composer (FIR-1637).
+import type { DictationStatus } from "@multica/cerebro-dictation"; // CEREBRO-PATCH(chat-input-dictation-skeleton): FIR-1637 — status type for Forslag B.
 // CEREBRO-PATCH(composer-height-cap): TECH-3536 — unify chat expand with the comment/channel/DM composer (shared pill + height behavior).
 import { ComposerExpandToggle, useComposerHeight } from "@multica/cerebro-ui";
 import { Square } from "lucide-react";
@@ -144,6 +145,13 @@ export function ChatInput({
     editorRef.current?.insertText(text);
   }, []);
 
+  // CEREBRO-PATCH(chat-input-dictation-skeleton): FIR-1637 — Forslag B: track
+  // transcribing so the composer shows skeleton lines where text will land.
+  const [dictationTranscribing, setDictationTranscribing] = useState(false);
+  const handleDictationStatus = useCallback((s: DictationStatus) => {
+    setDictationTranscribing(s === "transcribing");
+  }, []);
+
   // CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — match the
   // comment/reply/DM/channel composer: reserve a top band so the floating
   // expand pill sits ABOVE the first lines of text instead of overlapping
@@ -198,6 +206,8 @@ export function ChatInput({
         aria-disabled={noAgent || undefined}
       >
         {topSlot}
+        {/* CEREBRO-PATCH(chat-input-dictation-skeleton): FIR-1637 — Forslag B: skeleton lines while transcribing, over the composer text area. */}
+        {dictationTranscribing && <TranscribingSkeleton />}
         {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — same translucent expand pill as the comment/channel/DM composer, floating above the field. */}
         {composerHeight.showExpandToggle && (
           <ComposerExpandToggle
@@ -268,6 +278,7 @@ export function ChatInput({
           <EditorDictationMic
             disabled={!!disabled || !!noAgent}
             onTranscribed={handleDictationFinal}
+            onStatusChange={handleDictationStatus} // CEREBRO-PATCH(chat-input-dictation-skeleton): FIR-1637.
           />
           {rightAdornment}
           {isRunning && onStop && (

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
-import { Mic, Square } from "lucide-react";
+import { useCallback, useEffect, useMemo } from "react";
+import { Loader2, Mic, Square } from "lucide-react";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -13,7 +13,12 @@ import {
 import { useDictation } from "../use-dictation";
 import { createWebSocketStreamingTranscriber } from "../streaming-transcriber";
 import { Waveform } from "./waveform";
-import type { DictationError, StreamingTranscriber, Transcriber } from "../types";
+import type {
+  DictationError,
+  DictationStatus,
+  StreamingTranscriber,
+  Transcriber,
+} from "../types";
 
 const backendNotDeployedTranscriber: Transcriber = async () => {
   throw new Error("Dictation backend is not deployed yet.");
@@ -27,6 +32,13 @@ export interface MicButtonProps {
   onPartialTranscribed?: (text: string) => void;
   onTranscribed: (text: string) => void;
   onError?: (error: DictationError) => void;
+  /**
+   * Notifies the host of every dictation status change. Lets a wrapper render a
+   * destination-side cue (the transcribing skeleton, Forslag B) without owning
+   * the dictation hook itself. Memoize the callback — it is read in an effect
+   * dependency list.
+   */
+  onStatusChange?: (status: DictationStatus) => void;
 }
 
 export function MicButton({
@@ -37,6 +49,7 @@ export function MicButton({
   onPartialTranscribed,
   onTranscribed,
   onError,
+  onStatusChange,
 }: MicButtonProps) {
   // Dictation (speech → text) gates on its own flag only. The read-aloud flag
   // (cerebro_voice_output_enabled) is a separate, unrelated TTS feature — it
@@ -54,7 +67,19 @@ export function MicButton({
     onError,
   });
 
+  // Bubble every status change to the host so a wrapper can render a
+  // destination-side cue (the transcribing skeleton, Forslag B) — MicButton
+  // stays the single owner of the dictation hook (FIR-1637).
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [status, onStatusChange]);
+
   const isRecording = status === "recording";
+  // The gap the user feels: from releasing the mic until the text lands
+  // (the model transcribes for ~2-4s). Without a visible signal the button
+  // just goes inert and it looks broken — so we show a spinner + label while
+  // the clip is in flight (FIR-1637).
+  const isTranscribing = status === "transcribing";
   const isBusy =
     status === "requesting-permission" || status === "transcribing";
   const isDisabled = disabled || !isSupported || isBusy;
@@ -82,9 +107,11 @@ export function MicButton({
     ? "Dictation is not supported in this browser"
     : error
       ? error.message
-      : isRecording
-        ? "Stop dictation"
-        : "Start dictation";
+      : isTranscribing
+        ? "Transcribing…"
+        : isRecording
+          ? "Stop dictation"
+          : "Start dictation";
 
   return (
     <div className="flex items-center gap-1.5">
@@ -93,6 +120,18 @@ export function MicButton({
           gave. */}
       {isRecording && mediaStream && (
         <Waveform stream={mediaStream} className="w-16 text-brand sm:w-20" />
+      )}
+      {/* "Text is on its way" — the visible processing state between releasing
+          the mic and the transcript arriving (FIR-1637). aria-live announces it
+          to screen readers. */}
+      {isTranscribing && (
+        <span
+          className="flex items-center gap-1 text-xs text-muted-foreground"
+          aria-live="polite"
+        >
+          <Loader2 className="size-3 animate-spin" aria-hidden="true" />
+          Transcribing…
+        </span>
       )}
       <Tooltip>
         <TooltipTrigger
@@ -109,7 +148,13 @@ export function MicButton({
               aria-pressed={isRecording}
               onClick={handleClick}
             >
-              {isRecording ? <Square className="fill-current" /> : <Mic />}
+              {isRecording ? (
+                <Square className="fill-current" />
+              ) : isTranscribing ? (
+                <Loader2 className="animate-spin" />
+              ) : (
+                <Mic />
+              )}
             </Button>
           }
         />
