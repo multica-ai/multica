@@ -1,6 +1,9 @@
 package handler
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // FIR-1587 — the inbox body must always say WHO did it, WHAT changed, and WHY,
 // in plain language with real names (no short UUIDs).
@@ -32,5 +35,22 @@ func TestSkillForkedAndAgentAssignedBodies_NameTheActor(t *testing.T) {
 	if got, want := skillAgentAssignedBody("Jesper Hvejsel", "deploy", "Sara - CTO"),
 		"Jesper Hvejsel assigned deploy to the agent Sara - CTO"; got != want {
 		t.Fatalf("assign body mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
+// FIR-1587 — when an agent proposes, the inbox body must read
+// "Agent (on behalf of Owner)" so the owner sees both who acted and for whom.
+// A member proposer is already the principal and gets no suffix.
+func TestSkillProposerDisplay_AgentOnBehalfOfOwner(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Mia", []byte(`{}`)) // owner_id = testUserID
+
+	if got, want := testHandler.skillProposerDisplay(context.Background(), parseUUID(agentID)),
+		"Mia (on behalf of "+handlerTestName+")"; got != want {
+		t.Fatalf("agent proposer display mismatch:\n got: %q\nwant: %q", got, want)
+	}
+
+	if got, want := testHandler.skillProposerDisplay(context.Background(), parseUUID(testUserID)),
+		handlerTestName; got != want {
+		t.Fatalf("member proposer display mismatch:\n got: %q\nwant: %q", got, want)
 	}
 }

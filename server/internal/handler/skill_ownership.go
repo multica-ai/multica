@@ -372,6 +372,9 @@ func (h *Handler) CreateSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
+	// CEREBRO-PATCH(skill-change-request-actor): FIR-1587 — attribute the proposal to the acting agent (resolveActor), so an owner is notified of their own agents' proposals instead of being the excluded proposer.
+	_, proposerID := h.resolveActor(r, userID, uuidToString(skill.WorkspaceID))
+
 	cr, err := h.Queries.CreateSkillChangeRequest(r.Context(), db.CreateSkillChangeRequestParams{
 		SkillID:         skill.ID,
 		Title:           req.Title,
@@ -380,7 +383,7 @@ func (h *Handler) CreateSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		ProposedVersion: req.ProposedVersion,
 		ProposedContent: req.ProposedContent,
 		ProposedFiles:   encodeVersionFiles(req.ProposedFiles),
-		ProposedBy:      parseUUID(userID),
+		ProposedBy:      parseUUID(proposerID),
 		WorkSessionID:   sessionUUID,
 	})
 	if err != nil {
@@ -761,8 +764,8 @@ func (h *Handler) notifySkillChangeRequestCreated(ctx context.Context, skill db.
 		return
 	}
 	details := h.buildSkillChangeRequestDetails(ctx, skill, cr)
-	// CEREBRO-PATCH(skill-notify-bodies): FIR-1587 — who/what/why with the proposer's name, reason, and session link.
-	body := skillChangeRequestBody(h.skillActorName(ctx, cr.ProposedBy), skill.Name,
+	// CEREBRO-PATCH(skill-notify-bodies): FIR-1587 — who/what/why; agent proposers render as "Agent (on behalf of Owner)".
+	body := skillChangeRequestBody(h.skillProposerDisplay(ctx, cr.ProposedBy), skill.Name,
 		cr.BaseVersion, cr.ProposedVersion, cr.Description, cr.WorkSessionID.Valid)
 	title := fmt.Sprintf("Change request on %s", skill.Name)
 	for _, rid := range recipients {

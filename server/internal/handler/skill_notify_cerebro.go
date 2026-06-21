@@ -30,6 +30,27 @@ func (h *Handler) skillActorName(ctx context.Context, id pgtype.UUID) string {
 	return "Someone"
 }
 
+// skillProposerDisplay renders the proposer for a change-request inbox body.
+// When an agent proposes, it credits the agent acting on behalf of its human
+// owner — "Mia (on behalf of Jesper Hvejsel)" — so the owner sees both who
+// acted and for whom. Members render as their plain display name.
+func (h *Handler) skillProposerDisplay(ctx context.Context, id pgtype.UUID) string {
+	name := h.skillActorName(ctx, id)
+	if !id.Valid || h.Queries == nil {
+		return name
+	}
+	// Only agents get the "on behalf of" suffix; a member is already the principal.
+	agent, err := h.Queries.GetAgent(ctx, id)
+	if err != nil || strings.TrimSpace(agent.Name) == "" {
+		return name
+	}
+	owner := h.skillActorName(ctx, agent.OwnerID)
+	if !agent.OwnerID.Valid || owner == "Someone" {
+		return agent.Name
+	}
+	return fmt.Sprintf("%s (on behalf of %s)", agent.Name, owner)
+}
+
 // skillChangeRequestBody builds the who / what / why line shown in the inbox.
 // The "why" is the proposer's reason (the change-request description). When the
 // reason is missing we say so explicitly — the proposer is expected to explain
