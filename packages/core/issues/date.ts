@@ -95,3 +95,89 @@ export function isPastDateOnly(value: string | null | undefined): boolean {
   const today = dateOnlyToUTCDate(todayDateOnly());
   return today != null && d.getTime() < today.getTime();
 }
+
+// ---------------------------------------------------------------------------
+// Date-TIME helpers. Unlike the date-only helpers above, a value carrying a
+// time-of-day is a real INSTANT and is shown in the viewer's local timezone
+// (the same instant renders as different wall-clock times in different zones —
+// correct for a timed deadline, and does not reintroduce #3618, which was
+// specifically about all-day days shifting).
+// ---------------------------------------------------------------------------
+
+const DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+};
+
+/**
+ * True when the value carries a time-of-day (an RFC3339 instant such as
+ * "2026-02-01T14:30:00Z"), as opposed to a bare "YYYY-MM-DD" calendar day.
+ */
+export function hasTime(value: string | null | undefined): boolean {
+  return typeof value === "string" && /T\d{2}:\d{2}/.test(value);
+}
+
+/**
+ * Format an RFC3339 instant for display in the viewer's local timezone, e.g.
+ * "Feb 1, 14:30". `timeZone` is a test-only pin for determinism; production
+ * omits it so the host timezone is used. Returns "" for empty/unparseable.
+ */
+export function formatDateTime(
+  value: string | null | undefined,
+  options: Intl.DateTimeFormatOptions = DATE_TIME_OPTIONS,
+  locale?: string,
+  timeZone?: string,
+): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(locale, timeZone ? { ...options, timeZone } : options);
+}
+
+/**
+ * Render an issue start/due value: with time-of-day when it is a timed instant
+ * (local TZ), or as a bare calendar day when it is date-only (UTC-safe, never
+ * shifts). `timeZone` is for tests; production omits it.
+ */
+export function formatScheduleDate(
+  value: string | null | undefined,
+  locale?: string,
+  timeZone?: string,
+): string {
+  return hasTime(value)
+    ? formatDateTime(value, DATE_TIME_OPTIONS, locale, timeZone)
+    : formatDateOnly(value, { month: "short", day: "numeric" }, locale);
+}
+
+/** Default time-of-day applied when a picker gains a day but no time yet. */
+export const DEFAULT_DUE_TIME = { h: 23, m: 59 } as const;
+export const DEFAULT_START_TIME = { h: 9, m: 0 } as const;
+
+/**
+ * Parse a stored schedule value into a local Date for seeding a picker (its
+ * Calendar `selected` day and time-of-day field). A timed instant is parsed
+ * directly; a legacy date-only value goes through dateOnlyToLocalDate so its
+ * day does not shift across the UTC boundary. Returns undefined when empty or
+ * unparseable.
+ */
+export function isoToLocalDate(value: string | null | undefined): Date | undefined {
+  if (!value) return undefined;
+  if (hasTime(value)) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }
+  return dateOnlyToLocalDate(value);
+}
+
+/**
+ * Combine a local wall-clock Date (the picker's chosen day + time) into an
+ * RFC3339 UTC instant. This is the timezone-safe write path: the user's local
+ * selection becomes an unambiguous instant, so it renders back as the same
+ * wall-clock time for that user and the correct local time for everyone else.
+ */
+export function localDateTimeToIso(date: Date): string {
+  return date.toISOString();
+}

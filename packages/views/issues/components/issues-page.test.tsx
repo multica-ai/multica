@@ -625,4 +625,31 @@ describe("IssuesPage (shared)", () => {
     expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
     expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
   });
+
+  it("renders a date+time chip in list view when due_date carries a time", async () => {
+    mockViewState.viewMode = "list";
+    const timedIssue = {
+      ...mockIssues[0],
+      id: "issue-timed",
+      number: 77,
+      identifier: "TES-77",
+      title: "Timed task",
+      status: "todo",
+      due_date: "2026-02-01T14:30:00Z",
+    };
+    mockListIssues.mockImplementation((params: any) =>
+      Promise.resolve({
+        issues: params?.status === "todo" ? [timedIssue] : [],
+        total: params?.status === "todo" ? 1 : 0,
+      }),
+    );
+
+    renderWithQuery(<IssuesPage />);
+
+    await screen.findByText("Timed task");
+    // A time-of-day chip renders ("Mon D, HH:MM"). The exact wall-clock depends
+    // on the viewer's timezone, so match the shape, not a fixed time; the exact
+    // format + localization is asserted in core date.test.ts.
+    expect(screen.getByText(/^[A-Z][a-z]{2} \d{1,2}, \d{2}:\d{2}$/)).toBeInTheDocument();
+  });
 });

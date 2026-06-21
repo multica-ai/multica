@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Clock } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import {
-  toDateOnly,
-  dateOnlyToLocalDate,
-  formatDateOnly,
+  isoToLocalDate,
+  localDateTimeToIso,
+  formatScheduleDate,
+  DEFAULT_START_TIME,
 } from "@multica/core/issues/date";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
@@ -16,6 +17,14 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../../i18n";
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+function toTimeValue(d: Date): string {
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+const DEFAULT_TIME_VALUE = `${pad2(DEFAULT_START_TIME.h)}:${pad2(DEFAULT_START_TIME.m)}`;
 
 export function StartDatePicker({
   startDate,
@@ -42,7 +51,23 @@ export function StartDatePicker({
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
-  const date = dateOnlyToLocalDate(startDate);
+  const date = isoToLocalDate(startDate);
+  // Time-of-day, seeded from the stored value or the field default. The popover
+  // stays open after picking a day so the user can adjust the time; clicking
+  // outside closes it. Each change emits an instant via localDateTimeToIso.
+  const [time, setTime] = useState<string>(date ? toTimeValue(date) : DEFAULT_TIME_VALUE);
+
+  const emit = (day: Date, timeStr: string) => {
+    const [h, m] = timeStr.split(":").map(Number);
+    const combined = new Date(
+      day.getFullYear(),
+      day.getMonth(),
+      day.getDate(),
+      Number.isFinite(h) ? h : 0,
+      Number.isFinite(m) ? m : 0,
+    );
+    onUpdate({ start_date: localDateTimeToIso(combined) });
+  };
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -55,7 +80,7 @@ export function StartDatePicker({
             <CalendarClock className="h-3.5 w-3.5 text-muted-foreground" />
             {date ? (
               <span>
-                {formatDateOnly(startDate, { month: "short", day: "numeric" }, "en-US")}
+                {formatScheduleDate(startDate, "en-US")}
               </span>
             ) : (
               <span className="text-muted-foreground">{t(($) => $.pickers.start_date.trigger_label)}</span>
@@ -68,12 +93,21 @@ export function StartDatePicker({
           mode="single"
           selected={date}
           onSelect={(d: Date | undefined) => {
-            onUpdate({ start_date: d ? toDateOnly(d) : null });
-            setOpen(false);
+            if (d) emit(d, time);
           }}
         />
-        {date && (
-          <div className="border-t px-3 py-2">
+        <div className="flex items-center gap-2 border-t px-3 py-2">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => {
+              setTime(e.target.value);
+              if (date) emit(date, e.target.value);
+            }}
+            className="rounded border border-input bg-transparent px-1.5 py-0.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+          />
+          {date && (
             <Button
               variant="ghost"
               size="xs"
@@ -81,12 +115,12 @@ export function StartDatePicker({
                 onUpdate({ start_date: null });
                 setOpen(false);
               }}
-              className="text-muted-foreground hover:text-foreground"
+              className="ml-auto text-muted-foreground hover:text-foreground"
             >
               {t(($) => $.pickers.start_date.clear_action)}
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </PopoverContent>
     </Popover>
   );

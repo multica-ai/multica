@@ -74,6 +74,24 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
   });
+
+  it("accepts an RFC3339 date-time due_date", () => {
+    const payload = {
+      issues: [{ ...baseIssue, due_date: "2026-02-01T14:30:00Z", start_date: "2026-02-01T09:00:00Z" }],
+      total: 1,
+    };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.due_date).toBe("2026-02-01T14:30:00Z");
+    expect(parsed.issues[0]?.start_date).toBe("2026-02-01T09:00:00Z");
+  });
+
+  it("rejects a malformed (non-string) due_date", () => {
+    const payload = {
+      issues: [{ ...baseIssue, due_date: 1738423800 }],
+      total: 1,
+    };
+    expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
 });
 
 describe("TimelineEntriesSchema", () => {
