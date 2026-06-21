@@ -93,6 +93,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/workspaces/{id}/cerebro/dictation/warmup",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
       "gate": "via:DELETE /api/cerebro/sprint-recurring-tasks/{id}/"
     },
