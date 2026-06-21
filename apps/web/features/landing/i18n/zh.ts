@@ -293,6 +293,21 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.27",
+        date: "2026-06-19",
+        title: "桌面侧边栏更顺滑，固定项更清爽",
+        changes: [],
+        improvements: [
+          "桌面端侧边栏展开和收起更顺滑，同时保留常用导航控制，操作更连贯",
+          "侧边栏固定的 Issue 现在突出显示 Issue 标题，更容易快速识别",
+          "贡献者和智能体工作指引更简洁，发版前更容易审查和确认",
+        ],
+        fixes: [
+          "固定的 Issue 和项目现在只显示一个选中状态，不会同时点亮父级导航项",
+          "进入 Issue 或项目详情页、恢复已保存布局时，详情侧边栏不会再意外播放动画",
+        ],
+      },
+      {
         version: "0.3.25",
         date: "2026-06-18",
         title: "让技能、自动任务和聊天中的智能体工作更可靠",

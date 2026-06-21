@@ -293,6 +293,21 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.27",
+        date: "2026-06-19",
+        title: "Smoother Desktop Sidebars and Cleaner Pins",
+        changes: [],
+        improvements: [
+          "Desktop sidebars now open and close more smoothly while keeping navigation controls easy to reach",
+          "Pinned Issues in the sidebar are easier to scan because labels focus on the Issue title",
+          "Contributor guidance is shorter and clearer, making agent work easier to review before release",
+        ],
+        fixes: [
+          "Pinned Issues and projects now show a single active highlight instead of lighting up their parent navigation item too",
+          "Issue and project detail sidebars no longer animate unexpectedly when entering a page or restoring a saved layout",
+        ],
+      },
+      {
         version: "0.3.25",
         date: "2026-06-18",
         title: "More Reliable Agent Work Across Skills, Autopilots, and Chat",
