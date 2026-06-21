@@ -1056,6 +1056,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		} else {
 			h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, authorType, authorID)
 		}
+		// CEREBRO-PATCH(wake-no-silent-fail): FIR-1703 — record a System Activity line when the wake produces no runnable run.
+		h.observeCommentWakeOutcome(r.Context(), issue, comment, authorType, authorID)
 	}
 
 	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
@@ -1632,6 +1634,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				} else {
 					h.requestPrivateAssigneeRunOnComment(r.Context(), issue, comment, actorType, actorID)
 				}
+				// CEREBRO-PATCH(wake-no-silent-fail): FIR-1703 — same audit line for the edit-comment wake path.
+				h.observeCommentWakeOutcome(r.Context(), issue, comment, actorType, actorID)
 			}
 
 			if !privateAutopilotComment && h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, actorType, actorID) {

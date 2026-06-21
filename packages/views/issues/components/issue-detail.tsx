@@ -270,6 +270,17 @@ function formatActivity(
       return t(($) => $.activity.agent_run_requested, { agent: details.agent_name ?? "" });
     case "agent_run_approved":
       return t(($) => $.activity.agent_run_approved, { agent: details.agent_name ?? "" });
+    // CEREBRO-PATCH(wake-no-silent-fail): FIR-1703 — a member comment that should
+    // have woken the assignee agent did not start a run; show the cause so a wake
+    // can never fail silently.
+    case "comment_wake_failed":
+      if (details.reason === "runtime_offline")
+        return t(($) => $.activity.comment_wake_failed_runtime_offline);
+      if (details.reason === "no_runtime")
+        return t(($) => $.activity.comment_wake_failed_no_runtime);
+      if (details.reason === "archived")
+        return t(($) => $.activity.comment_wake_failed_archived);
+      return t(($) => $.activity.comment_wake_failed);
     default:
       return entry.action ?? "";
   }
