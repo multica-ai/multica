@@ -1634,6 +1634,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)
 			// CEREBRO-PATCH(daemon-context-duplication): score meta-skill duplication (FIR-2765)
 			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
+			// CEREBRO-PATCH(daemon-graphify-nudge): nudge agents to use the graphify code graph when the saving is on (FIR-1311)
+			h.applyGraphifyNudge(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it

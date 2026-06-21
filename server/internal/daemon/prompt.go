@@ -36,6 +36,9 @@ func BuildPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
+	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
+		b.WriteString(nudge)
+	}
 	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
 		b.WriteString(snap)
 		return b.String()
@@ -70,6 +73,9 @@ func buildWakeupPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "> %s\n\n", task.WakeupPrompt)
 	if task.TriggerCommentID != "" {
 		fmt.Fprintf(&b, "Reply target: post any visible result in the original thread using parent comment ID `%s`.\n\n", task.TriggerCommentID)
+	}
+	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
+		b.WriteString(nudge)
 	}
 	if snap, ok := snapshotIssueContext(task); ok {
 		b.WriteString(snap)
@@ -219,6 +225,9 @@ func buildCommentPrompt(task Task, provider string) string {
 		if task.Agent != nil && strings.Contains(task.Agent.Instructions, "## Squad Operating Protocol") {
 			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
 		}
+	}
+	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
+		b.WriteString(nudge)
 	}
 	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
 		b.WriteString(snap)

@@ -137,6 +137,8 @@ type Task struct {
 	BundleContextHint bool `json:"bundle_context_hint,omitempty"`
 	// CEREBRO-PATCH(daemon-snapshot-prompt): FIR-2384 — pre-rendered issue+thread snapshot shipped at claim time.
 	IssueSnapshot string `json:"issue_snapshot,omitempty"`
+	// CEREBRO-PATCH(daemon-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction shipped at claim time when the graphify saving is on.
+	GraphifyNudge string `json:"graphify_nudge,omitempty"`
 	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
 	// presentation_mode from claim response. "interactive" tells the daemon
 	// to mirror agent stdout to the cerebro terminal broker so a browser

@@ -242,6 +242,7 @@ type AgentTaskResponse struct {
 	IssueKind         string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
 	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
 	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+	GraphifyNudge     string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
 
 	NewCommentCount         int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince        string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
