@@ -182,4 +182,16 @@ describe("FirtalRegistryDataSourceSheet (FIR-1609 Phase 5)", () => {
       within(orders).getByRole("button", { name: /when|condition|add|vilkår/i }),
     ).toBeTruthy();
   });
+
+  it("shows get_schema/execute preset action chips for a data source (no host)", async () => {
+    const user = userEvent.setup();
+    renderSheet([dsRow("ds-1", "Orders", "allow")]);
+    const orders = screen.getByTestId("registry-data-source-ds-1");
+    await user.click(within(orders).getByTestId("condition-control-firtal_registry"));
+    const editor = within(await screen.findByTestId("condition-editor-firtal_registry"));
+    expect(editor.getByLabelText("Action get_schema")).toBeInTheDocument();
+    expect(editor.getByLabelText("Action execute")).toBeInTheDocument();
+    // A registry data source is not host-bound → no host allow-list section.
+    expect(editor.queryByLabelText("Add host")).not.toBeInTheDocument();
+  });
 });

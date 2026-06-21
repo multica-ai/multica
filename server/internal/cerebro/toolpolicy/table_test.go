@@ -335,6 +335,53 @@ func TestTable_RuntimeViewShowsOnlyThatRuntimesTools(t *testing.T) {
 	}
 }
 
+// TestTable_OfflineRuntimeShowsFullUniverse is the FIR-1708 D regression check:
+// a runtime that has reported NO capabilities (offline / never connected, so it
+// has zero cerebro_capability_subject rows) must still see the full workspace
+// tool universe — not an empty table — so an admin can author permissions for
+// it. A runtime WITH reported tools keeps its scoped view (Case A); a runtime
+// WITHOUT any keeps the fallback (Case B, the fix).
+func TestTable_OfflineRuntimeShowsFullUniverse(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	reportingRuntime, offlineRuntime := uuidByte(30), uuidByte(31)
+	addCap(t, s, "bash", "Bash", "tools", "runtime_report")
+	addCap(t, s, "read_file", "Read file", "tools", "runtime_report")
+	// Only reportingRuntime has reported a capability; offlineRuntime has none.
+	addCapSubject(t, s, "bash", "runtime", reportingRuntime, "reporter")
+
+	// Case A: a runtime WITH reported tools stays scoped to just those tools.
+	rowsReporting, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: reportingRuntime})
+	if err != nil {
+		t.Fatalf("table reporting runtime: %v", err)
+	}
+	if len(rowsReporting) != 1 {
+		t.Fatalf("reporting runtime got %d rows, want 1 (only its reported tool)", len(rowsReporting))
+	}
+	if _, ok := findRow(rowsReporting, "bash"); !ok {
+		t.Fatal("reporting runtime page missing its reported tool bash")
+	}
+
+	// Case B (the fix): a runtime with NO reported tools falls back to the full
+	// workspace universe instead of an empty table.
+	rowsOffline, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: offlineRuntime})
+	if err != nil {
+		t.Fatalf("table offline runtime: %v", err)
+	}
+	if len(rowsOffline) != 2 {
+		t.Fatalf("offline runtime got %d rows, want 2 (full universe fallback), rows=%v", len(rowsOffline), rowsOffline)
+	}
+	if _, ok := findRow(rowsOffline, "bash"); !ok {
+		t.Fatal("offline runtime page missing bash from full universe")
+	}
+	if _, ok := findRow(rowsOffline, "read_file"); !ok {
+		t.Fatal("offline runtime page missing read_file from full universe")
+	}
+}
+
 // TestTable_GroupsCombinedInRow proves the table collapses several group rows
 // into the single combined LayerGroup value (most permissive group wins).
 func TestTable_GroupsCombinedInRow(t *testing.T) {

@@ -498,6 +498,57 @@ describe("ToolPolicyTable (repo groups)", () => {
       });
     });
   });
+
+  it("a repo capability with a concrete rule shows read/checkout/push action chips (no host)", async () => {
+    const user = userEvent.setup();
+    // repo.push carries a concrete agent rule so the When editor can open.
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        repoCap("repo.read", "Read code"),
+        repoCap("repo.checkout", "Check out"),
+        repoCap("repo.push", "Push changes", "allow", { agent: "allow" }),
+      ],
+    });
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
+    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    const editor = within(await screen.findByTestId("condition-editor-repo.push"));
+    // Preset action chips for the repo verb model.
+    expect(editor.getByLabelText("Action read")).toBeInTheDocument();
+    expect(editor.getByLabelText("Action checkout")).toBeInTheDocument();
+    expect(editor.getByLabelText("Action push")).toBeInTheDocument();
+    // A repo capability is not host-bound → no host section.
+    expect(editor.queryByLabelText("Add host")).not.toBeInTheDocument();
+  });
+
+  it("writes the repo condition with the toggled preset actions and the repo resource", async () => {
+    const user = userEvent.setup();
+    mockCerebroRequest.mockResolvedValue({
+      tools: [repoCap("repo.push", "Push changes", "allow", { agent: "allow" })],
+    });
+    renderRepoTable();
+    const group = await screen.findByTestId(`repo-group-${REPO_URL}`);
+    await user.click(within(group).getByRole("button", { expanded: false }));
+    const push = screen.getByTestId(`repo-cap-repo.push-${REPO_URL}`);
+    await user.click(within(push).getByTestId("condition-control-repo.push"));
+    const editor = within(await screen.findByTestId("condition-editor-repo.push"));
+    await user.click(editor.getByLabelText("Action push"));
+    await user.click(editor.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      const put = findPutCalls().at(-1);
+      const body = JSON.parse((put![1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        tool_key: "repo.push",
+        layer: "agent",
+        subject_id: "agent-1",
+        setting: "allow",
+        resource_pattern: REPO_URL,
+      });
+      expect(body.condition.actions).toEqual(["push"]);
+    });
+  });
 });
 
 // FIR-1609 — the WHEN layer (Condition) sits beside the Decision pill. A
@@ -556,10 +607,45 @@ describe("ToolPolicyTable (Condition editor)", () => {
     );
   });
 
-  it("disables the When control on a layer with no concrete rule", async () => {
+  it("hides the When control entirely on a non-meaningful tool with no condition", async () => {
+    // list_issues is a plain read tool: no host facet, no action facet, and no
+    // condition already set → the control is contextual and must not render at
+    // all (no stray "When" affordance where a condition makes no sense).
     renderCondTable();
     const row = await screen.findByTestId("tool-row-list_issues");
-    const control = within(row).getByTestId("condition-control-list_issues");
+    expect(within(row).queryByTestId("condition-control-list_issues")).not.toBeInTheDocument();
+  });
+
+  it("shows the Host allow-list section only on a host-bound tool (web_fetch)", async () => {
+    const user = userEvent.setup();
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    await user.click(within(row).getByTestId("condition-control-web_fetch"));
+    const editor = within(await screen.findByTestId("condition-editor-web_fetch"));
+    // web_fetch has the host facet → the host input is present.
+    expect(editor.getByLabelText("Add host")).toBeInTheDocument();
+    // …and no actions facet for web_fetch, so no preset action chips.
+    expect(editor.queryByLabelText(/^Action /)).not.toBeInTheDocument();
+  });
+
+  it("disables the When control (concrete-rule hint) on a meaningful tool with no rule", async () => {
+    // A host-bound tool with no concrete rule on this layer keeps the disabled
+    // "When" hint (the facet IS meaningful), pointing the admin at the Decision.
+    mockCerebroRequest.mockResolvedValue({
+      tools: [
+        {
+          tool_key: "web_fetch",
+          title: "Fetch a URL",
+          category: "Built-in tools",
+          source: "builtin",
+          layers: { runtime: null, agent: null, group: null, user: null },
+          effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+        },
+      ],
+    });
+    renderCondTable();
+    const row = await screen.findByTestId("tool-row-web_fetch");
+    const control = within(row).getByTestId("condition-control-web_fetch");
     expect(control).toBeDisabled();
     expect(control).toHaveTextContent("When");
   });

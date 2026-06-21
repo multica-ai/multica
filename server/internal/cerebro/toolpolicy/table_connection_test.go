@@ -267,6 +267,14 @@ func TestTable_ConnectionRowSurvivesRuntimeFilter(t *testing.T) {
 	// runtime filter still scopes ordinary tools.
 	addCap(t, s, "bash", "Bash", "tools", "runtime_report")
 	addCapSubject(t, s, "bash", "runtime", otherRuntime, "reporter")
+	// The queried runtime must have reported at least one capability of its own,
+	// otherwise the FIR-1708 D fallback would (correctly) widen the view to the
+	// full universe for an offline/never-reported runtime — which would defeat the
+	// scoping this test asserts. Give it its own reported tool so the runtime
+	// filter stays active and we genuinely test that the connection row survives
+	// it while a foreign runtime's tool does not.
+	addCap(t, s, "ls", "List files", "tools", "runtime_report")
+	addCapSubject(t, s, "ls", "runtime", runtime, "reporter")
 
 	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, RuntimeID: runtime})
 	if err != nil {

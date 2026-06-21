@@ -142,18 +142,41 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// (the per-tool rows in table_connection.go already bypass this filter for
 	// the same reason), so the admin must see the connection-wide row — the one
 	// the Connections tab groups its tools under — everywhere too. Keep it.
+	//
+	// FIR-1708 D fallback: only apply the runtime EXISTS filter when the queried
+	// runtime has actually reported at least one capability. An offline or
+	// never-reported runtime has zero cerebro_capability_subject rows, and the
+	// EXISTS would then match nothing — leaving the authoring table EMPTY, so an
+	// admin could not author any permissions for it. When the runtime has no
+	// reported capabilities we leave runtimeFilter empty and fall back to the
+	// full workspace universe, keeping such runtimes authorable. Runtimes that
+	// HAVE reported keep their existing scoped view unchanged.
 	runtimeFilter := ""
 	if in.RuntimeID.Valid {
-		runtimeFilter = `
-		 AND (
-		   c.source = 'connection'
-		   OR EXISTS (
-		     SELECT 1 FROM cerebro_capability_subject sub
-		     WHERE sub.capability_id = c.id
-		       AND sub.subject_type = 'runtime'
-		       AND sub.subject_id = $2
-		   )
-		 )`
+		var runtimeHasCaps bool
+		if err := s.pool.QueryRow(ctx, `
+			SELECT EXISTS (
+			  SELECT 1 FROM cerebro_capability_subject sub
+			  JOIN cerebro_capability c ON c.id = sub.capability_id
+			  WHERE c.workspace_id = $1
+			    AND sub.subject_type = 'runtime'
+			    AND sub.subject_id = $2
+			)
+		`, in.WorkspaceID, in.RuntimeID).Scan(&runtimeHasCaps); err != nil {
+			return nil, fmt.Errorf("toolpolicy: probe runtime capabilities: %w", err)
+		}
+		if runtimeHasCaps {
+			runtimeFilter = `
+			 AND (
+			   c.source = 'connection'
+			   OR EXISTS (
+			     SELECT 1 FROM cerebro_capability_subject sub
+			     WHERE sub.capability_id = c.id
+			       AND sub.subject_type = 'runtime'
+			       AND sub.subject_id = $2
+			   )
+			 )`
+		}
 	}
 
 	// One row per (tool, matching policy layer) for the capability-wide

@@ -44,11 +44,13 @@ import {
   isLockedFromElsewhere,
   useSetToolPolicy,
   useClearToolPolicy,
+  type ToolCondition,
   type ToolEffectiveSetting,
   type ToolLayer,
   type ToolSetting,
   type ToolPolicyRow,
 } from "../core/tool-policy";
+import { ConditionControl } from "./tool-policy-table";
 
 const CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 const CHOICE_LABEL: Record<ToolSetting, string> = {
@@ -205,6 +207,24 @@ export function ConnectionConfigSheet({
     });
   }
 
+  // Write (or clear) the When (Condition) on one tool's rule. A condition can
+  // only refine a CONCRETE rule (allow/ask/deny) already authored on this layer —
+  // the same guard the main table makes — so a drifted row never creates an
+  // override as a side effect. The Decision is resent unchanged; connection tool
+  // rows pick up the host facet automatically (conditionFacets).
+  function applyCondition(row: ToolPolicyRow, condition: ToolCondition | null) {
+    const setting = editLayer === "group" ? null : row.layers[editLayer];
+    if (setting !== "allow" && setting !== "ask" && setting !== "deny") return;
+    setPolicy.mutate({
+      tool_key: connectionKey,
+      layer: editLayer,
+      subject_id: subjectId,
+      setting,
+      condition,
+      resource_pattern: row.resource_pattern,
+    });
+  }
+
   function allowAll() {
     for (const r of toolRows) write(r.resource_pattern, "allow");
   }
@@ -302,14 +322,22 @@ export function ConnectionConfigSheet({
                     </div>
                   ) : null}
                 </div>
-                <EndpointDecisionControl
-                  row={r}
-                  editLayer={editLayer}
-                  disabled={busy}
-                  floorRank={floorRank}
-                  floorLabel={CHOICE_LABEL[floor]}
-                  onChange={(setting) => write(r.resource_pattern, setting)}
-                />
+                <div className="flex items-center gap-2">
+                  <EndpointDecisionControl
+                    row={r}
+                    editLayer={editLayer}
+                    disabled={busy}
+                    floorRank={floorRank}
+                    floorLabel={CHOICE_LABEL[floor]}
+                    onChange={(setting) => write(r.resource_pattern, setting)}
+                  />
+                  <ConditionControl
+                    row={r}
+                    editLayer={editLayer}
+                    disabled={busy}
+                    onChange={(c) => applyCondition(r, c)}
+                  />
+                </div>
               </div>
             ))
           )}

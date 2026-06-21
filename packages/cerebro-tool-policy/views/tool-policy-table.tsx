@@ -83,6 +83,7 @@ import { cn } from "@multica/ui/lib/utils";
 import {
   classFacets,
   classifySideEffect,
+  conditionFacets,
   isLockedFromElsewhere,
   SIDE_EFFECT_LABEL,
   SIDE_EFFECTS,
@@ -468,6 +469,7 @@ export function ToolPolicyTable({
               busy={busy}
               onSetCapability={(url, toolKey, s) => applySetting(toolKey, s, url)}
               onSetGroup={applyRepoGroup}
+              onSetCondition={applyCondition}
             />
           )}
 
@@ -1308,14 +1310,22 @@ function ConditionChips({
   );
 }
 
-// ConditionControl is the WHEN editor that sits beside the Decision pill. A
-// condition NEVER changes Allow/Ask/Deny — it only narrows whether this layer's
-// rule applies to a request (host allow-list, allowed actions, or a CEL escape
-// hatch for genuine dynamics). It can therefore only attach to a CONCRETE rule
-// already authored on this page's own layer: with no override here there is
-// nothing to refine, so the control reads as a disabled "When" hint that points
-// the admin at the Decision first. The Group layer has no single condition, so
-// the control is omitted entirely on that page.
+// ConditionControl is the CONTEXTUAL WHEN editor that sits beside the Decision
+// pill. A condition NEVER changes Allow/Ask/Deny — it only narrows whether this
+// layer's rule applies to a request (host allow-list, allowed actions, or a CEL
+// escape hatch for genuine dynamics). It can therefore only attach to a CONCRETE
+// rule already authored on this page's own layer.
+//
+// The CEO rejected a generic editor that showed a host allow-list and a free-text
+// actions box on EVERY tool (a host allow-list on a notification tool is
+// nonsense). So the editor is now driven by conditionFacets(row): the host
+// section shows only when the tool egresses to a host, the Actions section shows
+// only when the tool has a verb dimension — and as PRESET TOGGLE CHIPS, not a
+// free-text input — and the CEL textarea lives under a collapsed Advanced
+// disclosure. On a row where neither facet is meaningful AND no condition is
+// already set, the whole control is hidden — there is no "When" affordance on a
+// tool where a condition makes no sense. The Group layer has no single condition,
+// so the control is omitted entirely on that page.
 export function ConditionControl({
   row,
   editLayer,
@@ -1332,8 +1342,8 @@ export function ConditionControl({
   const [actions, setActions] = useState<string[]>([]);
   const [expr, setExpr] = useState("");
   const [hostDraft, setHostDraft] = useState("");
-  const [actionDraft, setActionDraft] = useState("");
   const [hostError, setHostError] = useState<string | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const ruleSetting = editLayer === "group" ? null : row.layers[editLayer];
   const hasConcreteRule =
@@ -1341,8 +1351,19 @@ export function ConditionControl({
   const current = conditionForLayer(row, editLayer);
   const active = !conditionIsEmpty(current);
 
+  // The contextual facets: which structured sections are worth showing for this
+  // tool. `meaningful` is the gate for whether the control appears at all.
+  const facets = conditionFacets(row);
+  const meaningful = facets.host || facets.actions.length > 0;
+
   // Group has no single condition — show nothing there.
   if (editLayer === "group") return null;
+
+  // Hide the control entirely on a tool where a condition makes no sense AND none
+  // is already set — no stray "When" affordance on a notification tool. A row
+  // that already carries a condition keeps its control so the value stays
+  // editable even if the heuristic would otherwise hide it.
+  if (!meaningful && !active) return null;
 
   // Seed the form from the persisted condition each time the popover opens, so an
   // abandoned edit never leaks into the next open.
@@ -1352,8 +1373,10 @@ export function ConditionControl({
       setActions(current?.actions ?? []);
       setExpr(current?.expr ?? "");
       setHostDraft("");
-      setActionDraft("");
       setHostError(null);
+      // Open the Advanced disclosure pre-expanded only when a CEL expression is
+      // already set, so an existing expression is never hidden behind a click.
+      setAdvancedOpen(!!current?.expr.trim());
     }
     setOpen(next);
   }
@@ -1370,11 +1393,11 @@ export function ConditionControl({
     setHostDraft("");
   }
 
-  function addAction() {
-    const a = actionDraft.trim().toLowerCase();
-    if (!a) return;
-    if (!actions.includes(a)) setActions([...actions, a]);
-    setActionDraft("");
+  // Toggle a preset action chip — click to add, click again to remove. Presets
+  // are the literal verb list for the tool's resource model (conditionFacets),
+  // so there is no free-text entry to get wrong.
+  function toggleAction(a: string) {
+    setActions((prev) => (prev.includes(a) ? prev.filter((x) => x !== a) : [...prev, a]));
   }
 
   function save() {
@@ -1389,7 +1412,8 @@ export function ConditionControl({
   }
 
   // No concrete rule on this layer → nothing to refine. Disabled hint that names
-  // the prerequisite, rather than silently creating an override.
+  // the prerequisite, rather than silently creating an override. Only shown when
+  // a facet IS meaningful — on a non-meaningful row we hid the control above.
   if (!hasConcreteRule) {
     return (
       <button
@@ -1439,77 +1463,99 @@ export function ConditionControl({
             </PopoverDescription>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label className="flex items-center gap-1.5 text-xs">
-              <Globe className="size-3.5" /> Host allow-list
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                value={hostDraft}
-                onChange={(e) => {
-                  setHostDraft(e.target.value);
-                  setHostError(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addHost();
-                  }
-                }}
-                placeholder="firtal.com or *.firtal.com"
-                className="h-8"
-                aria-label="Add host"
-              />
-              <Button type="button" size="sm" variant="outline" onClick={addHost}>
-                <Plus className="size-4" />
-              </Button>
+          {facets.host && (
+            <div className="flex flex-col gap-2">
+              <Label className="flex items-center gap-1.5 text-xs">
+                <Globe className="size-3.5" /> Host allow-list
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={hostDraft}
+                  onChange={(e) => {
+                    setHostDraft(e.target.value);
+                    setHostError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addHost();
+                    }
+                  }}
+                  placeholder="firtal.com or *.firtal.com"
+                  className="h-8"
+                  aria-label="Add host"
+                />
+                <Button type="button" size="sm" variant="outline" onClick={addHost}>
+                  <Plus className="size-4" />
+                </Button>
+              </div>
+              {hostError && <p className="text-xs text-destructive">{hostError}</p>}
+              <ConditionChips items={hosts} onRemove={(h) => setHosts(hosts.filter((x) => x !== h))} />
             </div>
-            {hostError && <p className="text-xs text-destructive">{hostError}</p>}
-            <ConditionChips items={hosts} onRemove={(h) => setHosts(hosts.filter((x) => x !== h))} />
-          </div>
+          )}
 
-          <div className="flex flex-col gap-2">
-            <Label className="text-xs">Actions</Label>
-            <div className="flex gap-2">
-              <Input
-                value={actionDraft}
-                onChange={(e) => setActionDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addAction();
-                  }
-                }}
-                placeholder="read, push, reveal…"
-                className="h-8"
-                aria-label="Add action"
-              />
-              <Button type="button" size="sm" variant="outline" onClick={addAction}>
-                <Plus className="size-4" />
-              </Button>
+          {facets.actions.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <Label className="text-xs">Actions</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {facets.actions.map((a) => {
+                  const selected = actions.includes(a);
+                  return (
+                    <button
+                      key={a}
+                      type="button"
+                      aria-pressed={selected}
+                      aria-label={`Action ${a}`}
+                      onClick={() => toggleAction(a)}
+                      className={cn(
+                        "inline-flex items-center rounded-full border px-2.5 py-1 font-mono text-xs font-medium transition-colors",
+                        selected
+                          ? "border-primary bg-primary/10 text-primary"
+                          : "border-border bg-background text-muted-foreground hover:bg-muted",
+                      )}
+                    >
+                      {a}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Pick which actions this rule applies to. None selected means every
+                action.
+              </p>
             </div>
-            <ConditionChips
-              items={actions}
-              onRemove={(a) => setActions(actions.filter((x) => x !== a))}
-            />
-          </div>
+          )}
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={`cel-${row.tool_key}`} className="text-xs">
+          <div className="flex flex-col gap-1">
+            <button
+              type="button"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((o) => !o)}
+              className="inline-flex w-fit items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              {advancedOpen ? (
+                <ChevronDown className="size-3.5" />
+              ) : (
+                <ChevronRight className="size-3.5" />
+              )}
               Advanced (CEL)
-            </Label>
-            <Textarea
-              id={`cel-${row.tool_key}`}
-              value={expr}
-              onChange={(e) => setExpr(e.target.value)}
-              placeholder="request.time.getHours() >= 8 && request.time.getHours() < 17"
-              className="min-h-16 font-mono text-xs"
-              aria-label="CEL expression"
-            />
-            <p className="text-xs text-muted-foreground">
-              A CEL expression for genuine dynamics (e.g. business hours). Leave empty
-              unless you need it.
-            </p>
+            </button>
+            {advancedOpen && (
+              <div className="mt-1 flex flex-col gap-2">
+                <Textarea
+                  id={`cel-${row.tool_key}`}
+                  value={expr}
+                  onChange={(e) => setExpr(e.target.value)}
+                  placeholder="request.time.getHours() >= 8 && request.time.getHours() < 17"
+                  className="min-h-16 font-mono text-xs"
+                  aria-label="CEL expression"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A CEL expression for genuine dynamics (e.g. business hours). Leave
+                  empty unless you need it.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between gap-2">
@@ -1590,12 +1636,15 @@ function RepoSection({
   busy,
   onSetCapability,
   onSetGroup,
+  onSetCondition,
 }: {
   groups: RepoGroupData[];
   editLayer: ToolLayer;
   busy: boolean;
   onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
+  /** Write/clear the When condition on one repo capability row. */
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
 }) {
   return (
     <div className="flex flex-col gap-2" data-testid="repo-policy-section">
@@ -1619,6 +1668,7 @@ function RepoSection({
             busy={busy}
             onSetCapability={onSetCapability}
             onSetGroup={onSetGroup}
+            onSetCondition={onSetCondition}
           />
         ))}
       </div>
@@ -1632,12 +1682,14 @@ function RepoGroup({
   busy,
   onSetCapability,
   onSetGroup,
+  onSetCondition,
 }: {
   group: RepoGroupData;
   editLayer: ToolLayer;
   busy: boolean;
   onSetCapability: (url: string, toolKey: string, setting: ToolSetting) => void;
   onSetGroup: (group: RepoGroupData, setting: ToolSetting) => void;
+  onSetCondition: (row: ToolPolicyRow, condition: ToolCondition | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const verdict = repoGroupVerdict(group, editLayer);
@@ -1679,6 +1731,12 @@ function RepoGroup({
                   editLayer={editLayer}
                   disabled={busy}
                   onChange={(s) => onSetCapability(group.url, row.tool_key, s)}
+                />
+                <ConditionControl
+                  row={row}
+                  editLayer={editLayer}
+                  disabled={busy}
+                  onChange={(c) => onSetCondition(row, c)}
                 />
               </div>
             </div>
