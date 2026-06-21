@@ -43,6 +43,11 @@ The unified tool-policy chain is the model we want **everything** to converge on
   *(Note the asymmetry: the gate on this write is the **code-only** `RequireWorkspaceRole(
   "owner","admin")`, section 4 — you must be an admin by a hardcoded role check to author
   policy.)*
+- **CLI surface (FIR-1609):** `multica permissions explain|set|clear`
+  (`server/cmd/multica/cerebro_permissions.go`) wraps the read model + write surface above —
+  `explain` (GET) prints per-tool `Effective` + `DecidedBy`/`CappedBy`/reason + group blame to
+  answer "why is this agent+member blocked"; `set`/`clear` (PUT/DELETE) author/remove one
+  Allow/Ask/Deny rule at one layer, optional WHEN/CEL condition. Same admin-only server gate.
 
 **What actually routes through these interfaces today (Class A — the whole list):**
 
