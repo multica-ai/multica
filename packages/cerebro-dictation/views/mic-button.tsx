@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Mic, Square } from "lucide-react";
+import { toast } from "sonner";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -23,6 +24,38 @@ import type {
 const backendNotDeployedTranscriber: Transcriber = async () => {
   throw new Error("Dictation backend is not deployed yet.");
 };
+
+/** mm:ss for the recording timer. */
+function formatElapsed(totalSeconds: number): string {
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+/**
+ * A user-facing message for a dictation failure. Until now a failed
+ * transcription was silent — the button just went inert and nothing reached the
+ * field, so it looked like dictation "did nothing" (Jesper, FIR-1637). We now
+ * surface it as a toast. `aborted` is the user cancelling on purpose, so it is
+ * intentionally excluded by the caller.
+ */
+function errorToastMessage(error: DictationError): string {
+  switch (error.kind) {
+    case "permission-denied":
+      return "Microphone access was blocked. Allow it in your browser to dictate.";
+    case "no-microphone":
+      return "No microphone was found.";
+    case "unsupported":
+      return "Dictation isn't supported in this browser.";
+    case "transcription-failed":
+    case "streaming-failed":
+      return "Couldn't transcribe that — the speech service didn't respond. Please try again.";
+    case "recording-failed":
+      return "Recording failed. Please try again.";
+    default:
+      return error.message || "Dictation failed. Please try again.";
+  }
+}
 
 export interface MicButtonProps {
   disabled?: boolean;
@@ -75,6 +108,33 @@ export function MicButton({
   }, [status, onStatusChange]);
 
   const isRecording = status === "recording";
+
+  // Recording timer (FIR-1637, Jesper): a blue mm:ss counter next to the
+  // waveform so it's obvious the mic is actually capturing, not just animating.
+  // Ticks once a second only while recording; resets the moment it stops.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!isRecording) {
+      setElapsed(0);
+      return;
+    }
+    setElapsed(0);
+    const startedAt = performance.now();
+    const id = setInterval(() => {
+      setElapsed(Math.floor((performance.now() - startedAt) / 1000));
+    }, 250);
+    return () => clearInterval(id);
+  }, [isRecording]);
+
+  // Surface failures (FIR-1637, Jesper): a failed transcription used to be
+  // silent — nothing landed in the field and it looked like dictation "did
+  // nothing". Toast every non-aborted error so the user knows what happened.
+  useEffect(() => {
+    if (error && error.kind !== "aborted") {
+      toast.error(errorToastMessage(error));
+    }
+  }, [error]);
+
   // The gap the user feels: from releasing the mic until the text lands
   // (the model transcribes for ~2-4s). Without a visible signal the button
   // just goes inert and it looks broken — so we show a spinner + label while
@@ -120,6 +180,16 @@ export function MicButton({
           gave. */}
       {isRecording && mediaStream && (
         <Waveform stream={mediaStream} className="w-16 text-brand sm:w-20" />
+      )}
+      {/* Blue recording timer next to the wave (Jesper, FIR-1637) — proof the
+          mic is actually capturing. tabular-nums keeps it from jittering. */}
+      {isRecording && (
+        <span
+          className="text-xs font-medium tabular-nums text-blue-500"
+          aria-live="off"
+        >
+          {formatElapsed(elapsed)}
+        </span>
       )}
       {/* "Text is on its way" — the visible processing state between releasing
           the mic and the transcript arriving (FIR-1637). aria-live announces it

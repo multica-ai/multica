@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     key === "cerebro_voice_output_enabled"
   ),
   useDictation: vi.fn(),
+  toastError: vi.fn(),
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
@@ -18,8 +19,13 @@ vi.mock("../use-dictation", () => ({
   useDictation: mocks.useDictation,
 }));
 
+vi.mock("sonner", () => ({
+  toast: { error: mocks.toastError },
+}));
+
 describe("MicButton", () => {
   beforeEach(() => {
+    mocks.toastError.mockClear();
     mocks.useFeatureFlag.mockImplementation(
       (key: string) =>
         key === "cerebro_voice_dictation_enabled" ||
@@ -187,6 +193,65 @@ describe("MicButton", () => {
     render(<MicButton onTranscribed={vi.fn()} onStatusChange={onStatusChange} />);
 
     expect(onStatusChange).toHaveBeenCalledWith("transcribing");
+  });
+
+  it("shows a blue recording timer while recording (FIR-1637, Jesper)", () => {
+    mocks.useDictation.mockReturnValue({
+      status: "recording",
+      error: null,
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    // Counter starts at 0:00 — proof the mic is capturing, next to the wave.
+    expect(screen.getByText("0:00")).toBeInTheDocument();
+  });
+
+  it("does not show the timer when idle", () => {
+    render(<MicButton onTranscribed={vi.fn()} />);
+    expect(screen.queryByText(/^\d+:\d{2}$/)).toBeNull();
+  });
+
+  it("toasts a visible error when transcription fails (no more silent failures)", () => {
+    // FIR-1637 (Jesper): a failed transcription used to insert nothing with no
+    // feedback. Now it surfaces a toast.
+    mocks.useDictation.mockReturnValue({
+      status: "error",
+      error: { kind: "transcription-failed", message: "boom" },
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(mocks.toastError).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not toast when the user cancels (aborted is intentional)", () => {
+    mocks.useDictation.mockReturnValue({
+      status: "idle",
+      error: { kind: "aborted", message: "Transcription was cancelled." },
+      isSupported: true,
+      start: vi.fn(),
+      stop: vi.fn(),
+      cancel: vi.fn(),
+      lastTranscript: null,
+      mediaStream: null,
+    });
+
+    render(<MicButton onTranscribed={vi.fn()} />);
+
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
   it("disables the button when MediaRecorder is unavailable", () => {
