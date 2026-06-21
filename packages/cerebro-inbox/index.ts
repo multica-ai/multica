@@ -51,6 +51,10 @@ export { useInboxKeyboardShortcuts } from "./use-inbox-keyboard-shortcuts";
 // recognised as a channel across the re-surface refetch gap (no bare-notif
 // reappearance, no click-bounce out of the inbox).
 export { useKnownChannelIds, accumulateChannelIds } from "./known-channel-ids";
+// FIR-1576 (follow-up) — route a channel/DM notif by the issue's real kind, not
+// channel-list-cache membership, so first-load / back-nav never bounce a click
+// out of the inbox to /channels.
+export { useSelectedNotifChannel, type SelectedNotifChannel } from "./use-selected-notif-channel";
 // FIR-2684 — always refetch the opened message (timeline + detail) on select.
 export { useInboxMessageRefresh, refreshInboxMessageQueries } from "./use-inbox-message-refresh";
 export {

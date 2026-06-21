@@ -65,6 +65,7 @@ import {
   GlobalInboxReminderDialog,
   formatPlannedDateTime,
   useInboxActionGroupLabels,
+  useSelectedNotifChannel,
   useSetInboxMode,
 } from "@multica/cerebro-inbox";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -647,6 +648,13 @@ export function DynamicInbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChannelId]);
 
+  // FIR-1576 (follow-up) — route a notif by its issue's real kind, not channel-
+  // list-cache membership; see useSelectedNotifChannel for the full rationale.
+  const selectedNotifIssueId =
+    selected?.kind === "notif" ? selected.item.issue_id ?? null : null;
+  const { isChannel: selectedNotifIsChannel, kindPending: selectedNotifKindPending } =
+    useSelectedNotifChannel(wsId, selectedNotifIssueId, knownChannelIds);
+
   const detail = useMemo(() => {
     // JEH-901 — a freshly started agent chat (from "new message"). No session
     // exists until the first message is sent; InboxChatPanel owns that, then
@@ -696,11 +704,12 @@ export function DynamicInbox() {
         </ErrorBoundary>
       );
     }
-    // FIR-1576 — a notification whose issue is a known channel/DM (its channel
-    // briefly left channelMap during the archive re-surface gap) opens in the
-    // ChannelDetail pane, never IssueDetail — which would redirect out to
-    // /channels/<id> and kick the user out of the inbox.
-    if (selected.kind === "notif" && selected.item.issue_id && knownChannelIds.has(selected.item.issue_id)) {
+    // FIR-1576 — a notification whose issue is a channel/DM opens in the
+    // ChannelDetail pane, never IssueDetail (whose FIR-2452 effect would redirect
+    // the user out of the inbox to /channels/<id>). Channel-ness is decided by
+    // the issue's real `kind` (selectedNotifIsChannel), with knownChannelIds as a
+    // zero-latency fast path; see the note where those are computed above.
+    if (selected.kind === "notif" && selected.item.issue_id && selectedNotifIsChannel) {
       const channelId = selected.item.issue_id;
       return (
         <ErrorBoundary resetKeys={[channelId]}>
@@ -711,6 +720,17 @@ export function DynamicInbox() {
             onArchive={clearSelection}
           />
         </ErrorBoundary>
+      );
+    }
+    // FIR-1576 — kind not yet resolved: hold the pane on a light placeholder
+    // instead of mounting IssueDetail, so a channel notif never fires the
+    // redirect during the window before its kind loads (the first-load / back-
+    // navigation race that knownChannelIds alone could not close).
+    if (selected.kind === "notif" && selected.item.issue_id && selectedNotifKindPending) {
+      return (
+        <div className="flex h-full items-center justify-center text-muted-foreground">
+          <Inbox className="h-10 w-10 animate-pulse text-muted-foreground/30" />
+        </div>
       );
     }
     if (selected.kind === "notif" && selected.item.issue_id) {
@@ -809,7 +829,7 @@ export function DynamicInbox() {
         <p className="text-sm">Select a message to read it here.</p>
       </div>
     );
-  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, knownChannelIds, typeLabels]); // FIR-1576 — re-render the channel-vs-issue branch when a channel id becomes known
+  }, [selected, selectedNote, clearSelection, newChat, onArchive, selectedChannelCommentId, selectedNotifIsChannel, selectedNotifKindPending, typeLabels]); // FIR-1576 — re-render the channel-vs-issue branch when the selected notif's kind resolves
 
   const createMenuProps = {
     onNewMessage: () => setShowNewMessage(true),
