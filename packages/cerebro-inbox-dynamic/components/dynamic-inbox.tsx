@@ -79,6 +79,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { SlackBlock } from "@multica/cerebro-inbox-slack-block";
 import type { Channel, InboxItem } from "@multica/core/types";
 import { useDynamicInboxData } from "../use-dynamic-inbox-data";
+import { useInboxScrollAnchor } from "../use-inbox-scroll-anchor";
 import { INBOX_MESSAGE_PARAM, messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam } from "../message-link";
 import { useInboxLayout } from "../use-inbox-layout";
 import {
@@ -261,6 +262,25 @@ export function DynamicInbox() {
       ? selected.item.issue_id ?? selected.item.id
       : selected.id
     : null;
+
+  // FIR-1702 — anchor the viewport so the list can re-sort without the page
+  // jumping. Prefer the open row (where the user's eyes are); when nothing is
+  // open, fall back to the first row whose agent is actively running — that is
+  // the "active task" whose position moves when an agent is started. The key
+  // shape matches entryKey() / selectedKey so it lines up with the row's
+  // data-inbox-entry-key attribute.
+  const runningAnchorKey = useMemo<string | null>(() => {
+    const { issueRunStates, chatRunStates } = filterContext.action;
+    if (!issueRunStates.size && !chatRunStates.size) return null;
+    for (const e of entries) {
+      if (e.kind === "notif" && e.item.issue_id && issueRunStates.has(e.item.issue_id)) {
+        return e.item.issue_id;
+      }
+      if (e.kind === "chat" && chatRunStates.has(e.session.id)) return e.id;
+    }
+    return null;
+  }, [entries, filterContext]);
+  useInboxScrollAnchor(sectionsScrollRef, selectedKey ?? runningAnchorKey);
 
   const clearSelection = useCallback(() => {
     if (secretarySelectedKey) {
