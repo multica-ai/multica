@@ -96,6 +96,11 @@ export type CerebroFlagKey =
   // Jakob had no UI once cerebro_tool_policy hid the legacy grants card).
   | "cerebro_runtime_tool_grant_ui"
   | "cerebro_simple_tool_policy"
+  // FIR-1771: the "Test as user" profile-menu entry that resolves another
+  // user+agent's effective tool verdict. The real gate is the
+  // tools:test-as-user permission (default Allow for the owner only); this flag
+  // is a workspace-wide on/off for the whole feature.
+  | "cerebro_test_as_user"
   | "cerebro_web_fetch_policy"
   | "cerebro_platform_capabilities"
   | "cerebro_approvals"
@@ -345,6 +350,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // — nothing changes until an admin turns it on.
   cerebro_runtime_tool_grant_ui: false,
   cerebro_simple_tool_policy: true,
+  // FIR-1771: Test as user. Default ON — the feature is still locked down by the
+  // tools:test-as-user permission (default Allow for the workspace owner only),
+  // so turning the flag on exposes nothing to members who lack the permission.
+  cerebro_test_as_user: true,
   cerebro_web_fetch_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
@@ -961,6 +970,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
+  },
+  {
+    key: "cerebro_test_as_user",
+    label: "Test as user",
+    group: "permissions",
+    description:
+      "Show the 'Test as user' entry in the profile menu: pick a user + an agent and see how every tool resolves for that combination — the same answer as the tool-policy explain CLI, with the user's real groups resolved automatically. The feature is locked behind the tools:test-as-user permission (default Allow for the workspace owner only), so turning this flag on exposes nothing to members who lack the permission. FIR-1771.",
   },
   {
     key: "cerebro_web_fetch_policy",

@@ -78,6 +78,8 @@ import {
 } from "@multica/ui/components/ui/popover";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm pins when cerebro_channels is OFF
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 Test as user profile-menu entry + dialog host.
+import { CerebroTestAsUserMenuItem, CerebroTestAsUserDialogHost } from "@multica/cerebro-tool-policy";
 // CEREBRO-PATCH(dashboard-nav): JEH-684 sidebar entry for cerebro dashboard
 import { DashboardNavItem } from "@multica/cerebro-dashboard/views/dashboard-nav-item";
 // CEREBRO-PATCH(cerebro-tasks-sidebar): JEH-900 sidebar entry for cerebro tasks page
@@ -731,6 +733,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </>
                   )}
                   <DropdownMenuSeparator />
+                  {/* CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 bottom-of-menu Test as user entry (self-gates on flag + permission). */}
+                  <CerebroTestAsUserMenuItem wsId={workspace?.id ?? ""} />
                   <DropdownMenuGroup>
                     <DropdownMenuItem variant="destructive" onClick={logout}>
                       <LogOut className="h-3.5 w-3.5" />
@@ -739,6 +743,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
+              {/* CEREBRO-PATCH(cerebro-test-as-user): FIR-1771 dialog host outside the dropdown so it survives close. */}
+              <CerebroTestAsUserDialogHost wsId={workspace?.id ?? ""} />
             </SidebarMenuItem>
           </SidebarMenu>
           <SidebarMenu>
