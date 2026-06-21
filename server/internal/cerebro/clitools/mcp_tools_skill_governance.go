@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-skill-governance): FIR-2655 — expose the
 // skill ownership / change-request / version / fork governance flow as MCP

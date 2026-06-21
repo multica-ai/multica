@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-test): cerebro modification of upstream file
 
@@ -11,15 +11,15 @@ import (
 // when a "subagent" tracks a different session and then completes it,
 // the parent's ambient pointer must remain intact.
 func TestMcpSessionState_AmbientIsolation(t *testing.T) {
-	var s mcpSessionState
+	var s SessionState
 
 	// Parent attaches to its issue and becomes ambient.
-	s.track("parent-ws", "parent-issue", 0)
-	s.setAmbient("parent-ws", "parent-issue")
+	s.Track("parent-ws", "parent-issue", 0)
+	s.SetAmbient("parent-ws", "parent-issue")
 
 	// Subagent attaches to its own issue WITHOUT becoming ambient
 	// (set_active=false in attach_session).
-	s.track("child-ws", "child-issue", 0)
+	s.Track("child-ws", "child-issue", 0)
 
 	// Subagent completes its session.
 	s.forget("child-ws")
@@ -28,7 +28,7 @@ func TestMcpSessionState_AmbientIsolation(t *testing.T) {
 	}
 
 	// Parent's ambient must still be intact.
-	wsID, issueID := s.ambient()
+	wsID, issueID := s.Ambient()
 	if wsID != "parent-ws" || issueID != "parent-issue" {
 		t.Fatalf("parent ambient was clobbered by subagent: got (%q,%q), want (parent-ws,parent-issue)", wsID, issueID)
 	}
@@ -37,9 +37,9 @@ func TestMcpSessionState_AmbientIsolation(t *testing.T) {
 // TestMcpSessionState_PerSessionSeq verifies that two parallel sessions
 // each have an independent seq counter.
 func TestMcpSessionState_PerSessionSeq(t *testing.T) {
-	var s mcpSessionState
-	s.track("a", "issue-a", 0)
-	s.track("b", "issue-b", 0)
+	var s SessionState
+	s.Track("a", "issue-a", 0)
+	s.Track("b", "issue-b", 0)
 
 	if got := s.nextSeq("a"); got != 1 {
 		t.Fatalf("a seq #1 = %d, want 1", got)
@@ -61,9 +61,9 @@ func TestMcpSessionState_PerSessionSeq(t *testing.T) {
 // TestMcpSessionState_PerSessionNamed verifies that each session gets its
 // own first-activity auto-name event independently.
 func TestMcpSessionState_PerSessionNamed(t *testing.T) {
-	var s mcpSessionState
-	s.track("a", "issue-a", 0)
-	s.track("b", "issue-b", 0)
+	var s SessionState
+	s.Track("a", "issue-a", 0)
+	s.Track("b", "issue-b", 0)
 
 	if !s.markNamed("a") {
 		t.Fatalf("markNamed(a) first call must return true")
@@ -80,7 +80,7 @@ func TestMcpSessionState_PerSessionNamed(t *testing.T) {
 // independent sessions from many goroutines and verifying that each session's
 // seq counter ends at exactly the number of nextSeq calls it received.
 func TestMcpSessionState_ConcurrentSessions(t *testing.T) {
-	var s mcpSessionState
+	var s SessionState
 
 	const sessions = 8
 	const callsPerSession = 200
@@ -88,7 +88,7 @@ func TestMcpSessionState_ConcurrentSessions(t *testing.T) {
 	ids := make([]string, sessions)
 	for i := 0; i < sessions; i++ {
 		ids[i] = string(rune('a' + i))
-		s.track(ids[i], "issue", 0)
+		s.Track(ids[i], "issue", 0)
 	}
 
 	var wg sync.WaitGroup
@@ -114,14 +114,14 @@ func TestMcpSessionState_ConcurrentSessions(t *testing.T) {
 // TestMcpSessionState_AmbientCompleteClears verifies that completing the
 // ambient session DOES clear the ambient pointer.
 func TestMcpSessionState_AmbientCompleteClears(t *testing.T) {
-	var s mcpSessionState
-	s.track("ws", "issue", 0)
-	s.setAmbient("ws", "issue")
+	var s SessionState
+	s.Track("ws", "issue", 0)
+	s.SetAmbient("ws", "issue")
 
 	if !s.clearAmbientIfMatches("ws") {
 		t.Fatalf("clearAmbientIfMatches must return true when wsID is the ambient one")
 	}
-	wsID, issueID := s.ambient()
+	wsID, issueID := s.Ambient()
 	if wsID != "" || issueID != "" {
 		t.Fatalf("ambient not cleared: got (%q,%q)", wsID, issueID)
 	}

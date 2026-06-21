@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/clitools"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
 )
@@ -21,7 +22,7 @@ import (
 // parent attaches, subagent attaches with set_active=false and then
 // completes its own session — parent's ambient pointer must be intact.
 //
-// Unlike the unit tests in cmd_mcp_test.go that drive mcpSessionState
+// Unlike the unit tests in cmd_mcp_test.go that drive clitools.SessionState
 // directly, this test exercises the full registered-tool dispatch path:
 // it creates a real *mcp.Server, calls registerTools with a real cli.APIClient
 // pointing at an httptest mock of the Multica API, and invokes attach_session
@@ -32,8 +33,9 @@ func TestJEH420_EndToEnd(t *testing.T) {
 
 	srv := mcp.NewServer("multica", "test")
 	client := cli.NewAPIClient(mock.URL, "ws-test", "token-test")
-	var sessionState mcpSessionState
-	registerTools(srv, client, &sessionState, "ws-test", "proj-test", "" /* gitRoot */)
+	// CEREBRO-PATCH(mcp-cli-clitools-extract): FIR-1449 tool registry lifted to importable clitools package.
+	var sessionState clitools.SessionState
+	clitools.RegisterTools(srv, client, &sessionState, "ws-test", "proj-test", "" /* gitRoot */)
 
 	ctx := context.Background()
 
@@ -116,8 +118,8 @@ func TestExplicitWorkSessionID_Required(t *testing.T) {
 
 	srv := mcp.NewServer("multica", "test")
 	client := cli.NewAPIClient(mock.URL, "ws-test", "token-test")
-	var sessionState mcpSessionState
-	registerTools(srv, client, &sessionState, "ws-test", "proj-test", "")
+	var sessionState clitools.SessionState
+	clitools.RegisterTools(srv, client, &sessionState, "ws-test", "proj-test", "")
 
 	ctx := context.Background()
 

@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-credentials): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire for credential_list + credential_audit_log).
 
@@ -314,7 +314,7 @@ var mockCredentials = []mockCredential{
 	},
 	{
 		ID: "cred-002", WorkspaceID: mockWorkspaceID, Type: "mcp_bearer",
-		Name: "multica MCP server",
+		Name:   "multica MCP server",
 		Status: "active", RedactedValue: "mcp_***...***qK",
 		CreatedAt: "2026-02-20T08:15:00Z", UpdatedAt: "2026-02-20T08:15:00Z",
 		ExpiresAt: "2026-05-22T08:15:00Z",
@@ -328,14 +328,14 @@ var mockCredentials = []mockCredential{
 	},
 	{
 		ID: "cred-005", WorkspaceID: mockWorkspaceID, Type: "webhook_secret",
-		Name: "GitHub deploy webhook",
+		Name:   "GitHub deploy webhook",
 		Status: "expired", RedactedValue: "whsec_***...***99",
 		CreatedAt: "2025-08-01T12:00:00Z", UpdatedAt: "2026-04-30T00:00:00Z",
 		ExpiresAt: "2026-04-30T00:00:00Z",
 	},
 	{
 		ID: "cred-006", WorkspaceID: mockWorkspaceID, Type: "oauth_token",
-		Name: "Slack OAuth (notifications)",
+		Name:   "Slack OAuth (notifications)",
 		Status: "revoked", RedactedValue: "xoxb-***...***",
 		CreatedAt: "2026-01-04T14:00:00Z", UpdatedAt: "2026-04-20T09:30:00Z",
 	},

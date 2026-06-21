@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools): cerebro modification of upstream file
 
@@ -57,11 +57,11 @@ func captureGitDiffStat(gitRoot string) string {
 // ambient session to the repo binding. Only called when ambient state has
 // actually changed — subagent attaches with set_active=false skip this and
 // therefore do not clobber the parent's persisted ambient slot.
-func persistAmbient(gitRoot string, session *mcpSessionState) {
+func persistAmbient(gitRoot string, session *SessionState) {
 	if gitRoot == "" {
 		return
 	}
-	wsID, issueID := session.ambient()
+	wsID, issueID := session.Ambient()
 	bindings, err := mcp.LoadRepoBindings()
 	if err != nil {
 		return
@@ -96,7 +96,7 @@ func optBool(args map[string]any, key string, defaultVal bool) bool {
 	return b
 }
 
-func registerTools(srv *mcp.Server, client *cli.APIClient, session *mcpSessionState, workspaceID, projectID, gitRoot string) {
+func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState, workspaceID, projectID, gitRoot string) {
 	registerArtifactTools(srv, client)
 	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
 	registerCerebroGroupTools(srv, client)
@@ -627,7 +627,7 @@ PARALLEL-SAFETY WARNING: ` + "`active_session`" + ` is the AMBIENT pointer — s
 
 		// Include ambient session info. NOTE: ambient is shared across this
 		// MCP process — see description warning above.
-		ambientID, ambientIssueID := session.ambient()
+		ambientID, ambientIssueID := session.Ambient()
 		if ambientID != "" {
 			active := map[string]any{
 				"work_session_id": ambientID,
@@ -736,9 +736,9 @@ The persisted ambient slot survives MCP restarts so a single-agent flow can resu
 		}
 
 		id, _ := result["id"].(string)
-		session.track(id, issueID, 0)
+		session.Track(id, issueID, 0)
 		if setActive {
-			session.setAmbient(id, issueID)
+			session.SetAmbient(id, issueID)
 			persistAmbient(gitRoot, session)
 		}
 
@@ -931,9 +931,9 @@ The returned ` + "`work_session_id`" + ` is the SAME id you passed in — captur
 			seq = len(msgs)
 		}
 
-		session.track(wsID, issueID, seq)
+		session.Track(wsID, issueID, seq)
 		if setActive {
-			session.setAmbient(wsID, issueID)
+			session.SetAmbient(wsID, issueID)
 			persistAmbient(gitRoot, session)
 		}
 
@@ -975,9 +975,9 @@ CAPTURE the returned new work_session_id and pass it to subsequent ` + "`report_
 		newID, _ := result["id"].(string)
 		issueID, _ := result["issue_id"].(string)
 
-		session.track(newID, issueID, 0)
+		session.Track(newID, issueID, 0)
 		if setActive {
-			session.setAmbient(newID, issueID)
+			session.SetAmbient(newID, issueID)
 			persistAmbient(gitRoot, session)
 		}
 

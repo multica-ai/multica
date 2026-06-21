@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // TECH-3077: MCP tools for skill metadata filtering and audit.
 

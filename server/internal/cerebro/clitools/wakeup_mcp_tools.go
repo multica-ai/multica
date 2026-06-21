@@ -1,5 +1,5 @@
 // CEREBRO-PATCH(cerebro-wakeup-mcp-tools): agent wakeup MCP tools.
-package main
+package clitools
 
 import (
 	"context"

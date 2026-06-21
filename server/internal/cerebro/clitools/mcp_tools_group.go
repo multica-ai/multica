@@ -1,5 +1,5 @@
 // CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 cerebro-only file — group MCP tools.
-package main
+package clitools
 
 import (
 	"context"

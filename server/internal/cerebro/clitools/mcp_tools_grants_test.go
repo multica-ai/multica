@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-test): tests for the Persona grant MCP tools (JEH-1181) — backend swapped via factory, mock still used here.
 

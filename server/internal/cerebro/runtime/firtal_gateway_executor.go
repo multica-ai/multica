@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -71,6 +72,13 @@ type FirtalGatewayExecutor struct {
 	connDeny *toolpolicy.Store
 
 	attachmentStorage storage.Storage
+
+	// routerHandler is the server's own HTTP router, used by the FIR-1449
+	// in-process bridge to reach the full CLI/MCP tool surface via a loopback
+	// transport carrying the task's identity. Nil disables the bridge (default).
+	// Set only by SetInProcessBridge, which the server calls under the
+	// MULTICA_SERVER_FIRTAL_GATEWAY_INPROCESS_BRIDGE env flag.
+	routerHandler http.Handler
 }
 
 // SetConnectionDenyStore wires the always-on connection per-tool deny resolver
@@ -886,6 +894,12 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	if e.registry != nil {
 		taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 		taskRegistry.db = e.registry.db
+		// FIR-1449 step 2: bridge the full Multica CLI/MCP tool surface into this
+		// task's registry BEFORE the permission gating below runs, so bridged
+		// tools are governed by the same cascade/policy as native ones (no-op
+		// unless the in-process bridge is enabled). The cascade decides exposure;
+		// the bridge only supplies handlers.
+		e.bridgeInProcessTools(ctx, taskRegistry, agentID, workspaceID, originalUserID, meta.TaskID)
 		// FIR-1512 Step 1 (engine-flip): when this agent is tool-policy scoped,
 		// the tool list is built from the unified Allow/Ask/Deny chain — the same
 		// engine that guards each call — so the grant cascade is retired for

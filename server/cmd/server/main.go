@@ -439,6 +439,8 @@ func main() {
 		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
+		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 default-off in-process bridge to the full CLI tool surface, controlled rollout via env.
+		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
 		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's approved
 		// Multica MCP tool package on every startup (idempotent upsert).

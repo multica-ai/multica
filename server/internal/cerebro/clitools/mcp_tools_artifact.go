@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-artifact): cerebro modification of upstream file
 
@@ -18,7 +18,7 @@ import (
 //
 // Lives in its own file so the feature stays additive — no edits to
 // cmd_mcp_tools.go beyond a single registerArtifactTools(srv, client) call
-// inside registerTools().
+// inside RegisterTools().
 func registerArtifactTools(srv *mcp.Server, client *cli.APIClient) {
 	// -----------------------------------------------------------------------
 	// create_artifact

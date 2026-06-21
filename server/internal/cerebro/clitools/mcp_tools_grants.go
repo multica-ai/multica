@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants): new cerebro file for the
 // Persona grant control plane MCP tools (JEH-1181). Lives next to the

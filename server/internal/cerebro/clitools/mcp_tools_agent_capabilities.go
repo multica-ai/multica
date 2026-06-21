@@ -1,4 +1,4 @@
-package main
+package clitools
 
 // CEREBRO-PATCH(mcp-agent-capabilities): TECH-3642 `get_agent_capabilities` MCP
 // tool — the MCP surface of the unified per-agent capabilities card. Thin client
@@ -15,7 +15,7 @@ import (
 
 func registerCerebroAgentCapabilitiesTools(srv *mcp.Server, client *cli.APIClient) {
 	srv.RegisterTool(mcp.Tool{
-		Name: "get_agent_capabilities",
+		Name:        "get_agent_capabilities",
 		Description: `Get an agent's capabilities card: what it can do (skills), may use (tools), has access to (credentials — names/types only, never secret values), and is limited by (sandbox + MCP servers). Use this to understand what an agent is set up to handle before assigning or routing work to it.`,
 		InputSchema: map[string]any{
 			"type":     "object",

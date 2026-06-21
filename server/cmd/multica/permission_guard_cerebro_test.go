@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/clitools"
 	"github.com/multica-ai/multica/server/internal/cerebro/permguard"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -22,8 +23,8 @@ func TestPermissionGuard_MCPToolsInventoried(t *testing.T) {
 	// The arguments are placeholders — the test never invokes a handler,
 	// only enumerates registered tool names.
 	client := cli.NewAPIClient("http://invalid", "", "")
-	var state mcpSessionState
-	registerTools(srv, client, &state, "", "", "")
+	var state clitools.SessionState
+	clitools.RegisterTools(srv, client, &state, "", "", "")
 
 	var ids []string
 	for _, tool := range srv.Tools() {
