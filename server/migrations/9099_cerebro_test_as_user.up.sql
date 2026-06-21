@@ -31,4 +31,4 @@ SELECT m.workspace_id,
        m.user_id
 FROM member m
 WHERE m.user_id = 'd7a6fa72-e68d-48ca-86be-2ab4313ecf44'
-ON CONFLICT (workspace_id, tool_key, layer, subject_id) DO NOTHING;
+ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING;
