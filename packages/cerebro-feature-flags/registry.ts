@@ -233,6 +233,14 @@ export type CerebroFlagKey =
   // gates so genuine dynamics ("only in business hours") can be expressed.
   // Default OFF — structured terms cover the common cases.
   | "cerebro_policy_cel"
+  // FIR-1609 Phase 7 keystone: lets an EXPLICIT tool-policy Allow row grant
+  // credential access, making the unified chain an Allow-source for secrets so the
+  // legacy grant table can eventually be retired. While OFF the chain stays a pure
+  // tighten-only cap and credential governance is byte-for-byte the prior behaviour;
+  // a no-row default NEVER grants, so this can never open a default-allow hole on
+  // reveal. Default OFF — flip on only after the grant→tool-policy migration is
+  // verified 1:1.
+  | "cerebro_credential_chain_grant"
   // TECH-3196: Agent Vault — per-agent secret brokering via the internal path.
   | "cerebro_agent_vault"
   // TECH-3491: per-device draft persistence for the comment / channel / DM
@@ -523,6 +531,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // Conditions stays dormant; structured host/action terms bite, an `expr` rule
   // fails closed until an admin opts in. No deploy-time behaviour change.
   cerebro_policy_cel: false,
+  // FIR-1609 Phase 7 keystone: OFF by default — the unified chain stays a pure
+  // tighten-only cap for credentials; an explicit Allow row only grants once an
+  // admin flips this on, after the grant→tool-policy migration is verified 1:1.
+  // No deploy-time behaviour change; can never open a default-allow hole on reveal.
+  cerebro_credential_chain_grant: false,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -1351,6 +1364,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Let a per-tool rule carry a CEL expression as its WHEN condition, for genuine dynamics that the structured terms (host allowlist, action list) can't express — for example 'only during business hours'. Off by default: only the structured conditions apply, and a rule that carries an expression stays inert (it fails closed, never silently allows). On wires the expression evaluator into both the gateway and local-runtime gates. No restart needed. FIR-1609.",
+  },
+  {
+    key: "cerebro_credential_chain_grant",
+    label: "Grant credentials from the tool-policy chain",
+    group: "permissions",
+    description:
+      "Let an explicit Allow rule in the unified per-tool policy GRANT access to a credential, instead of only ever tightening it. This makes the one policy chain the place to grant secret access, so the old separate grant store can eventually be retired. Off by default and fail-safe: with no explicit rule a credential stays deny-by-default exactly as today, so turning it off can never widen who can reveal a secret. Only flip on once existing grants have been migrated onto the chain 1:1. FIR-1609 Phase 7.",
   },
 ];
 

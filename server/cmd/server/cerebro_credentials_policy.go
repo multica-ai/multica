@@ -169,17 +169,25 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 		return credentials.Deny("multica permission engine failed: " + err.Error())
 	}
 
-	// 2. ADMIN/SYSTEM CAPS — tighten-only. Base=Allow, so an unconfigured chain
-	// adds nothing; Deny|Ask rows on this credential (id or type scope) tighten
-	// the floor. Fails CLOSED on any resolve/lookup error.
-	cap, capReason, err := m.adminCap(ctx, req, action, idResource, typeResource)
+	// 2. CHAIN SIGNAL — one resolution of the unified tool-policy chain per scope,
+	// reporting BOTH roles the chain plays for credentials:
+	//   - cap:   the more-restrictive Deny|Ask it imposes (tighten-only, Base=Allow,
+	//            so no rows ⇒ Allow ⇒ no cap). This is the pre-FIR-1609-Phase-7-keystone
+	//            behaviour and is ALWAYS active.
+	//   - grant: an EXPLICIT Allow row (DecidedBy set) granting access at either
+	//            scope — the keystone that lets the chain be an Allow-source so the
+	//            old grant table can be retired. Gated behind cerebro_credential_chain_grant
+	//            (default OFF) and never counts a no-row Base=Allow result, so it can
+	//            NEVER open a default-allow hole on reveal. Fails CLOSED on any error.
+	cap, capReason, granted, grantReason, err := m.chainCredentialSignal(ctx, req, action, idResource, typeResource)
 	if err != nil {
-		return credentials.Deny("credential policy cap resolve failed: " + err.Error())
+		return credentials.Deny("credential policy chain resolve failed: " + err.Error())
 	}
 
-	// 3. COMBINE — the cap can only tighten the floor, never loosen it, so the
-	// result is never more permissive than the grant floor alone (no regression).
-	final, reason := foldCredentialCap(floor, cap, floorReason, capReason)
+	// 3. COMBINE — union the grant authorities (grant floor OR explicit chain Allow),
+	// then apply the tighten-only cap. The cap can only tighten, never loosen, so the
+	// result is never looser than both the floor and an explicit per-credential Deny.
+	final, reason := foldCredentialVerdict(floor, floorReason, granted, grantReason, cap, capReason)
 
 	switch final {
 	case toolpolicy.SettingAllow:
@@ -212,6 +220,29 @@ func foldCredentialCap(floor, cap toolpolicy.Setting, floorReason, capReason str
 		return final, capReason
 	}
 	return final, floorReason
+}
+
+// foldCredentialVerdict combines the two grant authorities and the tighten-only
+// cap into the final credential verdict (FIR-1609 Phase 7 keystone).
+//
+// Step 1 — UNION the grant authorities: access is granted if the deny-by-default
+// grant floor allows OR an explicit tool-policy Allow row grants it. An explicit
+// chain Allow only ever RAISES the floor toward Allow; it can never tighten (that
+// is the cap's job) and never fabricates a grant from a no-row default (the caller
+// passes granted=false in that case), so deny-by-default is preserved.
+//
+// Step 2 — apply the tighten-only cap exactly as before, so a per-credential admin
+// Deny (or Ask) still overrides even a freshly granted credential. Security
+// invariant: the result is never looser than min(floor-or-grant) AND never looser
+// than the cap — identical to foldCredentialCap once the grant is folded in.
+func foldCredentialVerdict(floor toolpolicy.Setting, floorReason string, granted bool, grantReason string, cap toolpolicy.Setting, capReason string) (toolpolicy.Setting, string) {
+	base, baseReason := floor, floorReason
+	// An explicit chain Allow grants only when the floor did not already allow —
+	// it lifts an Ask/Deny floor to Allow. It never loosens the cap below.
+	if granted && base != toolpolicy.SettingAllow {
+		base, baseReason = toolpolicy.SettingAllow, grantReason
+	}
+	return foldCredentialCap(base, cap, baseReason, capReason)
 }
 
 // grantFloor computes the deny-by-default credential verdict from grants alone,
@@ -255,63 +286,111 @@ func (m *multicaCredentialPolicy) grantFloor(ctx context.Context, req credential
 	return toolpolicy.SettingDeny, "", "no matching credential grant (id or type)", nil
 }
 
-// adminCap resolves the unified tool-policy chain for both credential scopes and
-// returns the more-restrictive cap (Deny at EITHER scope caps — a per-credential
-// id Deny is not weakened by a broader type grant). Base=Allow means no rows ⇒
-// Allow ⇒ no cap. nil store ⇒ Allow. Any lookup/resolve error fails CLOSED.
-func (m *multicaCredentialPolicy) adminCap(ctx context.Context, req credentials.PolicyRequest, action, idResource, typeResource string) (toolpolicy.Setting, string, error) {
+// flagCredentialChainGrant is the workspace feature-flag key (default OFF) that
+// lets an EXPLICIT tool-policy Allow row grant credential access — the FIR-1609
+// Phase 7 keystone that makes the unified chain an Allow-source so the legacy
+// grant table can eventually be retired. While OFF, the chain stays a pure
+// tighten-only cap and credential governance is byte-for-byte the prior behaviour.
+const flagCredentialChainGrant = "cerebro_credential_chain_grant"
+
+// chainCredentialSignal resolves the unified tool-policy chain once per credential
+// scope (id, then type fallback) and reports BOTH roles the chain plays:
+//
+//   - cap   — the more-restrictive Deny|Ask the chain imposes (Deny at EITHER scope
+//     caps; Base=Allow ⇒ no rows ⇒ Allow ⇒ no cap). ALWAYS active; identical to the
+//     prior adminCap.
+//   - grant — true iff an EXPLICIT Allow row (eff.DecidedBy != "", i.e. a real
+//     authored layer, never the no-row Base default) allows at either scope, AND the
+//     cerebro_credential_chain_grant flag is on for this workspace. A no-row Base=Allow
+//     result is NOT a grant, so this can never open a default-allow hole on reveal.
+//
+// nil store ⇒ Allow cap, no grant (pure grant-floor behaviour). Any lookup/resolve
+// error fails CLOSED (cap=Deny, grant=false).
+func (m *multicaCredentialPolicy) chainCredentialSignal(ctx context.Context, req credentials.PolicyRequest, action, idResource, typeResource string) (cap toolpolicy.Setting, capReason string, grant bool, grantReason string, err error) {
 	if m.caps == nil {
-		return toolpolicy.SettingAllow, "", nil
+		return toolpolicy.SettingAllow, "", false, "", nil
 	}
 	base, err := m.actorQueryBase(ctx, req)
 	if err != nil {
-		return toolpolicy.SettingDeny, "", err
+		return toolpolicy.SettingDeny, "", false, "", err
 	}
+	grantEnabled := m.credentialChainGrantEnabled(ctx, base.WorkspaceID)
 
-	capID, reasonID, err := m.resolveCap(ctx, base, action, idResource)
-	if err != nil {
-		return toolpolicy.SettingDeny, "", err
-	}
-	cap, reason := capID, reasonID
+	cap = toolpolicy.SettingAllow
+	// id scope is most specific and named first for attribution.
+	resources := []string{idResource}
 	if typeResource != "" {
-		capType, reasonType, err := m.resolveCap(ctx, base, action, typeResource)
-		if err != nil {
-			return toolpolicy.SettingDeny, "", err
+		resources = append(resources, typeResource)
+	}
+	for _, resource := range resources {
+		eff, rerr := m.resolveChainEffective(ctx, base, action, resource)
+		if rerr != nil {
+			return toolpolicy.SettingDeny, "", false, "", rerr
 		}
-		if toolpolicy.MoreRestrictive(cap, capType) == capType && capType != cap {
-			cap, reason = capType, reasonType
+		switch {
+		case eff.Setting == toolpolicy.SettingAllow && eff.DecidedBy != "":
+			// EXPLICIT Allow row — an Allow-source grant (keystone). Only honoured
+			// when the flag is on; id scope wins attribution (set once).
+			if grantEnabled && !grant {
+				grant, grantReason = true, "granted by tool-policy: "+eff.Reason
+			}
+		case eff.Setting == toolpolicy.SettingDeny || eff.Setting == toolpolicy.SettingAsk:
+			// Tighten-only cap — Deny at either scope caps (more-restrictive wins).
+			if toolpolicy.MoreRestrictive(cap, eff.Setting) == eff.Setting && eff.Setting != cap {
+				cap, capReason = eff.Setting, eff.Reason
+			}
 		}
 	}
-	return cap, reason, nil
+	return cap, capReason, grant, grantReason, nil
 }
 
-// resolveCap runs one chain resolution with Base=Allow and validates the result
-// is a concrete setting (fail CLOSED on anything unexpected).
-func (m *multicaCredentialPolicy) resolveCap(ctx context.Context, base toolpolicy.Query, action, resource string) (toolpolicy.Setting, string, error) {
+// resolveChainEffective runs one chain resolution with Base=Allow and validates the
+// result is a concrete setting (fail CLOSED on anything unexpected). It returns the
+// full Effective so the caller can distinguish an EXPLICIT Allow row (DecidedBy set)
+// from the no-row Base=Allow default (DecidedBy empty) — the difference between a
+// real grant and a hole.
+func (m *multicaCredentialPolicy) resolveChainEffective(ctx context.Context, base toolpolicy.Query, action, resource string) (toolpolicy.Effective, error) {
 	q := base
 	q.ToolKey = action
 	q.ResourcePattern = resource
 	q.Base = toolpolicy.SettingAllow
 	// CEREBRO-PATCH(credential-action-condition): FIR-1609 — derive the action verb
 	// (credential.reveal→"reveal"…) so an action-scoped Condition bites on credential
-	// cap rows too. Without it ctx.Action is "" and an action-scoped Deny silently
-	// drops; mirrors the repo gate. No conditioned credential rows exist yet, so this
-	// is behaviour-preserving.
+	// rows too. Without it ctx.Action is "" and an action-scoped Deny silently drops;
+	// mirrors the repo gate.
 	q.RequestContext = toolpolicy.RequestContext{Action: toolpolicy.ActionOf(action)}
-	// Inject the CEL evaluator (flag-gated) so an Expr condition on a credential cap
-	// row evaluates rather than failing closed undecided — FIR-1609, twin of the
+	// Inject the CEL evaluator (flag-gated) so an Expr condition on a credential row
+	// evaluates rather than failing closed undecided — FIR-1609, twin of the
 	// daemon/registry gates. nil (flag off) keeps the prior fail-closed behaviour.
 	q.Eval = m.policyCELEvaluator(ctx, q.WorkspaceID)
 	eff, err := m.caps.Resolve(ctx, q)
 	if err != nil {
-		return toolpolicy.SettingDeny, "", err
+		return toolpolicy.Effective{}, err
 	}
 	switch eff.Setting {
 	case toolpolicy.SettingAllow, toolpolicy.SettingAsk, toolpolicy.SettingDeny:
-		return eff.Setting, eff.Reason, nil
+		return eff, nil
 	default:
-		return toolpolicy.SettingDeny, "credential cap returned non-concrete setting", nil
+		return toolpolicy.Effective{Setting: toolpolicy.SettingDeny, Reason: "credential chain returned non-concrete setting"}, nil
 	}
+}
+
+// credentialChainGrantEnabled reads the default-OFF cerebro_credential_chain_grant
+// flag for the workspace. A lookup miss or DB error resolves to OFF — fail safe, so
+// the chain stays a pure cap and the grant table remains the sole Allow-source.
+func (m *multicaCredentialPolicy) credentialChainGrantEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	if m.cerebroQueries == nil {
+		return false
+	}
+	enabled, err := m.cerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+		WorkspaceID: workspaceID,
+		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		FlagKey:     flagCredentialChainGrant,
+	})
+	if err != nil {
+		return false
+	}
+	return enabled
 }
 
 // actorQueryBase maps the credential actor onto the chain's subject ids. A member

@@ -238,10 +238,19 @@ live enforcement path** (no UI/seed creates such grants), so the recommendation 
 those features in the consolidation unless a concrete need surfaces.
 
 **Blocking prerequisites before the table can be dropped:**
-1. Give **credential** enforcement a home on the tool-policy chain (today there is none) — e.g.
-   a `tools:credential-reveal`-style capability with **Base=Deny**, mirroring the agent-browser
-   precedent (`daemon_tool_policy_cerebro.go:289`). Until then, dropping the table removes the
-   only live secret gate.
+1. Give **credential** enforcement a home on the tool-policy chain. **IN PROGRESS (FIR-1609
+   Phase 7 keystone):** `cerebro_credentials_policy.go` now consults the chain as an
+   **Allow-source** — an explicit Allow row on `credential.<action>` / `cerebro-credential:<uuid>`
+   grants access (`chainCredentialSignal` → `foldCredentialVerdict`), flag-gated behind
+   `cerebro_credential_chain_grant` (default OFF). This is the safe inverse of a Base=Deny
+   capability: rather than flip the chain's default to Deny for credentials (which the monotone
+   fold cannot express via `q.Base` — an Allow can never loosen a Deny base), the grant is
+   recognised **only** from an explicit authored Allow row (`Effective.DecidedBy != ""`), never a
+   no-row Base=Allow default — so it can never open a default-allow hole on reveal, and the grant
+   floor still supplies deny-by-default until grants are migrated. **Remaining before drop:**
+   migrate existing `cerebro_workspace_grant` credential grants → tool-policy Allow rows
+   (fail-closed if not 1:1), verify, then flip the flag on and retire the floor. Until that
+   migration + verification, the table is still the only live secret gate.
 2. Decide the fate of `approval_required` / `time_window_*` / `classification_ceiling`.
 3. Repoint or remove: workspace-copy, grants UI/handler/CLI/MCP, the `get_grant` tool, the
    audit FK (`cerebro_workspace_grant_audit`).

@@ -82,3 +82,56 @@ func TestFoldCredentialCap_PerCredentialDenyCaps(t *testing.T) {
 		t.Fatalf("granted+adminDeny -> reason %q, want admin deny", reason)
 	}
 }
+
+// TestFoldCredentialVerdict_NoGrantIsPreviousBehaviour is the keystone's safety
+// invariant (FIR-1609 Phase 7): with granted=false — the case for the flag OFF, for
+// no credential rows, and for any no-row Base=Allow default — the verdict MUST be
+// byte-for-byte foldCredentialCap(floor, cap). The chain grant path adds nothing
+// until an explicit Allow row AND the flag flip both occur.
+func TestFoldCredentialVerdict_NoGrantIsPreviousBehaviour(t *testing.T) {
+	settings := []toolpolicy.Setting{toolpolicy.SettingAllow, toolpolicy.SettingAsk, toolpolicy.SettingDeny}
+	for _, floor := range settings {
+		for _, cap := range settings {
+			gotS, gotR := foldCredentialVerdict(floor, "floor-reason", false, "grant-reason", cap, "cap-reason")
+			wantS, wantR := foldCredentialCap(floor, cap, "floor-reason", "cap-reason")
+			if gotS != wantS || gotR != wantR {
+				t.Errorf("floor=%s cap=%s no-grant -> (%s,%q), want (%s,%q) — keystone changed default behaviour",
+					floor, cap, gotS, gotR, wantS, wantR)
+			}
+		}
+	}
+}
+
+// TestFoldCredentialVerdict_ExplicitGrantLiftsFloor pins the keystone's added
+// power: an explicit chain Allow grant lifts an Ask/Deny floor to Allow (the chain
+// becomes an Allow-source), but only when no cap tightens it back down.
+func TestFoldCredentialVerdict_ExplicitGrantLiftsFloor(t *testing.T) {
+	for _, floor := range []toolpolicy.Setting{toolpolicy.SettingAsk, toolpolicy.SettingDeny} {
+		final, reason := foldCredentialVerdict(floor, "no grant", true, "granted by tool-policy", toolpolicy.SettingAllow, "")
+		if final != toolpolicy.SettingAllow {
+			t.Errorf("floor=%s + chain grant + no cap -> %s, want allow", floor, final)
+		}
+		if reason != "granted by tool-policy" {
+			t.Errorf("floor=%s grant -> reason %q, want grant attribution", floor, reason)
+		}
+	}
+}
+
+// TestFoldCredentialVerdict_CapStillOverridesGrant is the security ceiling: a chain
+// Allow GRANT must never beat a tighten-only Deny/Ask cap. A secret freshly granted
+// on the chain but carrying a per-credential admin Deny still resolves to Deny —
+// the grant is an Allow-SOURCE, not an override of an explicit denial.
+func TestFoldCredentialVerdict_CapStillOverridesGrant(t *testing.T) {
+	final, reason := foldCredentialVerdict(toolpolicy.SettingDeny, "no grant", true, "granted by tool-policy", toolpolicy.SettingDeny, "admin deny")
+	if final != toolpolicy.SettingDeny {
+		t.Fatalf("grant + adminDeny -> %s, want deny (cap must win)", final)
+	}
+	if reason != "admin deny" {
+		t.Fatalf("grant + adminDeny -> reason %q, want admin deny", reason)
+	}
+	// Ask cap on a granted credential routes to approval, never silently allows.
+	askFinal, _ := foldCredentialVerdict(toolpolicy.SettingDeny, "no grant", true, "granted", toolpolicy.SettingAsk, "needs approval")
+	if askFinal != toolpolicy.SettingAsk {
+		t.Fatalf("grant + adminAsk -> %s, want ask", askFinal)
+	}
+}
