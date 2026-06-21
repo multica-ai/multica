@@ -93,6 +93,22 @@ vi.mock("@multica/cerebro-terminal", () => ({
   openTerminalPopout: vi.fn(),
 }));
 
+// CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — stub the feature-flag +
+// wakeup hooks so this task-focused test doesn't need a QueryClient + workspace
+// provider. Wakeup folding has its own coverage in @multica/cerebro-wakeup.
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
+vi.mock("@multica/cerebro-wakeup", () => ({
+  useIssueWakeups: () => ({
+    wakeups: [],
+    now: 0,
+    cancel: vi.fn(),
+    cancellingIds: new Set<string>(),
+  }),
+  WakeupActivityRow: () => null,
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------

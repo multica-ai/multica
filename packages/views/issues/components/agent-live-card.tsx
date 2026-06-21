@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon, AlarmClock } from "lucide-react"; // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 AlarmClock for wakeup-only fold
 // CEREBRO-PATCH(agent-live-card-terminal-link): use cerebro-terminal hook to render an "Open terminal" affordance for tasks running in interactive presentation mode.
 import { useIssueTerminalLink, openTerminalPopout } from "@multica/cerebro-terminal";
 import { api } from "@multica/core/api";
@@ -33,6 +33,10 @@ import {
   parseRuntimePauseWaitReason,
   runtimePauseQueuedLabel,
 } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — fold pending wakeups into this
+// bar's multi-collapse so a running agent + a scheduled run read as one bar, not two.
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useIssueWakeups, WakeupActivityRow } from "@multica/cerebro-wakeup";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -78,11 +82,20 @@ interface TaskState {
 
 interface AgentLiveCardProps {
   issueId: string;
+  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — issue UUID for the
+  // wakeups fetch (the /cerebro/wakeups endpoint requires a UUID, not the route
+  // identifier `issueId` used for tasks). Optional so upstream callers compile.
+  wakeupIssueId?: string;
 }
 
-export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
+export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — pending wakeups for this
+  // issue, folded into the bar below. Gated by cerebro_wakeup_bar; only fetched when
+  // a UUID is available.
+  const wakeupBarEnabled = useFeatureFlag("cerebro_wakeup_bar");
+  const wake = useIssueWakeups(wakeupIssueId ?? "", wakeupBarEnabled && !!wakeupIssueId);
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   // Cancel confirmation is hoisted here (not per-card) so a single dialog
   // serves both the inline single banner and the multi-agent popover. A
@@ -281,7 +294,10 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     }
   }, [cancelTarget, issueId, t]);
 
-  if (taskStates.size === 0) return null;
+  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — keep the bar alive when
+  // there are no tasks but a pending wakeup exists, so the scheduled run folds in here.
+  const wakeups = wake.wakeups;
+  if (taskStates.size === 0 && wakeups.length === 0) return null;
 
   // Order: running → dispatched → waiting → queued. The most-active task
   // takes the sticky slot; the parked / queued tasks sit below so the
@@ -302,7 +318,6 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     (a, b) => statusRank[a.task.status] - statusRank[b.task.status],
   );
   const firstEntry = entries[0];
-  if (!firstEntry) return null;
 
   const resolveName = (agentId: string | null) =>
     agentId ? getActorName("agent", agentId) : t(($) => $.agent_live.fallback_name);
@@ -312,13 +327,28 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   // (one bordered container with divided rows, never N detached boxes).
   // Active count tops out at ~4-5 in practice, so the expanded list stays
   // short.
-  const isMulti = entries.length > 1;
+  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — pending wakeups count
+  // toward the fold, so "1 running agent + 1 scheduled run" collapses into one bar.
+  const totalCount = entries.length + wakeups.length;
+  const isMulti = totalCount > 1;
   const agentIds = [
     ...new Set(
       entries.map((e) => e.task.agent_id).filter((id): id is string => !!id),
     ),
   ];
   const anyRunning = entries.some((e) => e.task.status === "running");
+  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — stay sticky only when a real
+  // task is present; a lone scheduled run scrolls with the page (no frozen wakeup bar).
+  const hasTask = entries.length > 0;
+  // Summary text for the collapsed multi header. Pure-task stays on the upstream
+  // localized string; once a wakeup joins, append the scheduled-run count.
+  const agentSummary = t(($) => $.agent_activity.hover_header, { count: agentIds.length });
+  const multiSummary =
+    wakeups.length === 0
+      ? agentSummary
+      : hasTask
+        ? `${agentSummary} · ${wakeups.length} scheduled`
+        : `${wakeups.length} scheduled run${wakeups.length > 1 ? "s" : ""}`;
 
   return (
     // Sticky bar at the top of the main content, above the editable title —
@@ -326,8 +356,11 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     // thread scrolls under it. One bordered container in every state: the
     // single row, the collapsed summary, and the expanded list all share it,
     // so the bar reads at one consistent width.
-    <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
-      <div className="overflow-hidden rounded-lg border border-info/20 bg-info/5">
+    // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — sticky only when a real task
+    // is present; a lone scheduled run renders in-flow so it scrolls with the page. The
+    // container tints orange when it is wakeup-only, matching the old scheduled-run banner.
+    <div className={cn("mt-4 rounded-lg", hasTask && "sticky top-4 z-10 bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md")}>
+      <div className={cn("overflow-hidden rounded-lg border", hasTask ? "border-info/20 bg-info/5" : "border-warning/30 bg-warning/10")}>
         {isMulti ? (
           <>
             <button
@@ -336,15 +369,21 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
               aria-expanded={expanded}
               className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-info/10 aria-expanded:bg-info/10 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
             >
-              <AgentAvatarStack agentIds={agentIds} size={20} max={4} />
+              {/* CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — agent avatars when a
+                  task is present, otherwise an alarm clock for a wakeup-only fold. */}
+              {hasTask ? (
+                <AgentAvatarStack agentIds={agentIds} size={20} max={4} />
+              ) : (
+                <AlarmClock className="h-3.5 w-3.5 shrink-0 text-warning" />
+              )}
               <span className="flex min-w-0 items-center gap-1.5 text-xs">
                 {anyRunning ? (
                   <Loader2 className="h-3 w-3 animate-spin text-info shrink-0" />
-                ) : (
+                ) : hasTask ? (
                   <Clock className="h-3 w-3 text-muted-foreground shrink-0" />
-                )}
+                ) : null}
                 <span className="truncate font-medium text-foreground">
-                  {t(($) => $.agent_activity.hover_header, { count: agentIds.length })}
+                  {multiSummary}
                 </span>
               </span>
               <ChevronDown
@@ -363,16 +402,35 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
                     cancelling={cancellingIds.has(task.id)}
                   />
                 ))}
+                {/* CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — pending wakeups as
+                    rows below the agent rows, so the scheduled run is part of the same fold. */}
+                {wakeups.map((w) => (
+                  <WakeupActivityRow
+                    key={w.id}
+                    wakeup={w}
+                    now={wake.now}
+                    onCancel={() => wake.cancel(w.id)}
+                    cancelling={wake.cancellingIds.has(w.id)}
+                  />
+                ))}
               </div>
             )}
           </>
-        ) : (
+        ) : hasTask && firstEntry ? (
           <AgentLiveRow
             task={firstEntry.task}
             items={buildTimeline(firstEntry.messages)}
             agentName={resolveName(firstEntry.task.agent_id)}
             onRequestCancel={() => setCancelTarget(firstEntry.task)}
             cancelling={cancellingIds.has(firstEntry.task.id)}
+          />
+        ) : (
+          /* CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — single wakeup, no task. */
+          <WakeupActivityRow
+            wakeup={wakeups[0]!}
+            now={wake.now}
+            onCancel={() => wake.cancel(wakeups[0]!.id)}
+            cancelling={wake.cancellingIds.has(wakeups[0]!.id)}
           />
         )}
       </div>

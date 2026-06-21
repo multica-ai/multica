@@ -102,8 +102,9 @@ import { StatusIcon } from "./status-icon";
 import { DependenciesSection } from "./dependencies-section";
 // CEREBRO-PATCH(cerebro-wakeup-sidebar): TECH-3176 — wakeup list + cancel, now from the cerebro-wakeup extension package.
 // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — wakeup timeline action note.
-// CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — top-of-issue scheduled-wakeup banner.
-import { CerebroWakeupSection, CerebroWakeupBar, WakeupNote, isWakeupEntry } from "@multica/cerebro-wakeup";
+// CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1714 — pending wakeups now fold into the
+// running-agent bar (AgentLiveCard), so there is no separate top-of-issue banner here.
+import { CerebroWakeupSection, WakeupNote, isWakeupEntry } from "@multica/cerebro-wakeup";
 import { AssigneePicker, canAssignAgent, DueDatePicker, LabelPicker, PriorityPicker, StartDatePicker, StatusPicker } from "./pickers";
 // CEREBRO-PATCH(issue-detail-status-model): FIR-1550 provide the issue's project status-model presentation to status surfaces
 import { CerebroStatusModelProvider } from "@multica/cerebro-status-models/views";
@@ -1176,8 +1177,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
-  // CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 gate the top-of-issue wakeup banner.
-  const wakeupBarEnabled = useFeatureFlag("cerebro_wakeup_bar");
   const issueKind = issue?.kind ?? "issue";
   // CEREBRO-PATCH(reply-target-agent-indicator): FIR-2392 — resolve the
   // agent the backend trigger logic will wake when a member posts a
@@ -2471,12 +2470,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
             {/* CEREBRO-PATCH(issue-detail-tabs): Agent live output and run/session tabs are task-only.
                 Chat threads run conversationally — there is no agent-run history to surface here. */}
-            {!isChat && <AgentLiveCard key={id} issueId={id} />}
-
-            {/* CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1521 — orange scheduled-wakeup banner under the running card.
-                Pass the issue UUID (issue.id), not the route identifier (id): the wakeups
-                list endpoint requires a UUID and 400s on an identifier, leaving the bar empty. */}
-            {!isChat && wakeupBarEnabled && issue?.id && <CerebroWakeupBar issueId={issue.id} />}
+            {/* CEREBRO-PATCH(cerebro-wakeup-bar): FIR-1714 — pending wakeups fold INTO this
+                bar instead of a separate banner. wakeupIssueId is the issue UUID (issue.id),
+                not the route identifier (id): the wakeups list endpoint requires a UUID. */}
+            {!isChat && <AgentLiveCard key={id} issueId={id} wakeupIssueId={issue?.id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />

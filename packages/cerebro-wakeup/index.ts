@@ -3,9 +3,12 @@
 // (cerebro_wakeup_time / cerebro_wakeup_issue_status / cerebro_wakeup_github_ci)
 // and is enforced server-side in server/internal/cerebro/wakeup.
 export { CerebroWakeupSection } from "./components/wakeup-section";
-// CEREBRO: FIR-1521 — prominent top-of-issue orange wakeup banner (countdown +
-// status/CI), mirroring the running-agent banner. Feature flag cerebro_wakeup_bar.
-export { CerebroWakeupBar } from "./components/wakeup-bar";
+// CEREBRO: FIR-1714 — pending wakeups are folded into the running-agent activity
+// bar (AgentLiveCard) via its existing multi-collapse, so a working agent + a
+// scheduled run read as ONE bar, not two stacked banners. These are the reusable
+// pieces that bar consumes: the query hook and the row renderer. Replaces the old
+// standalone CerebroWakeupBar. Feature flag cerebro_wakeup_bar.
+export { useIssueWakeups, WakeupActivityRow, type IssueWakeups } from "./components/wakeup-activity";
 // CEREBRO: FIR-1521 (part 2) — small orange clock pip that stacks next to the
 // running-agent indicator on issue lists + board cards. Feature flag
 // cerebro_activity_wakeup_dot.
