@@ -486,6 +486,20 @@ type CerebroChannelState struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroChapter struct {
+	ID               pgtype.UUID        `json:"id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	Name             string             `json:"name"`
+	Status           string             `json:"status"`
+	Position         int32              `json:"position"`
+	HandoffSummary   string             `json:"handoff_summary"`
+	HandoffDone      []byte             `json:"handoff_done"`
+	HandoffRemaining []byte             `json:"handoff_remaining"`
+	PlanRef          pgtype.Text        `json:"plan_ref"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroCommentTask struct {
 	CommentID   pgtype.UUID        `json:"comment_id"`
 	TaskID      pgtype.UUID        `json:"task_id"`
@@ -1245,6 +1259,7 @@ type Comment struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	Classification string             `json:"classification"`
+	ChapterID      pgtype.UUID        `json:"chapter_id"`
 }
 
 type CommentReaction struct {

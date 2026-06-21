@@ -100,6 +100,8 @@ import (
 	cerebroissuedatetime "github.com/multica-ai/multica/server/internal/cerebro/issuedatetime"
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler import
 	cerebrorecurringissue "github.com/multica-ai/multica/server/internal/cerebro/recurringissue"
+	// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters handler import.
+	cerebrochapters "github.com/multica-ai/multica/server/internal/cerebro/chapters"
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler import
 	cerebrosavedfilters "github.com/multica-ai/multica/server/internal/cerebro/savedfilters"
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler import
@@ -627,7 +629,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	mentionGate := cerebromentiongate.New(queries, cerebroGroupPermissionsHandler.Service) // CEREBRO-PATCH(router-mention-trigger-gate): JEH-1917.
 	h.MentionTriggerGate = mentionGate
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
-	cerebroNoteHandler.Gate = mentionGate // CEREBRO-PATCH(cerebro-notes-handler): FIR-1621 gate send-to-issue agent triggers.
+	cerebroNoteHandler.Gate = mentionGate                                          // CEREBRO-PATCH(cerebro-notes-handler): FIR-1621 gate send-to-issue agent triggers.
 	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries)                 // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
 	h.ChannelCreateGuard = cerebrochannels.NewCreateGuard(cerebroQueries, queries) // CEREBRO-PATCH(router-channel-create-guard): FIR-2660 — gated by the cerebro_channel_create_restricted feature flag (registry.ts); default off so any member/agent can still create until an admin turns it on.
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.
@@ -730,6 +732,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroIssueDateTimeSettingsHandler := cerebroissuedatetime.NewSettingsHandler(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-recurring-issue-routes): TECH-3064 recurring-issue handler instance
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
+	// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters handler instance.
+	cerebroChaptersHandler := cerebrochapters.NewHandler(pool, queries)
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
 	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
@@ -1998,6 +2002,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", cerebroRecurringIssueHandler.GetByIssue)
 				r.Put("/", cerebroRecurringIssueHandler.Upsert)
 				r.Delete("/", cerebroRecurringIssueHandler.Delete)
+			})
+			// CEREBRO-PATCH(cerebro-chapters-routes): FIR-1704 issue comment chapters REST surface.
+			r.Route("/api/cerebro/issues/{issueID}/chapters", func(r chi.Router) {
+				r.Get("/", cerebroChaptersHandler.List)
+				r.Post("/", cerebroChaptersHandler.Create)
+				r.Post("/start-fresh", cerebroChaptersHandler.StartFresh)
+				r.Patch("/{chapterId}", cerebroChaptersHandler.Update)
 			})
 			r.Post("/api/cerebro/issue-recurrences/{id}/run", cerebroRecurringIssueHandler.RunNow)
 			// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters REST surface.

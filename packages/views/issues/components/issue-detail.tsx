@@ -6,7 +6,7 @@
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -119,6 +119,8 @@ import { SprintPicker } from "@multica/cerebro-sprints/views";
 import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
+// CEREBRO-PATCH(comment-chapters-ui): FIR-1704 wraps existing comment threads in lightweight chapters.
+import { ChapterHeader, HandoffBrief, StartFresh, defaultChapter, useChapters } from "@multica/cerebro-chapters";
 // CEREBRO-PATCH(issue-private-badge-import): inherited-privacy badge in issue header (JEH-1750).
 import { PrivacyToggle, PrivateBadge } from "@multica/cerebro-access/views";
 import { RestrictedRef } from "@multica/cerebro-access/views";
@@ -373,7 +375,7 @@ function TimelineSkeleton() {
 // recent N entries — a single block of 50 status flips drowns the comment area
 // as badly as N blocks of 1 would. Older entries fold behind a "Show N more
 // activities" line that expands in place.
-const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 5; // CEREBRO-PATCH(comment-chapters-activity-limit): FIR-1704 keep only latest 5 activities visible by default.
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -1074,6 +1076,27 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     }
     return null;
   }, [timelineView.groups]);
+
+  // CEREBRO-PATCH(comment-chapters-ui): FIR-1704 chapter metadata wraps the existing thread groups.
+  const chaptersQuery = useChapters(id);
+  const fallbackChapter = useMemo(() => defaultChapter(id), [id]);
+  const chaptersById = useMemo(() => {
+    const map = new Map((chaptersQuery.data ?? []).map((chapter) => [chapter.id, chapter]));
+    map.set("default", fallbackChapter);
+    return map;
+  }, [chaptersQuery.data, fallbackChapter]);
+  const activeChapterId = useMemo(() => {
+    const chapters = chaptersQuery.data ?? [];
+    return (
+      chapters.find((chapter) => chapter.status !== "done")?.id ??
+      chapters[chapters.length - 1]?.id ??
+      "default"
+    );
+  }, [chaptersQuery.data]);
+  const [openChapterId, setOpenChapterId] = useState<string>("default");
+  useEffect(() => {
+    setOpenChapterId(activeChapterId);
+  }, [activeChapterId]);
 
   const {
     reactions: issueReactions,
@@ -2508,33 +2531,63 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               <TimelineSkeleton />
             ) : (
             <>
+            <div className="mt-4 flex justify-end">
+              <StartFresh issueId={id} />
+            </div>
             <div className="mt-4 flex flex-col gap-3">
-              {timelineView.groups.map((group) => {
+              {(() => {
+                let previousChapterId: string | null = null;
+                return timelineView.groups.map((group) => {
+                const firstEntry = group.entries[0]!;
+                const chapterId = group.type === "comment" ? (firstEntry.chapter_id ?? "default") : "default";
+                const chapter = chaptersById.get(chapterId) ?? fallbackChapter;
+                const showChapterHeader = chapterId !== previousChapterId;
+                previousChapterId = chapterId;
+                const chapterOpen = chapterId === openChapterId;
+                const chapterShell = (children: ReactNode) => (
+                  <Fragment key={`${chapterId}-${firstEntry.id}`}>
+                    {showChapterHeader && (
+                      <>
+                        <ChapterHeader
+                          chapter={chapter}
+                          open={chapterOpen}
+                          onToggle={() => setOpenChapterId(chapterOpen ? "" : chapterId)}
+                        />
+                        {chapterOpen ? (
+                          <HandoffBrief chapter={chapter} />
+                        ) : chapter.handoff_summary ? (
+                          <div className="px-4 text-xs text-muted-foreground">{chapter.handoff_summary}</div>
+                        ) : null}
+                      </>
+                    )}
+                    {chapterOpen ? children : null}
+                  </Fragment>
+                );
                 if (group.type === "comment") {
                   const entry = group.entries[0]!;
                   // CEREBRO-PATCH(cerebro-wakeup-note): TECH-3298 — render an
                   // agent wakeup as a collapsible action note, not a comment card.
                   if (isWakeupEntry(entry)) {
-                    return (
+                    return chapterShell(
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <WakeupNote entry={entry} timeAgo={timeAgo} />
-                      </div>
+                      </div>,
                     );
                   }
                   const isResolved = !!entry.resolved_at;
                   const isExpanded = expandedResolved.has(entry.id);
                   if (isResolved && !isExpanded) {
-                    return (
+                    return chapterShell(
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <ResolvedThreadBar
                           entry={entry}
                           replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}
                           onExpand={() => toggleResolvedExpand(entry.id, true)}
                         />
-                      </div>
+                      </div>,
                     );
                   }
-                  return (
+                  return chapterShell(
                     <div key={entry.id} id={`comment-${entry.id}`}>
                       <CommentCard
                         issueId={id}
@@ -2555,7 +2608,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                         highlightedCommentId={highlightedId}
                         triggerAgentId={triggerAgentId}
                       />
-                    </div>
+                    </div>,
                   );
                 }
 
@@ -2565,7 +2618,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   : collapsedActivityIds.has(activityId)
                     ? false
                     : activityId === lastActivityGroupId;
-                return (
+                return chapterShell(
                   <ActivityBlock
                     key={activityId}
                     entries={group.entries}
@@ -2577,9 +2630,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                     getActorName={getActorName}
                     t={t}
                     timeAgo={timeAgo}
-                  />
+                  />,
                 );
-              })}
+              });
+              })()}
             </div>
             </>
             )}

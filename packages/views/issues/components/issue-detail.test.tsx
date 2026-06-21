@@ -963,7 +963,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
-  it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
+  it("truncates the trailing activity block to the most recent 5 entries with a show-more toggle", async () => {
     // 10 activities, all in the trailing block (no comment after them, so it's
     // the trailing block by definition). Alternating action types so the
     // 2-minute coalesce window never merges consecutive entries — we end up
@@ -988,56 +988,50 @@ describe("IssueDetail (shared)", () => {
     // stays hidden — the "Show N more" link is the only control we want
     // to expose for a glance at recent activity.
     await waitFor(() => {
-      expect(screen.getByText("Show 2 more activities")).toBeInTheDocument();
+      expect(screen.getByText("Show 5 more activities")).toBeInTheDocument();
     });
     expect(screen.queryByText("10 activities")).not.toBeInTheDocument();
 
-    // Only the 8 most recent entries (act-3..act-10) are rendered by default.
-    // act-1 and act-2 are folded behind the show-more line.
-    expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument(); // act-3
+    // Only the 5 most recent entries (act-6..act-10) are rendered by default.
+    // act-1..act-5 are folded behind the show-more line.
+    expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument(); // act-6
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument(); // act-10
     expect(screen.queryByText(/from Todo to In Progress/i)).not.toBeInTheDocument(); // act-1
-    expect(screen.queryByText(/from Low to Medium/i)).not.toBeInTheDocument(); // act-2
+    expect(screen.queryByText(/from In Review to Done/i)).not.toBeInTheDocument(); // act-5
 
     // Clicking the toggle reveals the older entries in place and brings the
     // full "N activities" header back (so the user can fold the block).
-    fireEvent.click(screen.getByText("Show 2 more activities"));
+    fireEvent.click(screen.getByText("Show 5 more activities"));
     await waitFor(() => {
       expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/from Low to Medium/i)).toBeInTheDocument();
+    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
     expect(screen.getByText("10 activities")).toBeInTheDocument();
     expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
   });
 
-  it("does not show the show-more toggle when the trailing block has 8 or fewer entries", async () => {
+  it("does not show the show-more toggle when the trailing block has 5 or fewer entries", async () => {
     const trailingBlock: TimelineEntry[] = [
       { type: "activity", id: "act-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "todo", to: "in_progress" }, created_at: "2026-01-18T00:00:00Z" },
       { type: "activity", id: "act-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "low", to: "high" }, created_at: "2026-01-18T00:01:00Z" },
       { type: "activity", id: "act-3", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_progress", to: "in_review" }, created_at: "2026-01-18T00:02:00Z" },
       { type: "activity", id: "act-4", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "high", to: "urgent" }, created_at: "2026-01-18T00:03:00Z" },
-      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "in_review", to: "done" }, created_at: "2026-01-18T00:04:00Z" },
-      { type: "activity", id: "act-6", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "urgent", to: "low" }, created_at: "2026-01-18T00:05:00Z" },
-      { type: "activity", id: "act-7", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "done", to: "blocked" }, created_at: "2026-01-18T00:06:00Z" },
-      { type: "activity", id: "act-8", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:07:00Z" },
+      { type: "activity", id: "act-5", actor_type: "member", actor_id: "user-1", action: "due_date_changed", details: { to: "2026-02-01T00:00:00Z" }, created_at: "2026-01-18T00:04:00Z" },
     ] as TimelineEntry[];
     mockApiObj.listTimeline.mockResolvedValue(trailingBlock);
 
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("8 activities")).toBeInTheDocument();
+      expect(screen.getByText("5 activities")).toBeInTheDocument();
     });
-    // Every one of the 8 entries should be visible — the trailing block fits
+    // Every one of the 5 entries should be visible — the trailing block fits
     // exactly within the limit, so no "Show N more activities" line appears.
     expect(screen.getByText(/from Todo to In Progress/i)).toBeInTheDocument();
     expect(screen.getByText(/from Low to High/i)).toBeInTheDocument();
     expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
     expect(screen.getByText(/from High to Urgent/i)).toBeInTheDocument();
-    expect(screen.getByText(/from In Review to Done/i)).toBeInTheDocument();
-    expect(screen.getByText(/from Urgent to Low/i)).toBeInTheDocument();
-    expect(screen.getByText(/from Done to Blocked/i)).toBeInTheDocument();
     expect(screen.getByText(/set due date to/i)).toBeInTheDocument();
     expect(screen.queryByText(/Show \d+ more activit/i)).not.toBeInTheDocument();
   });
@@ -1045,7 +1039,7 @@ describe("IssueDetail (shared)", () => {
   it("expanding a non-trailing block shows every entry — only the trailing block truncates older ones", async () => {
     // Non-trailing block (10 activities) + comment + trailing block (1 activity).
     // Manually expanding the older block must reveal all 10 entries — the
-    // truncate-to-8 rule applies only to the trailing block.
+    // truncate-to-5 rule applies only to the trailing block.
     const timeline: TimelineEntry[] = [
       { type: "activity", id: "old-1", actor_type: "member", actor_id: "user-1", action: "status_changed", details: { from: "backlog", to: "todo" }, created_at: "2026-01-16T00:00:00Z" },
       { type: "activity", id: "old-2", actor_type: "member", actor_id: "user-1", action: "priority_changed", details: { from: "none", to: "low" }, created_at: "2026-01-16T00:01:00Z" },
@@ -1080,7 +1074,7 @@ describe("IssueDetail (shared)", () => {
     fireEvent.click(screen.getByText("10 activities"));
 
     // Every one of the 10 entries should now be visible — even though the
-    // block has more than 8 entries, the truncate-to-8 rule does not apply
+    // block has more than 5 entries, the truncate-to-5 rule does not apply
     // to non-trailing blocks, so no "Show N more activities" line appears.
     await waitFor(() => {
       expect(screen.getByText(/from Backlog to Todo/i)).toBeInTheDocument();

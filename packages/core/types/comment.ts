@@ -24,6 +24,8 @@ export interface Comment {
   content: string;
   type: CommentType;
   parent_id: string | null;
+  // CEREBRO-PATCH(comment-chapters-types): FIR-1704 carries optional chapter grouping for root comments.
+  chapter_id?: string | null;
   reactions: Reaction[];
   attachments: import("./attachment").Attachment[];
   created_at: string;

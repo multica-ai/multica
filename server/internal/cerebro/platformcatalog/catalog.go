@@ -231,6 +231,17 @@ var catalog = []Capability{
 			"POST /api/comments/{commentId}/move-to-subissue",
 		},
 	},
+	{
+		Key:         "manage_chapters",
+		Title:       "Manage chapters",
+		Category:    CategoryComments,
+		Description: "Create a chapter, edit a chapter, or start a fresh chapter (with or without handoff) in an issue's comment thread.",
+		Ops: []string{
+			"POST /api/cerebro/issues/{issueID}/chapters/",
+			"PATCH /api/cerebro/issues/{issueID}/chapters/{chapterId}",
+			"POST /api/cerebro/issues/{issueID}/chapters/start-fresh",
+		},
+	},
 
 	// --- Autopilots -----------------------------------------------------------
 	{
