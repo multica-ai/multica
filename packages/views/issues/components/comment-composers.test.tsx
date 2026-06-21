@@ -1,5 +1,5 @@
 import { forwardRef, useImperativeHandle, useRef, type ReactElement, type ReactNode, type Ref } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -175,18 +175,62 @@ function renderReplyInput({
   return { ...view, onSubmit };
 }
 
+// FIR-1684: jsdom has no layout, so the editor body reports scrollHeight 0 and
+// useComposerHeight keeps the expand pill hidden. Fake a body height so a test
+// can pin the "field is full" (pill shown) or "field is short" (pill hidden)
+// state deterministically.
+let scrollHeightDescriptor: PropertyDescriptor | undefined;
+function setComposerBodyHeight(px: number) {
+  scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return px;
+    },
+  });
+}
+function restoreComposerBodyHeight() {
+  if (scrollHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+  } else {
+    delete (HTMLElement.prototype as { scrollHeight?: unknown }).scrollHeight;
+  }
+  scrollHeightDescriptor = undefined;
+}
+
 beforeEach(() => {
   uploadWithToast.mockReset();
   localStorage.clear();
 });
 
+afterEach(() => {
+  restoreComposerBodyHeight();
+});
+
 describe("comment composers", () => {
   // TECH-3536: every composer (issue comment, channel, DM, reply, agent chat)
-  // now carries the same unified expand pill — an extra button labelled
+  // carries the same unified expand pill — an extra button labelled
   // "Expand"/"Collapse" alongside the attach + submit buttons. The height cap
   // is an inline style on the inner scroll container, not a className on the
   // shell, so the shell-className assertions below still hold.
+  //
+  // FIR-1684: the pill only appears once the body fills the collapsed field, so
+  // these tests fake a tall body first; the "short draft" cases pin the hidden
+  // default.
+  it("hides the expand control on the main comment composer while the draft is short", () => {
+    setComposerBodyHeight(0);
+    const { container } = renderCommentInput();
+
+    expect(screen.queryByRole("button", { name: "Expand" })).toBeNull();
+    // Just attach + submit while short.
+    expect(container.querySelectorAll("button")).toHaveLength(2);
+  });
+
   it("renders the main comment composer with the unified expand control", () => {
+    setComposerBodyHeight(500);
     const { container } = renderCommentInput();
 
     expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
@@ -203,6 +247,7 @@ describe("comment composers", () => {
   });
 
   it("renders reply composer with the unified expand control", () => {
+    setComposerBodyHeight(500);
     const { container } = renderReplyInput();
 
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
@@ -216,6 +261,7 @@ describe("comment composers", () => {
   });
 
   it("renders the unified expand control on default-size replies too", () => {
+    setComposerBodyHeight(500);
     const { container } = renderReplyInput({ size: "default" });
 
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();

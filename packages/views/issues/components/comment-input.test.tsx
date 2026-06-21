@@ -114,6 +114,32 @@ vi.mock("../../editor/use-file-drop-zone", async () => {
 
 import { CommentInput } from "./comment-input";
 
+// FIR-1684: jsdom has no layout, so the editor body reports scrollHeight 0 and
+// useComposerHeight keeps the expand pill hidden. Fake a body height so a test
+// can pin the "field is full" (pill shown) or "field is short" (pill hidden)
+// state deterministically.
+let scrollHeightDescriptor: PropertyDescriptor | undefined;
+function setComposerBodyHeight(px: number) {
+  scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return px;
+    },
+  });
+}
+function restoreComposerBodyHeight() {
+  if (scrollHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+  } else {
+    delete (HTMLElement.prototype as { scrollHeight?: unknown }).scrollHeight;
+  }
+  scrollHeightDescriptor = undefined;
+}
+
 beforeEach(() => {
   autoFocusEvents.length = 0;
   focusSpy.mockClear();
@@ -195,9 +221,24 @@ describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
       configurable: true,
       value: origVisualViewport,
     });
+    restoreComposerBodyHeight();
+  });
+
+  it("hides the expand pill (and its top band) while the draft is short", () => {
+    setComposerBodyHeight(0);
+    setViewport(1280, 900);
+    const { getByTestId, queryByRole } = renderWithI18n(
+      <CommentInput issueId="c1" onSubmit={vi.fn()} />,
+    );
+    expect(queryByRole("button", { name: "Expand" })).toBeNull();
+    const scrollContainer = getByTestId("content-editor").parentElement!;
+    // No overlay band reserved without the pill → bare 4-line desktop cap.
+    expect(scrollContainer.style.maxHeight).toBe("92px");
+    expect(scrollContainer.style.paddingTop).toBe("");
   });
 
   it("caps the editor at 4 lines on mobile and grows to 80% on toggle", () => {
+    setComposerBodyHeight(500); // body fills the field → expand pill shows
     setViewport(400, 800); // mobile width, 800px of space above the keyboard
     const { getByTestId, getByRole } = renderWithI18n(
       <CommentInput issueId="c1" onSubmit={vi.fn()} />,
@@ -223,6 +264,7 @@ describe("CommentInput — TECH-3536 mobile height cap + expand pill", () => {
   });
 
   it("caps at 4 lines (+overlay band) on desktop and still shows the unified pill", () => {
+    setComposerBodyHeight(500); // body fills the field → expand pill shows
     setViewport(1280, 900); // desktop width
     const { getByTestId, getByRole } = renderWithI18n(
       <CommentInput issueId="c1" onSubmit={vi.fn()} />,

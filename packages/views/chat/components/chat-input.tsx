@@ -210,8 +210,9 @@ export function ChatInput({
             collapseLabel={t(($) => $.input.collapse_tooltip)}
           />
         )}
-        {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size. */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={scrollStyle}>
+        {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size.
+            CEREBRO-PATCH(composer-toggle-when-full): FIR-1684 — scrollRef lets the hook measure the body and show the expand pill only when the field fills. */}
+        <div ref={composerHeight.scrollRef} className="flex-1 min-h-0 overflow-y-auto px-3 py-2" style={scrollStyle}>
           <ContentEditor
             // Remount the editor when the active session changes so its
             // uncontrolled defaultValue picks up the new session's draft.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 
 // Collapsed cap: the field shows at most COLLAPSED_LINES lines of body text,
@@ -12,6 +12,11 @@ const MOBILE_LINE_HEIGHT = 26; // 16px * 1.625
 const DESKTOP_LINE_HEIGHT = 23; // 14px * 1.625
 const MOBILE_COLLAPSED_MAX = COLLAPSED_LINES * MOBILE_LINE_HEIGHT; // 104
 const DESKTOP_COLLAPSED_MAX = COLLAPSED_LINES * DESKTOP_LINE_HEIGHT; // 92
+
+// Vertical padding on the scroll container (Tailwind `py-2` → 8px top + 8px
+// bottom). The editor body itself carries no padding, so the visible body area
+// of the collapsed field is the cap minus this. FIR-1684.
+const COLLAPSED_VERTICAL_PADDING = 16;
 
 // Expanded fractions of the visible viewport a compose field may occupy.
 // On mobile `window.visualViewport.height` already excludes the on-screen
@@ -34,9 +39,14 @@ export interface ComposerHeight {
     | undefined;
   isExpanded: boolean;
   toggleExpanded: () => void;
-  /** True once a height is known — the expand toggle has a target to grow
-   *  to. True on both mobile and desktop so the control is identical
-   *  everywhere. */
+  /** Attach to the scroll container that wraps the editor body. The hook
+   *  measures the body's content height through it to decide whether the
+   *  field is full enough to warrant the expand toggle. FIR-1684. */
+  scrollRef: (node: HTMLElement | null) => void;
+  /** True only once the draft has grown enough to fill (and start to
+   *  overflow) the collapsed field, or while the field is already expanded
+   *  so the user can collapse it back. A short draft hides the toggle so it
+   *  no longer floats over a single line of text. FIR-1684. */
   showExpandToggle: boolean;
 }
 
@@ -49,6 +59,9 @@ export interface ComposerHeight {
  * Collapsed: at most 4 lines of body text (~104px mobile, ~92px desktop),
  * then the field scrolls (FIR-1625). Expanded caps against the viewport —
  * 80% of the space above the keyboard on mobile, 70% of the window on desktop.
+ *
+ * The expand toggle stays hidden until the draft is long enough to fill the
+ * collapsed field — a single line of text gets no overlay pill (FIR-1684).
  */
 export function useComposerHeight(): ComposerHeight {
   const isMobile = useIsMobile();
@@ -57,6 +70,10 @@ export function useComposerHeight(): ComposerHeight {
     if (typeof window === "undefined") return null;
     return window.visualViewport?.height ?? window.innerHeight ?? null;
   });
+  // True once the editor body has grown past the collapsed field's visible
+  // area — i.e. the draft no longer fits in the short field and expanding
+  // would help. FIR-1684.
+  const [bodyFillsField, setBodyFillsField] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -73,6 +90,44 @@ export function useComposerHeight(): ComposerHeight {
       window.removeEventListener("resize", update);
     };
   }, []);
+
+  // Measure the editor body (the scroll container's only child) and flip the
+  // toggle on once it overflows the collapsed visible area. The body's own
+  // height is independent of the container's padding, so adding the overlay
+  // band when the toggle appears can't feed back into the measurement (no
+  // flicker). Re-attaches if the editor remounts (e.g. session switch).
+  const scrollElRef = useRef<HTMLElement | null>(null);
+  const scrollRef = useCallback((node: HTMLElement | null) => {
+    scrollElRef.current = node;
+  }, []);
+  useEffect(() => {
+    const scrollEl = scrollElRef.current;
+    if (!scrollEl || typeof ResizeObserver === "undefined") return;
+    const collapsedMax = isMobile ? MOBILE_COLLAPSED_MAX : DESKTOP_COLLAPSED_MAX;
+    const threshold = collapsedMax - COLLAPSED_VERTICAL_PADDING;
+    const measure = () => {
+      const body = scrollEl.firstElementChild as HTMLElement | null;
+      setBodyFillsField(body != null && body.scrollHeight > threshold);
+    };
+    const ro = new ResizeObserver(measure);
+    const observeBody = () => {
+      const body = scrollEl.firstElementChild;
+      if (body) ro.observe(body);
+    };
+    observeBody();
+    measure();
+    // The editor remounts on key changes; re-observe the fresh body node.
+    const mo = new MutationObserver(() => {
+      ro.disconnect();
+      observeBody();
+      measure();
+    });
+    mo.observe(scrollEl, { childList: true });
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+    };
+  }, [isMobile]);
 
   const known = viewportHeight != null;
 
@@ -102,6 +157,9 @@ export function useComposerHeight(): ComposerHeight {
     containerStyle,
     isExpanded,
     toggleExpanded: () => setIsExpanded((v) => !v),
-    showExpandToggle: known,
+    scrollRef,
+    // Show the toggle once the body fills the collapsed field, or whenever the
+    // field is already expanded so the user can always collapse it. FIR-1684.
+    showExpandToggle: known && (bodyFillsField || isExpanded),
   };
 }

@@ -1,8 +1,34 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { forwardRef, useImperativeHandle, type Ref } from "react";
 import { renderWithI18n } from "../../test/i18n";
+
+// FIR-1684: jsdom has no layout, so the editor body reports scrollHeight 0 and
+// useComposerHeight keeps the expand pill hidden. Fake a body height so a test
+// can pin the "field is full" (pill shown) or "field is short" (pill hidden)
+// state deterministically.
+let scrollHeightDescriptor: PropertyDescriptor | undefined;
+function setComposerBodyHeight(px: number) {
+  scrollHeightDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollHeight",
+  );
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return px;
+    },
+  });
+}
+function restoreComposerBodyHeight() {
+  if (scrollHeightDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", scrollHeightDescriptor);
+  } else {
+    delete (HTMLElement.prototype as { scrollHeight?: unknown }).scrollHeight;
+  }
+  scrollHeightDescriptor = undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Hoisted mocks. ContentEditor is replaced by a stub that exposes a fixed
@@ -249,17 +275,38 @@ describe("ChatInput — TECH-3536 unified expand toggle", () => {
   // (4 lines × 23px desktop line-height, FIR-1625) PLUS a 28px top band
   // (CEREBRO-PATCH composer-overlay-fade) reserved above the floating expand
   // pill so text never sits under it → 120px collapsed maxHeight.
+  //
+  // FIR-1684: the pill only appears once the body fills the collapsed field,
+  // so these tests fake a tall body first; the "short draft" case below pins
+  // the hidden state.
   const findScroll = (container: HTMLElement) =>
     container.querySelector(".overflow-y-auto") as HTMLElement;
 
-  it("starts collapsed with a height cap, no fixed height", () => {
+  afterEach(() => {
+    restoreComposerBodyHeight();
+  });
+
+  it("hides the expand pill (and its top band) while the draft is short", () => {
+    setComposerBodyHeight(0);
     const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /expand|collapse/i })).toBeNull();
+    const scroll = findScroll(container);
+    // No overlay band reserved when there's no pill → bare 4-line cap.
+    expect(scroll.style.maxHeight).toBe("92px");
+    expect(scroll.style.paddingTop).toBe("");
+  });
+
+  it("starts collapsed with a height cap once the field fills, no fixed height", () => {
+    setComposerBodyHeight(500);
+    const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /expand|collapse/i })).toBeInTheDocument();
     const scroll = findScroll(container);
     expect(scroll.style.maxHeight).toBe("120px");
     expect(scroll.style.height).toBe("");
   });
 
   it("grows to a fixed height on toggle and collapses again on second click", async () => {
+    setComposerBodyHeight(500);
     const user = userEvent.setup();
     const { container } = renderWithI18n(<ChatInput onSend={vi.fn()} />);
     const expandBtn = screen.getByRole("button", { name: /expand|collapse/i });

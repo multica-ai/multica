@@ -214,7 +214,9 @@ function CommentInput({ issueId, onSubmit, autoFocus = false, pinnable = false, 
           )}
           {/* CEREBRO-PATCH(composer-height-cap): TECH-3536 — collapsed caps growth, expanded jumps to the larger size.
               CEREBRO-PATCH(composer-overlay-fade): FIR-1625 follow-up — padded down so text starts below the overlay band; track scroll so the overlays fade only once text is under them. */}
+          {/* CEREBRO-PATCH(composer-toggle-when-full): FIR-1684 — scrollRef lets the hook measure the body and show the expand pill only when the field fills. */}
           <div
+            ref={composerHeight.scrollRef}
             className="flex-1 min-h-0 overflow-y-auto px-3 py-2"
             style={scrollStyle}
             onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
