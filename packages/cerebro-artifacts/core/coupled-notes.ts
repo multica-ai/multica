@@ -5,8 +5,9 @@ import { api } from "@multica/core/api";
 // FIR-1621 — coupled notes shown on the issue document list. A note can
 // reference an issue (the forward note→issue link); this is the reverse read:
 // the notes coupled to one issue, fetched via GET /api/notes/by-reference. A
-// note IS an artifact (kind='note'), so its id opens in the same ArtifactSheet
-// the document cards use — no separate note route is needed here.
+// note IS an artifact (kind='note'), so its id opens in the same full-page note
+// editor (documentDetail) the document cards use — no separate note route is
+// needed here.
 //
 // Defensive parse (API Response Compatibility rule): the backend wraps the list
 // in `{notes: []}`; on any shape drift this returns [] rather than throwing.

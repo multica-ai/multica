@@ -12,9 +12,10 @@ import {
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { cn } from "@multica/ui/lib/utils";
+import { useNavigation } from "@multica/views/navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { Artifact } from "@multica/core/types";
 import { ArtifactCard } from "./artifact-card";
-import { ArtifactSheet } from "./artifact-sheet";
 
 type Scope =
   | { issueId: string; projectId?: undefined }
@@ -28,11 +29,12 @@ export type ArtifactListProps = Scope & {
 
 /**
  * Renders a list of artifacts for an issue or a project. Clicking a card opens
- * the artifact in a side sheet for view/edit. Hidden when there are no
- * artifacts and no `emptyState` is provided.
+ * the artifact in the full-page note editor (`documentDetail`) — every text
+ * document opens in the same editor, never a preview-only sheet. Hidden when
+ * there are no artifacts and no `emptyState` is provided.
  *
  * FIR-1621: on an issue, also shows notes coupled to that issue (two-way
- * note↔issue link). A note is an artifact, so it opens in the same sheet.
+ * note↔issue link). A note is an artifact, so it opens in the same editor.
  * Gated by `cerebro_note_agent_collab`.
  */
 export function ArtifactList(props: ArtifactListProps) {
@@ -51,7 +53,8 @@ export function ArtifactList(props: ArtifactListProps) {
   });
   const coupledNotes = collabEnabled ? (coupledQuery.data ?? []) : [];
 
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const router = useNavigation();
+  const wsPaths = useWorkspacePaths();
 
   const artifacts = data ?? [];
   const hasArtifacts = artifacts.length > 0;
@@ -73,7 +76,11 @@ export function ArtifactList(props: ArtifactListProps) {
       {hasArtifacts && (
         <div className="flex flex-col gap-2">
           {artifacts.map((a: Artifact) => (
-            <ArtifactCard key={a.id} artifact={a} onClick={() => setOpenId(a.id)} />
+            <ArtifactCard
+              key={a.id}
+              artifact={a}
+              onClick={() => router.push(wsPaths.documentDetail(a.id))}
+            />
           ))}
         </div>
       )}
@@ -84,16 +91,13 @@ export function ArtifactList(props: ArtifactListProps) {
             Coupled notes
           </div>
           {coupledNotes.map((n: CoupledNote) => (
-            <CoupledNoteCard key={n.id} note={n} onClick={() => setOpenId(n.id)} />
+            <CoupledNoteCard
+              key={n.id}
+              note={n}
+              onClick={() => router.push(wsPaths.documentDetail(n.id))}
+            />
           ))}
         </div>
-      )}
-      {openId && (
-        <ArtifactSheet
-          artifactId={openId}
-          open={Boolean(openId)}
-          onOpenChange={(open) => !open && setOpenId(null)}
-        />
       )}
     </div>
   );

@@ -6,9 +6,10 @@ import { Plus, FileQuestion } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { artifactSearchOptions } from "@multica/cerebro-artifacts/core";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useNavigation } from "@multica/views/navigation";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { ListArtifactsParams } from "@multica/core/types";
 import { ArtifactCard } from "./artifact-card";
-import { ArtifactSheet } from "./artifact-sheet";
 import { CreateArtifactSheet } from "./create-artifact-sheet";
 import {
   ArtifactFilters,
@@ -27,7 +28,8 @@ export function WorkspaceDocuments() {
     q: "",
   });
   const [creating, setCreating] = React.useState(false);
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  const router = useNavigation();
+  const wsPaths = useWorkspacePaths();
 
   const params: ListArtifactsParams = React.useMemo(
     () => ({
@@ -94,7 +96,7 @@ export function WorkspaceDocuments() {
               key={a.id}
               artifact={a}
               showScope
-              onClick={() => setOpenId(a.id)}
+              onClick={() => router.push(wsPaths.documentDetail(a.id))}
             />
           ))}
         </div>
@@ -105,14 +107,6 @@ export function WorkspaceDocuments() {
         open={creating}
         onOpenChange={setCreating}
       />
-
-      {openId && (
-        <ArtifactSheet
-          artifactId={openId}
-          open={Boolean(openId)}
-          onOpenChange={(open) => !open && setOpenId(null)}
-        />
-      )}
     </div>
   );
 }
