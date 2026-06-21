@@ -95,15 +95,15 @@ const LAYER_LABEL: Record<string, string> = {
 function changeHint(layer: string): string {
   switch (layer) {
     case "workspace":
-      return "Ændr det under Settings → Tools (workspace).";
+      return "Change it under Settings → Tools (workspace).";
     case "runtime":
-      return "Ændr det på Runtime-indstillinger → Tools.";
+      return "Change it under Runtime settings → Tools.";
     case "agent":
-      return "Ændr det på denne agents Tools-fane.";
+      return "Change it on this agent's Tools tab.";
     case "group":
-      return "Ændr det under Settings → Groups.";
+      return "Change it under Settings → Groups.";
     case "user":
-      return "Det er sat på brugerens egne rettigheder (loftet).";
+      return "It is set on the user's own permissions (the ceiling).";
     default:
       return "";
   }
@@ -158,11 +158,11 @@ export function ConnectionConfigSheet({
 
   const blocker = connectionRow.effective.capped_by || connectionRow.effective.decided_by;
   const blockerGroups = connectionRow.capped_by_groups
-    .map((g) => (g.owner ? `${g.name} (ejer: ${g.owner})` : g.name))
+    .map((g) => (g.owner ? `${g.name} (owner: ${g.owner})` : g.name))
     .join(", ");
   const blockerLabel =
     blocker === "group" && blockerGroups
-      ? `gruppen ${blockerGroups}`
+      ? `group ${blockerGroups}`
       : (LAYER_LABEL[blocker] ?? blocker);
 
   // API connections expose endpoint+method rows ("POST /orders"); MCP connections
@@ -254,12 +254,12 @@ export function ConnectionConfigSheet({
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <p className="font-medium">
-                Hele forbindelsen er sat til “{CHOICE_LABEL[floor]}” af {blockerLabel}.
+                The whole connection is set to “{CHOICE_LABEL[floor]}” by {blockerLabel}.
               </p>
               <p className="mt-0.5 text-destructive/90">
                 {floor === "deny"
-                  ? `En Allow på et enkelt ${unitLabel} her får ingen effekt — forbindelsen er blokeret ovenfra.`
-                  : `Et enkelt ${unitLabel} kan kun strammes (ikke gøres mere åbent end forbindelsen).`}{" "}
+                  ? `An Allow on a single ${unitLabel} here has no effect — the connection is blocked from a higher layer.`
+                  : `A single ${unitLabel} can only be tightened (not made more open than the connection).`}{" "}
                 {changeHint(blocker)}
               </p>
             </div>
@@ -285,12 +285,12 @@ export function ConnectionConfigSheet({
             onClick={allowAll}
             title={
               allowAllFutile
-                ? `Forbindelsen er sat til “${CHOICE_LABEL[floor]}” — Tillad alle får ingen effekt.`
+                ? `The connection is set to “${CHOICE_LABEL[floor]}” — Allow all has no effect.`
                 : undefined
             }
           >
             {busy ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-            Tillad alle
+            Allow all
           </Button>
         </div>
 
@@ -413,7 +413,7 @@ function EndpointDecisionControl({
               onClick={() => onChange(choice)}
               title={
                 futile
-                  ? `Forbindelsen er sat til “${floorLabel}” — “${CHOICE_LABEL[choice]}” her er mere åbent og får ingen effekt.`
+                  ? `The connection is set to “${floorLabel}” — “${CHOICE_LABEL[choice]}” here is more open and has no effect.`
                   : undefined
               }
               className={cn(

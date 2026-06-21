@@ -104,13 +104,13 @@ describe("ConnectionConfigSheet (TECH-3287 hul 1/6/7)", () => {
     // Workspace denies the whole connection → the agent page can't loosen it.
     renderSheet(connRow("deny", { decided_by: "workspace", reason: "Denied by workspace" }));
     const banner = screen.getByTestId("connection-blocked-banner");
-    expect(within(banner).getByText(/Hele forbindelsen er sat til/)).toBeInTheDocument();
+    expect(within(banner).getByText(/The whole connection is set to/)).toBeInTheDocument();
     expect(within(banner).getByText(/Workspace/)).toBeInTheDocument();
   });
 
-  it("disables 'Tillad alle' and the looser per-endpoint choices when the connection floor is Deny", () => {
+  it("disables 'Allow all' and the looser per-endpoint choices when the connection floor is Deny", () => {
     renderSheet(connRow("deny", { decided_by: "workspace" }));
-    expect(screen.getByRole("button", { name: /Tillad alle/ })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Allow all/ })).toBeDisabled();
     const tool = screen.getByTestId("connection-tool-lookup_order");
     // The pill dropdown lists the choices; looser-than-floor ones are disabled.
     expect(within(tool).getByRole("menuitem", { name: "Allow" })).toBeDisabled();
@@ -123,7 +123,7 @@ describe("ConnectionConfigSheet (TECH-3287 hul 1/6/7)", () => {
   it("leaves all choices enabled and shows no banner when the connection allows", () => {
     renderSheet(connRow("allow"));
     expect(screen.queryByTestId("connection-blocked-banner")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Tillad alle/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Allow all/ })).toBeEnabled();
     const tool = screen.getByTestId("connection-tool-lookup_order");
     expect(within(tool).getByRole("menuitem", { name: "Allow" })).toBeEnabled();
   });

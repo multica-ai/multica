@@ -215,7 +215,7 @@ describe("ToolPolicyTable (capability catalog)", () => {
     renderTable("agent");
     const row = await screen.findByTestId("tool-row-create_issue");
     expect(
-      within(row).getByText("Capped by group All members (ejer: Jesper Hvejsel)"),
+      within(row).getByText("Capped by group All members (owner: Jesper Hvejsel)"),
     ).toBeInTheDocument();
     expect(within(row).queryByText("Override on Agent")).not.toBeInTheDocument();
   });

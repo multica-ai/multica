@@ -210,7 +210,7 @@ describe("SimpleToolPolicyTable", () => {
     ).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("renders the firtal_registry Konfigurer button only when its feature flag is on", async () => {
+  it("renders the firtal_registry Configure button only when its feature flag is on", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
     });
@@ -307,7 +307,7 @@ describe("SimpleToolPolicyTable", () => {
     });
   });
 
-  it("hides the Konfigurer button when the flag is off", async () => {
+  it("hides the Configure button when the flag is off", async () => {
     mockCerebroRequest.mockResolvedValue({
       tools: [row({ tool_key: "firtal_registry", title: "Firtal Data Registry" })],
     });

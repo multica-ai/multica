@@ -138,7 +138,7 @@ export function FirtalRegistryConfigDialog({
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
           <div className="flex items-center justify-between gap-3 rounded-md border p-3">
             <div className="space-y-0.5">
-              <Label htmlFor="allow-all-ds">Tillad alle data sources</Label>
+              <Label htmlFor="allow-all-ds">Allow all data sources</Label>
               <p className="text-xs text-muted-foreground">
                 Gives this agent access to list and run every Registry data source.
               </p>
@@ -174,12 +174,12 @@ export function FirtalRegistryConfigDialog({
               {dataSourcesQuery.isLoading || configQuery.isLoading ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Henter data sources…
+                  Loading data sources…
                 </div>
               ) : dataSourcesQuery.isError ? (
                 <p className="py-4 text-sm text-destructive">
-                  Kunne ikke hente data sources fra registret. Tjek at
-                  workspace har data registry konfigureret.
+                  Could not load data sources from the registry. Check that
+                  the workspace has a data registry configured.
                 </p>
               ) : filteredSources.length === 0 ? (
                 <p className="py-4 text-sm text-muted-foreground">
@@ -229,7 +229,7 @@ export function FirtalRegistryConfigDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Annuller
+              Cancel
             </Button>
             <Button
               type="button"
@@ -243,10 +243,10 @@ export function FirtalRegistryConfigDialog({
               {saveMutation.isPending ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Gemmer…
+                  Saving…
                 </>
               ) : (
-                "Gem"
+                "Save"
               )}
             </Button>
           </div>

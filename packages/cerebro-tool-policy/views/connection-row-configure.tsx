@@ -47,7 +47,7 @@ export function ConnectionRowConfigure({
 }) {
   const [open, setOpen] = useState(false);
   const count = toolRows.length;
-  const label = count > 0 ? `Konfigurer (${count})` : "Konfigurer";
+  const label = count > 0 ? `Configure (${count})` : "Configure";
   // The whole connection is blocked from a higher layer → flag it on the button.
   const blockedAbove = isLockedFromElsewhere(connectionRow, editLayer);
 
@@ -62,7 +62,7 @@ export function ConnectionRowConfigure({
         data-testid="connection-configure"
         title={
           blockedAbove
-            ? `${connectionLabel} er blokeret ovenfra — åbn for at se hvor det ændres`
+            ? `${connectionLabel} is blocked from a higher layer — open to see where to change it`
             : `Configure individual tools for ${connectionLabel}`
         }
       >

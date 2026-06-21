@@ -900,17 +900,17 @@ export function originOf(
 function changeHint(layer: string): string {
   switch (layer) {
     case "workspace":
-      return "Ændr det under Settings → Tools (workspace).";
+      return "Change it under Settings → Tools (workspace).";
     case "runtime":
-      return "Ændr det på Runtime-indstillinger → Tools.";
+      return "Change it under Runtime settings → Tools.";
     case "agent":
-      return "Ændr det på denne agents Tools-fane.";
+      return "Change it on this agent's Tools tab.";
     case "group":
-      return "Ændr det under Settings → Groups.";
+      return "Change it under Settings → Groups.";
     case "user":
-      return "Det er sat på brugerens egne rettigheder (loftet).";
+      return "It is set on the user's own permissions (the ceiling).";
     case "system":
-      return "Det er sat på autopilotens System-loft (vælg autopiloten ovenfor).";
+      return "It is set on the autopilot's System ceiling (select the autopilot above).";
     default:
       return "";
   }
@@ -920,7 +920,7 @@ function changeHint(layer: string): string {
 // the TECH-3287 hul 5 copy. Owner is omitted when the backend has no creator.
 function formatGroupAttribution(row: ToolPolicyRow): string {
   return row.capped_by_groups
-    .map((g) => (g.owner ? `${g.name} (ejer: ${g.owner})` : g.name))
+    .map((g) => (g.owner ? `${g.name} (owner: ${g.owner})` : g.name))
     .join(", ");
 }
 
@@ -935,7 +935,7 @@ interface RowAttribution {
 function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
   const blocker = row.effective.capped_by || row.effective.decided_by;
   if (blocker === "group" && row.capped_by_groups.length > 0) {
-    return { phrase: `gruppen ${formatGroupAttribution(row)}`, hint: changeHint("group") };
+    return { phrase: `group ${formatGroupAttribution(row)}`, hint: changeHint("group") };
   }
   return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
 }
@@ -961,7 +961,7 @@ export function rowAttribution(row: ToolPolicyRow, editLayer: ToolLayer): RowAtt
     return {
       kind: "capped",
       label: blocker === "group" ? `Capped by group ${formatGroupAttribution(row)}` : `Capped by ${phrase}`,
-      tooltip: `Din ${LAYER_LABEL[editLayer]}-indstilling slår ikke igennem — blokeret af ${phrase}. ${hint}`,
+      tooltip: `Your ${LAYER_LABEL[editLayer]} setting has no effect — blocked by ${phrase}. ${hint}`,
     };
   }
 
@@ -973,7 +973,7 @@ export function rowAttribution(row: ToolPolicyRow, editLayer: ToolLayer): RowAtt
       : `No override on this level — the rule is inherited from ${origin.level}.`;
   if (locked) {
     const { phrase, hint } = blockerText(row);
-    tooltip = `Blokeret af ${phrase} — kan ikke gøres mere åbent her. ${hint}`;
+    tooltip = `Blocked by ${phrase} — cannot be made more open here. ${hint}`;
   }
   return { kind: origin.kind, label: origin.label, tooltip };
 }
