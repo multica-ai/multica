@@ -377,7 +377,7 @@ jobs:
         run: |
           mkdir -p dist
           gh release download "${GITHUB_REF_NAME}" -D dist \
-            -p "multica_*" -p "multica-cli-*" -p "checksums.txt" \
+            -p "cs-workflow-cli-*" -p "checksums.txt" \
             --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

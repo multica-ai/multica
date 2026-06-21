@@ -38,7 +38,7 @@ irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps
 装完验证一下：
 
 ```bash
-multica version
+cs-workflow version
 ```
 
 ## 3. 登录 + 启动守护进程
@@ -46,10 +46,10 @@ multica version
 一条命令完成登录 + 启动守护进程：
 
 ```bash
-multica setup
+cs-workflow setup
 ```
 
-`multica setup` 会：
+`cs-workflow setup` 会：
 
 1. 把命令行工具配置成连接 Multica Cloud
 2. 打开浏览器让你登录（和 Web 登录一样的邮箱验证码 / Google OAuth）
@@ -57,13 +57,13 @@ multica setup
 4. **自动启动守护进程**——开始每 3 秒轮询任务、每 15 秒发心跳
 
 <Callout type="info">
-**用的是桌面应用？** 桌面应用启动时**自动拉起守护进程**，不需要手动跑 `multica setup`。见 [桌面应用](/desktop-app)。
+**用的是桌面应用？** 桌面应用启动时**自动拉起守护进程**，不需要手动跑 `cs-workflow setup`。见 [桌面应用](/desktop-app)。
 </Callout>
 
 验证守护进程在运行：
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 看到 `online` 就说明它成功注册到服务器了。
@@ -90,16 +90,16 @@ multica daemon status
 在 Web 界面创建一条 issue，或者用命令行：
 
 ```bash
-multica issue create --title "给 README 加一段 ASCII 架构图"
+cs-workflow issue create --title "给 README 加一段 ASCII 架构图"
 ```
 
 把这条 issue 分配给你刚创建的那个智能体——可以在 Web 上点它的头像，或用命令行：
 
 ```bash
-multica issue assign MUL-1 --to my-agent-name
+cs-workflow issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `multica agent list --output json` 或 `multica workspace member list --output json`。
+`--to` 后面填智能体或成员的**名字**，子串就行——如果智能体叫 `my-code-reviewer`，填 `reviewer` 也能命中。如果工作区里名字相互重叠或冲突，改用 `--to-id <uuid>`（与 `--to` 互斥）；UUID 来自 `cs-workflow agent list --output json` 或 `cs-workflow workspace member list --output json`。
 
 **接下来守护进程会**：
 

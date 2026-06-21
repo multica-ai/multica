@@ -15,7 +15,7 @@ import { Mermaid } from "@/components/mermaid";
 守护进程是 Multica CLI 的一部分。装好 [Multica CLI](/cli) 后，在自己机器上跑：
 
 ```bash
-multica daemon start
+cs-workflow daemon start
 ```
 
 启动后它会做四件事：
@@ -29,15 +29,15 @@ multica daemon start
 
 | 命令 | 作用 |
 |---|---|
-| `multica daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
-| `multica daemon stop` | 停止 |
-| `multica daemon restart` | 重启 |
-| `multica daemon status` | 查看状态 |
-| `multica daemon logs` | 查看日志（加 `-f` 跟随）|
+| `cs-workflow daemon start` | 启动（默认后台，加 `--foreground` 前台运行）|
+| `cs-workflow daemon stop` | 停止 |
+| `cs-workflow daemon restart` | 重启 |
+| `cs-workflow daemon status` | 查看状态 |
+| `cs-workflow daemon logs` | 查看日志（加 `-f` 跟随）|
 
 完整 CLI 参考见 [CLI 命令速查](/cli)。
 
-**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `multica daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
+**桌面应用自带守护进程。**用 [桌面应用](/desktop-app) 就不必手动 `cs-workflow daemon start`——它启动时会自动拉起守护进程。哪种方式更适合你的工作流，详见 [桌面应用](/desktop-app) 页面。
 
 ## 为什么一台机器会有多个运行时
 
@@ -99,8 +99,8 @@ Multica 对并发有两层限额：
 
 遇到「我的智能体不工作」类问题，先过一遍这三步：
 
-1. 跑 `multica daemon status`，确认守护进程在运行且在线
-2. 跑 `multica daemon logs -f`，看是否有错误
+1. 跑 `cs-workflow daemon status`，确认守护进程在运行且在线
+2. 跑 `cs-workflow daemon logs -f`，看是否有错误
 3. 去 Multica 界面的 **Runtimes** 页面，确认你的运行时显示「在线」
 
 更多场景见 [Troubleshooting](/troubleshooting)。

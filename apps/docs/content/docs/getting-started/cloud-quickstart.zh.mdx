@@ -42,7 +42,7 @@ Then configure, authenticate, and start the daemon:
 
 ```bash
 # Configure, authenticate, and start the daemon
-multica setup
+cs-workflow setup
 ```
 
 The daemon auto-detects available agent CLIs (`claude`, `codex`, `gemini`, `openclaw`, `opencode`, `hermes`, `pi`) on your PATH. When an agent is assigned a task, the daemon creates an isolated environment, runs the agent, and reports results back.
@@ -59,6 +59,6 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 ## 5. Assign your first task
 
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
+Create an issue from the board (or via `cs-workflow issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
 That's it! Your agent is now part of the team.

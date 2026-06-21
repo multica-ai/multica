@@ -183,7 +183,7 @@ This is a first-class workflow.
 Example:
 
 - main checkout
-  - database: `multica`
+  - database: `cs-workflow`
   - backend: `8080`
   - frontend: `3000`
 - worktree checkout
@@ -306,7 +306,7 @@ Run the local daemon:
 make daemon
 ```
 
-The daemon authenticates using the CLI's stored token (`multica login`).
+The daemon authenticates using the CLI's stored token (`cs-workflow login`).
 It registers runtimes for all watched workspaces from the CLI config.
 
 ## Full-Stack Isolated Testing
@@ -434,7 +434,7 @@ make cli ARGS="daemon start --profile $PROFILE"
 ```
 
 The daemon runs from the current worktree's Go source, connecting to the
-local backend. Agent-executed `multica` commands automatically use the same
+local backend. Agent-executed `cs-workflow` commands automatically use the same
 binary (the daemon prepends its own directory to `PATH`).
 
 ### Stop the Isolated Environment
@@ -471,8 +471,8 @@ pnpm dev:desktop
 
 This automatically:
 
-1. Compiles the `multica` CLI from `server/cmd/multica` into
-   `apps/desktop/resources/bin/multica`
+1. Compiles the `cs-workflow` CLI from `server/cmd/cs-workflow` into
+   `apps/desktop/resources/bin/cs-workflow`
 2. Creates an isolated profile named `desktop-localhost-<PORT>`
 3. Starts and manages its own daemon instance
 4. Connects to the local backend
@@ -491,7 +491,7 @@ VITE_WS_URL=ws://localhost:<backend-port>/ws
 
 ### Isolation Guarantee
 
-Nothing in this flow touches the system-installed `multica` or the default
+Nothing in this flow touches the system-installed `cs-workflow` or the default
 `~/.multica/config.json`:
 
 | Resource | System / Production | Local Dev (per-worktree) |
@@ -554,7 +554,7 @@ Look for:
 ### List All Local Databases in Shared PostgreSQL
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres -At -c "select datname from pg_database order by datname;"
+docker compose exec -T postgres psql -U cs-workflow -d postgres -At -c "select datname from pg_database order by datname;"
 ```
 
 ### Worktree Is Accidentally Using the Main Database

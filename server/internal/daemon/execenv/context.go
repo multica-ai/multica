@@ -336,7 +336,7 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
-	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
+	fmt.Fprintf(&b, "Run `cs-workflow issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
 	if len(ctx.AgentSkills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
@@ -391,9 +391,9 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
-	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `multica issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
+	b.WriteString("This is a run-only autopilot task with no assigned issue. Do not run `cs-workflow issue get` unless the autopilot instructions explicitly ask you to create or update an issue.\n\n")
 	if ctx.AutopilotID != "" {
-		fmt.Fprintf(&b, "Run `multica autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
+		fmt.Fprintf(&b, "Run `cs-workflow autopilot get %s --output json` if you need the full autopilot configuration.\n\n", ctx.AutopilotID)
 	}
 	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
 		b.WriteString("## Autopilot Instructions\n\n")

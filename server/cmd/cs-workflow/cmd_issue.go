@@ -613,7 +613,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
-	// before invoking the agent, the agent's `multica issue create` call
+	// before invoking the agent, the agent's `cs-workflow issue create` call
 	// inherits the env var and tags the new issue with origin_type=
 	// quick_create + origin_id=<task_id>. The completion handler then
 	// locates the issue deterministically by origin instead of "most
@@ -1688,7 +1688,7 @@ func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
 // assignee_id) by looking it up against the workspace's members, agents, and
 // (when allowed) squads. It is the deterministic counterpart to
 // resolveAssignee: callers that already hold a UUID (e.g. agents reading IDs
-// from `multica workspace member list --output json`) should use this instead of
+// from `cs-workflow workspace member list --output json`) should use this instead of
 // round-tripping through name matching, which can be ambiguous in workspaces
 // with overlapping names.
 func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, kinds assigneeKinds) (string, string, error) {

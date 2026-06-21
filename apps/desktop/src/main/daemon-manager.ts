@@ -54,7 +54,7 @@ let activeProfile: ActiveProfile | null = null;
 // corrupting the JSON.
 let configWriteChain: Promise<void> = Promise.resolve();
 
-// Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
+// Keep the Go impl in sync: server/cmd/cs-workflow/cmd_daemon.go healthPortForProfile.
 function healthPortForProfile(profile: string): number {
   if (!profile) return DEFAULT_HEALTH_PORT;
   let sum = 0;
@@ -282,7 +282,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
 }
 
 function findCliOnPath(): string | null {
-  const candidates = process.platform === "win32" ? ["multica.exe"] : ["multica"];
+  const candidates = process.platform === "win32" ? ["cs-workflow.exe"] : ["cs-workflow"];
   const paths = (process.env["PATH"] ?? "").split(
     process.platform === "win32" ? ";" : ":",
   );
@@ -302,14 +302,14 @@ function findCliOnPath(): string | null {
  * Returns the path to the CLI binary bundled inside the Desktop app.
  *
  * - Dev (`electron-vite dev`): `app.getAppPath()` → `apps/desktop`, resolving
- *   to `apps/desktop/resources/bin/multica`. `bundle-cli.mjs` populates this
+ *   to `apps/desktop/resources/bin/cs-workflow`. `bundle-cli.mjs` populates this
  *   before dev starts, so iterating on Go changes is "make build → restart".
  * - Packaged: `app.getAppPath()` → `<Multica.app>/Contents/Resources/app.asar`.
  *   electron-builder's `asarUnpack: resources/**` extracts the binary to
  *   `app.asar.unpacked/`, so we swap the path segment to execute it.
  */
 function bundledCliPath(): string {
-  const binName = process.platform === "win32" ? "multica.exe" : "multica";
+  const binName = process.platform === "win32" ? "cs-workflow.exe" : "cs-workflow";
   return join(app.getAppPath(), "resources", "bin", binName).replace(
     "app.asar",
     "app.asar.unpacked",
@@ -347,12 +347,12 @@ async function probeCliBinary(
 }
 
 /**
- * Returns a usable `multica` binary path. Priority:
+ * Returns a usable `cs-workflow` binary path. Priority:
  *   1. Cached result from a previous successful resolve.
  *   2. Bundled binary shipped with the Desktop app (`bundle-cli.mjs`).
  *   3. Managed binary already installed in userData (`managedCliPath`).
  *   4. Download + install latest release into userData.
- *   5. `multica` on PATH (dev convenience / user-installed via brew).
+ *   5. `cs-workflow` on PATH (dev convenience / user-installed via brew).
  * Returns `null` only when all of the above fail.
  *
  * Bundled is preferred so Desktop iterates in lockstep with Go changes in

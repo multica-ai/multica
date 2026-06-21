@@ -116,7 +116,7 @@ Issue 的 assignee 可以是 member（人）或 agent。这是 Multica 和传统
 ### 创建 Issue（CLI）
 
 ```bash
-multica issue create \
+cs-workflow issue create \
   --title "Fix login bug" \
   --assignee @alice
 ```
@@ -124,7 +124,7 @@ multica issue create \
 ### 分配给 Agent（触发自动执行）
 
 ```bash
-multica issue assign <issue-id> --agent <agent-slug>
+cs-workflow issue assign <issue-id> --agent <agent-slug>
 ```
 
 分配给 agent 时，Multica 会立刻入队一个 task 到对应 runtime。详见
@@ -229,7 +229,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 1.2 How Multica Works — ⬜ Not started [v1]
 
-- **Source files**: `server/cmd/multica-daemon/`, `packages/core/`, 战略 plan 的"产品定位"段
+- **Source files**: `server/cmd/cs-workflow-daemon/`, `packages/core/`, 战略 plan 的"产品定位"段
 - **目标读者**: P0 新用户（想先建立心智模型再动手）
 - **叙事位置**: 第二页。一张大图把 User / Issue / Agent / Runtime / Daemon / Task / Trigger 串起来。
 - **写什么**（800-1200 字 + 一张架构图）:
@@ -247,11 +247,11 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 1.3 Quickstart (Cloud) — ⬜ Not started [v1]
 
-- **Source files**: `apps/docs/content/docs/cloud-quickstart.mdx`（现有）, `server/cmd/multica/cmd_setup.go`, `cmd_login.go`, `cmd_agent.go`, `cmd_issue.go`
+- **Source files**: `apps/docs/content/docs/cloud-quickstart.mdx`（现有）, `server/cmd/cs-workflow/cmd_setup.go`, `cmd_login.go`, `cmd_agent.go`, `cmd_issue.go`
 - **目标读者**: P0 新用户（想 5 分钟跑起来）
 - **叙事位置**: 第三页。
 - **写什么**（600-1000 字）:
-  - Signup → install CLI → `multica login` → `multica setup cloud` → 创建第一个 agent → 创建第一个 issue → 分配给 agent → 看它工作
+  - Signup → install CLI → `cs-workflow login` → `cs-workflow setup cloud` → 创建第一个 agent → 创建第一个 issue → 分配给 agent → 看它工作
   - 每步命令可独立复制运行
   - 末尾一句："如果你想用 desktop app，参见 [Desktop App](/docs/desktop-app)"
 - **不写**: self-host（下一篇）、daemon 深入配置
@@ -263,14 +263,14 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 1.4 Quickstart (Self-Host) — ⬜ Not started [v1]
 
-- **Source files**: `Makefile`（selfhost target）, `docker-compose.selfhost.yml`, `.env.example`, `server/cmd/multica/cmd_setup.go`
+- **Source files**: `Makefile`（selfhost target）, `docker-compose.selfhost.yml`, `.env.example`, `server/cmd/cs-workflow/cmd_setup.go`
 - **目标读者**: P0 self-host 评估者
 - **叙事位置**: Cloud Quickstart 的姐妹篇。
 - **写什么**（800-1200 字）:
   - `make selfhost` vs `make selfhost-build` 差异
   - 自动生成 JWT_SECRET
   - Migration 启动自动执行（**zero-touch upgrade** 是卖点）
-  - 第一次启动后 `multica setup self-host`
+  - 第一次启动后 `cs-workflow setup self-host`
   - 最小可行配置（必填 env）
   - **⚠️ 提醒 `APP_ENV=production` 的陷阱**（详细讲在 §7.2）
 - **不写**: 完整 env 表（§7.1）、Storage/Email 进阶配置（v2）
@@ -401,7 +401,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 3.2 Creating & Configuring Agents — ⬜ Not started [v1]
 
-- **Source files**: `server/internal/handler/agent.go`, `server/pkg/db/queries/agent.sql`, `packages/views/agents/`, `server/cmd/multica/cmd_agent.go`
+- **Source files**: `server/internal/handler/agent.go`, `server/pkg/db/queries/agent.sql`, `packages/views/agents/`, `server/cmd/cs-workflow/cmd_agent.go`
 - **目标读者**: P1 团队管理员
 - **叙事位置**: 怎么创建一个 agent。
 - **写什么**（1200-1800 字）:
@@ -422,7 +422,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 3.3 Skills — ⬜ Not started [v1]
 
-- **Source files**: `server/internal/handler/skill.go`, `server/pkg/db/queries/skill.sql`, `server/internal/daemon/execenv/context.go`（各 provider skill 注入路径）, `server/cmd/multica/cmd_skill.go`
+- **Source files**: `server/internal/handler/skill.go`, `server/pkg/db/queries/skill.sql`, `server/internal/daemon/execenv/context.go`（各 provider skill 注入路径）, `server/cmd/cs-workflow/cmd_skill.go`
 - **目标读者**: P1 重度用户、P2 agent
 - **叙事位置**: 强化 agent 能力。
 - **写什么**（1200-1800 字）:
@@ -460,7 +460,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 > **合并说明**：Daemon 和 Runtime 概念耦合紧密（runtime = daemon × provider），放一页讲更连贯。
 
 - **Source files**:
-  - Daemon: `server/internal/daemon/daemon.go`, `server/cmd/multica-daemon/main.go`, `server/cmd/multica/cmd_daemon.go`, `server/pkg/db/queries/daemon.sql`
+  - Daemon: `server/internal/daemon/daemon.go`, `server/cmd/cs-workflow-daemon/main.go`, `server/cmd/cs-workflow/cmd_daemon.go`, `server/pkg/db/queries/daemon.sql`
   - Runtime: `server/pkg/db/queries/runtime.sql`, `server/internal/handler/runtime.go`, `server/migrations/004`, `server/cmd/server/runtime_sweeper.go`
 - **目标读者**: P0 运维、P1 开发者
 - **叙事位置**: 板块 4 第一篇。"为什么我的 agent 不工作" 的答疑总枢。
@@ -473,7 +473,7 @@ multica issue assign <issue-id> --agent <agent-slug>
     - Recover-orphans（启动时把 dispatched/running 转 failed）
     - Legacy daemon_id migration（hostname → UUID 自动迁移）
     - 配置优先级（CLI flag > config file > env）
-    - CLI：`multica daemon install/login/start/stop/status/logs`
+    - CLI：`cs-workflow daemon install/login/start/stop/status/logs`
   - **Runtime 部分**:
     - Runtime = daemon × provider
     - 唯一约束 `(workspace_id, daemon_id, provider)`
@@ -571,7 +571,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 - **叙事位置**: 最常见触发方式。
 - **写什么**（600-1000 字）:
   - UI：issue 详情页选 agent as assignee
-  - CLI：`multica issue assign <id> --agent <agent-slug>`
+  - CLI：`cs-workflow issue assign <id> --agent <agent-slug>`
   - 分配后立刻入队 task
   - Private agent 仅 owner/admin 可分配
   - 取消分配：**不自动取消订阅**
@@ -772,12 +772,12 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 > **合并说明**：v1 不做 14 页 CLI 详细 reference，用一页 cheatsheet 覆盖核心命令 + 认证入口。V2 再按命令组拆详细页。
 
-- **Source files**: `server/cmd/multica/main.go`（命令树）, 各 `cmd_*.go`
+- **Source files**: `server/cmd/cs-workflow/main.go`（命令树）, 各 `cmd_*.go`
 - **目标读者**: P1 开发者、P2 agent
 - **叙事位置**: Reference 板块首篇。
 - **写什么**（2000-2500 字）:
   - **认证入口**（开头一段）:
-    - `multica login` → 拿 PAT（`mul_` 前缀）
+    - `cs-workflow login` → 拿 PAT（`mul_` 前缀）
     - PAT 存 `~/.multica/config.json`
     - 详细 token 机制见 [Authentication & Tokens](/docs/auth-tokens)
   - **命令总览**（按功能分组，每条一行）:
@@ -804,7 +804,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 
 ### 8.2 Authentication & Tokens — ⬜ Not started [v1]
 
-- **Source files**: `server/internal/handler/auth.go`, `server/internal/middleware/auth.go`, `server/internal/middleware/daemon_auth.go`, `server/cmd/multica/cmd_auth.go`
+- **Source files**: `server/internal/handler/auth.go`, `server/internal/middleware/auth.go`, `server/internal/middleware/daemon_auth.go`, `server/cmd/cs-workflow/cmd_auth.go`
 - **目标读者**: P1 管理员、P1 开发者（用 API / CLI / daemon）
 - **叙事位置**: Reference 板块。讲"三种身份证"。
 - **写什么**（1200-1800 字）:
@@ -820,8 +820,8 @@ multica issue assign <issue-id> --agent <agent-slug>
     | `/api/daemon/*` | ✗ | ✓ | ✓ |
     | `WS /ws` | ✓（cookie）| ✓（首条消息）| - |
   - 登录 flow（email + code / OAuth）
-  - PAT 创建 / 撤销 / 管理（UI 在 Settings，CLI 通过 `multica login`）
-  - Daemon token 生成时机（`multica daemon login`）
+  - PAT 创建 / 撤销 / 管理（UI 在 Settings，CLI 通过 `cs-workflow login`）
+  - Daemon token 生成时机（`cs-workflow daemon login`）
   - Logout（删本地 token，不撤销 server session）
 - **不写**: self-host 时的 auth setup（§7.2）、CLI 具体命令（§8.1）
 - **写前要验证**: Daemon Token 在 WS 的行为；JWT 过期后重连
@@ -839,7 +839,7 @@ multica issue assign <issue-id> --agent <agent-slug>
   - **Desktop vs Web 对比表**（开篇）
   - **多 tab 系统**（per-workspace 隔离，localStorage 持久化，跨 workspace 切换时恢复上次活跃 tab）
   - **自动更新**（electron-updater + GitHub Release；Windows arm64 特殊处理 `latest-arm64.yml`；app quit 时安装）
-  - **Daemon 不内置**：desktop 只是窗口，daemon 要单独 `multica daemon start`，desktop package 里 bundle 了 CLI
+  - **Daemon 不内置**：desktop 只是窗口，daemon 要单独 `cs-workflow daemon start`，desktop package 里 bundle 了 CLI
   - 安装：macOS .dmg / Windows .exe / Linux .AppImage
 - **不写**:
   - Window Overlay（实现细节，用户无感知）
@@ -868,18 +868,18 @@ multica issue assign <issue-id> --agent <agent-slug>
   - 7.7 Email（Resend 配置 / 邮件场景 / 未配置 fallback）
   - 7.8 Upgrading（版本 tag / migration 自动执行 / 回滚策略）
 - **板块 8**（CLI 详细 reference，从 8.1 cheatsheet 拆开）:
-  - 8.4 multica auth / login 详细
-  - 8.5 multica setup 详细
-  - 8.6 multica workspace 详细
-  - 8.7 multica issue（+comment / subscriber）详细
-  - 8.8 multica project 详细
-  - 8.9 multica agent（+skills）详细
-  - 8.10 multica skill 详细
-  - 8.11 multica autopilot 详细
-  - 8.12 multica repo 详细
-  - 8.13 multica daemon 详细
-  - 8.14 multica runtime 详细
-  - 8.15 multica config / version / update / attachment 详细
+  - 8.4 cs-workflow auth / login 详细
+  - 8.5 cs-workflow setup 详细
+  - 8.6 cs-workflow workspace 详细
+  - 8.7 cs-workflow issue（+comment / subscriber）详细
+  - 8.8 cs-workflow project 详细
+  - 8.9 cs-workflow agent（+skills）详细
+  - 8.10 cs-workflow skill 详细
+  - 8.11 cs-workflow autopilot 详细
+  - 8.12 cs-workflow repo 详细
+  - 8.13 cs-workflow daemon 详细
+  - 8.14 cs-workflow runtime 详细
+  - 8.15 cs-workflow config / version / update / attachment 详细
 
 ---
 

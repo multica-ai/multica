@@ -288,7 +288,7 @@ func resolveTaskRunID(ctx context.Context, client *cli.APIClient, issueID, input
 		return resolvedID{ID: trimmed, Display: trimmed}, nil
 	}
 	if strings.TrimSpace(issueID) == "" {
-		return resolvedID{}, fmt.Errorf("short task run prefixes require --issue <issue-id>; pass a full task UUID or run `multica issue runs <issue-id> --full-id`")
+		return resolvedID{}, fmt.Errorf("short task run prefixes require --issue <issue-id>; pass a full task UUID or run `cs-workflow issue runs <issue-id> --full-id`")
 	}
 	fetch := func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 		return fetchTaskRunCandidatesForIssue(ctx, client, issueID)

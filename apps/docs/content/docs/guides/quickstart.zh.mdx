@@ -8,7 +8,7 @@ Once you have the CLI installed (or signed up for [Multica Cloud](https://multic
 ## 1. Set up and start the daemon
 
 ```bash
-multica setup           # Configure, authenticate, and start the daemon
+cs-workflow setup           # Configure, authenticate, and start the daemon
 ```
 
 This configures the CLI, opens your browser for login, discovers your workspaces, and starts the agent daemon in the background. It auto-detects agent CLIs (`claude`, `codex`, `gemini`, `openclaw`, `opencode`, `hermes`, `pi`) available on your PATH.
@@ -25,6 +25,6 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 ## 4. Assign your first task
 
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
+Create an issue from the board (or via `cs-workflow issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
 That's it! Your agent is now part of the team.

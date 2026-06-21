@@ -114,15 +114,15 @@ jobs:
           commit=$(git rev-parse --short HEAD)
           date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
 
-          output="multica"
+          output="cs-workflow"
           if [ "$GOOS" = "windows" ]; then
-            output="multica.exe"
+            output="cs-workflow.exe"
           fi
 
           go build \
             -ldflags "-s -w -X main.version=$VERSION -X main.commit=$commit -X main.date=$date" \
             -o "bin/$output" \
-            ./cmd/multica
+            ./cmd/cs-workflow
 
           echo "Built: server/bin/$output"
           ./bin/$output version || true
@@ -136,8 +136,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ needs.verify-ref.outputs.version }}
         run: |
-          archive_name="multica-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
-          tar czf "$archive_name" multica
+          archive_name="cs-workflow-cli-${VERSION}-${GOOS}-${GOARCH}.tar.gz"
+          tar czf "$archive_name" cs-workflow
           echo "archive_name=$archive_name" >> "$GITHUB_ENV"
           echo "Created archive: $archive_name"
 
@@ -150,15 +150,15 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           VERSION: ${{ needs.verify-ref.outputs.version }}
         run: |
-          $archive_name = "multica-cli-${env:VERSION}-${env:GOOS}-${env:GOARCH}.zip"
-          Compress-Archive -Path multica.exe -DestinationPath $archive_name
+          $archive_name = "cs-workflow-cli-${env:VERSION}-${env:GOOS}-${env:GOARCH}.zip"
+          Compress-Archive -Path cs-workflow.exe -DestinationPath $archive_name
           Add-Content -Path $env:GITHUB_ENV -Value "archive_name=$archive_name"
           Write-Host "Created archive: $archive_name"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: multica-cli-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: cs-workflow-cli-${{ matrix.goos }}-${{ matrix.goarch }}
           path: server/bin/${{ env.archive_name }}
           if-no-files-found: error
           retention-days: 30
@@ -172,7 +172,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: multica-cli-*
+          pattern: cs-workflow-cli-*
           merge-multiple: true
 
       - name: Upload to GitHub Release
@@ -213,7 +213,7 @@ jobs:
         run: |
           mkdir -p dist
           gh release download "${{ needs.verify-ref.outputs.tag_name }}" -D dist \
-            -p "multica-cli-*" \
+            -p "cs-workflow-cli-*" \
             --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -325,7 +325,7 @@ func TestPrepareWithRepoContext(t *testing.T) {
 	}
 	s := string(content)
 	for _, want := range []string{
-		"multica repo checkout",
+		"cs-workflow repo checkout",
 		"https://github.com/org/backend",
 		"https://github.com/org/frontend",
 	} {
@@ -450,14 +450,14 @@ func TestWriteContextFilesAutopilotRunOnly(t *testing.T) {
 		"run-1",
 		"autopilot-1",
 		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		"cs-workflow autopilot get autopilot-1 --output json",
 		"no assigned issue",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("autopilot context missing %q\n---\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "Run `multica issue get") {
+	if strings.Contains(s, "Run `cs-workflow issue get") {
 		t.Errorf("autopilot context should not contain issue get workflow\n---\n%s", s)
 	}
 }
@@ -573,8 +573,8 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		"multica issue get",
-		"multica issue comment list",
+		"cs-workflow issue get",
+		"cs-workflow issue comment list",
 		"Go Conventions",
 		"PR Review",
 		"discovered automatically",
@@ -602,17 +602,17 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	for _, want := range []string{
 		"## Available Commands",
 		"core agent loop and common issue create/update tasks",
-		"`multica <command> --help`",
-		"multica issue get <id> --output json",
-		"multica issue comment list <issue-id>",
-		"multica issue create --title",
-		"multica issue update <id>",
+		"`cs-workflow <command> --help`",
+		"cs-workflow issue get <id> --output json",
+		"cs-workflow issue comment list <issue-id>",
+		"cs-workflow issue create --title",
+		"cs-workflow issue update <id>",
 		"--description-file <path>",
 		"--parent \"\"",
-		"multica repo checkout <url>",
-		"multica issue status <id> <status>",
-		"multica issue comment add <issue-id>",
-		"multica issue comment add --help",
+		"cs-workflow repo checkout <url>",
+		"cs-workflow issue status <id> <status>",
+		"cs-workflow issue comment add <issue-id>",
+		"cs-workflow issue comment add --help",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
@@ -620,30 +620,30 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 
 	for _, banned := range []string{
-		"multica issue list [--status",
-		"multica issue label list",
-		"multica issue subscriber list",
-		"multica label list",
-		"multica workspace member list",
-		"multica agent list",
-		"multica squad list",
-		"multica issue runs",
-		"multica issue run-messages",
-		"multica attachment download",
-		"multica autopilot list",
-		"multica autopilot create",
-		"multica autopilot update",
-		"multica autopilot trigger",
-		"multica autopilot delete",
-		"multica project get",
-		"multica project resource list",
-		"multica issue assign",
-		"multica issue label add",
-		"multica issue label remove",
-		"multica issue subscriber add",
-		"multica issue subscriber remove",
-		"multica issue comment delete",
-		"multica label create",
+		"cs-workflow issue list [--status",
+		"cs-workflow issue label list",
+		"cs-workflow issue subscriber list",
+		"cs-workflow label list",
+		"cs-workflow workspace member list",
+		"cs-workflow agent list",
+		"cs-workflow squad list",
+		"cs-workflow issue runs",
+		"cs-workflow issue run-messages",
+		"cs-workflow attachment download",
+		"cs-workflow autopilot list",
+		"cs-workflow autopilot create",
+		"cs-workflow autopilot update",
+		"cs-workflow autopilot trigger",
+		"cs-workflow autopilot delete",
+		"cs-workflow project get",
+		"cs-workflow project resource list",
+		"cs-workflow issue assign",
+		"cs-workflow issue label add",
+		"cs-workflow issue label remove",
+		"cs-workflow issue subscriber add",
+		"cs-workflow issue subscriber remove",
+		"cs-workflow issue comment delete",
+		"cs-workflow label create",
 	} {
 		if strings.Contains(s, banned) {
 			t.Errorf("AGENTS.md should not inject non-core command %q\n---\n%s", banned, s)
@@ -672,7 +672,7 @@ func TestInjectRuntimeConfigGemini(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		"multica issue get",
+		"cs-workflow issue get",
 		"Writing",
 	} {
 		if !strings.Contains(s, want) {
@@ -732,7 +732,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue get") {
+	if !strings.Contains(s, "cs-workflow issue get") {
 		t.Error("should reference multica CLI even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
@@ -1121,7 +1121,7 @@ func TestPrepareWithRepoContextOpencode(t *testing.T) {
 	}
 	s := string(content)
 	for _, want := range []string{
-		"multica repo checkout",
+		"cs-workflow repo checkout",
 		"https://github.com/org/backend",
 	} {
 		if !strings.Contains(s, want) {
@@ -1163,10 +1163,10 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			}
 			s := string(data)
 
-			// The workflow must contain an explicit `multica issue comment add`
+			// The workflow must contain an explicit `cs-workflow issue comment add`
 			// invocation for this issue — not just a prose mention of posting.
 			mustContain := []string{
-				"multica issue comment add issue-1",
+				"cs-workflow issue comment add issue-1",
 				"mandatory",
 			}
 			for _, want := range mustContain {
@@ -1179,7 +1179,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			// output is not user-visible. This is the second line of defense
 			// in case the agent skips past the workflow steps.
 			for _, want := range []string{
-				"Final results MUST be delivered via `multica issue comment add`",
+				"Final results MUST be delivered via `cs-workflow issue comment add`",
 				"does NOT see your terminal output",
 			} {
 				if !strings.Contains(s, want) {
@@ -1301,7 +1301,7 @@ func TestInjectRuntimeConfigCodexLinuxEmphasizesStdin(t *testing.T) {
 // the Codex-Specific section directs the agent at `--content-file` instead
 // of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped HEREDOC
 // bytes through the active console codepage and silently drop non-ASCII
-// as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+// as `?` before reaching `cs-workflow.exe` (#2198 / #2236 / #2376).
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
@@ -1395,7 +1395,7 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 		"Autopilot in run-only mode",
 		"Autopilot run ID: `run-1`",
 		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		"cs-workflow autopilot get autopilot-1 --output json",
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -1404,8 +1404,8 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	}
 
 	for _, absent := range []string{
-		"Run `multica issue get",
-		"Final results MUST be delivered via `multica issue comment add`",
+		"Run `cs-workflow issue get",
+		"Final results MUST be delivered via `cs-workflow issue comment add`",
 	} {
 		if strings.Contains(s, absent) {
 			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
@@ -2866,7 +2866,7 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	for _, want := range []string{
 		"Squad leader rule",
 		"DO NOT post any comment",
-		"multica squad activity",
+		"cs-workflow squad activity",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
@@ -3116,12 +3116,12 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	for _, want := range []string{
 		"--thread " + triggerID,
 		"--tail 30",
-		"multica issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
+		"cs-workflow issue comment list " + issueID + " --thread " + triggerID + " --tail 30 --output json",
 		// Reply cursor walks older replies inside the same thread.
 		"Next reply cursor:",
 		"--before-id <reply-id>",
 		// --recent fallback at the documented default N=20 for cross-thread context.
-		"multica issue comment list " + issueID + " --recent 20 --output json",
+		"cs-workflow issue comment list " + issueID + " --recent 20 --output json",
 		// Cursor walks via the stderr line the CLI emits, not invented flags.
 		"Next thread cursor",
 		"--before",
@@ -3160,7 +3160,7 @@ func TestInjectRuntimeConfigCommentTriggerThreadFirstReads(t *testing.T) {
 	}
 	// The pre-MUL-2421 unbounded `--thread` recipe (no --tail) is also a
 	// regression target: it dumps the entire thread on long threads.
-	if strings.Contains(s, "multica issue comment list "+issueID+" --thread "+triggerID+" --output json") {
+	if strings.Contains(s, "cs-workflow issue comment list "+issueID+" --thread "+triggerID+" --output json") {
 		t.Errorf("comment-triggered Workflow regressed to unbounded --thread recipe (no --tail) — long threads will overflow context\n---\n%s", s)
 	}
 }
@@ -3186,7 +3186,7 @@ func TestInjectRuntimeConfigAssignmentTriggerMentionsRecent(t *testing.T) {
 
 	// Mandatory full-history rule (MUL-1124) must stay.
 	for _, want := range []string{
-		"multica issue comment list issue-1 --output json",
+		"cs-workflow issue comment list issue-1 --output json",
 		"this is mandatory, not optional",
 		"Skipping this step is the most common cause",
 	} {
@@ -3234,9 +3234,9 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 	// discovery point for the CLI when an agent decides to read or write
 	// metadata outside the numbered workflow.
 	coreDiscoveryLines := []string{
-		"multica issue metadata list <issue-id>",
-		"multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
-		"multica issue metadata delete <issue-id> --key <k>",
+		"cs-workflow issue metadata list <issue-id>",
+		"cs-workflow issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]",
+		"cs-workflow issue metadata delete <issue-id> --key <k>",
 	}
 
 	type wantSection struct {
@@ -3278,7 +3278,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 		},
 	}
 	withoutSection := wantSection{
-		// We can't simply require `multica issue metadata list` absent
+		// We can't simply require `cs-workflow issue metadata list` absent
 		// because the Available Commands → Core discovery line is
 		// global (it uses `<issue-id>` placeholder text). What MUST be
 		// absent is the semantic section itself plus the workflow-step
@@ -3316,13 +3316,13 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
-				"multica issue metadata list issue-md-1 --output json",
+				"cs-workflow issue metadata list issue-md-1 --output json",
 				"See the `## Issue Metadata` section above",
 				// Exit step must show both write and delete, not just
 				// "set" — stale-key cleanup is the half that keeps
 				// metadata from rotting.
-				"multica issue metadata set",
-				"multica issue metadata delete",
+				"cs-workflow issue metadata set",
+				"cs-workflow issue metadata delete",
 				"Before exiting",
 			},
 			want: withSection,
@@ -3333,10 +3333,10 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			provider:            "claude",
 			filename:            "CLAUDE.md",
 			workflowStepPresent: []string{
-				"multica issue metadata list issue-md-2 --output json",
+				"cs-workflow issue metadata list issue-md-2 --output json",
 				"See the `## Issue Metadata` section above",
-				"multica issue metadata set",
-				"multica issue metadata delete",
+				"cs-workflow issue metadata set",
+				"cs-workflow issue metadata delete",
 				"Before exiting",
 			},
 			want: withSection,
@@ -3448,7 +3448,7 @@ func TestInjectRuntimeConfigIssueMetadataCodexFormattingUnchanged(t *testing.T) 
 		if !strings.Contains(s, "## Issue Metadata") {
 			t.Fatalf("Issue Metadata section missing\n---\n%s", s)
 		}
-		if !strings.Contains(s, "multica issue metadata list issue-md-codex --output json") {
+		if !strings.Contains(s, "cs-workflow issue metadata list issue-md-codex --output json") {
 			t.Fatalf("metadata list step missing\n---\n%s", s)
 		}
 		// ...AND the codex-specific stdin-only rule is still emitted.

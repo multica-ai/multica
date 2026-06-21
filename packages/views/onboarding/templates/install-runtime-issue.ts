@@ -55,7 +55,7 @@ For English users, the fastest first path is Codex:
    which codex
    codex --version
 5. Restart the Multica daemon:
-   multica daemon restart
+   cs-workflow daemon restart
    If you use the desktop app, restarting the app is enough.
 6. Return to Runtimes and refresh. You should see a Codex runtime online.
 7. Create your first agent from that runtime, then assign an issue to the agent and set status to todo.
@@ -95,7 +95,7 @@ const zh = `欢迎来到 Multica。
    kimi
 4. 首次启动后输入 /login,按提示完成 Kimi Code 或 API key 配置。
 5. 重启 Multica 守护进程:
-   multica daemon restart
+   cs-workflow daemon restart
    如果你用桌面端,重启 app 即可。
 6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。
 7. 用这个运行时创建第一个智能体,再把一个 issue 分配给它,并把状态切到 todo。

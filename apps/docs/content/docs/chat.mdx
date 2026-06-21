@@ -29,11 +29,11 @@ Agents run in a **fully sandboxed** mode inside a conversation.
 - Answer the questions in your current message
 - Use its configured [skills](/skills) and MCP
 - Read and write files in its own working directory
-- Call `multica` CLI commands that do not need issue context (for example, querying basic workspace info)
+- Call `cs-workflow` CLI commands that do not need issue context (for example, querying basic workspace info)
 
 **Cannot do:**
 
-- **See any issue** — the prompt the agent receives has no issue IDs, and commands like `multica issue list` return empty
+- **See any issue** — the prompt the agent receives has no issue IDs, and commands like `cs-workflow issue list` return empty
 - **Change any issue** — without issue context, API calls are blocked by permission checks
 - **See other conversations** — conversations are fully isolated
 - **@-mention anyone or any agent** — chat is a private space with no path to notify others

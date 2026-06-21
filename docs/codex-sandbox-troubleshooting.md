@@ -75,7 +75,7 @@ curl -sSf https://multica-api.copilothub.ai/healthz
 From inside a Codex session (after the daemon writes its config):
 
 ```bash
-multica issue list --limit 1 --output json >/dev/null && echo OK
+cs-workflow issue list --limit 1 --output json >/dev/null && echo OK
 ```
 
 If the host curl works but the Codex-session call fails with `no such host`,

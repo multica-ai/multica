@@ -20,7 +20,7 @@ var MinVersions = map[string]string{
 // the multica CLI version reported by the daemon at registration time. The
 // quick-create prompt that the agent runs depends on CLI behavior introduced
 // after this version (attachment URL handling, no-retry semantics on
-// `multica issue create` failure — see PR #1851); older daemons would either
+// `cs-workflow issue create` failure — see PR #1851); older daemons would either
 // double-create issues or mishandle pasted screenshot URLs. Treated as a hard
 // requirement: missing / unparsable / below this threshold all fail closed.
 const MinQuickCreateCLIVersion = "0.2.20"

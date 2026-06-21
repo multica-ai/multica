@@ -15,7 +15,7 @@ import (
 // On macOS, Codex's Seatbelt sandbox in the `workspace-write` mode silently
 // ignores `[sandbox_workspace_write] network_access = true`. DNS resolution is
 // blocked at the syscall layer, so processes inside the sandbox see
-// `no such host` errors when calling out (for example, `multica issue get`
+// `no such host` errors when calling out (for example, `cs-workflow issue get`
 // hitting the Multica API). See upstream issue openai/codex#10390.
 //
 // Until a fixed Codex release ships, the per-task Codex config on macOS needs

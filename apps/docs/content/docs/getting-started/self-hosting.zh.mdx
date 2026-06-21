@@ -13,7 +13,7 @@ Multica has three components:
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
-Each user who wants to run AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
+Each user who wants to run AI agents locally also installs the **`cs-workflow` CLI** and runs the **agent daemon** on their own machine.
 
 ## Prerequisites
 
@@ -28,7 +28,7 @@ Two commands to set up everything:
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 
 # Configure CLI, authenticate, and start the daemon
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 This installs the CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost. Then open http://localhost:3000 and pick a login method: configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or leave Resend unset and copy the generated code from backend logs. See [Step 2 — Log In](#step-2--log-in) for details.
@@ -101,7 +101,7 @@ You also need at least one AI agent CLI:
 ### b) One-command setup
 
 ```bash
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 This automatically:
@@ -113,17 +113,17 @@ This automatically:
 For on-premise deployments with custom domains:
 
 ```bash
-multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+cs-workflow setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
 Verify the daemon is running:
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 <Callout>
-Alternatively, configure step by step: `multica config set server_url http://localhost:8080 && multica config set app_url http://localhost:3000 && multica login && multica daemon start`
+Alternatively, configure step by step: `cs-workflow config set server_url http://localhost:8080 && cs-workflow config set app_url http://localhost:3000 && cs-workflow login && cs-workflow daemon start`
 </Callout>
 
 ### Step 4 — Verify & Start Using
@@ -140,7 +140,7 @@ Alternatively, configure step by step: `multica config set server_url http://loc
 make selfhost-stop
 
 # Stop the local daemon
-multica daemon stop
+cs-workflow daemon stop
 ```
 
 ## Switching to Multica Cloud
@@ -148,7 +148,7 @@ multica daemon stop
 If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
 
 ```bash
-multica setup
+cs-workflow setup
 ```
 
 This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
@@ -279,7 +279,7 @@ Multica requires PostgreSQL 17 with the pgvector extension.
 docker compose up -d postgres
 ```
 
-This starts a `pgvector/pgvector:pg17` container on port 5432 with default credentials (`multica`/`multica`).
+This starts a `pgvector/pgvector:pg17` container on port 5432 with default credentials (`cs-workflow`/`cs-workflow`).
 
 ### Using Your Own PostgreSQL
 

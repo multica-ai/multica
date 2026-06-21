@@ -134,7 +134,7 @@ func TestLoginTokenFlagWiring(t *testing.T) {
 		t.Fatalf("loginCmd --token type = %q, want %q (regressed to bool?)", got, "string")
 	}
 	if tokenFlag.NoOptDefVal != tokenPromptSentinel {
-		t.Fatalf("loginCmd --token NoOptDefVal = %q, want %q (legacy `multica login --token` prompt mode would break)", tokenFlag.NoOptDefVal, tokenPromptSentinel)
+		t.Fatalf("loginCmd --token NoOptDefVal = %q, want %q (legacy `cs-workflow login --token` prompt mode would break)", tokenFlag.NoOptDefVal, tokenPromptSentinel)
 	}
 }
 

@@ -1949,7 +1949,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 // comment, threaded under the trigger. Before the fix, CompleteTask exempted
 // comment-triggered tasks from the auto-synthesis path, so a Claude Code /
 // Codex / etc. agent that ended its run with only terminal text (no
-// `multica issue comment add` call) left the user staring at a "Completed"
+// `cs-workflow issue comment add` call) left the user staring at a "Completed"
 // badge with no reply.
 func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *testing.T) {
 	if testHandler == nil {

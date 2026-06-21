@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli cs-workflow build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -95,7 +95,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
+		echo "  cs-workflow setup self-host"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
@@ -137,7 +137,7 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo ""; \
 		echo "Next — install the CLI and connect your machine:"; \
 		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
+		echo "  cs-workflow setup self-host"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
@@ -268,13 +268,13 @@ server: ## Run only the Go server for the current checkout
 	cd server && go run ./cmd/server
 
 daemon: ## Restart the local agent daemon using the CLI's stored auth/session
-	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
+	@$(MAKE) cs-workflow MULTICA_ARGS="daemon restart --profile local"
 
-cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
-	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
+cli: ## Run the cs-workflow CLI with ARGS or MULTICA_ARGS from source
+	@$(MAKE) cs-workflow MULTICA_ARGS="$(MULTICA_ARGS)"
 
-multica: ## Run the multica CLI entrypoint directly from the Go source tree
-	cd server && go run ./cmd/multica $(MULTICA_ARGS)
+cs-workflow: ## Run the cs-workflow CLI entrypoint directly from the Go source tree
+	cd server && go run ./cmd/cs-workflow $(MULTICA_ARGS)
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -282,7 +282,7 @@ DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build: ## Build the server, CLI, and migrate binaries into server/bin
 	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/cs-workflow ./cmd/cs-workflow
 	cd server && go build -o bin/migrate ./cmd/migrate
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied

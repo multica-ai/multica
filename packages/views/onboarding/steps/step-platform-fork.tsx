@@ -474,7 +474,7 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
     return () => window.clearInterval(id);
   }, [dialogOpen]);
 
-  // Stage thresholds are rough — `multica setup` typical flow is
+  // Stage thresholds are rough — `cs-workflow setup` typical flow is
   //   ~1s save config → browser-tab auth (user-driven, 5–30s) →
   //   ~2s daemon boot → immediate WS register. So under 15s means
   //   "still normal", 15–45s means "probably stuck on browser auth",
@@ -516,21 +516,21 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
         {stage === "normal" && (
           <>
             {t(($) => $.step_platform.stage_normal_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{"cs-workflow setup"}</span>
             {t(($) => $.step_platform.stage_normal_suffix)}
           </>
         )}
         {stage === "midway" && (
           <>
             {t(($) => $.step_platform.stage_midway_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{"cs-workflow setup"}</span>
             {t(($) => $.step_platform.stage_midway_suffix)}
           </>
         )}
         {stage === "slow" && (
           <>
             {t(($) => $.step_platform.stage_slow_prefix)}
-            <span className="font-mono">{"multica setup"}</span>
+            <span className="font-mono">{"cs-workflow setup"}</span>
             {t(($) => $.step_platform.stage_slow_suffix)}
           </>
         )}

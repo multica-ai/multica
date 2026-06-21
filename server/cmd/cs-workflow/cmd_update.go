@@ -15,7 +15,7 @@ var updateDownloadTimeout time.Duration = cli.DefaultUpdateDownloadTimeout
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update multica to the latest version",
+	Short: "Update cs-workflow to the latest version",
 	RunE:  runUpdate,
 }
 

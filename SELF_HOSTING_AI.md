@@ -15,15 +15,15 @@ This document is designed for AI agents to execute. Follow these steps exactly t
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 
 # Configure CLI for localhost, authenticate, and start daemon
-multica setup self-host
+cs-workflow setup self-host
 ```
 
-Wait for the server output `✓ Multica server is running and CLI is ready!` before running `multica setup self-host`.
+Wait for the server output `✓ Multica server is running and CLI is ready!` before running `cs-workflow setup self-host`.
 
 **Expected result:**
 - Frontend at http://localhost:3000
 - Backend at http://localhost:8080
-- `multica` CLI installed and configured for localhost
+- `cs-workflow` CLI installed and configured for localhost
 
 ## Alternative: Manual Setup
 
@@ -32,10 +32,10 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 make selfhost
 brew install multica-ai/tap/multica
-multica setup self-host
+cs-workflow setup self-host
 ```
 
-The `multica setup self-host` command will:
+The `cs-workflow setup self-host` command will:
 1. Configure CLI to connect to localhost:8080 / localhost:3000
 2. Open a browser for login — use the emailed code, or the generated code printed in backend logs when Resend is unset
 3. Discover workspaces automatically
@@ -44,7 +44,7 @@ The `multica setup self-host` command will:
 ## Verification
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 Should show `running` with detected agents.
@@ -53,7 +53,7 @@ Should show `running` with detected agents.
 
 ```bash
 # Stop the daemon
-multica daemon stop
+cs-workflow daemon stop
 
 # Stop all Docker services
 cd multica
@@ -66,11 +66,11 @@ If the default ports (8080/3000) are in use:
 
 1. Edit `.env` and change `PORT` and `FRONTEND_PORT`
 2. Run `make selfhost`
-3. Run `multica setup self-host --port <PORT> --frontend-port <FRONTEND_PORT>`
+3. Run `cs-workflow setup self-host --port <PORT> --frontend-port <FRONTEND_PORT>`
 
 ## Troubleshooting
 
 - **Backend not ready:** `docker compose -f docker-compose.selfhost.yml logs backend`
 - **Frontend not ready:** `docker compose -f docker-compose.selfhost.yml logs frontend`
-- **Daemon issues:** `multica daemon logs`
+- **Daemon issues:** `cs-workflow daemon logs`
 - **Health checks:** `curl http://localhost:8080/health` for liveness, `curl http://localhost:8080/readyz` for dependency-aware readiness

@@ -3,10 +3,10 @@ version: 2
 project_name: multica
 
 builds:
-  - id: multica
-    main: ./cmd/multica
+  - id: cs-workflow
+    main: ./cmd/cs-workflow
     dir: server
-    binary: multica
+    binary: cs-workflow
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -23,19 +23,9 @@ builds:
       - arm64
 
 archives:
-  # Legacy archive name kept so already-released CLIs (whose `multica update`
-  # looks for `multica_{os}_{arch}.{ext}`) can keep self-updating. Remove
-  # once those versions are no longer in use.
-  - id: legacy
-    formats:
-      - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
-    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-  # Versioned archive name used by current CLI / install scripts /
-  # desktop bootstrap going forward.
+  # Versioned archive name used by the CLI self-update, install scripts, and
+  # desktop bootstrap. project_name stays "multica" (brand), so the CLI
+  # archive name is spelled out explicitly here.
   - id: versioned
     formats:
       - tar.gz
@@ -43,7 +33,7 @@ archives:
       - goos: windows
         formats:
           - zip
-    name_template: "{{ .ProjectName }}-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
+    name_template: "cs-workflow-cli-{{ .Version }}-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: "checksums.txt"

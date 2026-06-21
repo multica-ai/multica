@@ -45,7 +45,7 @@ To avoid waiting for cron while debugging an autopilot, trigger it manually:
 - CLI:
 
 ```bash
-multica autopilot trigger <autopilot-id>
+cs-workflow autopilot trigger <autopilot-id>
 ```
 
 A manual trigger goes through the exact same execution flow as a `schedule` trigger — only the `source` field on the run record is marked `manual`.
@@ -106,7 +106,7 @@ autopilot. Treat it like a token:
 
 - **Don't paste it into public issue threads, screenshots, or chat history.**
 - **Rotate it if it leaks** — click "Rotate URL" on the trigger row, or run
-  `multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>`. The
+  `cs-workflow autopilot trigger-rotate-url <autopilot-id> <trigger-id>`. The
   old URL stops working immediately.
 - For sources that require strong source authentication, wait for
   per-trigger HMAC signature verification; this v1 URL is bearer-only.

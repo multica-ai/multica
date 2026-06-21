@@ -22,10 +22,10 @@ var attachmentDownloadCmd = &cobra.Command{
 	Short: "Download an attachment to a local file",
 	Long:  "Download an attachment by its ID to a local file.",
 	Example: `  # Download an image attachment to the current directory
-  $ multica attachment download abc123
+  $ cs-workflow attachment download abc123
 
   # Download to a specific directory
-  $ multica attachment download abc123 -o /tmp/images`,
+  $ cs-workflow attachment download abc123 -o /tmp/images`,
 	Args:  exactArgs(1),
 	RunE:  runAttachmentDownload,
 }

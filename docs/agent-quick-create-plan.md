@@ -146,10 +146,10 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
 3. Daemon 构造 prompt:
    - daemon/prompt.go:45-106 (buildQuickCreatePrompt)
    - 把用户的自然语言 prompt 作为语义核心
-   - 加上"调用 multica issue create CLI 命令"的指令
+   - 加上"调用 cs-workflow issue create CLI 命令"的指令
 
 4. Agent 跑 LLM + tool calling:
-   - LLM 输出形如 `multica issue create --title="..." --description="..."` 的命令
+   - LLM 输出形如 `cs-workflow issue create --title="..." --description="..."` 的命令
    - daemon 执行 CLI 命令,CLI 调 POST /api/issues 创建 issue
    - CLI 自动在请求里带上 MULTICA_QUICK_CREATE_TASK_ID env(daemon/daemon.go:2081)
      → 让创建出来的 issue 带 origin_type='quick_create' + origin_id=<task_id>
@@ -253,10 +253,10 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
     可选 skill 清单(JSON):
     {curated_skill_index}
     
-    输出:调用 `multica skill find --output-results '<JSON>'` 命令,
+    输出:调用 `cs-workflow skill find --output-results '<JSON>'` 命令,
     JSON 形态为 [{name, description, source_url, reason}, ...]
     ```
-- **CLI 命令**(新):`multica skill find --output-results <JSON>`
+- **CLI 命令**(新):`cs-workflow skill find --output-results <JSON>`
   - 不发起 HTTP 请求,只把 JSON 写到 daemon 通过 env 指定的临时文件
   - daemon 读这个文件,把内容塞进 inbox notification 的 payload
 - **Curated skill 索引**:`server/internal/agenttmpl/skill_index.json`(新文件)
@@ -278,7 +278,7 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
 | `server/internal/service/task.go` | 加 `EnqueueSkillFindTask` + 完成检测 + inbox 通知 |
 | `server/internal/daemon/prompt.go` | 加 `buildSkillFindPrompt` |
 | `server/internal/daemon/daemon.go` | 加 `SkillFindContext` 识别 + env 注入 |
-| `server/cmd/multica/cmd_skill.go` | 加 `find --output-results` 子命令 |
+| `server/cmd/cs-workflow/cmd_skill.go` | 加 `find --output-results` 子命令 |
 | `server/internal/agenttmpl/skill_index.json`(新文件) | curated 清单 |
 | `packages/views/skills/components/find-skills-dialog.tsx`(新文件) | UI |
 | `packages/core/api/skill.ts` | 加 `findSkills` API |
@@ -296,13 +296,13 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
   - 后端:enqueue 任务,context = `{type: "agent-create", prompt}`,返回 202 + task_id
 - **Daemon prompt builder**:`buildAgentCreatePrompt` 指挥 agent 三步走:
   ```
-  1. 调用 `multica skill find --output-results ...` 选 skill
+  1. 调用 `cs-workflow skill find --output-results ...` 选 skill
      (或直接看 curated 清单选)
   2. 基于选定 skill 写 instructions
-  3. 调用 `multica agent create --name ... --instructions ... --skill-ids ...`
+  3. 调用 `cs-workflow agent create --name ... --instructions ... --skill-ids ...`
      创建 agent 并关联 skill
   ```
-- **CLI 命令**(新):`multica agent create`
+- **CLI 命令**(新):`cs-workflow agent create`
   - 后端 handler 已存在(handler/agent.go:CreateAgent),只需要绑 CLI(~50 行)
   - 创建时带 `MULTICA_AI_DRAFT_TASK_ID` env,服务端用它做 origin 标记 + LinkTaskToAgent
 - **完成通知**:inbox_item type = `agent_draft_done`,payload 含 agent_id + 摘要
@@ -316,7 +316,7 @@ skill 引用为什么用 URL 而不是内联 SKILL.md 内容:
 | `server/internal/handler/agent.go` | 新 handler `AIDraftAgent`(enqueue task) |
 | `server/internal/service/task.go` | 加 `EnqueueAgentDraftTask` + 完成检测 + inbox 通知 |
 | `server/internal/daemon/prompt.go` | 加 `buildAgentCreatePrompt` |
-| `server/cmd/multica/cmd_agent.go` | 加 `create` 子命令(handler 已有) |
+| `server/cmd/cs-workflow/cmd_agent.go` | 加 `create` 子命令(handler 已有) |
 | `packages/views/agents/components/create-agent-dialog.tsx` | 加 "AI" 模式 |
 | `packages/core/api/agent.ts` | 加 `aiDraftAgent` API |
 | `packages/views/inbox/items/agent-draft-result.tsx`(新文件) | inbox item 渲染 |
@@ -383,19 +383,19 @@ func (h *Handler) createSkillWithFiles(
 
 **工作量**:小(< 50 行 + 1 条 sqlc query)
 
-### 4.3 [SOFT] 缺 `multica skill find` CLI
+### 4.3 [SOFT] 缺 `cs-workflow skill find` CLI
 
 **影响范围**:Phase 2
 
-**方案**:加一个 CLI 子命令,模仿 `multica skill import` 的实现(`server/cmd/multica/cmd_skill.go:55-60, 323-357`)。**注意**:这个命令不发 HTTP 请求,只是 LLM agent 用来"输出推荐结果"的 channel——它把 LLM 推荐的 JSON 写到 daemon 指定的临时文件,daemon 读完塞进 inbox notification。
+**方案**:加一个 CLI 子命令,模仿 `cs-workflow skill import` 的实现(`server/cmd/cs-workflow/cmd_skill.go:55-60, 323-357`)。**注意**:这个命令不发 HTTP 请求,只是 LLM agent 用来"输出推荐结果"的 channel——它把 LLM 推荐的 JSON 写到 daemon 指定的临时文件,daemon 读完塞进 inbox notification。
 
 **工作量**:小(~80 行)
 
-### 4.4 [SOFT] 缺 `multica agent create` CLI
+### 4.4 [SOFT] 缺 `cs-workflow agent create` CLI
 
 **影响范围**:Phase 3
 
-**方案**:后端 handler 已有(`handler/agent.go:CreateAgent`),只需在 `server/cmd/multica/cmd_agent.go` 加 `create` 子命令。
+**方案**:后端 handler 已有(`handler/agent.go:CreateAgent`),只需在 `server/cmd/cs-workflow/cmd_agent.go` 加 `create` 子命令。
 
 **工作量**:小(~50 行)
 
@@ -550,6 +550,6 @@ Multica 只有**单体 skill**(SKILL.md + skill_file),没有 plugin / bundle 概
 | Quick-create 完成检测 + inbox | `server/internal/service/task.go:1810-1949` |
 | LinkTaskToIssue | `server/internal/handler/agent.go:97-105` |
 | Quick-create Issue 前端 modal | `packages/views/modals/quick-create-issue.tsx:48-570+` |
-| Multica CLI 入口 | `server/cmd/multica/main.go:62-79` |
-| Skill CLI 命令 | `server/cmd/multica/cmd_skill.go:17-96`(已有 import,无 find) |
-| Agent CLI 命令 | `server/cmd/multica/cmd_agent.go:101-112`(已有 list/get,无 create) |
+| Multica CLI 入口 | `server/cmd/cs-workflow/main.go:62-79` |
+| Skill CLI 命令 | `server/cmd/cs-workflow/cmd_skill.go:17-96`(已有 import,无 find) |
+| Agent CLI 命令 | `server/cmd/cs-workflow/cmd_agent.go:101-112`(已有 list/get,无 create) |

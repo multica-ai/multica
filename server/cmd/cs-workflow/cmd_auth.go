@@ -23,7 +23,7 @@ import (
 
 var authCmd = &cobra.Command{
 	Use:   "auth",
-	Short: "Authenticate multica with Multica",
+	Short: "Authenticate cs-workflow with Multica",
 }
 
 var authStatusCmd = &cobra.Command{
@@ -75,7 +75,7 @@ func resolveAppURL(cmd *cobra.Command) string {
 	if err == nil && cfg.AppURL != "" {
 		return strings.TrimRight(cfg.AppURL, "/")
 	}
-	fmt.Fprintln(os.Stderr, "No app URL configured. Run 'multica setup' first.")
+	fmt.Fprintln(os.Stderr, "No app URL configured. Run 'cs-workflow setup' first.")
 	os.Exit(1)
 	return "" // unreachable
 }
@@ -119,7 +119,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "Or provide a personal access token:")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "  multica login --token mul_xxx")
+	fmt.Fprintln(os.Stderr, "  cs-workflow login --token mul_xxx")
 	return fmt.Errorf("not authenticated")
 }
 

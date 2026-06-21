@@ -52,8 +52,8 @@ After creation, open the squad's detail page to:
 CLI equivalent:
 
 ```bash
-multica squad create --name "Frontend Team" --leader frontend-lead-agent
-multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
+cs-workflow squad create --name "Frontend Team" --leader frontend-lead-agent
+cs-workflow squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
 ```
 
 ## How a squad-assigned issue runs
@@ -63,7 +63,7 @@ When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a 
 1. **Leader claims the task.** The agent runtime picks up the task on its next poll, same as any other agent assignment.
 2. **Leader is briefed.** On claim, Multica appends three sections to the leader's system prompt — see [What the leader sees on every turn](#what-the-leader-sees-on-every-turn) below.
 3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster — that mention triggers a new `task` for each mentioned agent.
-4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
+4. **Leader records its evaluation** via `cs-workflow squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
 5. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back, the leader is re-triggered to read the update and either delegate the next step, escalate, or stay silent.
 
 If the issue is in **Backlog**, the leader is not triggered — Backlog is a parking lot, same rule as for direct agent assignment.
@@ -74,7 +74,7 @@ On each squad-leader run, three blocks are appended to the leader's instructions
 
 - **Squad Operating Protocol** — a hard-coded rule set: read the issue, delegate by `@`-mention, be terse (don't restate the issue body — the assignee can read it), record an evaluation every turn, and **stop after dispatching**. This protocol is system-managed and not editable.
 - **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.
-- **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `multica squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
+- **Squad Instructions** — your custom guidance for this squad (set on the squad detail page or via `cs-workflow squad update --instructions`). Use this for routing rules ("send DB work to Alice, frontend to Bob"), escalation policies, or anything else the leader needs to know that isn't already in the issue.
 
 ## When the leader is re-triggered
 
@@ -104,7 +104,7 @@ The same anti-loop rules apply: the leader skips itself, and an explicit member 
 
 **Reassigning an issue away from a squad** behaves like any other assignee change: all of the issue's active tasks (including the leader's) are cancelled, and the new assignee — agent, member, or another squad — is enqueued. There is no separate "remove squad without changing assignee" action; pick a different assignee.
 
-**Archiving a squad** (`multica squad delete <id>`, or the Archive button on the detail page):
+**Archiving a squad** (`cs-workflow squad delete <id>`, or the Archive button on the detail page):
 
 1. **Transfers issues currently assigned to the squad to the leader agent**, so the work continues against a concrete agent instead of going silent.
 2. Marks the squad with `archived_at` / `archived_by` — the row is preserved so historical activity entries still resolve, but the squad disappears from lists, pickers, and the @-mention dropdown.
@@ -116,17 +116,17 @@ There is currently no unarchive command; create a new squad if you need the rout
 
 | Command | Purpose |
 |---|---|
-| `multica squad list` | List squads in the workspace |
-| `multica squad get <id>` | Show one squad's name, leader, description, instructions |
-| `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
-| `multica squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | Update one or more fields |
-| `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
-| `multica squad member list <id>` | List a squad's members |
-| `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | Add a member (owner / admin) |
-| `multica squad member remove <id> --member-id <uuid> --type agent\|member` | Remove a member (the leader cannot be removed — change leader first) |
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Recorded by the leader agent at the end of every turn |
+| `cs-workflow squad list` | List squads in the workspace |
+| `cs-workflow squad get <id>` | Show one squad's name, leader, description, instructions |
+| `cs-workflow squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
+| `cs-workflow squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | Update one or more fields |
+| `cs-workflow squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
+| `cs-workflow squad member list <id>` | List a squad's members |
+| `cs-workflow squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | Add a member (owner / admin) |
+| `cs-workflow squad member remove <id> --member-id <uuid> --type agent\|member` | Remove a member (the leader cannot be removed — change leader first) |
+| `cs-workflow squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Recorded by the leader agent at the end of every turn |
 
-`--leader` accepts an agent name or UUID; for everything else, IDs come from `multica agent list --output json`, `multica workspace member list --output json`, and `multica squad list --output json`.
+`--leader` accepts an agent name or UUID; for everything else, IDs come from `cs-workflow agent list --output json`, `cs-workflow workspace member list --output json`, and `cs-workflow squad list --output json`.
 
 ## Next
 

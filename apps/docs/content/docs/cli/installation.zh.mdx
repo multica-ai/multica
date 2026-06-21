@@ -17,7 +17,7 @@ brew install multica-ai/tap/multica
 git clone https://github.com/multica-ai/multica.git
 cd multica
 make build
-cp server/bin/multica /usr/local/bin/multica
+cp server/bin/cs-workflow /usr/local/bin/cs-workflow
 ```
 
 ### Download from GitHub Releases
@@ -39,10 +39,10 @@ LATEST=$(curl -sI https://github.com/multica-ai/multica/releases/latest \
 
 # Download and extract
 curl -sL "https://github.com/multica-ai/multica/releases/download/${LATEST}/multica_${OS}_${ARCH}.tar.gz" \
-  -o /tmp/multica.tar.gz
-tar -xzf /tmp/multica.tar.gz -C /tmp multica
-sudo mv /tmp/multica /usr/local/bin/multica
-rm /tmp/multica.tar.gz
+  -o /tmp/cs-workflow.tar.gz
+tar -xzf /tmp/cs-workflow.tar.gz -C /tmp multica
+sudo mv /tmp/cs-workflow /usr/local/bin/cs-workflow
+rm /tmp/cs-workflow.tar.gz
 ```
 
 ### Update
@@ -54,26 +54,26 @@ brew upgrade multica-ai/tap/multica
 For install script or manual installs, use:
 
 ```bash
-multica update
+cs-workflow update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`cs-workflow update` auto-detects your installation method and upgrades accordingly.
 
 ## Quick Start
 
 ```bash
 # One command: configure, authenticate, and start the daemon
-multica setup
+cs-workflow setup
 ```
 
 This configures the CLI for Multica Cloud, opens your browser for login, discovers your workspaces, and starts the agent daemon.
 
-For self-hosted servers, use `multica setup self-host` instead. See [Self-Hosting](/getting-started/self-hosting) for details.
+For self-hosted servers, use `cs-workflow setup self-host` instead. See [Self-Hosting](/getting-started/self-hosting) for details.
 
 ## Verify
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 Confirm:
@@ -94,5 +94,5 @@ If the agents list is empty, install at least one supported AI agent CLI:
 Then restart the daemon:
 
 ```bash
-multica daemon stop && multica daemon start
+cs-workflow daemon stop && cs-workflow daemon start
 ```

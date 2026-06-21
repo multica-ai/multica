@@ -1,5 +1,5 @@
 version: '1.0'
-name: multica-cli-build
+name: cs-workflow-cli-build
 displayName: CLI多架构构建
 triggers:
   trigger: manual
@@ -46,37 +46,37 @@ stages:
           # Darwin AMD64
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o "bin/multica" ./cmd/multica
-          tar czf "dist/multica-cli-${VERSION}-darwin-amd64.tar.gz" -C bin multica
-          rm bin/multica
+            -o "bin/cs-workflow" ./cmd/cs-workflow
+          tar czf "dist/cs-workflow-cli-${VERSION}-darwin-amd64.tar.gz" -C bin cs-workflow
+          rm bin/cs-workflow
 
           # Darwin ARM64
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o "bin/multica" ./cmd/multica
-          tar czf "dist/multica-cli-${VERSION}-darwin-arm64.tar.gz" -C bin multica
-          rm bin/multica
+            -o "bin/cs-workflow" ./cmd/cs-workflow
+          tar czf "dist/cs-workflow-cli-${VERSION}-darwin-arm64.tar.gz" -C bin cs-workflow
+          rm bin/cs-workflow
 
           # Linux AMD64
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o "bin/multica" ./cmd/multica
-          tar czf "dist/multica-cli-${VERSION}-linux-amd64.tar.gz" -C bin multica
-          rm bin/multica
+            -o "bin/cs-workflow" ./cmd/cs-workflow
+          tar czf "dist/cs-workflow-cli-${VERSION}-linux-amd64.tar.gz" -C bin cs-workflow
+          rm bin/cs-workflow
 
           # Linux ARM64
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o "bin/multica" ./cmd/multica
-          tar czf "dist/multica-cli-${VERSION}-linux-arm64.tar.gz" -C bin multica
-          rm bin/multica
+            -o "bin/cs-workflow" ./cmd/cs-workflow
+          tar czf "dist/cs-workflow-cli-${VERSION}-linux-arm64.tar.gz" -C bin cs-workflow
+          rm bin/cs-workflow
 
           # Windows AMD64
           GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
-            -o "bin/multica.exe" ./cmd/multica
-          (cd bin && zip "../dist/multica-cli-${VERSION}-windows-amd64.zip" multica.exe)
-          rm bin/multica.exe
+            -o "bin/cs-workflow.exe" ./cmd/cs-workflow
+          (cd bin && zip "../dist/cs-workflow-cli-${VERSION}-windows-amd64.zip" cs-workflow.exe)
+          rm bin/cs-workflow.exe
 
           echo "All builds completed:"
           ls -lh dist/

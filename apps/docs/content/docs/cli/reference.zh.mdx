@@ -3,14 +3,14 @@ title: CLI Reference
 description: Complete command reference for the Multica CLI and agent daemon.
 ---
 
-The `multica` CLI connects your local machine to Multica. It handles authentication, workspace management, issue tracking, and runs the agent daemon that executes AI tasks locally.
+The `cs-workflow` CLI connects your local machine to Multica. It handles authentication, workspace management, issue tracking, and runs the agent daemon that executes AI tasks locally.
 
 ## Authentication
 
 ### Browser Login
 
 ```bash
-multica login
+cs-workflow login
 ```
 
 Opens your browser for OAuth authentication, creates a 90-day personal access token, and auto-configures your workspaces.
@@ -18,7 +18,7 @@ Opens your browser for OAuth authentication, creates a 90-day personal access to
 ### Token Login
 
 ```bash
-multica login --token <mul_...>
+cs-workflow login --token <mul_...>
 ```
 
 Authenticate using a personal access token directly. Useful for headless environments. Pass `--token=` with an empty value to be prompted interactively (so the token never lands in shell history).
@@ -26,7 +26,7 @@ Authenticate using a personal access token directly. Useful for headless environ
 ### Check Status
 
 ```bash
-multica auth status
+cs-workflow auth status
 ```
 
 Shows your current server, user, and token validity.
@@ -34,7 +34,7 @@ Shows your current server, user, and token validity.
 ### Logout
 
 ```bash
-multica auth logout
+cs-workflow auth logout
 ```
 
 Removes the stored authentication token.
@@ -46,7 +46,7 @@ The daemon is the local agent runtime. It detects available AI CLIs on your mach
 ### Start
 
 ```bash
-multica daemon start
+cs-workflow daemon start
 ```
 
 By default, the daemon runs in the background and logs to `~/.multica/daemon.log`.
@@ -54,20 +54,20 @@ By default, the daemon runs in the background and logs to `~/.multica/daemon.log
 To run in the foreground (useful for debugging):
 
 ```bash
-multica daemon start --foreground
+cs-workflow daemon start --foreground
 ```
 
 ### Stop
 
 ```bash
-multica daemon stop
+cs-workflow daemon stop
 ```
 
 ### Status
 
 ```bash
-multica daemon status
-multica daemon status --output json
+cs-workflow daemon status
+cs-workflow daemon status --output json
 ```
 
 Shows PID, uptime, detected agents, and watched workspaces.
@@ -75,9 +75,9 @@ Shows PID, uptime, detected agents, and watched workspaces.
 ### Logs
 
 ```bash
-multica daemon logs              # Last 50 lines
-multica daemon logs -f           # Follow (tail -f)
-multica daemon logs -n 100       # Last 100 lines
+cs-workflow daemon logs              # Last 50 lines
+cs-workflow daemon logs -f           # Follow (tail -f)
+cs-workflow daemon logs -n 100       # Last 100 lines
 ```
 
 ### Supported Agents
@@ -155,15 +155,15 @@ When connecting to a self-hosted Multica instance, point the CLI to your server 
 export MULTICA_APP_URL=https://app.example.com
 export MULTICA_SERVER_URL=wss://api.example.com/ws
 
-multica login
-multica daemon start
+cs-workflow login
+cs-workflow daemon start
 ```
 
 Or set them persistently:
 
 ```bash
-multica config set app_url https://app.example.com
-multica config set server_url wss://api.example.com/ws
+cs-workflow config set app_url https://app.example.com
+cs-workflow config set server_url wss://api.example.com/ws
 ```
 
 ### Profiles
@@ -172,13 +172,13 @@ Profiles let you run multiple daemons on the same machine — for example, one f
 
 ```bash
 # Set up a staging profile
-multica setup self-host --profile staging --server-url https://api-staging.example.com --app-url https://staging.example.com
+cs-workflow setup self-host --profile staging --server-url https://api-staging.example.com --app-url https://staging.example.com
 
 # Start its daemon
-multica daemon start --profile staging
+cs-workflow daemon start --profile staging
 
 # Default profile runs separately
-multica daemon start
+cs-workflow daemon start
 ```
 
 Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root.
@@ -188,7 +188,7 @@ Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daem
 ### List Workspaces
 
 ```bash
-multica workspace list
+cs-workflow workspace list
 ```
 
 Watched workspaces are marked with `*`. The daemon only processes tasks for watched workspaces.
@@ -196,21 +196,21 @@ Watched workspaces are marked with `*`. The daemon only processes tasks for watc
 ### Watch / Unwatch
 
 ```bash
-multica workspace watch <workspace-id>
-multica workspace unwatch <workspace-id>
+cs-workflow workspace watch <workspace-id>
+cs-workflow workspace unwatch <workspace-id>
 ```
 
 ### Get Details
 
 ```bash
-multica workspace get <workspace-id>
-multica workspace get <workspace-id> --output json
+cs-workflow workspace get <workspace-id>
+cs-workflow workspace get <workspace-id> --output json
 ```
 
 ### List Members
 
 ```bash
-multica workspace member list <workspace-id>
+cs-workflow workspace member list <workspace-id>
 ```
 
 ### Update Workspace
@@ -218,8 +218,8 @@ multica workspace member list <workspace-id>
 需要 admin 或 owner 权限。所有字段都是部分更新（PATCH 语义）：未传的字段保持不变。
 
 ```bash
-multica workspace update <workspace-id> --name "Acme Eng"
-multica workspace update <workspace-id> \
+cs-workflow workspace update <workspace-id> --name "Acme Eng"
+cs-workflow workspace update <workspace-id> \
   --description "Engineering team workspace" \
   --issue-prefix ENG
 ```
@@ -227,7 +227,7 @@ multica workspace update <workspace-id> \
 长文本走 stdin（保留换行/反斜杠）：
 
 ```bash
-cat <<'CTX' | multica workspace update <workspace-id> --context-stdin
+cat <<'CTX' | cs-workflow workspace update <workspace-id> --context-stdin
 我们是一支 5 人 AI-native 团队。
 工作语言：中文 + 英文混合。
 CTX
@@ -240,12 +240,12 @@ CTX
 ### List Issues
 
 ```bash
-multica issue list
-multica issue list --status in_progress
-multica issue list --priority urgent --assignee "Agent Name"
-multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
-multica issue list --full-id
-multica issue list --limit 20 --output json
+cs-workflow issue list
+cs-workflow issue list --status in_progress
+cs-workflow issue list --priority urgent --assignee "Agent Name"
+cs-workflow issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue list --full-id
+cs-workflow issue list --limit 20 --output json
 ```
 
 表格输出默认显示可直接复制到后续命令的 issue `KEY`（例如 `MUL-123`）；需要完整 UUID 时使用 `--full-id`。Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--limit`. 在重名 workspace 下用 `--assignee-id <uuid>` 可以精确锁定一个成员或 agent。
@@ -253,34 +253,34 @@ multica issue list --limit 20 --output json
 ### Get Issue
 
 ```bash
-multica issue get MUL-123
-multica issue get <uuid>
-multica issue get <id> --output json
+cs-workflow issue get MUL-123
+cs-workflow issue get <uuid>
+cs-workflow issue get <id> --output json
 ```
 
-`<id>` 同时接受 issue key（`multica issue list` 表格里直接显示，例如 `MUL-123`）和完整 UUID（给 `list` 加 `--full-id` 可显示）。同样的规则适用于下面 `update` / `assign` / `status` / `comment` / `subscriber` / `runs` 等接受 `<id>` 的命令。
+`<id>` 同时接受 issue key（`cs-workflow issue list` 表格里直接显示，例如 `MUL-123`）和完整 UUID（给 `list` 加 `--full-id` 可显示）。同样的规则适用于下面 `update` / `assign` / `status` / `comment` / `subscriber` / `runs` 等接受 `<id>` 的命令。
 
 ### Create Issue
 
 ```bash
-multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
-multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
+cs-workflow issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. 脚本里如果已经拿到了 UUID（例如来自 `multica workspace member list --output json`），传 `--assignee-id <uuid>`（与 `--assignee` 互斥）以精确锁定。
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. 脚本里如果已经拿到了 UUID（例如来自 `cs-workflow workspace member list --output json`），传 `--assignee-id <uuid>`（与 `--assignee` 互斥）以精确锁定。
 
 ### Update Issue
 
 ```bash
-multica issue update <id> --title "New title" --priority urgent
+cs-workflow issue update <id> --title "New title" --priority urgent
 ```
 
 ### Assign Issue
 
 ```bash
-multica issue assign <id> --to "Lambda"
-multica issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
-multica issue assign <id> --unassign
+cs-workflow issue assign <id> --to "Lambda"
+cs-workflow issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue assign <id> --unassign
 ```
 
 `--to-id <uuid>`（与 `--to` 互斥）按 UUID 精确分配；适合重名 workspace 下脚本化场景。
@@ -288,7 +288,7 @@ multica issue assign <id> --unassign
 ### Change Status
 
 ```bash
-multica issue status <id> in_progress
+cs-workflow issue status <id> in_progress
 ```
 
 Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
@@ -297,33 +297,33 @@ Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`
 
 ```bash
 # List comments
-multica issue comment list <issue-id>
+cs-workflow issue comment list <issue-id>
 
 # Add a comment
-multica issue comment add <issue-id> --content "Looks good, merging now"
+cs-workflow issue comment add <issue-id> --content "Looks good, merging now"
 
 # Reply to a specific comment
-multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
+cs-workflow issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 
 # Delete a comment
-multica issue comment delete <comment-id>
+cs-workflow issue comment delete <comment-id>
 ```
 
 ### Execution History
 
 ```bash
 # List all execution runs for an issue
-multica issue runs <issue-id>
-multica issue runs <issue-id> --full-id
-multica issue runs <issue-id> --output json
+cs-workflow issue runs <issue-id>
+cs-workflow issue runs <issue-id> --full-id
+cs-workflow issue runs <issue-id> --output json
 
 # View messages for a specific execution run
-multica issue run-messages <task-id>
-multica issue run-messages <short-task-id> --issue <issue-id>
-multica issue run-messages <task-id> --output json
+cs-workflow issue run-messages <task-id>
+cs-workflow issue run-messages <short-task-id> --issue <issue-id>
+cs-workflow issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
-multica issue run-messages <task-id> --since 42 --output json
+cs-workflow issue run-messages <task-id> --since 42 --output json
 ```
 
 `runs` 的表格输出默认显示 task UUID 短前缀；需要完整 task UUID 时使用 `--full-id`。`run-messages` 可直接接受完整 task UUID；从 `runs` 表格复制短前缀时需要同时传 `--issue <issue-id>`，CLI 只会在该 issue 的 runs 内解析。
@@ -336,9 +336,9 @@ belongs to a workspace and can optionally have a lead (member or agent).
 ### List Projects
 
 ```bash
-multica project list
-multica project list --status in_progress
-multica project list --output json
+cs-workflow project list
+cs-workflow project list --status in_progress
+cs-workflow project list --output json
 ```
 
 Available filters: `--status`.
@@ -346,14 +346,14 @@ Available filters: `--status`.
 ### Get Project
 
 ```bash
-multica project get <id>
-multica project get <id> --output json
+cs-workflow project get <id>
+cs-workflow project get <id> --output json
 ```
 
 ### Create Project
 
 ```bash
-multica project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
+cs-workflow project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
 ```
 
 Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
@@ -361,8 +361,8 @@ Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
 ### Update Project
 
 ```bash
-multica project update <id> --title "New title" --status in_progress
-multica project update <id> --lead "Lambda"
+cs-workflow project update <id> --title "New title" --status in_progress
+cs-workflow project update <id> --lead "Lambda"
 ```
 
 Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
@@ -370,7 +370,7 @@ Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
 ### Change Status
 
 ```bash
-multica project status <id> in_progress
+cs-workflow project status <id> in_progress
 ```
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
@@ -378,7 +378,7 @@ Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
 ### Delete Project
 
 ```bash
-multica project delete <id>
+cs-workflow project delete <id>
 ```
 
 ### Associating Issues with Projects
@@ -387,9 +387,9 @@ Use the `--project` flag on `issue create` / `issue update` to attach an issue t
 project, or on `issue list` to filter issues by project:
 
 ```bash
-multica issue create --title "Login bug" --project <project-id>
-multica issue update <issue-id> --project <project-id>
-multica issue list --project <project-id>
+cs-workflow issue create --title "Login bug" --project <project-id>
+cs-workflow issue update <issue-id> --project <project-id>
+cs-workflow issue list --project <project-id>
 ```
 
 ## Configuration
@@ -397,7 +397,7 @@ multica issue list --project <project-id>
 ### View Config
 
 ```bash
-multica config show
+cs-workflow config show
 ```
 
 Shows config file path, server URL, app URL, and default workspace.
@@ -405,17 +405,17 @@ Shows config file path, server URL, app URL, and default workspace.
 ### Set Values
 
 ```bash
-multica config set server_url wss://api.example.com/ws
-multica config set app_url https://app.example.com
-multica config set workspace_id <workspace-id>
+cs-workflow config set server_url wss://api.example.com/ws
+cs-workflow config set app_url https://app.example.com
+cs-workflow config set workspace_id <workspace-id>
 ```
 
 ## Other Commands
 
 ```bash
-multica version              # Show CLI version and commit hash
-multica update               # Update to latest version
-multica agent list           # List agents in the current workspace
+cs-workflow version              # Show CLI version and commit hash
+cs-workflow update               # Update to latest version
+cs-workflow agent list           # List agents in the current workspace
 ```
 
 ## Output Formats
@@ -426,6 +426,6 @@ Most commands support `--output` with two formats:
 - `json` — structured JSON (useful for scripting and automation)
 
 ```bash
-multica issue list --output json
-multica daemon status --output json
+cs-workflow issue list --output json
+cs-workflow daemon status --output json
 ```

@@ -13,7 +13,7 @@ Multica Desktop is a native desktop app for macOS, Windows, and Linux. For the e
 |---|---|---|
 | Access | Open a URL in your browser | Install a native app |
 | Multiple tabs | Your browser's own tabs (no workspace separation) | **One independent tab group per workspace** |
-| Daemon | You run `multica daemon start` yourself | **Started automatically** on launch |
+| Daemon | You run `cs-workflow daemon start` yourself | **Started automatically** on launch |
 | Upgrades | Refresh to get the latest | App checks in the background and installs on next launch |
 | Signed-in data | Identical | Identical |
 
@@ -47,11 +47,11 @@ The macOS build is signed and notarized, so you won't see an "unidentified devel
 
 ## Do I still need the standalone CLI and daemon?
 
-**No.** Desktop ships with the same `multica` CLI binary embedded inside it, and it launches its own daemon profile at startup (isolated from any daemon you may be running manually from the terminal).
+**No.** Desktop ships with the same `cs-workflow` CLI binary embedded inside it, and it launches its own daemon profile at startup (isolated from any daemon you may be running manually from the terminal).
 
-If you've already installed the CLI and run `multica daemon start` by hand, Desktop won't take over your daemon — it starts its own with a separate profile. Both register as **different runtimes**, and you'll see two independent runtimes in the UI.
+If you've already installed the CLI and run `cs-workflow daemon start` by hand, Desktop won't take over your daemon — it starts its own with a separate profile. Both register as **different runtimes**, and you'll see two independent runtimes in the UI.
 
-If you want to run CLI commands in your terminal, Desktop doesn't offer a special path — use the CLI you installed separately, or run the bundled copy at `resources/bin/multica` inside the app's resources directory.
+If you want to run CLI commands in your terminal, Desktop doesn't offer a special path — use the CLI you installed separately, or run the bundled copy at `resources/bin/cs-workflow` inside the app's resources directory.
 
 ## Downloading and installing
 

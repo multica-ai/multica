@@ -30,7 +30,7 @@ import (
 // so the agent knows how to signal it needs user input.
 const awaitingInputInstructions = "## Input Request\n\n" +
 	"If you need user input before proceeding:\n\n" +
-	"1. Post a comment with your question: `multica issue comment add <issue-id> --content \"your question and options here (with recommended option)\"`\n" +
+	"1. Post a comment with your question: `cs-workflow issue comment add <issue-id> --content \"your question and options here (with recommended option)\"`\n" +
 	"2. Then use only this JSON as a response to end this task (no other text, the output JSON format must be valid.):\n\n" +
 	`{"status":"awaiting_input","question":"<your question>","options":["<option A>","<option B>",...],"recommended":"<recommended option>"}` + "\n\n" +
 	"- status: must be \"awaiting_input\"\n" +
@@ -1152,7 +1152,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					pd.Content + "\n```\n" +
 					"\n**IMPORTANT:**\nIf any related documentation other than code is generated during this process, " +
 					"please upload all documentation as attachments to the comment section before the task ends," +
-					"using the `multica issue comment add [--attachment]` command.\n</instructions>\n\n"
+					"using the `cs-workflow issue comment add [--attachment]` command.\n</instructions>\n\n"
 			}
 		}
 
@@ -1253,7 +1253,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							Label:        label,
 						})
 						// Lift github_repo resources into the daemon's repo list
-						// so `multica repo checkout` and the meta-skill render
+						// so `cs-workflow repo checkout` and the meta-skill render
 						// them as the issue's repos.
 						if row.ResourceType == "github_repo" {
 							var payload struct {
@@ -1377,7 +1377,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// attachments linked to that exact message. Without the structured
 			// attachment list the agent only sees the markdown URL in
 			// `ChatMessage` — fine for vision models inline but unusable when
-			// the agent wants to `multica attachment download <id>` (URL is
+			// the agent wants to `cs-workflow attachment download <id>` (URL is
 			// signed and 30-min expiring on private CDN).
 			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
 				for i := len(msgs) - 1; i >= 0; i-- {
@@ -1447,7 +1447,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task: the prompt template can name
-			// the project, and `multica repo checkout` sees the project's
+			// the project, and `cs-workflow repo checkout` sees the project's
 			// github_repo resources instead of the workspace fallback.
 			var projectRepos []RepoData
 			if qc.ProjectID != "" {

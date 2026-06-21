@@ -90,14 +90,14 @@ irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps
 Then configure, authenticate, and start the daemon in one command:
 
 ```bash
-multica setup          # Connect to Multica Cloud, log in, start daemon
+cs-workflow setup          # Connect to Multica Cloud, log in, start daemon
 ```
 
 > **Self-hosting?** Add `--with-server` to deploy a full Multica server on your machine:
 >
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
-> multica setup self-host
+> cs-workflow setup self-host
 > ```
 >
 > This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
@@ -110,7 +110,7 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 ### 1. Set up and start the daemon
 
 ```bash
-multica setup           # Configure, authenticate, and start the daemon
+cs-workflow setup           # Configure, authenticate, and start the daemon
 ```
 
 The daemon runs in the background and auto-detects agent CLIs (`claude`, `codex`, `copilot`, `openclaw`, `opencode`, `hermes`, `gemini`, `pi`, `cursor-agent`, `kimi`, `kiro-cli`) on your PATH.
@@ -127,26 +127,26 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 ### 4. Assign your first task
 
-Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
+Create an issue from the board (or via `cs-workflow issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
 ---
 
 ## CLI
 
-The `multica` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
+The `cs-workflow` CLI connects your local machine to Multica — authenticate, manage workspaces, and run the agent daemon.
 
 | Command | Description |
 |---------|-------------|
-| `multica login` | Authenticate (opens browser) |
-| `multica daemon start` | Start the local agent runtime |
-| `multica daemon status` | Check daemon status |
-| `multica setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
-| `multica setup self-host` | Same, but for self-hosted deployments |
-| `multica workspace list` | List your workspaces (current is marked with `*`) |
-| `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
-| `multica issue list` | List issues in your workspace |
-| `multica issue create` | Create a new issue |
-| `multica update` | Update to the latest version |
+| `cs-workflow login` | Authenticate (opens browser) |
+| `cs-workflow daemon start` | Start the local agent runtime |
+| `cs-workflow daemon status` | Check daemon status |
+| `cs-workflow setup` | One-command setup for Multica Cloud (configure + login + start daemon) |
+| `cs-workflow setup self-host` | Same, but for self-hosted deployments |
+| `cs-workflow workspace list` | List your workspaces (current is marked with `*`) |
+| `cs-workflow workspace switch <id\|slug>` | Switch the default workspace for this profile |
+| `cs-workflow issue list` | List issues in your workspace |
+| `cs-workflow issue create` | Create a new issue |
+| `cs-workflow update` | Update to the latest version |
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference.
 

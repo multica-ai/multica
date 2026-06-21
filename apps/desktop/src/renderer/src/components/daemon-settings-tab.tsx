@@ -115,8 +115,8 @@ export function DaemonSettingsTab() {
             {cliInstalled === null
               ? "Checking…"
               : cliInstalled
-                ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."}
+                ? "cs-workflow CLI is installed and available in PATH."
+                : "cs-workflow CLI not found. Install it to enable daemon management."}
           </p>
           {cliInstalled === false && (
             <Button
