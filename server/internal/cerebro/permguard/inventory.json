@@ -2637,6 +2637,22 @@
       "gate": "via:PUT /api/squads/{id}/"
     },
     {
+      "id": "tool-policy explain",
+      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/tool-policy"
+    },
+    {
+      "id": "tool-policy list",
+      "exempt": "read-only \u2014 wraps GET /api/workspaces/{id}/tool-policy"
+    },
+    {
+      "id": "tool-policy set",
+      "gate": "via:PUT /api/workspaces/{id}/tool-policy"
+    },
+    {
+      "id": "tool-policy unset",
+      "gate": "via:DELETE /api/workspaces/{id}/tool-policy"
+    },
+    {
       "id": "update",
       "exempt": "local-only — replaces the multica binary on disk"
     },
