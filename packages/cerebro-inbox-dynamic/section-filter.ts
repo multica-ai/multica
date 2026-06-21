@@ -315,6 +315,13 @@ export function entryMatchesQuery(entry: DynInboxEntry, query: string): boolean 
 export interface SelectOptions {
   /** Free-text query applied across all sections (from the inbox search bar). */
   query?: string;
+  /**
+   * FIR-394 (Jesper) — when on, reminder rows are excluded from the "All
+   * messages" box (section.kind === "all") so a fired reminder only appears in
+   * its own Reminders box, not in two places. Gated by cerebro_inbox_hide_reminders;
+   * other section kinds (notably the Reminders box itself) are never affected.
+   */
+  hideRemindersFromAll?: boolean;
 }
 
 /** Filter + sort + cap a section's rows. */
@@ -328,12 +335,17 @@ export function selectSectionEntries(
   // from EVERY view; only the explicit "Muted" view surfaces them again. This
   // is a global rule now, so the old per-box `excludeMuted` toggle is redundant.
   const showsMuted = section.viewFilter === "muted";
+  // FIR-394 (Jesper) — reminders only count as a reminder for this exclusion in
+  // the "All messages" box; the dedicated Reminders box (kind "reminders") and
+  // every other box keep showing them.
+  const hideReminders = !!opts.hideRemindersFromAll && section.kind === "all";
   const filtered = entries.filter(
     (e) =>
       entryMatchesSection(e, section, ctx) &&
       // TECH-3541 #2 — the classic view switch, applied on top of the box kind.
       (!section.viewFilter || matchesViewFilter(e, section.viewFilter, ctx)) &&
       (showsMuted || !entryIsMuted(e)) &&
+      (!hideReminders || classifyInboxAction(e, ctx.action) !== "reminders") &&
       entryMatchesQuery(e, opts.query ?? ""),
   );
   const sorted = sortEntries(filtered, section, ctx.action.userId);

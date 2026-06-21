@@ -38,6 +38,13 @@ vi.mock("./dynamic-inbox-row", () => ({
   DynamicInboxRow: () => null,
 }));
 
+// FIR-394 — DynamicInboxSection reads cerebro_inbox_hide_reminders via
+// useFeatureFlag, which calls useWorkspaceId and throws when rendered bare.
+// Default off here so these tests keep their pre-flag behavior (reminders shown).
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
+
 const filterContext: SectionFilterContext = {
   action: {
     userId: "me",

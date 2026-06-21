@@ -125,6 +125,28 @@ describe("section-filter", () => {
     expect(out.map((e) => e.time)).toEqual([1, 2, 3]);
   });
 
+  it("FIR-394 — hideRemindersFromAll drops reminder rows from the 'all' box only", () => {
+    const msg = notifEntry(2, { id: "n-msg", type: "new_comment" });
+    const reminder = notifEntry(1, { id: "n-rem", type: "reminder" });
+    const entries = [msg, reminder];
+
+    // Default (option off): the reminder stays in All messages.
+    const shown = selectSectionEntries(entries, { id: "s", kind: "all" }, ctx);
+    expect(shown.map((e) => e.id).sort()).toEqual(["n-msg", "n-rem"]);
+
+    // Option on: the reminder is excluded from the All messages box.
+    const hidden = selectSectionEntries(entries, { id: "s", kind: "all" }, ctx, {
+      hideRemindersFromAll: true,
+    });
+    expect(hidden.map((e) => e.id)).toEqual(["n-msg"]);
+
+    // Option on but a different box kind (the Reminders box) is untouched.
+    const reminderBox = selectSectionEntries(entries, { id: "s", kind: "reminders" }, ctx, {
+      hideRemindersFromAll: true,
+    });
+    expect(reminderBox.map((e) => e.id)).toEqual(["n-rem"]);
+  });
+
   it("detects mentions on notif (type) and channel (context set)", () => {
     expect(entryIsMentioned(notifEntry(1, { type: "mentioned" }), ctx)).toBe(true);
     expect(entryIsMentioned(notifEntry(1, { type: "new_comment" }), ctx)).toBe(false);

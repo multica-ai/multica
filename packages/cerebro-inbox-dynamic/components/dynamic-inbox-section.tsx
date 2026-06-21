@@ -13,6 +13,7 @@ import {
   DropdownMenuGroup,
 } from "@multica/ui/components/ui/dropdown-menu";
 import type { InboxActionCategory } from "@multica/cerebro-inbox";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { AgentRunState } from "@multica/views/inbox/components/inbox-list-item";
 import type { Project } from "@multica/core/types";
 import {
@@ -182,9 +183,14 @@ export function runStateFor(
 export function DynamicInboxSection(props: DynamicInboxSectionProps) {
   const { section, entries, filterContext, actionLabels, projects, selectedKey, query } = props;
 
+  // FIR-394 (Jesper) — opt-in: keep fired reminders out of "All messages" so they
+  // only live in the standalone Reminders box. Scoped to section.kind === "all"
+  // inside selectSectionEntries; the Reminders box is never affected.
+  const hideRemindersFromAll = useFeatureFlag("cerebro_inbox_hide_reminders");
+
   const selected = useMemo(
-    () => selectSectionEntries(entries, section, filterContext, { query }),
-    [entries, section, filterContext, query],
+    () => selectSectionEntries(entries, section, filterContext, { query, hideRemindersFromAll }),
+    [entries, section, filterContext, query, hideRemindersFromAll],
   );
 
   // TECH-3579 — "All messages" box only: pull starred conversations out of the

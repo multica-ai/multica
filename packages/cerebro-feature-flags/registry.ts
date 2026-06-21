@@ -143,6 +143,10 @@ export type CerebroFlagKey =
   // to the source message), with the opened reminder card. Gates the nav entry +
   // /reminders route. OFF until QA'd on staging.
   | "cerebro_reminders"
+  // FIR-394 (Jesper): hide reminder rows from the inbox "All messages" box so a
+  // fired reminder only lives in its own Reminders box, not in two places.
+  // Opt-in per user; OFF by default (reminders show in All messages).
+  | "cerebro_inbox_hide_reminders"
   // FIR-2674: reject agent comments that mention no target (person, agent, or issue).
   | "cerebro_comment_target_guard"
   // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
@@ -410,6 +414,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // system. Gates the nav entry + /reminders route + the per-surface "remind me"
   // entries; the backend entity + sweeper are always live.
   cerebro_reminders: true,
+  // FIR-394 (Jesper): OFF by default — reminders show in "All messages". Turn on
+  // to hide reminder rows from "All messages" so they only appear in the
+  // standalone Reminders box (no duplicate across two boxes).
+  cerebro_inbox_hide_reminders: false,
   // FIR-2674: OFF by default. When on, an agent-authored comment that mentions
   // no target at all (no person, agent, or issue) is rejected by the server
   // with a 422 telling the agent to add one. Members are never affected. Off
@@ -746,6 +754,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "inbox",
     description:
       "Star a conversation in the dynamic inbox to make it a favorite and float it to the top of the \"All messages\" box, in its own Favorites section. Each row's avatar turns into a star on hover so you can toggle it in place. The top Favorites section can be switched off per box (favorites then stay in their normal position but can still be starred), and a standalone Favorites block can be added from the \"Add section\" menu. Favorites are saved per user and follow you across devices. Requires the Dynamic inbox.",
+  },
+  {
+    key: "cerebro_inbox_hide_reminders",
+    label: "Hide reminders from All messages",
+    group: "inbox",
+    description:
+      "Hide reminder rows (reminders, due-date and start-date reminders) from the \"All messages\" box so a fired reminder lives only in its own Reminders box, instead of showing in two places. Off (default) keeps reminders in All messages; add a Reminders box from the \"Add section\" menu to see them on their own.",
   },
   {
     key: "cerebro_inbox_wakeup_running",
