@@ -91,7 +91,7 @@ This is a first-class workflow. Both checkouts use the same PostgreSQL container
 
 | | Main | Worktree |
 |---|---|---|
-| Database | `multica` | `multica_my_feature_702` |
+| Database | `cs-workflow` | `multica_my_feature_702` |
 | Backend port | `8080` | generated (e.g. `18782`) |
 | Frontend port | `3000` | generated (e.g. `13702`) |
 
@@ -157,7 +157,7 @@ Look for `POSTGRES_DB`, `DATABASE_URL`, `PORT`, `FRONTEND_PORT`.
 ### List All Local Databases
 
 ```bash
-docker compose exec -T postgres psql -U multica -d postgres \
+docker compose exec -T postgres psql -U cs-workflow -d postgres \
   -At -c "select datname from pg_database order by datname;"
 ```
 

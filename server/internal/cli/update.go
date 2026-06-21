@@ -143,11 +143,8 @@ func releaseAssetCandidates(targetVersion, goos, goarch string) []string {
 	tag := normalizeReleaseTag(targetVersion)
 	version := strings.TrimPrefix(tag, "v")
 	ext := releaseArchiveExtension(goos)
-	// Prefer the versioned name (current scheme); fall back to the legacy
-	// `multica_{os}_{arch}` name for releases that still ship it.
 	return []string{
-		fmt.Sprintf("multica-cli-%s-%s-%s.%s", version, goos, goarch, ext),
-		fmt.Sprintf("multica_%s_%s.%s", goos, goarch, ext),
+		fmt.Sprintf("cs-workflow-cli-%s-%s-%s.%s", version, goos, goarch, ext),
 	}
 }
 
@@ -419,9 +416,9 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	}
 
 	// Extract the binary from the archive.
-	binaryName := "multica"
+	binaryName := "cs-workflow"
 	if runtime.GOOS == "windows" {
-		binaryName = "multica.exe"
+		binaryName = "cs-workflow.exe"
 	}
 	var binaryData []byte
 	if runtime.GOOS == "windows" {

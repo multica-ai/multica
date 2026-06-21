@@ -9,32 +9,32 @@ Look up issues by symptom. Each entry gives you **symptom / likely causes / how 
 
 ## Daemon can't connect to the server
 
-**Symptom**: [`multica daemon`](/cli)'s `status` command shows `offline` or `connection refused`; the server logs show no `/api/daemon/register` or `/api/daemon/heartbeat` requests. For how the daemon mechanism works, see [Daemon and runtimes](/daemon-runtimes).
+**Symptom**: [`cs-workflow daemon`](/cli)'s `status` command shows `offline` or `connection refused`; the server logs show no `/api/daemon/register` or `/api/daemon/heartbeat` requests. For how the daemon mechanism works, see [Daemon and runtimes](/daemon-runtimes).
 
 **Likely causes**:
 
 1. **`MULTICA_SERVER_URL` points at the wrong address** — default is `ws://localhost:8080/ws`; self-host must change it to your server address
 2. **Network / firewall blocking** — the daemon and server aren't on the same network, or outbound traffic is blocked
-3. **Token expired or invalid** — you never ran `multica login`, or the PAT was revoked
+3. **Token expired or invalid** — you never ran `cs-workflow login`, or the PAT was revoked
 4. **Server rejected registration** — the account you signed in with isn't in the target workspace (register returns 403)
 5. **DNS resolution failure** — the hostname doesn't resolve on the daemon machine
 
 **How to diagnose**:
 
 ```bash
-multica daemon logs --lines 100    # look for daemon-side errors
+cs-workflow daemon logs --lines 100    # look for daemon-side errors
 echo $MULTICA_SERVER_URL          # confirm the address is set
 curl -i http://<server-host>:8080/health   # hit the server directly
 curl -i http://<server-host>:8080/readyz  # include DB + migration readiness
 cat ~/.multica/config.json        # verify api_token exists
-multica workspace list            # confirm you're a member of the target workspace
+cs-workflow workspace list            # confirm you're a member of the target workspace
 ```
 
-**How to fix**: address each cause above. The two most common fixes are **changing `MULTICA_SERVER_URL` and restarting the daemon** (`multica daemon restart`) and **signing in again** (`multica logout && multica login`).
+**How to fix**: address each cause above. The two most common fixes are **changing `MULTICA_SERVER_URL` and restarting the daemon** (`cs-workflow daemon restart`) and **signing in again** (`cs-workflow logout && cs-workflow login`).
 
 ## Tasks stuck in `queued`
 
-**Symptom**: after assigning an issue to an agent, the issue status flips to `in_progress` immediately, but a long time passes with no sign of agent execution on the page; `multica daemon status` shows the daemon `online`.
+**Symptom**: after assigning an issue to an agent, the issue status flips to `in_progress` immediately, but a long time passes with no sign of agent execution on the page; `cs-workflow daemon status` shows the daemon `online`.
 
 **Likely causes** (ordered by frequency):
 
@@ -47,19 +47,19 @@ multica workspace list            # confirm you're a member of the target worksp
 **How to diagnose**:
 
 ```bash
-multica daemon status --output json       # runtime list + last_seen_at
-multica agent list                         # check agent archived state
-multica issue show <issue-id>             # inspect task history
+cs-workflow daemon status --output json       # runtime list + last_seen_at
+cs-workflow agent list                         # check agent archived state
+cs-workflow issue show <issue-id>             # inspect task history
 ```
 
 On the server side (self-host), grep for `"no_tasks"` / `"no_capacity"` to see the claim outcome.
 
 **How to fix**:
 
-- Concurrency full → wait for running tasks to finish, or `multica agent update <id> --max-concurrent-tasks 10` to raise the ceiling
+- Concurrency full → wait for running tasks to finish, or `cs-workflow agent update <id> --max-concurrent-tasks 10` to raise the ceiling
 - Same-issue serialization → wait for the previous task to finish, or reassign to a different agent
-- Agent archived → `multica agent restore <id>`
-- Runtime not registered → `multica daemon restart`, and the daemon will re-register
+- Agent archived → `cs-workflow agent restore <id>`
+- Runtime not registered → `cs-workflow daemon restart`, and the daemon will re-register
 
 ## WebSocket can't connect
 
@@ -134,7 +134,7 @@ Check your inbox (including spam) for the real verification code.
 
 ## Port conflicts
 
-**Symptom**: `multica server` or `multica daemon start` fails with `address already in use`.
+**Symptom**: `multica server` or `cs-workflow daemon start` fails with `address already in use`.
 
 **Likely causes**:
 
@@ -159,10 +159,10 @@ netstat -ano | findstr :8080    # Windows
 
 | Component | Location | Command |
 |---|---|---|
-| **Daemon** | `~/.multica/daemon.log` (background mode) or foreground stdout | `multica daemon logs -f --lines 100` |
+| **Daemon** | `~/.multica/daemon.log` (background mode) or foreground stdout | `cs-workflow daemon logs -f --lines 100` |
 | **Server (Docker)** | Container stdout | `docker logs -f <container>` |
 | **Server (systemd)** | journal | `journalctl -u multica-server -f` |
 | **Frontend (dev)** | Terminal running `pnpm dev` | Read directly |
 | **Frontend (browser)** | DevTools → Console | Press `F12` |
 
-For more detailed daemon logs, move it from background to foreground: `multica daemon stop && multica daemon start --foreground`.
+For more detailed daemon logs, move it from background to foreground: `cs-workflow daemon stop && cs-workflow daemon start --foreground`.

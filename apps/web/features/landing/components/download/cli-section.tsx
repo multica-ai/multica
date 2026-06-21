@@ -9,9 +9,9 @@ const INSTALL_CMD =
   "curl -fsSL https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.sh | bash";
 
 function makeTokenCmd(serverUrl: string) {
-  return `multica config set server_url ${serverUrl || "https://api.multica.ai"}
-multica login --token <YOUR_TOKEN>
-multica daemon start`;
+  return `cs-workflow config set server_url ${serverUrl || "https://api.multica.ai"}
+cs-workflow login --token <YOUR_TOKEN>
+cs-workflow daemon start`;
 }
 
 /**

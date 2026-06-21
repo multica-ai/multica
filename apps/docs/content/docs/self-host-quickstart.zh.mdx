@@ -109,7 +109,7 @@ RESEND_FROM_EMAIL=noreply@yourdomain.com  # 同时作为 SMTP From: 头
 CLI 和 server 在同一台机器上时，默认参数就够用：
 
 ```bash
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 会自动连 `http://localhost:8080`（backend）+ `http://localhost:3000`（frontend），引导你在浏览器里登录、把 PAT 存到本地、**自动启动守护进程**。
@@ -119,7 +119,7 @@ multica setup self-host
 因为 compose 默认只监听 `127.0.0.1`，从别的机器跑的 daemon 是连不上 `http://<server-ip>:8080` 的——这也是有意为之，否则默认 `JWT_SECRET` 等于直接暴露在公网。正确做法是在 server 上跑一个反向代理（Caddy / nginx / Cloudflare Tunnel），由它终结 TLS，再反代到 `127.0.0.1:8080`（backend）和 `127.0.0.1:3000`（frontend）。然后把 CLI 指到公开的 HTTPS 域名：
 
 ```bash
-multica setup self-host \
+cs-workflow setup self-host \
   --server-url https://<你的域名> \
   --app-url https://<你的域名>
 ```

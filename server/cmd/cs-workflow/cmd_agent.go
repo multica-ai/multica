@@ -189,7 +189,7 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	token := resolveToken(cmd)
 
 	if serverURL == "" {
-		return nil, fmt.Errorf("server URL not set: set COSTRICT_BASE_URL env var, use --server-url flag, MULTICA_SERVER_URL env, or run 'multica config set server_url <url>'")
+		return nil, fmt.Errorf("server URL not set: set COSTRICT_BASE_URL env var, use --server-url flag, MULTICA_SERVER_URL env, or run 'cs-workflow config set server_url <url>'")
 	}
 
 	client := cli.NewAPIClient(serverURL, workspaceID, token)
@@ -276,7 +276,7 @@ func resolveServerURL(cmd *cobra.Command) string {
 	if err == nil && cfg.ServerURL != "" {
 		return normalizeAPIBaseURL(cfg.ServerURL)
 	}
-	fmt.Fprintln(os.Stderr, "No server configured. Run 'multica setup' first.")
+	fmt.Fprintln(os.Stderr, "No server configured. Run 'cs-workflow setup' first.")
 	os.Exit(1)
 	return "" // unreachable
 }
@@ -324,7 +324,7 @@ func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 		if inAgentExecutionContext() {
 			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")
 		}
-		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'multica config set workspace_id <id>'")
+		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'cs-workflow config set workspace_id <id>'")
 	}
 	return id, nil
 }
@@ -527,7 +527,7 @@ func runAgentCreateFromTemplate(cmd *cobra.Command, client *cli.APIClient, name,
 	}
 
 	// 60s ceiling: templates fan out N HTTP fetches to GitHub, each ~200-500ms.
-	// Matches the timeout used by `multica skill import` (cmd_skill.go).
+	// Matches the timeout used by `cs-workflow skill import` (cmd_skill.go).
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 

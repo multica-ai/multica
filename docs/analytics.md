@@ -177,7 +177,7 @@ extra query, no race.
 | `runtime_mode` | string | Currently `local`; reserved for cloud runtimes. |
 | `provider` | string | e.g. `"codex"`, `"claude"`. |
 | `runtime_version` | string | Version of the agent runtime binary. |
-| `cli_version` | string | Version of the `multica` CLI that registered it. |
+| `cli_version` | string | Version of the `cs-workflow` CLI that registered it. |
 
 `distinct_id` is the authenticated owner's user id when the daemon was
 registered via a member's JWT/PAT; daemon-token registrations fall back to

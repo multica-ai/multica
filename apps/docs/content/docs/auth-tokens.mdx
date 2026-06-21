@@ -15,7 +15,7 @@ Multica has three kinds of tokens, one for each context: the browser Web UI, the
 | **Personal access token (PAT)** | Prefixed with `mul_` | CLI, scripts, direct API calls | No expiry by default; when you create one via the API you can pass `expires_in_days` |
 | **Daemon token** | Prefixed with `mdt_` | Daemon-to-server communication | Managed by the daemon itself |
 
-In day-to-day use you'll only touch the first two directly. The **[daemon](/daemon-runtimes) token** is created and refreshed automatically by `multica daemon login` — you don't have to think about it.
+In day-to-day use you'll only touch the first two directly. The **[daemon](/daemon-runtimes) token** is created and refreshed automatically by `cs-workflow daemon login` — you don't have to think about it.
 
 ## What each token can hit
 
@@ -50,7 +50,7 @@ Click **Sign in with Google** and go through the standard OAuth callback. Self-h
 **Creating** a PAT can be done two ways:
 
 - **Web UI**: Settings → Personal Access Tokens → New token
-- **CLI**: `multica login` creates one automatically if there's no local PAT yet
+- **CLI**: `cs-workflow login` creates one automatically if there's no local PAT yet
 
 <Callout type="warning">
 **The full PAT is displayed exactly once when it's created.** After you refresh or close the dialog, you won't be able to see it again.
@@ -64,7 +64,7 @@ Multica stores only the hash of the PAT in the database — not even the server 
 
 ## Logging out only deletes the local token
 
-When you run `multica auth logout` or click log out in the Web UI:
+When you run `cs-workflow auth logout` or click log out in the Web UI:
 
 - **The local token is cleared** — the CLI removes the PAT from `~/.multica/config.json`; the browser deletes the cookie.
 - **The PAT is still valid on the server** — if someone obtained your PAT before you logged out (for example, by copying it to another machine), they **can still use it**.

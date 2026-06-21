@@ -177,7 +177,7 @@ type AgentTaskResponse struct {
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
 	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
 	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `cs-workflow attachment download <id>` per entry
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
@@ -200,7 +200,7 @@ type AgentTaskResponse struct {
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
 // claim responses for chat tasks. The agent uses these to run
-// `multica attachment download <id>` rather than guessing from the
+// `cs-workflow attachment download <id>` rather than guessing from the
 // markdown URL (which is signed and 30-min expiring on private CDN).
 // The mirror struct on the daemon side lives in internal/daemon/types.go
 // and uses the same JSON field names.

@@ -20,13 +20,13 @@ The Multica server never sees your API keys or the tools themselves. Everything 
 
 Two prerequisites apply to **every** tool below:
 
-1. **The Multica daemon must be running.** Either run `multica daemon start` after installing the [Multica CLI](/cli), or use the [Multica desktop app](/desktop-app), which launches the daemon automatically. Without a running daemon there is nothing to detect tools.
+1. **The Multica daemon must be running.** Either run `cs-workflow daemon start` after installing the [Multica CLI](/cli), or use the [Multica desktop app](/desktop-app), which launches the daemon automatically. Without a running daemon there is nothing to detect tools.
 2. **The tool's binary must be reachable on `PATH`.** The daemon shells out to each tool by name (see the **Daemon looks for** column in each section). If `which <name>` doesn't find it in your terminal, the daemon won't find it either. After installing, open a fresh terminal (or restart the daemon) so the new `PATH` entry is picked up.
 
 After installing a tool, restart the daemon:
 
 ```bash
-multica daemon restart
+cs-workflow daemon restart
 ```
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
@@ -150,7 +150,7 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 ## After installing
 
 1. **Confirm the binary is on `PATH`.** Open a fresh terminal and run `which <name>` (for example `which claude`, `which cursor-agent`, `which kiro-cli`). If it prints a path, the daemon will find it. If it prints nothing, fix your shell `PATH` first (the typical cause is a per-shell rc file that wasn't reloaded).
-2. **Restart the daemon.** `multica daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
+2. **Restart the daemon.** `cs-workflow daemon restart`, or relaunch the desktop app. The daemon only scans `PATH` at startup.
 3. **Check the Runtimes page.** In the Multica UI, the **Runtimes** page should now list one row per `(workspace × tool)` combination. If the row says "offline", see [Daemon and runtimes → When a runtime is marked offline](/daemon-runtimes#when-a-runtime-is-marked-offline).
 4. **Go back to onboarding.** The "Connect a runtime" step polls and will pick up the new runtime within a few seconds — no need to refresh.
 
@@ -158,7 +158,7 @@ Minimalist. **Session resumption is unusual** — the resume id is the path to a
 
 - **`which` finds the binary but the daemon doesn't.** The daemon was started with an older `PATH`. Restart it.
 - **The binary exists but launching fails.** Run the tool's own `--version` or `--help` once from the terminal — most failures here are missing auth, expired tokens, or a Node.js / runtime mismatch.
-- **The Runtimes page shows the row, but tasks fail immediately.** Check `multica daemon logs -f` while triggering a task. The daemon surfaces the tool's own error output.
+- **The Runtimes page shows the row, but tasks fail immediately.** Check `cs-workflow daemon logs -f` while triggering a task. The daemon surfaces the tool's own error output.
 
 For broader symptoms, see the [Troubleshooting guide](/troubleshooting).
 

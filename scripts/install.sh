@@ -7,7 +7,7 @@
 # Install CLI + provision self-host server:
 #   curl -fsSL https://raw.githubusercontent.com/Askhz/multica/main/scripts/install.sh | bash -s -- --with-server
 #
-# After installation, run `multica setup` to configure your environment.
+# After installation, run `cs-workflow setup` to configure your environment.
 #
 set -euo pipefail
 
@@ -109,30 +109,30 @@ install_cli_binary() {
   fi
 
   local version="${latest#v}"
-  local url="https://github.com/Askhz/multica/releases/download/${latest}/multica-cli-${version}-${OS}-${ARCH}.tar.gz"
+  local url="https://github.com/Askhz/multica/releases/download/${latest}/cs-workflow-cli-${version}-${OS}-${ARCH}.tar.gz"
   local tmp_dir
   tmp_dir=$(mktemp -d)
 
   info "Downloading $url ..."
-  if ! curl -fsSL "$url" -o "$tmp_dir/multica.tar.gz"; then
+  if ! curl -fsSL "$url" -o "$tmp_dir/cs-workflow.tar.gz"; then
     rm -rf "$tmp_dir"
     fail "Failed to download CLI binary."
   fi
 
-  tar -xzf "$tmp_dir/multica.tar.gz" -C "$tmp_dir" multica
+  tar -xzf "$tmp_dir/cs-workflow.tar.gz" -C "$tmp_dir" cs-workflow
 
   # Try /usr/local/bin first, fall back to ~/.local/bin. Tests and scripted
   # installs can override the first choice with MULTICA_BIN_DIR.
   local bin_dir="${MULTICA_BIN_DIR:-/usr/local/bin}"
   if [ -w "$bin_dir" ]; then
-    mv "$tmp_dir/multica" "$bin_dir/multica"
+    mv "$tmp_dir/cs-workflow" "$bin_dir/cs-workflow"
   elif command_exists sudo; then
-    sudo mv "$tmp_dir/multica" "$bin_dir/multica"
+    sudo mv "$tmp_dir/cs-workflow" "$bin_dir/cs-workflow"
   else
     bin_dir="$HOME/.local/bin"
     mkdir -p "$bin_dir"
-    mv "$tmp_dir/multica" "$bin_dir/multica"
-    chmod +x "$bin_dir/multica"
+    mv "$tmp_dir/cs-workflow" "$bin_dir/cs-workflow"
+    chmod +x "$bin_dir/cs-workflow"
     # Add to PATH if not already there
     if ! echo "$PATH" | tr ':' '\n' | grep -q "^$bin_dir$"; then
       export PATH="$bin_dir:$PATH"
@@ -141,7 +141,7 @@ install_cli_binary() {
   fi
 
   rm -rf "$tmp_dir"
-  ok "Multica CLI installed to $bin_dir/multica"
+  ok "Multica CLI installed to $bin_dir/cs-workflow"
 }
 
 add_to_path() {
@@ -235,10 +235,10 @@ upgrade_cli_brew() {
 }
 
 install_cli() {
-  if command_exists multica; then
+  if command_exists cs-workflow; then
     local current_ver
-    # `multica version` outputs "multica v0.1.13 (commit: abc1234)" — extract just the version
-    current_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
+    # `cs-workflow version` outputs "cs-workflow v0.1.13 (commit: abc1234)" — extract just the version
+    current_ver=$(cs-workflow version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
 
     # Interactive prompt when a terminal is available.
     if [ -t 0 ]; then
@@ -246,8 +246,8 @@ install_cli() {
       read -r answer
       case "$answer" in
         [yY]|[yY][eE][sS])
-          info "Removing existing multica..."
-          rm -f "$(command -v multica)"
+          info "Removing existing cs-workflow..."
+          rm -f "$(command -v cs-workflow)"
           ;;
         *)
           info "Installation cancelled."
@@ -277,7 +277,7 @@ install_cli() {
       install_cli_binary
 
       local new_ver
-      new_ver=$(multica version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
+      new_ver=$(cs-workflow version 2>/dev/null | awk 'NR==1{print $2}' || echo "unknown")
       ok "Multica CLI upgraded ($current_ver → $new_ver)"
       return 0
     fi
@@ -286,8 +286,8 @@ install_cli() {
   install_cli_binary
 
   # Verify
-  if ! command_exists multica; then
-    fail "CLI installed but 'multica' not found on PATH. You may need to restart your shell."
+  if ! command_exists cs-workflow; then
+    fail "CLI installed but 'cs-workflow' not found on PATH. You may need to restart your shell."
   fi
 }
 
@@ -405,9 +405,9 @@ run_default() {
   printf "\n"
   printf "  ${BOLD}Next: configure your environment${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica config set server_url <YOUR_SERVER_URL>${RESET}\n"
-  printf "     ${CYAN}multica login --token <YOUR_TOKEN>${RESET}\n"
-  printf "     ${CYAN}multica daemon start${RESET}\n"
+  printf "     ${CYAN}cs-workflow config set server_url <YOUR_SERVER_URL>${RESET}\n"
+  printf "     ${CYAN}cs-workflow login --token <YOUR_TOKEN>${RESET}\n"
+  printf "     ${CYAN}cs-workflow daemon start${RESET}\n"
   printf "\n"
   printf "  ${BOLD}Get your token:${RESET} open the web dashboard → Settings → Tokens\n"
   printf "  ${BOLD}Self-hosting?${RESET} Install the server first:\n"
@@ -440,7 +440,7 @@ run_with_server() {
   printf "\n"
   printf "  ${BOLD}Next: configure your CLI to connect${RESET}\n"
   printf "\n"
-  printf "     ${CYAN}multica setup self-host${RESET}   # Configure + authenticate + start daemon\n"
+  printf "     ${CYAN}cs-workflow setup self-host${RESET}   # Configure + authenticate + start daemon\n"
   printf "\n"
   printf "  ${BOLD}Login:${RESET} configure ${CYAN}RESEND_API_KEY${RESET} in .env for email codes,\n"
   printf "  or read the generated code from backend logs when Resend is unset.\n"
@@ -469,8 +469,8 @@ run_stop() {
     warn "No Multica installation found at $INSTALL_DIR"
   fi
 
-  if command_exists multica; then
-    multica daemon stop 2>/dev/null && ok "Daemon stopped" || true
+  if command_exists cs-workflow; then
+    cs-workflow daemon stop 2>/dev/null && ok "Daemon stopped" || true
   fi
 
   printf "\n"
@@ -503,7 +503,7 @@ main() {
         echo "  MULTICA_SELFHOST_REF  Git ref to check out for self-host assets"
         echo "                        (default: latest release tag, falling back to main)"
         echo ""
-        echo "After installation, run 'multica setup' to configure your environment."
+        echo "After installation, run 'cs-workflow setup' to configure your environment."
         exit 0
         ;;
       *) warn "Unknown option: $1" ;;

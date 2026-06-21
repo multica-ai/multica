@@ -66,8 +66,8 @@ Multica = **人 + AI agent 在同一个看板上协作的任务管理平台**。
 
 | 篇目 | 核心内容 |
 |---|---|
-| **Cloud Quickstart** | 5 分钟：signup → install CLI → `multica setup` → 第一个 agent → 第一个 issue |
-| **Self-Host Quickstart** | 10 分钟：`install.sh --with-server` → `multica setup self-host` |
+| **Cloud Quickstart** | 5 分钟：signup → install CLI → `cs-workflow setup` → 第一个 agent → 第一个 issue |
+| **Self-Host Quickstart** | 10 分钟：`install.sh --with-server` → `cs-workflow setup self-host` |
 | **Your first task** | 从 issue 创建 → assign 给 agent → 看 agent 流式工作 → review 结果（截图 + GIF） |
 
 ### 板块 3. Concepts（17 篇 —— 灵魂）

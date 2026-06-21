@@ -38,7 +38,7 @@ irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps
 Verify the install:
 
 ```bash
-multica version
+cs-workflow version
 ```
 
 ## 3. Log in + start the daemon
@@ -46,10 +46,10 @@ multica version
 A single command handles login and starts the daemon:
 
 ```bash
-multica setup
+cs-workflow setup
 ```
 
-`multica setup` will:
+`cs-workflow setup` will:
 
 1. Configure the CLI to connect to Multica Cloud
 2. Open your browser for login (same email verification code / Google OAuth as the web)
@@ -57,13 +57,13 @@ multica setup
 4. **Start the daemon automatically** — it begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds
 
 <Callout type="info">
-**Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `multica setup` by hand. See [Desktop app](/desktop-app).
+**Using the desktop app?** The desktop app **starts the daemon automatically** on launch — no need to run `cs-workflow setup` by hand. See [Desktop app](/desktop-app).
 </Callout>
 
 Verify the daemon is running:
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 `online` means it has registered with the server.
@@ -90,16 +90,16 @@ Once created, the agent shows up in your workspace member list and can be assign
 Create an issue in the web UI, or from the CLI:
 
 ```bash
-multica issue create --title "Add an ASCII architecture diagram to the README"
+cs-workflow issue create --title "Add an ASCII architecture diagram to the README"
 ```
 
 Assign the issue to the agent you just created — click its avatar in the web UI, or use the CLI:
 
 ```bash
-multica issue assign MUL-1 --to my-agent-name
+cs-workflow issue assign MUL-1 --to my-agent-name
 ```
 
-`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `multica agent list --output json` or `multica workspace member list --output json`.
+`--to` takes the **name** of an agent or member. A substring match works — if the agent is called `my-code-reviewer`, `reviewer` resolves to it. If your workspace has overlapping names, pass `--to-id <uuid>` instead (mutually exclusive with `--to`); look up the UUID via `cs-workflow agent list --output json` or `cs-workflow workspace member list --output json`.
 
 **What happens next from the daemon**:
 

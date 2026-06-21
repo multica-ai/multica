@@ -690,9 +690,9 @@ func (d *Daemon) resolveAuth() error {
 		return nil
 	}
 
-	loginHint := "'multica login --token mul_...'"
+	loginHint := "'cs-workflow login --token mul_...'"
 	if d.cfg.Profile != "" {
-		loginHint = fmt.Sprintf("'multica login --profile %s --token mul_...'", d.cfg.Profile)
+		loginHint = fmt.Sprintf("'cs-workflow login --profile %s --token mul_...'", d.cfg.Profile)
 	}
 	d.logger.Warn("not authenticated — run " + loginHint + " to authenticate, then restart the daemon")
 	return fmt.Errorf("not authenticated: run %s first", loginHint)
@@ -901,7 +901,7 @@ func (d *Daemon) getGitlabAccessToken(workspaceID string) string {
 //
 // It's safe to call with the workspace's own repos — duplicates are
 // idempotent. Called from runTask before the agent spawns so
-// `multica repo checkout` accepts project-only URLs without an extra round
+// `cs-workflow repo checkout` accepts project-only URLs without an extra round
 // trip back to GetWorkspaceRepos (which doesn't carry project resources).
 func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if len(repos) == 0 {
@@ -1766,7 +1766,7 @@ func (d *Daemon) releaseClaimBarrier() {
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.
-// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/multica)
+// For brew installs, it keeps the symlink path (e.g. /opt/homebrew/bin/cs-workflow)
 // so the restarted daemon picks up the new Cellar version automatically.
 // For non-brew installs, it resolves to the absolute path of the replaced binary.
 // The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
@@ -1778,12 +1778,12 @@ func (d *Daemon) triggerRestart() {
 	}
 	// On Linux, os.Executable() reads /proc/self/exe, which the kernel resolves
 	// to the Cellar path. brew cleanup deletes that path after upgrade, so we
-	// must use the stable <brew-prefix>/bin/multica symlink instead.
+	// must use the stable <brew-prefix>/bin/cs-workflow symlink instead.
 	if isBrewInstall() {
 		if brewPrefix := getBrewPrefix(); brewPrefix != "" {
-			newBin = filepath.Join(brewPrefix, "bin", "multica")
+			newBin = filepath.Join(brewPrefix, "bin", "cs-workflow")
 		} else if prefix := matchKnownBrewPrefix(newBin); prefix != "" {
-			newBin = filepath.Join(prefix, "bin", "multica")
+			newBin = filepath.Join(prefix, "bin", "cs-workflow")
 		} else {
 			d.logger.Warn("brew install detected but prefix could not be resolved; restart may fail",
 				"executable", newBin)
@@ -2276,7 +2276,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// claimed task belongs to a project with github_repo resources the server
 	// has already narrowed it to project repos only. Make sure those URLs are
 	// in the per-workspace allowlist and the local cache, otherwise
-	// `multica repo checkout` would reject project-only URLs that aren't also
+	// `cs-workflow repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
 	d.registerTaskRepos(task.WorkspaceID, task.Repos)
 
@@ -2300,7 +2300,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
-	// via `multica repo checkout <url>`.
+	// via `cs-workflow repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                 task.IssueID,
 		TriggerCommentID:        task.TriggerCommentID,
@@ -2398,7 +2398,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	prompt := BuildPrompt(task, provider)
 
 	// Pass the daemon's auth credentials and context so the spawned agent CLI
-	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
+	// can call the Multica API and the local daemon (e.g. `cs-workflow repo checkout`).
 	// MULTICA_TASK_SLOT is allocated from the daemon-wide concurrency pool, not
 	// per-agent. When one daemon hosts multiple agents, slots index shared
 	// daemon-level resources such as GPUs.
@@ -2425,10 +2425,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.QuickCreatePrompt != "" {
 		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
+	// Ensure the cs-workflow CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
+	// cs-workflow binary so that `cs-workflow` commands in the agent always resolve.
 	if selfBin, err := os.Executable(); err == nil {
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
@@ -2570,7 +2570,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// identity/persona + skills + project context) so the backend prepends the
 	// same payload that file-based runtimes pick up from disk. Without this,
 	// these providers silently miss the workflow section and never call
-	// `multica issue status` / `multica issue comment add`, leaving issues
+	// `cs-workflow issue status` / `cs-workflow issue comment add`, leaving issues
 	// stuck in `todo`.
 	//
 	// Hermes is intentionally excluded: ACP sessions start in the task cwd and

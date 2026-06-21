@@ -141,7 +141,7 @@ export function ChatInput({
     // Block the send while any file is still uploading. If we let it
     // through the attachment id is not yet in uploadMapRef (the upload
     // resolves later) and the attachment would only end up bound to the
-    // session, not the message — the agent then can't `multica attachment
+    // session, not the message — the agent then can't `cs-workflow attachment
     // download <id>` the file. The SubmitButton is also disabled in this
     // state via `uploading`, but Mod+Enter bypasses the button so we
     // still gate here.

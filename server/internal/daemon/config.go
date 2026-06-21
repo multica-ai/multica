@@ -465,7 +465,7 @@ func NormalizeServerBaseURL(raw string) (string, error) {
 // should treat as the workspaces root. Resolution order: explicit override >
 // MULTICA_WORKSPACES_ROOT env > default ($HOME/multica_workspaces, or
 // $HOME/multica_workspaces_<profile> for a named profile). Read-only callers
-// (e.g. `multica daemon disk-usage`) use this directly so they pick the same
+// (e.g. `cs-workflow daemon disk-usage`) use this directly so they pick the same
 // directory the running daemon would have picked.
 func ResolveWorkspacesRoot(profile, override string) (string, error) {
 	root := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACES_ROOT"))

@@ -62,7 +62,7 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	})
 
 	prefix := filepath.Join(t.TempDir(), "home", "linuxbrew", ".linuxbrew")
-	deletedCellarPath := filepath.Join(prefix, "Cellar", "multica", "0.2.9", "bin", "multica")
+	deletedCellarPath := filepath.Join(prefix, "Cellar", "multica", "0.2.9", "bin", "cs-workflow")
 	isBrewInstall = func() bool { return true }
 	getBrewPrefix = func() string { return prefix }
 
@@ -71,7 +71,7 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 	d.triggerRestart()
 
-	want := filepath.Join(prefix, "bin", "multica")
+	want := filepath.Join(prefix, "bin", "cs-workflow")
 	if got := d.RestartBinary(); got != want {
 		t.Fatalf("restart binary = %q, want %q", got, want)
 	}
@@ -82,7 +82,7 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 
 // When `brew --prefix` is unavailable but the executable path is under a
 // known Cellar root, triggerRestart must recover the prefix from the
-// known-prefix list and target <prefix>/bin/multica.
+// known-prefix list and target <prefix>/bin/cs-workflow.
 func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.T) {
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
@@ -103,7 +103,7 @@ func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.
 	}
 	d.triggerRestart()
 
-	want := filepath.Join(knownPrefix, "bin", "multica")
+	want := filepath.Join(knownPrefix, "bin", "cs-workflow")
 	if got := d.RestartBinary(); got != want {
 		t.Fatalf("restart binary = %q, want %q", got, want)
 	}
@@ -111,7 +111,7 @@ func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.
 
 // When `brew --prefix` is unavailable AND the executable is not under any
 // known Cellar root, triggerRestart logs a warning and keeps the executable
-// path (no fabricated <prefix>/bin/multica path).
+// path (no fabricated <prefix>/bin/cs-workflow path).
 func TestTriggerRestart_BrewPrefixUnavailable_NoKnownPrefix_KeepsExecutable(t *testing.T) {
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
@@ -296,7 +296,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	// Prompt should contain the issue ID and CLI hint.
 	for _, want := range []string{
 		issueID,
-		"multica issue get",
+		"cs-workflow issue get",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("prompt missing %q", want)
@@ -343,8 +343,8 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Autopilot run ID: run-1",
 		"Daily dependency check",
 		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
-		"Do not run `multica issue get`",
+		"cs-workflow autopilot get autopilot-1 --output json",
+		"Do not run `cs-workflow issue get`",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)
@@ -379,7 +379,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 		commentContent,
 		"Focus on THIS comment",
 		commentID,
-		"multica issue comment add " + issueID + " --parent " + commentID,
+		"cs-workflow issue comment add " + issueID + " --parent " + commentID,
 		"do NOT reuse --parent values from previous turns",
 		// Silence-as-valid-exit for agent-to-agent loops depends on the
 		// reply command being framed conditionally rather than as a hard
@@ -393,7 +393,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	}
 
 	// Should still contain CLI hint for fetching issue context.
-	if !strings.Contains(prompt, "multica issue get") {
+	if !strings.Contains(prompt, "cs-workflow issue get") {
 		t.Fatal("prompt missing CLI hint for issue context")
 	}
 }
@@ -470,7 +470,7 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 		Agent:            &AgentData{Name: "Test"},
 	}, "claude")
 
-	if !strings.Contains(prompt, "multica issue get") {
+	if !strings.Contains(prompt, "cs-workflow issue get") {
 		t.Fatal("prompt missing CLI hint")
 	}
 }
@@ -497,7 +497,7 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 	for _, want := range []string{
 		"Squad leader no_action rule",
 		"DO NOT post any comment",
-		"multica squad activity",
+		"cs-workflow squad activity",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("squad leader prompt missing %q\n---\n%s", want, prompt)
@@ -1433,7 +1433,7 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 }
 
 // A project github_repo URL that the workspace itself does not bind must still
-// be allowed for `multica repo checkout` after registerTaskRepos runs. Without
+// be allowed for `cs-workflow repo checkout` after registerTaskRepos runs. Without
 // this, the new project-repos-override-workspace-repos behavior would surface
 // repos in the meta-skill that the agent then can't actually clone.
 func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {

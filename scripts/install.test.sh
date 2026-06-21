@@ -13,12 +13,12 @@ _setup_sandbox() {
   local payload_dir="$tmp/payload"
   mkdir -p "$stub_bin" "$install_bin" "$payload_dir"
 
-  cat >"$payload_dir/multica" <<'STUB'
+  cat >"$payload_dir/cs-workflow" <<'STUB'
 #!/usr/bin/env bash
-echo "multica v0.3.2 (commit: test)"
+echo "cs-workflow v0.3.2 (commit: test)"
 STUB
-  chmod +x "$payload_dir/multica"
-  tar -czf "$tmp/multica.tar.gz" -C "$payload_dir" multica
+  chmod +x "$payload_dir/cs-workflow"
+  tar -czf "$tmp/cs-workflow.tar.gz" -C "$payload_dir" cs-workflow
 
   cat >"$stub_bin/curl" <<'STUB'
 #!/usr/bin/env bash
@@ -55,7 +55,7 @@ _run_installer() {
   local err="$tmp/install.err"
   if ! PATH="$tmp/stub-bin:$tmp/install-bin:/usr/bin:/bin" \
     MULTICA_BIN_DIR="$tmp/install-bin" \
-    MULTICA_TEST_ARCHIVE="$tmp/multica.tar.gz" \
+    MULTICA_TEST_ARCHIVE="$tmp/cs-workflow.tar.gz" \
     bash "$ROOT_DIR/scripts/install.sh" >"$out" 2>"$err"; then
     echo "install.sh exited non-zero" >&2
     cat "$out" >&2 || true
@@ -63,8 +63,8 @@ _run_installer() {
     return 1
   fi
 
-  if [[ ! -x "$tmp/install-bin/multica" ]]; then
-    echo "expected fallback binary at $tmp/install-bin/multica" >&2
+  if [[ ! -x "$tmp/install-bin/cs-workflow" ]]; then
+    echo "expected fallback binary at $tmp/install-bin/cs-workflow" >&2
     cat "$out" >&2 || true
     cat "$err" >&2 || true
     return 1

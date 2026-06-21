@@ -1,6 +1,6 @@
 // Package execenv manages isolated per-task execution environments for the daemon.
 // Each task gets its own directory with injected context files. Repositories are
-// checked out on demand by the agent via `multica repo checkout`.
+// checked out on demand by the agent via `cs-workflow repo checkout`.
 package execenv
 
 import (
@@ -127,7 +127,7 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 
 // Prepare creates an isolated execution environment for a task.
 // The workdir starts empty (no repo checkouts). The agent checks out repos
-// on demand via `multica repo checkout <url>`.
+// on demand via `cs-workflow repo checkout <url>`.
 func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.WorkspacesRoot == "" {
 		return nil, fmt.Errorf("execenv: workspaces root is required")

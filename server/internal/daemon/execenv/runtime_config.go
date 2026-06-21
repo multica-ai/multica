@@ -186,15 +186,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
-	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
+	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `cs-workflow --help`, `cs-workflow <command> --help`, or `cs-workflow <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
-	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread --tail` or `--recent`.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
-	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
-	b.WriteString("- `multica issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
-	// Available Commands lists `multica issue comment add` neutrally —
+	b.WriteString("- `cs-workflow issue get <id> --output json` — Get full issue details.\n")
+	b.WriteString("- `cs-workflow issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread --tail` or `--recent`.\n")
+	b.WriteString("- `cs-workflow issue create --title \"...\" [--description \"...\" | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated.\n")
+	b.WriteString("- `cs-workflow issue update <id> [--title X] [--description X | --description-stdin | --description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--project <project-id>] [--due-date <RFC3339>]` — Update issue fields; use `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `cs-workflow repo checkout <url> [--ref <branch-or-sha>]` — Check out a repository into the working directory (creates a git worktree with a dedicated branch; use `--ref` for review/QA on a specific branch, tag, or commit)\n")
+	b.WriteString("- `cs-workflow issue status <id> <status>` — Shortcut for `issue update --status` when you only need to flip status (todo, in_progress, in_review, done, blocked, backlog, cancelled)\n")
+	// Available Commands lists `cs-workflow issue comment add` neutrally —
 	// three input modes, pick what fits.
 	// The previous "MUST pipe via stdin" mandate (#1795 / #1851) was
 	// originally a Codex-specific fix for codex emitting literal `\n`
@@ -210,15 +210,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// escaping correctly and can pick whichever flag suits their
 	// content. The `--content-file` line in the menu doubles as a
 	// pointer at the Windows-safe path.
-	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `multica issue comment add --help` for details.\n")
-	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
-	b.WriteString("- `multica issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
-	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
+	b.WriteString("- `cs-workflow issue comment add <issue-id> [--content \"...\" | --content-stdin | --content-file <path>] [--parent <comment-id>] [--attachment <path>]` — Post a comment. Pick the input mode that preserves your content; run `cs-workflow issue comment add --help` for details.\n")
+	b.WriteString("- `cs-workflow issue metadata list <issue-id> [--output json]` — List every metadata key pinned to an issue. Empty `{}` is normal.\n")
+	b.WriteString("- `cs-workflow issue metadata set <issue-id> --key <k> --value <v> [--type string|number|bool]` — Pin (or overwrite) a single metadata key. The CLI auto-infers JSON primitives, so URLs and plain text are stored as strings — pass `--type number` or `--type bool` only when the semantic type matters.\n")
+	b.WriteString("- `cs-workflow issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 
 	if provider == "codex" {
 		b.WriteString("## Codex-Specific Comment Formatting\n\n")
 		if runtimeGOOS == "windows" {
-			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`. Never use inline `--content` for agent-authored comments. ")
+			b.WriteString("Codex often follows the per-turn reply command literally. On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin`. PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `cs-workflow.exe`. Never use inline `--content` for agent-authored comments. ")
 			b.WriteString("Keep the same `--parent` value from the trigger comment when replying. ")
 			b.WriteString("Do not compress a multi-paragraph answer into one line and do not rely on `\\n` escapes.\n\n")
 		} else {
@@ -232,7 +232,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		b.WriteString("Use `cs-workflow repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
 		for _, repo := range ctx.Repos {
 			fmt.Fprintf(&b, "- %s\n", repo.URL)
 		}
@@ -242,7 +242,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("Create a merge request (pushes the branch automatically):\n\n")
 			b.WriteString("You must run this command from inside the checked-out repository directory (e.g. after `cd <repo-directory>`).\n")
 			b.WriteString("```bash\n")
-			b.WriteString("multica mr create --source-branch <branch> --title \"<title>\" [--description \"<desc>\"] [--target-branch <branch>]\n")
+			b.WriteString("cs-workflow mr create --source-branch <branch> --title \"<title>\" [--description \"<desc>\"] [--target-branch <branch>]\n")
 			b.WriteString("```\n\n")
 			b.WriteString("The command pushes the branch via the GitLab PAT and then creates the MR. The title must contain the issue's identifier.\n")
 			b.WriteString("The MR URL will be printed to stdout — include it in your completion report.\n\n")
@@ -263,7 +263,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
 			}
 			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
-			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
+			b.WriteString("For `github_repo` resources, use `cs-workflow repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
 		} else {
 			b.WriteString("This project has no resources attached yet.\n\n")
 		}
@@ -279,7 +279,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("Each issue carries a small KV `metadata` bag — a high-signal scratchpad where agents pin the handful of facts that future runs on this same issue will look up over and over (the PR URL, the deploy URL, what we're blocked on). It is NOT a place to record every fact you discover — that's what comments and the description are for. Most runs write **zero** new keys; that's the expected case, not a failure.\n\n")
 		b.WriteString("- **The bar for writing is high.** Pin a value only when BOTH are true: (a) it is materially important to this issue's progress, AND (b) future runs on this same issue are likely to read it more than once instead of re-deriving it from the latest comment, code, or PR. If you cannot name a concrete future read for the key, do not pin it. When in doubt, **do not write**.\n")
 		b.WriteString("- **Read on entry.** Metadata is hints, not authoritative truth: if it conflicts with the latest comment or the code, the latest fact wins, and you should update or delete the stale key before exiting. Empty `{}` and CLI failures are normal — do not stop or ask the user.\n")
-		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `multica issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `multica issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
+		b.WriteString("- **Write on exit.** Sparingly. If — and only if — this run produced a fact that clears the bar above (opened PR, deploy URL, external ticket, current blocker that will outlast this run), pin it with `cs-workflow issue metadata set`. If a key you saw on entry is now stale (e.g. `pipeline_status=waiting_review` but the PR has merged), overwrite it with the new value or `cs-workflow issue metadata delete` it. Don't let metadata rot — that recreates the comment-archaeology problem this feature is meant to solve. Stale-key cleanup is still expected even when you add nothing new.\n")
 		b.WriteString("- **What NOT to pin.** No secrets, tokens, or API keys. No logs, long quotes, or description / comment summaries — that's what description and comments are for. No runtime bookkeeping (`attempts`, run timestamps, agent ids) — metadata is the agent's editorial notebook, not a run log. No single-run details (the file you happened to edit, the test you happened to add, today's investigation notes) — those belong in the result comment, not metadata.\n")
 		b.WriteString("- **Recommended keys** (reuse these names so queries stay consistent across the workspace; coin a new key only when none fits): `pr_url`, `pr_number`, `pipeline_status`, `deploy_url`, `external_issue_url`, `waiting_on`, `blocked_reason`, `decision`. Use snake_case ASCII. The list is short on purpose — most issues only need 1-2 of these pinned, not the full set.\n\n")
 	}
@@ -291,10 +291,10 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 		b.WriteString("- Respond conversationally and helpfully to the user's message\n")
 		b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
-		b.WriteString("- If asked about issues, use `multica issue list --output json` or `multica issue get <id> --output json`\n")
-		b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
+		b.WriteString("- If asked about issues, use `cs-workflow issue list --output json` or `cs-workflow issue get <id> --output json`\n")
+		b.WriteString("- If asked about the workspace, use `cs-workflow workspace get --output json`\n")
 		b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
-		b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
+		b.WriteString("- If the task requires code changes, use `cs-workflow repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 		b.WriteString("- Keep responses concise and direct\n\n")
 	} else if ctx.QuickCreatePrompt != "" {
 		// Quick-create task: detailed field / output rules live in the
@@ -307,8 +307,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		// pointing at an empty issue id.
 		b.WriteString("**This task was triggered by quick-create.** There is NO existing Multica issue. Follow the field and output rules in the user message you just received; ignore the default assignment-task workflow.\n\n")
 		b.WriteString("Hard guardrails (apply even if the user message is missing):\n")
-		b.WriteString("- Run exactly one `multica issue create` invocation, then exit.\n")
-		b.WriteString("- Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `multica issue create` succeeded.\n")
+		b.WriteString("- Run exactly one `cs-workflow issue create` invocation, then exit.\n")
+		b.WriteString("- Do NOT call `cs-workflow issue get`, `cs-workflow issue status`, or `cs-workflow issue comment add` for this task — there is no issue to query, transition, or comment on. The platform writes the user's success/failure inbox notification automatically based on whether `cs-workflow issue create` succeeded.\n")
 		b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 	} else if ctx.AutopilotRunID != "" {
 		// Autopilot run_only task: no issue exists, so the agent must not
@@ -333,47 +333,47 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			b.WriteString("\n\n")
 		}
 		if ctx.AutopilotID != "" {
-			fmt.Fprintf(&b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
+			fmt.Fprintf(&b, "- Run `cs-workflow autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
 		}
 		b.WriteString("- Complete the autopilot instructions directly\n")
-		b.WriteString("- Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
+		b.WriteString("- Do not run `cs-workflow issue get`, `cs-workflow issue comment add`, or `cs-workflow issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue\n\n")
 	} else if ctx.TriggerCommentID != "" {
 		// Comment-triggered: focus on reading and replying
 		b.WriteString("**This task was triggered by a NEW comment.** Your primary job is to respond to THIS specific comment, even if you have handled similar requests before in this session.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand the issue context\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "3. Read the triggering thread first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `multica issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", ctx.IssueID, ctx.TriggerCommentID)
+		fmt.Fprintf(&b, "1. Run `cs-workflow issue get %s --output json` to understand the issue context\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `cs-workflow issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Read the triggering thread first — that is what this comment is actually about. Default to the 30 most recent replies in that thread: `cs-workflow issue comment list %s --thread %s --tail 30 --output json` returns the root + the 30 newest replies (root is always included, even at `--tail 0`).\n", ctx.IssueID, ctx.TriggerCommentID)
 		b.WriteString("   - If 30 replies aren't enough, walk older replies in the same thread one page at a time using the stderr `Next reply cursor: --before <ts> --before-id <reply-id>` line — pass the same pair back as `--before <ts> --before-id <reply-id>` on the next call. Under `--thread --tail` the cursor walks older *replies*, not older threads.\n")
-		fmt.Fprintf(&b, "   - If you also need cross-thread background, pull the most recently active threads on the issue: `multica issue comment list %s --recent 20 --output json`. Under `--recent` the same `--before` / `--before-id` flags walk older *threads* instead of older replies, and the stderr line is `Next thread cursor: --before <ts> --before-id <root-id>`. Pass the pair back to scroll to older threads when 20 still isn't enough.\n", ctx.IssueID)
-		b.WriteString("   - Avoid the unfiltered `multica issue comment list <issue-id> --output json` form on long-running issues — it dumps the entire flat timeline (cap 2000) and wastes context on chatter unrelated to the trigger. `--since <RFC3339-timestamp>` is still available for incremental polling against a known cursor and may combine with `--thread --tail` or `--recent`.\n")
+		fmt.Fprintf(&b, "   - If you also need cross-thread background, pull the most recently active threads on the issue: `cs-workflow issue comment list %s --recent 20 --output json`. Under `--recent` the same `--before` / `--before-id` flags walk older *threads* instead of older replies, and the stderr line is `Next thread cursor: --before <ts> --before-id <root-id>`. Pass the pair back to scroll to older threads when 20 still isn't enough.\n", ctx.IssueID)
+		b.WriteString("   - Avoid the unfiltered `cs-workflow issue comment list <issue-id> --output json` form on long-running issues — it dumps the entire flat timeline (cap 2000) and wastes context on chatter unrelated to the trigger. `--since <RFC3339-timestamp>` is still available for incremental polling against a known cursor and may combine with `--thread --tail` or `--recent`.\n")
 		fmt.Fprintf(&b, "4. Find the triggering comment (ID: `%s`) inside the thread you just read and understand what is being asked — do NOT confuse it with previous comments\n", ctx.TriggerCommentID)
 		if ctx.IsSquadLeader {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
-			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `multica squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "   - **Squad leader rule:** If your evaluation outcome is `no_action`, call `cs-workflow squad activity %s no_action --reason \"...\"` and then EXIT IMMEDIATELY. DO NOT post any comment whose only purpose is to announce that you are taking no action, exiting silently, or acknowledging another agent. A comment like \"No action needed\" or \"Exiting silently\" is noise — the `squad activity` call already records your decision in the timeline.\n", ctx.IssueID)
 		} else {
 			b.WriteString("5. **Decide whether a reply is warranted.** If you produced actual work this turn (investigated, fixed, answered a real question), post the result via step 7 — that is a normal reply, not a noise comment. If the triggering comment was a pure acknowledgment / thanks / sign-off from another agent AND you produced no work this turn, do NOT post a reply — and do NOT post a comment saying 'No reply needed' or similar. Simply exit with no output. Silence is a valid and preferred way to end agent-to-agent conversations.\n")
 		}
 		b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
 		b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
 		b.WriteString(BuildCommentReplyInstructions(provider, ctx.IssueID, ctx.TriggerCommentID))
-		b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
+		b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `cs-workflow issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 		b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 	} else {
 		// Assignment-triggered: defer to agent Skills for workflow specifics.
 		b.WriteString("You are responsible for managing the issue status throughout your work.\n\n")
-		fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", ctx.IssueID)
-		fmt.Fprintf(&b, "2. Run `multica issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "3. Run `multica issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
-		fmt.Fprintf(&b, "4. Run `multica issue status %s in_progress`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "1. Run `cs-workflow issue get %s --output json` to understand your task\n", ctx.IssueID)
+		fmt.Fprintf(&b, "2. Run `cs-workflow issue metadata list %s --output json` to see what prior agents pinned — best-effort, empty `{}` and CLI failures are normal. See the `## Issue Metadata` section above for what to look for.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "3. Run `cs-workflow issue comment list %s --output json` to read the full comment history (returns all comments, capped server-side at 2000) — this is mandatory, not optional. Earlier comments often carry context the issue body lacks (e.g. which repo to work in, the prior agent's findings, the reason the issue was reassigned to you). Skipping this step is the most common cause of agents acting on stale or incomplete instructions. When the flat dump is too large to ingest in one shot, treat `--recent 20 --output json` plus the `--before` / `--before-id` cursor (from the stderr `Next thread cursor:` line) as a paging strategy: keep walking older threads until you have read enough history to satisfy this mandatory step. `--recent` is a way to read the full history page-by-page, not a shortcut that replaces it.\n", ctx.IssueID)
+		fmt.Fprintf(&b, "4. Run `cs-workflow issue status %s in_progress`\n", ctx.IssueID)
 		b.WriteString("5. Follow your Skills and Agent Identity to complete the task (write code, investigate, etc.)\n")
 		if ctx.IsSquadLeader {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `multica squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment** (unless your outcome is `no_action` — in that case, calling `cs-workflow squad activity %s no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment announcing no_action or saying you are exiting silently): `cs-workflow issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID, ctx.IssueID)
 		} else {
-			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
+			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `cs-workflow issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
-		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
-		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
+		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `cs-workflow issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
+		fmt.Fprintf(&b, "8. When done, run `cs-workflow issue status %s in_review`\n", ctx.IssueID)
+		fmt.Fprintf(&b, "9. If blocked, run `cs-workflow issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 
 	// Sub-issue creation semantics — the only piece of the old Parent /
@@ -385,7 +385,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// runs (no parent/child semantics there).
 	if ctx.IssueID != "" && ctx.ChatSessionID == "" && ctx.QuickCreatePrompt == "" && ctx.AutopilotRunID == "" {
 		b.WriteString("## Sub-issue Creation\n\n")
-		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `multica issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
+		b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (the default — an agent assignee fires immediately). `--status backlog` = **wait** (assignee is set but no trigger fires; promote later with `cs-workflow issue status <child-id> todo`). Parallel children: all `--status todo`. Strict serial Step 1→2→3: only Step 1 is `todo`; Steps 2/3 are `--status backlog` from the start, promoted in turn.\n\n")
 	}
 
 	if len(ctx.AgentSkills) > 0 {
@@ -433,7 +433,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("## Attachments\n\n")
 	b.WriteString("Issues and comments may include file attachments (images, documents, etc.).\n")
-	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
+	b.WriteString("When a task includes attachment IDs and you need the files, inspect `cs-workflow attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
 
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
 	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
@@ -447,15 +447,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	case ctx.AutopilotRunID != "":
 		b.WriteString("This is a run-only autopilot task, so there may be no issue comment to post. Your final assistant output is captured automatically as the autopilot run result. Keep it concise and state the outcome.\n")
 	case ctx.QuickCreatePrompt != "":
-		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `multica issue create` succeeded.\n\n")
-		b.WriteString("- Do NOT call `multica issue comment add` — the issue you just created has no conversation context for this run.\n")
-		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `multica issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
+		b.WriteString("This is a quick-create task. There is NO existing issue to comment on. Your final stdout is captured automatically and the platform writes the user's success/failure inbox notification based on whether `cs-workflow issue create` succeeded.\n\n")
+		b.WriteString("- Do NOT call `cs-workflow issue comment add` — the issue you just created has no conversation context for this run.\n")
+		b.WriteString("- Print exactly one final line: `Created <identifier-or-id>: <title>` after a successful `cs-workflow issue create`. Use the created issue's `identifier` from JSON output when available; otherwise use its `id`. Do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
 		b.WriteString("- On CLI failure, exit with the CLI error as the only output. The platform translates that into a `quick_create_failed` inbox item carrying the original prompt for the user.\n")
 	default:
 		if ctx.IsSquadLeader {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `multica squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
+			b.WriteString("⚠️ **Final results MUST be delivered via `cs-workflow issue comment add`** — unless your outcome is `no_action`. When you evaluate a trigger and decide no action is needed, calling `cs-workflow squad activity <issue-id> no_action --reason \"...\"` alone is sufficient; you MUST exit without posting any comment. DO NOT post a comment that announces no_action, acknowledges another agent, or says you are exiting silently — such comments are noise. For all other outcomes (`action`, `failed`), a comment is still mandatory.\n\n")
 		} else {
-			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
+			b.WriteString("⚠️ **Final results MUST be delivered via `cs-workflow issue comment add`.** The user does NOT see your terminal output, assistant chat text, or run logs — only comments on the issue. A task that finishes without a result comment is invisible to the user, even if the work itself was correct.\n\n")
 		}
 		b.WriteString("Keep comments concise and natural — state the outcome, not the process.\n")
 		b.WriteString("Good: \"Fixed the login redirect. PR: https://...\"\n")

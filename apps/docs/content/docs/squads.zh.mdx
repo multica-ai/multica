@@ -52,8 +52,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 CLI 等价命令：
 
 ```bash
-multica squad create --name "Frontend Team" --leader frontend-lead-agent
-multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
+cs-workflow squad create --name "Frontend Team" --leader frontend-lead-agent
+cs-workflow squad member add <squad-id> --member-id <agent-or-user-uuid> --type agent --role "Owns Tailwind / shadcn surface"
 ```
 
 ## 分配给小队的 issue 是怎么跑的
@@ -63,7 +63,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 1. **队长领走 task。** 队长所在的 daemon 在下次轮询时把 task 领走，和普通智能体的分配流程一样。
 2. **队长拿到 briefing。** 领走的瞬间，Multica 会在队长的系统提示后面追加三段内容——详见下文 [队长每次执行看到的内容](#队长每次执行看到的内容)。
 3. **队长发一条"派活"评论。** 评论里用 roster 里给好的 mention markdown `@` 选中的成员——这个 `@` 会触发被派的成员入队新 `task`。
-4. **队长记录 evaluation：** `multica squad activity <issue-id> action --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长确实评估过这一次触发。
+4. **队长记录 evaluation：** `cs-workflow squad activity <issue-id> action --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长确实评估过这一次触发。
 5. **队长停下。** 派完活，队长**不动手干活**。当被派的成员有回复时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、还是保持沉默。
 
 如果 issue 是 **Backlog** 状态，队长不会被触发——Backlog 是停泊场，规则和直接分配给智能体一样。
@@ -74,7 +74,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 - **Squad Operating Protocol（小队工作规范）** —— 一段硬编码的规则集：读 issue → 用 `@` 派活 → 简洁（**不要**复述 issue 内容，被派的成员自己能读）→ 每次都记 evaluation → **派完就停**。这段是系统管理的，不可编辑。
 - **Squad Roster（小队花名册）** —— 队长自己一行 + 每个未归档成员一行。每一行带上**确切可用**的 mention markdown（`[@Name](mention://agent/<uuid>)` 或 `[@Name](mention://member/<uuid>)`）让队长直接复制——纯文本 `@name` 是**不会**触发任何人的。
-- **Squad Instructions（小队自定义指令）** —— 你为这个小队写的私货（在详情页里编辑，或用 `multica squad update --instructions`）。用来写路由规则（"DB 相关派给 Alice，前端派给 Bob"）、上报策略，或者任何 issue 本身不会有的背景。
+- **Squad Instructions（小队自定义指令）** —— 你为这个小队写的私货（在详情页里编辑，或用 `cs-workflow squad update --instructions`）。用来写路由规则（"DB 相关派给 Alice，前端派给 Bob"）、上报策略，或者任何 issue 本身不会有的背景。
 
 ## 队长什么时候会被再次触发
 
@@ -104,7 +104,7 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 **把分配人从小队改成别的**，行为和换 assignee 完全一致：当前 issue 上所有活跃 task（包括队长的）会被取消，新的 assignee（智能体、成员、或另一个小队）被入队。没有"不改 assignee 只移除小队"的单独操作；要换就选新的 assignee。
 
-**归档小队**（`multica squad delete <id>`，或详情页的 Archive 按钮）：
+**归档小队**（`cs-workflow squad delete <id>`，或详情页的 Archive 按钮）：
 
 1. **当前分配给这个小队的 issue 会被自动转给队长智能体**，让工作落到一个具体智能体上，避免无人接手。
 2. 在 squad 表上写入 `archived_at` / `archived_by`——记录被保留下来，历史的 activity 还能解析；但从列表、picker、`@` 下拉里它都消失。
@@ -116,17 +116,17 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 | 命令 | 用途 |
 |---|---|
-| `multica squad list` | 列出工作区里的小队 |
-| `multica squad get <id>` | 查看小队的名字、队长、描述、instructions |
-| `multica squad create --name "..." --leader <agent>` | 创建小队（owner / admin）|
-| `multica squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | 修改一个或多个字段 |
-| `multica squad delete <id>` | 归档（软删除）——同时把当前分配给小队的 issue 转给队长 |
-| `multica squad member list <id>` | 列出小队成员 |
-| `multica squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 加成员（owner / admin）|
-| `multica squad member remove <id> --member-id <uuid> --type agent\|member` | 移除成员（**不能移除队长**——先换队长）|
-| `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长每次结束前由它自己调用 |
+| `cs-workflow squad list` | 列出工作区里的小队 |
+| `cs-workflow squad get <id>` | 查看小队的名字、队长、描述、instructions |
+| `cs-workflow squad create --name "..." --leader <agent>` | 创建小队（owner / admin）|
+| `cs-workflow squad update <id> [--name X] [--description X] [--instructions X] [--leader Y] [--avatar-url Z]` | 修改一个或多个字段 |
+| `cs-workflow squad delete <id>` | 归档（软删除）——同时把当前分配给小队的 issue 转给队长 |
+| `cs-workflow squad member list <id>` | 列出小队成员 |
+| `cs-workflow squad member add <id> --member-id <uuid> --type agent\|member [--role "..."]` | 加成员（owner / admin）|
+| `cs-workflow squad member remove <id> --member-id <uuid> --type agent\|member` | 移除成员（**不能移除队长**——先换队长）|
+| `cs-workflow squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | 队长每次结束前由它自己调用 |
 
-`--leader` 接受智能体名字或 UUID；其它 ID 从 `multica agent list --output json`、`multica workspace member list --output json`、`multica squad list --output json` 拿。
+`--leader` 接受智能体名字或 UUID；其它 ID 从 `cs-workflow agent list --output json`、`cs-workflow workspace member list --output json`、`cs-workflow squad list --output json` 拿。
 
 ## 下一步
 

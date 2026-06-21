@@ -15,7 +15,7 @@ This structure is the biggest difference between Multica and Linear / Jira: **yo
 The daemon is part of the Multica CLI. Once you've installed the [Multica CLI](/cli), run on your own machine:
 
 ```bash
-multica daemon start
+cs-workflow daemon start
 ```
 
 On startup it does four things:
@@ -29,15 +29,15 @@ Common commands:
 
 | Command | Purpose |
 |---|---|
-| `multica daemon start` | Start (background by default; add `--foreground` to run in the foreground) |
-| `multica daemon stop` | Stop |
-| `multica daemon restart` | Restart |
-| `multica daemon status` | Show status |
-| `multica daemon logs` | Show logs (add `-f` to follow) |
+| `cs-workflow daemon start` | Start (background by default; add `--foreground` to run in the foreground) |
+| `cs-workflow daemon stop` | Stop |
+| `cs-workflow daemon restart` | Restart |
+| `cs-workflow daemon status` | Show status |
+| `cs-workflow daemon logs` | Show logs (add `-f` to follow) |
 
 Full CLI reference in [CLI commands](/cli).
 
-**The desktop app ships with a daemon.** If you use the [desktop app](/desktop-app), you don't need to run `multica daemon start` manually — it launches the daemon automatically on startup. See the [Desktop app](/desktop-app) page for which option fits your workflow.
+**The desktop app ships with a daemon.** If you use the [desktop app](/desktop-app), you don't need to run `cs-workflow daemon start` manually — it launches the daemon automatically on startup. See the [Desktop app](/desktop-app) page for which option fits your workflow.
 
 ## Why one machine has multiple runtimes
 
@@ -99,8 +99,8 @@ Even if this step fails due to a network issue, there's a server-side scan **eve
 
 When you hit a "my agent isn't working" problem, run this three-step checklist first:
 
-1. Run `multica daemon status` — confirm the daemon is running and online
-2. Run `multica daemon logs -f` — check for errors
+1. Run `cs-workflow daemon status` — confirm the daemon is running and online
+2. Run `cs-workflow daemon logs -f` — check for errors
 3. Open the **Runtimes** page in the Multica UI — confirm your runtime shows "online"
 
 More scenarios in [Troubleshooting](/troubleshooting).

@@ -40,7 +40,7 @@ Your responsibilities, in order:
      typing a plain "@name" will not trigger anyone.
 3. **Record your evaluation.** After every trigger — whether you delegated,
    decided no action is needed, or encountered an error — record it:
-   ` + "`" + `multica squad activity <issue-id> <outcome> --reason "<short reason>"` + "`" + `
+   ` + "`" + `cs-workflow squad activity <issue-id> <outcome> --reason "<short reason>"` + "`" + `
    Outcome values: ` + "`" + `action` + "`" + ` (you delegated or acted),
    ` + "`" + `no_action` + "`" + ` (you evaluated and decided nothing is needed),
    ` + "`" + `failed` + "`" + ` (you hit an error).
@@ -78,7 +78,7 @@ Hard rules:
 - If the squad has no member capable of the task, post a comment
   explaining the gap (and @mention the issue's reporter if possible)
   rather than silently doing the work.
-- ALWAYS call ` + "`" + `multica squad activity` + "`" + ` before ending your turn —
+- ALWAYS call ` + "`" + `cs-workflow squad activity` + "`" + ` before ending your turn —
   even when the outcome is no_action.
 - A child issue you create with ` + "`" + `--status todo` + "`" + ` and an agent assignee
   already fires that agent automatically — the assignment IS the trigger.

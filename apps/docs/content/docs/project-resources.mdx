@@ -43,18 +43,18 @@ From the **CLI**:
 # Create + attach in one shot. The server attaches resources in the same
 # transaction as the project create — invalid resources roll back the whole
 # operation, so you never end up with a project that has half its resources.
-multica project create \
+cs-workflow project create \
   --title "Agent UX 2026" \
   --repo https://github.com/multica-ai/multica
 
 # Manage resources later
-multica project resource list <project-id>
-multica project resource add  <project-id> --type github_repo --url <url>
-multica project resource remove <project-id> <resource-id>
+cs-workflow project resource list <project-id>
+cs-workflow project resource add  <project-id> --type github_repo --url <url>
+cs-workflow project resource remove <project-id> <resource-id>
 
 # Generic escape hatch for any resource_type the server understands —
 # no CLI change needed when a new type ships:
-multica project resource add <project-id> \
+cs-workflow project resource add <project-id> \
   --type notion_page \
   --ref '{"page_id":"…","title":"…"}'
 ```
@@ -102,7 +102,7 @@ Project resources (also written to `.multica/project/resources.json`):
 - **GitHub repo**: https://github.com/multica-ai/multica (default branch: `main`)
 
 Resources are pointers — open them only when relevant to the task. For
-`github_repo` resources, use `multica repo checkout <url>` to fetch the code.
+`github_repo` resources, use `cs-workflow repo checkout <url>` to fetch the code.
 ```
 
 The text is intentionally minimal. The full payload is on disk; the prompt only orients the agent so it knows the project exists and what's attached.
@@ -133,12 +133,12 @@ The repo list shown to the agent (`## Repositories` block in `CLAUDE.md` / `AGEN
 
 This keeps the agent's working set tight: when a project is explicit about its repos, that's the authoritative answer. The structured resource list at `.multica/project/resources.json` always carries the full set, so a skill that wants to inspect everything still can.
 
-The daemon mirrors this on the checkout side: when a task arrives with project-scoped `github_repo` URLs, those URLs are merged into the per-workspace allowlist *and* synced into the local repo cache before the agent spawns. So a project repo URL that isn't bound at the workspace level is still a valid argument to `multica repo checkout` — the daemon won't reject it as "not configured." The allowlist split is internal: workspace-bound URLs and task-scoped URLs are tracked separately, so a workspace-repos refresh doesn't accidentally revoke a project URL mid-run.
+The daemon mirrors this on the checkout side: when a task arrives with project-scoped `github_repo` URLs, those URLs are merged into the per-workspace allowlist *and* synced into the local repo cache before the agent spawns. So a project repo URL that isn't bound at the workspace level is still a valid argument to `cs-workflow repo checkout` — the daemon won't reject it as "not configured." The allowlist split is internal: workspace-bound URLs and task-scoped URLs are tracked separately, so a workspace-repos refresh doesn't accidentally revoke a project URL mid-run.
 
 ## What's intentionally **not** in scope here
 
 - **Cross-project sharing.** Each resource lives on exactly one project today.
 - **Per-skill resource scoping.** All resources are visible to every skill on the agent's run; type-aware filtering is a follow-up.
-- **Caching / sync.** `github_repo` is just metadata — checkout still happens via `multica repo checkout` on demand. Cached document text for Notion / Google Docs will arrive with those types.
+- **Caching / sync.** `github_repo` is just metadata — checkout still happens via `cs-workflow repo checkout` on demand. Cached document text for Notion / Google Docs will arrive with those types.
 
 These are deliberate omissions — the goal of the first cut is to validate the abstraction with the smallest set of moving parts.

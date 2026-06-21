@@ -103,14 +103,14 @@ Open [http://localhost:3000](http://localhost:3000):
 
 ## 5. Point the CLI at your own server
 
-The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-multica-cli) — Homebrew / script / PowerShell, pick one.
+The CLI install is the same as in [Cloud quickstart → 2. Install the CLI](/cloud-quickstart#2-install-the-cs-workflow-cli) — Homebrew / script / PowerShell, pick one.
 
 ### 5a. Same machine
 
 If the CLI and the server run on the same host, the defaults already work:
 
 ```bash
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3000` (frontend), takes you through browser login, stores the PAT locally, and **starts the daemon automatically**.
@@ -120,7 +120,7 @@ That points the CLI at `http://localhost:8080` (backend) and `http://localhost:3
 Because the compose stack only listens on `127.0.0.1`, a daemon on a different machine cannot reach `http://<server-ip>:8080` directly — and you do not want it to, since the default `JWT_SECRET` would otherwise be reachable from the open internet. Put a reverse proxy on the server that terminates TLS and forwards to `127.0.0.1:8080` (backend) and `127.0.0.1:3000` (frontend), then point the CLI at the public HTTPS URL:
 
 ```bash
-multica setup self-host \
+cs-workflow setup self-host \
   --server-url https://<your-domain> \
   --app-url https://<your-domain>
 ```

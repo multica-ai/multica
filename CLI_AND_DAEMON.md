@@ -1,6 +1,6 @@
 # CLI and Agent Daemon Guide
 
-The `multica` CLI connects your local machine to Multica. It handles authentication, workspace management, issue tracking, and runs the agent daemon that executes AI tasks locally.
+The `cs-workflow` CLI connects your local machine to Multica. It handles authentication, workspace management, issue tracking, and runs the agent daemon that executes AI tasks locally.
 
 ## Installation
 
@@ -16,7 +16,7 @@ brew install multica-ai/tap/multica
 git clone https://github.com/multica-ai/multica.git
 cd multica
 make build
-cp server/bin/multica /usr/local/bin/multica
+cp server/bin/cs-workflow /usr/local/bin/cs-workflow
 ```
 
 ### Update
@@ -28,41 +28,41 @@ brew upgrade multica-ai/tap/multica
 For install script or manual installs, use:
 
 ```bash
-multica update
+cs-workflow update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`cs-workflow update` auto-detects your installation method and upgrades accordingly.
 
 ## Quick Start
 
 ```bash
 # One-command setup: configure, authenticate, and start the daemon
-multica setup
+cs-workflow setup
 
 # For self-hosted (local) deployments:
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 Or step by step:
 
 ```bash
 # 1. Authenticate (opens browser for login)
-multica login
+cs-workflow login
 
 # 2. Start the agent daemon
-multica daemon start
+cs-workflow daemon start
 
 # 3. Done — agents in your watched workspaces can now execute tasks on your machine
 ```
 
-`multica login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
+`cs-workflow login` automatically discovers all workspaces you belong to and adds them to the daemon watch list.
 
 ## Authentication
 
 ### Browser Login
 
 ```bash
-multica login
+cs-workflow login
 ```
 
 Opens your browser for OAuth authentication, creates a 90-day personal access token, and auto-configures your workspaces.
@@ -70,7 +70,7 @@ Opens your browser for OAuth authentication, creates a 90-day personal access to
 ### Token Login
 
 ```bash
-multica login --token <mul_...>
+cs-workflow login --token <mul_...>
 ```
 
 Authenticate using a personal access token directly. Useful for headless environments. Pass `--token=` with an empty value to be prompted interactively (so the token never lands in shell history).
@@ -78,7 +78,7 @@ Authenticate using a personal access token directly. Useful for headless environ
 ### Check Status
 
 ```bash
-multica auth status
+cs-workflow auth status
 ```
 
 Shows your current server, user, and token validity.
@@ -86,7 +86,7 @@ Shows your current server, user, and token validity.
 ### Logout
 
 ```bash
-multica auth logout
+cs-workflow auth logout
 ```
 
 Removes the stored authentication token.
@@ -98,7 +98,7 @@ The daemon is the local agent runtime. It detects available AI CLIs on your mach
 ### Start
 
 ```bash
-multica daemon start
+cs-workflow daemon start
 ```
 
 By default, the daemon runs in the background and logs to `~/.multica/daemon.log`.
@@ -106,20 +106,20 @@ By default, the daemon runs in the background and logs to `~/.multica/daemon.log
 To run in the foreground (useful for debugging):
 
 ```bash
-multica daemon start --foreground
+cs-workflow daemon start --foreground
 ```
 
 ### Stop
 
 ```bash
-multica daemon stop
+cs-workflow daemon stop
 ```
 
 ### Status
 
 ```bash
-multica daemon status
-multica daemon status --output json
+cs-workflow daemon status
+cs-workflow daemon status --output json
 ```
 
 Shows PID, uptime, detected agents, and watched workspaces.
@@ -127,9 +127,9 @@ Shows PID, uptime, detected agents, and watched workspaces.
 ### Logs
 
 ```bash
-multica daemon logs              # Last 50 lines
-multica daemon logs -f           # Follow (tail -f)
-multica daemon logs -n 100       # Last 100 lines
+cs-workflow daemon logs              # Last 50 lines
+cs-workflow daemon logs -f           # Follow (tail -f)
+cs-workflow daemon logs -n 100       # Last 100 lines
 ```
 
 ### Supported Agents
@@ -229,25 +229,25 @@ When connecting to a self-hosted Multica instance, the easiest approach is:
 
 ```bash
 # One command — configures for localhost, authenticates, starts daemon
-multica setup self-host
+cs-workflow setup self-host
 
 # Or for on-premise with custom domains:
-multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+cs-workflow setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
 Or configure manually:
 
 ```bash
 # Set URLs individually
-multica config set server_url http://localhost:8080
-multica config set app_url http://localhost:3000
+cs-workflow config set server_url http://localhost:8080
+cs-workflow config set app_url http://localhost:3000
 
 # For production with TLS:
-# multica config set server_url https://api.example.com
-# multica config set app_url https://app.example.com
+# cs-workflow config set server_url https://api.example.com
+# cs-workflow config set app_url https://app.example.com
 
-multica login
-multica daemon start
+cs-workflow login
+cs-workflow daemon start
 ```
 
 ### Profiles
@@ -256,13 +256,13 @@ Profiles let you run multiple daemons on the same machine — for example, one f
 
 ```bash
 # Set up a staging profile
-multica setup self-host --profile staging --server-url https://api-staging.example.com --app-url https://staging.example.com
+cs-workflow setup self-host --profile staging --server-url https://api-staging.example.com --app-url https://staging.example.com
 
 # Start its daemon
-multica daemon start --profile staging
+cs-workflow daemon start --profile staging
 
 # Default profile runs separately
-multica daemon start
+cs-workflow daemon start
 ```
 
 Each profile gets its own config directory (`~/.multica/profiles/<name>/`), daemon state, health port, and workspace root.
@@ -275,18 +275,18 @@ Every command runs against a single workspace. The CLI resolves which one in thi
 
 1. `--workspace-id <id>` flag on the command
 2. `MULTICA_WORKSPACE_ID` environment variable
-3. The default workspace stored in your current profile (set by `multica workspace switch` or `multica login`)
+3. The default workspace stored in your current profile (set by `cs-workflow workspace switch` or `cs-workflow login`)
 
-`multica workspace switch <id|slug>` is the day-to-day way to change the default workspace. For scripting and headless setups where you don't want any stored state, prefer the `--workspace-id` flag or the env variable. `multica config set workspace_id <id>` is the low-level equivalent of `switch` (it writes the same setting but skips the access check).
+`cs-workflow workspace switch <id|slug>` is the day-to-day way to change the default workspace. For scripting and headless setups where you don't want any stored state, prefer the `--workspace-id` flag or the env variable. `cs-workflow config set workspace_id <id>` is the low-level equivalent of `switch` (it writes the same setting but skips the access check).
 
 If you need full isolation between organizations or accounts — separate tokens, separate daemons, separate config dirs — use `--profile <name>` instead. Each profile keeps its own default workspace.
 
 ### List Workspaces
 
 ```bash
-multica workspace list
-multica workspace list --full-id
-multica workspace list --output json
+cs-workflow workspace list
+cs-workflow workspace list --full-id
+cs-workflow workspace list --output json
 ```
 
 The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs.
@@ -294,8 +294,8 @@ The current default workspace is marked with `*`. Table output shows short UUID 
 ### Switch Default Workspace
 
 ```bash
-multica workspace switch <workspace-id>
-multica workspace switch <slug>
+cs-workflow workspace switch <workspace-id>
+cs-workflow workspace switch <slug>
 ```
 
 Verifies you have access to the workspace, then sets it as the default for the current profile. Subsequent commands without `--workspace-id` and `MULTICA_WORKSPACE_ID` target this workspace. Pair `--profile` if you want to change a non-default profile's workspace.
@@ -303,16 +303,16 @@ Verifies you have access to the workspace, then sets it as the default for the c
 ### Get Details
 
 ```bash
-multica workspace get <workspace-id>
-multica workspace get <workspace-id> --output json
+cs-workflow workspace get <workspace-id>
+cs-workflow workspace get <workspace-id> --output json
 ```
 
-Passing no `<workspace-id>` resolves to the current default workspace, so `multica workspace get` doubles as "what workspace am I on?".
+Passing no `<workspace-id>` resolves to the current default workspace, so `cs-workflow workspace get` doubles as "what workspace am I on?".
 
 ### List Members
 
 ```bash
-multica workspace member list <workspace-id>
+cs-workflow workspace member list <workspace-id>
 ```
 
 ## Issues
@@ -320,12 +320,12 @@ multica workspace member list <workspace-id>
 ### List Issues
 
 ```bash
-multica issue list
-multica issue list --status in_progress
-multica issue list --priority urgent --assignee "Agent Name"
-multica issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
-multica issue list --full-id
-multica issue list --limit 20 --output json
+cs-workflow issue list
+cs-workflow issue list --status in_progress
+cs-workflow issue list --priority urgent --assignee "Agent Name"
+cs-workflow issue list --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue list --full-id
+cs-workflow issue list --limit 20 --output json
 ```
 
 Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
@@ -333,38 +333,38 @@ Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into 
 Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
 
 ```bash
-multica issue list --metadata pipeline_status=waiting_review
-multica issue list --metadata pr_number=482 --metadata is_blocked=true
+cs-workflow issue list --metadata pipeline_status=waiting_review
+cs-workflow issue list --metadata pr_number=482 --metadata is_blocked=true
 ```
 
 ### Get Issue
 
 ```bash
-multica issue get <id>
-multica issue get <id> --output json
+cs-workflow issue get <id>
+cs-workflow issue get <id> --output json
 ```
 
 ### Create Issue
 
 ```bash
-multica issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
-multica issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue create --title "Fix login bug" --description "..." --priority high --assignee "Lambda"
+cs-workflow issue create --title "Fix login bug" --assignee-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
 ```
 
-Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `multica workspace member list --output json` / `multica agent list --output json`.
+Flags: `--title` (required), `--description`, `--status`, `--priority`, `--assignee` / `--assignee-id`, `--parent`, `--project`, `--due-date`. Pass `--assignee-id <uuid>` (mutually exclusive with `--assignee`) when scripting against the IDs returned by `cs-workflow workspace member list --output json` / `cs-workflow agent list --output json`.
 
 ### Update Issue
 
 ```bash
-multica issue update <id> --title "New title" --priority urgent
+cs-workflow issue update <id> --title "New title" --priority urgent
 ```
 
 ### Assign Issue
 
 ```bash
-multica issue assign <id> --to "Lambda"
-multica issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
-multica issue assign <id> --unassign
+cs-workflow issue assign <id> --to "Lambda"
+cs-workflow issue assign <id> --to-id 5fb87ac7-23b5-4a7a-81fa-ed295a54545d
+cs-workflow issue assign <id> --unassign
 ```
 
 Pass `--to-id <uuid>` to assign by canonical UUID (mutually exclusive with `--to`); useful when names overlap across members and agents.
@@ -372,7 +372,7 @@ Pass `--to-id <uuid>` to assign by canonical UUID (mutually exclusive with `--to
 ### Change Status
 
 ```bash
-multica issue status <id> in_progress
+cs-workflow issue status <id> in_progress
 ```
 
 Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`, `cancelled`.
@@ -383,49 +383,49 @@ Valid statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `blocked`
 # List comments — flat timeline, chronological. Hard cap of 2000 rows; on
 # long-running issues prefer one of the thread-aware reads below to keep
 # context windows tight.
-multica issue comment list <issue-id>
+cs-workflow issue comment list <issue-id>
 
 # Single thread (root + every descendant). Anchor may be the root itself
 # or any reply inside the thread — the server walks up to the root.
-multica issue comment list <issue-id> --thread <comment-id>
+cs-workflow issue comment list <issue-id> --thread <comment-id>
 
 # Single thread, capped to the N most recent replies. The thread root is
 # always included (even with --tail 0), so an agent landing on a long
 # thread keeps the "what is this about" context without dragging hundreds
 # of replies into its prompt.
-multica issue comment list <issue-id> --thread <comment-id> --tail 30
+cs-workflow issue comment list <issue-id> --thread <comment-id> --tail 30
 
 # Scroll older replies inside the same thread. --before / --before-id are
 # the reply cursor that the previous response emitted on stderr as
 # `Next reply cursor: --before <ts> --before-id <reply-id>`.
-multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
+cs-workflow issue comment list <issue-id> --thread <comment-id> --tail 30 \
     --before <ts> --before-id <reply-id>
 
 # Most recently active threads (root + every descendant), grouped by
 # thread. Returns N complete conversational arcs, oldest-active first so
 # the freshest thread sits closest to "now" in an agent prompt.
-multica issue comment list <issue-id> --recent 20
+cs-workflow issue comment list <issue-id> --recent 20
 
 # Scroll older threads. Under --recent, --before / --before-id are a
 # THREAD cursor (thread last_activity_at + root id), emitted on stderr as
 # `Next thread cursor: --before <ts> --before-id <root-id>`.
-multica issue comment list <issue-id> --recent 20 \
+cs-workflow issue comment list <issue-id> --recent 20 \
     --before <ts> --before-id <root-id>
 
 # Incremental polling. Combines with --thread or --recent; filters out
 # replies created on or before <ts> from the page (the thread root is
 # exempt so the agent always gets context).
-multica issue comment list <issue-id> --thread <comment-id> --tail 30 \
+cs-workflow issue comment list <issue-id> --thread <comment-id> --tail 30 \
     --since <RFC3339-timestamp>
 
 # Add a comment
-multica issue comment add <issue-id> --content "Looks good, merging now"
+cs-workflow issue comment add <issue-id> --content "Looks good, merging now"
 
 # Reply to a specific comment
-multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
+cs-workflow issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 
 # Delete a comment
-multica issue comment delete <comment-id>
+cs-workflow issue comment delete <comment-id>
 ```
 
 **`--before` / `--before-id` semantics depend on the paging mode**, by
@@ -459,42 +459,42 @@ The bar for writing is high: pin a value only when it is materially important to
 
 ```bash
 # List every key on an issue
-multica issue metadata list <issue-id>
+cs-workflow issue metadata list <issue-id>
 
 # Read a single key
-multica issue metadata get <issue-id> --key pipeline_status
+cs-workflow issue metadata get <issue-id> --key pipeline_status
 
 # Write a single key — value auto-typed (true/false → bool, numbers → number, else string)
-multica issue metadata set <issue-id> --key pipeline_status --value waiting_review
-multica issue metadata set <issue-id> --key pr_number --value 482
-multica issue metadata set <issue-id> --key is_blocked --value true
+cs-workflow issue metadata set <issue-id> --key pipeline_status --value waiting_review
+cs-workflow issue metadata set <issue-id> --key pr_number --value 482
+cs-workflow issue metadata set <issue-id> --key is_blocked --value true
 
 # Force a specific type when sniffing would pick the wrong one
-multica issue metadata set <issue-id> --key code --value 42 --type string
+cs-workflow issue metadata set <issue-id> --key code --value 42 --type string
 
 # Remove a key
-multica issue metadata delete <issue-id> --key pipeline_status
+cs-workflow issue metadata delete <issue-id> --key pipeline_status
 ```
 
-All writes are single-key atomic — concurrent agents writing different keys do not lose each other's updates. To query, use `multica issue list --metadata key=value` (see *List Issues* above).
+All writes are single-key atomic — concurrent agents writing different keys do not lose each other's updates. To query, use `cs-workflow issue list --metadata key=value` (see *List Issues* above).
 
 ### Subscribers
 
 ```bash
 # List subscribers of an issue
-multica issue subscriber list <issue-id>
+cs-workflow issue subscriber list <issue-id>
 
 # Subscribe yourself to an issue
-multica issue subscriber add <issue-id>
+cs-workflow issue subscriber add <issue-id>
 
 # Subscribe another member or agent by name
-multica issue subscriber add <issue-id> --user "Lambda"
+cs-workflow issue subscriber add <issue-id> --user "Lambda"
 
 # Unsubscribe yourself
-multica issue subscriber remove <issue-id>
+cs-workflow issue subscriber remove <issue-id>
 
 # Unsubscribe another member or agent
-multica issue subscriber remove <issue-id> --user "Lambda"
+cs-workflow issue subscriber remove <issue-id> --user "Lambda"
 ```
 
 Subscribers receive notifications about issue activity (new comments, status changes, etc.). Without `--user`, the command acts on the caller.
@@ -503,17 +503,17 @@ Subscribers receive notifications about issue activity (new comments, status cha
 
 ```bash
 # List all execution runs for an issue
-multica issue runs <issue-id>
-multica issue runs <issue-id> --full-id
-multica issue runs <issue-id> --output json
+cs-workflow issue runs <issue-id>
+cs-workflow issue runs <issue-id> --full-id
+cs-workflow issue runs <issue-id> --output json
 
 # View messages for a specific execution run
-multica issue run-messages <task-id>
-multica issue run-messages <short-task-id> --issue <issue-id>
-multica issue run-messages <task-id> --output json
+cs-workflow issue run-messages <task-id>
+cs-workflow issue run-messages <short-task-id> --issue <issue-id>
+cs-workflow issue run-messages <task-id> --output json
 
 # Incremental fetch (only messages after a given sequence number)
-multica issue run-messages <task-id> --since 42 --output json
+cs-workflow issue run-messages <task-id> --since 42 --output json
 ```
 
 The `runs` command shows all past and current executions for an issue, including running tasks. Table output uses short task UUID prefixes by default; pass `--full-id` to print canonical task UUIDs. The `run-messages` command accepts full task UUIDs directly; copied short task prefixes must be scoped with `--issue <issue-id>` so the CLI only checks that issue's runs. It shows the detailed message log (tool calls, thinking, text, errors) for a single run. Use `--since` for efficient polling of in-progress runs.
@@ -526,9 +526,9 @@ belongs to a workspace and can optionally have a lead (member or agent).
 ### List Projects
 
 ```bash
-multica project list
-multica project list --status in_progress
-multica project list --output json
+cs-workflow project list
+cs-workflow project list --status in_progress
+cs-workflow project list --output json
 ```
 
 Available filters: `--status`.
@@ -536,14 +536,14 @@ Available filters: `--status`.
 ### Get Project
 
 ```bash
-multica project get <id>
-multica project get <id> --output json
+cs-workflow project get <id>
+cs-workflow project get <id> --output json
 ```
 
 ### Create Project
 
 ```bash
-multica project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
+cs-workflow project create --title "2026 Week 16 Sprint" --icon "🏃" --lead "Lambda"
 ```
 
 Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
@@ -551,8 +551,8 @@ Flags: `--title` (required), `--description`, `--status`, `--icon`, `--lead`.
 ### Update Project
 
 ```bash
-multica project update <id> --title "New title" --status in_progress
-multica project update <id> --lead "Lambda"
+cs-workflow project update <id> --title "New title" --status in_progress
+cs-workflow project update <id> --lead "Lambda"
 ```
 
 Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
@@ -560,7 +560,7 @@ Flags: `--title`, `--description`, `--status`, `--icon`, `--lead`.
 ### Change Status
 
 ```bash
-multica project status <id> in_progress
+cs-workflow project status <id> in_progress
 ```
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
@@ -568,7 +568,7 @@ Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
 ### Delete Project
 
 ```bash
-multica project delete <id>
+cs-workflow project delete <id>
 ```
 
 ### Associating Issues with Projects
@@ -577,35 +577,35 @@ Use the `--project` flag on `issue create` / `issue update` to attach an issue t
 project, or on `issue list` to filter issues by project:
 
 ```bash
-multica issue create --title "Login bug" --project <project-id>
-multica issue update <issue-id> --project <project-id>
-multica issue list --project <project-id>
+cs-workflow issue create --title "Login bug" --project <project-id>
+cs-workflow issue update <issue-id> --project <project-id>
+cs-workflow issue list --project <project-id>
 ```
 
 ## Setup
 
 ```bash
 # One-command setup for Multica Cloud: configure, authenticate, and start the daemon
-multica setup
+cs-workflow setup
 
 # For local self-hosted deployments
-multica setup self-host
+cs-workflow setup self-host
 
 # Custom ports
-multica setup self-host --port 9090 --frontend-port 4000
+cs-workflow setup self-host --port 9090 --frontend-port 4000
 
 # On-premise with custom domains
-multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+cs-workflow setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
-`multica setup` configures the CLI, opens your browser for authentication, and starts the daemon — all in one step. Use `multica setup self-host` to connect to a self-hosted server instead of Multica Cloud.
+`cs-workflow setup` configures the CLI, opens your browser for authentication, and starts the daemon — all in one step. Use `cs-workflow setup self-host` to connect to a self-hosted server instead of Multica Cloud.
 
 ## Configuration
 
 ### View Config
 
 ```bash
-multica config show
+cs-workflow config show
 ```
 
 Shows config file path, server URL, app URL, and default workspace.
@@ -613,12 +613,12 @@ Shows config file path, server URL, app URL, and default workspace.
 ### Set Values
 
 ```bash
-multica config set server_url https://api.example.com
-multica config set app_url https://app.example.com
-multica config set workspace_id <workspace-id>
+cs-workflow config set server_url https://api.example.com
+cs-workflow config set app_url https://app.example.com
+cs-workflow config set workspace_id <workspace-id>
 ```
 
-`config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
+`config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `cs-workflow workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
 
 ## Autopilot Commands
 
@@ -627,9 +627,9 @@ Autopilots are scheduled/triggered automations that dispatch agent tasks (either
 ### List Autopilots
 
 ```bash
-multica autopilot list
-multica autopilot list --full-id
-multica autopilot list --status active --output json
+cs-workflow autopilot list
+cs-workflow autopilot list --full-id
+cs-workflow autopilot list --status active --output json
 ```
 
 Autopilot table IDs are short UUID prefixes; follow-up autopilot commands accept copied prefixes when they are unique in the current workspace. Use `--full-id` to print canonical UUIDs.
@@ -637,22 +637,22 @@ Autopilot table IDs are short UUID prefixes; follow-up autopilot commands accept
 ### Get Autopilot Details
 
 ```bash
-multica autopilot get <id>
-multica autopilot get <id> --output json   # includes triggers
+cs-workflow autopilot get <id>
+cs-workflow autopilot get <id> --output json   # includes triggers
 ```
 
 ### Create / Update / Delete
 
 ```bash
-multica autopilot create \
+cs-workflow autopilot create \
   --title "Nightly bug triage" \
   --description "Scan todo issues and prioritize." \
   --agent "Lambda" \
   --mode create_issue
 
-multica autopilot update <id> --status paused
-multica autopilot update <id> --description "New prompt"
-multica autopilot delete <id>
+cs-workflow autopilot update <id> --status paused
+cs-workflow autopilot update <id> --description "New prompt"
+cs-workflow autopilot delete <id>
 ```
 
 `--mode` currently only accepts `create_issue` (creates a new issue on each run and assigns it to the agent). The server data model also defines `run_only`, but the daemon task path doesn't yet resolve a workspace for runs without an issue, so it's not exposed by the CLI. `--agent` accepts either a name or UUID.
@@ -660,22 +660,22 @@ multica autopilot delete <id>
 ### Manual Trigger
 
 ```bash
-multica autopilot trigger <id>            # Fires the autopilot once, returns the run
+cs-workflow autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
 
 ### Run History
 
 ```bash
-multica autopilot runs <id>
-multica autopilot runs <id> --limit 50 --output json
+cs-workflow autopilot runs <id>
+cs-workflow autopilot runs <id> --limit 50 --output json
 ```
 
 ### Schedule Triggers
 
 ```bash
-multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
-multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
-multica autopilot trigger-delete <autopilot-id> <trigger-id>
+cs-workflow autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
+cs-workflow autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
+cs-workflow autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
 
 Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
@@ -683,9 +683,9 @@ Only cron-based `schedule` triggers are currently exposed via the CLI. The data 
 ## Other Commands
 
 ```bash
-multica version              # Show CLI version and commit hash
-multica update               # Update to latest version
-multica agent list           # List agents in the current workspace
+cs-workflow version              # Show CLI version and commit hash
+cs-workflow update               # Update to latest version
+cs-workflow agent list           # List agents in the current workspace
 ```
 
 ## Output Formats
@@ -696,6 +696,6 @@ Most commands support `--output` with two formats:
 - `json` — structured JSON (useful for scripting and automation)
 
 ```bash
-multica issue list --output json
-multica daemon status --output json
+cs-workflow issue list --output json
+cs-workflow daemon status --output json
 ```

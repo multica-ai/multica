@@ -24,10 +24,10 @@ authenticates via browser and starts the agent daemon.
 
 If a configuration already exists, you will be prompted before overwriting.
 
-Use 'multica setup self-host' to connect to a self-hosted server instead.
+Use 'cs-workflow setup self-host' to connect to a self-hosted server instead.
 
 Use --profile to create an isolated configuration for a separate environment:
-  multica setup self-host --profile staging --server-url https://api-staging.co`,
+  cs-workflow setup self-host --profile staging --server-url https://api-staging.co`,
 	RunE: runSetupCloud,
 }
 
@@ -36,7 +36,7 @@ var setupCloudCmd = &cobra.Command{
 	Short: "Configure the CLI for Multica Cloud (multica.ai)",
 	Long: `Explicitly configures the CLI to connect to Multica Cloud (multica.ai).
 
-This is equivalent to running 'multica setup' without a subcommand.`,
+This is equivalent to running 'cs-workflow setup' without a subcommand.`,
 	RunE: runSetupCloud,
 }
 
@@ -53,9 +53,9 @@ If you run this command from a different machine than the server, also pass
 the OAuth login flow can return the token to the CLI.
 
 Examples:
-  multica setup self-host
-  multica setup self-host --server-url https://api.internal.co --app-url https://app.internal.co
-  multica setup self-host --port 9090 --frontend-port 4000`,
+  cs-workflow setup self-host
+  cs-workflow setup self-host --server-url https://api.internal.co --app-url https://app.internal.co
+  cs-workflow setup self-host --port 9090 --frontend-port 4000`,
 	RunE: runSetupSelfHost,
 }
 
@@ -206,7 +206,7 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	// Check if the server is reachable.
 	if !probeServer(serverURL) {
 		fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable.\n", serverURL)
-		fmt.Fprintln(os.Stderr, "  Make sure the server is running, then run 'multica login'.")
+		fmt.Fprintln(os.Stderr, "  Make sure the server is running, then run 'cs-workflow login'.")
 		return nil
 	}
 

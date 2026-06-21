@@ -11,8 +11,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// multica issue label {list|add|remove} — manages the labels attached to a
-// specific issue. The label itself is managed via `multica label ...`.
+// cs-workflow issue label {list|add|remove} — manages the labels attached to a
+// specific issue. The label itself is managed via `cs-workflow label ...`.
 
 var issueLabelCmd = &cobra.Command{
 	Use:   "label",

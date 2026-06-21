@@ -10,7 +10,7 @@ Deploy Multica on your own infrastructure in minutes.
 | **Frontend** | Web application | Next.js 16 |
 | **Database** | Primary data store | PostgreSQL 17 with pgvector |
 
-Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
+Each user who runs AI agents locally also installs the **`cs-workflow` CLI** and runs the **agent daemon** on their own machine.
 
 ## Quick Install (Recommended)
 
@@ -21,10 +21,10 @@ Two commands to set up everything — server, CLI, and configuration:
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
 
 # 2. Configure CLI, authenticate, and start the daemon
-multica setup self-host
+cs-workflow setup self-host
 ```
 
-This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
+This installs the `cs-workflow` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
 
 Open http://localhost:3000. To log in, configure `RESEND_API_KEY` in `.env` for email-based codes (recommended), or leave Resend unset and copy the generated code from the backend logs. See [Step 2 — Log In](#step-2--log-in) for details.
 
@@ -105,7 +105,7 @@ You also need at least one AI agent CLI installed:
 ### b) One-command setup
 
 ```bash
-multica setup self-host
+cs-workflow setup self-host
 ```
 
 This automatically:
@@ -117,13 +117,13 @@ This automatically:
 For on-premise deployments with custom domains:
 
 ```bash
-multica setup self-host --server-url https://api.example.com --app-url https://app.example.com
+cs-workflow setup self-host --server-url https://api.example.com --app-url https://app.example.com
 ```
 
 To verify the daemon is running:
 
 ```bash
-multica daemon status
+cs-workflow daemon status
 ```
 
 > **Alternative:** If you prefer manual steps, see [Manual CLI Configuration](#manual-cli-configuration) below.
@@ -150,7 +150,7 @@ If you cloned the repo manually:
 make selfhost-stop
 
 # Stop the local daemon
-multica daemon stop
+cs-workflow daemon stop
 ```
 
 ## Switching to Multica Cloud
@@ -158,7 +158,7 @@ multica daemon stop
 If you've been self-hosting and want to switch your CLI to [Multica Cloud](https://multica.ai):
 
 ```bash
-multica setup
+cs-workflow setup
 ```
 
 This reconfigures the CLI for multica.ai, re-authenticates, and restarts the daemon. You will be prompted before overwriting the existing configuration.
@@ -202,27 +202,27 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ## Manual CLI Configuration
 
-If you prefer configuring the CLI step by step instead of `multica setup`:
+If you prefer configuring the CLI step by step instead of `cs-workflow setup`:
 
 ```bash
 # Point CLI to your local server
-multica config set server_url http://localhost:8080
-multica config set app_url http://localhost:3000
+cs-workflow config set server_url http://localhost:8080
+cs-workflow config set app_url http://localhost:3000
 
 # Login (opens browser)
-multica login
+cs-workflow login
 
 # Start the daemon
-multica daemon start
+cs-workflow daemon start
 ```
 
 For production deployments with TLS:
 
 ```bash
-multica config set app_url https://app.example.com
-multica config set server_url https://api.example.com
-multica login
-multica daemon start
+cs-workflow config set app_url https://app.example.com
+cs-workflow config set server_url https://api.example.com
+cs-workflow login
+cs-workflow daemon start
 ```
 
 ## Advanced Configuration

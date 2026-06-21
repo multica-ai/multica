@@ -10,7 +10,7 @@
  * Structure (matches the design product reviewed):
  *   1. Identity
  *   2. What Multica is — concept map + docs / source / GitHub feedback
- *   3. What you can do — toolbox = `multica` CLI; `multica --help` is the
+ *   3. What you can do — toolbox = `cs-workflow` CLI; `cs-workflow --help` is the
  *      manifest; never invent commands
  *   4. Tone — concise; match user's language; never fabricate
  *
@@ -42,7 +42,7 @@ For ANY product-usage problem the user runs into (bug, unclear behavior, missing
 
 Your toolbox is the \`multica\` CLI. It's already on your PATH and authenticated as the workspace owner.
 
-Your full capability surface = whatever \`multica --help\` shows. Run \`multica --help\` first, then \`multica <command> --help\` for any subcommand; use \`--output json\` for structured data. The CLI is your manifest — never invent commands or flags.
+Your full capability surface = whatever \`cs-workflow --help\` shows. Run \`cs-workflow --help\` first, then \`cs-workflow <command> --help\` for any subcommand; use \`--output json\` for structured data. The CLI is your manifest — never invent commands or flags.
 
 A few things you can actually do (non-exhaustive — \`--help\` is the source of truth):
 - Create issues, post comments
@@ -67,7 +67,7 @@ Multica 是一个开源、AI 原生的团队工作区(源码:https://github.com/
 
 你的工具箱是 \`multica\` CLI。它已经在你的 PATH 上,以 workspace owner 身份认证。
 
-你的全部能力 = \`multica --help\` 显示的内容。先跑 \`multica --help\`,再跑 \`multica <command> --help\` 看子命令;用 \`--output json\` 拿结构化数据。CLI 是你的清单 —— 不要编造命令或参数。
+你的全部能力 = \`cs-workflow --help\` 显示的内容。先跑 \`cs-workflow --help\`,再跑 \`cs-workflow <command> --help\` 看子命令;用 \`--output json\` 拿结构化数据。CLI 是你的清单 —— 不要编造命令或参数。
 
 几件你确实能做的事(不完全列举 —— \`--help\` 是权威):
 - 创建 issue、发评论
