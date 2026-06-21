@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import {
   AlertCircle,
   AlertTriangle,
@@ -69,9 +70,14 @@ const SCOPE_KEYS: FilterKey[] = ["all", "used", "unused", "mine"];
 function PageHeaderBar({
   totalCount,
   onCreate,
+  folderTrigger,
 }: {
   totalCount: number;
   onCreate: () => void;
+  // CEREBRO-PATCH(skill-folders-mobile-header): FIR-1772 — render the mobile
+  // Folders drawer trigger inline in the title row, matching the Autopilots
+  // page, instead of stacking it into the filter row below.
+  folderTrigger?: ReactNode;
 }) {
   const { t } = useT("skills");
   return (
@@ -84,6 +90,8 @@ function PageHeaderBar({
             {totalCount}
           </span>
         )}
+        {/* CEREBRO-PATCH(skill-folders-mobile-header): FIR-1772 — mobile folder drawer trigger beside the title. */}
+        {folderTrigger}
         <p className="ml-2 hidden text-xs text-muted-foreground md:block">
           {t(($) => $.page.tagline)}{" "}
           <a
@@ -403,6 +411,7 @@ export default function SkillsPage() {
       <PageHeaderBar
         totalCount={totalCount}
         onCreate={() => setCreateOpen(true)}
+        folderTrigger={folderView.mobileTrigger}
       />
 
       {supportingQueryDown && (
@@ -444,8 +453,6 @@ export default function SkillsPage() {
             />
             {/* CEREBRO-PATCH(skill-category-filter): TECH-3077 — category filter row. */}
             <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2 sm:px-4">
-              {/* CEREBRO-PATCH(skill-folders-mobile): FIR-1772 — mobile folder drawer trigger; inline sidebar is hidden under md. */}
-              {folderView.mobileTrigger}
               <SkillCategoryFilter
                 skills={skills}
                 category={categoryFilter}
