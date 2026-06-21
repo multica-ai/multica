@@ -722,9 +722,13 @@ function DateBuilderSubContent({
   return (
     <>
       {value.length === 0 && (
-        <DropdownMenuLabel className="font-normal text-muted-foreground">
-          No date filters yet
-        </DropdownMenuLabel>
+        // CEREBRO-PATCH(my-issues-date-builder): FIR-1799 — GroupLabel must sit
+        // inside a Group or Base UI throws #31 and white-screens the page.
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="font-normal text-muted-foreground">
+            No date filters yet
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
       )}
       {value.map((c, i) => (
         <Fragment key={i}>
