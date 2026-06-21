@@ -229,8 +229,13 @@ artefacts (`agent.persona_sandbox`, `agent_runtime.persona_sandbox` columns; `ce
 It is **"dead for now" in intent but live in code**: it is the backing store of the **new**
 permission engine (`permissions/resolver.go:117`) **and** the live, deny-by-default
 **credential** security boundary (`permission-system.md` row 1). It is read by
-workspace-copy (`workspacecopy/copy_roles.go:135-189`), the grants API/UI, and the
-`get_grant` agent tool (`firtal_gateway_tools_extended.go:1525`).
+workspace-copy (`workspacecopy/copy_roles.go:135-189`) and the grants API/UI (the
+`cerebro/grants` HTTP handler at `router.go` `/grants`). **The agent-facing surfaces have
+been removed (FIR-1777): the `get_grant` runtime tool, the `list_grants` MCP tools, and the
+`multica grant` CLI no longer exist** — so an agent can no longer read or mutate grants, and
+nothing advertises "Persona" to a runtime. The table stays only as the internal credential
+gate + the operator grants UI/API; the persona Go package is now reduced to `spawner.go`
+(`ResolveSpawnSubject`, used by the daemon).
 
 `cerebro_tool_policy` cannot today represent three columns the grant table carries:
 `approval_required`, `time_window_*`, `classification_ceiling`. **None are exercised by any
@@ -252,11 +257,13 @@ those features in the consolidation unless a concrete need surfaces.
    (fail-closed if not 1:1), verify, then flip the flag on and retire the floor. Until that
    migration + verification, the table is still the only live secret gate.
 2. Decide the fate of `approval_required` / `time_window_*` / `classification_ceiling`.
-3. Repoint or remove: workspace-copy, grants UI/handler/CLI/MCP, the `get_grant` tool, the
-   audit FK (`cerebro_workspace_grant_audit`).
-4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and remove the grants package,
-   queries, CLI (`cmd_grant.go`), MCP tools (`cmd_mcp_tools_grants.go`), and the persona shim
-   (`internal/cerebro/persona/`).
+3. Repoint or remove the remaining grant consumers: workspace-copy, the grants UI + server
+   handler, the audit FK (`cerebro_workspace_grant_audit`). *(The agent-facing CLI/MCP/`get_grant`
+   surfaces are already removed — FIR-1777.)*
+4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and remove the server grants package +
+   queries. The persona shim is already gone except `internal/cerebro/persona/spawner.go`,
+   which is in-use by the daemon (`ResolveSpawnSubject`) and stays until the spawn-subject
+   resolution is renamed/relocated.
 
 ---
 

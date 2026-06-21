@@ -102,9 +102,6 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerCerebroGroupTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-capabilities): TECH-3642 per-agent capabilities card MCP tool.
 	registerCerebroAgentCapabilitiesTools(srv, client)
-	// CEREBRO-PATCH(mcp-cli-cmd-mcp-tools-grants-wire): JEH-1181 Persona grant control plane MCP tools (HTTP backend, JEH-1179 on main).
-	actorID, actorType := resolveMCPActor(client)
-	registerGrantTools(srv, client, workspaceID, actorID, actorType)
 	// CEREBRO-PATCH(mcp-credentials-tools): credential governance MCP tools (JEH-1199 + JEH-1217 live-wire).
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.

@@ -163,7 +163,7 @@ func TestBridge_AdminDenylistShape(t *testing.T) {
 
 	mustAllow := []string{
 		"search_issues", "skill_list", "skill_get", "list_groups",
-		"get_grant", "create_artifact", "schedule_wakeup", "list_wakeups",
+		"create_artifact", "schedule_wakeup", "list_wakeups",
 		"add_attachment",
 	}
 	for _, name := range mustAllow {

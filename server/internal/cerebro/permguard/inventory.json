@@ -1635,10 +1635,6 @@
       "gate": "via:POST /api/artifact-folders/"
     },
     {
-      "id": "create_grant",
-      "gate": "via:POST /api/workspaces/{id}/grants"
-    },
-    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
     },
@@ -1675,16 +1671,8 @@
       "gate": "via:DELETE /api/artifact-folders/{id}"
     },
     {
-      "id": "delete_grant",
-      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
       "id": "delete_group",
       "gate": "via:DELETE /api/groups/{id}"
-    },
-    {
-      "id": "evaluate_policy",
-      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants policy check"
     },
     {
       "id": "fork_session",
@@ -1697,10 +1685,6 @@
     {
       "id": "get_artifact",
       "exempt": "read-only — GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "get_grant",
-      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
     },
     {
       "id": "get_group",
@@ -1725,14 +1709,6 @@
     {
       "id": "list_comments",
       "exempt": "read-only — GET endpoints carry their own auth, no mutation"
-    },
-    {
-      "id": "list_grant_audit",
-      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
-    },
-    {
-      "id": "list_grants",
-      "exempt": "local-only stub — in-memory mock per mcp-serve process, no HTTP until JEH-1179"
     },
     {
       "id": "list_group_agents",
@@ -1885,10 +1861,6 @@
     {
       "id": "update_artifact_folder",
       "gate": "via:PUT /api/artifact-folders/{id}"
-    },
-    {
-      "id": "update_grant",
-      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
     },
     {
       "id": "update_group",
@@ -2131,26 +2103,6 @@
     {
       "id": "document update",
       "gate": "via:PUT /api/artifacts/{id}"
-    },
-    {
-      "id": "grant create",
-      "gate": "via:POST /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant delete",
-      "gate": "via:DELETE /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant get",
-      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants/{grantId}"
-    },
-    {
-      "id": "grant list",
-      "exempt": "read-only — wraps GET /api/workspaces/{id}/grants"
-    },
-    {
-      "id": "grant update",
-      "gate": "via:PATCH /api/workspaces/{id}/grants/{grantId}"
     },
     {
       "id": "group agent add",

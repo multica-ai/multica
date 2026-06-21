@@ -1561,7 +1561,7 @@ func formatArtifacts(artifacts []db.Artifact) []map[string]any {
 	return out
 }
 
-// ── list_groups / get_grant / credential_list ────────────────────────────────
+// ── list_groups / credential_list ────────────────────────────────
 
 type FirtalListGroupsTool struct {
 	cerebro *cerebrodb.Queries
@@ -1597,57 +1597,6 @@ func (t *FirtalListGroupsTool) Call(ctx context.Context, args map[string]any) (s
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return "", fmt.Errorf("list_groups: marshal result: %w", err)
-	}
-	return string(raw), nil
-}
-
-type FirtalGetGrantTool struct {
-	cerebro *cerebrodb.Queries
-	tctx    ToolContext
-}
-
-func (t *FirtalGetGrantTool) Name() string { return "get_grant" }
-func (t *FirtalGetGrantTool) Description() string {
-	return "Fetch one Persona grant by grant_id."
-}
-func (t *FirtalGetGrantTool) InputSchema() map[string]any {
-	return map[string]any{
-		"type":     "object",
-		"required": []string{"grant_id"},
-		"properties": map[string]any{
-			"grant_id": map[string]any{"type": "string", "description": "Persona grant UUID."},
-		},
-	}
-}
-func (t *FirtalGetGrantTool) Call(ctx context.Context, args map[string]any) (string, error) {
-	if t.cerebro == nil {
-		return "", fmt.Errorf("get_grant: cerebro queries unavailable")
-	}
-	grantRef, ok := args["grant_id"].(string)
-	if !ok || strings.TrimSpace(grantRef) == "" {
-		return "", fmt.Errorf("get_grant: grant_id is required")
-	}
-	grantID, err := util.ParseUUID(strings.TrimSpace(grantRef))
-	if err != nil {
-		return "", fmt.Errorf("get_grant: invalid grant_id: %w", err)
-	}
-	grant, err := t.cerebro.GetCerebroWorkspaceGrant(ctx, cerebrodb.GetCerebroWorkspaceGrantParams{
-		ID:          grantID,
-		WorkspaceID: t.tctx.WorkspaceID,
-	})
-	if err != nil {
-		return "", fmt.Errorf("get_grant: %w", err)
-	}
-	raw, err := json.Marshal(map[string]any{
-		"id":               util.UUIDToString(grant.ID),
-		"subject_type":     grant.SubjectType,
-		"subject_id":       util.UUIDToString(grant.SubjectID),
-		"resource_pattern": grant.ResourcePattern,
-		"capability":       grant.Capability,
-		"status":           grant.Status,
-	})
-	if err != nil {
-		return "", fmt.Errorf("get_grant: marshal result: %w", err)
 	}
 	return string(raw), nil
 }
@@ -1763,7 +1712,6 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalListRuntimesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalGetMeTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListGroupsTool{cerebro: cerebroQueries, tctx: tctx})
-	r.Register(&FirtalGetGrantTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalRegistryTool{queries: queries, cerebro: cerebroQueries, tctx: tctx, registry: r})
 	r.Register(&WebFetchTool{cerebro: cerebroQueries, tctx: tctx})

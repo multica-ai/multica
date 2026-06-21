@@ -48,8 +48,6 @@ func init() {
 	workspaceCmd.GroupID = groupCore
 	repoCmd.GroupID = groupCore
 	skillCmd.GroupID = groupCore
-	// CEREBRO-PATCH(cerebro-grants-cli): JEH-1179 grant control plane CLI
-	grantCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
 
 	// Runtime commands
@@ -85,7 +83,6 @@ func init() {
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(groupCmd)
-	rootCmd.AddCommand(grantCmd) // CEREBRO-PATCH(cerebro-grants-cli): JEH-1179
 	rootCmd.AddCommand(squadCmd)
 	rootCmd.AddCommand(orchestrateCmd) // CEREBRO-PATCH(cerebro-orchestration): FIR-2564
 	rootCmd.AddCommand(sprintCmd)      // CEREBRO-PATCH(cerebro-sprints-cli): FIR-2718

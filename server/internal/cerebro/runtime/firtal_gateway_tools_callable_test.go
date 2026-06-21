@@ -89,22 +89,6 @@ func TestFirtalGatewayCallableToolFamilies(t *testing.T) {
 		_ = cerebro.DeleteCerebroGroup(context.Background(), group.ID)
 	})
 
-	grant, err := cerebro.CreateCerebroWorkspaceGrant(ctx, cerebrodb.CreateCerebroWorkspaceGrantParams{
-		WorkspaceID:     runtimeAccountTestWSID,
-		SubjectType:     "agent",
-		SubjectID:       agentID,
-		ResourcePattern: "workspace:*",
-		Capability:      "read",
-		GrantedByType:   pgtype.Text{String: "agent", Valid: true},
-		GrantedByID:     agentID,
-	})
-	if err != nil {
-		t.Fatalf("create grant: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = cerebro.DeleteCerebroWorkspaceGrant(context.Background(), cerebrodb.DeleteCerebroWorkspaceGrantParams{ID: grant.ID, WorkspaceID: runtimeAccountTestWSID})
-	})
-
 	credential, err := cerebro.CreateCerebroCredential(ctx, cerebrodb.CreateCerebroCredentialParams{
 		WorkspaceID:    runtimeAccountTestWSID,
 		Type:           "api_key",
@@ -139,7 +123,6 @@ func TestFirtalGatewayCallableToolFamilies(t *testing.T) {
 		{family: "project", tool: "create_project", args: map[string]any{"title": "Gateway Tool Family Test Project"}, want: "Gateway Tool Family Test Project"},
 		{family: "artifact", tool: "search_artifacts", args: map[string]any{"q": "Gateway artifact probe"}, want: "Gateway artifact probe"},
 		{family: "group", tool: "list_groups", args: map[string]any{}, want: "Gateway Tool Family Test Group"},
-		{family: "grant", tool: "get_grant", args: map[string]any{"grant_id": util.UUIDToString(grant.ID)}, want: "workspace:*"},
 		{family: "credential", tool: "credential_list", args: map[string]any{}, want: "Gateway Tool Family Test Credential"},
 		{family: "session/runtime", tool: "list_runtimes", args: map[string]any{}, want: runtimeAccountTestRuntimeN},
 	}

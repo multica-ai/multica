@@ -369,7 +369,6 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `cerebro-dashboard-route` | server/cmd/server/router.go | 4 | JEH-684 — mounts `/api/cerebro/dashboard` overview endpoint. Two patch lines: one import (`cerebrodashboard`) and one handler instantiation; one route registration. Handler lives in `server/internal/cerebro/dashboard/`. |
 | `cerebro-dashboard-actor-messages-route` | server/cmd/server/router.go | 1 | TECH-3093 — mounts `/api/cerebro/dashboard/actor-messages` endpoint for per-member chat message history + spend drill-down. Handler in `server/internal/cerebro/dashboard/`. |
 | `cerebro-grants-routes` | server/cmd/server/router.go | 5 | JEH-1179 — import + handler instantiation + GET/POST/PATCH/DELETE routes under `/api/workspaces/{id}/grants`. Handler/service live in `server/internal/cerebro/grants/`. |
-| `cerebro-grants-cli` | server/cmd/multica/main.go | 2 | JEH-1179 — registers `grantCmd` in the core command group and adds it to rootCmd. |
 | `cerebro-tool-policy-routes` | server/cmd/server/router.go | 5 | FIR-2230 — import + handler instantiation + GET (member) / PUT + DELETE (admin/owner) routes under `/api/workspaces/{id}/tool-policy`. The unified per-tool permission table the admin screen reads from. Handler/store live in `server/internal/cerebro/toolpolicy/`. |
 | `cerebro-sandbox-profile-routes` | server/cmd/server/router.go | 3 | FIR-2230 phase 6 — import + handler instantiation + GET (member) route `/api/workspaces/{id}/sandbox-profiles`. Static catalog of sandbox isolation profiles (Developer / Read-only / Custom) the runtime screen renders. Handler lives in `server/internal/cerebro/sandboxprofile/`. |
 | `cerebro-cost-optimization-routes` | server/cmd/server/router.go | 5 | FIR-2325 phase 2 — import + handler instantiation + GET (member) / PUT + DELETE (admin/owner) routes under `/api/workspaces/{id}/cost-optimization`. Per-workspace agent-saving mode overrides (off/shadow/on). Handler lives in `server/internal/cerebro/cost_optimization/`; server-side mirror of `packages/cerebro-cost-optimization`. |
@@ -585,9 +584,6 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `mcp-cli-cmd-mcp-test` | server/cmd/multica/cmd_mcp_test.go | 126 | Cerebro MCP CLI subcommand |
 | `mcp-cli-cmd-mcp-tools` | server/cmd/multica/cmd_mcp_tools.go | 959 | Cerebro MCP CLI subcommand |
 | `mcp-cli-cmd-mcp-tools-artifact` | server/cmd/multica/cmd_mcp_tools_artifact.go | 526 | Cerebro MCP CLI subcommand |
-| `mcp-cli-cmd-mcp-tools-grants` | server/cmd/multica/cmd_mcp_tools_grants.go | 320 | Persona grant control plane MCP tools (JEH-1181); in-memory mock backend until JEH-1179 lands the HTTP API |
-| `mcp-cli-cmd-mcp-tools-grants-wire` | server/cmd/multica/cmd_mcp_tools.go | 3 | JEH-1181 — registerTools() call site that wires the Persona grant tools into the upstream MCP tools registration |
-| `mcp-cli-cmd-mcp-tools-grants-test` | server/cmd/multica/cmd_mcp_tools_grants_test.go | 195 | JEH-1181 — Go test file for the Persona grant MCP tools; header marker because `*.test.*` exclusion in cerebro-zones.txt is for JS/TS, not Go's `_test.go` |
 | `mcp-repo-config` | server/internal/mcp/repo_config.go | 132 | MCP server additions |
 | `mcp-server` | server/internal/mcp/server.go | 212 | MCP server additions |
 | `mcp-tools-inventory` | server/internal/mcp/server.go | 9 | JEH-1171 — expose registered tools via `Server.Tools()` so the permguard regression test can enumerate them without speaking JSON-RPC |
