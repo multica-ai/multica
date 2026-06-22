@@ -197,6 +197,58 @@ func TestScheduledAutopilotDispatchIsIdempotentPerOccurrence(t *testing.T) {
 	}
 }
 
+func TestScheduledAutopilotSkipIsIdempotentPerOccurrence(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	offlineAgentID := createOfflineSchedulerAgent(t, "scheduled-skip-idempotency")
+	ap := seedAutopilot(t, queries, "Scheduled skip occurrence idempotency", "member", parseUUID(testUserID), offlineAgentID)
+	fireAt := time.Date(2099, 1, 2, 10, 0, 0, 0, time.UTC)
+	trigger := createScheduleTrigger(t, queries, ap.ID, fireAt, "0 10 * * *")
+	scheduledFireAt := pgtype.Timestamptz{Time: fireAt, Valid: true}
+
+	run, err := autopilotSvc.DispatchScheduledAutopilot(ctx, ap, trigger.ID, scheduledFireAt)
+	if err != nil {
+		t.Fatalf("first DispatchScheduledAutopilot: %v", err)
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("expected skipped run, got %q", run.Status)
+	}
+	if !run.FailureReason.Valid || !strings.Contains(run.FailureReason.String, "offline") {
+		t.Fatalf("expected offline skip reason, got %+v", run.FailureReason)
+	}
+	if !run.ScheduledFireAt.Valid || !run.ScheduledFireAt.Time.Equal(fireAt) {
+		t.Fatalf("expected run scheduled_fire_at %s, got %+v", fireAt, run.ScheduledFireAt)
+	}
+	if run.TaskID.Valid {
+		t.Fatalf("expected skipped run not to enqueue a task, got %v", run.TaskID)
+	}
+
+	if _, err := autopilotSvc.DispatchScheduledAutopilot(ctx, ap, trigger.ID, scheduledFireAt); err == nil {
+		t.Fatal("expected duplicate skipped scheduled occurrence to fail")
+	} else if !shouldAdvanceAfterScheduleDispatch(nil, err) {
+		t.Fatalf("expected scheduler to advance after duplicate skipped occurrence, got %v", err)
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM autopilot_run
+		WHERE trigger_id = $1
+		  AND source = 'schedule'
+		  AND status = 'skipped'
+		  AND scheduled_fire_at = $2
+	`, trigger.ID, fireAt).Scan(&count); err != nil {
+		t.Fatalf("count skipped scheduled runs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly one skipped run for the scheduled occurrence, got %d", count)
+	}
+}
+
 func createScheduleTrigger(t *testing.T, queries *db.Queries, autopilotID pgtype.UUID, nextRunAt time.Time, cronExpr string) db.AutopilotTrigger {
 	t.Helper()
 	trigger, err := queries.CreateAutopilotTrigger(context.Background(), db.CreateAutopilotTriggerParams{
@@ -211,4 +263,41 @@ func createScheduleTrigger(t *testing.T, queries *db.Queries, autopilotID pgtype
 		t.Fatalf("CreateAutopilotTrigger: %v", err)
 	}
 	return trigger
+}
+
+func createOfflineSchedulerAgent(t *testing.T, name string) pgtype.UUID {
+	t.Helper()
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%s-%d", name, time.Now().UnixNano())
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'local', $3, 'offline', '{}'::jsonb, '{}'::jsonb, now())
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), suffix+" runtime", suffix+"_runtime").Scan(&runtimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'workspace', 1, $4)
+		RETURNING id::text
+	`, parseUUID(testWorkspaceID), suffix+" agent", runtimeID, parseUUID(testUserID)).Scan(&agentID); err != nil {
+		t.Fatalf("create offline agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	return parseUUID(agentID)
 }

@@ -6,5 +6,5 @@
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.
 - `resolveAutopilotLeader` resolves squad-assigned autopilots to the squad leader.
 - `AgentReadiness` blocks archived/runtime-unready agents before enqueue.
-- `server/cmd/server/autopilot_scheduler.go` claims due schedule triggers, passes the claimed `scheduled_fire_at` into `DispatchScheduledAutopilot`, and advances from that occurrence instead of the app server clock.
+- `server/cmd/server/autopilot_scheduler.go` claims due schedule triggers, passes the claimed `scheduled_fire_at` into `DispatchScheduledAutopilot`, and advances from DB `claimed_at` so missed occurrences collapse.
 - `server/cmd/server/router.go` exposes authenticated `/api/autopilots` routes and unauthenticated webhook ingress `/api/webhooks/autopilots/{token}`.
