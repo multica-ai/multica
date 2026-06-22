@@ -54,11 +54,21 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 // context. The squad path still flows through enqueueSquadLeaderTask so the
 // leader access gate and pending dedup stay in one place.
 func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+	enqueued := false
 	switch trigger.AssigneeType {
 	case "agent":
-		h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote)
+		if _, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote); err == nil {
+			enqueued = true
+		}
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		enqueued = h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+	}
+	// Leave a display-only handoff record only when a run actually started and a
+	// note was provided (MUL-3375 §6.2). This is decoupled from injection: the
+	// daemon already got the note via the task field; this is the human-visible
+	// trace, written off the trigger path so it never starts another run.
+	if enqueued && handoffNote != "" {
+		h.TaskService.RecordHandoff(ctx, issue, actorType, actorID, handoffNote)
 	}
 }
 

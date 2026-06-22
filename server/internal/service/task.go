@@ -2183,6 +2183,59 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
 }
 
+// RecordHandoff writes a display-only handoff record to the issue timeline when
+// an assignment/promotion carrying a handoff note actually starts a run
+// (MUL-3375 §6.2). It is deliberately NOT a trigger carrier: it goes straight
+// through Queries.CreateComment + a single timeline event, bypassing
+// Handler.CreateComment / triggerTasksForComment, so it can never enqueue a
+// second run. type='handoff' keeps it out of comment-trigger and conversation
+// counting and lets the UI render a handoff card rather than a normal comment.
+// The author is the actor who performed the handoff (X); the note is the body.
+func (s *TaskService) RecordHandoff(ctx context.Context, issue db.Issue, authorType, authorID, note string) {
+	if note == "" {
+		return
+	}
+	authorUUID, err := util.ParseUUID(authorID)
+	if err != nil {
+		slog.Warn("record handoff skipped: bad author id", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  authorType,
+		AuthorID:    authorUUID,
+		Content:     note,
+		Type:        "handoff",
+	})
+	if err != nil {
+		slog.Warn("record handoff failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
+		return
+	}
+	// Single timeline event, like createAgentComment — but no thread side
+	// effects (a handoff record is a root note, never a reply) and, crucially,
+	// no triggerTasksForComment.
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   authorType,
+		ActorID:     authorID,
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          util.UUIDToString(comment.ID),
+				"issue_id":    util.UUIDToString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   util.UUIDToString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"created_at":  comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+			},
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+		},
+	})
+}
+
 // AutoUnresolveThreadOnReply clears resolved_at on the thread root when a
 // reply lands in a resolved thread, and broadcasts comment:unresolved. Shared
 // between the user-facing Handler.CreateComment path and the agent-facing

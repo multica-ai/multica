@@ -263,6 +263,64 @@ func TestUpdateIssueHandoffNotePersistsOnTask(t *testing.T) {
 	}
 }
 
+func handoffRecordCount(t *testing.T, issueID string) (int, string) {
+	t.Helper()
+	var n int
+	var content string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*), COALESCE(max(content), '') FROM comment
+		WHERE issue_id = $1 AND type = 'handoff'
+	`, issueID).Scan(&n, &content); err != nil {
+		t.Fatalf("count handoff records: %v", err)
+	}
+	return n, content
+}
+
+// TestHandoffRecordWrittenAndDoesNotRetrigger is the §6.2/§10 must-test: an
+// assign with a handoff note writes exactly one display-only handoff record,
+// and that record does NOT enqueue a second task (it bypasses the comment
+// trigger path). A suppressed assign writes neither a record nor a task.
+func TestHandoffRecordWrittenAndDoesNotRetrigger(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	note := "Keep this to the migration only."
+
+	issue := createIssueForTest(t, map[string]any{"title": "handoff trace", "status": "todo"})
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent", "assignee_id": agentID, "handoff_note": note,
+	}), "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue handoff: %d %s", w.Code, w.Body.String())
+	}
+
+	n, content := handoffRecordCount(t, issue.ID)
+	if n != 1 {
+		t.Fatalf("expected exactly 1 handoff record, got %d", n)
+	}
+	if content != note {
+		t.Fatalf("handoff record content = %q, want %q", content, note)
+	}
+	// The record must NOT re-trigger: still exactly one task (the run itself).
+	if got := taskCountFor(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("handoff record re-triggered: expected 1 task, got %d", got)
+	}
+
+	// Suppressed assign with a note: no run, so no record.
+	suppressed := createIssueForTest(t, map[string]any{"title": "handoff trace suppressed", "status": "todo"})
+	w2 := httptest.NewRecorder()
+	req2 := withURLParam(newRequest("PUT", "/api/issues/"+suppressed.ID, map[string]any{
+		"assignee_type": "agent", "assignee_id": agentID, "handoff_note": note, "suppress_run": true,
+	}), "id", suppressed.ID)
+	testHandler.UpdateIssue(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("UpdateIssue suppressed: %d %s", w2.Code, w2.Body.String())
+	}
+	if n, _ := handoffRecordCount(t, suppressed.ID); n != 0 {
+		t.Fatalf("suppressed assign should write no handoff record, got %d", n)
+	}
+}
+
 // TestPreviewIssueTrigger_MalformedBody verifies the endpoint rejects a
 // malformed body with 400 rather than a 500 or a silent empty result.
 func TestPreviewIssueTrigger_MalformedBody(t *testing.T) {
