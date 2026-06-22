@@ -227,16 +227,25 @@ export function DeleteRuntimeDialog({
 }
 
 // ---------------------------------------------------------------------------
-// Self-heal notice — informational banner shown when the runtime is a live
-// local daemon that re-registers itself within seconds of a server-side
-// delete. Replaces the old "block the affordance and toast on attempt"
-// dance (MUL-3352): the owner now sees the warning *before* confirming
-// rather than discovering it only after they've been told they cannot
-// proceed.
+// Persistence notice — informational banner shown when deleting the runtime
+// row may not permanently remove the runnable backend. Profile-backed custom
+// runtimes win over the generic local-daemon warning: stopping the daemon is
+// not sufficient when the workspace-level profile still exists.
 // ---------------------------------------------------------------------------
 
-function SelfHealNotice({ runtime }: { runtime: AgentRuntime }) {
+function DeletePersistenceNotice({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
+  if (runtime.profile_id) {
+    return (
+      <div
+        role="status"
+        className="mt-3 flex items-start gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+      >
+        <Info className="mt-0.5 size-3.5 shrink-0 text-warning" />
+        <span>{t(($) => $.detail.delete_dialog.profile_backed_notice)}</span>
+      </div>
+    );
+  }
   if (!isSelfHealingRuntime(runtime)) return null;
   return (
     <div
@@ -278,7 +287,7 @@ function LightBody({
             name: runtime.name,
           })}
         </p>
-        <SelfHealNotice runtime={runtime} />
+        <DeletePersistenceNotice runtime={runtime} />
       </div>
       <div className="border-t bg-muted/25 px-5 py-3">
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -354,7 +363,7 @@ function CascadeBody({
           })}
         </p>
 
-        <SelfHealNotice runtime={runtime} />
+        <DeletePersistenceNotice runtime={runtime} />
 
         {/* Destructive banner — keep the user's eye on the irreversible
             half before they scan the agent table. */}
