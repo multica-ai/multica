@@ -28,9 +28,14 @@ require_env() {
   fi
 }
 
+tmp_env="$(mktemp)"
+trap 'rm -f "$tmp_env"' EXIT
+sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
+printf '\nBACKEND_PORT=9100\n' >>"$tmp_env"
+
 config="$(
-  FRONTEND_PORT=3100 BACKEND_PORT=9100 docker compose \
-    --env-file .env.example \
+  docker compose \
+    --env-file "$tmp_env" \
     -f docker-compose.selfhost.yml \
     config
 )"
@@ -47,11 +52,6 @@ for script in scripts/dev.sh scripts/check.sh; do
     exit 1
   fi
 done
-
-tmp_env="$(mktemp)"
-trap 'rm -f "$tmp_env"' EXIT
-sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
-printf '\nBACKEND_PORT=9100\n' >>"$tmp_env"
 
 local_env="$(
   env -i PATH="$PATH" bash -c '

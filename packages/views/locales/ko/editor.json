@@ -80,6 +80,9 @@
   },
   "slash_command": {
     "no_skills_configured": "구성된 스킬 없음",
-    "no_results": "일치하는 스킬 없음"
+    "no_results": "일치하는 스킬 없음",
+    "commands": {
+      "note": "메모 추가 — 에이전트를 트리거하지 않음"
+    }
   }
 }

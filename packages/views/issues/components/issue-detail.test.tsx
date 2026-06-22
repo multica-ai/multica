@@ -192,7 +192,15 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, onExternalSyncAccepted, onUploadFile, placeholder, hideAttachments }: any,
+    {
+      defaultValue,
+      onUpdate,
+      onExternalSyncAccepted,
+      onUploadFile,
+      placeholder,
+      hideAttachments,
+      flushPendingOnUnmount,
+    }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
@@ -228,6 +236,7 @@ vi.mock("../../editor", () => ({
         placeholder={placeholder}
         data-hide-attachments={hideAttachments ? "true" : "false"}
         data-testid="rich-text-editor"
+        data-flush-on-unmount={flushPendingOnUnmount ? "true" : undefined}
       />
     );
   }),
@@ -427,11 +436,14 @@ vi.mock("@multica/core/issues/stores", () => ({
 // compute a 0-height viewport and render nothing. The mock renders every item
 // inline so id="comment-..." nodes are always present in the DOM — this
 // matches the production cold-path where `initialItemCount` force-mounts
-// items[0..targetIdx], giving the native scrollIntoView a real target.
+// items[0..targetIdx], giving the deep-link effect a real target node.
 //
-// scrollIntoViewSpy: we spy on Element.prototype.scrollIntoView (jsdom no-ops
-// it by default) so tests can assert the deep-link effect dispatched a
-// native scroll on the target node.
+// scrollIntoViewSpy: the deep-link effect no longer calls native
+// scrollIntoView (it drives the timeline container's scrollTop directly to
+// avoid scrolling ancestor overflow:hidden boxes — see issue-detail.tsx). We
+// keep a no-op stub on the prototype so any stray scrollIntoView call from
+// other components doesn't throw; deep-link tests assert the highlight ring
+// instead, which is mechanism-independent and observable without layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
@@ -441,7 +453,8 @@ vi.mock("react-virtuoso", () => ({
   ) {
     useImperativeHandle(ref, () => ({
       // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the cold-path uses native scrollIntoView on the DOM node.
+      // since the deep-link cold-path drives the container's scrollTop on the
+      // real DOM node, not Virtuoso's imperative API.
       scrollIntoView: vi.fn(),
       scrollToIndex: vi.fn(),
     }));
@@ -935,6 +948,15 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("opts the description editor into the unmount flush", async () => {
+    // Closing the issue modal must save the description the user last saw;
+    // this pins the IssueDetail wiring while ContentEditor owns flush behavior.
+    renderIssueDetail();
+
+    const description = await screen.findByDisplayValue("Add JWT auth to the backend");
+    expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
   it("renders issue identifier in the breadcrumb", async () => {
     renderIssueDetail();
 
@@ -1402,6 +1424,26 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
+  it("renders activity rows with unknown status values without crashing", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-unknown-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "todo", to: "mystery_status" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(/from Todo to mystery_status/i)).toBeInTheDocument();
+    });
+  });
+
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
     // 10 activities, all in the trailing block (no comment after them, so it's
     // the trailing block by definition). Alternating action types so the
@@ -1575,22 +1617,23 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
 
-      // The deep-link useLayoutEffect calls native scrollIntoView on the
-      // target node ({block: 'center'}).
+      // The deep-link effect lands on AND highlights the target comment: it
+      // drives the timeline container's scrollTop directly (jsdom has no
+      // layout, so the scroll itself isn't observable here) and applies the
+      // brand highlight ring. Assert the user-facing highlight.
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalled();
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
-      expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ block: "center" }),
-      );
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
       // Reproduces the inbox-click race: timeline data is in the cache
       // before the issue resolves. While loading is true, IssueDetail
-      // renders the loading skeleton (Virtuoso never mounts), so no
-      // scroll can fire. After the issue resolves, Virtuoso mounts and
-      // the useLayoutEffect dispatches the native scroll.
+      // renders the loading skeleton (the timeline never mounts), so no
+      // scroll/highlight can fire. After the issue resolves, the timeline
+      // mounts and the deep-link effect lands on + highlights the comment.
       let resolveIssue: (value: Issue) => void = () => {};
       const issuePromise = new Promise<Issue>((resolve) => {
         resolveIssue = resolve;
@@ -1602,7 +1645,8 @@ describe("IssueDetail (shared)", () => {
       expect(
         document.getElementById("comment-comment-2"),
       ).toBeNull();
-      expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+      // Nothing highlighted while the loading skeleton is up.
+      expect(document.querySelector(".ring-2")).toBeNull();
 
       resolveIssue(mockIssue);
 
@@ -1612,9 +1656,9 @@ describe("IssueDetail (shared)", () => {
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
-        );
+        expect(
+          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
+        ).not.toBeNull();
       });
     });
 
@@ -1662,16 +1706,18 @@ describe("IssueDetail (shared)", () => {
       );
 
       // After expansion, the reply must appear in the DOM (inside the now
-      // -unfolded CommentCard) and the deep-link effect must scroll to it.
+      // -unfolded CommentCard) and the deep-link effect must land on + highlight
+      // it. The reply highlight renders as a computed bg tint on its row (see
+      // CommentCard's reply branch), so assert the row carries the brand tint.
       await waitFor(() => {
         expect(
           document.getElementById("comment-reply-1"),
         ).not.toBeNull();
       });
       await waitFor(() => {
-        expect(scrollIntoViewSpy).toHaveBeenCalledWith(
-          expect.objectContaining({ block: "center" }),
-        );
+        expect(
+          document.getElementById("comment-reply-1")?.className,
+        ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
       });
     });
   });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ScrollText } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -82,6 +82,19 @@ export function TranscriptButton({
     },
     [refetch, usesProvidedItems],
   );
+
+  useEffect(() => {
+    if (!open) return;
+
+    const handleGlobalNavigate = () => {
+      setOpen(false);
+    };
+
+    window.addEventListener("multica:navigate", handleGlobalNavigate);
+    return () => {
+      window.removeEventListener("multica:navigate", handleGlobalNavigate);
+    };
+  }, [open]);
 
   return (
     <>

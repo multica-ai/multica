@@ -28,6 +28,17 @@ func TestNewReturnsCodexBackend(t *testing.T) {
 	}
 }
 
+func TestNewReturnsCodebuddyBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("codebuddy", Config{ExecutablePath: "/nonexistent/codebuddy"})
+	if err != nil {
+		t.Fatalf("New(codebuddy) error: %v", err)
+	}
+	if _, ok := b.(*codebuddyBackend); !ok {
+		t.Fatalf("expected *codebuddyBackend, got %T", b)
+	}
+}
+
 func TestNewReturnsCopilotBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
@@ -99,7 +110,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor", "DeepSeek-TUI",
-		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "wujieclaw", "qoderclicn",
+		"gemini", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "wujieclaw", "qoderclicn", "mmx",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

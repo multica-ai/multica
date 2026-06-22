@@ -48,7 +48,7 @@ multica daemon restart
 
 ### Codex（OpenAI）
 
-JSON-RPC 2.0 传输，审批粒度更细。MCP 配置会写入单次任务的 `$CODEX_HOME/config.toml`。**会话续接的代码在，但调不到** —— 要续接的话选 Claude Code 或 ACP 系列。
+JSON-RPC 2.0 传输，审批粒度更细。MCP 配置会写入单次任务的 `$CODEX_HOME/config.toml`。**会话续接可用**——Multica 通过 Codex app-server 的 `thread/resume` 续接；thread 过期或不存在时会回退到新 thread。
 
 | | |
 |---|---|
@@ -58,7 +58,7 @@ JSON-RPC 2.0 传输，审批粒度更细。MCP 配置会写入单次任务的 `$
 
 ### Cursor（Anysphere）
 
-Cursor 编辑器的 CLI 对应物。**会话续接是坏的** —— Cursor CLI 不返回 session id，你传过去的续接 id 永远无效。
+Cursor 编辑器的 CLI 对应物。**会话续接可用**——当前 Cursor Agent 会在 stream-json 事件里返回 `session_id`，Multica 会在下一次运行时用 `--resume <id>` 传回去。
 
 | | |
 |---|---|

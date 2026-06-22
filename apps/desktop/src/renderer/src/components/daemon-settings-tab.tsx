@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, LogIn } from "lucide-react";
+import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
@@ -88,6 +88,12 @@ export function DaemonSettingsTab() {
     [],
   );
 
+  // The daemon runs somewhere the app can't drive (e.g. inside WSL2 behind a
+  // Windows desktop): /health is reachable but the lifecycle CLI can't reach
+  // its process. Auto-start/auto-stop can't work, so disable them and say why
+  // rather than letting the toggles silently no-op. See #3916.
+  const externallyManaged = status.externallyManaged === true;
+
   return (
     <div>
       <h2 className="text-lg font-semibold">Daemon</h2>
@@ -119,6 +125,19 @@ export function DaemonSettingsTab() {
         </div>
       )}
 
+      {externallyManaged && (
+        <div className="mt-4 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p className="min-w-0 text-sm text-muted-foreground">
+            This device&apos;s daemon runs outside the app — for example inside
+            WSL2 — so the app can&apos;t start or stop it. Start or stop it from
+            that environment with{" "}
+            <code className="font-mono text-xs">multica daemon start</code> /{" "}
+            <code className="font-mono text-xs">multica daemon stop</code>.
+          </p>
+        </div>
+      )}
+
       <div className="mt-6 divide-y">
         <SettingRow
           label="Auto-start on launch"
@@ -127,7 +146,7 @@ export function DaemonSettingsTab() {
           <Switch
             checked={prefs.autoStart}
             onCheckedChange={(checked) => updatePref("autoStart", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
         </SettingRow>
 
@@ -138,7 +157,7 @@ export function DaemonSettingsTab() {
           <Switch
             checked={prefs.autoStop}
             onCheckedChange={(checked) => updatePref("autoStop", checked)}
-            disabled={saving}
+            disabled={saving || externallyManaged}
           />
         </SettingRow>
 

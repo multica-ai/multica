@@ -84,6 +84,14 @@
       "description": "Control native OS notification banners shown when Multica is in the background.",
       "label": "Show system notifications",
       "hint": "Show a banner from your operating system for new inbox items when the app isn't focused."
+    },
+    "browser": {
+      "label": "Browser notifications",
+      "hint": "Allow this browser to show notification banners for new inbox items.",
+      "enable": "Enable",
+      "granted": "This browser can show notification banners.",
+      "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
+      "enabled_badge": "Enabled"
     }
   },
   "tokens": {

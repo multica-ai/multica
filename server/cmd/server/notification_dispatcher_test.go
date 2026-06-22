@@ -451,6 +451,7 @@ func TestBuildDingTalkDeliveryMarkdown_TruncatesBodyWithoutClippingActionLink(t 
 		ActorName:       "Alice",
 		Body:            body,
 		Link:            link,
+		RenderMode:      string(RenderModeDetail),
 	})
 
 	actionLink := "[Open In Multica](" + dingtalkExternalBrowserURL(link) + ")"

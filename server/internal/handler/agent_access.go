@@ -34,6 +34,43 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	return err == nil
 }
 
+// canDispatchToPrivateAgent gates dispatch-time surfaces for private agents:
+// enqueuing a task via comment / child-done / autopilot run, and cancelling a
+// non-chat task. These are NOT read surfaces — a plain member who can VIEW a
+// private agent (OPE-817) must still not be able to make it run work.
+//
+// This is the pre-OPE-817 access policy: allowed = {agent owner} ∪
+// {workspace owner/admin} ∪ {explicitly allowlisted principals}. Agent-to-agent
+// traffic (actorType == "agent") is always allowed so A2A collaboration keeps
+// working. Public agents are unrestricted.
+//
+// Kept separate from canTriggerPrivateAgent (mention/assign, which does NOT
+// grant an admin bypass) because dispatch on an already-welded assignee is an
+// owner/admin-grade action: the owner/admin already chose this private agent,
+// and downstream comments/child-done/autopilot runs must keep flowing for them.
+func (h *Handler) canDispatchToPrivateAgent(ctx context.Context, agent db.Agent, actorType, actorID, workspaceID string) bool {
+	if agent.Visibility != "private" {
+		return true
+	}
+	if actorType == "agent" {
+		return true
+	}
+	if actorType != "member" {
+		return false
+	}
+	if uuidToString(agent.OwnerID) == actorID {
+		return true
+	}
+	if h.isAgentAllowedPrincipal(ctx, agent.ID, actorID) {
+		return true
+	}
+	member, err := h.getWorkspaceMember(ctx, actorID, workspaceID)
+	if err != nil {
+		return false
+	}
+	return roleAllowed(member.Role, "owner", "admin")
+}
+
 // canTriggerPrivateAgent enforces the stricter mention/assign policy:
 // private agents may be triggered by their owner, explicitly allowed members,
 // or same-owner agents. Workspace admins do not bypass this gate unless they
@@ -120,7 +157,7 @@ func (h *Handler) isAgentAllowedPrincipal(ctx context.Context, agentID pgtype.UU
 
 // canEnqueueSquadLeader returns true when the given actor is allowed to
 // trigger the squad's private leader. It loads the leader agent and delegates
-// to canAccessPrivateAgent. Non-private leaders always pass. System-initiated
+// to canDispatchToPrivateAgent. Non-private leaders always pass. System-initiated
 // triggers (e.g. github webhooks) pass by treating "system" like "agent".
 func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, workspaceID string) bool {
 	agent, err := h.Queries.GetAgent(ctx, leaderID)
@@ -130,5 +167,5 @@ func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUI
 	if actorType == "system" {
 		actorType = "agent"
 	}
-	return h.canAccessPrivateAgent(ctx, agent, actorType, actorID, workspaceID)
+	return h.canDispatchToPrivateAgent(ctx, agent, actorType, actorID, workspaceID)
 }

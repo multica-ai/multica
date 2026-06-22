@@ -46,208 +46,243 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
 
-			tokenString, fromCookie := extractToken(r)
-			if tokenString == "" {
+			candidates := extractTokenCandidates(r)
+			if len(candidates) == 0 {
 				slog.Debug("auth: no token found", "path", r.URL.Path)
 				http.Error(w, `{"error":"missing authorization"}`, http.StatusUnauthorized)
 				return
 			}
 
-			// Cookie-based auth requires CSRF validation for state-changing methods.
-			if fromCookie && !auth.ValidateCSRF(r) {
-				slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
-				http.Error(w, `{"error":"CSRF validation failed"}`, http.StatusForbidden)
-				return
-			}
+			// Try each candidate in order (bearer header first, then cookie).
+			// A stale bearer must not shadow a valid browser session cookie:
+			// if the bearer fails, we fall back to the cookie candidate so the
+			// localStorage→cookie migration doesn't break in-flight sessions.
+			// 503 (cloud verifier unavailable) is a transient infra error, not
+			// an invalid credential — it short-circuits without falling back,
+			// otherwise a reachable cookie could mask a Cloud outage.
+			lastStatus := http.StatusUnauthorized
+			lastBody := `{"error":"invalid token"}`
+			for _, candidate := range candidates {
+				tokenString := candidate.token
 
-			// Agent task token: "mat_" prefix. Minted by the server at
-			// task-claim time and injected by the daemon into the agent
-			// process. Authoritative for actor identity — the bound
-			// (user_id, agent_id, task_id, workspace_id) triple is
-			// written into request headers here, OVERRIDING whatever the
-			// client sent, so a downstream actor-resolver cannot be
-			// tricked by a client that strips or forges X-Agent-ID /
-			// X-Task-ID. Owner-only endpoints (e.g. agent env
-			// management) reject requests authenticated this way; see
-			// `actorSourceFromRequest`. MUL-2600.
-			if strings.HasPrefix(tokenString, "mat_") {
-				if queries == nil {
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
+				// Cookie-based auth requires CSRF validation for state-changing methods.
+				if candidate.fromCookie && !auth.ValidateCSRF(r) {
+					slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
+					lastStatus = http.StatusForbidden
+					lastBody = `{"error":"CSRF validation failed"}`
+					continue
 				}
-				hash := auth.HashToken(tokenString)
-				tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
-				if err != nil {
-					slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				r.Header.Set("X-User-ID", uuidToString(tt.UserID))
-				r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
-				r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
-				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
-				// X-Actor-Source flags the auth path so resolveActor and
-				// any owner-only handler can deny without re-querying the
-				// token table. The value "task_token" is the only signal
-				// this header is allowed to carry — strip anything else a
-				// client tried to send.
-				r.Header.Set("X-Actor-Source", "task_token")
-				next.ServeHTTP(w, r)
-				return
-			}
 
-			// Cloud Node PAT: "mcn_" prefix. Verified by calling the
-			// Multica Cloud Fleet service — Cloud (not us) is the
-			// authoritative owner of the token's status and owner_id
-			// binding. We never look at the local
-			// personal_access_tokens table for this prefix; an mcn_
-			// string is not a valid mul_ value, so falling through
-			// would just be a redundant DB miss. When the verifier
-			// is unconfigured (no MULTICA_CLOUD_FLEET_URL) we reject
-			// at this branch rather than treating the token as a
-			// JWT/PAT — failing closed avoids a misconfigured prod
-			// silently downgrading auth.
-			//
-			// After Cloud confirms the token, we also confirm that
-			// the returned owner_id maps to a real local user. The
-			// Cloud `owner_id` and our `users.id` share the same UUID
-			// space by contract, so this is a defense in depth: a
-			// missing user means the local row was deleted out from
-			// under a still-active node, or something is forging
-			// owner_ids — either way we must not let the request
-			// pass with a phantom X-User-ID.
-			if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
-				if cloudPAT == nil {
-					slog.Warn("auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-					return
-				}
-				identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
-				if err != nil {
-					if errors.Is(err, auth.ErrCloudPATInvalid) {
-						slog.Warn("auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)
-						http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-						return
+				// Agent task token: "mat_" prefix. Minted by the server at
+				// task-claim time and injected by the daemon into the agent
+				// process. Authoritative for actor identity — the bound
+				// (user_id, agent_id, task_id, workspace_id) triple is
+				// written into request headers here, OVERRIDING whatever the
+				// client sent, so a downstream actor-resolver cannot be
+				// tricked by a client that strips or forges X-Agent-ID /
+				// X-Task-ID. Owner-only endpoints (e.g. agent env
+				// management) reject requests authenticated this way; see
+				// `actorSourceFromRequest`. MUL-2600.
+				if strings.HasPrefix(tokenString, "mat_") {
+					if queries == nil {
+						continue
 					}
-					// Cloud unreachable / 5xx / decode error. We surface
-					// 503 so callers (CLI / daemon) can retry — a 401
-					// here would tell them to throw out a valid token.
-					slog.Warn("auth: cloud pat verify unavailable", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
-					return
-				}
-				r.Header.Set("X-User-ID", identity.OwnerID)
-				// Tag the auth path so account-level guards (e.g.
-				// handler.RequireHumanActor on /api/cloud-billing/*)
-				// can distinguish a cloud-node machine credential
-				// from a human PAT/JWT. Mirrors the mat_ branch's
-				// stamp of "task_token" — both are server-set,
-				// authoritative, and stripped from any client-
-				// supplied value at the top of this middleware. Same
-				// rationale as MUL-2600: a machine credential
-				// (running agent or running cloud node) must not be
-				// treated as the owner having approved an account-
-				// level action.
-				r.Header.Set("X-Actor-Source", "cloud_pat")
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// PAT: tokens starting with "mul_"
-			if strings.HasPrefix(tokenString, "mul_") {
-				hash := auth.HashToken(tokenString)
-
-				// Cache hit: TTL has not expired, the token was valid the
-				// last time we looked, and nothing has invalidated the
-				// entry since. Skip the DB SELECT and the last_used_at
-				// UPDATE — last_used_at is bumped once per TTL window.
-				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					r.Header.Set("X-User-ID", userID)
+					hash := auth.HashToken(tokenString)
+					tt, err := queries.GetTaskTokenByHash(r.Context(), hash)
+					if err != nil {
+						slog.Warn("auth: invalid task token", "path", r.URL.Path, "error", err)
+						continue
+					}
+					r.Header.Set("X-User-ID", uuidToString(tt.UserID))
+					r.Header.Set("X-Agent-ID", uuidToString(tt.AgentID))
+					r.Header.Set("X-Task-ID", uuidToString(tt.TaskID))
+					r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
+					// X-Actor-Source flags the auth path so resolveActor and
+					// any owner-only handler can deny without re-querying the
+					// token table. The value "task_token" is the only signal
+					// this header is allowed to carry — strip anything else a
+					// client tried to send.
+					r.Header.Set("X-Actor-Source", "task_token")
 					next.ServeHTTP(w, r)
 					return
 				}
 
-				if queries == nil {
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+				// Cloud Node PAT: "mcn_" prefix. Verified by calling the
+				// Multica Cloud Fleet service — Cloud (not us) is the
+				// authoritative owner of the token's status and owner_id
+				// binding. We never look at the local
+				// personal_access_tokens table for this prefix; an mcn_
+				// string is not a valid mul_ value, so falling through
+				// would just be a redundant DB miss. When the verifier
+				// is unconfigured (no MULTICA_CLOUD_FLEET_URL) we reject
+				// at this branch rather than treating the token as a
+				// JWT/PAT — failing closed avoids a misconfigured prod
+				// silently downgrading auth.
+				//
+				// After Cloud confirms the token, we also confirm that
+				// the returned owner_id maps to a real local user. The
+				// Cloud `owner_id` and our `users.id` share the same UUID
+				// space by contract, so this is a defense in depth: a
+				// missing user means the local row was deleted out from
+				// under a still-active node, or something is forging
+				// owner_ids — either way we must not let the request
+				// pass with a phantom X-User-ID.
+				if strings.HasPrefix(tokenString, auth.CloudPATPrefix) {
+					if cloudPAT == nil {
+						slog.Warn("auth: mcn_ token presented but cloud verifier not configured", "path", r.URL.Path)
+						continue
+					}
+					identity, err := cloudPAT.Verify(r.Context(), tokenString, ownerLookupFor(queries))
+					if err != nil {
+						if errors.Is(err, auth.ErrCloudPATInvalid) {
+							slog.Warn("auth: cloud rejected mcn_ token", "path", r.URL.Path, "error", err)
+							continue
+						}
+						// Cloud unreachable / 5xx / decode error. We surface
+						// 503 so callers (CLI / daemon) can retry — a 401
+						// here would tell them to throw out a valid token.
+						// Do not fall back to a cookie candidate: a reachable
+						// cookie must not mask a Cloud outage.
+						slog.Warn("auth: cloud pat verify unavailable", "path", r.URL.Path, "error", err)
+						http.Error(w, `{"error":"cloud pat verifier unavailable"}`, http.StatusServiceUnavailable)
+						return
+					}
+					r.Header.Set("X-User-ID", identity.OwnerID)
+					// Tag the auth path so account-level guards (e.g.
+					// handler.RequireHumanActor on /api/cloud-billing/*)
+					// can distinguish a cloud-node machine credential
+					// from a human PAT/JWT. Mirrors the mat_ branch's
+					// stamp of "task_token" — both are server-set,
+					// authoritative, and stripped from any client-
+					// supplied value at the top of this middleware. Same
+					// rationale as MUL-2600: a machine credential
+					// (running agent or running cloud node) must not be
+					// treated as the owner having approved an account-
+					// level action.
+					r.Header.Set("X-Actor-Source", "cloud_pat")
+					next.ServeHTTP(w, r)
 					return
 				}
-				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
-				if err != nil {
-					slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
-					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+
+				// PAT: tokens starting with "mul_"
+				if strings.HasPrefix(tokenString, "mul_") {
+					hash := auth.HashToken(tokenString)
+
+					// Cache hit: TTL has not expired, the token was valid the
+					// last time we looked, and nothing has invalidated the
+					// entry since. Skip the DB SELECT and the last_used_at
+					// UPDATE — last_used_at is bumped once per TTL window.
+					if patCache != nil {
+						if userID, ok := patCache.Get(r.Context(), hash); ok {
+							r.Header.Set("X-User-ID", userID)
+							next.ServeHTTP(w, r)
+							return
+						}
+					}
+
+					if queries == nil {
+						continue
+					}
+					pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
+					if err != nil {
+						slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
+						continue
+					}
+
+					userID := uuidToString(pat.UserID)
+					r.Header.Set("X-User-ID", userID)
+
+					// Clamp cache TTL to the token's remaining lifetime so a
+					// PAT expiring in <AuthCacheTTL can't continue passing
+					// auth on a cache hit after expires_at.
+					var expiresAt time.Time
+					if pat.ExpiresAt.Valid {
+						expiresAt = pat.ExpiresAt.Time
+					}
+					if patCache != nil {
+						patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+					}
+
+					// Cache miss = TTL expired (or first use after revoke /
+					// process restart). Refresh last_used_at; subsequent hits
+					// within the TTL window skip this write entirely.
+					go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+
+					next.ServeHTTP(w, r)
 					return
 				}
 
-				userID := uuidToString(pat.UserID)
-				r.Header.Set("X-User-ID", userID)
-
-				// Clamp cache TTL to the token's remaining lifetime so a
-				// PAT expiring in <AuthCacheTTL can't continue passing
-				// auth on a cache hit after expires_at.
-				var expiresAt time.Time
-				if pat.ExpiresAt.Valid {
-					expiresAt = pat.ExpiresAt.Time
+				// JWT
+				token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
+					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, jwt.ErrSignatureInvalid
+					}
+					return auth.JWTSecret(), nil
+				})
+				if err != nil || !token.Valid {
+					slog.Warn("auth: invalid token", "path", r.URL.Path, "source", candidate.source, "error", err)
+					continue
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
 
-				// Cache miss = TTL expired (or first use after revoke /
-				// process restart). Refresh last_used_at; subsequent hits
-				// within the TTL window skip this write entirely.
-				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
+				claims, ok := token.Claims.(jwt.MapClaims)
+				if !ok {
+					slog.Warn("auth: invalid claims", "path", r.URL.Path, "source", candidate.source)
+					lastBody = `{"error":"invalid claims"}`
+					continue
+				}
+
+				sub, ok := claims["sub"].(string)
+				if !ok || strings.TrimSpace(sub) == "" {
+					slog.Warn("auth: invalid claims", "path", r.URL.Path, "source", candidate.source)
+					lastBody = `{"error":"invalid claims"}`
+					continue
+				}
+				r.Header.Set("X-User-ID", sub)
+				if email, ok := claims["email"].(string); ok {
+					r.Header.Set("X-User-Email", email)
+				}
 
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			// JWT
-			token, err := jwt.Parse(tokenString, func(token *jwt.Token) (any, error) {
-				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-					return nil, jwt.ErrSignatureInvalid
-				}
-				return auth.JWTSecret(), nil
-			})
-			if err != nil || !token.Valid {
-				slog.Warn("auth: invalid token", "path", r.URL.Path, "error", err)
-				http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
-				return
-			}
-
-			claims, ok := token.Claims.(jwt.MapClaims)
-			if !ok {
-				slog.Warn("auth: invalid claims", "path", r.URL.Path)
-				http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
-				return
-			}
-
-			sub, ok := claims["sub"].(string)
-			if !ok || strings.TrimSpace(sub) == "" {
-				slog.Warn("auth: invalid claims", "path", r.URL.Path)
-				http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
-				return
-			}
-			r.Header.Set("X-User-ID", sub)
-			if email, ok := claims["email"].(string); ok {
-				r.Header.Set("X-User-Email", email)
-			}
-
-			next.ServeHTTP(w, r)
+			http.Error(w, lastBody, lastStatus)
 		})
 	}
 }
 
-// extractToken returns the bearer token and whether it came from a cookie.
-// Priority: Authorization header > multica_auth cookie.
-func extractToken(r *http.Request) (token string, fromCookie bool) {
+type tokenCandidate struct {
+	token      string
+	fromCookie bool
+	source     string
+}
+
+// extractTokenCandidates returns candidate tokens in preferred order:
+// the Authorization: Bearer header first, then the multica_auth cookie.
+// A stale bearer token must not shadow a valid browser session cookie —
+// this happens during the localStorage-to-cookie migration when old web
+// bundles or OAuth callback pages still carry a legacy token in memory.
+// Returning both lets the Auth loop fall back to the cookie when the
+// bearer is invalid (see Auth).
+func extractTokenCandidates(r *http.Request) []tokenCandidate {
+	candidates := make([]tokenCandidate, 0, 2)
 	if authHeader := r.Header.Get("Authorization"); authHeader != "" {
 		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
 		if tokenString != authHeader {
-			return tokenString, false
+			candidates = append(candidates, tokenCandidate{
+				token:  tokenString,
+				source: "authorization",
+			})
 		}
 	}
 
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
-		return cookie.Value, true
+		candidates = append(candidates, tokenCandidate{
+			token:      cookie.Value,
+			fromCookie: true,
+			source:     "cookie",
+		})
 	}
 
-	return "", false
+	return candidates
 }

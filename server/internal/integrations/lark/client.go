@@ -106,6 +106,16 @@ type APIClient interface {
 	// positional label. openIDs beyond Lark's 50-per-call cap are dropped
 	// by the client.
 	BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error)
+
+	// AddMessageReaction adds an emoji reaction to an existing message.
+	// The standard use-case is the "Typing" indicator that signals the
+	// Bot is processing the user's message. Returns the reaction_id Lark
+	// assigns so it can be removed later.
+	AddMessageReaction(ctx context.Context, p AddReactionParams) (string, error)
+
+	// DeleteMessageReaction removes a previously-added reaction from a
+	// message. This is the cleanup half of the typing-indicator lifecycle.
+	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
 }
 
 // ListMessagesParams selects a bounded, recent window of messages in a
@@ -233,6 +243,22 @@ type BindingPromptParams struct {
 	BindURL string
 }
 
+// AddReactionParams is the input shape for adding an emoji reaction to
+// a message.
+type AddReactionParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	EmojiType      string
+}
+
+// DeleteReactionParams is the input shape for removing a previously-added
+// reaction from a message.
+type DeleteReactionParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	ReactionID     string
+}
+
 // InstallationCredentials is the per-installation transport context the
 // client needs to authenticate against Lark on behalf of a workspace's
 // bot. Passing these explicitly to each call (rather than constructing
@@ -332,4 +358,14 @@ func (s *stubAPIClient) ListChatMessages(ctx context.Context, creds Installation
 func (s *stubAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
 	s.log.Warn("lark stub client: BatchGetUsers called", "count", len(openIDs))
 	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) AddMessageReaction(ctx context.Context, p AddReactionParams) (string, error) {
+	s.log.Warn("lark stub client: AddMessageReaction called", "message_id", p.MessageID, "emoji_type", p.EmojiType)
+	return "", ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
+	s.log.Warn("lark stub client: DeleteMessageReaction called", "message_id", p.MessageID, "reaction_id", p.ReactionID)
+	return ErrAPIClientNotConfigured
 }

@@ -39,6 +39,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		"please file a bug",
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -113,6 +114,7 @@ func TestQuickCreateCompletion_RequesterPreferenceDisabled(t *testing.T) {
 		"please file another bug",
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -187,6 +189,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		"another bug",
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)

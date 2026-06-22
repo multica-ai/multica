@@ -136,10 +136,11 @@ const (
 	EventChannelMessageDeleted = "channel_message:deleted"
 
 	// Daemon events
-	EventDaemonHeartbeat     = "daemon:heartbeat"
-	EventDaemonHeartbeatAck  = "daemon:heartbeat_ack"
-	EventDaemonRegister      = "daemon:register"
-	EventDaemonTaskAvailable = "daemon:task_available"
+	EventDaemonHeartbeat              = "daemon:heartbeat"
+	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"
+	EventDaemonRegister               = "daemon:register"
+	EventDaemonTaskAvailable          = "daemon:task_available"
+	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
 
 	// Notification delivery events (server <-> daemon)
 	EventNotificationDeliver        = "notification:deliver"
