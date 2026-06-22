@@ -120,12 +120,15 @@ export default async function RootLayout({
         {/*
           react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click
           any element to copy its source path + line + component stack for pasting
-          to an AI. Opt-in per developer: only loads when REACT_GRAB is set in a
-          local, gitignored apps/web/.env.local — it never activates for anyone
+          to an AI. Opt-in per developer: only loads when VITE_REACT_GRAB is set in
+          a local, gitignored apps/web/.env.local — it never activates for anyone
           else. Both guards are read server-side, so the <Script> is omitted from
-          the HTML entirely unless you opted in. See https://www.react-grab.com/
+          the HTML entirely unless you opted in. The VITE_ prefix is shared with the
+          desktop renderer (apps/desktop/src/renderer/src/main.tsx), where Vite only
+          exposes VITE_-prefixed vars to client code, so one var name covers both
+          apps. See https://www.react-grab.com/
         */}
-        {process.env.NODE_ENV === "development" && process.env.REACT_GRAB && (
+        {process.env.NODE_ENV === "development" && process.env.VITE_REACT_GRAB && (
           <Script
             src="//unpkg.com/react-grab/dist/index.global.js"
             crossOrigin="anonymous"
