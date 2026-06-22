@@ -832,6 +832,16 @@ var catalog = []Capability{
 			"POST /api/workspaces/{id}/credentials/{credId}/rotate",
 		},
 	},
+	{
+		Key:         "manage_credential_access",
+		Title:       "Grant credential access",
+		Category:    CategoryCredentials,
+		Description: "Grant, deny, or clear an actor's (agent / group / user) access to a specific credential at a given layer (FIR-1479). The credential twin of \"Grant runtime tool access\". Highly sensitive.",
+		Ops: []string{
+			"POST /api/agents/{id}/credential-grants",
+			"DELETE /api/agents/{id}/credential-grants",
+		},
+	},
 
 	// --- Workflows ------------------------------------------------------------
 	{
@@ -1038,13 +1048,13 @@ var excluded = map[string]string{
 	"POST /api/cloud-billing/portal-sessions":   "billing — external Stripe, human-actor only",
 
 	// cosmetic / system — not access-bearing actions.
-	"POST /api/agents/generate-avatar":          "cosmetic — avatar image generation",
-	"POST /api/agents/{id}/generate-avatar":     "cosmetic — per-agent async avatar image generation",
-	"POST /api/agents/backfill-avatars":         "cosmetic — avatar backfill maintenance",
-	"POST /api/capabilities/report":             "runtime-self-report — a runtime reporting its own tools, not a user action",
-	"POST /api/workspaces/{id}/grants/evaluate": "read-only — dry-run evaluation of a grant decision; reads policy, changes no state",
+	"POST /api/agents/generate-avatar":               "cosmetic — avatar image generation",
+	"POST /api/agents/{id}/generate-avatar":          "cosmetic — per-agent async avatar image generation",
+	"POST /api/agents/backfill-avatars":              "cosmetic — avatar backfill maintenance",
+	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
+	"POST /api/workspaces/{id}/grants/evaluate":      "read-only — dry-run evaluation of a grant decision; reads policy, changes no state",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
-	"POST /api/issues/{id}/squad-evaluated":     "system-callback — squad-evaluation marker set by the platform, not a user action",
+	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 
 // All returns a copy of the catalog so callers cannot mutate the package state.
