@@ -40,4 +40,4 @@ images:
     newTag: "02997ed8"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "e550f17e"
+    newTag: "02997ed8"
