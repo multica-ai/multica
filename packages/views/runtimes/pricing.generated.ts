@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-06-19
+// Snapshot: 2026-06-22
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -87,7 +87,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 0 },
   "glm-5-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
-  "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5v-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "google/gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
   "google/gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
@@ -164,6 +164,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode-go/deepseek-v4-pro": { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },
   "opencode/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
   "opencode/deepseek-v4-pro": { input: 1.74, output: 3.84, cacheRead: 0.145, cacheWrite: 1.74 },
