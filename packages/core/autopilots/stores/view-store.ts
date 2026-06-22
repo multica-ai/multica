@@ -74,11 +74,13 @@ export const AUTOPILOT_DEFAULT_HIDDEN_COLUMNS: AutopilotColumnKey[] = [
 
 export interface AutopilotsViewState {
   scope: AutopilotScope;
+  mineOnly: boolean;
   sortField: AutopilotSortField;
   sortDirection: AutopilotSortDirection;
   hiddenColumns: AutopilotColumnKey[];
   filters: AutopilotListFilters;
   setScope: (scope: AutopilotScope) => void;
+  setMineOnly: (mineOnly: boolean) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
   toggleSort: (field: AutopilotSortField) => void;
@@ -92,6 +94,7 @@ export interface AutopilotsViewState {
 
 const DEFAULTS = {
   scope: "all" as AutopilotScope,
+  mineOnly: false,
   sortField: "lastRun" as AutopilotSortField,
   sortDirection: AUTOPILOT_SORT_DEFAULT_DIRECTION.lastRun,
   hiddenColumns: AUTOPILOT_DEFAULT_HIDDEN_COLUMNS,
@@ -103,6 +106,7 @@ export const useAutopilotsViewStore = create<AutopilotsViewState>()(
     (set) => ({
       ...DEFAULTS,
       setScope: (scope) => set({ scope }),
+      setMineOnly: (mineOnly) => set({ mineOnly }),
       toggleSort: (field) =>
         set((state) =>
           state.sortField === field
@@ -147,6 +151,7 @@ export const useAutopilotsViewStore = create<AutopilotsViewState>()(
       ),
       partialize: (state) => ({
         scope: state.scope,
+        mineOnly: state.mineOnly,
         sortField: state.sortField,
         sortDirection: state.sortDirection,
         hiddenColumns: state.hiddenColumns,

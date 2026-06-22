@@ -344,10 +344,30 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	if s := r.URL.Query().Get("status"); s != "" {
 		statusFilter = pgtype.Text{String: s, Valid: true}
 	}
+	var mineUserID pgtype.UUID
+	if rawMine := strings.TrimSpace(r.URL.Query().Get("mine")); rawMine != "" {
+		mine, err := strconv.ParseBool(rawMine)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid mine")
+			return
+		}
+		if mine {
+			userID, ok := requireUserID(w, r)
+			if !ok {
+				return
+			}
+			parsed, ok := parseUUIDOrBadRequest(w, userID, "user id")
+			if !ok {
+				return
+			}
+			mineUserID = parsed
+		}
+	}
 
 	autopilots, err := h.Queries.ListAutopilots(r.Context(), db.ListAutopilotsParams{
 		WorkspaceID: parseUUID(workspaceID),
 		Status:      statusFilter,
+		MineUserID:  mineUserID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list autopilots")

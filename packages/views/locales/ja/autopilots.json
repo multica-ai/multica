@@ -358,6 +358,7 @@
   "toolbar": {
     "result_count_title": "該当する自動化 / すべての自動化",
     "filter_label": "フィルター",
+    "mine_filter": "自分",
     "filter_active_count_one": "{{count}} 件のフィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
