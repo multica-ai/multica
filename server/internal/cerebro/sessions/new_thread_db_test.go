@@ -115,4 +115,18 @@ func TestNewThreadOpensSession(t *testing.T) {
 	if openCreated.Unix() != c3.Unix() {
 		t.Fatalf("open session created_at should equal thread-3 comment time")
 	}
+
+	// FIR-1787 regression: the frontend groups a comment into the latest session
+	// whose start <= the comment's created_at, but it sees the comment's
+	// created_at truncated to the whole second (comment API = time.RFC3339) while
+	// the session marker keeps sub-second precision (sessions API = RFC3339Nano).
+	// So the active session's marker MUST be <= the comment's second-truncated
+	// time, or the comment sorts before its own marker, drops into the previous
+	// session, and the active session renders empty (the "active session doesn't
+	// work" bug Jesper hit). Before the floor-to-second fix, openCreated carried
+	// sub-seconds and this assertion fails.
+	commentAsFrontendSees := c3.Truncate(time.Second)
+	if openCreated.After(commentAsFrontendSees) {
+		t.Fatalf("active session marker %v is AFTER the comment's second-truncated time %v — comment would fall into the previous session and the active session renders empty", openCreated, commentAsFrontendSees)
+	}
 }

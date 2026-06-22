@@ -58,6 +58,17 @@ func OpenSessionForNewThread(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID
 		return err
 	}
 
+	// FIR-1787 fix: the new session marker MUST be placed at the comment time
+	// floored to the whole second. The comment API serialises created_at with
+	// time.RFC3339 (second precision, util.TimestampToString) while the sessions
+	// API serialises it as RFC3339Nano (sub-second). If we marked the session at
+	// the comment's sub-second instant (e.g. .793), the frontend — which sees the
+	// comment truncated to .000 of that second — would sort the comment BEFORE its
+	// own marker, dropping it back into the previous session and leaving this
+	// session empty (so it never renders). Flooring to the second makes the marker
+	// equal the comment's frontend-visible time, so the comment lands in it.
+	atSec := at.Truncate(time.Second)
+
 	if sessionCount == 0 {
 		// Second thread on an issue with no markers yet: materialise Session 1
 		// covering the whole prior timeline (issue creation → now) and open
@@ -66,7 +77,7 @@ func OpenSessionForNewThread(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID
 		if _, err := createSession(ctx, tx, issueID, 1, "Session 1", "done", nil, &issueCreatedAt); err != nil {
 			return err
 		}
-		if _, err := createSession(ctx, tx, issueID, 2, "Session 2", "in_progress", nil, &at); err != nil {
+		if _, err := createSession(ctx, tx, issueID, 2, "Session 2", "in_progress", nil, &atSec); err != nil {
 			return err
 		}
 		return nil
@@ -96,7 +107,7 @@ func OpenSessionForNewThread(ctx context.Context, tx pgx.Tx, issueID pgtype.UUID
 		issueID).Scan(&nextPos); err != nil {
 		return err
 	}
-	if _, err := createSession(ctx, tx, issueID, nextPos, "Session "+strconv.Itoa(int(nextPos)), "in_progress", nil, &at); err != nil {
+	if _, err := createSession(ctx, tx, issueID, nextPos, "Session "+strconv.Itoa(int(nextPos)), "in_progress", nil, &atSec); err != nil {
 		return err
 	}
 	return nil
