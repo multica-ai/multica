@@ -595,6 +595,82 @@ func TestAgyTranscriptTrackerToolOutputChainNotFinal(t *testing.T) {
 	}
 }
 
+// TestAgyTranscriptTrackerRediscovery verifies that the tracker detects a new
+// agy session transcript created after initial discovery and switches to it,
+// flushing any pending final from the old session.
+func TestAgyTranscriptTrackerRediscovery(t *testing.T) {
+	// Create a fake HOME with two brain sessions.
+	origHome := os.Getenv("HOME")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	brainDir := filepath.Join(tmp, ".gemini", "antigravity-cli", "brain")
+
+	// Session A (old): one historical entry.
+	sessA := filepath.Join(brainDir, "aaa-old-session", ".system_generated", "logs")
+	if err := os.MkdirAll(sessA, 0o755); err != nil {
+		t.Fatalf("mkdir sessA: %v", err)
+	}
+	oldTime := time.Now().UTC().Add(-60 * time.Second)
+	oldLines := `{"step_index":0,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + oldTime.Format(time.RFC3339) + `","content":"old final"}`
+	if err := os.WriteFile(filepath.Join(sessA, "transcript.jsonl"), []byte(oldLines+"\n"), 0o644); err != nil {
+		t.Fatalf("write old transcript: %v", err)
+	}
+
+	now := time.Now().UTC()
+	startedAt := now.Add(-1 * time.Second)
+	reporter := &localRunReporter{}
+	tracker := &agyTranscriptTracker{
+		reporter:  reporter,
+		startedAt: startedAt,
+		ticker:    time.NewTicker(time.Hour), // manual sync only
+		seen:      make(map[int]bool),
+		done:      make(chan struct{}),
+		stopped:   make(chan struct{}),
+	}
+
+	// First sync: discovers session A's transcript. Historical entry is
+	// processed but skipped by startedAt filter → pendingFinal stays nil.
+	tracker.sync()
+	if tracker.transcript == "" {
+		t.Fatal("expected transcript to be discovered")
+	}
+	if !strings.Contains(tracker.transcript, "aaa-old-session") {
+		t.Fatalf("expected transcript from old session, got %q", tracker.transcript)
+	}
+	if tracker.pendingFinal != nil {
+		t.Fatalf("expected pendingFinal nil for historical entry, got %v", tracker.pendingFinal)
+	}
+
+	// Simulate agy creating a new session B with a recent entry.
+	sessB := filepath.Join(brainDir, "bbb-new-session", ".system_generated", "logs")
+	if err := os.MkdirAll(sessB, 0o755); err != nil {
+		t.Fatalf("mkdir sessB: %v", err)
+	}
+	newLines := `{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"` + now.Format(time.RFC3339) + `","content":"<USER_REQUEST>\nhello\n</USER_REQUEST>"}` + "\n" +
+		`{"step_index":1,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"` + now.Format(time.RFC3339) + `","content":"hi there"}`
+	if err := os.WriteFile(filepath.Join(sessB, "transcript.jsonl"), []byte(newLines+"\n"), 0o644); err != nil {
+		t.Fatalf("write new transcript: %v", err)
+	}
+
+	// Force re-discovery by resetting lastDiscovery.
+	tracker.lastDiscovery = time.Time{}
+	tracker.sync()
+
+	if !strings.Contains(tracker.transcript, "bbb-new-session") {
+		t.Fatalf("expected tracker to switch to new session, still on %q", tracker.transcript)
+	}
+	// The new session's MODEL entry should be pendingFinal.
+	if tracker.pendingFinal == nil {
+		t.Fatal("expected pendingFinal to be set from new session")
+	}
+	if tracker.pendingFinal.Content != "hi there" {
+		t.Fatalf("pendingFinal.Content = %q, want %q", tracker.pendingFinal.Content, "hi there")
+	}
+
+	_ = origHome
+}
+
 func TestInferCLIName(t *testing.T) {
 	tests := []struct {
 		in   string
