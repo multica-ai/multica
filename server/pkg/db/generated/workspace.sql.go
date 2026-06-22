@@ -169,6 +169,45 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 	return items, nil
 }
 
+const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
+SELECT id, repos FROM workspace
+WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
+ORDER BY id
+`
+
+type ListWorkspacesWithReposRow struct {
+	ID    pgtype.UUID `json:"id"`
+	Repos []byte      `json:"repos"`
+}
+
+// Workspaces that have at least one repository in their registry, returning
+// only the id and the repos JSONB. Used to route an inbound GitHub webhook to
+// the workspace that actually owns the event's repository (instead of the
+// single workspace the delivering App installation happens to be mapped to —
+// one GitHub account/installation can serve repos belonging to several
+// workspaces).
+// ORDER BY id so the multi-match tie-break in resolveWorkspaceForRepo is
+// stable across webhook replays.
+func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]ListWorkspacesWithReposRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspacesWithReposRow{}
+	for rows.Next() {
+		var i ListWorkspacesWithReposRow
+		if err := rows.Scan(&i.ID, &i.Repos); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateWorkspace = `-- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE($2, name),
