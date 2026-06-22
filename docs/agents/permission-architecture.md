@@ -187,7 +187,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **daemon repo allowlist** | `daemon/daemon.go:885` `workspaceRepoAllowed` | repo URL in the daemon's in-memory allowlist | not present → false | in-memory list |
 | **autopilot webhook scope** | `handler/autopilot_webhook.go:663` | autopilot webhook event filter | missing → **fail closed** | trigger config |
 | **wakeup self-limits** | `wakeup/service.go:465` | max wakeups/issue + min interval | limit-based (anti-flood, not access) | workspace settings |
-| **the grant resolver** (FIR-2193 capability engine) | `permissions/resolver.go:115` `Resolve` | credentials + grant-preview + repo grants | **deny-by-default** (no grant → Deny) | `cerebro_workspace_grant` (the Persona grant table) |
+| **the capability engine** (grant resolver + permgate, FIR-2193) — **a usable function, documented in §5.2** | `permissions/resolver.go:115` `Can` + `permgate/permgate.go` | credentials + repo grants + the approval inbox | **deny-by-default** (no grant → Deny) | `cerebro_workspace_grant` (engine store; empty in practice — see §5.2) |
 
 ### 4.4 Not access control — do NOT fold these into the model
 
@@ -197,73 +197,82 @@ codexlimit, `permguard` (test-time inventory), Cloudflare Access (authentication
 
 ---
 
-## 5. Persona — DECISION: remove it entirely
+## 5. The capability engine (grant resolver + permgate) — a usable function, and Persona's status
 
-**Decision (Jesper, 2026-06-18, FIR-1497):** Persona dies and is removed from all of
-Multica; the grant store is "dead for now"; everything converges on the tool-policy chain.
-This **supersedes** the prior "keep persona as a separate service" plans, now archived under
-[`docs/archive/persona/`](../archive/persona/) (`persona-deferred-work.md`,
-`persona-finish-plan.md`, `persona-next-session.md`) — do not act on them.
+The word "grant" covers two different things here. Keep them separate: the **external Persona
+service** (gone) and the **capability engine** (a live, usable function — documented below, NOT
+cruft to delete ad-hoc).
 
-"Persona" is **four different things** with different fates. Do not delete them as one blob.
-
-### 5.1 Delete now — the external Persona service + SDK — ✅ DONE (FIR-1609 Phase 8, branch `feat/fir-1609-permission-engine`)
-Persona was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **unset in prod** (verified
-across all Infisical folders), so removal was zero prod-behavior risk. All of the following are
-removed; `go build ./...` + `go vet` green and no `.go` source imports the persona SDK:
+### 5.1 Persona — the external service + SDK — REMOVED ✅ (FIR-1497 / FIR-1609 Phase 8 / FIR-1777)
+Persona-the-service was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **unset in prod**
+(verified across all Infisical folders), so removal was zero prod-behavior risk. Removed:
 - [x] `CutoverPolicyChecker` / `NewPersonaPolicyChecker` / `PersonaChecker` / `personaBackend` and the
-  `MULTICA_PERMISSION_ENGINE` / `_PARALLEL_SAMPLE` switch — `newCredentialsPolicy` now returns
+  `MULTICA_PERMISSION_ENGINE` / `_PARALLEL_SAMPLE` switch — `newCredentialsPolicy` returns
   `ChainPolicyChecker(owner, multica)` unconditionally; `multicaCredentialPolicy` is the sole checker.
 - [x] `cerebro-persona-hook` binary + the dev-only `multica agent e2e-spawn` command.
 - [x] persona-mask (`cerebro_persona_mask.go`, `internal/cerebro/persona/mask/`, the 10 `handler/persona_mask_*` files + tests, migration 9021).
 - [x] daemon spawn persona path (`daemon/persona.go`, `persona_http.go`, config persona fields).
 - [x] share-token feature (`internal/cerebro/sharetoken/`) — Persona was its only auth; public-share retired (Jesper: "bruger vi ikke").
 - [x] persona handlers + routes (`handler/persona.go`, `persona_approvals.go`, `ListWorkspacePersonaAgents`, `UpdateAgentRuntimePersonaSandbox` + all `/api/persona/*` + `/persona-sandbox` route mounts).
-- [x] SDK package `packages/cerebro-persona-sdk/` + `server/go.mod` `replace`/`require` (`go mod tidy`) + persona dev scripts.
+- [x] SDK package `packages/cerebro-persona-sdk/` + `server/go.mod` `replace`/`require` + persona dev scripts.
+- [x] **Agent-facing grant surfaces (FIR-1777, PR #1688):** the `get_grant` runtime tool, the
+  `list_grants`/`create_grant`/… MCP tools, and the `multica grant` CLI. An agent can no longer
+  see or call grants, and nothing advertises "Persona" to a runtime. The prior "keep Persona as a
+  separate service" plans are archived under [`docs/archive/persona/`](../archive/persona/) — do not act on them.
 
-Remaining (tracked separately, see §5.2 + the persona-sandbox DB columns): drop the now-inert DB
-artefacts (`agent.persona_sandbox`, `agent_runtime.persona_sandbox` columns; `cerebro_persona_mask_audit`,
-`cerebro_share_token` tables) via rename→verify→drop, and the frontend persona remnants.
+Still inert and tracked for a later sweep: the `agent.persona_sandbox` / `agent_runtime.persona_sandbox`
+DB columns + the frontend persona-sandbox tab. The persona Go package is reduced to `spawner.go`
+(`ResolveSpawnSubject`, used by the daemon — keep).
 
-### 5.2 Migrate before dropping — the grant table `cerebro_workspace_grant`
-It is **"dead for now" in intent but live in code**: it is the backing store of the **new**
-permission engine (`permissions/resolver.go:117`) **and** the live, deny-by-default
-**credential** security boundary (`permission-system.md` row 1). It is read by
-workspace-copy (`workspacecopy/copy_roles.go:135-189`) and the grants API/UI (the
-`cerebro/grants` HTTP handler at `router.go` `/grants`). **The agent-facing surfaces have
-been removed (FIR-1777): the `get_grant` runtime tool, the `list_grants` MCP tools, and the
-`multica grant` CLI no longer exist** — so an agent can no longer read or mutate grants, and
-nothing advertises "Persona" to a runtime. The table stays only as the internal credential
-gate + the operator grants UI/API; the persona Go package is now reduced to `spawner.go`
-(`ResolveSpawnSubject`, used by the daemon).
+### 5.2 The capability engine — a documented, usable function (KEEP, do not blind-drop)
+`permissions.Resolver` (`permissions/resolver.go`, FIR-2193) + `permgate`
+(`permgate/permgate.go`) are a **live, usable capability + approval engine** — not dead Persona
+cruft. Use it as follows:
 
-`cerebro_tool_policy` cannot today represent three columns the grant table carries:
-`approval_required`, `time_window_*`, `classification_ceiling`. **None are exercised by any
-live enforcement path** (no UI/seed creates such grants), so the recommendation is to drop
-those features in the consolidation unless a concrete need surfaces.
+- **What it answers:** `Can(actor, capability, resource) → Allow | Deny | NeedsApproval`,
+  **deny-by-default** (no matching grant → Deny). `capability == ""` is always Deny.
+- **Subject layering** (most-specific layer wins and shadows the layers below it, per-capability):
+  `workspace_default < project < role < group < actor` (`resolver.go` Pass 1).
+- **Grant shape** (`cerebro_workspace_grant`): `(subject_type, subject_id, capability,
+  resource_pattern, status, approval_required, …)`.
+  - `capabilityMatches`: `*` = any · exact (`credential.reveal`) · prefix (`credential.*`).
+    An **empty** capability pattern matches nothing (so a blank grant grants nothing).
+  - `resourceMatches`: empty or `*` = any · exact · `prefix/*`.
+- **permgate** is the enforcement seam that turns a `NeedsApproval` verdict into a real entry in
+  the approval inbox and blocks the action until a human approves / rejects / it expires
+  (cross-process, by polling the approval row). Consulted by: the credentials policy, the daemon
+  tool-policy gate, repo-approval, the runtime approval gate, and the firtal-gateway executor.
+- **Where it is wired live today:**
+  - **Credentials** — the deny-by-default secret gate (`cerebro_credentials_policy.go`): owner
+    passes; an agent needs a grant. The unified tool-policy chain is layered on top as (a) a
+    tighten-only **cap** and (b) — flag-gated `cerebro_credential_chain_grant` (default OFF) —
+    an **explicit-Allow grant source** (FIR-1609 Phase 7 keystone, `chainCredentialSignal` →
+    `foldCredentialVerdict`). The keystone is the safe step that lets the chain eventually own
+    credential grants: it grants only from an authored Allow row (`Effective.DecidedBy != ""`),
+    never a no-row Base=Allow default, so it can never widen who reveals a secret by default.
+  - **Repo grants** — `repo.checkout/read/push`, but only when the `repo_grants_enabled`
+    workspace setting is ON. Default OFF ⇒ repo checkout is `Base=Allow` via the tool-policy
+    chain (`CheckDaemonRepoCapability`), **not** this engine.
+- **Current data state (Firtal, verified 2026-06-22):** the grant table holds only 2 inert
+  `workspace_default` rows (empty capability ⇒ match nothing) and **zero** credential/repo
+  grants. Secrets live in **Infisical + agent vault**, and credentials are **owner-only** in
+  practice. So the engine currently grants nothing beyond owner access — but it is available and
+  load-bearing in code, so it cannot be deleted ad-hoc (see §5.3).
 
-**Blocking prerequisites before the table can be dropped:**
-1. Give **credential** enforcement a home on the tool-policy chain. **IN PROGRESS (FIR-1609
-   Phase 7 keystone):** `cerebro_credentials_policy.go` now consults the chain as an
-   **Allow-source** — an explicit Allow row on `credential.<action>` / `cerebro-credential:<uuid>`
-   grants access (`chainCredentialSignal` → `foldCredentialVerdict`), flag-gated behind
-   `cerebro_credential_chain_grant` (default OFF). This is the safe inverse of a Base=Deny
-   capability: rather than flip the chain's default to Deny for credentials (which the monotone
-   fold cannot express via `q.Base` — an Allow can never loosen a Deny base), the grant is
-   recognised **only** from an explicit authored Allow row (`Effective.DecidedBy != ""`), never a
-   no-row Base=Allow default — so it can never open a default-allow hole on reveal, and the grant
-   floor still supplies deny-by-default until grants are migrated. **Remaining before drop:**
-   migrate existing `cerebro_workspace_grant` credential grants → tool-policy Allow rows
-   (fail-closed if not 1:1), verify, then flip the flag on and retire the floor. Until that
-   migration + verification, the table is still the only live secret gate.
-2. Decide the fate of `approval_required` / `time_window_*` / `classification_ceiling`.
-3. Repoint or remove the remaining grant consumers: workspace-copy, the grants UI + server
-   handler, the audit FK (`cerebro_workspace_grant_audit`). *(The agent-facing CLI/MCP/`get_grant`
-   surfaces are already removed — FIR-1777.)*
-4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and remove the server grants package +
-   queries. The persona shim is already gone except `internal/cerebro/persona/spawner.go`,
-   which is in-use by the daemon (`ResolveSpawnSubject`) and stays until the spawn-subject
-   resolution is renamed/relocated.
+### 5.3 Consolidation path — via the engine-flip (FIR-1512), never a blind drop
+The end state moves credential (and other) grant authority off `cerebro_workspace_grant` and
+onto the unified tool-policy chain, then retires the table. That is **FIR-1512** ("Engine-flip —
+pensionér grants") + FIR-1739 — a deliberate change, **not** a one-shot delete. Because the
+resolver + permgate are wired into the live credential / approval / repo paths, an unsequenced
+`DROP` breaks those gates. Safe sequence:
+1. Credential keystone on the chain — **done** (flag-gated, §5.2).
+2. Migrate any real grants → tool-policy Allow rows (fail-closed if not 1:1), then flip the
+   credential flag on and retire the deny-by-default floor.
+3. Repoint repo + workspace-copy (`workspacecopy/copy_roles.go`) off the table; remove the
+   operator grants UI + `cerebro/grants` server handler (`router.go` `/grants`) + the audit FK.
+4. **Then** drop `cerebro_workspace_grant` (+ `_audit`) and reduce the resolver. `approval_required`
+   / `time_window_*` / `classification_ceiling` carry no live enforcement — drop them in the
+   consolidation unless a concrete need surfaces.
 
 ---
 
@@ -280,7 +289,9 @@ The end state we are building toward (FIR-1496):
    last-owner guard, signup) are documented as such so "code-only" reads as a deliberate choice,
    not a missing feature.
 3. **Credentials onto the chain** (Base=Deny), retiring the grant resolver for credentials.
-4. **Persona removed** per section 5.
+4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
+   usable function that consolidates onto the chain via the engine-flip (FIR-1512, §5.3) — never
+   an ad-hoc drop.
 5. **Visible enforcement state.** The flags that decide whether policy rows are actually
    enforced (`cerebro_local_tool_policy(_enforce)`, `cerebro_approval_gate`) must be shown next
    to the policy tables — an admin setting Deny must see whether enforcement is on.
