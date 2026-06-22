@@ -305,12 +305,13 @@ function AgentPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex items-center gap-1.5 rounded-md px-1.5 py-1 -ml-1 cursor-pointer outline-none transition-colors hover:bg-accent aria-expanded:bg-accent">
-        {/* CEREBRO-PATCH(chat-selector-align): FIR-1789 — 24px ActorAvatar
-            with status dot, identical to chat-window AgentDropdown. */}
+        {/* CEREBRO-PATCH(chat-selector-align): FIR-1789 — 14px avatar so the
+            "Talking to" selector matches the "Replying to" trigger-target bar
+            (trigger-target-bar.tsx). Same size in inbox + chat-window. */}
         <ActorAvatar
           actorType="agent"
           actorId={activeAgent.id}
-          size={24}
+          size={14}
           enableHoverCard
           showStatusDot
         />

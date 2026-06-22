@@ -77,16 +77,28 @@ vi.mock("@multica/cerebro-composer", () => ({
   ChatComposer: ({
     agentName,
     onSend,
+    leftAdornment,
   }: {
     agentName?: string;
     onSend: (content: string) => void;
+    leftAdornment?: React.ReactNode;
   }) => (
     <div>
       <div data-testid="chat-input-agent">{agentName}</div>
+      <div data-testid="chat-input-left-adornment">{leftAdornment}</div>
       <button type="button" onClick={() => onSend("hello")}>
         Send
       </button>
     </div>
+  ),
+}));
+
+// FIR-1789: the agent-selector trigger renders the shared ActorAvatar at the
+// same size as the "Replying to" trigger-target bar. Stub it and expose the
+// size prop so the alignment is asserted in a test.
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({ size }: { size?: number }) => (
+    <div data-testid="selector-avatar" data-size={String(size)} />
   ),
 }));
 
@@ -163,6 +175,13 @@ describe("InboxChatPanel", () => {
         title: "hello",
       });
     });
+  });
+
+  it("renders the agent selector avatar at size 14 to match the Replying to bar (FIR-1789)", () => {
+    renderPanel("agent-sara");
+
+    const avatar = screen.getByTestId("selector-avatar");
+    expect(avatar).toHaveAttribute("data-size", "14");
   });
 
   it("puts recent chats above the new-conversation prompt for the active agent", () => {
