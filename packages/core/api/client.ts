@@ -2190,6 +2190,8 @@ export class ApiClient {
     if (params?.labels?.length) search.set("labels", params.labels.join(","));
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.agent_id) search.set("agent_id", params.agent_id);
+    if (params?.source_type) search.set("source_type", params.source_type);
+    if (params?.source_id) search.set("source_id", params.source_id);
     if (params?.include_inactive) search.set("include_inactive", "true");
     if (params?.limit !== undefined) search.set("limit", String(params.limit));
     if (params?.offset !== undefined) search.set("offset", String(params.offset));

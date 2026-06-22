@@ -109,6 +109,7 @@
     "generating": "Generating...",
     "generated": "Knowledge draft generated",
     "generate_failed": "Failed to generate knowledge draft",
+    "existing_draft": "Knowledge draft already exists",
     "candidates": "Candidates",
     "no_candidates": "No knowledge candidates for this issue yet.",
     "open_draft": "Open draft",

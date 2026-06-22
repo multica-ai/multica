@@ -1,33 +1,47 @@
 -- name: ListKnowledgeItems :many
-SELECT *
-FROM knowledge_item
-WHERE workspace_id = sqlc.arg('workspace_id')
+SELECT ki.*
+FROM knowledge_item ki
+WHERE ki.workspace_id = sqlc.arg('workspace_id')
   AND (
       sqlc.arg('include_inactive')::boolean
-      OR lifecycle_status NOT IN ('archived', 'deprecated')
+      OR ki.lifecycle_status NOT IN ('archived', 'deprecated')
   )
-  AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type'))
-  AND (sqlc.narg('status')::text IS NULL OR lifecycle_status = sqlc.narg('status'))
-  AND (sqlc.narg('project_id')::uuid IS NULL OR project_id = sqlc.narg('project_id'))
-  AND (sqlc.narg('agent_id')::uuid IS NULL OR agent_id = sqlc.narg('agent_id'))
+  AND (sqlc.narg('type')::text IS NULL OR ki.type = sqlc.narg('type'))
+  AND (sqlc.narg('status')::text IS NULL OR ki.lifecycle_status = sqlc.narg('status'))
+  AND (sqlc.narg('project_id')::uuid IS NULL OR ki.project_id = sqlc.narg('project_id'))
+  AND (sqlc.narg('agent_id')::uuid IS NULL OR ki.agent_id = sqlc.narg('agent_id'))
   AND (
       COALESCE(cardinality(sqlc.narg('labels')::text[]), 0) = 0
-      OR domain_labels && sqlc.narg('labels')::text[]
+      OR ki.domain_labels && sqlc.narg('labels')::text[]
   )
   AND (
       sqlc.narg('query')::text IS NULL
-      OR LOWER(title) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(problem_pattern) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(trigger_conditions) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(diagnostic_steps) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(recommended_practice) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(anti_patterns) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
-      OR LOWER(applicability) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.title) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.problem_pattern) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.trigger_conditions) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.diagnostic_steps) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.recommended_practice) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.anti_patterns) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+      OR LOWER(ki.applicability) LIKE '%' || LOWER(sqlc.narg('query')::text) || '%'
+  )
+  AND (
+      (
+          sqlc.narg('source_type')::text IS NULL
+          AND sqlc.narg('source_id')::uuid IS NULL
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_source ks
+          WHERE ks.knowledge_item_id = ki.id
+            AND ks.workspace_id = ki.workspace_id
+            AND (sqlc.narg('source_type')::text IS NULL OR ks.source_type = sqlc.narg('source_type'))
+            AND (sqlc.narg('source_id')::uuid IS NULL OR ks.source_id = sqlc.narg('source_id'))
+      )
   )
 ORDER BY
-    CASE WHEN review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
-    updated_at DESC,
-    created_at DESC
+    CASE WHEN ki.review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
+    ki.updated_at DESC,
+    ki.created_at DESC
 LIMIT sqlc.arg('limit') OFFSET sqlc.arg('offset');
 
 -- name: GetKnowledgeItem :one

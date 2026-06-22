@@ -159,6 +159,59 @@ func TestKnowledgeLifecycleListSearchFeedbackAndArchive(t *testing.T) {
 	}
 }
 
+func TestKnowledgeListFiltersBySource(t *testing.T) {
+	issueID := createKnowledgeCandidateTestIssue(t, "Knowledge source filter match", "done", "medium")
+	otherIssueID := createKnowledgeCandidateTestIssue(t, "Knowledge source filter miss", "done", "medium")
+	matching := createKnowledgeFixture(t, map[string]any{
+		"title":                "Issue source filter target",
+		"type":                 "lesson",
+		"problem_pattern":      "Issue detail should find drafts created from the current issue.",
+		"recommended_practice": "Filter knowledge by issue source before showing existing draft state.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   issueID,
+		}},
+	})
+	other := createKnowledgeFixture(t, map[string]any{
+		"title":                "Issue source filter non target",
+		"type":                 "lesson",
+		"problem_pattern":      "Another issue can also have a draft.",
+		"recommended_practice": "Do not show drafts from a different issue.",
+		"sources": []map[string]any{{
+			"source_type": "issue",
+			"source_id":   otherIssueID,
+		}},
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/knowledge?source_type=issue&source_id="+issueID+"&status=draft&limit=10", nil)
+	testHandler.ListKnowledge(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListKnowledge by issue source: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var list struct {
+		Items []KnowledgeItemResponse `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != matching.Item.ID {
+		t.Fatalf("source filtered items = %#v, want only %s", list.Items, matching.Item.ID)
+	}
+	for _, item := range list.Items {
+		if item.ID == other.Item.ID {
+			t.Fatalf("source filtered list included other issue draft %s", other.Item.ID)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/knowledge?source_type=issue&source_id=not-a-uuid", nil)
+	testHandler.ListKnowledge(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("ListKnowledge invalid source_id: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestKnowledgeRejectsInvalidEnumsAndPublishingWithoutSource(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/knowledge", map[string]any{

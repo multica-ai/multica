@@ -34,6 +34,7 @@ import {
   Tag,
   Trash2,
   Users,
+  FileText,
   FoldVertical,
   UnfoldVertical,
 } from "lucide-react";
@@ -101,9 +102,15 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { childIssuesOptions, issueAttachmentsOptions, issueDetailOptions, issueUsageOptions } from "@multica/core/issues/queries";
 import { useClearIssueHistory } from "@multica/core/issues/mutations";
-import { knowledgeCandidatesOptions, knowledgeInjectionsOptions, curatorDraftTaskOptions } from "@multica/core/knowledge/queries";
+import {
+  curatorDraftTaskOptions,
+  knowledgeCandidatesOptions,
+  knowledgeInjectionsOptions,
+  knowledgeKeys,
+  knowledgeListOptions,
+} from "@multica/core/knowledge/queries";
 import { useCreateKnowledgeDraftFromIssue, useCreateKnowledgeFeedback } from "@multica/core/knowledge/mutations";
 import type { KnowledgeCandidate, KnowledgeFeedbackValue } from "@multica/core/knowledge/types";
 import { projectDetailOptions } from "@multica/core/projects/queries";
@@ -1265,6 +1272,34 @@ export function IssueDetail({
     enabled: !!issue,
   });
   const knowledgeCandidates = knowledgeCandidatesData?.candidates ?? [];
+  const { data: issueKnowledgeDraftsData } = useQuery({
+    ...knowledgeListOptions(wsId, {
+      source_type: "issue",
+      source_id: resolvedId,
+      status: "draft",
+      limit: 20,
+    }),
+    enabled: !!issue,
+  });
+  const existingKnowledgeIds = useMemo(
+    () => knowledgeCandidates
+      .map(candidateKnowledgeItemId)
+      .filter((id): id is string => id !== null),
+    [knowledgeCandidates],
+  );
+  const issueKnowledgeDraftIds = useMemo(
+    () => issueKnowledgeDraftsData?.items
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id)) ?? [],
+    [issueKnowledgeDraftsData],
+  );
+  // Track knowledge IDs created in the current page session, since
+  // local curator task completion may finish after the initial list query.
+  const [sessionKnowledgeIds, setSessionKnowledgeIds] = useState<string[]>([]);
+  const allExistingDraftIds = useMemo(
+    () => [...new Set([...sessionKnowledgeIds, ...issueKnowledgeDraftIds, ...existingKnowledgeIds])],
+    [sessionKnowledgeIds, issueKnowledgeDraftIds, existingKnowledgeIds],
+  );
   const { data: knowledgeInjectionsData } = useQuery({
     ...knowledgeInjectionsOptions(wsId, resolvedId),
     enabled: !!issue,
@@ -1999,6 +2034,7 @@ export function IssueDetail({
       }
       toast.success(tKnowledge(($) => $.issue.generated));
       if (result.item.id) {
+        setSessionKnowledgeIds((prev) => prev.includes(result.item.id) ? prev : [...prev, result.item.id]);
         router.push(paths.knowledgeDetail(result.item.id));
       }
     } catch (err) {
@@ -2014,6 +2050,8 @@ export function IssueDetail({
       const itemId = detail?.item?.id;
       if (itemId) {
         toast.success(tKnowledge(($) => $.issue.generated));
+        setSessionKnowledgeIds((prev) => prev.includes(itemId) ? prev : [...prev, itemId]);
+        queryClient.invalidateQueries({ queryKey: knowledgeKeys.all(wsId) });
         router.push(paths.knowledgeDetail(itemId));
       }
       setCuratorDraftTaskId(null);
@@ -2021,7 +2059,7 @@ export function IssueDetail({
       toast.error(curatorDraftTask.error ?? tKnowledge(($) => $.issue.generate_failed));
       setCuratorDraftTaskId(null);
     }
-  }, [curatorDraftTask, curatorDraftTaskId, router]);
+  }, [curatorDraftTask, curatorDraftTaskId, queryClient, router, tKnowledge, wsId]);
 
   const handleKnowledgeFeedback = async (knowledgeId: string, value: KnowledgeFeedbackValue) => {
     try {
@@ -2371,6 +2409,20 @@ export function IssueDetail({
                 ? tKnowledge(($) => $.issue.generating)
                 : tKnowledge(($) => $.issue.generate_draft)}
             </Button>
+
+            {/* Existing drafts notice */}
+            {allExistingDraftIds.length > 0 && (
+              <AppLink
+                href={paths.knowledgeDetail(allExistingDraftIds[0]!)}
+                className="flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200 dark:hover:bg-amber-900"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0" />
+                <span>{tKnowledge(($) => $.issue.existing_draft)}</span>
+                <span className="ml-auto font-medium underline underline-offset-2">
+                  {tKnowledge(($) => $.issue.open_draft)}
+                </span>
+              </AppLink>
+            )}
 
             {/* Injections */}
             <div className="space-y-1.5">

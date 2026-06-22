@@ -380,6 +380,10 @@ func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	sourceID, ok := parseOptionalUUIDQuery(w, q.Get("source_id"), "source_id")
+	if !ok {
+		return
+	}
 	status := textFromString(q.Get("status"))
 	includeInactive := q.Get("include_inactive") == "true"
 	if status.Valid && (status.String == "archived" || status.String == "deprecated") {
@@ -393,6 +397,8 @@ func (h *Handler) ListKnowledge(w http.ResponseWriter, r *http.Request) {
 		Status:          status,
 		ProjectID:       projectID,
 		AgentID:         agentID,
+		SourceType:      textFromString(q.Get("source_type")),
+		SourceID:        sourceID,
 		Labels:          labels,
 		Query:           textFromString(q.Get("q")),
 		Limit:           limit,

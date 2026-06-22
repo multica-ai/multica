@@ -93,6 +93,7 @@
     "generating": "生成中...",
     "generated": "Knowledge 草稿已生成",
     "generate_failed": "生成 Knowledge 草稿失败",
+    "existing_draft": "已生成 Knowledge 草稿",
     "candidates": "候选",
     "no_candidates": "这个 issue 还没有 Knowledge 候选。",
     "open_draft": "打开草稿",

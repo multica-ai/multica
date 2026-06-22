@@ -251,7 +251,27 @@ func (s *KnowledgeCuratorService) GenerateDraftFromIssue(ctx context.Context, p 
 	if err != nil {
 		return KnowledgeDetail{}, err
 	}
-	return s.createDraft(ctx, p.WorkspaceID, p.CreatedBy, input, draft)
+	detail, err := s.createDraft(ctx, p.WorkspaceID, p.CreatedBy, input, draft)
+	if err != nil {
+		return KnowledgeDetail{}, err
+	}
+	// Mark any pending candidates for this issue as drafted so the issue page
+	// can show an "existing draft" notice on subsequent visits.
+	candidates, err := s.Queries.ListKnowledgeCandidates(ctx, db.ListKnowledgeCandidatesParams{
+		WorkspaceID: p.WorkspaceID,
+		IssueID:     p.IssueID,
+		Status:      pgtype.Text{String: "pending", Valid: true},
+		Limit:       10,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return KnowledgeDetail{}, err
+	}
+	for _, candidate := range candidates {
+		if _, err := s.markCandidateDraftSucceeded(ctx, candidate, detail.Item.ID, input.SourceSummary); err != nil {
+			return KnowledgeDetail{}, err
+		}
+	}
+	return detail, nil
 }
 
 func (s *KnowledgeCuratorService) GenerateDraftFromCandidate(ctx context.Context, p CuratorCandidateDraftParams) (KnowledgeDetail, error) {

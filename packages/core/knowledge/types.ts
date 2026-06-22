@@ -267,6 +267,8 @@ export interface ListKnowledgeParams {
   labels?: string[];
   project_id?: string | null;
   agent_id?: string | null;
+  source_type?: string | null;
+  source_id?: string | null;
   include_inactive?: boolean;
   limit?: number;
   offset?: number;

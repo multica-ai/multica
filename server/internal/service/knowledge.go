@@ -366,15 +366,15 @@ type correctionRound struct {
 }
 
 type prEvidenceItem struct {
-	Number        int32  `json:"number"`
-	Title         string `json:"title"`
-	RepoOwner     string `json:"repo_owner"`
-	RepoName      string `json:"repo_name"`
-	State         string `json:"state"`
-	MergedAt      string `json:"merged_at"`
-	Additions     int32  `json:"additions"`
-	Deletions     int32  `json:"deletions"`
-	ChangedFiles  int32  `json:"changed_files"`
+	Number       int32  `json:"number"`
+	Title        string `json:"title"`
+	RepoOwner    string `json:"repo_owner"`
+	RepoName     string `json:"repo_name"`
+	State        string `json:"state"`
+	MergedAt     string `json:"merged_at"`
+	Additions    int32  `json:"additions"`
+	Deletions    int32  `json:"deletions"`
+	ChangedFiles int32  `json:"changed_files"`
 }
 
 type similarityMatch struct {
@@ -392,6 +392,9 @@ func (s *KnowledgeService) List(ctx context.Context, arg db.ListKnowledgeItemsPa
 	}
 	if arg.Status.Valid && !validKnowledgeLifecycleStatus(arg.Status.String) {
 		return nil, validationError("invalid lifecycle_status")
+	}
+	if arg.SourceType.Valid && !validKnowledgeSourceType(arg.SourceType.String) {
+		return nil, validationError("invalid source_type")
 	}
 	return s.Queries.ListKnowledgeItems(ctx, arg)
 }
@@ -1481,7 +1484,7 @@ func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandid
 	simSignal, simScore, simMatches := s.scoreSimilarity(ctx, p.WorkspaceID, text)
 	if simSignal == "near_duplicate" {
 		evidenceUpdates["similarity"] = map[string]any{
-			"top_matches":   simMatches,
+			"top_matches":    simMatches,
 			"max_similarity": simMatches[0].VectorScore,
 		}
 		signals = append(signals, "near_duplicate")
@@ -1493,7 +1496,7 @@ func (s *KnowledgeService) scoreCandidate(ctx context.Context, p KnowledgeCandid
 	}
 	if len(simMatches) > 0 {
 		evidenceUpdates["similarity"] = map[string]any{
-			"top_matches":   simMatches,
+			"top_matches":    simMatches,
 			"max_similarity": simMatches[0].VectorScore,
 		}
 	}
@@ -1794,11 +1797,11 @@ func (s *KnowledgeService) EvaluateIssuePRMergedCandidate(ctx context.Context, i
 		prEvidence = append(prEvidence, item)
 	}
 	return s.EvaluateCandidate(ctx, KnowledgeCandidateEvaluateParams{
-		WorkspaceID:    issue.WorkspaceID,
-		SourceType:     "issue",
-		SourceID:       issue.ID,
-		TriggerReason:  "pr_merged",
-		Issue:          &issue,
+		WorkspaceID:   issue.WorkspaceID,
+		SourceType:    "issue",
+		SourceID:      issue.ID,
+		TriggerReason: "pr_merged",
+		Issue:         &issue,
 		AdditionalMeta: map[string]any{
 			"pr_count": len(prEvidence),
 			"pr_data":  prEvidence,

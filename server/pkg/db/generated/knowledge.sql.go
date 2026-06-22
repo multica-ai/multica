@@ -790,7 +790,7 @@ func (q *Queries) GetKnowledgePublishTargetByType(ctx context.Context, arg GetKn
 }
 
 const listIssueAgentTasksForKnowledgeDraft = `-- name: ListIssueAgentTasksForKnowledgeDraft :many
-SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.channel_id, atq.channel_message_id, atq.channel_thread_id, atq.channel_reply_to_id
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
@@ -841,6 +841,10 @@ func (q *Queries) ListIssueAgentTasksForKnowledgeDraft(ctx context.Context, arg 
 			&i.ForceFreshSession,
 			&i.IsLeaderTask,
 			&i.WaitReason,
+			&i.ChannelID,
+			&i.ChannelMessageID,
+			&i.ChannelThreadID,
+			&i.ChannelReplyToID,
 		); err != nil {
 			return nil, err
 		}
@@ -1731,36 +1735,50 @@ func (q *Queries) ListKnowledgeInjectionsByIssue(ctx context.Context, arg ListKn
 }
 
 const listKnowledgeItems = `-- name: ListKnowledgeItems :many
-SELECT id, workspace_id, project_id, agent_id, title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status, lifecycle_status, created_by, reviewed_by, reviewed_at, published_at, archived_at, created_at, updated_at, updated_by, deprecated_at, stale_score, effectiveness_score, conflict_group, review_reason, update_suggestion, review_needed_at, governance_checked_at
-FROM knowledge_item
-WHERE workspace_id = $1
+SELECT ki.id, ki.workspace_id, ki.project_id, ki.agent_id, ki.title, ki.type, ki.domain_labels, ki.problem_pattern, ki.trigger_conditions, ki.diagnostic_steps, ki.recommended_practice, ki.anti_patterns, ki.applicability, ki.confidence_status, ki.lifecycle_status, ki.created_by, ki.reviewed_by, ki.reviewed_at, ki.published_at, ki.archived_at, ki.created_at, ki.updated_at, ki.updated_by, ki.deprecated_at, ki.stale_score, ki.effectiveness_score, ki.conflict_group, ki.review_reason, ki.update_suggestion, ki.review_needed_at, ki.governance_checked_at
+FROM knowledge_item ki
+WHERE ki.workspace_id = $1
   AND (
       $2::boolean
-      OR lifecycle_status NOT IN ('archived', 'deprecated')
+      OR ki.lifecycle_status NOT IN ('archived', 'deprecated')
   )
-  AND ($3::text IS NULL OR type = $3)
-  AND ($4::text IS NULL OR lifecycle_status = $4)
-  AND ($5::uuid IS NULL OR project_id = $5)
-  AND ($6::uuid IS NULL OR agent_id = $6)
+  AND ($3::text IS NULL OR ki.type = $3)
+  AND ($4::text IS NULL OR ki.lifecycle_status = $4)
+  AND ($5::uuid IS NULL OR ki.project_id = $5)
+  AND ($6::uuid IS NULL OR ki.agent_id = $6)
   AND (
       COALESCE(cardinality($7::text[]), 0) = 0
-      OR domain_labels && $7::text[]
+      OR ki.domain_labels && $7::text[]
   )
   AND (
       $8::text IS NULL
-      OR LOWER(title) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(problem_pattern) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(trigger_conditions) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(diagnostic_steps) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(recommended_practice) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(anti_patterns) LIKE '%' || LOWER($8::text) || '%'
-      OR LOWER(applicability) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.title) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.problem_pattern) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.trigger_conditions) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.diagnostic_steps) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.recommended_practice) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.anti_patterns) LIKE '%' || LOWER($8::text) || '%'
+      OR LOWER(ki.applicability) LIKE '%' || LOWER($8::text) || '%'
+  )
+  AND (
+      (
+          $9::text IS NULL
+          AND $10::uuid IS NULL
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM knowledge_source ks
+          WHERE ks.knowledge_item_id = ki.id
+            AND ks.workspace_id = ki.workspace_id
+            AND ($9::text IS NULL OR ks.source_type = $9)
+            AND ($10::uuid IS NULL OR ks.source_id = $10)
+      )
   )
 ORDER BY
-    CASE WHEN review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
-    updated_at DESC,
-    created_at DESC
-LIMIT $10 OFFSET $9
+    CASE WHEN ki.review_needed_at IS NULL THEN 0 ELSE 1 END ASC,
+    ki.updated_at DESC,
+    ki.created_at DESC
+LIMIT $12 OFFSET $11
 `
 
 type ListKnowledgeItemsParams struct {
@@ -1772,6 +1790,8 @@ type ListKnowledgeItemsParams struct {
 	AgentID         pgtype.UUID `json:"agent_id"`
 	Labels          []string    `json:"labels"`
 	Query           pgtype.Text `json:"query"`
+	SourceType      pgtype.Text `json:"source_type"`
+	SourceID        pgtype.UUID `json:"source_id"`
 	Offset          int32       `json:"offset"`
 	Limit           int32       `json:"limit"`
 }
@@ -1786,6 +1806,8 @@ func (q *Queries) ListKnowledgeItems(ctx context.Context, arg ListKnowledgeItems
 		arg.AgentID,
 		arg.Labels,
 		arg.Query,
+		arg.SourceType,
+		arg.SourceID,
 		arg.Offset,
 		arg.Limit,
 	)
