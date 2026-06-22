@@ -35,8 +35,11 @@ export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
   cache_share_percent: 0,
 };
 
-export async function getContextUsage(issueId: string): Promise<ContextUsage> {
-  const path = `${base(issueId)}/context-usage`;
+export async function getContextUsage(issueId: string, sessionId?: string): Promise<ContextUsage> {
+  // FIR-1870: scope the measurement to a specific session so each session shows
+  // its own context window; omit for the active session.
+  const query = sessionId && sessionId !== "default" ? `?session_id=${encodeURIComponent(sessionId)}` : "";
+  const path = `${base(issueId)}/context-usage${query}`;
   const raw = await api.cerebroRequest<unknown>(path);
   return parseWithFallback(raw, ContextUsageSchema, CONTEXT_USAGE_FALLBACK, {
     endpoint: path,

@@ -28,12 +28,20 @@ function formatTokens(n: number): string {
 
 export function SessionContextBar({
   issueId,
+  sessionId,
   groups,
+  active = true,
 }: {
   issueId: string;
+  // FIR-1870: scope the bar to one session so each session shows its own context
+  // window; omit for the active session.
+  sessionId?: string;
   groups: TimelineGroup[];
+  // Only the active session offers the handoff CTA; historical sessions show the
+  // fill bar as a read-only record of how full they got.
+  active?: boolean;
 }) {
-  const { data } = useContextUsage(issueId);
+  const { data } = useContextUsage(issueId, sessionId);
   const startFresh = useStartFresh(issueId);
 
   let fraction: number;
@@ -62,7 +70,7 @@ export function SessionContextBar({
   const usedPct = Math.round(pct * 100);
   const leftPct = 100 - usedPct;
   const warm = pct >= WARM_THRESHOLD;
-  const recommendHandoff = pct >= HANDOFF_THRESHOLD;
+  const recommendHandoff = active && pct >= HANDOFF_THRESHOLD;
 
   // Quiet until half full, then warm to orange, then to destructive near the
   // handoff line — semantic/amber tokens only, no custom colours.

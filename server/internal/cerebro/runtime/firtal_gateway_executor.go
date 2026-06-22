@@ -1113,6 +1113,13 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
 		acc.PromptInputChars += c.PromptInputChars
+		// FIR-1870: the context-window footprint is the LAST round's whole prompt
+		// (gateway InputTokens already includes cache), not the cross-round sum.
+		// Overwrite each round that reports usage so the final round wins.
+		if c.Usage.InputTokens > 0 {
+			acc.ContextInputTokens = c.Usage.InputTokens
+			acc.ContextCacheReadTokens = c.Usage.CacheReadTokens
+		}
 	}
 
 	maxRounds := firtalGatewayMaxToolRounds
@@ -1227,6 +1234,13 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
 		acc.PromptInputChars += c.PromptInputChars
+		// FIR-1870: the context-window footprint is the LAST round's whole prompt
+		// (gateway InputTokens already includes cache), not the cross-round sum.
+		// Overwrite each round that reports usage so the final round wins.
+		if c.Usage.InputTokens > 0 {
+			acc.ContextInputTokens = c.Usage.InputTokens
+			acc.ContextCacheReadTokens = c.Usage.CacheReadTokens
+		}
 	}
 
 	maxRounds := firtalGatewayMaxToolRounds
@@ -1395,6 +1409,13 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 		acc.Usage.CacheWriteTokens += c.Usage.CacheWriteTokens
 		acc.Usage.CostCents += c.Usage.CostCents
 		acc.PromptInputChars += c.PromptInputChars
+		// FIR-1870: the context-window footprint is the LAST round's whole prompt
+		// (gateway InputTokens already includes cache), not the cross-round sum.
+		// Overwrite each round that reports usage so the final round wins.
+		if c.Usage.InputTokens > 0 {
+			acc.ContextInputTokens = c.Usage.InputTokens
+			acc.ContextCacheReadTokens = c.Usage.CacheReadTokens
+		}
 	}
 
 	gwClient := e.gateway
@@ -1860,6 +1881,20 @@ func (e *FirtalGatewayExecutor) recordTaskUsage(ctx context.Context, task db.Age
 		CostCents:        usage.CostCents,
 	}); err != nil {
 		e.logger.Warn("firtal gateway task usage upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
+	}
+
+	// FIR-1870: task_usage above is the lifetime sum (cost truth); record the last
+	// round's prompt footprint separately so the context-window indicator reads
+	// real occupancy instead of the cross-round sum (which pins the gauge at 100%).
+	if completion.ContextInputTokens > 0 {
+		if err := e.cerebro.UpsertCerebroTaskContextFootprint(ctx, cerebrodb.UpsertCerebroTaskContextFootprintParams{
+			TaskID:          task.ID,
+			Model:           completion.Model,
+			InputTokens:     completion.ContextInputTokens,
+			CacheReadTokens: completion.ContextCacheReadTokens,
+		}); err != nil {
+			e.logger.Warn("firtal gateway context footprint upsert failed", "task_id", util.UUIDToString(task.ID), "model", completion.Model, "error", err)
+		}
 	}
 
 	cents := usage.CostCents

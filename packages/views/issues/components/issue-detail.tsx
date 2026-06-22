@@ -2703,6 +2703,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                           {activityGroups.map((g) => renderGroup(g, false, true))}
                         </div>
                       ) : null}
+                      {/* CEREBRO-PATCH(session-context-per-session): FIR-1870 — every session has its own context window, shown directly under that session. */}
+                      {sessionContextHairlineEnabled ? (
+                        <div className="mt-2">
+                          <SessionContextBar issueId={id} sessionId={sg.session.id} groups={sg.groups} active={isActive} />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 });
@@ -2718,13 +2724,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   mount CommentInput via channel-detail.tsx) leave pinnable
                   off so chat-style surfaces stay unchanged. */}
               {/* CEREBRO-PATCH(issue-composer-unify): FIR-1748 — shared CommentComposer (new-comment variant). */}
+              {/* CEREBRO-PATCH(session-context-per-session): FIR-1870 — the context window now renders per session (under each session box) rather than once under the composer. */}
               <CommentComposer issueId={id} onSubmit={submitComment} pinnable triggerAgentId={triggerAgentId} />
-              {/* CEREBRO-PATCH(session-context-below-input): FIR-1839 1C — the active session's own context measurement sits directly under the input box, not above it. */}
-              {sessionsEnabled && sessionContextHairlineEnabled ? (
-                <div className="mt-2">
-                  <SessionContextBar issueId={id} groups={timelineView.groups} />
-                </div>
-              ) : null}
             </div>
               </TabsContent>
             </Tabs>

@@ -1059,6 +1059,14 @@ type CerebroStatusModel struct {
 	WorkspaceDefault bool               `json:"workspace_default"`
 }
 
+type CerebroTaskContextFootprint struct {
+	TaskID          pgtype.UUID        `json:"task_id"`
+	Model           string             `json:"model"`
+	InputTokens     int64              `json:"input_tokens"`
+	CacheReadTokens int64              `json:"cache_read_tokens"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroToolPolicy struct {
 	ID              pgtype.UUID        `json:"id"`
 	WorkspaceID     pgtype.UUID        `json:"workspace_id"`

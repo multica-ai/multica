@@ -56,7 +56,10 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sessionID, start, end, hasEnd, err := h.activeSessionWindow(r.Context(), issue.ID)
+	// FIR-1870: an optional session_id scopes the measurement to a specific
+	// session so the indicator can be shown per session; empty = active session.
+	requestedSession := r.URL.Query().Get("session_id")
+	sessionID, start, end, hasEnd, err := h.activeSessionWindow(r.Context(), issue.ID, requestedSession)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve active session")
 		return
@@ -177,11 +180,15 @@ func clampPercent(p int) int {
 	return p
 }
 
-// activeSessionWindow returns the active session's id and timeline window. The
-// active session is the first non-done marker, else the latest. When the issue
-// has no session markers it is the implicit single "Session 1" covering the
-// whole timeline: id "default", start = zero time, no end.
-func (h *Handler) activeSessionWindow(ctx context.Context, issueID pgtype.UUID) (sessionID string, start time.Time, end time.Time, hasEnd bool, err error) {
+// activeSessionWindow returns a session's id and timeline window. When
+// requestedID is empty it resolves the ACTIVE session (first non-done marker,
+// else the latest); when requestedID names an existing marker it returns THAT
+// session's window, so the indicator can be shown per session (FIR-1870 — every
+// session has its own context window). When the issue has no session markers it
+// is the implicit single "Session 1" covering the whole timeline: id "default",
+// start = zero time, no end. An unknown requestedID falls back to the active
+// session.
+func (h *Handler) activeSessionWindow(ctx context.Context, issueID pgtype.UUID, requestedID string) (sessionID string, start time.Time, end time.Time, hasEnd bool, err error) {
 	rows, err := h.pool.Query(ctx, `
 		SELECT id, status, created_at
 		FROM cerebro_session
@@ -216,16 +223,27 @@ func (h *Handler) activeSessionWindow(ctx context.Context, issueID pgtype.UUID) 
 		return "default", time.Time{}, time.Time{}, false, nil
 	}
 
-	activeIdx := len(markers) - 1 // default: latest
+	idx := len(markers) - 1 // default: latest
+	// A specific session was requested: return its window when it exists.
+	if requestedID != "" && requestedID != "default" {
+		for i, m := range markers {
+			if m.id == requestedID {
+				idx = i
+				goto chosen
+			}
+		}
+	}
+	// Otherwise resolve the active session: first non-done marker, else latest.
 	for i, m := range markers {
 		if m.status != "done" {
-			activeIdx = i
+			idx = i
 			break
 		}
 	}
-	active := markers[activeIdx]
-	if activeIdx+1 < len(markers) {
-		return active.id, active.created, markers[activeIdx+1].created, true, nil
+chosen:
+	chosenMarker := markers[idx]
+	if idx+1 < len(markers) {
+		return chosenMarker.id, chosenMarker.created, markers[idx+1].created, true, nil
 	}
-	return active.id, active.created, time.Time{}, false, nil
+	return chosenMarker.id, chosenMarker.created, time.Time{}, false, nil
 }

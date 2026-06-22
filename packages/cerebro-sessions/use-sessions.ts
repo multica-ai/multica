@@ -13,13 +13,14 @@ export function useSessions(issueId: string) {
   });
 }
 
-// Context-window usage for the issue's active session, from real per-run tokens
-// (cross-runtime, cross-model). `enabled` lets the caller fetch only when the
-// hairline is actually shown, so non-active session headers cost nothing.
-export function useContextUsage(issueId: string, enabled = true) {
+// Context-window usage from real per-run tokens (cross-runtime, cross-model).
+// `sessionId` scopes it to one session so each session shows its own window
+// (FIR-1870); omit/empty for the issue's active session. `enabled` lets the
+// caller fetch only when the bar is actually shown.
+export function useContextUsage(issueId: string, sessionId?: string, enabled = true) {
   return useQuery({
-    queryKey: ["cerebro-session-context-usage", issueId],
-    queryFn: () => getContextUsage(issueId),
+    queryKey: ["cerebro-session-context-usage", issueId, sessionId ?? ""],
+    queryFn: () => getContextUsage(issueId, sessionId),
     enabled,
   });
 }

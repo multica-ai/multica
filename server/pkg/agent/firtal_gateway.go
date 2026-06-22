@@ -247,7 +247,10 @@ func usageFromGatewayResponse(resp firtalGatewayResponse) TokenUsage {
 			InputTokens:     resp.Firtal.InputTokens,
 			OutputTokens:    resp.Firtal.OutputTokens,
 			CacheReadTokens: resp.Firtal.CachedInputTokens,
-			CostCents:       resp.Firtal.CostCents,
+			// CEREBRO-PATCH(agent-firtal-gateway-context-footprint): FIR-1870 OpenAI-style input already includes cache, so it is the whole-prompt footprint for the context-window indicator (avoids the cumulative input+cacheRead double-count).
+			ContextInputTokens:     resp.Firtal.InputTokens,
+			ContextCacheReadTokens: resp.Firtal.CachedInputTokens,
+			CostCents:              resp.Firtal.CostCents,
 		}
 	}
 	if resp.Usage == nil {
@@ -269,6 +272,9 @@ func usageFromGatewayResponse(resp firtalGatewayResponse) TokenUsage {
 		InputTokens:     input,
 		OutputTokens:    output,
 		CacheReadTokens: cached,
+		// CEREBRO-PATCH(agent-firtal-gateway-context-footprint): FIR-1870 input already includes cache (OpenAI-style), so it is the whole-prompt footprint for the context-window indicator.
+		ContextInputTokens:     input,
+		ContextCacheReadTokens: cached,
 	}
 }
 

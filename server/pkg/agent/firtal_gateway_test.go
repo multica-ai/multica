@@ -43,8 +43,8 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 	backend := &firtalGatewayBackend{cfg: Config{Env: map[string]string{
 		"FIRTAL_REGISTRY_URL": srv.URL,
 		"FIRTAL_REGISTRY_KEY": "rk_test",
-		"MULTICA_TASK_ID":                     "task-1",
-		"MULTICA_AGENT_ID":                    "agent-1",
+		"MULTICA_TASK_ID":     "task-1",
+		"MULTICA_AGENT_ID":    "agent-1",
 	}}}
 
 	session, err := backend.Execute(context.Background(), "Sig hej", ExecOptions{
@@ -94,6 +94,10 @@ func TestFirtalGatewayExecuteCallsChatCompletions(t *testing.T) {
 	usage := result.Usage["claude-sonnet-4-6"]
 	if usage.InputTokens != 10 || usage.OutputTokens != 4 || usage.CacheReadTokens != 2 || usage.CostCents != 7 {
 		t.Fatalf("usage = %#v", usage)
+	}
+	// CEREBRO-PATCH(agent-firtal-gateway-context-footprint): FIR-1870 the gateway's input already includes cache, so the context-window footprint equals input (10) with the cached subset (2).
+	if usage.ContextInputTokens != 10 || usage.ContextCacheReadTokens != 2 {
+		t.Fatalf("footprint = %d/%d, want 10/2", usage.ContextInputTokens, usage.ContextCacheReadTokens)
 	}
 }
 

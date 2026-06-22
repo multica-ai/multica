@@ -127,6 +127,14 @@ type GatewayCompletion struct {
 	Output    string
 	ToolCalls []GatewayToolCall
 	Usage     GatewayUsage
+	// ContextInputTokens / ContextCacheReadTokens are the FIR-1870 last-round
+	// context-window footprint: the whole prompt the model read on the FINAL
+	// round (gateway accounting is OpenAI-style, so InputTokens already includes
+	// the cached subset) and that round's cached portion. Unlike Usage, which is
+	// summed across rounds for cost, these are overwritten each round so the last
+	// round wins — that is how full the window actually is. 0 on a usage-less run.
+	ContextInputTokens     int64
+	ContextCacheReadTokens int64
 	// ToolResultChars is the total characters of tool-result content produced
 	// across the tool loop. It feeds the prune_tool_results cost measurement
 	// (FIR-2325); it is summed alongside Usage and is 0 for tool-free runs.
