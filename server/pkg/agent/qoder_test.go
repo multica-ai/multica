@@ -108,6 +108,30 @@ done
 `
 }
 
+func fakeQoderACPScriptWithLateStdoutAfterResult() string {
+	return `#!/bin/sh
+# Fake qodercli that returns session/prompt, then leaves stdout open via a
+# child process that writes one more notification after the bounded drain grace.
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fake"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"ok"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      ( sleep 0.08; printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"late"}}}}\n' ) &
+      sleep 30
+      ;;
+  esac
+done
+`
+}
+
 // fakeQoderACPScriptCapturingRPC records every JSON-RPC line it receives to
 // $QODER_RPC_FILE so a test can inspect the session/new mcpServers payload that
 // qoder actually sent (e.g. that remote MCP headers survived the conversion).
@@ -405,6 +429,62 @@ func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("qoder result blocked waiting for reader shutdown")
 	}
+}
+
+func TestQoderMessageStreamDropsSendAfterClose(t *testing.T) {
+	stream := newQoderMessageStream(1)
+	stream.close()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("send after close panicked: %v", r)
+		}
+	}()
+	stream.send(Message{Type: MessageText, Content: "late"})
+
+	if _, ok := <-stream.ch; ok {
+		t.Fatal("message channel should be closed")
+	}
+}
+
+func TestQoderBackendIgnoresLateReaderOutputAfterGrace(t *testing.T) {
+	oldGrace := qoderReaderDrainGrace
+	qoderReaderDrainGrace = 25 * time.Millisecond
+	t.Cleanup(func() { qoderReaderDrainGrace = oldGrace })
+
+	fakePath := filepath.Join(t.TempDir(), "qodercli")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithLateStdoutAfterResult()))
+
+	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "hi", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("status=%q err=%q", result.Status, result.Error)
+		}
+		if result.Output != "ok" {
+			t.Fatalf("output=%q want ok", result.Output)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("qoder result blocked waiting for reader shutdown")
+	}
+
+	time.Sleep(150 * time.Millisecond)
 }
 
 // TestQoderForwardsMcpAuthHeaderToSessionNew is the end-to-end guard for the

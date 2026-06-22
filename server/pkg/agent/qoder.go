@@ -38,6 +38,35 @@ type qoderBackend struct {
 
 var qoderReaderDrainGrace = 2 * time.Second
 
+type qoderMessageStream struct {
+	ch     chan Message
+	mu     sync.Mutex
+	closed bool
+}
+
+func newQoderMessageStream(size int) *qoderMessageStream {
+	return &qoderMessageStream{ch: make(chan Message, size)}
+}
+
+func (s *qoderMessageStream) send(msg Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	trySend(s.ch, msg)
+}
+
+func (s *qoderMessageStream) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	s.closed = true
+	close(s.ch)
+}
+
 func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -109,7 +138,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgCh := make(chan Message, 256)
+	msgStream := newQoderMessageStream(256)
 	resCh := make(chan Result, 1)
 
 	var outputMu sync.Mutex
@@ -138,7 +167,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				output.WriteString(msg.Content)
 				outputMu.Unlock()
 			}
-			trySend(msgCh, msg)
+			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
 			if !streamingCurrentTurn.Load() {
@@ -168,7 +197,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	go func() {
 		defer cancel()
-		defer close(msgCh)
+		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
 			stdin.Close()
@@ -363,8 +392,10 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		case <-drainCtx.Done():
 		}
 		drainCancel()
-		// The stdout reader may still run after the grace window; forbid further
-		// forwarding to msgCh before this goroutine's defer closes it (panic on send).
+		// The stdout reader may still run after the grace window. Flip the
+		// stream gate before this goroutine's defer closes msgStream; if a
+		// late reader already passed the gate, qoderMessageStream serializes
+		// send and close so the late send is dropped instead of panicking.
 		streamingCurrentTurn.Store(false)
 
 		outputMu.Lock()
@@ -401,5 +432,5 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	return &Session{Messages: msgStream.ch, Result: resCh}, nil
 }
