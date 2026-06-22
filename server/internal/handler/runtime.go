@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/claimwindow"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -32,16 +34,25 @@ type AgentRuntimeResponse struct {
 	// Visibility is "private" (default — only the owner / workspace admins
 	// can bind agents) or "public" (any workspace member can). See migration
 	// 083 and canUseRuntimeForAgent.
-	Visibility string  `json:"visibility"`
+	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID  *string `json:"profile_id"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	ProfileID                  *string `json:"profile_id"`
+	LastSeenAt                 *string `json:"last_seen_at"`
+	CreatedAt                  string  `json:"created_at"`
+	UpdatedAt                  string  `json:"updated_at"`
+	ClaimWindowStart           *string `json:"claim_window_start"`
+	ClaimWindowTimezone        *string `json:"claim_window_timezone"`
+	ClaimWindowDurationMinutes int     `json:"claim_window_duration_minutes"`
+	ClaimWindowOpen            *bool   `json:"claim_window_open"`
+	ClaimWindowTransitionAt    *string `json:"claim_window_transition_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
+	return runtimeToResponseAt(rt, time.Now())
+}
+
+func runtimeToResponseAt(rt db.AgentRuntime, now time.Time) AgentRuntimeResponse {
 	var metadata any
 	if rt.Metadata != nil {
 		json.Unmarshal(rt.Metadata, &metadata)
@@ -50,24 +61,71 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		metadata = map[string]any{}
 	}
 
-	return AgentRuntimeResponse{
-		ID:           uuidToString(rt.ID),
-		WorkspaceID:  uuidToString(rt.WorkspaceID),
-		DaemonID:     textToPtr(rt.DaemonID),
-		Name:         rt.Name,
-		RuntimeMode:  rt.RuntimeMode,
-		Provider:     rt.Provider,
-		LaunchHeader: agent.LaunchHeader(rt.Provider),
-		Status:       rt.Status,
-		DeviceInfo:   rt.DeviceInfo,
-		Metadata:     metadata,
-		OwnerID:      uuidToPtr(rt.OwnerID),
-		Visibility:   rt.Visibility,
-		ProfileID:    uuidToPtr(rt.ProfileID),
-		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
-		CreatedAt:    timestampToString(rt.CreatedAt),
-		UpdatedAt:    timestampToString(rt.UpdatedAt),
+	resp := AgentRuntimeResponse{
+		ID:                         uuidToString(rt.ID),
+		WorkspaceID:                uuidToString(rt.WorkspaceID),
+		DaemonID:                   textToPtr(rt.DaemonID),
+		Name:                       rt.Name,
+		RuntimeMode:                rt.RuntimeMode,
+		Provider:                   rt.Provider,
+		LaunchHeader:               agent.LaunchHeader(rt.Provider),
+		Status:                     rt.Status,
+		DeviceInfo:                 rt.DeviceInfo,
+		Metadata:                   metadata,
+		OwnerID:                    uuidToPtr(rt.OwnerID),
+		Visibility:                 rt.Visibility,
+		ProfileID:                  uuidToPtr(rt.ProfileID),
+		LastSeenAt:                 timestampToPtr(rt.LastSeenAt),
+		CreatedAt:                  timestampToString(rt.CreatedAt),
+		UpdatedAt:                  timestampToString(rt.UpdatedAt),
+		ClaimWindowDurationMinutes: claimwindow.DurationMinutes,
 	}
+
+	if !rt.ClaimWindowStart.Valid && !rt.ClaimWindowTimezone.Valid {
+		return resp
+	}
+
+	open := false
+	resp.ClaimWindowOpen = &open
+	if rt.ClaimWindowStart.Valid {
+		minutes := int(rt.ClaimWindowStart.Microseconds / int64(time.Minute/time.Microsecond))
+		start := claimwindow.FormatHHMM(minutes)
+		if start != "" {
+			resp.ClaimWindowStart = &start
+		}
+	}
+	if rt.ClaimWindowTimezone.Valid {
+		timezone := rt.ClaimWindowTimezone.String
+		resp.ClaimWindowTimezone = &timezone
+	}
+
+	minuteMicros := int64(time.Minute / time.Microsecond)
+	if !rt.ClaimWindowStart.Valid || !rt.ClaimWindowTimezone.Valid ||
+		resp.ClaimWindowStart == nil || rt.ClaimWindowStart.Microseconds%minuteMicros != 0 {
+		slog.Warn("runtime has malformed claim window", "runtime_id", resp.ID)
+		return resp
+	}
+
+	startMinutes, err := claimwindow.ParseHHMM(*resp.ClaimWindowStart)
+	if err != nil {
+		slog.Warn("runtime has malformed claim window", "runtime_id", resp.ID, "error", err)
+		return resp
+	}
+	state, err := claimwindow.Evaluate(now, startMinutes, rt.ClaimWindowTimezone.String)
+	if err != nil {
+		slog.Warn("runtime claim window evaluation failed", "runtime_id", resp.ID, "error", err)
+		return resp
+	}
+
+	open = state.Open
+	resp.ClaimWindowOpen = &open
+	transition := state.NextStart
+	if state.Open {
+		transition = state.End
+	}
+	formattedTransition := transition.UTC().Format(time.RFC3339)
+	resp.ClaimWindowTransitionAt = &formattedTransition
+	return resp
 }
 
 // ---------------------------------------------------------------------------
@@ -405,12 +463,17 @@ type UpdateAgentRuntimeRequest struct {
 	// Visibility flips a runtime between "private" (default — only the owner
 	// or workspace admins can bind agents) and "public" (any workspace
 	// member can). Owner / workspace admin only, gated by canEditRuntime.
-	Visibility *string `json:"visibility,omitempty"`
+	Visibility  *string         `json:"visibility,omitempty"`
+	ClaimWindow json.RawMessage `json:"claim_window,omitempty"`
 }
 
-// UpdateAgentRuntime handles PATCH /api/runtimes/:id. Currently visibility
-// is editable; the request shape is open-ended so future fields (display
-// name, description) can be added without a route change.
+type updateRuntimeClaimWindowRequest struct {
+	StartTime string `json:"start_time"`
+	Timezone  string `json:"timezone"`
+}
+
+// UpdateAgentRuntime handles PATCH /api/runtimes/:id. Visibility and the
+// recurring task-claim window are editable; daemon-owned fields remain read-only.
 // Workspace-membership-checked; write access is gated by canEditRuntime.
 func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -441,8 +504,11 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		newVisibility  string
-		needVisibility bool
+		newVisibility    string
+		needVisibility   bool
+		newClaimStart    pgtype.Time
+		newClaimTimezone pgtype.Text
+		needClaimWindow  bool
 	)
 	if req.Visibility != nil {
 		v := *req.Visibility
@@ -455,14 +521,51 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			needVisibility = true
 		}
 	}
+	if req.ClaimWindow != nil {
+		if bytes.Equal(bytes.TrimSpace(req.ClaimWindow), []byte("null")) {
+			needClaimWindow = rt.ClaimWindowStart.Valid || rt.ClaimWindowTimezone.Valid
+		} else {
+			var window updateRuntimeClaimWindowRequest
+			if err := json.Unmarshal(req.ClaimWindow, &window); err != nil {
+				writeError(w, http.StatusBadRequest, "claim_window must be an object or null")
+				return
+			}
+			startMinutes, err := claimwindow.ParseHHMM(window.StartTime)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "claim_window.start_time must use HH:MM")
+				return
+			}
+			if window.Timezone == "" || window.Timezone == "Local" {
+				writeError(w, http.StatusBadRequest, "claim_window.timezone must be a valid IANA timezone")
+				return
+			}
+			if _, err := time.LoadLocation(window.Timezone); err != nil {
+				writeError(w, http.StatusBadRequest, "claim_window.timezone must be a valid IANA timezone")
+				return
+			}
+			newClaimStart = pgtype.Time{
+				Microseconds: int64(startMinutes) * int64(time.Minute/time.Microsecond),
+				Valid:        true,
+			}
+			newClaimTimezone = pgtype.Text{String: window.Timezone, Valid: true}
+			needClaimWindow = !rt.ClaimWindowStart.Valid ||
+				rt.ClaimWindowStart.Microseconds != newClaimStart.Microseconds ||
+				!rt.ClaimWindowTimezone.Valid ||
+				rt.ClaimWindowTimezone.String != newClaimTimezone.String
+		}
+	}
 
-	if needVisibility {
-		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
-			ID:         runtimeUUID,
-			Visibility: newVisibility,
+	if needVisibility || needClaimWindow {
+		updated, err := h.Queries.UpdateAgentRuntimeEditable(r.Context(), db.UpdateAgentRuntimeEditableParams{
+			SetVisibility:       needVisibility,
+			Visibility:          newVisibility,
+			SetClaimWindow:      needClaimWindow,
+			ClaimWindowStart:    newClaimStart,
+			ClaimWindowTimezone: newClaimTimezone,
+			ID:                  runtimeUUID,
 		})
 		if err != nil {
-			slog.Error("UpdateAgentRuntimeVisibility failed", "error", err, "runtime_id", runtimeID)
+			slog.Error("UpdateAgentRuntimeEditable failed", "error", err, "runtime_id", runtimeID)
 			writeError(w, http.StatusInternalServerError, "failed to update runtime")
 			return
 		}
@@ -473,6 +576,9 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
 			"action": "update",
 		})
+		if needClaimWindow && h.TaskService != nil && h.TaskService.EmptyClaim != nil {
+			h.TaskService.EmptyClaim.Bump(r.Context(), runtimeID)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, runtimeToResponse(rt))

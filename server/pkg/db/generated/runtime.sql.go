@@ -938,48 +938,6 @@ func (q *Queries) UpdateAgentRuntimeEditable(ctx context.Context, arg UpdateAgen
 	return i, err
 }
 
-const updateAgentRuntimeVisibility = `-- name: UpdateAgentRuntimeVisibility :one
-UPDATE agent_runtime
-SET visibility = $1, updated_at = now()
-WHERE id = $2
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, claim_window_start, claim_window_timezone
-`
-
-type UpdateAgentRuntimeVisibilityParams struct {
-	Visibility string      `json:"visibility"`
-	ID         pgtype.UUID `json:"id"`
-}
-
-// Toggles a runtime between 'private' (only owner can bind agents) and
-// 'public' (any workspace member can). Default for new rows is 'private'
-// (see migration 083). Gated at the handler layer to owner / workspace
-// admin only.
-func (q *Queries) UpdateAgentRuntimeVisibility(ctx context.Context, arg UpdateAgentRuntimeVisibilityParams) (AgentRuntime, error) {
-	row := q.db.QueryRow(ctx, updateAgentRuntimeVisibility, arg.Visibility, arg.ID)
-	var i AgentRuntime
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.DaemonID,
-		&i.Name,
-		&i.RuntimeMode,
-		&i.Provider,
-		&i.Status,
-		&i.DeviceInfo,
-		&i.Metadata,
-		&i.LastSeenAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OwnerID,
-		&i.LegacyDaemonID,
-		&i.Visibility,
-		&i.ProfileID,
-		&i.ClaimWindowStart,
-		&i.ClaimWindowTimezone,
-	)
-	return i, err
-}
-
 const upsertAgentRuntime = `-- name: UpsertAgentRuntime :one
 INSERT INTO agent_runtime (
     workspace_id,

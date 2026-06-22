@@ -113,17 +113,6 @@ SET visibility = CASE
 WHERE id = sqlc.arg('id')
 RETURNING *;
 
--- name: UpdateAgentRuntimeVisibility :one
--- Toggles a runtime between 'private' (only owner can bind agents) and
--- 'public' (any workspace member can). Default for new rows is 'private'
--- (see migration 083). Gated at the handler layer to owner / workspace
--- admin only.
-UPDATE agent_runtime
-SET visibility = @visibility, updated_at = now()
-WHERE id = @id
-RETURNING *;
-
-
 -- name: TouchAgentRuntimeLastSeen :execrows
 -- Bumps last_seen_at on an already-online runtime. Deliberately does NOT
 -- touch status or updated_at: status is unchanged on the hot heartbeat path,
