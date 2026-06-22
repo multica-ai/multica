@@ -22,6 +22,10 @@
     "low": "低",
     "none": "優先度なし"
   },
+  "stage": {
+    "none": "ステージなし",
+    "value": "ステージ {{n}}"
+  },
   "scope": {
     "all_label": "すべて",
     "all_description": "このワークスペースのすべてのイシュー",
@@ -193,6 +197,7 @@
     "pull_request_card_show_less": "折りたたむ",
     "prop_status": "ステータス",
     "prop_priority": "優先度",
+    "prop_stage": "ステージ",
     "prop_assignee": "担当者",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",

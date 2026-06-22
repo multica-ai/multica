@@ -34,6 +34,7 @@ const baseIssue = {
   parent_issue_id: null,
   project_id: null,
   position: 0,
+  stage: null,
   start_date: null,
   due_date: null,
   metadata: {},
@@ -73,6 +74,19 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
       total: 1,
     };
     expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+  });
+
+  it("accepts a numeric stage", () => {
+    const payload = { issues: [{ ...baseIssue, stage: 2 }], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBe(2);
+  });
+
+  it("defaults stage to null when the server omits it (older backend)", () => {
+    const { stage: _omit, ...issueWithoutStage } = baseIssue;
+    const payload = { issues: [issueWithoutStage], total: 1 };
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.stage).toBeNull();
   });
 });
 

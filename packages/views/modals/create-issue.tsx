@@ -35,7 +35,7 @@ import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multi
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
-import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -140,6 +140,11 @@ export function ManualCreatePanel({
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
+  // Stage only applies to a sub-issue; kept local (not in the persisted draft)
+  // since it's a per-creation choice tied to the chosen parent.
+  const [stage, setStage] = useState<number | null>(
+    typeof data?.stage === "number" ? (data.stage as number) : null,
+  );
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Start date is a low-frequency field — by default it lives in the
   // overflow ⋯ menu. Clicking the menu item flips this open, which both
@@ -211,6 +216,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setProjectId(undefined);
     setParentIssueId(undefined);
+    setStage(null);
     setChildIssues([]);
     setDraft({
       title: "",
@@ -246,6 +252,8 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        // Stage is only meaningful for a sub-issue (relative to its siblings).
+        stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
 
@@ -569,6 +577,16 @@ export function ManualCreatePanel({
                 triggerRender={<PillButton />}
                 align="start"
               />
+
+              {/* Stage — only relevant when creating a sub-issue under a parent */}
+              {parentIssueId && (
+                <StagePicker
+                  stage={stage}
+                  onUpdate={(u) => setStage(u.stage ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
+              )}
 
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field
