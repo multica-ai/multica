@@ -257,6 +257,20 @@ func claimAndDecodeTask(t *testing.T, runtimeID string) (*TaskAgentData, AgentTa
 func queueSquadIssueTaskFor(t *testing.T, squadID, agentID, runtimeID string, issueNumber int) (issueID, taskID string) {
 	t.Helper()
 	ctx := context.Background()
+	// The handler-test runtime is shared across the whole suite, and
+	// ClaimTaskForRuntime returns the oldest claimable task for the runtime —
+	// not necessarily ours. Other tests that create agent-assigned issues
+	// enqueue tasks on this same runtime; a stray queued/dispatched row left
+	// in flight when this test claims would be returned instead of the
+	// briefing task and carry no squad briefing. Park any pre-existing
+	// claimable tasks for this runtime so our seeded task is the one claimed.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')`,
+		runtimeID,
+	); err != nil {
+		t.Fatalf("park stray runtime tasks: %v", err)
+	}
 	if err := testPool.QueryRow(ctx, `
 INSERT INTO issue (
 workspace_id, title, status, priority, creator_id, creator_type,
@@ -368,6 +382,16 @@ func TestClaimTask_LeaderGetsBriefingFromTaskContext(t *testing.T) {
 		t.Fatalf("queue task: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	// Shared runtime: park any other in-flight claimable tasks so the leader
+	// claims this seeded task rather than a stray one left by a sibling test.
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched') AND id <> $2`,
+		runtimeID, taskID,
+	); err != nil {
+		t.Fatalf("park stray runtime tasks: %v", err)
+	}
 
 	agent, task := claimAndDecodeTask(t, runtimeID)
 	if task.SquadID != util.UUIDToString(squad.ID) {

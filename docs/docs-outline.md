@@ -534,10 +534,8 @@ multica issue assign <issue-id> --agent <agent-slug>
     | Provider | 厂商 | Session Resume | MCP | Skill 注入路径 | custom_args | 备注 |
   - 每个 provider 一小段（80-150 字）：核心定位 + 用户画像 + 官网链接 + Multica 兼容性
   - **Session resume 精确现状**:
-    - ✅ 真用：Claude / Hermes / Kimi / OpenCode / Copilot
-    - ⚠️ Codex：代码有 thread/resume 但 unreachable（future feature）
-    - ❌ 不支持：Pi / Gemini / OpenClaw
-    - ❓ 未审：Cursor
+    - ✅ 真用：Antigravity / Claude / Codex / Copilot / Cursor / Hermes / Kimi / Kiro CLI / OpenCode / OpenClaw / Pi
+    - ❌ 不支持：Gemini
 - **不写**: provider 官方使用文档（外链）、MCP 协议本身
 - **写前要验证**:
   - 认领者**必须逐个打开 `server/pkg/agent/*.go`** 确认
@@ -546,7 +544,7 @@ multica issue assign <issue-id> --agent <agent-slug>
 - **⚠️ 动笔前必读**:
   - ⚠️ 这是最容易过时的一页，provider 代码频繁变动
   - 精确到 "代码里这个 flag 传给这个 CLI" 级别，不模糊说"支持"
-  - Codex "unreachable" 状态必须明确（不是承诺）
+  - Codex fallback 语义必须明确：`thread/resume` 可用，但 stale / missing thread 会回退到 fresh thread
 - **Owner**: –
 
 ---

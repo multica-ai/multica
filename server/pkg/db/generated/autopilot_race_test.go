@@ -94,9 +94,11 @@ func TestUpdateAutopilotTriggerPreservesConcurrentAdvance(t *testing.T) {
 	autopilot, err := queries.CreateAutopilot(ctx, CreateAutopilotParams{
 		WorkspaceID:        mustUUID(t, workspaceID),
 		Title:              "Autopilot trigger race regression",
+		AssigneeType:       "agent",
 		AssigneeID:         mustUUID(t, agentID),
 		Status:             "active",
 		ExecutionMode:      "run_only",
+		ManualOptions:      []string{},
 		CreatedByType:      "member",
 		CreatedByID:        mustUUID(t, userID),
 		Description:        pgtype.Text{String: "regression test", Valid: true},

@@ -29,6 +29,12 @@ var testUserID string
 var testWorkspaceID string
 var testRuntimeID string
 
+// testProjectID is a shared project seeded into the fixture workspace. Issue
+// creation now requires project_id (issue.go), so helpers that build issues
+// without a caller-supplied project default to this one. Cleaned up with the
+// workspace via ON DELETE CASCADE.
+var testProjectID string
+
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
 	handlerTestName          = "Handler Test User"
@@ -121,11 +127,11 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 	testRuntimeID = runtimeID
@@ -137,6 +143,14 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1, $4)
 	`, workspaceID, "Handler Test Agent", runtimeID, userID); err != nil {
+		return "", "", err
+	}
+
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, workspaceID, "Handler Test Project").Scan(&testProjectID); err != nil {
 		return "", "", err
 	}
 
@@ -154,6 +168,7 @@ func cleanupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func newRequest(method, path string, body any) *http.Request {
+	body = withDefaultIssueProject(method, path, body)
 	var buf bytes.Buffer
 	if body != nil {
 		json.NewEncoder(&buf).Encode(body)
@@ -165,6 +180,40 @@ func newRequest(method, path string, body any) *http.Request {
 	return req
 }
 
+// withDefaultIssueProject back-fills project_id on CreateIssue bodies that omit
+// it. project_id is mandatory for top-level issues (OPE-1372), but the bulk of
+// handler tests build issues only to exercise unrelated behaviour and don't
+// care which project the issue lands in. Rather than thread testProjectID
+// through ~100 call sites, default it here at the single request-builder
+// chokepoint. Bodies that pin their own project_id (project-scoping tests) or
+// carry a parent_issue_id (sub-issues inherit the parent's project) are left
+// untouched, as are non-map bodies and any path other than the POST /api/issues
+// collection endpoint. Tests that deliberately assert the "project_id is
+// required" rejection must build their request without this helper.
+func withDefaultIssueProject(method, path string, body any) any {
+	if method != "POST" {
+		return body
+	}
+	if p, _, _ := strings.Cut(path, "?"); p != "/api/issues" {
+		return body
+	}
+	m, ok := body.(map[string]any)
+	if !ok {
+		return body
+	}
+	if _, hasProject := m["project_id"]; hasProject {
+		return body
+	}
+	if _, hasParent := m["parent_issue_id"]; hasParent {
+		return body
+	}
+	if testProjectID == "" {
+		return body
+	}
+	m["project_id"] = testProjectID
+	return m
+}
+
 func withURLParam(req *http.Request, key, value string) *http.Request {
 	rctx := chi.NewRouteContext()
 	if existing, ok := req.Context().Value(chi.RouteCtxKey).(*chi.Context); ok && existing != nil {
@@ -174,6 +223,22 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	}
 	rctx.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func setWorkspaceIssuePrefixForTest(t *testing.T, prefix string) {
+	t.Helper()
+
+	ctx := context.Background()
+	var previous string
+	if err := testPool.QueryRow(ctx, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous); err != nil {
+		t.Fatalf("load workspace prefix: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, prefix, testWorkspaceID); err != nil {
+		t.Fatalf("set workspace prefix: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, previous, testWorkspaceID)
+	})
 }
 
 func handlerTestRuntimeID(t *testing.T) string {
@@ -714,9 +779,14 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 
 func TestCreateIssue_ProjectIDRequired(t *testing.T) {
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": "No project issue",
-	})
+	// Build the request directly (not via newRequest) so the test-fixture
+	// default-project injection does not mask the very rejection under test.
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]any{"title": "No project issue"})
+	req := httptest.NewRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
@@ -1056,6 +1126,7 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1136,6 +1207,7 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1208,6 +1280,7 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1309,6 +1382,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
 		"project_id":           projectID,
+		"manual_options":      []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1380,6 +1454,7 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 		"title":          "Project update autopilot",
 		"assignee_id":    agentID,
 		"execution_mode": "create_issue",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1617,6 +1692,7 @@ func TestTriggerAutopilotRejectsPayloadWithoutManualOptions(t *testing.T) {
 		"title":          "Manual trigger no options",
 		"assignee_id":    agentID,
 		"execution_mode": "run_only",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -2125,6 +2201,78 @@ func TestCommentCRUD(t *testing.T) {
 	testHandler.DeleteIssue(w, req)
 }
 
+func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+
+	ctx := context.Background()
+	setWorkspaceIssuePrefixForTest(t, "MUL")
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
+		VALUES ($1, 'member', $2, $3, 3310)
+		RETURNING id
+	`, testWorkspaceID, testUserID, "preserve bare issue identifiers").Scan(&issueID); err != nil {
+		t.Fatalf("create issue fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	explicitMention := fmt.Sprintf("[MUL-3310](mention://issue/%s)", issueID)
+	createCases := []string{
+		"MUL-3310",
+		"issue/MUL-3310",
+		"feature/MUL-3310",
+		explicitMention,
+	}
+
+	var firstCommentID string
+	for _, content := range createCases {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+			"content": content,
+		})
+		req = withURLParam(req, "id", issueID)
+		testHandler.CreateComment(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", content, w.Code, w.Body.String())
+		}
+
+		var created CommentResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatalf("decode created comment: %v", err)
+		}
+		if created.Content != content {
+			t.Fatalf("CreateComment(%q) stored %q", content, created.Content)
+		}
+		if firstCommentID == "" {
+			firstCommentID = created.ID
+		}
+	}
+
+	updatedContent := "updated MUL-3310 issue/MUL-3310 feature/MUL-3310 " + explicitMention
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/comments/"+firstCommentID, map[string]any{
+		"content": updatedContent,
+	})
+	req = withURLParam(req, "commentId", firstCommentID)
+	testHandler.UpdateComment(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated comment: %v", err)
+	}
+	if updated.Content != updatedContent {
+		t.Fatalf("UpdateComment stored %q, want %q", updated.Content, updatedContent)
+	}
+}
+
 func TestCreateCommentRejectsMalformedParentID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -2170,6 +2318,7 @@ func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
 		"title":          "Malformed assignee autopilot",
 		"assignee_id":    "not-a-uuid",
 		"execution_mode": "run_only",
+		"manual_options": []string{},
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusBadRequest {

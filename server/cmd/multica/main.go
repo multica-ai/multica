@@ -16,6 +16,11 @@ var (
 	date    = "unknown"
 )
 
+// debugFlag is bound to the persistent --debug flag and, when set, makes
+// FormatError emit the full original error chain instead of just the
+// user-facing message.
+var debugFlag bool
+
 var rootCmd = &cobra.Command{
 	Use:           "multica",
 	Short:         "Multica CLI — local agent runtime and management tool",
@@ -36,6 +41,7 @@ func init() {
 	rootCmd.PersistentFlags().String("workspace-id", "", "Workspace ID (env: MULTICA_WORKSPACE_ID)")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile name (e.g. dev) — isolates config, daemon state, and workspaces")
 	rootCmd.PersistentFlags().String("config", "", "Explicit CLI config file path — also isolates daemon state by instance")
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print full error details on failure (env: MULTICA_DEBUG)")
 
 	// Core commands
 	issueCmd.GroupID = groupCore
@@ -104,8 +110,8 @@ func main() {
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {
-			fmt.Fprintln(os.Stderr, "Error:", err)
+			fmt.Fprintln(os.Stderr, cli.FormatError(err, debugFlag))
 		}
-		os.Exit(1)
+		os.Exit(cli.ExitCodeFor(err))
 	}
 }

@@ -104,9 +104,18 @@ type SkillWithFilesResponse struct {
 	Files []SkillFileResponse `json:"files"`
 }
 
+type SkillImportResult struct {
+	Status        string                  `json:"status"`
+	Reason        string                  `json:"reason,omitempty"`
+	Skill         *SkillWithFilesResponse `json:"skill,omitempty"`
+	ExistingSkill *ExistingSkillIdentity  `json:"existing_skill,omitempty"`
+}
+
 type ExistingSkillIdentity struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	CreatedBy    string `json:"created_by,omitempty"`
+	CanOverwrite bool   `json:"can_overwrite,omitempty"`
 }
 
 func writeSkillImportDuplicateConflict(w http.ResponseWriter, existing ExistingSkillIdentity) {
@@ -141,7 +150,19 @@ func (h *Handler) existingSkillIdentityByName(ctx context.Context, workspaceID p
 		}
 		return ExistingSkillIdentity{}, false, err
 	}
-	return ExistingSkillIdentity{ID: uuidToString(skill.ID), Name: skill.Name}, true, nil
+	return existingSkillIdentity(skill, ""), true, nil
+}
+
+func existingSkillIdentity(skill db.Skill, userID string) ExistingSkillIdentity {
+	identity := ExistingSkillIdentity{
+		ID:           uuidToString(skill.ID),
+		Name:         skill.Name,
+		CanOverwrite: canOverwriteSkillByLocalImport(userID, skill),
+	}
+	if skill.CreatedBy.Valid {
+		identity.CreatedBy = uuidToString(skill.CreatedBy)
+	}
+	return identity
 }
 
 // decodeSkillConfig decodes a JSONB skill.config blob, defaulting to {} when
@@ -394,6 +415,15 @@ func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill d
 	return true
 }
 
+// canOverwriteSkillByLocalImport reports whether userID may overwrite skill via
+// a runtime-local-skill re-import. This is intentionally NARROWER than
+// canManageSkill: only the original creator may overwrite by re-importing.
+// Workspace owners/admins who want to change a skill they did not create must
+// edit it in-app instead. See MUL-2701 / MUL-2800.
+func canOverwriteSkillByLocalImport(userID string, skill db.Skill) bool {
+	return skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID
+}
+
 func (h *Handler) UpdateSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	skill, ok := h.loadSkillForUser(w, r, id)
@@ -527,7 +557,9 @@ func (h *Handler) DeleteSkill(w http.ResponseWriter, r *http.Request) {
 type ImportSkillRequest struct {
 	URL        string `json:"url"`
 	GiteeToken string `json:"gitee_token,omitempty"`
+	// Overwrite is a legacy alias for on_conflict=overwrite.
 	Overwrite  bool   `json:"overwrite,omitempty"`
+	OnConflict string `json:"on_conflict,omitempty"`
 }
 
 type DiscoverImportSkillsRequest struct {
@@ -547,6 +579,23 @@ type DiscoveredImportSkill struct {
 
 type DiscoverImportSkillsResponse struct {
 	Skills []DiscoveredImportSkill `json:"skills"`
+}
+
+const (
+	importOnConflictFail      = "fail"
+	importOnConflictOverwrite = "overwrite"
+	importOnConflictRename    = "rename"
+	importOnConflictSkip      = "skip"
+)
+
+const maxImportRenameAttempts = 50
+
+func validImportOnConflict(strategy string) bool {
+	switch strategy {
+	case "", importOnConflictFail, importOnConflictOverwrite, importOnConflictRename, importOnConflictSkip:
+		return true
+	}
+	return false
 }
 
 // Per-import bundle limits. These mirror the local-runtime importer so that
@@ -2571,6 +2620,116 @@ func skillMdNotFoundError(owner, repo, skillName string) error {
 	return fmt.Errorf("SKILL.md not found in repository %s/%s for skill %s", owner, repo, skillName)
 }
 
+func skillImportConflictReason() string {
+	return "a skill with this name already exists; use --on-conflict overwrite to replace it or --on-conflict rename to import a copy"
+}
+
+func (h *Handler) createImportedSkillWithName(ctx context.Context, workspaceID, creatorID pgtype.UUID, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest) (SkillWithFilesResponse, error) {
+	return h.createSkillWithFiles(ctx, skillCreateInput{
+		WorkspaceID: workspaceID,
+		CreatorID:   creatorID,
+		Name:        name,
+		Description: imported.description,
+		Content:     imported.content,
+		Config:      config,
+		Files:       files,
+	})
+}
+
+func (h *Handler) createRenamedImportedSkill(ctx context.Context, workspaceID, creatorID pgtype.UUID, baseName string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest) (SkillWithFilesResponse, error) {
+	for suffix := 2; suffix < maxImportRenameAttempts+2; suffix++ {
+		candidate := fmt.Sprintf("%s-%d", baseName, suffix)
+		resp, err := h.createImportedSkillWithName(ctx, workspaceID, creatorID, candidate, imported, config, files)
+		if err == nil {
+			return resp, nil
+		}
+		if !isUniqueViolation(err) {
+			return SkillWithFilesResponse{}, err
+		}
+	}
+	return SkillWithFilesResponse{}, fmt.Errorf("failed to find an available renamed skill name after %d attempts", maxImportRenameAttempts)
+}
+
+func skillImportOverwriteFailure(err error) (int, string) {
+	switch {
+	case errors.Is(err, errSkillOverwriteNotFound):
+		return http.StatusConflict, "target skill no longer exists"
+	case errors.Is(err, errSkillOverwriteForbidden):
+		return http.StatusForbidden, "only the skill creator can overwrite this skill"
+	case errors.Is(err, errSkillOverwriteNameMismatch):
+		return http.StatusConflict, "target skill name no longer matches the imported skill"
+	default:
+		return http.StatusInternalServerError, "failed to overwrite skill: " + err.Error()
+	}
+}
+
+func (h *Handler) resolveImportSkillConflict(w http.ResponseWriter, r *http.Request, strategy string, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID string, name string, imported *importedSkill, config map[string]any, files []CreateSkillFileRequest, existing db.Skill) {
+	existingInfo := existingSkillIdentity(existing, creatorID)
+	switch strategy {
+	case importOnConflictSkip:
+		writeJSON(w, http.StatusOK, SkillImportResult{
+			Status:        "skipped",
+			Reason:        "a skill with this name already exists",
+			ExistingSkill: &existingInfo,
+		})
+	case importOnConflictOverwrite:
+		if !canOverwriteSkillByLocalImport(creatorID, existing) {
+			writeJSON(w, http.StatusForbidden, SkillImportResult{
+				Status:        "failed",
+				Reason:        "only the skill creator can overwrite this skill",
+				ExistingSkill: &existingInfo,
+			})
+			return
+		}
+		resp, err := h.overwriteSkillWithFiles(r.Context(), skillOverwriteInput{
+			WorkspaceID:   workspaceUUID,
+			TargetSkillID: existing.ID,
+			UserID:        creatorID,
+			ExpectedName:  name,
+			Description:   imported.description,
+			Content:       imported.content,
+			Config:        config,
+			Files:         files,
+		})
+		if err != nil {
+			status, reason := skillImportOverwriteFailure(err)
+			writeJSON(w, status, SkillImportResult{
+				Status:        "failed",
+				Reason:        reason,
+				ExistingSkill: &existingInfo,
+			})
+			return
+		}
+		actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+		h.publish(protocol.EventSkillUpdated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+		writeJSON(w, http.StatusOK, SkillImportResult{Status: "updated", Skill: &resp})
+	case importOnConflictRename:
+		resp, err := h.createRenamedImportedSkill(r.Context(), workspaceUUID, creatorUUID, name, imported, config, files)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
+				Status:        "failed",
+				Reason:        "failed to create renamed skill: " + err.Error(),
+				ExistingSkill: &existingInfo,
+			})
+			return
+		}
+		actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
+		h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+		writeJSON(w, http.StatusCreated, SkillImportResult{
+			Status:        "created",
+			Reason:        "renamed to avoid an existing skill",
+			Skill:         &resp,
+			ExistingSkill: &existingInfo,
+		})
+	default:
+		writeJSON(w, http.StatusConflict, SkillImportResult{
+			Status:        "conflict",
+			Reason:        skillImportConflictReason(),
+			ExistingSkill: &existingInfo,
+		})
+	}
+}
+
 // --- Import handler ---
 
 func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
@@ -2590,6 +2749,18 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	if req.Overwrite && req.OnConflict == "" {
+		req.OnConflict = importOnConflictOverwrite
+	}
+	if !validImportOnConflict(req.OnConflict) {
+		writeError(w, http.StatusBadRequest, "on_conflict must be one of: fail, overwrite, rename, skip")
+		return
+	}
+	structuredResult := req.OnConflict != ""
+	strategy := req.OnConflict
+	if strategy == "" {
+		strategy = importOnConflictFail
 	}
 
 	source, normalized, err := detectImportSource(req.URL)
@@ -2618,26 +2789,36 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 
 	// Persist provenance into skill.config.origin so list/detail UI can show
 	// "Imported from GitHub / ClawHub / Skills.sh" and link back to the source.
-	createReq := imported.createRequest(false)
+	config := map[string]any{}
+	if imported.origin != nil {
+		config["origin"] = imported.origin
+	}
+	name := sanitizeNullBytes(imported.name)
+	files := imported.createFileRequests()
 
-	input := skillCreateInput{
-		WorkspaceID: workspaceUUID,
-		CreatorID:   creatorUUID,
-		Name:        createReq.Name,
-		Description: createReq.Description,
-		Content:     createReq.Content,
-		Config:      createReq.Config,
-		Files:       createReq.Files,
+	if structuredResult {
+		if existing, found, lerr := h.lookupSkillByName(r.Context(), workspaceUUID, name); lerr != nil {
+			writeJSON(w, http.StatusInternalServerError, SkillImportResult{
+				Status: "failed",
+				Reason: "failed to check for existing skill: " + lerr.Error(),
+			})
+			return
+		} else if found {
+			h.resolveImportSkillConflict(w, r, strategy, workspaceID, workspaceUUID, creatorUUID, creatorID, name, imported, config, files, existing)
+			return
+		}
 	}
-	overwroteExisting := false
-	resp, err := h.createSkillWithFiles(r.Context(), input)
-	if err != nil && req.Overwrite && isUniqueViolation(err) {
-		resp, err = h.overwriteSkillWithFiles(r.Context(), input)
-		overwroteExisting = err == nil
-	}
+
+	resp, err := h.createImportedSkillWithName(r.Context(), workspaceUUID, creatorUUID, name, imported, config, files)
 	if err != nil {
 		if isUniqueViolation(err) {
-			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, imported.name); findErr == nil && found {
+			if structuredResult {
+				if existing, found, lerr := h.lookupSkillByName(r.Context(), workspaceUUID, name); lerr == nil && found {
+					h.resolveImportSkillConflict(w, r, strategy, workspaceID, workspaceUUID, creatorUUID, creatorID, name, imported, config, files, existing)
+					return
+				}
+			}
+			if existing, found, findErr := h.existingSkillIdentityByName(r.Context(), workspaceUUID, name); findErr == nil && found {
 				writeSkillImportDuplicateConflict(w, existing)
 			} else {
 				writeError(w, http.StatusConflict, "a skill with this name already exists")
@@ -2652,12 +2833,12 @@ func (h *Handler) ImportSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, creatorID, workspaceID)
-	h.publish(skillImportEvent(overwroteExisting), workspaceID, actorType, actorID, map[string]any{"skill": resp})
-	status := http.StatusCreated
-	if overwroteExisting {
-		status = http.StatusOK
+	h.publish(protocol.EventSkillCreated, workspaceID, actorType, actorID, map[string]any{"skill": resp})
+	if structuredResult {
+		writeJSON(w, http.StatusCreated, SkillImportResult{Status: "created", Skill: &resp})
+		return
 	}
-	writeJSON(w, status, resp)
+	writeJSON(w, http.StatusCreated, resp)
 }
 
 func (h *Handler) DiscoverImportSkills(w http.ResponseWriter, r *http.Request) {
@@ -2786,7 +2967,25 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 		resp, err := h.createSkillWithFiles(r.Context(), input)
 		if err != nil && isUniqueViolation(err) {
 			if s.Overwrite {
-				resp, err = h.overwriteSkillWithFiles(r.Context(), input)
+				existing, found, findErr := h.lookupSkillByName(r.Context(), workspaceUUID, sanitizeNullBytes(s.Name))
+				if findErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed to check existing skill "+s.Name+": "+findErr.Error())
+					return
+				}
+				if !found {
+					skipped = append(skipped, s.Name)
+					continue
+				}
+				resp, err = h.overwriteSkillWithFiles(r.Context(), skillOverwriteInput{
+					WorkspaceID:   workspaceUUID,
+					TargetSkillID: existing.ID,
+					UserID:        creatorID,
+					ExpectedName:  sanitizeNullBytes(s.Name),
+					Description:   s.Description,
+					Content:       s.Content,
+					Config:        s.Config,
+					Files:         files,
+				})
 				overwroteExisting = err == nil
 			} else {
 				skipped = append(skipped, s.Name)
@@ -2807,7 +3006,11 @@ func (h *Handler) BatchImportSkills(w http.ResponseWriter, r *http.Request) {
 		}
 
 		created = append(created, resp)
-		h.publish(skillImportEvent(overwroteExisting), workspaceID, actorType, actorID, map[string]any{"skill": resp})
+		event := protocol.EventSkillCreated
+		if overwroteExisting {
+			event = protocol.EventSkillUpdated
+		}
+		h.publish(event, workspaceID, actorType, actorID, map[string]any{"skill": resp})
 	}
 
 	writeJSON(w, http.StatusCreated, BatchImportSkillsResponse{

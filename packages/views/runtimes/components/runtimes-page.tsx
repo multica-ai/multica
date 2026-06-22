@@ -32,8 +32,13 @@ import { PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
+import {
+  pendingRuntimesForProfiles,
+  type PendingRuntimeProfile,
+} from "./pending-runtime";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,
@@ -103,6 +108,8 @@ export function RuntimesPage({
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isLoading = useAuthStore((s) => s.isLoading);
+  const { t } = useT("runtimes");
+  const pendingMachineName = t(($) => $.machine.pending_custom_runtimes);
   const currentUserId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -123,6 +130,9 @@ export function RuntimesPage({
   }, []);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
+  const [pendingProfiles, setPendingProfiles] = useState<PendingRuntimeProfile[]>(
+    [],
+  );
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: "multica_runtimes_layout",
   });
@@ -135,6 +145,15 @@ export function RuntimesPage({
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
 
+  // Custom runtime management is an admin-only affordance, gated the same
+  // way the runtime list gates delete: workspace owner/admin role.
+  const currentMember = currentUserId
+    ? members.find((m) => m.user_id === currentUserId)
+    : null;
+  const canManageProfiles =
+    currentMember?.role === "owner" || currentMember?.role === "admin";
+  const [showProfilesDialog, setShowProfilesDialog] = useState(false);
+
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
   }, [qc, wsId]);
@@ -143,18 +162,54 @@ export function RuntimesPage({
   const updatableIds = useUpdatableRuntimeIds(wsId);
   const now = useNowTick();
 
+  useEffect(() => {
+    if (pendingProfiles.length === 0) return;
+    const registeredProfileIds = new Set(
+      runtimes
+        .map((runtime) => runtime.profile_id)
+        .filter((profileId): profileId is string => !!profileId),
+    );
+    if (registeredProfileIds.size === 0) return;
+    setPendingProfiles((current) => {
+      const next = current.filter(
+        ({ profile }) => !registeredProfileIds.has(profile.id),
+      );
+      return next.length === current.length ? current : next;
+    });
+  }, [pendingProfiles.length, runtimes]);
+
+  const visibleRuntimes = useMemo(
+    () =>
+      pendingRuntimesForProfiles({
+        pendingProfiles,
+        runtimes,
+        ownerId: currentUserId,
+        localDaemonId,
+        localMachineName,
+        fallbackMachineName: pendingMachineName,
+      }),
+    [
+      pendingProfiles,
+      runtimes,
+      currentUserId,
+      localDaemonId,
+      localMachineName,
+      pendingMachineName,
+    ],
+  );
+
   const workloadIndex = useMemo(
     () => buildWorkloadIndex(agents, snapshot),
     [agents, snapshot],
   );
 
-  const scopedRuntimes = useMemo(() => {
-    return filterRuntimesByScope(runtimes, scope, currentUserId);
-  }, [runtimes, scope, currentUserId]);
+  const scopedVisibleRuntimes = useMemo(() => {
+    return filterRuntimesByScope(visibleRuntimes, scope, currentUserId);
+  }, [visibleRuntimes, scope, currentUserId]);
 
   const machines = useMemo(
     () =>
-      buildRuntimeMachines(scopedRuntimes, {
+      buildRuntimeMachines(scopedVisibleRuntimes, {
         now,
         localDaemonId,
         localMachineName,
@@ -163,7 +218,7 @@ export function RuntimesPage({
         ensureLocalMachine: hasLocalMachine,
       }),
     [
-      scopedRuntimes,
+      scopedVisibleRuntimes,
       now,
       localDaemonId,
       localMachineName,
@@ -212,7 +267,7 @@ export function RuntimesPage({
 
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
-  const totalCount = runtimes.length;
+  const totalCount = visibleRuntimes.length;
   // Desktop always has a synthesized local machine row, so the
   // "register a runtime" empty state would hide the Start button.
   const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
@@ -224,6 +279,8 @@ export function RuntimesPage({
         onConnectRemote={() => setShowConnectDialog(true)}
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
+        canManageProfiles={canManageProfiles}
+        onAddRuntime={() => setShowProfilesDialog(true)}
       />
 
       {showEmpty ? (
@@ -231,7 +288,7 @@ export function RuntimesPage({
           <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
         </div>
       ) : isMobile ? (
-        <div className="flex min-h-0 flex-1 flex-col border-t bg-background">
+        <div className="flex min-h-0 flex-1 flex-col bg-background">
           <MachineSidebar
             machines={filteredMachines}
             members={members}
@@ -257,7 +314,7 @@ export function RuntimesPage({
           />
         </div>
       ) : (
-        <div className="min-h-0 flex-1 border-t bg-background">
+        <div className="min-h-0 flex-1 bg-background">
           <ResizablePanelGroup
             orientation="horizontal"
             className="min-h-0 flex-1"
@@ -309,6 +366,18 @@ export function RuntimesPage({
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
+      {canManageProfiles && showProfilesDialog && (
+        <RuntimeProfilesDialog
+          wsId={wsId}
+          onProfileCreated={(profile) =>
+            setPendingProfiles((current) => [
+              ...current.filter((item) => item.profile.id !== profile.id),
+              { profile, createdAt: Date.now() },
+            ])
+          }
+          onClose={() => setShowProfilesDialog(false)}
+        />
+      )}
     </div>
   );
 }
@@ -323,11 +392,15 @@ function PageHeaderBar({
   onConnectRemote,
   cloudRuntimeEnabled,
   onOpenCloudRuntime,
+  canManageProfiles,
+  onAddRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
   cloudRuntimeEnabled: boolean;
   onOpenCloudRuntime: () => void;
+  canManageProfiles: boolean;
+  onAddRuntime: () => void;
 }) {
   const { t } = useT("runtimes");
   return (
@@ -341,21 +414,53 @@ function PageHeaderBar({
           </span>
         )}
       </div>
+      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
+          reserved for the empty state's CTA. All three share the same
+          dimensions, padding, and responsive icon-only behavior so the
+          header reads as a single, consistent action group. */}
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+        {canManageProfiles && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.profiles.cta)}
+            onClick={onAddRuntime}
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.profiles.cta)}
+            </span>
+          </Button>
+        )}
         {cloudRuntimeEnabled && (
           <Button
             type="button"
             size="sm"
             variant="outline"
+            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+            aria-label={t(($) => $.cloud_runtime.action)}
             onClick={onOpenCloudRuntime}
           >
-            <Cloud className="h-3 w-3" />
-            {t(($) => $.cloud_runtime.action)}
+            <Cloud className="h-3.5 w-3.5" />
+            <span className="hidden md:inline">
+              {t(($) => $.cloud_runtime.action)}
+            </span>
           </Button>
         )}
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus className="h-3 w-3" />
-          {t(($) => $.page.connect_remote)}
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
+          aria-label={t(($) => $.page.connect_remote)}
+          onClick={onConnectRemote}
+        >
+          <Plus className="h-3.5 w-3.5" />
+          <span className="hidden md:inline">
+            {t(($) => $.page.connect_remote)}
+          </span>
         </Button>
       </div>
     </PageHeader>
@@ -839,7 +944,7 @@ function RuntimesPageSkeleton() {
       <PageHeader className="justify-between px-5">
         <Skeleton className="h-4 w-24" />
       </PageHeader>
-      <div className="flex min-h-0 flex-1 border-t">
+      <div className="flex min-h-0 flex-1">
         <div className="hidden w-[300px] shrink-0 border-r p-3 md:block">
           <Skeleton className="h-9 w-full rounded-md" />
           <div className="mt-3 flex gap-2">

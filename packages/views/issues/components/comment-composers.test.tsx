@@ -1,4 +1,5 @@
-import { forwardRef, useImperativeHandle, useRef, type Ref } from "react";
+import { forwardRef, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -76,8 +77,19 @@ vi.mock("../../editor", () => ({
   }),
 }));
 
+function renderWithProviders(ui: ReactNode) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+    },
+  });
+  return renderWithI18n(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
+
 function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(undefined)) {
-  const view = renderWithI18n(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
+  const view = renderWithProviders(<CommentInput issueId="issue-1" onSubmit={onSubmit} />);
   return { ...view, onSubmit };
 }
 
@@ -85,12 +97,13 @@ function renderReplyInput({
   onSubmit = vi.fn().mockResolvedValue(undefined),
   size = "sm",
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[]) => Promise<void>;
+  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<void>;
   size?: "sm" | "default";
 } = {}) {
-  const view = renderWithI18n(
+  const view = renderWithProviders(
     <ReplyInput
       issueId="issue-1"
+      parentId="comment-1"
       avatarType="member"
       avatarId="user-1"
       onSubmit={onSubmit}
@@ -155,7 +168,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined);
     });
   });
 
@@ -168,7 +181,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined);
     });
   });
 });

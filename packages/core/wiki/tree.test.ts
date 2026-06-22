@@ -7,6 +7,7 @@ function page(partial: Partial<WikiPageSummary> & Pick<WikiPageSummary, "id" | "
     workspace_id: "ws-1",
     parent_id: null,
     slug: partial.id,
+    type: "page",
     position: 0,
     created_by: null,
     updated_by: null,

@@ -27,6 +27,8 @@ type larkFakeServer struct {
 	sendN   atomic.Int32
 	patchN  atomic.Int32
 	bindN   atomic.Int32
+	reactN  atomic.Int32
+	delRN   atomic.Int32
 	authObs atomic.Value // last Authorization header seen across all paths
 }
 
@@ -125,6 +127,58 @@ func (f *larkFakeServer) stubPatch(resp map[string]any, verify func(r *http.Requ
 		}
 		if verify != nil {
 			verify(r, id, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
+// stubReaction installs the IM-reaction-create endpoint.
+func (f *larkFakeServer) stubReaction(resp map[string]any, verify func(r *http.Request, id string, body map[string]any)) {
+	const suffix = "/reactions"
+	f.mux.HandleFunc("/open-apis/im/v1/messages/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, suffix) {
+			return // let other handlers match
+		}
+		if r.Method != http.MethodPost {
+			f.t.Errorf("reaction: want POST, got %s", r.Method)
+		}
+		f.reactN.Add(1)
+		rawID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/open-apis/im/v1/messages/"), suffix)
+		if rawID == "" {
+			f.t.Errorf("reaction: missing message id")
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			f.t.Errorf("reaction: decode body: %v", err)
+		}
+		if verify != nil {
+			verify(r, rawID, body)
+		}
+		writeJSON(w, resp)
+	})
+}
+
+// stubReactionDelete installs the IM-reaction-delete endpoint.
+func (f *larkFakeServer) stubReactionDelete(resp map[string]any, verify func(r *http.Request, msgID string, reactionID string)) {
+	const prefix = "/open-apis/im/v1/messages/"
+	f.mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			return // let other handlers match
+		}
+		rest := strings.TrimPrefix(r.URL.Path, prefix)
+		parts := strings.Split(rest, "/reactions/")
+		if len(parts) != 2 {
+			return // not a delete path
+		}
+		f.delRN.Add(1)
+		if parts[0] == "" {
+			f.t.Errorf("reaction delete: missing message id")
+		}
+		if parts[1] == "" {
+			f.t.Errorf("reaction delete: missing reaction id")
+		}
+		if verify != nil {
+			verify(r, parts[0], parts[1])
 		}
 		writeJSON(w, resp)
 	})
@@ -719,6 +773,94 @@ func TestHTTPClient_TokenEndpointError(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "code=10003") {
 		t.Errorf("want code=10003 surfaced, got %v", err)
+	}
+}
+
+func TestHTTPClient_AddMessageReaction_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_react", 7200)
+	fake.stubReaction(map[string]any{"code": 0, "msg": "ok", "data": map[string]string{"reaction_id": "re_42"}}, func(r *http.Request, id string, body map[string]any) {
+		if id != "om_user_msg_1" {
+			t.Errorf("message id: got %q want om_user_msg_1", id)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_react" {
+			t.Errorf("Authorization=%q want Bearer tok_react", got)
+		}
+		reactionType, ok := body["reaction_type"].(map[string]any)
+		if !ok {
+			t.Fatalf("reaction_type missing or wrong shape: %v", body)
+		}
+		if got := reactionType["emoji_type"]; got != "Typing" {
+			t.Errorf("emoji_type=%v want Typing", got)
+		}
+	})
+
+	c := newTestClient(fake, time.Now)
+	reactionID, err := c.AddMessageReaction(context.Background(), AddReactionParams{
+		InstallationID: testCreds(),
+		MessageID:      "om_user_msg_1",
+		EmojiType:      "Typing",
+	})
+	if err != nil {
+		t.Fatalf("AddMessageReaction: %v", err)
+	}
+	if reactionID != "re_42" {
+		t.Errorf("reaction id: got %q want re_42", reactionID)
+	}
+	if got := fake.reactN.Load(); got != 1 {
+		t.Fatalf("reaction endpoint calls=%d want 1", got)
+	}
+}
+
+func TestHTTPClient_DeleteMessageReaction_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_del", 7200)
+	fake.stubReactionDelete(map[string]any{"code": 0, "msg": "ok"}, func(r *http.Request, msgID string, reactionID string) {
+		if msgID != "om_user_msg_1" {
+			t.Errorf("message id: got %q want om_user_msg_1", msgID)
+		}
+		if reactionID != "re_42" {
+			t.Errorf("reaction id: got %q want re_42", reactionID)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer tok_del" {
+			t.Errorf("Authorization=%q want Bearer tok_del", got)
+		}
+	})
+
+	c := newTestClient(fake, time.Now)
+	if err := c.DeleteMessageReaction(context.Background(), DeleteReactionParams{
+		InstallationID: testCreds(),
+		MessageID:      "om_user_msg_1",
+		ReactionID:     "re_42",
+	}); err != nil {
+		t.Fatalf("DeleteMessageReaction: %v", err)
+	}
+	if got := fake.delRN.Load(); got != 1 {
+		t.Fatalf("reaction delete endpoint calls=%d want 1", got)
+	}
+}
+
+func TestHTTPClient_AddMessageReaction_Validation(t *testing.T) {
+	c := NewHTTPAPIClient(HTTPClientConfig{}).(*httpAPIClient)
+	_, err := c.AddMessageReaction(context.Background(), AddReactionParams{MessageID: "m"})
+	if err == nil || !strings.Contains(err.Error(), "missing emoji_type") {
+		t.Errorf("want missing emoji_type error, got %v", err)
+	}
+	_, err = c.AddMessageReaction(context.Background(), AddReactionParams{EmojiType: "Typing"})
+	if err == nil || !strings.Contains(err.Error(), "missing message_id") {
+		t.Errorf("want missing message_id error, got %v", err)
+	}
+}
+
+func TestHTTPClient_DeleteMessageReaction_Validation(t *testing.T) {
+	c := NewHTTPAPIClient(HTTPClientConfig{}).(*httpAPIClient)
+	err := c.DeleteMessageReaction(context.Background(), DeleteReactionParams{ReactionID: "re"})
+	if err == nil || !strings.Contains(err.Error(), "missing message_id") {
+		t.Errorf("want missing message_id error, got %v", err)
+	}
+	err = c.DeleteMessageReaction(context.Background(), DeleteReactionParams{MessageID: "m"})
+	if err == nil || !strings.Contains(err.Error(), "missing reaction_id") {
+		t.Errorf("want missing reaction_id error, got %v", err)
 	}
 }
 

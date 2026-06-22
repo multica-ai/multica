@@ -7,6 +7,7 @@ import {
   Activity,
   ScrollText,
   LogIn,
+  Info,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -126,6 +127,12 @@ export function DaemonRuntimeActions() {
   }, []);
 
   const isRunning = status.state === "running";
+  // The daemon runs somewhere the app can't drive (e.g. inside WSL2): the
+  // lifecycle CLI acts on the host process namespace and can't reach it. Hide
+  // Stop/Restart so they don't silently no-op, mirroring the Settings tab. The
+  // real guard is in the main process (stopDaemon/restartDaemon); this is the
+  // matching UX. See #3916.
+  const externallyManaged = status.externallyManaged === true;
   const isStopped = status.state === "stopped";
   const isCliMissing = status.state === "cli_not_found";
   const isAuthExpired = status.state === "auth_expired";
@@ -142,24 +149,33 @@ export function DaemonRuntimeActions() {
               <ScrollText className="size-3.5 mr-1.5" />
               View logs
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRestart}
-              disabled={actionLoading}
-            >
-              <RotateCw className="size-3.5 mr-1.5" />
-              Restart
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={handleStopClick}
-              disabled={actionLoading}
-            >
-              <Square className="size-3.5 mr-1.5" />
-              Stop
-            </Button>
+            {externallyManaged ? (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Info className="size-3.5 shrink-0" />
+                Managed outside the app
+              </span>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRestart}
+                  disabled={actionLoading}
+                >
+                  <RotateCw className="size-3.5 mr-1.5" />
+                  Restart
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleStopClick}
+                  disabled={actionLoading}
+                >
+                  <Square className="size-3.5 mr-1.5" />
+                  Stop
+                </Button>
+              </>
+            )}
           </>
         )}
 

@@ -39,8 +39,8 @@ interface ReactionBarProps {
   currentUserId?: string;
   onToggle: (emoji: string) => void;
   getActorName: (type: string, id: string) => string;
-  className?: string;
   hideAddButton?: boolean;
+  className?: string;
 }
 
 function ReactionBar({
@@ -48,8 +48,8 @@ function ReactionBar({
   currentUserId,
   onToggle,
   getActorName,
+  hideAddButton = false,
   className,
-  hideAddButton,
 }: ReactionBarProps) {
   const grouped = groupReactions(reactions, currentUserId);
 

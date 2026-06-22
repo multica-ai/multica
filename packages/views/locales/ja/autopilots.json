@@ -6,15 +6,23 @@
     "table": {
       "name": "名前",
       "agent": "エージェント",
+      "created_by": "作成者",
       "mode": "モード",
       "status": "ステータス",
-      "last_run": "最終実行"
+      "last_run": "最終実行",
+      "assignee": "担当",
+      "trigger": "トリガー",
+      "next_run": "次回実行",
+      "created": "作成日時"
     },
     "last_run_empty": "--",
     "empty": {
       "title": "まだオートパイロットがありません",
       "hint": "AI エージェントの繰り返しタスクをスケジュールしましょう。テンプレートを選ぶか、ゼロから始められます。"
-    }
+    },
+    "scope_all": "すべて",
+    "no_matches": "該当する自動化はありません",
+    "retry": "再試行"
   },
   "status": {
     "active": "アクティブ",
@@ -71,6 +79,7 @@
     "section_run_history": "実行履歴",
     "section_danger": "危険な操作",
     "field_agent": "エージェント",
+    "field_created_by": "作成者",
     "field_output_mode": "出力モード",
     "field_project": "プロジェクト",
     "no_project": "プロジェクトなし",
@@ -345,5 +354,39 @@
   },
   "timezone_picker": {
     "search_placeholder": "タイムゾーンを検索..."
+  },
+  "toolbar": {
+    "result_count_title": "該当する自動化 / すべての自動化",
+    "filter_label": "フィルター",
+    "filter_active_count_one": "{{count}} 件のフィルター",
+    "filter_active_count_other": "{{count}} 件のフィルター",
+    "clear_filters": "フィルターをクリア",
+    "section_assignee": "担当",
+    "section_mode": "モード",
+    "section_trigger": "トリガー",
+    "section_creator": "作成者",
+    "display": "表示",
+    "sort_by": "並び替え",
+    "direction_asc": "昇順",
+    "direction_desc": "降順",
+    "section_columns": "列"
+  },
+  "actions": {
+    "row_menu": "自動化の操作",
+    "pause": "一時停止",
+    "resume": "再開",
+    "delete": "削除",
+    "selected_one": "{{count}} 件選択中",
+    "selected_other": "{{count}} 件選択中",
+    "clear_selection": "選択を解除",
+    "delete_dialog": {
+      "title": "自動化を削除しますか？",
+      "description_one": "「{{name}}」とその実行履歴を完全に削除します。",
+      "description_other": "{{count}} 件の自動化とその実行履歴を完全に削除します。",
+      "warning": "この操作は取り消せません。",
+      "cancel": "キャンセル",
+      "confirm": "完全に削除",
+      "deleting": "削除中…"
+    }
   }
 }

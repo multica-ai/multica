@@ -1,6 +1,6 @@
 ---
 name: multica-projects-and-resources
-description: Use when creating, inspecting, updating, or debugging Multica projects and project resources. Covers durable project context, github_repo and local_directory resources, how resources affect future agent task context, when to bind repos, and when not to mutate resources.
+description: "Use when creating, inspecting, updating, or debugging Multica projects and project resources. Covers durable project context, github_repo and local_directory resources, how resources affect future agent task context, when to bind repos, and when not to mutate resources."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---

@@ -239,6 +239,7 @@ func TestCreateIssueAssignToSquadRejectsUnselectablePrivateLeader(t *testing.T) 
 			"priority":      "medium",
 			"assignee_type": "squad",
 			"assignee_id":   workspaceLeaderSquadID,
+			"project_id":    testProjectID,
 		}))
 		if w.Code != http.StatusCreated {
 			t.Fatalf("CreateIssue squad workspace leader: expected 201, got %d: %s", w.Code, w.Body.String())
