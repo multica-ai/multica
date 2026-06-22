@@ -209,6 +209,9 @@ type TaskUsageEntry struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	// CEREBRO-PATCH(daemon-types-firtal-gateway-usage-cost): forward exact gateway spend (always emit, matches TaskUsagePayload shape).
 	CostCents int64 `json:"cost_cents"`
+	// CEREBRO-PATCH(daemon-types-context-footprint): FIR-1856 forward the last-turn context footprint for the window indicator (omitempty: only Codex sets it).
+	ContextInputTokens     int64 `json:"context_input_tokens,omitempty"`
+	ContextCacheReadTokens int64 `json:"context_cache_read_tokens,omitempty"`
 }
 
 // TaskResult is the outcome of executing a task.

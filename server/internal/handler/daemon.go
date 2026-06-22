@@ -2337,6 +2337,9 @@ type TaskUsagePayload struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 	// CEREBRO-PATCH(handler-daemon-firtal-gateway-usage-cost): accept exact spend from managed gateway runtimes.
 	CostCents int64 `json:"cost_cents"`
+	// CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 accept the last-turn footprint for the context-window indicator.
+	ContextInputTokens     int64 `json:"context_input_tokens"`
+	ContextCacheReadTokens int64 `json:"context_cache_read_tokens"`
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -2385,6 +2388,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 
 		h.TaskService.CaptureTaskUsage(r.Context(), task, u.Provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 
+		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
 	}
 	h.recordCerebroAccountTokenUsage(r.Context(), task, accountTokens) // CEREBRO-PATCH(handler-daemon-account-token-usage): keep account rolling windows in lockstep with task usage.
 

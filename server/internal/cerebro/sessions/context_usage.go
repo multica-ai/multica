@@ -30,20 +30,20 @@ import (
 )
 
 type contextUsageResponse struct {
-	SessionID         string `json:"session_id"`
-	HasData           bool   `json:"has_data"`
-	Model             string `json:"model"`
-	InputTokens       int64  `json:"input_tokens"`
-	CacheReadTokens   int64  `json:"cache_read_tokens"`
-	CacheWriteTokens  int64  `json:"cache_write_tokens"`
-	OutputTokens      int64  `json:"output_tokens"`
+	SessionID        string `json:"session_id"`
+	HasData          bool   `json:"has_data"`
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
 	// ContextTokens is the whole prompt the model last read: input + cache_read
 	// + cache_write. This — not InputTokens alone — is the numerator for window
 	// fullness, and the figure the indicator should display.
-	ContextTokens     int64  `json:"context_tokens"`
-	MaxContextTokens  int64  `json:"max_context_tokens"`
-	UsedPercent       int    `json:"used_percent"`
-	CacheSharePercent int    `json:"cache_share_percent"`
+	ContextTokens     int64 `json:"context_tokens"`
+	MaxContextTokens  int64 `json:"max_context_tokens"`
+	UsedPercent       int   `json:"used_percent"`
+	CacheSharePercent int   `json:"cache_share_percent"`
 }
 
 // ContextUsage serves GET /api/cerebro/issues/{issueId}/sessions/context-usage.
@@ -67,14 +67,22 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	// Latest run inside the window that has recorded token usage. Membership is
 	// by run start time relative to the session markers — the same Model B order
 	// the surface uses, so the indicator and the timeline agree.
+	// cf.* is the FIR-1856 last-turn footprint (Codex/gpt only): the size of the
+	// prompt the model last read, i.e. how full the window is. When present it is
+	// the authoritative numerator; the task_usage SUMs below stay the fallback for
+	// runtimes that report a per-turn footprint already (Claude et al.). For Codex
+	// the task_usage figure is the lifetime sum and would pin the gauge at 100%.
 	const q = `
 		SELECT COALESCE(SUM(tu.input_tokens), 0),
 		       COALESCE(SUM(tu.cache_read_tokens), 0),
 		       COALESCE(SUM(tu.cache_write_tokens), 0),
 		       COALESCE(SUM(tu.output_tokens), 0),
-		       MAX(tu.model)
+		       MAX(tu.model),
+		       COALESCE(MAX(cf.input_tokens), 0),
+		       COALESCE(MAX(cf.cache_read_tokens), 0)
 		FROM agent_task_queue t
 		JOIN task_usage tu ON tu.task_id = t.id
+		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
 		WHERE t.issue_id = $1
 		  AND t.created_at >= $2
 		  AND ($3::timestamptz IS NULL OR t.created_at < $3)
@@ -87,8 +95,9 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 		endParam = end
 	}
 	var input, cacheRead, cacheWrite, output int64
+	var footprintInput, footprintCacheRead int64
 	var model pgtype.Text
-	err = h.pool.QueryRow(r.Context(), q, issue.ID, start, endParam).Scan(&input, &cacheRead, &cacheWrite, &output, &model)
+	err = h.pool.QueryRow(r.Context(), q, issue.ID, start, endParam).Scan(&input, &cacheRead, &cacheWrite, &output, &model, &footprintInput, &footprintCacheRead)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeJSON(w, http.StatusOK, resp) // no run with usage yet — has_data stays false
@@ -104,9 +113,35 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.CacheReadTokens = cacheRead
 	resp.CacheWriteTokens = cacheWrite
 	resp.OutputTokens = output
-	resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
-		computeContextUsage(input, cacheRead, cacheWrite, model.String)
+	if footprintInput > 0 {
+		// FIR-1856: Codex/gpt runtimes record the last turn's footprint. It is
+		// the prompt the model last read (input already includes cached for
+		// OpenAI), so it is the window occupancy directly — not a sum of turns.
+		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
+			computeContextFootprint(footprintInput, footprintCacheRead, model.String)
+	} else {
+		resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent =
+			computeContextUsage(input, cacheRead, cacheWrite, model.String)
+	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// computeContextFootprint is the FIR-1856 path for runtimes that report a
+// last-turn footprint (Codex/gpt). `footprintInput` is the size of the prompt
+// the model last read — for OpenAI accounting it already includes the cached
+// tokens, so it IS the window occupancy and must not have cacheRead added on
+// top (that is the double-count that made Codex read 1955k/272k and pin at
+// 100%). `footprintCacheRead` is the cached subset, used only for the display.
+func computeContextFootprint(footprintInput, footprintCacheRead int64, model string) (contextTokens, maxContext int64, usedPercent, cacheSharePercent int) {
+	contextTokens = footprintInput
+	maxContext = contextWindowForModel(model)
+	if maxContext > 0 {
+		usedPercent = clampPercent(int(contextTokens * 100 / maxContext))
+	}
+	if contextTokens > 0 {
+		cacheSharePercent = clampPercent(int(footprintCacheRead * 100 / contextTokens))
+	}
+	return contextTokens, maxContext, usedPercent, cacheSharePercent
 }
 
 // computeContextUsage is the pure core of the measurement: from a run's raw

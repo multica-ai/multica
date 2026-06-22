@@ -14,12 +14,12 @@ func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 		{"gpt-5.5", 272_000},
 		{"gpt-5", 272_000},
 		{"gemini-2.5-pro", 1_000_000},
-		{"Claude-Sonnet-4-5-20251101", 1_000_000}, // dated snapshot resolves to the family row
-		{"claude-opus-4-8[1m]", 1_000_000},        // [1m] long-context beta tag → 1M, not the base Opus 200k (the live miss Jesper flagged)
-		{"Claude-Opus-4-8[1m]", 1_000_000},        // case-insensitive
+		{"Claude-Sonnet-4-5-20251101", 1_000_000},   // dated snapshot resolves to the family row
+		{"claude-opus-4-8[1m]", 1_000_000},          // [1m] long-context beta tag → 1M, not the base Opus 200k (the live miss Jesper flagged)
+		{"Claude-Opus-4-8[1m]", 1_000_000},          // case-insensitive
 		{"claude-opus-4-8[1m]-20260101", 1_000_000}, // [1m] tag wins even with a trailing date
-		{"claude-opus-4-8[exp]", 200_000},         // an unrelated bracketed tag strips to the base family (200k)
-		{"", 200_000},                             // unknown/empty falls back to the conservative default
+		{"claude-opus-4-8[exp]", 200_000},           // an unrelated bracketed tag strips to the base family (200k)
+		{"", 200_000},                               // unknown/empty falls back to the conservative default
 		{"some-future-model", 200_000},
 	}
 	for _, c := range cases {
@@ -53,6 +53,27 @@ func TestComputeContextUsage_NoTokens(t *testing.T) {
 	ctx, _, used, cacheShare := computeContextUsage(0, 0, 0, "claude-opus-4-8")
 	if ctx != 0 || used != 0 || cacheShare != 0 {
 		t.Errorf("zero usage = (%d,%d,%d), want all zero", ctx, used, cacheShare)
+	}
+}
+
+func TestComputeContextFootprint_LastTurnNotLifetimeSum(t *testing.T) {
+	// FIR-1856: the Codex screenshot showed 1955k/272k → pinned at 100% because
+	// the indicator used the lifetime sum (total_token_usage). With the last-turn
+	// footprint instead, a gpt-5.5 session whose final prompt is 110k (100k of it
+	// cached) reads ~40% — not 100%. footprintInput already includes the cached
+	// tokens (OpenAI accounting), so cacheRead must NOT be added on top.
+	ctx, maxCtx, used, cacheShare := computeContextFootprint(110_000, 100_000, "gpt-5.5")
+	if ctx != 110_000 {
+		t.Errorf("context tokens = %d, want 110000 (no double-count of cached)", ctx)
+	}
+	if maxCtx != 272_000 {
+		t.Errorf("max context = %d, want 272000", maxCtx)
+	}
+	if used != 40 { // 110000 / 272000 = 40.4% → 40, not the bugged 100
+		t.Errorf("used percent = %d, want 40", used)
+	}
+	if cacheShare != 90 { // 100000 / 110000 = 90%
+		t.Errorf("cache share = %d, want 90", cacheShare)
 	}
 }
 

@@ -3287,6 +3287,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
 			CostCents:        u.CostCents,
+			// CEREBRO-PATCH(daemon-daemon-context-footprint): FIR-1856 forward the last-turn footprint for the context-window indicator.
+			ContextInputTokens:     u.ContextInputTokens,
+			ContextCacheReadTokens: u.ContextCacheReadTokens,
 		})
 	}
 
@@ -3930,6 +3933,11 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 		existing.CacheReadTokens += u.CacheReadTokens
 		existing.CacheWriteTokens += u.CacheWriteTokens
 		existing.CostCents += u.CostCents
+		// CEREBRO-PATCH(daemon-merge-context-footprint): FIR-1856 footprint is the last-turn window occupancy, not a sum — take the later run's value.
+		if u.ContextInputTokens > 0 {
+			existing.ContextInputTokens = u.ContextInputTokens
+			existing.ContextCacheReadTokens = u.ContextCacheReadTokens
+		}
 		merged[model] = existing
 	}
 	return merged

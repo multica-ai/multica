@@ -1816,6 +1816,11 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 					OutputTokens:    usage.OutputTokens + usage.ReasoningOutputTokens,
 					CacheReadTokens: cachedTokens,
 				}
+				// CEREBRO-PATCH(agent-context-footprint): FIR-1856 record the last turn's prompt size for the context-window indicator; total_token_usage above is the lifetime sum kept for cost.
+				if last := evt.Payload.Info.LastTokenUsage; last != nil {
+					result.usage.ContextInputTokens = last.InputTokens
+					result.usage.ContextCacheReadTokens = max(last.CachedInputTokens, last.CacheReadInputTokens)
+				}
 				if evt.Payload.Info.Model != "" {
 					result.model = evt.Payload.Info.Model
 				}

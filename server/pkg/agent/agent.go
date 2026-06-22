@@ -108,6 +108,9 @@ type TokenUsage struct {
 	CacheWriteTokens int64
 	// CEREBRO-PATCH(agent-firtal-gateway-usage-cost): preserve gateway-reported spend for managed HTTP runtimes.
 	CostCents int64
+	// CEREBRO-PATCH(agent-context-footprint): FIR-1856 last-turn prompt footprint (input incl. cached for OpenAI) + cached subset, for the context-window indicator; separate from the cumulative cost tokens above.
+	ContextInputTokens     int64
+	ContextCacheReadTokens int64
 }
 
 // Result is the final outcome after an agent session completes.
