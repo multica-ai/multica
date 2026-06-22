@@ -715,12 +715,30 @@ SELECT
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND ($2::text IS NULL OR a.status = $2)
+  AND (
+    $3::uuid IS NULL
+    OR (
+      a.created_by_type = 'member'
+      AND a.created_by_id = $3::uuid
+    )
+    OR (
+      a.created_by_type = 'agent'
+      AND EXISTS (
+        SELECT 1
+        FROM agent ag
+        WHERE ag.id = a.created_by_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = $3::uuid
+      )
+    )
+  )
 ORDER BY a.created_at DESC
 `
 
 type ListAutopilotsParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Status      pgtype.Text `json:"status"`
+	MineUserID  pgtype.UUID `json:"mine_user_id"`
 }
 
 type ListAutopilotsRow struct {
@@ -740,7 +758,7 @@ type ListAutopilotsRow struct {
 // last_run_status is COALESCEd to ” (never ran) because sqlc cannot infer
 // nullability through a scalar subquery; the handler maps ” back to omitted.
 func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsRow, error) {
-	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.Status)
+	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.Status, arg.MineUserID)
 	if err != nil {
 		return nil, err
 	}

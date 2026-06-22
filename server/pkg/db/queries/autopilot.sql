@@ -31,6 +31,23 @@ SELECT
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR a.status = sqlc.narg('status'))
+  AND (
+    sqlc.narg('mine_user_id')::uuid IS NULL
+    OR (
+      a.created_by_type = 'member'
+      AND a.created_by_id = sqlc.narg('mine_user_id')::uuid
+    )
+    OR (
+      a.created_by_type = 'agent'
+      AND EXISTS (
+        SELECT 1
+        FROM agent ag
+        WHERE ag.id = a.created_by_id
+          AND ag.workspace_id = a.workspace_id
+          AND ag.owner_id = sqlc.narg('mine_user_id')::uuid
+      )
+    )
+  )
 ORDER BY a.created_at DESC;
 
 -- name: GetAutopilot :one

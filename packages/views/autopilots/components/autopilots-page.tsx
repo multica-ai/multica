@@ -602,13 +602,6 @@ export function AutopilotsPage() {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
-  const {
-    data: autopilots = [],
-    isLoading,
-    error: listError,
-    refetch: refetchList,
-  } = useQuery(autopilotListOptions(wsId));
-
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
     useState<AutopilotTemplate | null>(null);
@@ -621,6 +614,8 @@ export function AutopilotsPage() {
   const rawScope = useAutopilotsViewStore((s) => s.scope);
   const scope = AUTOPILOT_SCOPES.includes(rawScope) ? rawScope : "all";
   const setScope = useAutopilotsViewStore((s) => s.setScope);
+  const mineOnly = useAutopilotsViewStore((s) => s.mineOnly);
+  const setMineOnly = useAutopilotsViewStore((s) => s.setMineOnly);
   const sortField = useAutopilotsViewStore((s) => s.sortField);
   const sortDirection = useAutopilotsViewStore((s) => s.sortDirection);
   const hiddenColumns = useAutopilotsViewStore((s) => s.hiddenColumns);
@@ -631,6 +626,14 @@ export function AutopilotsPage() {
   const toggleColumn = useAutopilotsViewStore((s) => s.toggleColumn);
   const toggleFilter = useAutopilotsViewStore((s) => s.toggleFilter);
   const clearFilters = useAutopilotsViewStore((s) => s.clearFilters);
+  const {
+    data: autopilots = [],
+    isLoading,
+    error: listError,
+    refetch: refetchList,
+  } = useQuery(
+    autopilotListOptions(wsId, mineOnly ? { mine: true } : undefined),
+  );
 
   const isColVisible = (key: AutopilotColumnKey) =>
     !hiddenColumns.includes(key);
@@ -756,7 +759,7 @@ export function AutopilotsPage() {
   };
 
   const totalCount = autopilots.length;
-  const showEmpty = !isLoading && !listError && totalCount === 0;
+  const showEmpty = !isLoading && !listError && totalCount === 0 && !mineOnly;
 
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
@@ -855,6 +858,8 @@ export function AutopilotsPage() {
           <AutopilotListToolbar
             scope={scope}
             onScopeChange={setScope}
+            mineOnly={mineOnly}
+            onMineOnlyChange={setMineOnly}
             scopeCounts={scopeCounts}
             filters={filters}
             onToggleFilter={toggleFilter}
