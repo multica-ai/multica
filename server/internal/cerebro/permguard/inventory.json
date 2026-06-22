@@ -1201,6 +1201,10 @@
       "gate": "pre_auth_token"
     },
     {
+      "id": "POST /api/webhooks/gateway/channel-message",
+      "gate": "channel_membership — IsIssueSubscriber on the X-On-Behalf-Of principal (agent/member must participate in the target channel); pre-auth gateway bearer token (CEREBRO_GATEWAY_TOKEN, constant-time) only attests the caller and is the feature kill switch (404 when unset)"
+    },
+    {
       "id": "POST /api/webhooks/github",
       "exempt": "pre-auth signed webhook — GitHub HMAC signature authorises delivery before any user JWT exists"
     },

@@ -886,6 +886,16 @@ var catalog = []Capability{
 			"PUT /api/channels/{id}/agents/{agentId}/listen-mode",
 		},
 	},
+	{
+		Key:               "gateway_channel_delivery",
+		Title:             "Gateway inbound channel message",
+		Category:          CategoryChannels,
+		Description:       "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Governed by the gateway service token plus the acting principal's channel membership, not the tool-policy gate.",
+		ManagedExternally: true,
+		Ops: []string{
+			"POST /api/webhooks/gateway/channel-message",
+		},
+	},
 
 	// --- Read access (læse-adgang til sager/projekter) -----------------------
 	// Reads are governed by workspace membership and project access lists, not

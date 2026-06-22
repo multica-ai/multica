@@ -28,6 +28,8 @@ import (
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
 	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
+	// CEREBRO-PATCH(cerebro-webhook-gateway-delivery): FIR-1766 gateway on-behalf-of channel delivery import.
+	cerebrowebhookgateway "github.com/multica-ai/multica/server/internal/cerebro/webhookgateway"
 	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 inbox Slack-block presence + typing handler imports.
 	cerebropresence "github.com/multica-ai/multica/server/internal/cerebro/presence"
 	cerebrotyping "github.com/multica-ai/multica/server/internal/cerebro/typing"
@@ -873,6 +875,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// only forward the bytes + the Stripe-Signature header; see
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
+	// CEREBRO-PATCH(cerebro-webhook-gateway-delivery): FIR-1766 — the Firtal Gateway posts a channel message on behalf of a chosen principal (agent/member), gated by channel membership (IsIssueSubscriber). Bearer token IS the credential; disabled (404) when CEREBRO_GATEWAY_TOKEN is unset. Mounted OUTSIDE auth by design, like the webhook routes above.
+	r.Post("/api/webhooks/gateway/channel-message", cerebrowebhookgateway.New(queries, bus, strings.TrimSpace(os.Getenv("CEREBRO_GATEWAY_TOKEN"))).Handle)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
