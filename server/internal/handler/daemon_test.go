@@ -189,6 +189,57 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	return taskID
 }
 
+func setRuntimeClaimWindowRelative(t *testing.T, ctx context.Context, runtimeID string, offset time.Duration) {
+	t.Helper()
+	now := time.Now().UTC()
+	startMinutes := (now.Hour()*60 + now.Minute() + int(offset/time.Minute)) % (24 * 60)
+	if startMinutes < 0 {
+		startMinutes += 24 * 60
+	}
+	start := fmt.Sprintf("%02d:%02d", startMinutes/60, startMinutes%60)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET claim_window_start = $1::time, claim_window_timezone = 'UTC'
+		WHERE id = $2
+	`, start, runtimeID); err != nil {
+		t.Fatalf("set runtime claim window: %v", err)
+	}
+}
+
+func createClaimWindowIssue(t *testing.T, ctx context.Context, name string) string {
+	t.Helper()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES (
+			$1, $2, 'in_progress', 'none', $3, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, name, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create claim-window issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	return issueID
+}
+
+func createQueuedClaimWindowTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID, createdAge string) string {
+	t.Helper()
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, attempt, created_at
+		)
+		VALUES ($1, $2, $3, 'queued', 0, 1, now() - ($4::interval))
+		RETURNING id
+	`, agentID, runtimeID, issueID, createdAge).Scan(&taskID); err != nil {
+		t.Fatalf("create queued claim-window task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	return taskID
+}
+
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	ID string `json:"id"`
 }, string) {
@@ -243,6 +294,77 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	}
 	if !refreshed {
 		t.Fatal("expected reclaimed task to refresh dispatched_at")
+	}
+}
+
+func TestClaimTaskByRuntime_ClaimWindow(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	closedRuntimeID := createClaimReclaimRuntime(t, ctx, "Closed claim-window runtime")
+	openRuntimeID := createClaimReclaimRuntime(t, ctx, "Open claim-window runtime")
+	setRuntimeClaimWindowRelative(t, ctx, closedRuntimeID, time.Hour)
+	setRuntimeClaimWindowRelative(t, ctx, openRuntimeID, -time.Hour)
+
+	agentID, closedIssueID := createClaimReclaimAgentAndIssue(t, ctx, closedRuntimeID, "Claim-window rebound agent")
+	openIssueID := createClaimWindowIssue(t, ctx, "Open claim-window issue")
+	closedTaskID := createQueuedClaimWindowTask(t, ctx, agentID, closedRuntimeID, closedIssueID, "2 minutes")
+
+	// Rebinding does not rewrite existing queue rows. The open runtime must not
+	// dispatch the older row that remains attached to the closed runtime.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = $1 WHERE id = $2`, openRuntimeID, agentID); err != nil {
+		t.Fatalf("rebind agent to open runtime: %v", err)
+	}
+	openTaskID := createQueuedClaimWindowTask(t, ctx, agentID, openRuntimeID, openIssueID, "1 minute")
+
+	closedTask, closedBody := claimTaskByRuntimeForTest(t, closedRuntimeID)
+	if closedTask != nil {
+		t.Fatalf("closed runtime claimed task %s: %s", closedTask.ID, closedBody)
+	}
+	assertQueuedUntouched := func() {
+		t.Helper()
+		var status string
+		var attempt int32
+		var dispatched bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT status, attempt, dispatched_at IS NOT NULL
+			FROM agent_task_queue
+			WHERE id = $1
+		`, closedTaskID).Scan(&status, &attempt, &dispatched); err != nil {
+			t.Fatalf("load closed task: %v", err)
+		}
+		if status != "queued" || attempt != 1 || dispatched {
+			t.Fatalf("closed task changed: status=%s attempt=%d dispatched=%v", status, attempt, dispatched)
+		}
+	}
+	assertQueuedUntouched()
+
+	openTask, openBody := claimTaskByRuntimeForTest(t, openRuntimeID)
+	if openTask == nil {
+		t.Fatalf("open runtime returned no task: %s", openBody)
+	}
+	if openTask.ID != openTaskID {
+		t.Fatalf("open runtime claimed %s, want %s", openTask.ID, openTaskID)
+	}
+	assertQueuedUntouched()
+}
+
+func TestClaimTaskByRuntime_ClosedWindowReclaimsStaleDispatch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Closed stale-dispatch runtime")
+	setRuntimeClaimWindowRelative(t, ctx, runtimeID, time.Hour)
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Closed stale-dispatch agent")
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+
+	task, body := claimTaskByRuntimeForTest(t, runtimeID)
+	if task == nil || task.ID != taskID {
+		t.Fatalf("closed runtime did not reclaim stale dispatch %s: %s", taskID, body)
 	}
 }
 

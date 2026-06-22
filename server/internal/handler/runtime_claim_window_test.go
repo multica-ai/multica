@@ -263,3 +263,60 @@ func TestRuntimeToResponse_ClaimWindow(t *testing.T) {
 		t.Fatalf("malformed transition = %v; want nil", malformedResp.ClaimWindowTransitionAt)
 	}
 }
+
+func TestAutopilotClaimWindowDoesNotBlockAdmission(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Closed autopilot claim-window runtime")
+	setRuntimeClaimWindowRelative(t, ctx, runtimeID, time.Hour)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, 'closed-window-autopilot-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 1, $3)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create autopilot agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (
+			workspace_id, title, assignee_id, execution_mode,
+			created_by_type, created_by_id
+		)
+		VALUES ($1, 'closed-window-autopilot', $2, 'run_only', 'member', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	queries := db.New(testPool)
+	autopilot, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("load autopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, autopilot, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("dispatch autopilot: %v", err)
+	}
+	if run == nil || !run.TaskID.Valid || run.Status != "running" {
+		t.Fatalf("dispatch run = %+v; want running task", run)
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, run.TaskID).Scan(&status); err != nil {
+		t.Fatalf("load autopilot task: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("closed-window autopilot task status = %s; want queued", status)
+	}
+}

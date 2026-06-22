@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/claimwindow"
 	"github.com/multica-ai/multica/server/internal/events"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -934,7 +935,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 
 // ClaimTask atomically claims the next queued task for an agent,
 // respecting max_concurrent_tasks.
-func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+func (s *TaskService) ClaimTask(ctx context.Context, agentID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
 		outcome                                                              = "unknown"
@@ -966,7 +967,10 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	}
 
 	t0 = time.Now()
-	task, err := s.Queries.ClaimAgentTask(ctx, agentID)
+	task, err := s.Queries.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+		AgentID:   agentID,
+		RuntimeID: runtimeID,
+	})
 	claimAgentMs = time.Since(t0).Milliseconds()
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -1053,6 +1057,24 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
 	}
 
+	runtime, err := s.Queries.GetAgentRuntime(ctx, runtimeID)
+	if err != nil {
+		outcome = "error_load_claim_window"
+		return nil, fmt.Errorf("load runtime claim window: %w", err)
+	}
+	if runtime.ClaimWindowStart.Valid && runtime.ClaimWindowTimezone.Valid {
+		startMinutes := int(runtime.ClaimWindowStart.Microseconds / int64(time.Minute/time.Microsecond))
+		state, err := claimwindow.Evaluate(time.Now(), startMinutes, runtime.ClaimWindowTimezone.String)
+		if err != nil {
+			outcome = "error_evaluate_claim_window"
+			return nil, fmt.Errorf("evaluate runtime claim window: %w", err)
+		}
+		if !state.Open {
+			outcome = "claim_window_closed"
+			return nil, nil
+		}
+	}
+
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
 		outcome = "empty_cache_hit"
 		return nil, nil
@@ -1092,7 +1114,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
-		task, err := s.ClaimTask(ctx, candidate.AgentID)
+		task, err := s.ClaimTask(ctx, candidate.AgentID, runtimeID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
