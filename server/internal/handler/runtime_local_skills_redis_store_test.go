@@ -11,11 +11,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const redisTestDB = 14
+
 // newRedisTestClient connects to the Redis instance indicated by REDIS_TEST_URL
-// and flushes it so each test starts from a clean slate. The helper skips the
-// calling test if the env var is unset — matches the DATABASE_URL gating in
-// the rest of the suite so `go test ./...` still works on a stock laptop
-// without a running Redis.
+// and flushes this package's logical test DB so each test starts from a clean
+// slate. The helper skips the calling test if the env var is unset — matches
+// the DATABASE_URL gating in the rest of the suite so `go test ./...` still
+// works on a stock laptop without a running Redis.
 func newRedisTestClient(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -26,6 +28,7 @@ func newRedisTestClient(t *testing.T) *redis.Client {
 	if err != nil {
 		t.Fatalf("parse REDIS_TEST_URL: %v", err)
 	}
+	opts.DB = redisTestDB
 	rdb := redis.NewClient(opts)
 	ctx := context.Background()
 	if err := rdb.Ping(ctx).Err(); err != nil {
