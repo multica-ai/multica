@@ -954,6 +954,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
 			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/credential-grants", h.ListAgentCredentialGrants)      // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
+			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/credential-grants", h.AddAgentCredentialGrant)       // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
+			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/credential-grants", h.RemoveAgentCredentialGrant) // CEREBRO-PATCH(cerebro-agent-credential-grant-write): FIR-1479 agent-centric credential grant write (flag-gated).
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling

@@ -1085,6 +1085,9 @@ importers:
       '@multica/cerebro-agentvault':
         specifier: workspace:*
         version: link:../cerebro-agentvault
+      '@multica/cerebro-credentials':
+        specifier: workspace:*
+        version: link:../cerebro-credentials
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
@@ -1773,9 +1776,6 @@ importers:
       '@multica/ui':
         specifier: workspace:*
         version: link:../ui
-      '@multica/views':
-        specifier: workspace:*
-        version: link:../views
       '@tanstack/react-query':
         specifier: 'catalog:'
         version: 5.100.14(react@19.2.3)

@@ -101,6 +101,13 @@ export type CerebroFlagKey =
   // tools:test-as-user permission (default Allow for the owner only); this flag
   // is a workspace-wide on/off for the whole feature.
   | "cerebro_test_as_user"
+  // FIR-1479: credentials as a first-class permission type — assign a vault
+  // box (one credential = one Agent Vault box) to an actor (agent / person /
+  // group) per layer, exactly like a tool grant. A check = access to that one
+  // box; least-privilege, opens nothing on its own. OFF by default — the
+  // credentials column only appears in the permissions interface once an admin
+  // turns it on, and access is deny-by-default until a box is granted.
+  | "cerebro_credentials_per_actor"
   | "cerebro_web_fetch_policy"
   | "cerebro_platform_capabilities"
   | "cerebro_approvals"
@@ -354,6 +361,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // tools:test-as-user permission (default Allow for the workspace owner only),
   // so turning the flag on exposes nothing to members who lack the permission.
   cerebro_test_as_user: true,
+  // FIR-1479: credentials-per-actor grant column. Default OFF — deny-by-default
+  // until an admin turns it on and grants a box to an actor.
+  cerebro_credentials_per_actor: false,
   cerebro_web_fetch_policy: true,
   // FIR-2594: surface the Multica platform actions (create issue, add comment,
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
@@ -658,6 +668,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Enable the cerebro-fork access-control flow (combined restrict + pick) for issues and projects.",
+  },
+  {
+    key: "cerebro_credentials_per_actor",
+    label: "Credentials per actor",
+    group: "permissions",
+    description:
+      "Add credentials as a permission type in the permissions interface: tick a vault box (one credential = one Agent Vault box) for an agent, person, or group to grant access to exactly that box — like a tool grant. Least-privilege; access is denied until a box is ticked.",
   },
   {
     key: "cerebro_folder_access",

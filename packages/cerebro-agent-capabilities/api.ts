@@ -83,6 +83,10 @@ const AgentCapabilityCredentialSchema = z
     name: z.string().default(""),
     type: z.string().default(""),
     description: z.string().default(""),
+    // permission is the per-actor credential-grant verdict (allow|deny|inherit),
+    // populated by the backend only when cerebro_credentials_per_actor is on;
+    // empty otherwise. Unknown values downgrade to a neutral badge in the tab.
+    permission: z.string().default(""),
   })
   .loose();
 

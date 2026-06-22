@@ -537,6 +537,18 @@ type CerebroCredentialBinding struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroCredentialPolicy struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	CredentialKey string             `json:"credential_key"`
+	Layer         string             `json:"layer"`
+	SubjectID     pgtype.UUID        `json:"subject_id"`
+	Setting       string             `json:"setting"`
+	UpdatedBy     pgtype.UUID        `json:"updated_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroEntityFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

@@ -33,6 +33,7 @@ import {
   type AgentCapabilityTool,
   type AgentCapabilityConnection,
   type AgentCapabilityRepo,
+  type AgentCapabilityCredential,
   type AgentCapabilitySecretSet,
   type AgentCapabilityObservedAccess,
   type AgentCapabilityObservedTool,
@@ -172,7 +173,11 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
         ) : (
           <PillRow>
             {caps.credentials.map((c) => (
-              <Pill key={c.name} title={c.type}>
+              <Pill
+                key={c.name}
+                className={permissionPill(c.permission)}
+                title={credentialTitle(c)}
+              >
                 {c.name}
                 {c.type && <span className="text-muted-foreground">· {c.type}</span>}
               </Pill>
@@ -255,6 +260,16 @@ function permissionPill(permission: string): string {
     default:
       return "";
   }
+}
+
+// credentialTitle builds the hover text for a credential pill. When the per-actor
+// grant is live (cerebro_credentials_per_actor on) the verdict leads; otherwise it
+// falls back to the credential type so the pill is never tooltip-less.
+function credentialTitle(c: AgentCapabilityCredential): string {
+  const parts: string[] = [];
+  if (c.permission) parts.push(`grant: ${c.permission}`);
+  if (c.type) parts.push(c.type);
+  return parts.join(" · ");
 }
 
 function toolTitle(t: AgentCapabilityTool): string {
