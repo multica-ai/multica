@@ -4770,3 +4770,94 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
 	}
 }
+
+// TestGetChannelLaneGCCheck verifies the channel lane-liveness gc-check
+// endpoint: same-workspace daemon token gets a `live` answer; cross-workspace
+// probe 404s with no oracle; a lane with a recent task reports live=true.
+func TestGetChannelLaneGCCheck(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	// Create a channel in the test workspace.
+	var channelID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel (workspace_id, name, slug, access_mode, created_by)
+		VALUES ($1, 'gc-check channel', 'gc-check-channel', 'open', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&channelID); err != nil {
+		t.Fatalf("setup: create channel: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM channel WHERE id = $1`, channelID)
+
+	// A completed task on the main-timeline lane (channel_thread_id NULL),
+	// finished ~1h ago — well within any realistic GCTTL.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, channel_id, completed_at)
+		VALUES ($1, $2, 'completed', 0, $3, NOW() - INTERVAL '1 hour')
+		RETURNING id
+	`, agentID, runtimeID, channelID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create channel task: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+
+	sinceLongAgo := time.Now().Add(-30 * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	sinceRecent := time.Now().Add(-5 * time.Minute).UTC().Format(time.RFC3339Nano)
+
+	// Cross-workspace probe → 404, no oracle.
+	w := httptest.NewRecorder()
+	path := "/api/daemon/channels/" + channelID + "/gc-check?workspace_id=00000000-0000-0000-0000-000000000000&agent_id=" + agentID + "&since=" + sinceLongAgo
+	req := newDaemonTokenRequest("GET", path, nil, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "channelId", channelID)
+	testHandler.GetChannelLaneGCCheck(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Same-workspace, since=30d ago → lane has 1h-old activity → live=true.
+	w = httptest.NewRecorder()
+	path = "/api/daemon/channels/" + channelID + "/gc-check?workspace_id=" + testWorkspaceID + "&agent_id=" + agentID + "&since=" + sinceLongAgo
+	req = newDaemonTokenRequest("GET", path, nil, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "channelId", channelID)
+	testHandler.GetChannelLaneGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token (live): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var liveResp struct {
+		Live         bool   `json:"live"`
+		LastActivity string `json:"last_activity"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&liveResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !liveResp.Live {
+		t.Fatalf("expected live=true for lane with 1h-old task, got false")
+	}
+
+	// Same-workspace, since=5min ago → 1h-old activity is older than since → live=false.
+	w = httptest.NewRecorder()
+	path = "/api/daemon/channels/" + channelID + "/gc-check?workspace_id=" + testWorkspaceID + "&agent_id=" + agentID + "&since=" + sinceRecent
+	req = newDaemonTokenRequest("GET", path, nil, testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "channelId", channelID)
+	testHandler.GetChannelLaneGCCheck(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("same-workspace token (quiet): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var quietResp struct {
+		Live bool `json:"live"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&quietResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if quietResp.Live {
+		t.Fatalf("expected live=false when activity older than since, got true")
+	}
+}

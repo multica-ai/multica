@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"time"
@@ -464,6 +465,37 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 	}
 	return &resp, nil
 }
+
+// ChannelLaneGCStatus carries the lane-liveness answer for channel GC.
+// Live=true means there has been task activity on the (agent, channel,
+// thread) lane more recent than the cutoff the daemon passed in — the lane
+// is not quiet and any envRoot on it must be preserved.
+type ChannelLaneGCStatus struct {
+	Live         bool      `json:"live"`
+	LastActivity time.Time `json:"last_activity"`
+}
+
+// GetChannelLaneGCCheck asks the server whether a channel context lane is
+// live (has task activity newer than since). workspaceID is the anti-
+// enumeration scope the daemon already knows (from .gc_meta.json);
+// agentID scopes the lane to the same agent whose resume would reuse the
+// envRoot; threadID empty means the channel main-timeline lane.
+func (c *Client) GetChannelLaneGCCheck(ctx context.Context, workspaceID, channelID, agentID, threadID string, since time.Time) (*ChannelLaneGCStatus, error) {
+	q := url.Values{}
+	q.Set("workspace_id", workspaceID)
+	q.Set("agent_id", agentID)
+	if threadID != "" {
+		q.Set("thread_id", threadID)
+	}
+	q.Set("since", since.UTC().Format(time.RFC3339Nano))
+	var resp ChannelLaneGCStatus
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/channels/%s/gc-check?%s", channelID, q.Encode()), &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+
 
 func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
 	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{

@@ -518,6 +518,7 @@ const (
 	GCKindChat         GCMetaKind = "chat"
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
 	GCKindQuickCreate  GCMetaKind = "quick_create"
+	GCKindChannel      GCMetaKind = "channel"
 )
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
@@ -533,8 +534,19 @@ type GCMeta struct {
 	ChatSessionID  string     `json:"chat_session_id,omitempty"`
 	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
 	TaskID         string     `json:"task_id,omitempty"`
-	WorkspaceID    string     `json:"workspace_id"`
-	CompletedAt    time.Time  `json:"completed_at"`
+	// ChannelID + ChannelThreadID are meaningful only when Kind == channel.
+	// They scope the lane-liveness check so the GC loop never reclaims an
+	// envRoot that a follow-up task on the same (agent, channel, thread)
+	// lane is about to resume into. ChannelThreadID is empty for the
+	// channel main timeline lane (channel_thread_id IS NULL). AgentID
+	// matches the resume key (GetLastChannelTaskSession scopes on
+	// agent_id) so the liveness check guards exactly the lane that would
+	// resume into this envRoot.
+	AgentID         string    `json:"agent_id,omitempty"`
+	ChannelID       string    `json:"channel_id,omitempty"`
+	ChannelThreadID string    `json:"channel_thread_id,omitempty"`
+	WorkspaceID     string    `json:"workspace_id"`
+	CompletedAt     time.Time `json:"completed_at"`
 	// LocalDirectory marks tasks whose WorkDir pointed at a user-owned
 	// path rather than the synthesised envRoot/workdir. The GC loop honours
 	// this by never falling into the gcActionClean branch (which would

@@ -1047,6 +1047,141 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 	}
 }
 
+// channelGCMux builds a test mux that serves the task gc-check endpoint with
+// the given status/completedAt, plus the channel lane gc-check endpoint whose
+// `live` answer is derived from the request's `since` vs lastActivity.
+func channelGCMux(t *testing.T, taskID string, status string, completedAt time.Time, lastActivity time.Time) http.Handler {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/tasks/%s/gc-check", taskID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":       status,
+			"completed_at": completedAt,
+		})
+	})
+	mux.HandleFunc("/api/daemon/channels/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		live := !lastActivity.IsZero() && lastActivity.After(parseSince(t, r))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"live":          live,
+			"last_activity": lastActivity,
+		})
+	})
+	return mux
+}
+
+func parseSince(t *testing.T, r *http.Request) time.Time {
+	t.Helper()
+	s := r.URL.Query().Get("since")
+	tt, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		t.Fatalf("parse since: %v", err)
+	}
+	return tt
+}
+
+func channelMeta(taskID string) *execenv.GCMeta {
+	return &execenv.GCMeta{
+		Kind:      execenv.GCKindChannel,
+		TaskID:    taskID,
+		AgentID:   "11111111-1111-1111-1111-111111111111",
+		ChannelID: "22222222-2222-2222-2222-222222222222",
+		// ChannelThreadID empty → main-timeline lane.
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelTerminalOverTTLLaneQuiet(t *testing.T) {
+	t.Parallel()
+	taskID := "33333333-3333-3333-3333-333333333333"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+	quiet := time.Now().Add(-10 * 24 * time.Hour) // older than now-GCTTL
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, quiet))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-clean", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionClean {
+		t.Fatalf("expected clean, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelRunningSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "44444444-4444-4444-4444-444444444444"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "running", time.Time{}, overTTL))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-running", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip for running task, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelRecentTerminalSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "55555555-5555-5555-5555-555555555555"
+	withinTTL := time.Now().Add(-1 * time.Hour) // terminal but not past GCTTL
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", withinTTL, withinTTL))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-recent", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip for recent terminal, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelLaneLiveSkips(t *testing.T) {
+	t.Parallel()
+	taskID := "66666666-6666-6666-6666-666666666666"
+	// Task terminal long ago, but the lane has fresh activity (a follow-up
+	// task resumed/running on the same lane) → must not reclaim.
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+	laneFresh := time.Now().Add(-1 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, laneFresh))
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-lane-live", channelMeta(taskID))
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip when lane is live, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelTask404OldOrphan(t *testing.T) {
+	t.Parallel()
+	taskID := "77777777-7777-7777-7777-777777777777"
+	// No task handler registered → 404. An old directory should fall back
+	// to orphan-by-mtime cleanup.
+	mux := http.NewServeMux() // nothing registered → 404 for everything
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-404", channelMeta(taskID))
+	// Backdate the directory past GCOrphanTTL so orphan path reclaims it.
+	if err := os.Chtimes(taskDir, time.Now().Add(-40*24*time.Hour), time.Now().Add(-40*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionOrphan {
+		t.Fatalf("expected gcActionOrphan on task 404 + old dir, got %d", got)
+	}
+}
+
+func TestShouldCleanTaskDir_ChannelMissingLaneKeySkips(t *testing.T) {
+	t.Parallel()
+	taskID := "88888888-8888-8888-8888-888888888888"
+	overTTL := time.Now().Add(-10 * 24 * time.Hour)
+
+	d := newGCTestDaemon(t, channelGCMux(t, taskID, "completed", overTTL, overTTL))
+	meta := channelMeta(taskID)
+	meta.AgentID = "" // incomplete lane key → must skip, not delete
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "ch-nokey", meta)
+
+	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
+		t.Fatalf("expected skip on incomplete lane key, got %d", got)
+	}
+}
+
 func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 	t.Parallel()
 
@@ -1258,6 +1393,22 @@ func TestGCMetaForTask(t *testing.T) {
 			task: Task{ID: "t4", WorkspaceID: "ws", QuickCreatePrompt: "do the thing"},
 			want: execenv.GCKindQuickCreate,
 			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
+		},
+		{
+			name: "channel task — lane key + task id stamped",
+			task: Task{ID: "t6", WorkspaceID: "ws", AgentID: "a1", ChannelID: "ch1", ChannelThreadID: "th1"},
+			want: execenv.GCKindChannel,
+			idOK: func(m execenv.GCMeta) bool {
+				return m.TaskID == "t6" && m.ChannelID == "ch1" && m.ChannelThreadID == "th1" && m.AgentID == "a1"
+			},
+		},
+		{
+			name: "channel task — main-timeline lane has empty thread id",
+			task: Task{ID: "t7", WorkspaceID: "ws", AgentID: "a1", ChannelID: "ch1"},
+			want: execenv.GCKindChannel,
+			idOK: func(m execenv.GCMeta) bool {
+				return m.TaskID == "t7" && m.ChannelID == "ch1" && m.ChannelThreadID == "" && m.AgentID == "a1"
+			},
 		},
 		{
 			name: "chat wins over issue when both set (defensive ordering)",
