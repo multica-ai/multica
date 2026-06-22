@@ -743,10 +743,11 @@ function DateConditionEditor({
                 </div>
                 <div className="flex items-center gap-2">
                   <Input
-                    type="number"
-                    min={1}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={amount}
-                    onChange={(e) => setAmount(Number(e.target.value))}
+                    onChange={(e) => setAmount(Number(e.target.value.replace(/[^0-9]/g, "")))}
                     className="h-8 w-16"
                   />
                   <NativeSelect
@@ -1097,10 +1098,11 @@ function DateConditionRowV2({
       {needsValue && c.relative && (
         <div className="flex gap-2 md:contents">
           <Input
-            type="number"
-            min={1}
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={c.relative.amount}
-            onChange={(e) => setRelative({ amount: Number(e.target.value) })}
+            onChange={(e) => setRelative({ amount: Number(e.target.value.replace(/[^0-9]/g, "")) })}
             className="h-8 w-20 md:w-16"
           />
           <NativeSelect
