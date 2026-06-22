@@ -835,7 +835,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         </aside>
 
         {/* Editor */}
-        <section className="flex min-h-[32rem] min-w-0 shrink-0 flex-col md:min-h-0 md:flex-1 md:shrink">
+        {/* CEREBRO-PATCH(skills-mobile-detail-layout): fill+shrink to the viewport on mobile (was shrink-0, which let this pane grow to its content max-width and clip the description + frontmatter off-screen). */}
+        <section className="flex min-h-[32rem] w-full min-w-0 flex-1 flex-col md:min-h-0">
           {/* Name + description + subline */}
           <div className="space-y-2 border-b px-4 py-4 sm:px-5">
             <Input

@@ -29,7 +29,8 @@ function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
             <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
               {key}
             </span>
-            <span className="text-foreground whitespace-pre-wrap break-words">
+            {/* CEREBRO-PATCH(skills-mobile-detail-layout): min-w-0 lets long no-space values (JSON arrays) wrap instead of forcing the row wider than the phone screen. */}
+            <span className="min-w-0 text-foreground whitespace-pre-wrap break-words">
               {value.trimEnd()}
             </span>
           </div>
