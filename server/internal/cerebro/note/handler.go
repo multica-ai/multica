@@ -186,6 +186,13 @@ type createNoteRequest struct {
 	Body       string  `json:"body"`
 	FolderID   *string `json:"folder_id,omitempty"`
 	Visibility string  `json:"visibility,omitempty"`
+	// FIR-1852: when a note is created in an issue/project context, set the same
+	// issue_id/project_id columns a document (artifact) uses, so the note is
+	// unified with documents — it appears in the issue's document list and the
+	// editor renders "on FIR-XXX". Optional; absent means a workspace-scoped
+	// note exactly as before.
+	IssueID   *string `json:"issue_id,omitempty"`
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 type updateNoteRequest struct {
@@ -214,8 +221,13 @@ type NoteResponse struct {
 	OwnerID     string  `json:"owner_id"`
 	Visibility  string  `json:"visibility"`
 	Pinned      bool    `json:"pinned"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
+	// FIR-1852: the unified issue/project scope a note shares with documents.
+	// Populated on the single-note reads (create/get) where the artifact row is
+	// loaded; nil on lightweight list rows that never render the meta header.
+	IssueID   *string `json:"issue_id"`
+	ProjectID *string `json:"project_id"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 // --- handlers ---
@@ -274,10 +286,49 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		folderID = folder.ID
 	}
 
+	// FIR-1852: resolve optional issue/project scope so a note carries the same
+	// issue_id/project_id a document does. Both are validated against the
+	// caller's workspace; an unknown id is a 404 rather than a silent drop.
+	var issueID, projectID pgtype.UUID
+	if req.IssueID != nil && *req.IssueID != "" {
+		parsed, err := util.ParseUUID(*req.IssueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue id")
+			return
+		}
+		issue, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parsed,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		issueID = issue.ID
+	}
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		parsed, err := util.ParseUUID(*req.ProjectID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid project id")
+			return
+		}
+		project, err := h.Upstream.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+			ID:          parsed,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		projectID = project.ID
+	}
+
 	id, _ := uuid.NewV7()
 	artifact, err := h.Upstream.CreateArtifact(r.Context(), db.CreateArtifactParams{
 		ID:          pgtype.UUID{Bytes: id, Valid: true},
 		WorkspaceID: wsUUID,
+		IssueID:     issueID,
+		ProjectID:   projectID,
 		FolderID:    folderID,
 		Kind:        "note",
 		Format:      "md",
@@ -317,6 +368,8 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		IssueID:     uuidPtr(artifact.IssueID),
+		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
 		UpdatedAt:   tsStr(artifact.UpdatedAt),
 	})
@@ -447,6 +500,8 @@ func (h *Handler) GetNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		IssueID:     uuidPtr(artifact.IssueID),
+		ProjectID:   uuidPtr(artifact.ProjectID),
 		CreatedAt:   tsStr(artifact.CreatedAt),
 		UpdatedAt:   tsStr(artifact.UpdatedAt),
 	})
@@ -527,6 +582,8 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 		OwnerID:     uuidStr(noteRow.OwnerID),
 		Visibility:  noteRow.Visibility,
 		Pinned:      noteRow.Pinned,
+		IssueID:     uuidPtr(updated.IssueID),
+		ProjectID:   uuidPtr(updated.ProjectID),
 		CreatedAt:   tsStr(updated.CreatedAt),
 		UpdatedAt:   tsStr(updated.UpdatedAt),
 	})

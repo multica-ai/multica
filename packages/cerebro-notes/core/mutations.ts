@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { artifactKeys, coupledNotesKeys } from "@multica/cerebro-artifacts/core";
 import { noteKeys } from "./queries";
 import { safeParseNote } from "./types";
 import type { CreateNoteInput, NoteVisibility } from "./types";
@@ -11,8 +12,24 @@ export function useCreateNote() {
   return useMutation({
     mutationFn: async (input: CreateNoteInput) =>
       safeParseNote(await api.createNote(input)),
-    onSettled: () => {
+    onSettled: (_data, _err, input) => {
       qc.invalidateQueries({ queryKey: noteKeys.all(wsId) });
+      // FIR-1852: an issue/project-scoped note is now a document on that issue —
+      // refresh the issue's document list (and the legacy coupled-notes box) so
+      // it appears immediately, exactly like creating a document does.
+      if (input?.issue_id) {
+        qc.invalidateQueries({
+          queryKey: artifactKeys.byIssue(wsId, input.issue_id),
+        });
+        qc.invalidateQueries({
+          queryKey: coupledNotesKeys.forIssue(wsId, input.issue_id),
+        });
+      }
+      if (input?.project_id) {
+        qc.invalidateQueries({
+          queryKey: artifactKeys.byProject(wsId, input.project_id),
+        });
+      }
     },
   });
 }

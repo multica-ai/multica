@@ -4300,6 +4300,10 @@ export class ApiClient {
     body?: string;
     folder_id?: string | null;
     visibility?: string;
+    // CEREBRO-PATCH(cerebro-notes-issue-scope): FIR-1852 — note unified with
+    // documents by carrying the same issue/project scope at creation time.
+    issue_id?: string;
+    project_id?: string;
   }): Promise<T> {
     return this.fetch<T>(`/api/notes`, {
       method: "POST",

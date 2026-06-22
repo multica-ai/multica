@@ -74,6 +74,11 @@ func init() {
 	documentCreateCmd.Flags().String("content", "", "Markdown content (mutually exclusive with --content-stdin)")
 	documentCreateCmd.Flags().Bool("content-stdin", false, "Read markdown content from stdin (avoids shell escaping issues)")
 	documentCreateCmd.Flags().String("folder", "", "Place the document inside this folder ID")
+	// CEREBRO-PATCH(document-issue-scope): FIR-1852 — scope a document/note to an
+	// issue or project at creation, so it is unified with documents (shows on the
+	// issue and in its document list), matching `artifact create --issue`.
+	documentCreateCmd.Flags().String("issue", "", "Attach the document to this issue ID (sets issue_id)")
+	documentCreateCmd.Flags().String("project", "", "Attach the document to this project ID (sets project_id)")
 	documentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	documentUpdateCmd.Flags().String("title", "", "New title")
@@ -301,6 +306,14 @@ func runDocumentCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("folder"); v != "" {
 		body["folder_id"] = v
+	}
+	// CEREBRO-PATCH(document-issue-scope): FIR-1852 — forward the issue/project
+	// scope so the created note carries the same issue_id a document does.
+	if v, _ := cmd.Flags().GetString("issue"); v != "" {
+		body["issue_id"] = v
+	}
+	if v, _ := cmd.Flags().GetString("project"); v != "" {
+		body["project_id"] = v
 	}
 
 	var result map[string]any

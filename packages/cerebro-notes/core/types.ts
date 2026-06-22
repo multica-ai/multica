@@ -25,6 +25,11 @@ export const NoteSchema = z.object({
     .catch("private")
     .default("private"),
   pinned: z.boolean().default(false),
+  // FIR-1852: a note now shares the same issue/project scope a document carries,
+  // so the editor renders "on FIR-XXX" and the note lands in the issue's
+  // document list. Defaulted to null for older server builds that omit them.
+  issue_id: z.string().nullable().default(null),
+  project_id: z.string().nullable().default(null),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 });
@@ -38,6 +43,10 @@ export interface CreateNoteInput {
   body?: string;
   folder_id?: string | null;
   visibility?: NoteVisibility;
+  // FIR-1852: create the note already scoped to an issue (or project), so it is
+  // unified with documents instead of needing a separate reference afterwards.
+  issue_id?: string;
+  project_id?: string;
 }
 
 export interface ListNotesParams {

@@ -1083,13 +1083,16 @@ export function NoteEditor({
 
           {/* Shared metadata header (FIR-1647, request 8): the same owner +
               "Updated <date>" strip the Documents view shows. A note's owner_id
-              is a member id, so it maps onto the member author slot; notes have
-              no inline issue/project columns (they link through references
-              below), so those props are left off. */}
+              is a member id, so it maps onto the member author slot. FIR-1852:
+              a note now carries the same issue/project scope a document does, so
+              when set it renders "on FIR-XXX" here, identical to the Documents
+              view. */}
           <EntityMetaHeader
             authorType="member"
             authorId={note.owner_id}
             updatedAt={note.updated_at}
+            issueId={note.issue_id}
+            projectId={note.project_id}
           />
 
           <NoteReferences noteId={note.id} />
