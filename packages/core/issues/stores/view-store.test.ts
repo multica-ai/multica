@@ -135,4 +135,3 @@ describe("useIssueViewStore actions", () => {
     expect(useIssueViewStore.getState().topLevelOnly).toBe(false);
   });
 });
-

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Issue } from "@multica/core/types";
+import { BoardCardContent } from "./board-card";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
@@ -197,5 +198,3 @@ describe("BoardCardContent sub-issue indicator", () => {
     expect(icon).toBeNull();
   });
 });
-
-import { BoardCardContent } from "./board-card";
