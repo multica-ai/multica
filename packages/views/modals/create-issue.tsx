@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -33,6 +33,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+// CEREBRO-PATCH(create-issue-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
+import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -165,6 +167,17 @@ export function ManualCreatePanel({
     }
     return result;
   };
+
+  // CEREBRO-PATCH(create-issue-footer-dictation-state): FIR-1878 — footer mic
+  // inserts the finished transcript at the caret; skeleton lines show over the
+  // description editor while a clip is in flight (matches the chat composer).
+  const [dictationTranscribing, setDictationTranscribing] = useState(false);
+  const handleDictationFinal = useCallback((text: string) => {
+    descEditorRef.current?.insertText(text);
+  }, []);
+  const handleDictationStatus = useCallback((s: DictationStatus) => {
+    setDictationTranscribing(s === "transcribing");
+  }, []);
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -382,7 +395,12 @@ export function ManualCreatePanel({
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-2">
+                {/* CEREBRO-PATCH(create-issue-create-another-header): FIR-1878 — "create another" toggle moved up beside expand so both create windows line up. */}
+                <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Switch size="sm" checked={keepOpen} onCheckedChange={setKeepOpen} />
+                  <span className="hidden sm:inline">{t(($) => $.create_issue.create_another)}</span>
+                </label>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -440,7 +458,11 @@ export function ManualCreatePanel({
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
                 debounceMs={500}
+                // CEREBRO-PATCH(create-issue-footer-dictation-hide-corner): FIR-1878 — mic lives in the footer row, suppress the in-editor corner mic.
+                hideDictationMic
               />
+              {/* CEREBRO-PATCH(create-issue-footer-dictation-skeleton): FIR-1878 — skeleton lines over the description while transcribing. */}
+              {dictationTranscribing && <TranscribingSkeleton />}
               {descDragOver && <FileDropOverlay />}
             </div>
 
@@ -459,6 +481,14 @@ export function ManualCreatePanel({
               <StatusPicker
                 status={status}
                 onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                triggerRender={<PillButton />}
+                align="start"
+              />
+
+              {/* Project — CEREBRO-PATCH(create-issue-project-second): FIR-1878 — project promoted to the 2nd pill (before priority) per Jesper. */}
+              <ProjectPicker
+                projectId={projectId ?? null}
+                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
               />
@@ -491,13 +521,6 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Project */}
-              <ProjectPicker
-                projectId={projectId ?? null}
-                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
               {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint; PillButton trigger matches the sibling chips. */}
               <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" triggerRender={<PillButton />} />
 
@@ -660,6 +683,11 @@ export function ManualCreatePanel({
                   onAttach={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f))}
                   onEmbed={(files) => files.forEach((f) => descEditorRef.current?.uploadFile(f, { embedImage: true }))}
                 />
+                {/* CEREBRO-PATCH(create-issue-footer-dictation-mic): FIR-1878 — dictation mic in the bottom row, beside attach (matches chat composer). */}
+                <EditorDictationMic
+                  onTranscribed={handleDictationFinal}
+                  onStatusChange={handleDictationStatus}
+                />
                 <div className="flex-1" />
                 <button
                   type="button"
@@ -670,15 +698,10 @@ export function ManualCreatePanel({
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   <span className="hidden sm:inline">{t(($) => $.create_issue.switch_to_agent)}</span>
                 </button>
-                <div className="flex shrink-0 flex-col items-end gap-0.5">
-                  <Button size="sm" onClick={handleSubmit} disabled={!title.trim() || submitting}>
-                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
-                  </Button>
-                  <label className="flex items-center gap-1 text-[10px] leading-tight text-muted-foreground cursor-pointer select-none">
-                    <Switch size="sm" checked={keepOpen} onCheckedChange={setKeepOpen} />
-                    {t(($) => $.create_issue.create_another)}
-                  </label>
-                </div>
+                {/* CEREBRO-PATCH(create-issue-footer-create-button): FIR-1878 — "create another" toggle relocated to the header; footer keeps only the submit button. */}
+                <Button size="sm" className="shrink-0" onClick={handleSubmit} disabled={!title.trim() || submitting}>
+                  {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                </Button>
               </div>
 
               {/* CEREBRO-PATCH(create-issue-duplicate-check-overlay-mount): FIR-2536.

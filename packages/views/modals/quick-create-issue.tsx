@@ -46,6 +46,8 @@ import {
   FileDropOverlay,
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
+// CEREBRO-PATCH(quick-create-footer-dictation-import): FIR-1878 — footer-row dictation mic (matches chat composer), replacing the in-editor corner mic.
+import { EditorDictationMic, TranscribingSkeleton, type DictationStatus } from "@multica/cerebro-dictation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 // CEREBRO-PATCH(quick-create-duplicate-check-imports): FIR-2550. Mount the
@@ -321,6 +323,17 @@ export function AgentCreatePanel({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
+  // CEREBRO-PATCH(quick-create-footer-dictation-state): FIR-1878 — footer mic
+  // inserts the finished transcript at the caret; skeleton lines show over the
+  // prompt editor while a clip transcribes (matches the chat composer).
+  const [dictationTranscribing, setDictationTranscribing] = useState(false);
+  const handleDictationFinal = useCallback((text: string) => {
+    editorRef.current?.insertText(text);
+  }, []);
+  const handleDictationStatus = useCallback((s: DictationStatus) => {
+    setDictationTranscribing(s === "transcribing");
+  }, []);
+
   useEffect(() => {
     // Defer focus so it lands after the dialog's focus trap has settled —
     // otherwise the trap can bounce focus back to the first focusable header
@@ -455,7 +468,12 @@ export function AgentCreatePanel({
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
               auto-pop every open. Same workaround applies to expand. */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            {/* CEREBRO-PATCH(quick-create-create-another-header): FIR-1878 — "create another" toggle moved up beside expand so both create windows line up. */}
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+              <Switch size="sm" checked={keepOpen} onCheckedChange={setKeepOpen} />
+              <span className="hidden sm:inline">{t(($) => $.create_issue.create_another)}</span>
+            </label>
             <button
               type="button"
               onClick={() => setIsExpanded(!isExpanded)}
@@ -529,7 +547,11 @@ export function AgentCreatePanel({
             onUploadFile={handleUploadFile}
             onSubmit={submit}
             debounceMs={150}
+            // CEREBRO-PATCH(quick-create-footer-dictation-hide-corner): FIR-1878 — mic lives in the footer row, suppress the in-editor corner mic.
+            hideDictationMic
           />
+          {/* CEREBRO-PATCH(quick-create-footer-dictation-skeleton): FIR-1878 — skeleton lines over the prompt while transcribing. */}
+          {dictationTranscribing && <TranscribingSkeleton />}
           {isDragOver && <FileDropOverlay />}
         </div>
 
@@ -607,6 +629,12 @@ export function AgentCreatePanel({
               onAttach={(files) => files.forEach((f) => editorRef.current?.uploadFile(f))}
               onEmbed={(files) => files.forEach((f) => editorRef.current?.uploadFile(f, { embedImage: true }))}
             />
+            {/* CEREBRO-PATCH(quick-create-footer-dictation-mic): FIR-1878 — dictation mic in the bottom row, beside attach (matches chat composer). */}
+            <EditorDictationMic
+              disabled={uploading}
+              onTranscribed={handleDictationFinal}
+              onStatusChange={handleDictationStatus}
+            />
             {keepOpen && sentCount > 0 && (
               <span className="text-xs text-emerald-600 dark:text-emerald-400">
                 {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
@@ -623,14 +651,7 @@ export function AgentCreatePanel({
               <ArrowLeftRight className="size-3.5" />
               {t(($) => $.create_issue.switch_to_manual)}
             </button>
-            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <Switch
-                size="sm"
-                checked={keepOpen}
-                onCheckedChange={setKeepOpen}
-              />
-              {t(($) => $.create_issue.create_another)}
-            </label>
+            {/* CEREBRO-PATCH(quick-create-footer-no-toggle): FIR-1878 — "create another" toggle relocated to the header beside expand. */}
             <Button
               size="sm"
               onClick={submit}
