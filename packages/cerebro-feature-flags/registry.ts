@@ -465,7 +465,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1659: OFF by default while the feature is built across phases. Hides the
   // "Saved filters" section + "Save current filter" action in the issue Filter menu.
   cerebro_saved_filters: false,
-  cerebro_date_filter_v2: false,
+  // FIR-1812: ON by default (GA). The reference-aligned My Issues date filter was
+  // reviewed and approved; ship it to everyone. Off still falls back to the
+  // previous stacked date submenu via a per-workspace override.
+  cerebro_date_filter_v2: true,
   // TECH-3738 Bid C: OFF by default. The capability drift watcher does nothing
   // until an admin turns it on; then it periodically alerts owners/admins when
   // an agent uses a tool its declared policy denies.
