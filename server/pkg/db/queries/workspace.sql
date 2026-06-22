@@ -33,6 +33,16 @@ UPDATE workspace SET
 WHERE id = $1
 RETURNING *;
 
+-- name: ListWorkspacesWithRepos :many
+-- Workspaces that have at least one repository in their registry, returning
+-- only the id and the repos JSONB. Used to route an inbound GitHub webhook to
+-- the workspace that actually owns the event's repository (instead of the
+-- single workspace the delivering App installation happens to be mapped to —
+-- one GitHub account/installation can serve repos belonging to several
+-- workspaces).
+SELECT id, repos FROM workspace
+WHERE repos IS NOT NULL AND repos <> '[]'::jsonb;
+
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
