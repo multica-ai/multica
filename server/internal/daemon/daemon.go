@@ -4235,10 +4235,12 @@ func buildCuratorDraftPrompt(input map[string]any) string {
 		}
 	}
 	sourceSummary, _ := input["SourceSummary"].(string)
+	outputLanguage, _ := input["OutputLanguage"].(string)
 	evidence := buildCuratorEvidenceText(input)
 
 	return strings.Join([]string{
 		"Generate a reusable Multica knowledge draft from the issue evidence.",
+		curatorOutputLanguageInstruction(outputLanguage),
 		"Return ONLY valid JSON with keys: title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status.",
 		"Allowed type values: lesson, playbook, reference. Allowed confidence_status values: low, medium, high.",
 		"Issue:",
@@ -4248,6 +4250,19 @@ func buildCuratorDraftPrompt(input map[string]any) string {
 		"Evidence:",
 		evidence,
 	}, "\n\n")
+}
+
+func curatorOutputLanguageInstruction(language string) string {
+	language = strings.TrimSpace(language)
+	if language == "" {
+		language = "same language as the issue evidence"
+	}
+	return strings.Join([]string{
+		"Output language: " + language + ".",
+		"Use the output language for all human-readable JSON text fields.",
+		"Keep enum values such as type and confidence_status in English.",
+		"Preserve code, commands, error messages, API fields, file paths, identifiers, and proper nouns verbatim instead of translating them.",
+	}, " ")
 }
 
 // buildCuratorEvidenceText builds evidence text from the serialized draft

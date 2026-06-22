@@ -9,12 +9,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestOpenAICompatibleCuratorEngineMissingConfigIsUnavailable(t *testing.T) {
 	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{})
 	if _, err := engine.BuildEmbedding(context.Background(), "content"); !errors.Is(err, ErrCuratorEngineUnavailable) {
 		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorEngineUnavailable", err)
+	}
+}
+
+func testIssue(title, description string) db.Issue {
+	return db.Issue{
+		Title:       title,
+		Description: pgtype.Text{String: description, Valid: description != ""},
 	}
 }
 
@@ -46,6 +56,27 @@ func TestOpenAICompatibleCuratorEngineGeneratesDraftWithoutEmbeddingModel(t *tes
 		if r.URL.Path != "/chat/completions" {
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
+		var req struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Messages) < 2 || !strings.Contains(req.Messages[1].Content, "Output language: Chinese.") {
+			t.Fatalf("draft prompt missing output language constraint: %#v", req.Messages)
+		}
+		if !strings.Contains(req.Messages[1].Content, "Use the output language for all human-readable JSON text fields") {
+			t.Fatalf("draft prompt missing JSON field language instruction: %s", req.Messages[1].Content)
+		}
+		if !strings.Contains(req.Messages[1].Content, "Keep enum values such as type and confidence_status in English") {
+			t.Fatalf("draft prompt missing enum language instruction: %s", req.Messages[1].Content)
+		}
+		if !strings.Contains(req.Messages[1].Content, "Preserve code, commands, error messages, API fields, file paths, identifiers, and proper nouns verbatim") {
+			t.Fatalf("draft prompt missing technical text preservation instruction: %s", req.Messages[1].Content)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"title\":\"Draft\",\"type\":\"lesson\",\"domain_labels\":[\"ops\"],\"problem_pattern\":\"p\",\"trigger_conditions\":\"t\",\"diagnostic_steps\":\"d\",\"recommended_practice\":\"r\",\"anti_patterns\":\"a\",\"applicability\":\"app\",\"confidence_status\":\"medium\"}"}}]}`))
 	}))
@@ -57,7 +88,7 @@ func TestOpenAICompatibleCuratorEngineGeneratesDraftWithoutEmbeddingModel(t *tes
 		Model:    "chat-model",
 		Timeout:  time.Second,
 	})
-	draft, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{})
+	draft, err := engine.GenerateDraft(context.Background(), CuratorDraftInput{OutputLanguage: curatorOutputLanguageChinese})
 	if err != nil {
 		t.Fatalf("GenerateDraft error: %v", err)
 	}
@@ -66,6 +97,44 @@ func TestOpenAICompatibleCuratorEngineGeneratesDraftWithoutEmbeddingModel(t *tes
 	}
 	if _, err := engine.BuildEmbedding(context.Background(), "content"); !errors.Is(err, ErrCuratorEngineUnavailable) {
 		t.Fatalf("BuildEmbedding error = %v, want ErrCuratorEngineUnavailable", err)
+	}
+}
+
+func TestOpenAICompatibleCuratorEngineSummarizeSourceIncludesLanguageInstruction(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		var req struct {
+			Messages []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if len(req.Messages) < 2 || !strings.Contains(req.Messages[1].Content, "Output language: Chinese.") {
+			t.Fatalf("summary prompt missing inferred language constraint: %#v", req.Messages)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"- 中文摘要"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	engine := NewOpenAICompatibleCuratorEngine(OpenAICompatibleCuratorConfig{
+		Provider: "test",
+		BaseURL:  server.URL,
+		Model:    "chat-model",
+		Timeout:  time.Second,
+	})
+	summary, err := engine.SummarizeSource(context.Background(), CuratorSourceBundle{
+		Issue: testIssue("本地运行失败", "Error: context deadline exceeded"),
+	})
+	if err != nil {
+		t.Fatalf("SummarizeSource error: %v", err)
+	}
+	if summary != "- 中文摘要" {
+		t.Fatalf("summary = %q", summary)
 	}
 }
 

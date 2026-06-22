@@ -2418,6 +2418,7 @@ func TestApprovalPolicyResolution(t *testing.T) {
 
 func TestBuildCuratorDraftPrompt_PascalCaseKeys(t *testing.T) {
 	input := map[string]any{
+		"OutputLanguage": "Chinese",
 		"Issue": map[string]any{
 			"title": "Login timeout after 30s",
 			"description": map[string]any{
@@ -2435,6 +2436,12 @@ func TestBuildCuratorDraftPrompt_PascalCaseKeys(t *testing.T) {
 
 	if !strings.Contains(prompt, "Login timeout after 30s") {
 		t.Error("prompt should contain issue title")
+	}
+	if !strings.Contains(prompt, "Output language: Chinese.") {
+		t.Error("prompt should contain output language constraint")
+	}
+	if !strings.Contains(prompt, "Preserve code, commands, error messages, API fields, file paths, identifiers, and proper nouns verbatim") {
+		t.Error("prompt should preserve technical text verbatim")
 	}
 	if !strings.Contains(prompt, "session expiry") {
 		t.Error("prompt should contain issue description")

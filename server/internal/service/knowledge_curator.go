@@ -83,6 +83,7 @@ type KnowledgeEmbeddingRebuildResult struct {
 
 type CuratorDraftInput struct {
 	WorkspaceID      pgtype.UUID
+	OutputLanguage   string
 	Issue            db.Issue
 	Project          *db.Project
 	Labels           []db.IssueLabel
@@ -621,6 +622,7 @@ func (s *KnowledgeCuratorService) buildDraftInput(ctx context.Context, bundle Cu
 	}
 	return CuratorDraftInput{
 		WorkspaceID:    bundle.WorkspaceID,
+		OutputLanguage: inferCuratorOutputLanguage(bundle),
 		Issue:          bundle.Issue,
 		Project:        bundle.Project,
 		Labels:         bundle.Labels,

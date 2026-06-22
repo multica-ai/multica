@@ -230,7 +230,8 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 		EmbeddingModel: "test-embedding",
 		Provider:       "test",
 		DraftInput: service.CuratorDraftInput{
-			SourceSummary: "test summary",
+			OutputLanguage: "Chinese",
+			SourceSummary:  "test summary",
 		},
 	}
 	inputJSON, err := json.Marshal(input)
@@ -303,6 +304,13 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 	if _, ok := taskObj["draft_input"]; !ok {
 		t.Fatal("response must contain draft_input key")
 	}
+	var draftInput map[string]any
+	if err := json.Unmarshal(resp.Task.DraftInput, &draftInput); err != nil {
+		t.Fatalf("parse draft_input: %v", err)
+	}
+	if draftInput["OutputLanguage"] != "Chinese" {
+		t.Fatalf("draft_input.OutputLanguage = %v, want Chinese", draftInput["OutputLanguage"])
+	}
 
 	// Verify the DB input_data does NOT contain api_key or secret_ref.
 	var storedInput []byte
@@ -323,5 +331,12 @@ func TestCuratorDraftTaskInputData_HasNoApiKey(t *testing.T) {
 	}
 	if dbInput["base_url"] != "https://test.example/v1" {
 		t.Fatalf("DB input_data.base_url = %v, want https://test.example/v1", dbInput["base_url"])
+	}
+	nestedDraftInput, ok := dbInput["draft_input"].(map[string]any)
+	if !ok {
+		t.Fatalf("DB input_data.draft_input = %T, want object", dbInput["draft_input"])
+	}
+	if nestedDraftInput["OutputLanguage"] != "Chinese" {
+		t.Fatalf("DB input_data.draft_input.OutputLanguage = %v, want Chinese", nestedDraftInput["OutputLanguage"])
 	}
 }

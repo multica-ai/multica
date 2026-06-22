@@ -373,6 +373,7 @@ func looksLikeEmbeddingModel(id string) bool {
 func (e *OpenAICompatibleCuratorEngine) GenerateDraft(ctx context.Context, input CuratorDraftInput) (CuratorDraft, error) {
 	prompt := strings.Join([]string{
 		"Generate a reusable Multica knowledge draft from the issue evidence.",
+		curatorOutputLanguageInstruction(input.OutputLanguage),
 		"Return ONLY valid JSON with keys: title, type, domain_labels, problem_pattern, trigger_conditions, diagnostic_steps, recommended_practice, anti_patterns, applicability, confidence_status.",
 		"Allowed type values: lesson, playbook, reference. Allowed confidence_status values: low, medium, high.",
 		"Issue:", issueText(input.Issue),
@@ -389,6 +390,7 @@ func (e *OpenAICompatibleCuratorEngine) GenerateDraft(ctx context.Context, input
 func (e *OpenAICompatibleCuratorEngine) SummarizeSource(ctx context.Context, source CuratorSourceBundle) (string, error) {
 	prompt := strings.Join([]string{
 		"Summarize the reusable knowledge signals in this issue evidence in 3-6 concise bullet points.",
+		curatorOutputLanguageInstruction(inferCuratorOutputLanguage(source)),
 		"Focus on root cause, diagnostic path, fix, anti-patterns, and applicability. Return plain text only.",
 		"Issue:", issueText(source.Issue),
 		"Evidence:", sourceEvidenceText(source),
